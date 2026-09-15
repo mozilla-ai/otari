@@ -68,6 +68,10 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
+from gateway.services.provider_files.client import PlatformFilesClient
+from gateway.services.provider_files.contracts import FileAccount, FilesError, Operation
+from gateway.services.provider_files.inference import FileOutputBinder
+from gateway.services.provider_files.references import collect_file_references
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
@@ -229,9 +233,7 @@ def _strip_gateway_minted_blocks(messages: Any) -> Any:
             continue
         # Two passes: identify our web-search results and our provenance-prefixed
         # MCP uses, then drop each complete pair. A provider's pair matches neither.
-        minted_web_ids = {
-            block.get("tool_use_id") for block in content if _is_gateway_minted_result(block)
-        }
+        minted_web_ids = {block.get("tool_use_id") for block in content if _is_gateway_minted_result(block)}
         minted_mcp_ids = {
             block.get("id") if block.get("type") == "mcp_tool_use" else block.get("tool_use_id")
             for block in content
@@ -342,12 +344,8 @@ def _billable_messages_usage(usage: Any) -> GatewayUsage:
         prompt_tokens=input_tokens,
         completion_tokens=output_tokens,
         total_tokens=input_tokens + output_tokens,
-        cache_read_tokens=sum(
-            (getattr(part, "cache_read_input_tokens", None) or 0) for part in billable_parts
-        ),
-        cache_write_tokens=sum(
-            (getattr(part, "cache_creation_input_tokens", None) or 0) for part in billable_parts
-        ),
+        cache_read_tokens=sum((getattr(part, "cache_read_input_tokens", None) or 0) for part in billable_parts),
+        cache_write_tokens=sum((getattr(part, "cache_creation_input_tokens", None) or 0) for part in billable_parts),
         cache_write_1h_tokens=sum(_cache_write_1h_tokens(part) for part in billable_parts),
         cache_tokens_in_prompt=False,
     )
@@ -614,6 +612,131 @@ def _reject_container_on_managed_credential(ctx: RequestContext) -> None:
     )
 
 
+class _FileMessagesAdapter(_MessagesAdapter):
+    def __init__(self, client: PlatformFilesClient, request_id: str, references: list[str]) -> None:
+        self.files_client = client
+        self.files_request_id = request_id
+        self.file_references = references
+        self.pending_binder: FileOutputBinder | None = None
+
+    def attempt_kwargs(self, attempt: ResolvedAttempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
+        result = super().attempt_kwargs(attempt, base_request_fields)
+        result["api_key"], result["api_base"] = attempt.api_key, attempt.api_base
+        result["client_args"] = {"max_retries": 0}
+        supplied = result.get("extra_headers")
+        result["extra_headers"] = (
+            {
+                key.lower(): value
+                for key, value in supplied.items()
+                if key.lower() in {"anthropic-version", "anthropic-beta"} and isinstance(value, str)
+            }
+            if isinstance(supplied, dict)
+            else {}
+        )
+        result["_file_attempt"] = attempt
+        return result
+
+    async def _binder(self, kwargs: dict[str, Any]) -> FileOutputBinder:
+        attempt = kwargs.pop("_file_attempt")
+        if attempt.provider != "anthropic" or not attempt.provider_account_generation_id:
+            raise FilesError(403, "Provider file outputs require an authorized Anthropic account")
+        operation = await self.files_client.post(
+            "outputs/prepare",
+            {
+                "operation_id": str(uuid.uuid4()),
+                "request_id": self.files_request_id,
+                "attempt_id": attempt.attempt_id,
+                "generation_id": attempt.provider_account_generation_id,
+            },
+            Operation,
+        )
+        if (
+            operation.account.api_key.get_secret_value() != attempt.api_key
+            or operation.account.api_base != attempt.api_base
+            or str(operation.account.generation_id) != attempt.provider_account_generation_id
+        ):
+            raise FilesError(409, "Inference provider account changed before dispatch")
+        if operation.account.workspace is not None:
+            kwargs["client_args"]["default_headers"] = {"anthropic-workspace-id": operation.account.workspace}
+        return FileOutputBinder(self.files_client, operation, self.file_references)
+
+    async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
+        binder = await self._binder(kwargs)
+        try:
+            result = await super().call_provider(kwargs)
+        except BaseException:
+            await binder.complete()
+            raise
+        self.pending_binder = binder
+        return result
+
+    async def finalize_outputs(self, result: MessageResponse) -> None:
+        binder, self.pending_binder = self.pending_binder, None
+        if binder is not None:
+            try:
+                await binder.register(result.model_dump(exclude_unset=True))
+            finally:
+                await binder.complete()
+
+    async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
+        binder = await self._binder(kwargs)
+        try:
+            stream = await super().open_provider_stream(kwargs)
+        except BaseException:
+            await binder.complete()
+            raise
+        return binder.stream(stream)
+
+    async def run_tool_loop(
+        self,
+        kwargs: dict[str, Any],
+        pool: ToolBackend,
+        max_iterations: int,
+        on_first_response: Callable[[], None] | None = None,
+        *,
+        emit_native_web_search: bool = False,
+        web_search_budget: WebSearchBudget | None = None,
+    ) -> MessageResponse:
+        binder = await self._binder(kwargs)
+        try:
+            result = await super().run_tool_loop(
+                kwargs,
+                pool,
+                max_iterations,
+                on_first_response,
+                emit_native_web_search=emit_native_web_search,
+                web_search_budget=web_search_budget,
+            )
+        except BaseException:
+            await binder.complete()
+            raise
+        self.pending_binder = binder
+        return result
+
+    def open_tool_loop_stream(
+        self,
+        kwargs: dict[str, Any],
+        pool: ToolBackend,
+        max_iterations: int,
+        *,
+        emit_native_web_search: bool = False,
+        web_search_budget: WebSearchBudget | None = None,
+    ) -> AsyncIterator[MessageStreamEvent]:
+        async def stream() -> AsyncIterator[MessageStreamEvent]:
+            binder = await self._binder(kwargs)
+            source = super(_FileMessagesAdapter, self).open_tool_loop_stream(
+                kwargs,
+                pool,
+                max_iterations,
+                emit_native_web_search=emit_native_web_search,
+                web_search_budget=web_search_budget,
+            )
+            async for event in binder.stream(source):
+                yield event
+
+        return stream()
+
+
 _ADAPTER = _MessagesAdapter()
 
 
@@ -636,6 +759,8 @@ async def create_message(
     fallback across the resolved route, tool-loop requests included (fallback
     applies up to the pre-lock-in point, same as chat).
     """
+    if config.is_hybrid_mode and {"extra_body", "extra_query"} & (request.model_extra or {}).keys():
+        raise _anthropic_error(_ERR_API, "Transport body overrides are not supported in hybrid mode", 400)
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
     merged_betas = _merge_anthropic_betas(request.betas, raw_request)
     if merged_betas is not None:
@@ -647,6 +772,8 @@ async def create_message(
     # overcharge the request. Provenance comes from each block, so this is
     # independent of whether the current request enables the same tool again.
     request.messages = _strip_gateway_minted_blocks(request.messages)
+
+    adapter = _ADAPTER
 
     async def _normalize(
         user_id: str,
@@ -674,7 +801,7 @@ async def create_message(
 
     try:
         ctx = await resolve_request_context(
-            adapter=_ADAPTER,
+            adapter=adapter,
             raw_request=raw_request,
             response=response,
             db=db,
@@ -713,8 +840,41 @@ async def create_message(
             await release_reservation(ctx)
             raise
 
+    if ctx.hybrid_mode:
+        try:
+            references = collect_file_references(request.messages)
+            native_outputs = (
+                any(
+                    isinstance(tool, dict) and str(tool.get("type", "")).startswith("code_execution_")
+                    for tool in (request.tools or [])
+                )
+                or request.container is not None
+            )
+            if references or (native_outputs and config.files_provider_native_enabled):
+                if not config.files_provider_native_enabled:
+                    raise FilesError(400, "Hybrid provider file references and native outputs are not enabled")
+                assert ctx.route is not None and ctx.user_token is not None
+                client = PlatformFilesClient(config.platform["base_url"], config.platform_token or "", ctx.user_token)
+                if references:
+                    account = await client.post("references/resolve", {"ids": references}, FileAccount)
+                    attempts = [
+                        attempt
+                        for attempt in ctx.route.attempts
+                        if attempt.provider == "anthropic"
+                        and attempt.provider_account_generation_id == str(account.generation_id)
+                    ]
+                    if not attempts:
+                        raise FilesError(403, "File account is not authorized by the requested model policy")
+                    selected = attempts[0]
+                    selected.api_key, selected.api_base = account.api_key.get_secret_value(), account.api_base
+                    selected.extra_params = None
+                    ctx.route.attempts, ctx.route.fallback_enabled = [selected], False
+                adapter = _FileMessagesAdapter(client, ctx.route.request_id, references)
+        except FilesError as exc:
+            raise _anthropic_error(_ERR_API, exc.detail, exc.status_code) from None
+
     tool_ctx = await prepare_gateway_tools(
-        adapter=_ADAPTER,
+        adapter=adapter,
         ctx=ctx,
         response=response,
         guardrails=request.guardrails,
@@ -762,7 +922,7 @@ async def create_message(
                 )
             try:
                 return await run_streaming_with_fallback(
-                    adapter=_ADAPTER,
+                    adapter=adapter,
                     route=route,
                     base_request_fields=request_fields,
                     config=config,
@@ -780,15 +940,15 @@ async def create_message(
                     raise
                 raise converted from exc
             except Exception as exc:
-                raise_all_streaming_attempts_failed(_ADAPTER, exc, route)
+                raise_all_streaming_attempts_failed(adapter, exc, route)
 
         # Standalone: single attempt streaming.
         resolved = await resolve_dispatch_provider(
-            ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
+            ctx, config, request.model, adapter=adapter, model_provider=model_provider
         )
         call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
         return await run_single_attempt_stream(
-            adapter=_ADAPTER,
+            adapter=adapter,
             ctx=ctx,
             tool_ctx=tool_ctx,
             call_kwargs=call_kwargs,
@@ -807,7 +967,8 @@ async def create_message(
         assert route is not None  # guaranteed by the hybrid-mode preamble
         try:
             result = await run_platform_non_stream(
-                adapter=_ADAPTER,
+                build_kwargs=adapter.attempt_kwargs,
+                adapter=adapter,
                 route=route,
                 base_request_fields=request_fields,
                 tool_ctx=tool_ctx,
@@ -826,15 +987,20 @@ async def create_message(
             if converted is exc:
                 raise
             raise converted from exc
+        if isinstance(adapter, _FileMessagesAdapter):
+            try:
+                await adapter.finalize_outputs(result)
+            except FilesError as exc:
+                raise _anthropic_error(_ERR_API, exc.detail, exc.status_code) from None
         return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path
     resolved = await resolve_dispatch_provider(
-        ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
+        ctx, config, request.model, adapter=adapter, model_provider=model_provider
     )
     call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
     result = await run_standalone_non_stream(
-        adapter=_ADAPTER,
+        adapter=adapter,
         ctx=ctx,
         tool_ctx=tool_ctx,
         call_kwargs=call_kwargs,

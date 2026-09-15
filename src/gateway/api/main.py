@@ -22,6 +22,7 @@ from gateway.api.routes import (
     files,
     health,
     hosted_mode,
+    hybrid_files,
     hybrid_mode,
     images,
     invitations,
@@ -148,6 +149,7 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
         api.include_router(mcp.router)
 
     if config.is_hybrid_mode:
+        api.include_router(hybrid_files.router)
         # The hybrid stub router is mounted by register_routers, after the
         # contributed routers; see the note there.
         return  # Remaining routers (including batches) are standalone-mode only

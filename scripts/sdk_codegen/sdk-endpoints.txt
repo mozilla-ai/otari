@@ -389,3 +389,19 @@ DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}              # 
 # token; an application reaches the same search through the otari_web_search
 # tool on a completion request.
 GET /api/v1/web-search/search                                                 # gateway-to-gateway
+
+# Provider-native Files control-plane protocol.
+POST /api/v1/gateway/files/cleanup/claim  # internal gateway authentication and file lifecycle
+POST /api/v1/gateway/files/cleanup/{lease_id}/result  # internal gateway authentication and file lifecycle
+POST /api/v1/gateway/files/list  # internal gateway authentication and file lifecycle
+POST /api/v1/gateway/files/outputs/prepare  # internal gateway authentication and file lifecycle
+POST /api/v1/gateway/files/outputs/register  # internal gateway authentication and file lifecycle
+POST /api/v1/gateway/files/outputs/{operation_id}/abandon  # internal gateway authentication and file lifecycle
+POST /api/v1/gateway/files/outputs/{operation_id}/complete  # internal gateway authentication and file lifecycle
+POST /api/v1/gateway/files/references/resolve  # internal gateway authentication and file lifecycle
+POST /api/v1/gateway/files/uploads/prepare  # internal gateway authentication and file lifecycle
+POST /api/v1/gateway/files/uploads/{binding_id}/abandon  # internal gateway authentication and file lifecycle
+POST /api/v1/gateway/files/uploads/{binding_id}/finalize  # internal gateway authentication and file lifecycle
+POST /api/v1/gateway/files/{binding_id}/cleanup-result  # internal gateway authentication and file lifecycle
+POST /api/v1/gateway/files/{file_id}/resolve  # internal gateway authentication and file lifecycle
+GET /api/v1/gateway/files/status  # internal gateway authentication and cleanup backlog

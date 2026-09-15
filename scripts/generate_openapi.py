@@ -13,15 +13,21 @@ import json
 import sys
 import tempfile
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from gateway.core.config import GatewayConfig
+from fastapi import APIRouter, FastAPI, Request
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from gateway.api.routes.hybrid_files import router as hybrid_files_router
+from gateway.api.routes.provider_files import create_provider_files_router
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
+from gateway.services.provider_files.contracts import FileAccount, FileScope, OutputPrepare
 
 
 def generate_openapi_spec() -> dict[str, object]:
@@ -47,7 +53,83 @@ def generate_openapi_spec() -> dict[str, object]:
             web_search_backend_token="openapi-generation-placeholder",
         )
         app = create_app(config)
-        return cast(dict[str, object], app.openapi())
+        app.include_router(
+            create_provider_files_router(
+                authenticate=_schema_identity,
+                authenticate_gateway=_schema_identity,
+                authorize_attempt=_schema_attempt,
+            ),
+            prefix=API_ROOT,
+        )
+        spec = app.openapi()
+        _merge_hybrid_files(spec)
+        return cast(dict[str, object], spec)
+
+
+async def _schema_identity(request: Request, db: AsyncSession) -> FileScope:
+    raise RuntimeError("Schema-only authentication dependency")
+
+
+async def _schema_attempt(scope: FileScope, request: OutputPrepare, db: AsyncSession) -> FileAccount:
+    raise RuntimeError("Schema-only inference authorization dependency")
+
+
+def _merge_hybrid_files(spec: dict[str, Any]) -> None:
+    """Publish both runtime contracts without replacing standalone storage schemas."""
+    hybrid = FastAPI()
+    routes = APIRouter(prefix=API_ROOT)
+    routes.include_router(hybrid_files_router)
+    hybrid.include_router(routes)
+    native = hybrid.openapi()
+    spec["components"]["schemas"].update(native.get("components", {}).get("schemas", {}))
+    for path, methods in native["paths"].items():
+        for method, operation in methods.items():
+            target = spec["paths"][path][method]
+            target["description"] = target.get("description", "") + (
+                "\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. "
+                "It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. "
+                "Hosted mode does not serve public file bytes."
+            )
+            schema = operation["responses"].get("200", {}).get("content", {}).get("application/json", {}).get("schema")
+            if schema and "$ref" in schema:
+                media = target["responses"]["200"]["content"]["application/json"]
+                media["schema"] = {"anyOf": [media["schema"], schema]}
+            target.setdefault("parameters", []).append(
+                {
+                    "name": "anthropic-version",
+                    "in": "header",
+                    "required": False,
+                    "schema": {"type": "string"},
+                    "description": "Required in hybrid provider-native mode.",
+                }
+            )
+    listing = spec["paths"][f"{API_ROOT}/files"]["get"]
+    listing["parameters"].extend(
+        [
+            {
+                "name": "page",
+                "in": "query",
+                "required": False,
+                "schema": {"type": "string"},
+                "description": "Hybrid GA cursor.",
+            },
+            {
+                "name": "ids[]",
+                "in": "query",
+                "required": False,
+                "schema": {"type": "array", "items": {"type": "string"}, "maxItems": 100},
+                "description": "Hybrid IDs filter; mutually exclusive with page and limit.",
+            },
+        ]
+    )
+    upload = spec["paths"][f"{API_ROOT}/files"]["post"]
+    body_ref = upload["requestBody"]["content"]["multipart/form-data"]["schema"]["$ref"].split("/")[-1]
+    spec["components"]["schemas"][body_ref]["properties"]["expires_in_seconds"] = {
+        "type": "integer",
+        "minimum": 3600,
+        "maximum": 7776000,
+        "description": "Hybrid provider retention, capped by the control-plane maximum.",
+    }
 
 
 def write_spec(spec: dict[str, object], output_path: Path) -> None:

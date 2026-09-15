@@ -1739,7 +1739,7 @@
         {
           "name": "List Files",
           "request": {
-            "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.",
+            "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1769,16 +1769,28 @@
                   "disabled": true,
                   "key": "workspace_id",
                   "value": ""
+                },
+                {
+                  "description": "Hybrid GA cursor.",
+                  "disabled": true,
+                  "key": "page",
+                  "value": ""
+                },
+                {
+                  "description": "Hybrid IDs filter; mutually exclusive with page and limit.",
+                  "disabled": true,
+                  "key": "ids[]",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/files?user=&purpose=&workspace_id="
+              "raw": "{{baseUrl}}/api/v1/files?user=&purpose=&workspace_id=&page=&ids[]="
             }
           }
         },
         {
           "name": "Create File",
           "request": {
-            "description": "OpenAI-compatible file upload endpoint.",
+            "description": "OpenAI-compatible file upload endpoint.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
             "header": [],
             "method": "POST",
             "url": {
@@ -1797,7 +1809,7 @@
         {
           "name": "Get File",
           "request": {
-            "description": "Retrieve metadata for a single file.",
+            "description": "Retrieve metadata for a single file.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1832,7 +1844,7 @@
         {
           "name": "Delete File",
           "request": {
-            "description": "Soft-delete a file's metadata and remove its bytes from the backend.",
+            "description": "Soft-delete a file's metadata and remove its bytes from the backend.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -1867,7 +1879,7 @@
         {
           "name": "Get File Content",
           "request": {
-            "description": "Download the raw bytes of a file, streamed rather than buffered whole.",
+            "description": "Download the raw bytes of a file, streamed rather than buffered whole.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1902,6 +1914,539 @@
         }
       ],
       "name": "files"
+    },
+    {
+      "item": [
+        {
+          "name": "Claim",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"limit\": 20\n}"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "gateway",
+                "files",
+                "cleanup",
+                "claim"
+              ],
+              "raw": "{{baseUrl}}/api/v1/gateway/files/cleanup/claim"
+            }
+          }
+        },
+        {
+          "name": "Complete Lease",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"token\": \"string\",\n  \"results\": {}\n}"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "gateway",
+                "files",
+                "cleanup",
+                ":lease_id",
+                "result"
+              ],
+              "raw": "{{baseUrl}}/api/v1/gateway/files/cleanup/:lease_id/result",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "lease_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Files",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"ids\": [\n    \"string\"\n  ],\n  \"limit\": 0,\n  \"page\": \"string\"\n}"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "gateway",
+                "files",
+                "list"
+              ],
+              "raw": "{{baseUrl}}/api/v1/gateway/files/list"
+            }
+          }
+        },
+        {
+          "name": "Prepare Output",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"operation_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"request_id\": \"string\",\n  \"attempt_id\": \"string\",\n  \"generation_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "gateway",
+                "files",
+                "outputs",
+                "prepare"
+              ],
+              "raw": "{{baseUrl}}/api/v1/gateway/files/outputs/prepare"
+            }
+          }
+        },
+        {
+          "name": "Register Output",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"operation_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"metadata\": {\n    \"id\": \"string\",\n    \"filename\": \"string\",\n    \"mime_type\": \"string\",\n    \"size_bytes\": 0,\n    \"created_at\": \"2024-01-01T00:00:00Z\",\n    \"downloadable\": false\n  }\n}"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "gateway",
+                "files",
+                "outputs",
+                "register"
+              ],
+              "raw": "{{baseUrl}}/api/v1/gateway/files/outputs/register"
+            }
+          }
+        },
+        {
+          "name": "Abandon Output",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"cleanup_token\": \"string\"\n}"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "gateway",
+                "files",
+                "outputs",
+                ":operation_id",
+                "abandon"
+              ],
+              "raw": "{{baseUrl}}/api/v1/gateway/files/outputs/:operation_id/abandon",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "operation_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Complete Output",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"cleanup_token\": \"string\",\n  \"deleted\": false\n}"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "gateway",
+                "files",
+                "outputs",
+                ":operation_id",
+                "complete"
+              ],
+              "raw": "{{baseUrl}}/api/v1/gateway/files/outputs/:operation_id/complete",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "operation_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "References",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"ids\": [\n    \"string\"\n  ]\n}"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "gateway",
+                "files",
+                "references",
+                "resolve"
+              ],
+              "raw": "{{baseUrl}}/api/v1/gateway/files/references/resolve"
+            }
+          }
+        },
+        {
+          "name": "Backlog",
+          "request": {
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "gateway",
+                "files",
+                "status"
+              ],
+              "raw": "{{baseUrl}}/api/v1/gateway/files/status"
+            }
+          }
+        },
+        {
+          "name": "Prepare",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"operation_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"size_bytes\": 0\n}"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "gateway",
+                "files",
+                "uploads",
+                "prepare"
+              ],
+              "raw": "{{baseUrl}}/api/v1/gateway/files/uploads/prepare"
+            }
+          }
+        },
+        {
+          "name": "Abandon",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"cleanup_token\": \"string\"\n}"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "gateway",
+                "files",
+                "uploads",
+                ":binding_id",
+                "abandon"
+              ],
+              "raw": "{{baseUrl}}/api/v1/gateway/files/uploads/:binding_id/abandon",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "binding_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Finalize",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"metadata\": {\n    \"id\": \"string\",\n    \"filename\": \"string\",\n    \"mime_type\": \"string\",\n    \"size_bytes\": 0,\n    \"created_at\": \"2024-01-01T00:00:00Z\",\n    \"downloadable\": false\n  }\n}"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "gateway",
+                "files",
+                "uploads",
+                ":binding_id",
+                "finalize"
+              ],
+              "raw": "{{baseUrl}}/api/v1/gateway/files/uploads/:binding_id/finalize",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "binding_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cleanup Result",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"cleanup_token\": \"string\",\n  \"deleted\": false\n}"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "gateway",
+                "files",
+                ":binding_id",
+                "cleanup-result"
+              ],
+              "raw": "{{baseUrl}}/api/v1/gateway/files/:binding_id/cleanup-result",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "binding_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Resolve",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"operation\": \"metadata\"\n}"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "gateway",
+                "files",
+                ":file_id",
+                "resolve"
+              ],
+              "raw": "{{baseUrl}}/api/v1/gateway/files/:file_id/resolve",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "file_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "provider-files"
     },
     {
       "item": [

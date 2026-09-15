@@ -58,6 +58,7 @@ from gateway.services.pricing_refresh_service import (
     run_price_update_poller,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
+from gateway.services.provider_files.executor import run_provider_file_cleanup
 from gateway.services.provider_store_service import (
     load_providers_at_startup,
     reset_provider_cache,
@@ -354,8 +355,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         catalog_refresher: asyncio.Task[None] | None = None
         selector_refresher: asyncio.Task[None] | None = None
         reservation_sweeper: asyncio.Task[None] | None = None
+        file_cleanup: asyncio.Task[None] | None = None
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
+            if config.files_provider_native_enabled:
+                file_cleanup = asyncio.create_task(run_provider_file_cleanup(config))
         else:
             init_db(config)
             async with create_session() as session:
@@ -486,6 +490,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             yield
         finally:
             refreshers = [
+                (file_cleanup, "provider file cleanup"),
                 (alias_refresher, "alias"),
                 (policy_refresher, "policy"),
                 (provider_refresher, "provider"),

@@ -1101,12 +1101,16 @@ export interface paths {
          *
          *     ``workspace_id`` narrows a master-key listing to one workspace; a keyed
          *     request is already confined to its key's own and cannot widen or move it.
+         *
+         *     Hybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.
          */
         get: operations["files-list_files"];
         put?: never;
         /**
          * Create File
          * @description OpenAI-compatible file upload endpoint.
+         *
+         *     Hybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.
          */
         post: operations["files-create_file"];
         delete?: never;
@@ -1125,6 +1129,8 @@ export interface paths {
         /**
          * Get File
          * @description Retrieve metadata for a single file.
+         *
+         *     Hybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.
          */
         get: operations["files-get_file"];
         put?: never;
@@ -1132,6 +1138,8 @@ export interface paths {
         /**
          * Delete File
          * @description Soft-delete a file's metadata and remove its bytes from the backend.
+         *
+         *     Hybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.
          */
         delete: operations["files-delete_file"];
         options?: never;
@@ -1149,10 +1157,250 @@ export interface paths {
         /**
          * Get File Content
          * @description Download the raw bytes of a file, streamed rather than buffered whole.
+         *
+         *     Hybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.
          */
         get: operations["files-get_file_content"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/cleanup/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Claim */
+        post: operations["provider-files-claim"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/cleanup/{lease_id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete Lease */
+        post: operations["provider-files-complete_lease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** List Files */
+        post: operations["provider-files-list_files"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/outputs/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare Output */
+        post: operations["provider-files-prepare_output"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/outputs/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register Output */
+        post: operations["provider-files-register_output"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/outputs/{operation_id}/abandon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Abandon Output */
+        post: operations["provider-files-abandon_output"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/outputs/{operation_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete Output */
+        post: operations["provider-files-complete_output"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/references/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** References */
+        post: operations["provider-files-references"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Backlog */
+        get: operations["provider-files-backlog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/uploads/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare */
+        post: operations["provider-files-prepare"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/uploads/{binding_id}/abandon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Abandon */
+        post: operations["provider-files-abandon"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/uploads/{binding_id}/finalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Finalize */
+        post: operations["provider-files-finalize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/{binding_id}/cleanup-result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cleanup Result */
+        post: operations["provider-files-cleanup_result"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/{file_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve */
+        post: operations["provider-files-resolve"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4997,6 +5245,27 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AbandonUpload */
+        AbandonUpload: {
+            /**
+             * Cleanup Token
+             * Format: password
+             */
+            cleanup_token: string;
+            /**
+             * Deleted
+             * @default false
+             */
+            deleted: boolean;
+            /** File Id */
+            file_id?: string | null;
+            metadata?: components["schemas"]["FileMetadata"] | null;
+            /**
+             * Outcome Unknown
+             * @default false
+             */
+            outcome_unknown: boolean;
+        };
         /** AcceptInvitationRequest */
         AcceptInvitationRequest: {
             /** Token */
@@ -5731,6 +6000,8 @@ export interface components {
         };
         /** Body_files-create_file */
         "Body_files-create_file": {
+            /** @description Hybrid provider retention, capped by the control-plane maximum. */
+            expires_in_seconds?: number;
             /** File */
             file: string;
             /**
@@ -6488,6 +6759,24 @@ export interface components {
             top_p?: number | null;
             /** User */
             user?: string | null;
+        };
+        /** CleanupClaim */
+        CleanupClaim: {
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
+        };
+        /** CleanupResult */
+        CleanupResult: {
+            /**
+             * Cleanup Token
+             * Format: password
+             */
+            cleanup_token: string;
+            /** Deleted */
+            deleted: boolean;
         };
         /**
          * ConfigField
@@ -7463,6 +7752,59 @@ export interface components {
             /** User Id */
             user_id?: string | null;
         };
+        /** FileListRequest */
+        FileListRequest: {
+            /** Ids */
+            ids?: string[] | null;
+            /** Limit */
+            limit?: number | null;
+            /** Page */
+            page?: string | null;
+        };
+        /**
+         * FileMetadata
+         * @description Anthropic's public metadata, without provider-neutral-only fields.
+         */
+        FileMetadata: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Downloadable */
+            downloadable: boolean;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Filename */
+            filename: string;
+            /** Id */
+            id: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Type
+             * @default file
+             * @constant
+             */
+            type: "file";
+        } & {
+            [key: string]: unknown;
+        };
+        /** FilePage */
+        FilePage: {
+            /** Data */
+            data: components["schemas"]["FileMetadata"][];
+            /** Next Page */
+            next_page?: string | null;
+        };
+        /** FinalizeUpload */
+        FinalizeUpload: {
+            /** Expires In Seconds */
+            expires_in_seconds?: number | null;
+            metadata: components["schemas"]["FileMetadata"];
+        };
         /**
          * GatewaySettings
          * @description Operator-facing runtime settings surfaced to the dashboard.
@@ -7959,6 +8301,18 @@ export interface components {
             default_target: string;
             /** Name */
             name: string;
+        };
+        /** LeaseResult */
+        LeaseResult: {
+            /** Results */
+            results: {
+                [key: string]: boolean;
+            };
+            /**
+             * Token
+             * Format: password
+             */
+            token: string;
         };
         /**
          * MailSettings
@@ -8519,6 +8873,17 @@ export interface components {
             provider_raw?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /** NativeFileDeleted */
+        NativeFileDeleted: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default file_deleted
+             * @constant
+             */
+            type: "file_deleted";
         };
         /**
          * OAuthCallbackRequest
@@ -9454,6 +9819,32 @@ export interface components {
             /** Data */
             data: components["schemas"]["OrganizationScopedBudgetPublic"][];
         };
+        /** OutputPrepare */
+        OutputPrepare: {
+            /** Attempt Id */
+            attempt_id: string;
+            /**
+             * Generation Id
+             * Format: uuid
+             */
+            generation_id: string;
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            /** Request Id */
+            request_id: string;
+        };
+        /** OutputRegister */
+        OutputRegister: {
+            metadata: components["schemas"]["FileMetadata"];
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+        };
         /**
          * OutputShape
          * @description The decision form a guardrail produces (aligns with the populated ``GuardrailOutput`` fields).
@@ -9913,6 +10304,18 @@ export interface components {
             /** Warm */
             warm: boolean;
         };
+        /** PrepareUpload */
+        PrepareUpload: {
+            /** Expires In Seconds */
+            expires_in_seconds?: number | null;
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
         /**
          * PricingDriftRow
          * @description A stored deployment rate beside the default it shadows.
@@ -10263,6 +10666,11 @@ export interface components {
              */
             unreadable: number;
         };
+        /** References */
+        References: {
+            /** Ids */
+            ids: string[];
+        };
         /**
          * RegisterPasskeyRequest
          * @description A completed registration ceremony, with the label to file it under.
@@ -10382,6 +10790,14 @@ export interface components {
              * @description The token from the reset link.
              */
             token: string;
+        };
+        /** ResolveFile */
+        ResolveFile: {
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "metadata" | "download" | "delete";
         };
         /**
          * ResourceLink
@@ -14251,8 +14667,15 @@ export interface operations {
                 user?: string | null;
                 purpose?: string | null;
                 workspace_id?: string | null;
+                /** @description Hybrid GA cursor. */
+                page?: string;
+                /** @description Hybrid IDs filter; mutually exclusive with page and limit. */
+                "ids[]"?: string[];
             };
-            header?: never;
+            header?: {
+                /** @description Required in hybrid provider-native mode. */
+                "anthropic-version"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -14266,7 +14689,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: unknown;
-                    };
+                    } | components["schemas"]["FilePage"];
                 };
             };
             /** @description Validation Error */
@@ -14283,7 +14706,10 @@ export interface operations {
     "files-create_file": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Required in hybrid provider-native mode. */
+                "anthropic-version"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -14301,7 +14727,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: unknown;
-                    };
+                    } | components["schemas"]["FileMetadata"];
                 };
             };
             /** @description Validation Error */
@@ -14320,7 +14746,10 @@ export interface operations {
             query?: {
                 user?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description Required in hybrid provider-native mode. */
+                "anthropic-version"?: string;
+            };
             path: {
                 file_id: string;
             };
@@ -14336,7 +14765,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: unknown;
-                    };
+                    } | components["schemas"]["FileMetadata"];
                 };
             };
             /** @description Validation Error */
@@ -14355,7 +14784,10 @@ export interface operations {
             query?: {
                 user?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description Required in hybrid provider-native mode. */
+                "anthropic-version"?: string;
+            };
             path: {
                 file_id: string;
             };
@@ -14371,7 +14803,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: unknown;
-                    };
+                    } | components["schemas"]["NativeFileDeleted"];
                 };
             };
             /** @description Validation Error */
@@ -14390,7 +14822,10 @@ export interface operations {
             query?: {
                 user?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description Required in hybrid provider-native mode. */
+                "anthropic-version"?: string;
+            };
             path: {
                 file_id: string;
             };
@@ -14408,6 +14843,479 @@ export interface operations {
                 content: {
                     "*/*": string;
                     "application/octet-stream": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CleanupClaim"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-complete_lease": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lease_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaseResult"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-list_files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FileListRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-prepare_output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutputPrepare"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-register_output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutputRegister"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-abandon_output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AbandonUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-complete_output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CleanupResult"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["References"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-backlog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+        };
+    };
+    "provider-files-prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrepareUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-abandon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                binding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AbandonUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-finalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                binding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FinalizeUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-cleanup_result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                binding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CleanupResult"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveFile"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

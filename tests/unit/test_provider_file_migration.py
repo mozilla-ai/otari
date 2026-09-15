@@ -1,0 +1,32 @@
+"""The provider-files revision round-trips on the standalone SQLite engine."""
+
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine, inspect
+
+TABLES = {
+    "provider_account_generations",
+    "provider_file_bindings",
+    "provider_file_output_operations",
+    "provider_file_rate_windows",
+}
+
+
+def test_provider_file_migration_round_trip(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[2]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "alembic"))
+    url = f"sqlite:///{tmp_path / 'files.db'}"
+    config.set_main_option("sqlalchemy.url", url)
+    command.upgrade(config, "c3e5a7b9d1f4")
+    engine = create_engine(url)
+    try:
+        assert TABLES <= set(inspect(engine).get_table_names())
+        command.downgrade(config, "b2d4f6a8c0e2")
+        assert not TABLES & set(inspect(engine).get_table_names())
+        command.upgrade(config, "c3e5a7b9d1f4")
+        assert TABLES <= set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()

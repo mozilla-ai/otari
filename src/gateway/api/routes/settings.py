@@ -116,7 +116,22 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "Files",
-        ("files_enabled", "files_backend", "files_local_dir", "files_max_bytes", "files_retention_hours"),
+        (
+            "files_enabled",
+            "files_backend",
+            "files_local_dir",
+            "files_max_bytes",
+            "files_retention_hours",
+            "files_provider_native_enabled",
+            "files_transfer_timeout_seconds",
+            "files_idle_timeout_seconds",
+            "files_rate_limit_rpm",
+            "files_max_count",
+            "files_max_outstanding_bytes",
+            "files_temporary_capacity_bytes",
+            "files_operation_timeout_seconds",
+            "files_diagnostic_retention_days",
+        ),
     ),
     (
         "Vision & file understanding",

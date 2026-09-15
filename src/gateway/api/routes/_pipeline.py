@@ -4350,6 +4350,7 @@ async def run_platform_non_stream(
     config: GatewayConfig,
     rate_limit_info: RateLimitInfo | None,
     session_label: str | None = None,
+    build_kwargs: Callable[[ResolvedAttempt, dict[str, Any]], dict[str, Any]] = default_attempt_kwargs,
 ) -> ResultT:
     """Drive the multi-attempt hybrid-mode non-streaming path via the shared
     ``run_platform_attempts`` runner, dispatching each attempt through the
@@ -4420,6 +4421,7 @@ async def run_platform_non_stream(
 
     try:
         result = await run_platform_attempts(
+            build_kwargs=build_kwargs,
             route=route,
             attempts=attempts,
             base_request_fields=base_request_fields,
