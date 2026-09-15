@@ -11643,6 +11643,8 @@ export interface components {
             prompt_tokens: number | null;
             /** Provider */
             provider: string | null;
+            /** Provider Latency Ms */
+            provider_latency_ms: number | null;
             /** Request Group Id */
             request_group_id?: string | null;
             /** Selection Reason */
@@ -11792,6 +11794,8 @@ export interface components {
             prompt_tokens: number | null;
             /** Provider */
             provider: string | null;
+            /** Provider Latency Ms */
+            provider_latency_ms: number | null;
             /** Status */
             status: string;
             /** Timestamp */

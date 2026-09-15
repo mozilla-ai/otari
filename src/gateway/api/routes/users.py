@@ -112,6 +112,7 @@ class UsageLogResponse(BaseModel):
     status: str
     error_message: str | None
     latency_ms: int | None
+    provider_latency_ms: int | None
 
     @classmethod
     def from_model(cls, log: UsageLog) -> "UsageLogResponse":
@@ -130,6 +131,7 @@ class UsageLogResponse(BaseModel):
             status=log.status,
             error_message=log.error_message,
             latency_ms=log.latency_ms,
+            provider_latency_ms=log.provider_latency_ms,
         )
 
 

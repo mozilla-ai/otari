@@ -1081,6 +1081,12 @@ function RequestDetail({
         <DetailField label="Total time">
           {formatLatency(entry.latency_ms)}
         </DetailField>
+        {/* Provider-reported compute time, best-effort (Groq, Ollama today).
+            formatLatency's null placeholder means not reported, not zero.
+            Diagnostic only: Total time above stays the canonical measure. */}
+        <DetailField label="Provider time">
+          {formatLatency(entry.provider_latency_ms)}
+        </DetailField>
         <DetailField label="Request ID" copyValue={entry.id}>
           {entry.id}
         </DetailField>

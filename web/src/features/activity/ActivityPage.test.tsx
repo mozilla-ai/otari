@@ -40,6 +40,7 @@ function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
     error_message: null,
     status_code: null,
     latency_ms: 842,
+    provider_latency_ms: null,
     source: "gateway",
     source_label: null,
     counts_toward_budget: true,
@@ -540,6 +541,24 @@ describe("ActivityPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Close" }))
     expect(screen.queryByText("Request detail")).not.toBeInTheDocument()
+  })
+
+  it("shows the provider-reported compute time in the detail panel", async () => {
+    // provider_latency_ms is a diagnostic alongside Total time (otari#337); this
+    // asserts the row's value actually reaches the "Provider time" field rather
+    // than only being present in the fixture shape.
+    const user = userEvent.setup()
+    mockApi({
+      rows: [entry({ provider: "groq", provider_latency_ms: 156 })],
+    })
+    renderPage(<ActivityPage />)
+
+    await user.click((await screen.findByText("gpt-4o")).closest("tr")!)
+
+    const label = screen.getByText("Provider time", {
+      selector: "span.text-overline",
+    })
+    expect(label.parentElement?.textContent).toContain("156 ms")
   })
 
   it("sends the status filter to the API", async () => {

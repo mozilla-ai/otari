@@ -857,6 +857,13 @@ class UsageLog(Base):
     # provider-never-reached rejections) have no meaningful request duration.
     latency_ms: Mapped[int | None] = mapped_column()
 
+    # Provider-reported server-side compute time, in milliseconds, best-effort
+    # (otari#337): prompt + generation time, excluding model load time where the
+    # provider reports load separately (see _PROVIDER_LATENCY_FIELDS in
+    # gateway.core.usage). Nullable: most providers report nothing here, and an
+    # extraction failure must never block a write.
+    provider_latency_ms: Mapped[int | None] = mapped_column()
+
     # Milliseconds from request start to the first streamed chunk. Nullable:
     # non-streaming requests have no first chunk, historical rows predate the
     # column, and a stream that failed before yielding anything never reached one.
@@ -900,6 +907,7 @@ class UsageLog(Base):
             "error_message": self.error_message,
             "status_code": self.status_code,
             "latency_ms": self.latency_ms,
+            "provider_latency_ms": self.provider_latency_ms,
             "policy_name": self.policy_name,
             "selection_reason": self.selection_reason,
             "attempt_position": self.attempt_position,
