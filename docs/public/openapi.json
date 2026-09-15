@@ -5409,6 +5409,45 @@
         "title": "ExternalUsageEvent",
         "type": "object"
       },
+      "GateResultResponse": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "enforcement": {
+            "title": "Enforcement",
+            "type": "string"
+          },
+          "gate_id": {
+            "title": "Gate Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gate_id",
+          "enforcement",
+          "outcome",
+          "message"
+        ],
+        "title": "GateResultResponse",
+        "type": "object"
+      },
       "GatewaySettings": {
         "description": "Operator-facing runtime settings surfaced to the dashboard.\n\nThe top-level flags are kept for the callers that read them directly\n(pricing warnings, the models/providers pages); ``config`` is the full\nread-only view with the settable/startup-only marking.",
         "properties": {
@@ -10152,6 +10191,68 @@
           "mcp_servers"
         ],
         "title": "PlaygroundToolsResponse",
+        "type": "object"
+      },
+      "PolicyCheckRequest": {
+        "additionalProperties": false,
+        "description": "A policy body plus the evidence to check it against, both caller-supplied.",
+        "properties": {
+          "changed_paths": {
+            "description": "Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10000,
+            "title": "Changed Paths",
+            "type": "array"
+          },
+          "policy_yaml": {
+            "maxLength": 262144,
+            "minLength": 1,
+            "title": "Policy Yaml",
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy_yaml"
+        ],
+        "title": "PolicyCheckRequest",
+        "type": "object"
+      },
+      "PolicyCheckResponse": {
+        "properties": {
+          "blocked": {
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "policy_id": {
+            "title": "Policy Id",
+            "type": "string"
+          },
+          "provenance": {
+            "default": "client_reported",
+            "title": "Provenance",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/GateResultResponse"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy_id",
+          "schema_version",
+          "results",
+          "blocked"
+        ],
+        "title": "PolicyCheckResponse",
         "type": "object"
       },
       "PolicyRequest": {
@@ -20438,6 +20539,56 @@
         "summary": "Health Readiness",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/v1/hooks/check": {
+      "post": {
+        "description": "Evaluate a submitted policy against submitted evidence.\n\nAuthenticated with either an API key or the master key (the router-level\ngate), like ``POST /api/v1/usage/external-events``: this identifies who\nsent the request, not whether its evidence is true. `blocked` is set when\na required gate's outcome is not `pass`/`not_applicable` (an unresolved\ngate never counts as a pass).",
+        "operationId": "hooks-check_policy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Check Policy",
+        "tags": [
+          "hooks"
         ]
       }
     },
