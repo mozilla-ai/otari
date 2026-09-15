@@ -370,6 +370,13 @@ class ReencryptProviderCredentialsResponse(BaseModel):
 
     reencrypted: int = Field(description="Number of stored provider keys re-encrypted.")
     unreadable: int = Field(description="Number of encrypted keys left untouched because they could not be decrypted.")
+    skipped: int = Field(
+        default=0,
+        description=(
+            "Number of rows whose stored key changed between the read and the write, so the "
+            "re-encryption was not applied. They already hold whoever wrote them last."
+        ),
+    )
 
 
 class TestProviderRequest(BaseModel):
@@ -506,7 +513,7 @@ async def reencrypt_stored_provider_keys(
     by replacing the affected provider keys.
     """
     try:
-        reencrypted, unreadable = await reencrypt_credentials(db)
+        reencrypted, unreadable, skipped = await reencrypt_credentials(db)
         await db.commit()
     except SecretBoxUnavailableError as exc:
         await db.rollback()
@@ -519,7 +526,7 @@ async def reencrypt_stored_provider_keys(
         await refresh_provider_cache(db, config)
     except SQLAlchemyError:
         logger.warning("Provider overlay refresh failed after re-encrypting credentials; converges within TTL")
-    return ReencryptProviderCredentialsResponse(reencrypted=reencrypted, unreadable=unreadable)
+    return ReencryptProviderCredentialsResponse(reencrypted=reencrypted, unreadable=unreadable, skipped=skipped)
 
 
 @router.get("/provider-credentials")
