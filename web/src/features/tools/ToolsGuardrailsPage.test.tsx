@@ -700,6 +700,7 @@ describe("ToolsGuardrailsPage tool status", () => {
         model_key: "otari:web_fetch",
         input_price_per_million: 4200,
         output_price_per_million: 0,
+        unit: "requests",
       })
     })
   })
