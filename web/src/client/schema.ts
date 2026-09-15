@@ -1723,7 +1723,8 @@ export interface paths {
          *
          *     The policies list's sibling, over ``model_aliases``, and scoped the same way:
          *     stored rows from the caller's visible workspaces, plus the config-file
-         *     aliases, which are deployment-wide.
+         *     aliases, which are deployment-wide, and narrowed to one workspace when
+         *     ``workspace_id`` names one.
          */
         get: operations["aliases-list_visible_aliases"];
         put?: never;
@@ -2468,7 +2469,8 @@ export interface paths {
          *     Stored policies from the caller's visible workspaces plus the config-file
          *     policies, which are deployment-wide and resolve in every workspace. The
          *     response is the shape ``GET /api/v1/routing/policies`` answers, narrowed to the
-         *     caller's own organization.
+         *     caller's own organization, and narrowed again to one workspace when
+         *     ``workspace_id`` names one.
          */
         get: operations["routing-list_visible_routing_policies"];
         put?: never;
@@ -15328,6 +15330,8 @@ export interface operations {
             query?: {
                 /** @description Maximum entries to return, stored and config-file together. */
                 limit?: number;
+                /** @description Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit for every workspace this caller may see. */
+                workspace_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -16689,6 +16693,8 @@ export interface operations {
             query?: {
                 /** @description Maximum entries to return, stored and config-file together. */
                 limit?: number;
+                /** @description Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit for every workspace this caller may see. */
+                workspace_id?: string | null;
             };
             header?: never;
             path?: never;

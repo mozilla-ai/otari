@@ -11,61 +11,84 @@ import type {
   SetRoutingPolicyRequest,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   ALIASES,
   CATALOG,
   MODELS,
-  ORGANIZATION_ALIASES,
-  ORGANIZATION_ROUTING_POLICIES,
   ROUTER_STATUS,
   ROUTING_POLICIES,
 } from "@/shared/api/queryKeys"
 
-export function useAliases(enabled = true) {
-  return useQuery({
-    queryKey: [ALIASES],
-    queryFn: () => apiFetch<AliasResponse[]>("/aliases"),
-    staleTime: 60_000,
-    enabled,
-  })
+// Which of the two routing surfaces this caller may read, the `useKeysScope`
+// construction over the same pair of endpoints. `/routing/policies` and
+// `/aliases` are deployment-wide and refuse anyone who does not operate the
+// deployment; the `/organizations/me/*` two answer the same shapes for the
+// caller's own organization (otari-ai#1942, otari-ai#1969). The bases are part
+// of every query key they feed, so a demotion cannot serve the wider list from
+// cache, and an errored context falls through to the narrower surface.
+export function useRoutingScope(): {
+  policies: string
+  aliases: string
+  isReady: boolean
+} {
+  const context = useOrganizationContext()
+  const isDeploymentWide = context.data?.deployment_operator === true
+  return {
+    policies: isDeploymentWide
+      ? "/routing/policies"
+      : "/organizations/me/routing-policies",
+    aliases: isDeploymentWide ? "/aliases" : "/organizations/me/aliases",
+    isReady: context.isSuccess || context.isError,
+  }
 }
 
-// Unscoped for the same reason as `useAliases` above, `enabled` too.
-export function useRoutingPolicies(enabled = true) {
-  return useQuery({
-    queryKey: [ROUTING_POLICIES],
-    queryFn: () => apiFetch<RoutingPolicyResponse[]>("/routing/policies"),
-    staleTime: 60_000,
-    enabled,
-  })
+function inWorkspace(base: string, workspaceId?: string): string {
+  return workspaceId
+    ? `${base}?workspace_id=${encodeURIComponent(workspaceId)}`
+    : base
 }
 
-// The routing policies in force where the caller may see: stored rows from
-// their visible workspaces plus the deployment-wide config ones, the same
-// response shape as `useRoutingPolicies`. This is the read a signed-in member
-// gets (otari-ai#1942); the deployment-wide list above stays operator-only, so
-// the Routing page picks between the two off `isDeploymentOperator`.
-export function useOrganizationRoutingPolicies(enabled = true) {
+// The scope query a deployment-wide delete carries. Only a null or absent
+// `userId` means workspace-wide, checked explicitly because "" is a legal user
+// id and treating it as workspace-wide would delete the wrong row.
+function deploymentScope(
+  userId?: string | null,
+  workspaceId?: string | null,
+): string {
+  const parts: string[] = []
+  if (userId != null) parts.push(`user_id=${encodeURIComponent(userId)}`)
+  if (workspaceId != null)
+    parts.push(`workspace_id=${encodeURIComponent(workspaceId)}`)
+  return parts.length === 0 ? "" : `?${parts.join("&")}`
+}
+
+// The workspace is part of the key, not just the request, so switching
+// workspaces refetches rather than serving the previous one's rows. An unset id
+// keeps the whole-scope view, which is what a caller who belongs to no
+// workspace, and every read that wants the catalog rather than one workspace's
+// management list, still wants.
+export function useAliases(workspaceId?: string) {
+  const scope = useRoutingScope()
   return useQuery({
-    queryKey: [ORGANIZATION_ROUTING_POLICIES],
+    queryKey: [ALIASES, scope.aliases, workspaceId ?? null],
     queryFn: () =>
-      apiFetch<RoutingPolicyResponse[]>("/organizations/me/routing-policies"),
+      apiFetch<AliasResponse[]>(inWorkspace(scope.aliases, workspaceId)),
     staleTime: 60_000,
-    enabled,
+    enabled: scope.isReady,
   })
 }
 
-// The aliases in force where the caller may see, the policies list's sibling
-// over `model_aliases` and scoped the same way. This is the read a signed-in
-// member gets (otari-ai#1969); the deployment-wide `useAliases` above stays
-// operator-only, so the Routing page picks between the two off
-// `isDeploymentOperator`.
-export function useOrganizationAliases(enabled = true) {
+export function useRoutingPolicies(workspaceId?: string) {
+  const scope = useRoutingScope()
   return useQuery({
-    queryKey: [ORGANIZATION_ALIASES],
-    queryFn: () => apiFetch<AliasResponse[]>("/organizations/me/aliases"),
+    queryKey: [ROUTING_POLICIES, scope.policies, workspaceId ?? null],
+    queryFn: () =>
+      apiFetch<RoutingPolicyResponse[]>(
+        inWorkspace(scope.policies, workspaceId),
+      ),
     staleTime: 60_000,
-    enabled,
+    enabled: scope.isReady,
   })
 }
 
@@ -79,9 +102,6 @@ export function useSetRoutingPolicy() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ROUTING_POLICIES] })
-      void queryClient.invalidateQueries({
-        queryKey: [ORGANIZATION_ROUTING_POLICIES],
-      })
       // A policy is listed as a model, so the catalog changes too.
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
       void queryClient.invalidateQueries({ queryKey: [CATALOG] })
@@ -94,26 +114,24 @@ export function useDeleteRoutingPolicy() {
   return useMutation({
     // Scoped like an alias delete: the same name can exist globally and per user,
     // so a delete must say which. Only a null/absent userId means global, checked
-    // explicitly because "" is a legal user id.
+    // explicitly because "" is a legal user id. The workspace travels too, or the
+    // route falls back to the deployment's default one and deletes a row the page
+    // is not showing.
     mutationFn: ({
       name,
       userId,
+      workspaceId,
     }: {
       name: string
       userId?: string | null
-    }) => {
-      const scope =
-        userId == null ? "" : `?user_id=${encodeURIComponent(userId)}`
-      return apiFetch<void>(
-        `/routing/policies/${encodeURIComponent(name)}${scope}`,
+      workspaceId?: string | null
+    }) =>
+      apiFetch<void>(
+        `/routing/policies/${encodeURIComponent(name)}${deploymentScope(userId, workspaceId)}`,
         { method: "DELETE" },
-      )
-    },
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ROUTING_POLICIES] })
-      void queryClient.invalidateQueries({
-        queryKey: [ORGANIZATION_ROUTING_POLICIES],
-      })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
       void queryClient.invalidateQueries({ queryKey: [CATALOG] })
     },
@@ -129,18 +147,14 @@ export function useDeleteRoutingPolicy() {
  * `user_id` has no counterpart here at all: an organization's entries are
  * workspace-wide.
  *
- * Both list keys are invalidated by each of them, because which of the two a
- * page is reading is a function of the caller's role rather than of the write.
+ * Both list keys carry their surface and their workspace as trailing segments,
+ * so invalidating the head of each covers whichever one this caller is reading.
  */
 function invalidateRoutingLists(
   queryClient: ReturnType<typeof useQueryClient>,
 ) {
   void queryClient.invalidateQueries({ queryKey: [ROUTING_POLICIES] })
-  void queryClient.invalidateQueries({
-    queryKey: [ORGANIZATION_ROUTING_POLICIES],
-  })
   void queryClient.invalidateQueries({ queryKey: [ALIASES] })
-  void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_ALIASES] })
   // A policy and an alias are both listed as models, so the catalog changes too.
   void queryClient.invalidateQueries({ queryKey: [MODELS] })
   void queryClient.invalidateQueries({ queryKey: [CATALOG] })
@@ -285,16 +299,16 @@ export function useDeleteAlias() {
     mutationFn: ({
       name,
       userId,
+      workspaceId,
     }: {
       name: string
       userId?: string | null
-    }) => {
-      const scope =
-        userId == null ? "" : `?user_id=${encodeURIComponent(userId)}`
-      return apiFetch<void>(`/aliases/${encodeURIComponent(name)}${scope}`, {
-        method: "DELETE",
-      })
-    },
+      workspaceId?: string | null
+    }) =>
+      apiFetch<void>(
+        `/aliases/${encodeURIComponent(name)}${deploymentScope(userId, workspaceId)}`,
+        { method: "DELETE" },
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ALIASES] })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })

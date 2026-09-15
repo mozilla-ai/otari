@@ -39,13 +39,11 @@ export const SEARCH_PROVIDERS = "search-providers"
 // remote service's answer, so a settings save that changes that URL invalidates
 // it, while every other tool-settings write must not re-dial the sidecar.
 export const GUARDRAIL_PROFILES = "guardrail-profiles"
+// Both carry the surface they were read from and the workspace they were scoped
+// to as trailing key segments, so the deployment-wide list and its tenant-scoped
+// sibling share a head that one invalidation covers. See `useRoutingScope`.
 export const ALIASES = "aliases"
 export const ROUTING_POLICIES = "routing-policies"
-// The tenant-scoped sibling of ROUTING_POLICIES. Its own key: the two lists
-// answer different endpoints for different callers, and an operator's policy
-// write invalidates the deployment-wide one it changed.
-export const ORGANIZATION_ROUTING_POLICIES = "organization-routing-policies"
-export const ORGANIZATION_ALIASES = "organization-aliases"
 export const ROUTER_STATUS = "router-status"
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the

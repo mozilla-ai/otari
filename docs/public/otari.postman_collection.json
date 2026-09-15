@@ -420,7 +420,7 @@
         {
           "name": "List Visible Aliases",
           "request": {
-            "description": "List the aliases in force in the workspaces this caller may see.\n\nThe policies list's sibling, over ``model_aliases``, and scoped the same way:\nstored rows from the caller's visible workspaces, plus the config-file\naliases, which are deployment-wide.",
+            "description": "List the aliases in force in the workspaces this caller may see.\n\nThe policies list's sibling, over ``model_aliases``, and scoped the same way:\nstored rows from the caller's visible workspaces, plus the config-file\naliases, which are deployment-wide, and narrowed to one workspace when\n``workspace_id`` names one.",
             "header": [],
             "method": "GET",
             "url": {
@@ -440,9 +440,15 @@
                   "disabled": true,
                   "key": "limit",
                   "value": ""
+                },
+                {
+                  "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit for every workspace this caller may see.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/aliases?limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/aliases?limit=&workspace_id="
             }
           }
         },
@@ -4442,7 +4448,7 @@
         {
           "name": "List Visible Routing Policies",
           "request": {
-            "description": "List the routing policies in force in the workspaces this caller may see.\n\nStored policies from the caller's visible workspaces plus the config-file\npolicies, which are deployment-wide and resolve in every workspace. The\nresponse is the shape ``GET /api/v1/routing/policies`` answers, narrowed to the\ncaller's own organization.",
+            "description": "List the routing policies in force in the workspaces this caller may see.\n\nStored policies from the caller's visible workspaces plus the config-file\npolicies, which are deployment-wide and resolve in every workspace. The\nresponse is the shape ``GET /api/v1/routing/policies`` answers, narrowed to the\ncaller's own organization, and narrowed again to one workspace when\n``workspace_id`` names one.",
             "header": [],
             "method": "GET",
             "url": {
@@ -4462,9 +4468,15 @@
                   "disabled": true,
                   "key": "limit",
                   "value": ""
+                },
+                {
+                  "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit for every workspace this caller may see.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/routing-policies?limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/routing-policies?limit=&workspace_id="
             }
           }
         },

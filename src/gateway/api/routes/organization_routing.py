@@ -226,6 +226,13 @@ def _visible_workspace_ids(scope: VisibleWorkspaceScope) -> Select[tuple[uuid.UU
 
 _LIMIT = Query(ge=1, le=_MAX_ROWS, description="Maximum entries to return, stored and config-file together.")
 
+_WORKSPACE_FILTER = Query(
+    description=(
+        "Only stored entries in this workspace. Config-file entries are always included, being "
+        "deployment-wide. Omit for every workspace this caller may see."
+    )
+)
+
 
 @policies_router.get("")
 async def list_visible_routing_policies(
@@ -233,13 +240,15 @@ async def list_visible_routing_policies(
     config: Annotated[GatewayConfig, Depends(get_config)],
     current_identity: CurrentIdentity,
     limit: Annotated[int, _LIMIT] = _MAX_ROWS,
+    workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_FILTER] = None,
 ) -> list[PolicyResponse]:
     """List the routing policies in force in the workspaces this caller may see.
 
     Stored policies from the caller's visible workspaces plus the config-file
     policies, which are deployment-wide and resolve in every workspace. The
     response is the shape ``GET /api/v1/routing/policies`` answers, narrowed to the
-    caller's own organization.
+    caller's own organization, and narrowed again to one workspace when
+    ``workspace_id`` names one.
     """
     scope = await resolve_visible_workspace_scope(db, user=current_identity, organizations=OrganizationService(db))
     statement = select(RoutingPolicy).where(
@@ -248,6 +257,8 @@ async def list_visible_routing_policies(
         # is neither this surface's to show nor its to act on.
         col(RoutingPolicy.user_id).is_(None),
     )
+    if workspace_id is not None:
+        statement = statement.where(col(RoutingPolicy.workspace_id) == workspace_id)
     rows = (await db.execute(statement.order_by(RoutingPolicy.name).limit(limit))).scalars().all()
     policies = []
     for row in rows:
@@ -329,18 +340,22 @@ async def list_visible_aliases(
     config: Annotated[GatewayConfig, Depends(get_config)],
     current_identity: CurrentIdentity,
     limit: Annotated[int, _LIMIT] = _MAX_ROWS,
+    workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_FILTER] = None,
 ) -> list[AliasResponse]:
     """List the aliases in force in the workspaces this caller may see.
 
     The policies list's sibling, over ``model_aliases``, and scoped the same way:
     stored rows from the caller's visible workspaces, plus the config-file
-    aliases, which are deployment-wide.
+    aliases, which are deployment-wide, and narrowed to one workspace when
+    ``workspace_id`` names one.
     """
     scope = await resolve_visible_workspace_scope(db, user=current_identity, organizations=OrganizationService(db))
     statement = select(ModelAlias).where(
         col(ModelAlias.workspace_id).in_(_visible_workspace_ids(scope)),
         col(ModelAlias.user_id).is_(None),
     )
+    if workspace_id is not None:
+        statement = statement.where(col(ModelAlias.workspace_id) == workspace_id)
     rows = (await db.execute(statement.order_by(ModelAlias.name).limit(limit))).scalars().all()
     aliases = [AliasResponse.from_model(row) for row in rows]
     for name, target in config.aliases.items():

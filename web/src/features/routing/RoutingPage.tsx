@@ -21,8 +21,6 @@ import {
   useDeleteOrganizationAlias,
   useDeleteOrganizationRoutingPolicy,
   useDeleteRoutingPolicy,
-  useOrganizationAliases,
-  useOrganizationRoutingPolicies,
   useRoutingPolicies,
 } from "@/shared/api/routing"
 import { useUrlValue } from "@/shared/helpers/urlState"
@@ -181,49 +179,44 @@ function KindMark({ label }: { label: string }) {
 }
 
 export function RoutingPage() {
-  // Deliberately unscoped, unlike keys and usage. The gateway stores every
-  // policy and alias in the default workspace on purpose, because resolution
-  // reads a process-wide name-keyed cache: one stored elsewhere would be listed
-  // as scoped while it resolved for everyone. Filtering this list by the
-  // selected workspace would therefore show an empty page while those policies
-  // were live for that workspace's traffic, and hide a policy the moment it was
-  // created. Scope this when resolution is scoped, not before.
+  // Scoped to the selected workspace, like keys and usage (otari-ai#2087).
+  // Resolution is workspace-keyed (`services/policy_store`), so a stored policy
+  // decides the traffic of one workspace and belongs on that workspace's page.
+  // Left unscoped, the deployment-wide list showed an operator every tenant's
+  // rows and an admin every workspace of theirs, neither of which is what the
+  // page claims to be. Config-file entries have no workspace and are listed
+  // whatever the selection, being in force in all of them.
   //
-  // Which list is asked depends on who is signed in (otari-ai#1942): an
-  // operator reads the deployment-wide management view, and anyone else reads
-  // the tenant-scoped `/organizations/me/*` pair. Both reads wait for the
-  // context to settle rather than taking "not yet an operator" as "member", so
-  // an operator's page does not fire a read it is about to drop.
+  // Which of the two surfaces answers depends on who is signed in
+  // (otari-ai#1942, otari-ai#1969), and `useRoutingScope` makes that choice once
+  // for both lists: an operator reads the deployment-wide pair, anyone else the
+  // tenant-scoped `/organizations/me/*` one. Both wait for the context to settle
+  // rather than taking "not yet an operator" as "member".
   const organization = useOrganizationContext()
   const isOperator = isDeploymentOperator(organization.data)
   const isContextSettled =
     organization.data !== undefined || organization.isError
-  const policies = useRoutingPolicies(isOperator)
-  const memberPolicies = useOrganizationRoutingPolicies(
-    isContextSettled && !isOperator,
-  )
-  const aliases = useAliases(isOperator)
-  const memberAliases = useOrganizationAliases(isContextSettled && !isOperator)
+  // The switcher is seeded from the caller's own memberships, not the
+  // organization's whole list (otari-ai#1969), so this is null only for somebody
+  // who belongs to no workspace: they have nothing of their own to see and
+  // nowhere to write, and are shown the config entries on a read-only page.
+  const { selected: selectedWorkspace } = useSelectedWorkspace()
+  const workspaceId = selectedWorkspace?.workspace_id
+  const policies = useRoutingPolicies(workspaceId)
+  const aliases = useAliases(workspaceId)
   const deletePolicy = useDeleteRoutingPolicy()
   const deleteAlias = useDeleteAlias()
   const deleteOrgPolicy = useDeleteOrganizationRoutingPolicy()
   const deleteOrgAlias = useDeleteOrganizationAlias()
-  // Where a tenant admin's write lands, and null for an operator, who writes
-  // deployment-wide. The tenant surface requires the workspace named, so an
-  // admin who belongs to none has nowhere to write and is shown the read-only
-  // page: the switcher is seeded from their own memberships, not the
-  // organization's whole list (otari-ai#1969).
-  const { selected: selectedWorkspace } = useSelectedWorkspace()
-  const writeWorkspaceId = isOperator
-    ? null
-    : (selectedWorkspace?.workspace_id ?? null)
+  // Where a create lands, on either surface. An operator's used to omit it and
+  // land in the deployment's default workspace, which is a row saved from one
+  // workspace's page and listed on another's. A write to an existing row uses
+  // that row's own workspace instead (`deleteWorkspaceFor` below, and the Edit
+  // form's `workspaceId`), so a list still being refetched through a switch
+  // cannot move a row between workspaces.
+  const writeWorkspaceId = workspaceId ?? null
   const canEdit =
     isOperator || (canManage(organization.data) && writeWorkspaceId !== null)
-  // An admin's list spans every workspace of the organization, not just the
-  // selected one, so a write to an existing row goes back to the workspace that
-  // row lives in (`rowWorkspace` below, and the Edit form's `workspaceId`).
-  // Using the selection would create a second policy of the same name in the
-  // selected workspace and leave the edited one untouched.
   // A deep link may pre-fill the add form with ?target=provider:model.
   const initialTarget = useUrlValue("target")
   const [adding, setAdding] = useState(initialTarget !== "")
@@ -256,20 +249,12 @@ export function RoutingPage() {
 
   // Aliases and policies are listed together: an alias is the one-target case,
   // and this page is the only place either is managed.
-  //
-  // Both operator lists are read through `isOperator` rather than relied on to
-  // be empty because their hooks are disabled: a disabled query still hands
-  // back whatever sits in the cache under its key, so a caller who was an
-  // operator earlier in the session would keep seeing the deployment-wide rows
-  // after being demoted. The gate belongs where the data is rendered.
   const rows: RoutingRow[] = [
-    ...((isOperator ? policies.data : memberPolicies.data) ?? []).map(
-      (policy) => ({
-        ...policy,
-        kind: "policy" as const,
-      }),
-    ),
-    ...((isOperator ? aliases.data : memberAliases.data) ?? []).map(aliasAsRow),
+    ...(policies.data ?? []).map((policy) => ({
+      ...policy,
+      kind: "policy" as const,
+    })),
+    ...(aliases.data ?? []).map(aliasAsRow),
   ].sort(
     (a, b) =>
       a.name.localeCompare(b.name) ||
@@ -278,10 +263,7 @@ export function RoutingPage() {
   // The context counts as loading too: until it settles, neither list has been
   // asked, and an empty table would read as "no policies" rather than "not yet".
   const isListLoading =
-    !isContextSettled ||
-    (isOperator
-      ? policies.isLoading || aliases.isLoading
-      : memberPolicies.isLoading || memberAliases.isLoading)
+    !isContextSettled || policies.isLoading || aliases.isLoading
 
   // Stable so DataTable's row cache holds; see its docstring.
   const renderDetail = useCallback(
@@ -449,19 +431,19 @@ export function RoutingPage() {
     return base
   }, [canEdit, expanded, isOperator])
 
-  // Which of the four delete surfaces a row goes to. The tenant one names the
-  // workspace and has no user scope; the deployment-wide one defaults the
-  // workspace and keeps it.
+  // Which of the four delete surfaces a row goes to. Both name the workspace the
+  // row lives in; only the deployment-wide pair carries the user scope, which
+  // the tenant surface has no rows in.
   const deleteWorkspaceFor = (row: RoutingRow) =>
-    isOperator ? null : (row.workspace_id ?? writeWorkspaceId)
+    row.workspace_id ?? writeWorkspaceId
   const deleteMutationFor = (row: RoutingRow) =>
-    deleteWorkspaceFor(row) !== null
+    isOperator
       ? row.kind === "alias"
-        ? deleteOrgAlias
-        : deleteOrgPolicy
-      : row.kind === "alias"
         ? deleteAlias
         : deletePolicy
+      : row.kind === "alias"
+        ? deleteOrgAlias
+        : deleteOrgPolicy
   // Resolved for the pending row alone, not as a chain over all four: a refusal
   // stays on its mutation until the next call, so reading every one of them
   // would report the last row's failure over this row's confirm.
@@ -501,14 +483,7 @@ export function RoutingPage() {
 
       {/* The reads only. Every delete on this page reports inside its own
           confirm dialog, which is where the operator is looking. */}
-      <ErrorBanner
-        error={
-          policies.error ??
-          memberPolicies.error ??
-          aliases.error ??
-          memberAliases.error
-        }
-      />
+      <ErrorBanner error={policies.error ?? aliases.error} />
 
       {/* Mounted while closed so the frame plays its exit with the content
           intact, and keyed on the open counter so the draft is fresh on the way
@@ -523,6 +498,7 @@ export function RoutingPage() {
         // the frame's own restore has nothing to land on. The heading's action
         // survives.
         returnFocusRef={createButtonRef}
+        deploymentWide={isOperator}
         workspaceId={writeWorkspaceId}
         onClose={closeCreate}
       />
@@ -533,9 +509,8 @@ export function RoutingPage() {
           // with the first row's draft and save it under the second one's name.
           key={rowKeyOf(editing)}
           existing={editing}
-          workspaceId={
-            isOperator ? null : (editing.workspace_id ?? writeWorkspaceId)
-          }
+          deploymentWide={isOperator}
+          workspaceId={editing.workspace_id ?? writeWorkspaceId}
           onClose={() => setEditing(null)}
         />
       ) : null}
@@ -619,23 +594,25 @@ export function RoutingPage() {
           if (!pendingDelete) return
           const onSuccess = () => setPendingDelete(undefined)
           const rowWorkspace = deleteWorkspaceFor(pendingDelete)
-          if (rowWorkspace !== null) {
-            const scoped = {
+          if (isOperator) {
+            const deployment = {
               name: pendingDelete.name,
+              userId: pendingDelete.user_id,
               workspaceId: rowWorkspace,
             }
             if (pendingDelete.kind === "alias")
-              deleteOrgAlias.mutate(scoped, { onSuccess })
-            else deleteOrgPolicy.mutate(scoped, { onSuccess })
+              deleteAlias.mutate(deployment, { onSuccess })
+            else deletePolicy.mutate(deployment, { onSuccess })
             return
           }
-          const deployment = {
-            name: pendingDelete.name,
-            userId: pendingDelete.user_id,
-          }
+          // Unreachable: Delete is rendered behind `canEdit`, which for a
+          // tenant admin already requires a selected workspace, and a stored row
+          // always carries its own.
+          if (rowWorkspace === null) return
+          const scoped = { name: pendingDelete.name, workspaceId: rowWorkspace }
           if (pendingDelete.kind === "alias")
-            deleteAlias.mutate(deployment, { onSuccess })
-          else deletePolicy.mutate(deployment, { onSuccess })
+            deleteOrgAlias.mutate(scoped, { onSuccess })
+          else deleteOrgPolicy.mutate(scoped, { onSuccess })
         }}
       />
     </div>
