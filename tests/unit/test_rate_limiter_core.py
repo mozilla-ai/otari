@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from gateway.core.config import GatewayConfig
+from gateway.metrics import REGISTRY
 from gateway.rate_limit import RateLimiter, RateLimitInfo
 
 
@@ -140,3 +141,17 @@ def test_config_accepts_positive_rate_limit() -> None:
 def test_config_accepts_none_rate_limit() -> None:
     config = GatewayConfig(rate_limit_rpm=None)
     assert config.rate_limit_rpm is None
+
+
+def test_check_records_metric_on_429() -> None:
+    """RateLimiter.check() records a metric before raising 429."""
+    limiter = RateLimiter(rpm=1)
+    limiter.check("metric-rl-user")
+
+    before = REGISTRY.get_sample_value("gateway_rate_limit_hits_total") or 0.0
+
+    with pytest.raises(HTTPException) as exc_info:
+        limiter.check("metric-rl-user")
+
+    assert exc_info.value.status_code == 429
+    assert (REGISTRY.get_sample_value("gateway_rate_limit_hits_total") or 0.0) - before == 1.0

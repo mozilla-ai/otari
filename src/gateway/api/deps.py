@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
+from prometheus_client import Counter
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +14,7 @@ from gateway.container import Container
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, create_session, get_db
 from gateway.log_config import logger
-from gateway.metrics import record_auth_failure
+from gateway.metrics import REGISTRY
 from gateway.models.entities import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.billing_port import BillingPort
@@ -36,6 +37,18 @@ from gateway.services.tenancy.provisioning_service import ensure_bootstrap_ident
 # falls back to this shim for callers that set it directly (see ``set_config``).
 _config: GatewayConfig | None = None
 _LAST_USED_UPDATE_INTERVAL_SECONDS = 300
+
+AUTH_FAILURES = Counter(
+    "gateway_auth_failures",
+    "Total number of authentication failures",
+    ["reason"],
+    registry=REGISTRY,
+)
+
+
+def record_auth_failure(reason: str) -> None:
+    """Record an authentication failure."""
+    AUTH_FAILURES.labels(reason=reason).inc()
 
 
 def _as_utc(value: datetime | None) -> datetime | None:

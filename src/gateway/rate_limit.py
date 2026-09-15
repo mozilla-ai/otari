@@ -6,8 +6,15 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 
 from fastapi import HTTPException, Request, status
+from prometheus_client import Counter
 
-from gateway.metrics import record_rate_limit_hit
+from gateway.metrics import REGISTRY
+
+RATE_LIMIT_HITS = Counter(
+    "gateway_rate_limit_hits",
+    "Total number of rate limit hits",
+    registry=REGISTRY,
+)
 
 
 @dataclass
@@ -59,7 +66,7 @@ class RateLimiter:
         if len(timestamps) >= self._rpm:
             oldest = timestamps[0]
             retry_after = math.ceil(oldest - cutoff)
-            record_rate_limit_hit()
+            RATE_LIMIT_HITS.inc()
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Rate limit exceeded",
