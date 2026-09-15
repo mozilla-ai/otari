@@ -4010,18 +4010,16 @@ export interface paths {
          *     ``GET /api/v1/providers/catalog``: the same picker, for a guardrail rather
          *     than a provider, and on the same gate that one takes.
          *
-         *     Reaches no service, so there is no unavailable state to report. ``runnable``
-         *     says whether the modules a guardrail's backend needs are installed here,
-         *     probed rather than imported, and ``missing_extra`` names the Otari extra that
-         *     would fix it.
+         *     Reaches no service, so there is no unavailable state to report: the answer is
+         *     a property of the installed ``any_guardrail``, not of any deployment's state.
          *
-         *     On the operator router rather than the reader beside it, on both halves of
-         *     what it answers. It is the input to a write that stores a vendor API key
-         *     deployment-wide, which is an operator's action alone; and ``runnable``
-         *     describes the host's installed packages, which is infrastructure rather than
-         *     something a tenant is owed about their own requests. A profile *name* is the
-         *     one thing a caller needs, and the profiles read next door is where the set of
-         *     those is published.
+         *     On the operator router rather than the reader beside it, because it is the
+         *     input to a write that stores a vendor credential deployment-wide. The rows
+         *     carry secret constructor arguments and name the environment variables this
+         *     deployment would otherwise read them from, so this describes how the
+         *     deployment is credentialed rather than what a request will have done to it. A
+         *     profile *name* is the one thing a caller needs, and the profiles read next
+         *     door is where the set of those is published.
          *
          *     Not on ``verify_catalog_reader`` either: that plane is a closed set of three
          *     deployment-describing reads a data-plane key may make, and this is a
@@ -5864,11 +5862,6 @@ export interface components {
              */
             guardrail_name: string;
             /**
-             * Missing Extra
-             * @description The Otari extra to install to make this runnable, when one would. Null when it already runs, and null for a guardrail this gateway holds no backend information about
-             */
-            missing_extra?: string | null;
-            /**
              * Multilingual
              * @default false
              */
@@ -5895,11 +5888,6 @@ export interface components {
              * @default false
              */
             requires_api_key: boolean;
-            /**
-             * Runnable
-             * @description Whether every module this guardrail's backend needs is installed here. False is a missing package and not a broken guardrail
-             */
-            runnable: boolean;
             /** Stages */
             stages: string[];
             /**
