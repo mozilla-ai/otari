@@ -1,4 +1,4 @@
-"""Prometheus metrics for the gateway."""
+"""Prometheus registry and HTTP request instrumentation for the gateway."""
 
 from __future__ import annotations
 
@@ -46,27 +46,6 @@ REQUEST_DURATION_SECONDS = Histogram(
 ACTIVE_REQUESTS = Gauge(
     "gateway_active_requests",
     "Number of currently in-flight requests",
-    registry=REGISTRY,
-)
-
-TOKENS = Counter(
-    "gateway_tokens",
-    "Total number of tokens processed",
-    ["provider", "model", "type"],
-    registry=REGISTRY,
-)
-
-REQUEST_COST_DOLLARS = Histogram(
-    "gateway_request_cost_dollars",
-    "Request cost in USD",
-    ["provider", "model"],
-    registry=REGISTRY,
-)
-
-INLINE_COST_SETTLEMENTS = Counter(
-    "gateway_inline_cost_settlements",
-    "Inline platform cost settlement outcomes on the hybrid response path",
-    ["outcome"],
     registry=REGISTRY,
 )
 
@@ -149,21 +128,3 @@ class MetricsMiddleware:
             REQUEST_DURATION_SECONDS.labels(method=method, endpoint=endpoint, api_version=api_version).observe(
                 duration
             )
-
-
-def record_tokens(provider: str, model: str, prompt_tokens: int, completion_tokens: int) -> None:
-    """Record token usage metrics."""
-    if prompt_tokens:
-        TOKENS.labels(provider=provider, model=model, type="input").inc(prompt_tokens)
-    if completion_tokens:
-        TOKENS.labels(provider=provider, model=model, type="output").inc(completion_tokens)
-
-
-def record_cost(provider: str, model: str, cost: float) -> None:
-    """Record request cost."""
-    REQUEST_COST_DOLLARS.labels(provider=provider, model=model).observe(cost)
-
-
-def record_inline_cost_settlement(outcome: str) -> None:
-    """Record an attached, unattached, or timed-out inline settlement."""
-    INLINE_COST_SETTLEMENTS.labels(outcome=outcome).inc()
