@@ -24,10 +24,11 @@ every writer and none of them can be expressed in the schema at all:
   addressed through one of ``config.providers``' instances dispatches on the
   deployment's own credential, so the deployment settles its upstream bill and
   owns its rate. A bare ``provider:model`` key usually resolves against the
-  organization's BYO credential instead, but not always: with none stored, the
-  bound ``ModelProviderPort`` may still serve it on a hosted credential the
-  deployment owns (an overlay's managed-inference fleet), which pays the same
-  bill through a different door and gets the same refusal. See
+  organization's BYO credential instead, but not always: without a usable BYO
+  credential covering every one of its workspaces, the bound ``ModelProviderPort``
+  may still serve it on a hosted credential the deployment owns (an overlay's
+  managed-inference fleet), which pays the same bill through a different door
+  and gets the same refusal. See
   :meth:`OrganizationPricingService.raise_if_deployment_supplied`.
 
 Periods are half-open, ``[effective_from, effective_to)``. Two adjacent periods
