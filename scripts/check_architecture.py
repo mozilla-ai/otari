@@ -10,9 +10,9 @@ Enforces:
 6. Port boundaries: a port may describe the domain but not import a caller or an adapter.
 7. Composition root: only gateway/container.py may name a concrete adapter.
 8. Entrypoint purity: gateway/main.py may not import a route module.
-9. Feature packages: a listed package may not import the registry, the entry
-   point or the composition root; nothing outside a package imports its
-   private modules; nothing under gateway/ imports importlib.metadata.
+9. Registry: only the app wiring reads gateway/features.py, so a service or a
+   route may not import it; and nothing under gateway/ imports
+   importlib.metadata, so nothing is discovered.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -66,7 +66,7 @@ RULES: dict[str, LayerRule] = {
         # package itself are the two exemptions; see check_file.
         # importlib.metadata is banned for a different reason: it is how
         # entry-point discovery is written, and the registry in
-        # gateway/packages.py is a literal tuple on purpose (ARCHITECTURE.md).
+        # gateway/features.py is a literal tuple on purpose (ARCHITECTURE.md).
         "forbidden": ["gateway.overlay", "overlay", "gateway.adapters", "importlib.metadata"],
         "description": "OSS base",
     },
@@ -82,7 +82,10 @@ RULES: dict[str, LayerRule] = {
         # A service depends on the port and gets its adapter from the container;
         # naming a concrete adapter would pin the capability to one
         # implementation and defeat the seam (ARCHITECTURE.md, rule 5).
-        "forbidden": ["gateway.api", "gateway.adapters"],
+        # gateway.features is the registry the app wiring reads; a service
+        # that imported it could register itself, which is discovery by
+        # another name.
+        "forbidden": ["gateway.api", "gateway.adapters", "gateway.features"],
         "description": "Services",
     },
     # The API layer resolves a port through the container in deps.py; only the
@@ -113,7 +116,9 @@ RULES: dict[str, LayerRule] = {
             "gateway.core",
             "gateway.auth",
         ],
-        "forbidden": ["sqlalchemy.orm"],
+        # gateway.features for the reason services forbid it; the one route
+        # that reads the registry is exempted below (REGISTRY_READER).
+        "forbidden": ["sqlalchemy.orm", "gateway.features"],
         "description": "API routes",
     },
     "gateway/repositories": {
@@ -168,54 +173,19 @@ FILE_RULES: dict[str, LayerRule] = {
 }
 
 
-# The feature packages gateway/packages.py lists, by directory name under
-# gateway/. Each answers to the rule _feature_package_rule builds, and only
-# these submodules of one may be imported from outside it.
-FEATURE_PACKAGES: tuple[str, ...] = ()
-PUBLIC_SUBMODULES = frozenset({"models"})
-
-
-def _feature_package_rule(name: str) -> LayerRule:
-    """The layer rule for one feature package.
-
-    A package is a vertical slice: it may use the layers below it the way a
-    route or a service may, and must not reach the composition root, the app
-    entry point, or the registry. A package that imports the registry is a
-    package that registers itself, which is discovery by another name.
-    """
-    return {
-        "allowed": [
-            "gateway.api.deps",
-            "gateway.services",
-            "gateway.repositories",
-            "gateway.models",
-            "gateway.core",
-            "gateway.auth",
-            "gateway.ports",
-        ],
-        "forbidden": [
-            "gateway.adapters",
-            "gateway.api.main",
-            "gateway.api.routes",
-            "gateway.main",
-            "gateway.packages",
-            "gateway.container",
-        ],
-        "description": f"Feature package {name}",
-    }
-
-
-def _layer_rules() -> dict[str, LayerRule]:
-    """The path-keyed rules, with one entry per listed feature package."""
-    return {**RULES, **{f"gateway/{name}": _feature_package_rule(name) for name in FEATURE_PACKAGES}}
-
-
 # The one file allowed to name a concrete adapter, and the package the adapters
 # themselves live in (an adapter may of course refer to its siblings). Everything
 # else under gateway/ answers to the root rule's ban above.
 COMPOSITION_ROOT = "gateway/container.py"
 ADAPTERS_PACKAGE = "gateway/adapters/"
 ADAPTER_IMPORT = "gateway.adapters"
+
+# The one route allowed to read the feature registry: the deployment bootstrap
+# publishes which surfaces this deployment hosts, and a listed feature's
+# surface is one of them. Everything else under gateway/api/routes and
+# gateway/services answers to the ban in its layer rule.
+REGISTRY_READER = "gateway/api/routes/bootstrap.py"
+REGISTRY_IMPORT = "gateway.features"
 
 
 def _matches(module: str, prefix: str) -> bool:
@@ -246,57 +216,6 @@ def _imported_modules(node: ast.Import | ast.ImportFrom, file_path: Path, src_ro
     return [base] + [f"{base}.{alias.name}" for alias in node.names]
 
 
-def _is_submodule(src_root: Path, package: str, name: str) -> bool:
-    """Whether ``name`` is a module or subpackage of ``package`` on disk."""
-    location = src_root.joinpath(*package.split("."))
-    return (location / f"{name}.py").is_file() or (location / name).is_dir()
-
-
-def _private_module_reached(
-    node: ast.Import | ast.ImportFrom, package: str, file_path: Path, src_root: Path
-) -> str | None:
-    """The private module of ``package`` an import statement binds, if any."""
-    if isinstance(node, ast.Import):
-        candidates = [alias.name for alias in node.names]
-    else:
-        base = node.module if node.level == 0 else _resolve_relative(node, file_path, src_root)
-        if base is None:
-            return None
-        if base == package:
-            # ``from pkg import name`` binds a submodule only when one exists;
-            # a name the package exports is its public surface.
-            candidates = [f"{base}.{alias.name}" for alias in node.names if _is_submodule(src_root, base, alias.name)]
-        else:
-            candidates = [base]
-    for module in candidates:
-        if not module.startswith(package + "."):
-            continue
-        if module.removeprefix(package + ".").split(".")[0] not in PUBLIC_SUBMODULES:
-            return module
-    return None
-
-
-def _private_package_imports(
-    relative_path: str, imports: list[ast.Import | ast.ImportFrom], file_path: Path, src_root: Path
-) -> list[tuple[int, str, str]]:
-    """Imports that reach a feature package's private modules from outside it.
-
-    The gateway tree only: a test may exercise a package's internals, the way
-    it does any other layer's.
-    """
-    if not relative_path.startswith("gateway/"):
-        return []
-    violations: list[tuple[int, str, str]] = []
-    for name in FEATURE_PACKAGES:
-        if relative_path.startswith(f"gateway/{name}/"):
-            continue
-        for node in imports:
-            module = _private_module_reached(node, f"gateway.{name}", file_path, src_root)
-            if module is not None:
-                violations.append((node.lineno, module, f"Private module of feature package {name}"))
-    return violations
-
-
 def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
     """Check one Python file below src_root against the layer rules for its location.
 
@@ -310,11 +229,7 @@ def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
     # either a nested rule or a broader one. Most specific first, so a violation
     # is attributed to the closest layer that forbids it.
     matches = sorted(
-        (
-            (fragment, layer_rule)
-            for fragment, layer_rule in _layer_rules().items()
-            if relative_path.startswith(fragment + "/")
-        ),
+        ((fragment, layer_rule) for fragment, layer_rule in RULES.items() if relative_path.startswith(fragment + "/")),
         key=lambda match: len(match[0]),
         reverse=True,
     )
@@ -324,7 +239,9 @@ def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
         forbidden = [(prefix, file_rule["description"]) for prefix in file_rule["forbidden"]] + forbidden
     if relative_path == COMPOSITION_ROOT or relative_path.startswith(ADAPTERS_PACKAGE):
         forbidden = [entry for entry in forbidden if entry[0] != ADAPTER_IMPORT]
-    if not forbidden and not FEATURE_PACKAGES:
+    if relative_path == REGISTRY_READER:
+        forbidden = [entry for entry in forbidden if entry[0] != REGISTRY_IMPORT]
+    if not forbidden:
         return []
 
     try:
@@ -335,15 +252,15 @@ def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
         print(f"  ⚠ Syntax error in {file_path}: {exc}")
         return []
 
-    imports = [node for node in ast.walk(tree) if isinstance(node, ast.Import | ast.ImportFrom)]
     violations: list[tuple[int, str, str]] = []
-    for node in imports:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Import | ast.ImportFrom):
+            continue
         for module in _imported_modules(node, file_path, src_root):
             offended = next((description for prefix, description in forbidden if _matches(module, prefix)), None)
             if offended is not None:
                 violations.append((node.lineno, module, f"Forbidden import in {offended}"))
                 break
-    violations.extend(_private_package_imports(relative_path, imports, file_path, src_root))
     return violations
 
 
