@@ -193,6 +193,8 @@ GET /api/v1/agent-telemetry/summary                 # not yet wrapped
 GET /api/v1/agent-telemetry/count                   # not yet wrapped
 GET /api/v1/agent-telemetry/series                  # not yet wrapped
 DELETE /api/v1/agent-telemetry                      # not yet wrapped
+# Agent Gates' Hook Server: a hook-protocol endpoint for agent tooling, not an SDK surface
+POST /api/v1/hooks/check                            # not yet wrapped
 # Routing policies
 GET /api/v1/routing/policies                        # not yet wrapped
 POST /api/v1/routing/policies                       # not yet wrapped

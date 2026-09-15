@@ -1241,6 +1241,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/hooks/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Policy
+         * @description Evaluate a submitted policy against submitted evidence.
+         *
+         *     Authenticated with either an API key or the master key (the router-level
+         *     gate), like ``POST /api/v1/usage/external-events``: this identifies who
+         *     sent the request, not whether its evidence is true. `blocked` is set when
+         *     a required gate's outcome is not `pass`/`not_applicable` (an unresolved
+         *     gate never counts as a pass).
+         */
+        post: operations["hooks-check_policy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/images/generations": {
         parameters: {
             query?: never;
@@ -7471,6 +7497,19 @@ export interface components {
             /** User Id */
             user_id?: string | null;
         };
+        /** GateResultResponse */
+        GateResultResponse: {
+            /** Detail */
+            detail?: string | null;
+            /** Enforcement */
+            enforcement: string;
+            /** Gate Id */
+            gate_id: string;
+            /** Message */
+            message: string;
+            /** Outcome */
+            outcome: string;
+        };
         /**
          * GatewaySettings
          * @description Operator-facing runtime settings surfaced to the dashboard.
@@ -9853,6 +9892,35 @@ export interface components {
             /** Mcp Servers */
             mcp_servers: components["schemas"]["PlaygroundMcpServer"][];
             web_search: components["schemas"]["PlaygroundToolStatus"];
+        };
+        /**
+         * PolicyCheckRequest
+         * @description A policy body plus the evidence to check it against, both caller-supplied.
+         */
+        PolicyCheckRequest: {
+            /**
+             * Changed Paths
+             * @description Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).
+             */
+            changed_paths?: string[];
+            /** Policy Yaml */
+            policy_yaml: string;
+        };
+        /** PolicyCheckResponse */
+        PolicyCheckResponse: {
+            /** Blocked */
+            blocked: boolean;
+            /** Policy Id */
+            policy_id: string;
+            /**
+             * Provenance
+             * @default client_reported
+             */
+            provenance: string;
+            /** Results */
+            results: components["schemas"]["GateResultResponse"][];
+            /** Schema Version */
+            schema_version: string;
         };
         /**
          * PolicyRequest
@@ -14489,6 +14557,39 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    "hooks-check_policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PolicyCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

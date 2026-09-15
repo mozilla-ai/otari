@@ -21,6 +21,7 @@ from gateway.api.routes import (
     embeddings,
     files,
     health,
+    hooks,
     hosted_mode,
     hybrid_mode,
     images,
@@ -193,6 +194,7 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
         # (otari#822); ``hosted_mode.DATA_PLANE_PREFIXES`` answers its prefix
         # there with the 404 that names the data plane.
         api.include_router(playground.router)
+    api.include_router(hooks.router)
     api.include_router(providers.router)
     api.include_router(keys.router)
     api.include_router(users.router)
