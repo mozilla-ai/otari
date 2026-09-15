@@ -95,11 +95,14 @@ export function RateOverridesCard() {
   const [pendingDelete, setPendingDelete] =
     useState<OrganizationPricingOverride>()
 
-  const catalog = useModels()
-  const managedPrefixes = deploymentManagedPrefixes(catalog.data?.data)
-  const isOperator = isDeploymentOperator(context.data)
-
   const canEdit = canManage(context.data)
+  const isOperator = isDeploymentOperator(context.data)
+  // Only asked for when there is a control to withhold: a reader's Edit is
+  // already disabled by the role, so a viewer costs the page no catalog read.
+  // It also warms the query the dialog reads on open, which shares the key.
+  const catalog = useModels(canEdit)
+  const managedPrefixes = deploymentManagedPrefixes(catalog.data?.data)
+
   const rows = overrides.data ?? []
 
   // Why this row's rate is not this organization's to change, or undefined. A
