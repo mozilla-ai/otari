@@ -1,9 +1,9 @@
 """Pinned networking primitives for gateway-managed web retrieval.
 
 The transport in this module never resolves a request hostname itself. Callers
-first create a :class:`ValidatedTarget`, then attach it to an HTTPX request. The
-connection pool retains the canonical URL origin for TLS SNI, certificate
-verification, and HTTP Host while its network backend dials only an admitted IP.
+first create a :class:`ValidatedTarget`, then attach it to an HTTPX request. Each
+canonical origin and admitted IP has an isolated HTTPX transport that dials the
+IP while preserving the canonical hostname for TLS and HTTP authority.
 """
 
 from __future__ import annotations
@@ -14,16 +14,12 @@ import socket
 import ssl
 import zlib
 from collections import OrderedDict
-from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from time import monotonic
-from typing import Any, Protocol, TypeAlias, TypeVar
+from typing import Protocol, TypeAlias, TypeVar
 
-import httpcore
 import httpx
-from httpcore._backends.auto import AutoBackend
-from httpcore._backends.base import AsyncNetworkBackend, AsyncNetworkStream
-from httpx._transports.default import AsyncResponseStream, map_httpcore_exceptions
 
 from gateway.services.web_retrieval_policy import (
     CanonicalOrigin,
@@ -45,11 +41,12 @@ _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 
 T = TypeVar("T")
 PoolKey: TypeAlias = tuple[str, str, int, str]
+TransportFactory: TypeAlias = Callable[[], httpx.AsyncBaseTransport]
 
 
 @dataclass(slots=True)
 class _PoolEntry:
-    pool: httpcore.AsyncConnectionPool
+    transport: httpx.AsyncBaseTransport
     active_responses: int = 0
 
 
@@ -274,59 +271,15 @@ def is_redirect_status(status_code: int) -> bool:
     return status_code in _REDIRECT_STATUSES
 
 
-class _PinnedNetworkBackend(AsyncNetworkBackend):
-    """Ignore origin DNS and dial one already-admitted address."""
-
-    def __init__(
-        self,
-        *,
-        origin: CanonicalOrigin,
-        address: IPAddress,
-        backend: AsyncNetworkBackend,
-    ) -> None:
-        self._origin = origin
-        self._address = address
-        self._backend = backend
-
-    async def connect_tcp(
-        self,
-        host: str,
-        port: int,
-        timeout: float | None = None,
-        local_address: str | None = None,
-        socket_options: Any = None,
-    ) -> AsyncNetworkStream:
-        if host.lower().rstrip(".") != self._origin.host.value or port != self._origin.port:
-            raise PinnedTransportError("connection origin does not match validated target")
-        return await self._backend.connect_tcp(
-            str(self._address),
-            port,
-            timeout=timeout,
-            local_address=local_address,
-            socket_options=socket_options,
-        )
-
-    async def connect_unix_socket(
-        self,
-        path: str,
-        timeout: float | None = None,
-        socket_options: Any = None,
-    ) -> AsyncNetworkStream:
-        raise PinnedTransportError("Unix sockets are not supported by the web retrieval transport")
-
-    async def sleep(self, seconds: float) -> None:
-        await self._backend.sleep(seconds)
-
-
 class _LeasedAsyncResponseStream(httpx.AsyncByteStream):
     """Release one transport pool lease when its response stream closes."""
 
     def __init__(
         self,
-        stream: AsyncIterable[bytes],
+        stream: httpx.AsyncByteStream,
         release: Callable[[], Awaitable[None]],
     ) -> None:
-        self._stream = AsyncResponseStream(stream)
+        self._stream = stream
         self._release = release
         self._closed = False
 
@@ -347,7 +300,7 @@ class _LeasedAsyncResponseStream(httpx.AsyncByteStream):
 class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
     """HTTPX transport with pools isolated by canonical origin and pinned IP.
 
-    Each address has its own HTTP Core pool. A later validation may reuse a
+    Each address has its own HTTPX transport. A later validation may reuse a
     connection only when that exact address remains in the target's admitted
     address set. Idle pools are evicted in least-recently-used order at the
     configured bound; if every retained pool is active, a new origin fails fast
@@ -360,7 +313,7 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
         self,
         *,
         ssl_context: ssl.SSLContext | None = None,
-        backend_factory: Callable[[], AsyncNetworkBackend] = AutoBackend,
+        transport_factory: TransportFactory | None = None,
         max_connections: int = 10,
         max_keepalive_connections: int = 10,
         keepalive_expiry: float = 5.0,
@@ -369,14 +322,28 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
         if max_pools <= 0:
             raise ValueError("max_pools must be positive")
         self._ssl_context = ssl_context or httpx.create_ssl_context(verify=True, trust_env=False)
-        self._backend_factory = backend_factory
         self._max_connections = max_connections
         self._max_keepalive_connections = max_keepalive_connections
         self._keepalive_expiry = keepalive_expiry
+        self._transport_factory = transport_factory or self._build_transport
         self._max_pools = max_pools
         self._pools: OrderedDict[PoolKey, _PoolEntry] = OrderedDict()
         self._pool_lock = asyncio.Lock()
         self._closed = False
+
+    def _build_transport(self) -> httpx.AsyncBaseTransport:
+        return httpx.AsyncHTTPTransport(
+            verify=self._ssl_context,
+            trust_env=False,
+            http1=True,
+            http2=False,
+            limits=httpx.Limits(
+                max_connections=self._max_connections,
+                max_keepalive_connections=self._max_keepalive_connections,
+                keepalive_expiry=self._keepalive_expiry,
+            ),
+            retries=0,
+        )
 
     @staticmethod
     def _pool_key(target: ValidatedTarget, address: IPAddress) -> PoolKey:
@@ -403,23 +370,7 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
                             break
                     else:
                         raise PinnedTransportError("web retrieval connection pool capacity is in use")
-                network_backend = _PinnedNetworkBackend(
-                    origin=target.origin,
-                    address=address,
-                    backend=self._backend_factory(),
-                )
-                entry = _PoolEntry(
-                    pool=httpcore.AsyncConnectionPool(
-                        ssl_context=self._ssl_context,
-                        max_connections=self._max_connections,
-                        max_keepalive_connections=self._max_keepalive_connections,
-                        keepalive_expiry=self._keepalive_expiry,
-                        http1=True,
-                        http2=False,
-                        retries=0,
-                        network_backend=network_backend,
-                    )
-                )
+                entry = _PoolEntry(transport=self._transport_factory())
                 self._pools[key] = entry
             else:
                 self._pools.move_to_end(key)
@@ -427,7 +378,7 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
 
         if evicted is not None:
             try:
-                await evicted.pool.aclose()
+                await evicted.transport.aclose()
             except BaseException:
                 await self._release_pool(key, entry)
                 raise
@@ -460,21 +411,15 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
         last_connect_error: httpx.ConnectError | httpx.ConnectTimeout | None = None
         for address in target.addresses:
             key, entry = await self._acquire_pool(target, address)
-            core_request = httpcore.Request(
+            delegated_request = httpx.Request(
                 method=request.method,
-                url=httpcore.URL(
-                    scheme=request.url.raw_scheme,
-                    host=request.url.raw_host,
-                    port=request.url.port,
-                    target=request.url.raw_path,
-                ),
+                url=request.url.copy_with(host=str(address)),
                 headers=request.headers.raw,
-                content=request.stream,
-                extensions=request.extensions,
+                stream=request.stream,
+                extensions={**request.extensions, "sni_hostname": target.origin.host.value},
             )
             try:
-                with map_httpcore_exceptions():
-                    response = await entry.pool.handle_async_request(core_request)
+                response = await entry.transport.handle_async_request(delegated_request)
             except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
                 last_connect_error = exc
                 await self._release_pool(key, entry)
@@ -483,13 +428,12 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
                 await self._release_pool(key, entry)
                 raise
 
-            assert isinstance(response.stream, AsyncIterable)
-            stream = _LeasedAsyncResponseStream(
-                response.stream,
-                lambda: self._release_pool(key, entry),
-            )
+            if not isinstance(response.stream, httpx.AsyncByteStream):
+                await self._release_pool(key, entry)
+                raise PinnedTransportError("delegated transport returned a synchronous response stream")
+            stream = _LeasedAsyncResponseStream(response.stream, lambda: self._release_pool(key, entry))
             return httpx.Response(
-                status_code=response.status,
+                status_code=response.status_code,
                 headers=response.headers,
                 stream=stream,
                 extensions=response.extensions,
@@ -504,9 +448,9 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
             if self._closed:
                 return
             self._closed = True
-            pools = tuple(entry.pool for entry in self._pools.values())
+            transports = tuple(entry.transport for entry in self._pools.values())
             self._pools.clear()
-        await asyncio.gather(*(pool.aclose() for pool in pools), return_exceptions=True)
+        await asyncio.gather(*(transport.aclose() for transport in transports), return_exceptions=True)
 
 
 @dataclass(frozen=True, slots=True)

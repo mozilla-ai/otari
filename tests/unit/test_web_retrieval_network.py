@@ -9,15 +9,12 @@ import zlib
 from collections.abc import AsyncIterator, Awaitable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
 
-import httpcore
 import httpx
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from httpcore._backends.base import AsyncNetworkBackend, AsyncNetworkStream
 
 from gateway.services.web_retrieval_network import (
     PINNED_TARGET_EXTENSION,
@@ -73,6 +70,34 @@ class StaticResolver:
     async def resolve(self, host: str, port: int) -> Sequence[IPAddress]:
         self.calls.append((host, port))
         return self.addresses
+
+
+class RecordingTransport(httpx.AsyncBaseTransport):
+    def __init__(self, *, fail_connect: bool = False) -> None:
+        self.fail_connect = fail_connect
+        self.requests: list[httpx.Request] = []
+        self.closed = False
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if self.fail_connect:
+            raise httpx.ConnectError("scripted connect failure", request=request)
+        return httpx.Response(200, stream=OneChunkByteStream(b"OK"))
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class TransportFactory:
+    def __init__(self, failures: Sequence[bool] = ()) -> None:
+        self.failures = list(failures)
+        self.transports: list[RecordingTransport] = []
+
+    def __call__(self) -> httpx.AsyncBaseTransport:
+        fail_connect = self.failures.pop(0) if self.failures else False
+        transport = RecordingTransport(fail_connect=fail_connect)
+        self.transports.append(transport)
+        return transport
 
 
 @pytest.mark.asyncio
@@ -169,93 +194,6 @@ async def test_domain_policy_matches_canonical_unicode_identity() -> None:
     assert target.origin.host.value == "xn--bcher-kva.example"
 
 
-class ScriptedNetworkStream(AsyncNetworkStream):
-    def __init__(
-        self,
-        response: bytes = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
-    ) -> None:
-        self.response = response
-        self.read_count = 0
-        self.writes: list[bytes] = []
-        self.tls_server_names: list[str | None] = []
-        self.closed = False
-
-    async def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
-        del max_bytes, timeout
-        if self.read_count:
-            return b""
-        self.read_count += 1
-        return self.response
-
-    async def write(self, buffer: bytes, timeout: float | None = None) -> None:
-        del timeout
-        self.writes.append(buffer)
-
-    async def aclose(self) -> None:
-        self.closed = True
-
-    async def start_tls(
-        self,
-        ssl_context: ssl.SSLContext,
-        server_hostname: str | None = None,
-        timeout: float | None = None,
-    ) -> AsyncNetworkStream:
-        del ssl_context, timeout
-        self.tls_server_names.append(server_hostname)
-        return self
-
-    def get_extra_info(self, info: str) -> Any:
-        del info
-        return None
-
-
-class ScriptedNetworkBackend(AsyncNetworkBackend):
-    def __init__(self, *, fail_connect: bool = False) -> None:
-        self.fail_connect = fail_connect
-        self.connects: list[tuple[str, int]] = []
-        self.streams: list[ScriptedNetworkStream] = []
-
-    async def connect_tcp(
-        self,
-        host: str,
-        port: int,
-        timeout: float | None = None,
-        local_address: str | None = None,
-        socket_options: Any = None,
-    ) -> AsyncNetworkStream:
-        del timeout, local_address, socket_options
-        self.connects.append((host, port))
-        if self.fail_connect:
-            raise httpcore.ConnectError("scripted connect failure")
-        stream = ScriptedNetworkStream()
-        self.streams.append(stream)
-        return stream
-
-    async def connect_unix_socket(
-        self,
-        path: str,
-        timeout: float | None = None,
-        socket_options: Any = None,
-    ) -> AsyncNetworkStream:
-        del path, timeout, socket_options
-        raise AssertionError("Unix connection was not expected")
-
-    async def sleep(self, seconds: float) -> None:
-        await asyncio.sleep(seconds)
-
-
-class BackendFactory:
-    def __init__(self, failures: Sequence[bool] = ()) -> None:
-        self.failures = list(failures)
-        self.backends: list[ScriptedNetworkBackend] = []
-
-    def __call__(self) -> AsyncNetworkBackend:
-        fail = self.failures.pop(0) if self.failures else False
-        backend = ScriptedNetworkBackend(fail_connect=fail)
-        self.backends.append(backend)
-        return backend
-
-
 async def _request_with_target(
     client: httpx.AsyncClient,
     target: ValidatedTarget,
@@ -269,9 +207,9 @@ async def _request_with_target(
 
 
 @pytest.mark.asyncio
-async def test_transport_dials_pinned_ip_but_preserves_tls_and_http_authority() -> None:
-    factory = BackendFactory()
-    transport = PinnedAsyncHTTPTransport(backend_factory=factory)
+async def test_transport_delegates_to_public_transport_with_pinned_url_and_canonical_authority() -> None:
+    factory = TransportFactory()
+    transport = PinnedAsyncHTTPTransport(transport_factory=factory)
     target = ValidatedTarget(
         canonical_url=canonicalize_web_url("https://Example.COM.:8443/page?q=1"),
         addresses=(_PUBLIC_V4,),
@@ -281,13 +219,13 @@ async def test_transport_dials_pinned_ip_but_preserves_tls_and_http_authority() 
         response = await _request_with_target(client, target)
         assert await response.aread() == b"OK"
 
-    backend = factory.backends[0]
-    stream = backend.streams[0]
-    assert backend.connects == [(str(_PUBLIC_V4), 8443)]
-    assert stream.tls_server_names == ["example.com"]
-    request_bytes = b"".join(stream.writes)
-    assert b"GET /page?q=1 HTTP/1.1\r\n" in request_bytes
-    assert b"Host: example.com:8443\r\n" in request_bytes
+    assert len(factory.transports) == 1
+    delegated = factory.transports[0].requests
+    assert len(delegated) == 1
+    assert str(delegated[0].url) == f"https://{_PUBLIC_V4}:8443/page?q=1"
+    assert delegated[0].headers["Host"] == "example.com:8443"
+    assert delegated[0].extensions["sni_hostname"] == "example.com"
+    assert factory.transports[0].closed
 
 
 def _write_test_certificate(tmp_path: Path, hostname: str) -> tuple[Path, Path]:
@@ -371,20 +309,20 @@ async def test_transport_does_not_repeat_dns_after_validation() -> None:
     # This is what an ordinary lookup at connection time would see.
     assert await resolver.resolve("example.com", 80) == (_PRIVATE_V4,)
 
-    factory = BackendFactory()
-    transport = PinnedAsyncHTTPTransport(backend_factory=factory)
+    factory = TransportFactory()
+    transport = PinnedAsyncHTTPTransport(transport_factory=factory)
     async with httpx.AsyncClient(transport=transport) as client:
         response = await _request_with_target(client, target)
         assert await response.aread() == b"OK"
 
     assert resolver.calls == 2
-    assert factory.backends[0].connects == [(str(_PUBLIC_V4), 80)]
+    assert [request.url.host for request in factory.transports[0].requests] == [str(_PUBLIC_V4)]
 
 
 @pytest.mark.asyncio
 async def test_transport_retries_only_validated_addresses() -> None:
-    factory = BackendFactory((True, False))
-    transport = PinnedAsyncHTTPTransport(backend_factory=factory)
+    factory = TransportFactory((True, False))
+    transport = PinnedAsyncHTTPTransport(transport_factory=factory)
     target = ValidatedTarget(
         canonical_url=canonicalize_web_url("http://example.com/page"),
         addresses=(_PUBLIC_V4, _OTHER_PUBLIC_V4),
@@ -394,8 +332,8 @@ async def test_transport_retries_only_validated_addresses() -> None:
         response = await _request_with_target(client, target)
         assert await response.aread() == b"OK"
 
-    assert factory.backends[0].connects == [(str(_PUBLIC_V4), 80)]
-    assert factory.backends[1].connects == [(str(_OTHER_PUBLIC_V4), 80)]
+    assert [request.url.host for request in factory.transports[0].requests] == [str(_PUBLIC_V4)]
+    assert [request.url.host for request in factory.transports[1].requests] == [str(_OTHER_PUBLIC_V4)]
 
 
 def test_transport_requires_positive_pool_bound() -> None:
@@ -405,8 +343,8 @@ def test_transport_requires_positive_pool_bound() -> None:
 
 @pytest.mark.asyncio
 async def test_pool_keys_isolate_origin_and_pinned_address() -> None:
-    factory = BackendFactory()
-    transport = PinnedAsyncHTTPTransport(backend_factory=factory)
+    factory = TransportFactory()
+    transport = PinnedAsyncHTTPTransport(transport_factory=factory)
     first = ValidatedTarget(canonicalize_web_url("http://example.com/one"), (_PUBLIC_V4,))
     same_origin_new_path = ValidatedTarget(canonicalize_web_url("http://example.com/two"), (_PUBLIC_V4,))
     changed_address = ValidatedTarget(canonicalize_web_url("http://example.com/three"), (_OTHER_PUBLIC_V4,))
@@ -422,7 +360,7 @@ async def test_pool_keys_isolate_origin_and_pinned_address() -> None:
 
 @pytest.mark.asyncio
 async def test_transport_close_waits_for_every_pool_when_one_close_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    transport = PinnedAsyncHTTPTransport(backend_factory=BackendFactory())
+    transport = PinnedAsyncHTTPTransport(transport_factory=TransportFactory())
     first = ValidatedTarget(canonicalize_web_url("http://first.example/"), (_PUBLIC_V4,))
     second = ValidatedTarget(canonicalize_web_url("http://second.example/"), (_PUBLIC_V4,))
     _, first_entry = await transport._acquire_pool(first, _PUBLIC_V4)  # noqa: SLF001
@@ -440,8 +378,8 @@ async def test_transport_close_waits_for_every_pool_when_one_close_fails(monkeyp
         await asyncio.sleep(0)
         close_attempts.append("second")
 
-    monkeypatch.setattr(first_entry.pool, "aclose", failing_close)
-    monkeypatch.setattr(second_entry.pool, "aclose", successful_close)
+    monkeypatch.setattr(first_entry.transport, "aclose", failing_close)
+    monkeypatch.setattr(second_entry.transport, "aclose", successful_close)
 
     await transport.aclose()
 
@@ -450,8 +388,8 @@ async def test_transport_close_waits_for_every_pool_when_one_close_fails(monkeyp
 
 @pytest.mark.asyncio
 async def test_pool_bound_evicts_least_recently_used_idle_pool() -> None:
-    factory = BackendFactory()
-    transport = PinnedAsyncHTTPTransport(backend_factory=factory, max_pools=2)
+    factory = TransportFactory()
+    transport = PinnedAsyncHTTPTransport(transport_factory=factory, max_pools=2)
     first = ValidatedTarget(canonicalize_web_url("http://first.example/"), (_PUBLIC_V4,))
     second = ValidatedTarget(canonicalize_web_url("http://second.example/"), (_PUBLIC_V4,))
     third = ValidatedTarget(canonicalize_web_url("http://third.example/"), (_PUBLIC_V4,))
@@ -470,8 +408,8 @@ async def test_pool_bound_evicts_least_recently_used_idle_pool() -> None:
 
 @pytest.mark.asyncio
 async def test_pool_bound_never_evicts_an_active_response() -> None:
-    factory = BackendFactory()
-    transport = PinnedAsyncHTTPTransport(backend_factory=factory, max_pools=1)
+    factory = TransportFactory()
+    transport = PinnedAsyncHTTPTransport(transport_factory=factory, max_pools=1)
     first = ValidatedTarget(canonicalize_web_url("http://first.example/"), (_PUBLIC_V4,))
     second = ValidatedTarget(canonicalize_web_url("http://second.example/"), (_PUBLIC_V4,))
 
@@ -491,8 +429,8 @@ async def test_pool_bound_never_evicts_an_active_response() -> None:
 
 @pytest.mark.asyncio
 async def test_target_with_changed_address_set_cannot_use_old_address_pool() -> None:
-    factory = BackendFactory()
-    transport = PinnedAsyncHTTPTransport(backend_factory=factory)
+    factory = TransportFactory()
+    transport = PinnedAsyncHTTPTransport(transport_factory=factory)
     old = ValidatedTarget(canonicalize_web_url("http://example.com/one"), (_PUBLIC_V4,))
     revalidated = ValidatedTarget(canonicalize_web_url("http://example.com/two"), (_OTHER_PUBLIC_V4,))
 
@@ -500,14 +438,14 @@ async def test_target_with_changed_address_set_cannot_use_old_address_pool() -> 
         await (await _request_with_target(client, old)).aread()
         await (await _request_with_target(client, revalidated)).aread()
 
-    assert factory.backends[0].connects == [(str(_PUBLIC_V4), 80)]
-    assert factory.backends[1].connects == [(str(_OTHER_PUBLIC_V4), 80)]
+    assert [request.url.host for request in factory.transports[0].requests] == [str(_PUBLIC_V4)]
+    assert [request.url.host for request in factory.transports[1].requests] == [str(_OTHER_PUBLIC_V4)]
 
 
 @pytest.mark.asyncio
 async def test_transport_requires_exact_validated_url_and_get_method() -> None:
-    factory = BackendFactory()
-    transport = PinnedAsyncHTTPTransport(backend_factory=factory)
+    factory = TransportFactory()
+    transport = PinnedAsyncHTTPTransport(transport_factory=factory)
     target = ValidatedTarget(canonicalize_web_url("https://example.com/allowed"), (_PUBLIC_V4,))
 
     async with httpx.AsyncClient(transport=transport) as client:
@@ -528,7 +466,7 @@ async def test_transport_requires_exact_validated_url_and_get_method() -> None:
         with pytest.raises(PinnedTransportError, match="missing"):
             await client.send(request)
 
-    assert factory.backends == []
+    assert factory.transports == []
 
 
 def test_redirect_tracker_resolves_relative_targets_and_preserves_query() -> None:
@@ -652,7 +590,7 @@ async def test_dns_resolution_observes_network_deadline() -> None:
 
 @pytest.mark.asyncio
 async def test_capped_body_closes_consumed_response_and_releases_pool() -> None:
-    transport = PinnedAsyncHTTPTransport(backend_factory=BackendFactory())
+    transport = PinnedAsyncHTTPTransport(transport_factory=TransportFactory())
     target = ValidatedTarget(canonicalize_web_url("http://example.com/page"), (_PUBLIC_V4,))
 
     async with httpx.AsyncClient(transport=transport) as client:
