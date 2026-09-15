@@ -161,6 +161,16 @@ class OrganizationPricingService:
         Checked first, before the (possibly remote) determination below: an
         operator is exempt unconditionally, so there is no reason to spend a port
         round trip finding out what they are exempt from.
+
+        A write-time answer, not a standing one: an override that passed this check
+        keeps applying even if the organization's BYO key is later archived or
+        disabled, because nothing on the read path (`services.pricing_service.find_model_pricing`)
+        re-asks the question. That is the existing shape of this rule, not a new
+        gap: a ``config.providers`` instance added after an override already exists
+        has the identical property (`test_an_override_stored_before_the_rule_cannot_be_edited_by_an_organization`
+        pins it for that case), and the constructor-level fix is a re-check on
+        every priced request rather than at every write, which is a larger change
+        than this refusal gate.
         """
         if await DeploymentUserService(self.db).has_administration_access(user):
             return
@@ -209,25 +219,38 @@ class OrganizationPricingService:
         return credential is not None
 
     async def _organization_has_byo_credential(self, organization_id: uuid.UUID, provider: str) -> bool:
-        """Whether this organization holds any usable key of its own for ``provider``.
+        """Whether this organization holds a key of its own that could actually serve ``provider``.
 
-        Mirrors the existence check `organization_model_access.resolve_session_catalog_scope`
-        already uses to build an owner/admin's BYO catalog allowlist: any live,
-        decryptable key for the provider counts, in any workspace. Pricing is
-        organization-wide, not workspace-scoped, so that is the right question here
-        too, rather than `resolve_active_key`'s per-workspace tiering (which would
-        need a workspace this surface does not have).
+        Adapts the existence check `organization_model_access.resolve_session_catalog_scope`
+        already uses to build an owner/admin's BYO catalog allowlist, tightened for
+        a money-relevant question rather than a visibility one: a row is not enough
+        on its own, because `key_is_usable` only asks whether its secret decrypts,
+        which a row with none (``encrypted_api_key`` and ``api_base`` both unset)
+        trivially passes despite dispatch having nothing to send upstream with it.
+        Requiring one of those two fields is what tells a real credential (an
+        encrypted key, or a keyless backend's own base URL) apart from a row that
+        cannot serve a request at all, so an organization cannot mint a
+        never-dispatchable key purely to satisfy this check.
 
-        A key a workspace has disabled for itself still counts: the row still
-        means the organization holds a BYO credential for the provider, which is
-        the thing this check is answering. A key disabled in *every* workspace, so
-        that no request actually dispatches on it, is the one case this cannot
-        tell apart from a live one; closing that is future work, not a reason to
-        hold up the much larger gap this method exists to close.
+        Any live, qualifying key counts, in any workspace: pricing is
+        organization-wide, not workspace-scoped, so that is the right question here,
+        rather than `resolve_active_key`'s per-workspace tiering (which would need a
+        workspace this surface does not have). A key a workspace has disabled for
+        itself still counts, for the same reason: the row still means the
+        organization holds the credential. A key disabled in *every* workspace, so
+        that no request actually dispatches on it while still qualifying here, is
+        the one case this cannot tell apart from a live one; closing that needs a
+        walk over every workspace's resolution, which is future work, not a reason
+        to hold up the much larger gap this method exists to close.
         """
         normalized = provider_key(provider)
         keys = await OrgProviderKeyRepository(self.db).list_live_keys(organization_id)
-        return any(provider_key(key.provider) == normalized and key_is_usable(key) for key in keys)
+        return any(
+            provider_key(key.provider) == normalized
+            and (key.encrypted_api_key is not None or key.api_base is not None)
+            and key_is_usable(key)
+            for key in keys
+        )
 
     async def raise_if_overlapping(
         self,

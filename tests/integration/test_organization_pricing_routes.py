@@ -680,7 +680,9 @@ async def test_an_organization_with_its_own_byo_key_may_still_price_it(async_db:
         name="prod",
         encrypted_api_key=None,
         last4=None,
-        api_base=None,
+        # A keyless-backend credential still counts as BYO: the base URL is
+        # what dispatch would actually send the request to.
+        api_base="https://openai.example.test/v1",
         client_args=None,
     )
     service = OrganizationPricingService(
@@ -690,6 +692,37 @@ async def test_an_organization_with_its_own_byo_key_may_still_price_it(async_db:
     created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
 
     assert created.model_key == _MODEL_KEY
+
+
+@pytest.mark.asyncio
+async def test_a_key_row_with_no_credential_material_does_not_exempt_the_organization(
+    async_db: AsyncSession,
+) -> None:
+    """A row with neither a key nor a base URL cannot serve a request, so it does not count.
+
+    Otherwise an organization could mint a key row purely to satisfy the BYO
+    check while every real request for the provider still dispatches on the
+    deployment's hosted credential, pricing traffic it never actually paid for.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-hosted-decoy", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role="admin", name="admin person")
+    await OrgProviderKeyRepository(async_db).create_key(
+        organization_id=organization.id,
+        provider="openai",
+        name="decoy",
+        encrypted_api_key=None,
+        last4=None,
+        api_base=None,
+        client_args=None,
+    )
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="openai")
+    )
+
+    with pytest.raises(OrganizationPricingManagedModelError):
+        await service.create_for_caller(identity, _MODEL_KEY, _rates())
 
 
 @pytest.mark.asyncio
