@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, FastAPI
 
+from gateway import packages
 from gateway.api.deps import require_capability
 from gateway.api.routes import (
     admin,
@@ -250,3 +251,11 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
     api.include_router(tool_settings.reader_router)
     api.include_router(search_tools.router)
     api.include_router(tools.router)
+    # Feature packages the registry lists, mounted as core routes: no capability
+    # gate, because a listed package is part of this build. Management plane
+    # only, after the hybrid return above; a package that serves inference is
+    # not a shape the registry has yet.
+    for package in packages.CORE_PACKAGES:
+        if package.enabled(config):
+            for router in package.routers(config):
+                api.include_router(router)

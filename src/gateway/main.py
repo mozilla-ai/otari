@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from typing_extensions import override
 
+from gateway import packages
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
 from gateway.container import build_container
@@ -354,6 +355,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         catalog_refresher: asyncio.Task[None] | None = None
         selector_refresher: asyncio.Task[None] | None = None
         reservation_sweeper: asyncio.Task[None] | None = None
+        package_workers: list[tuple[asyncio.Task[None], str]] = []
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
         else:
@@ -475,6 +477,14 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                         retention_sec=config.budget_reservation_retention_sec,
                     )
                 )
+            # Workers of the feature packages the registry lists. Same
+            # supervisor as the refreshers above: created here, cancelled
+            # together in ``finally`` under one shared bound.
+            package_workers = [
+                (asyncio.create_task(package.worker(config)), package.name)
+                for package in packages.CORE_PACKAGES
+                if package.worker is not None and package.enabled(config)
+            ]
 
         # Start the writer inside the try so a failure here still runs the cleanup
         # below; the refresher tasks are already created and would otherwise leak.
@@ -498,7 +508,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 (selector_refresher, "catalog selectors"),
                 (reservation_sweeper, "budget reservation sweep"),
             ]
-            await _stop_refreshers([(task, name) for task, name in refreshers if task is not None])
+            await _stop_refreshers([(task, name) for task, name in refreshers if task is not None] + package_workers)
             if alias_refresher is not None:
                 reset_alias_cache()
             if policy_refresher is not None:
