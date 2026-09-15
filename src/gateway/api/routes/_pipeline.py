@@ -85,6 +85,7 @@ from gateway.api.routes._platform import (
     _resolve_platform_mcp_servers,
     _resolve_platform_web_search,
     is_provider_billing_error,
+    record_abandoned_attempt,
     run_platform_attempts,
     upstream_error_message,
     upstream_exception_chain,
@@ -117,7 +118,7 @@ from gateway.core.usage import (
 )
 from gateway.inflight import track_request
 from gateway.log_config import logger
-from gateway.metrics import record_abandoned_attempt, record_cost, record_inline_cost_settlement, record_tokens
+from gateway.metrics import record_cost, record_inline_cost_settlement, record_tokens
 from gateway.model_labeling import relabel_model
 from gateway.models.entities import APIKey, ModelPricing, UsageLog
 from gateway.models.guardrails import GuardrailConfig
