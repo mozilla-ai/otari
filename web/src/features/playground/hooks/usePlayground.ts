@@ -345,6 +345,17 @@ export function usePlayground() {
   }
 
   const loadConversation = async (conversationId: string) => {
+    const saved = conversations.data?.data.find(
+      (item) => item.id === conversationId,
+    )
+    if (!saved) {
+      setLoadError(
+        new Error(
+          "This conversation is no longer available. Reopen history and try again.",
+        ),
+      )
+      return
+    }
     setLoadError(undefined)
     // Before the fetch, not after: a reply still streaming would otherwise
     // patch its next fragment onto the transcript that replaced it.
@@ -359,14 +370,17 @@ export function usePlayground() {
       setLoadError(error)
       return
     }
-    setPanelA((prev) => ({
-      ...prev,
+    setIsComparing(false)
+    setPanelB(EMPTY_PANEL)
+    setPanelA({
+      ...EMPTY_PANEL,
+      model: saved.model,
       turns: loaded.data.map((message) => ({
         role: message.role === "assistant" ? "assistant" : "user",
         content: message.content,
         reasoning: message.reasoning ?? undefined,
       })),
-    }))
+    })
     setIsHistoryOpen(false)
     // A loaded transcript is already stored, so Save is disarmed rather than
     // offering to store a second copy of it.

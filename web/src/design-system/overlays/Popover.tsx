@@ -34,9 +34,7 @@ export function Popover({
 }) {
   return (
     <HeroPopover.Root isOpen={isOpen} onOpenChange={onOpenChange}>
-      <HeroPopover.Trigger className="inline-flex">
-        {trigger}
-      </HeroPopover.Trigger>
+      {trigger}
       <HeroPopover.Content placement={placement}>
         {/* `Dialog` here is HeroUI's popover dialog, not our modal of the same
             name: it is what puts the panel in the accessibility tree as a

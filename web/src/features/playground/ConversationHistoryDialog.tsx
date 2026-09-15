@@ -5,7 +5,7 @@ import type { PlaygroundConversation } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { IconButton } from "@/design-system/actions/IconButton"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
-import { Dialog } from "@/design-system/feedback/Dialog"
+import { Dialog, DialogSection } from "@/design-system/feedback/Dialog"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { formatDateTime } from "@/shared/helpers/format"
 
@@ -52,40 +52,42 @@ export function ConversationHistoryDialog({
         description="Transcripts you saved in this workspace. Only you can see them."
         actions={<Button onPress={() => onOpenChange(false)}>Close</Button>}
       >
-        {conversations.length === 0 ? (
-          <EmptyMessage>No saved conversations yet.</EmptyMessage>
-        ) : (
-          <ul className="flex flex-col">
-            {conversations.map((conversation) => (
-              <li
-                key={conversation.id}
-                className="flex items-center gap-2 border-border-subtle border-b last:border-b-0"
-              >
-                <button
-                  type="button"
-                  className="min-h-11 min-w-0 flex-1 rounded-md px-2 py-3 text-left transition-colors hover:bg-surface-subtle"
-                  onClick={() => onLoad(conversation.id)}
+        <DialogSection>
+          {conversations.length === 0 ? (
+            <EmptyMessage>No saved conversations yet.</EmptyMessage>
+          ) : (
+            <ul className="flex flex-col">
+              {conversations.map((conversation) => (
+                <li
+                  key={conversation.id}
+                  className="flex items-center gap-4 border-border-subtle border-b py-3 first:pt-0 last:border-b-0 last:pb-0"
                 >
-                  <span className="block truncate text-emphasis">
-                    {conversation.title}
-                  </span>
-                  <span className="block truncate text-caption">
-                    {conversation.model} · {conversation.message_count} turns ·{" "}
-                    {formatDateTime(conversation.created_at)}
-                  </span>
-                </button>
-                <IconButton
-                  label={`Delete conversation "${conversation.title}"`}
-                  variant="danger"
-                  onPress={() => setPendingDelete(conversation)}
-                  isDisabled={isDeleting}
-                >
-                  <FiTrash2 aria-hidden className="size-4" />
-                </IconButton>
-              </li>
-            ))}
-          </ul>
-        )}
+                  <button
+                    type="button"
+                    className="flex min-h-11 min-w-0 flex-1 flex-col justify-center gap-1 text-left transition-colors hover:bg-surface-subtle"
+                    onClick={() => onLoad(conversation.id)}
+                  >
+                    <span className="block break-words text-emphasis">
+                      {conversation.title}
+                    </span>
+                    <span className="block break-words text-caption">
+                      {conversation.model} · {conversation.message_count} turns
+                      · {formatDateTime(conversation.created_at)}
+                    </span>
+                  </button>
+                  <IconButton
+                    label={`Delete conversation "${conversation.title}"`}
+                    variant="danger"
+                    onPress={() => setPendingDelete(conversation)}
+                    isDisabled={isDeleting}
+                  >
+                    <FiTrash2 aria-hidden className="size-4" />
+                  </IconButton>
+                </li>
+              ))}
+            </ul>
+          )}
+        </DialogSection>
       </Dialog>
 
       <ConfirmDialog

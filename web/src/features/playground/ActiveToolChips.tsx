@@ -1,7 +1,7 @@
-import { FiCode, FiGlobe, FiServer, FiX } from "react-icons/fi"
+import { FiCode, FiGlobe, FiServer } from "react-icons/fi"
 
 import type { PlaygroundTools } from "@/client"
-import { Chip } from "@/design-system/indicators/Chip"
+import { DismissChip } from "@/design-system/indicators/DismissChip"
 
 /**
  * What is attached to the next message, each removable.
@@ -34,18 +34,18 @@ export function ActiveToolChips({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 px-1 pt-1">
+    <div className="flex flex-wrap items-center gap-2">
       {isWebSearchOn ? (
         <AttachedTool
           name="Web search"
-          icon={<FiGlobe aria-hidden className="size-3.5" />}
+          icon={<FiGlobe aria-hidden className="size-4" />}
           onRemove={() => onToggleWebSearch(false)}
         />
       ) : null}
       {isCodeExecutionOn ? (
         <AttachedTool
           name="Code execution"
-          icon={<FiCode aria-hidden className="size-3.5" />}
+          icon={<FiCode aria-hidden className="size-4" />}
           onRemove={() => onToggleCodeExecution(false)}
         />
       ) : null}
@@ -56,7 +56,7 @@ export function ActiveToolChips({
             tools?.mcp_servers.find((server) => server.id === id)?.name ??
             "MCP server"
           }
-          icon={<FiServer aria-hidden className="size-3.5" />}
+          icon={<FiServer aria-hidden className="size-4" />}
           onRemove={() => onToggleMcpServer(id, false)}
         />
       ))}
@@ -64,13 +64,6 @@ export function ActiveToolChips({
   )
 }
 
-/**
- * One chip with its own remove control.
- *
- * The control is a real button inside the chip rather than the chip being
- * pressable: a whole chip that removes on press has no affordance saying so, and
- * `Chip` is an indicator here as everywhere else in the product.
- */
 function AttachedTool({
   name,
   icon,
@@ -81,17 +74,15 @@ function AttachedTool({
   onRemove: () => void
 }) {
   return (
-    <Chip tone="accent" className="flex items-center gap-1.5">
-      {icon}
-      {name}
-      <button
-        type="button"
-        aria-label={`Remove ${name}`}
-        onClick={onRemove}
-        className="-mr-0.5 flex size-4 items-center justify-center rounded-sm text-primary-subtle-foreground/70 transition-colors hover:text-primary-subtle-foreground"
-      >
-        <FiX aria-hidden className="size-3" />
-      </button>
-    </Chip>
+    <DismissChip
+      value={
+        <>
+          {icon}
+          {name}
+        </>
+      }
+      dismissLabel={`Remove ${name}`}
+      onDismiss={onRemove}
+    />
   )
 }

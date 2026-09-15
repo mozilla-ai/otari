@@ -17,20 +17,13 @@ import { MessageBubble } from "./MessageBubble"
  */
 export function ChatPanel({
   panel,
-  isBordered = false,
   onRegenerate,
 }: {
   panel: PanelState
-  /** Frame the panel. Used while comparing, to separate the two columns. */
-  isBordered?: boolean
   onRegenerate: () => void
 }) {
   return (
-    <div
-      className={`flex min-w-0 flex-1 flex-col gap-4 ${
-        isBordered ? "rounded-lg border border-border p-4" : ""
-      }`}
-    >
+    <div className="flex min-w-0 flex-1 flex-col gap-6">
       {panel.turns.length === 0 && !panel.isAwaitingFirstToken ? (
         <p className="text-caption">Send a message to start.</p>
       ) : null}
@@ -46,6 +39,7 @@ export function ChatPanel({
             // remount the bubble, losing its copy state on each token.
             key={index}
             turn={turn}
+            model={panel.model}
             // Hidden on the reply still streaming: a Copy of a half-answer and
             // a Regenerate of a request in flight are both wrong.
             areActionsVisible={!(isLast && panel.isStreaming)}

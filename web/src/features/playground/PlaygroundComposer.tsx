@@ -1,13 +1,15 @@
-import type { FormEvent, KeyboardEvent } from "react"
-import { FiSend, FiSquare } from "react-icons/fi"
+import type { FormEvent, KeyboardEvent, ReactNode } from "react"
+import { FiArrowUp, FiSquare } from "react-icons/fi"
 
 import type { PlaygroundTools } from "@/client"
-import { IconButton } from "@/design-system/actions/IconButton"
+import { Button } from "@/design-system/actions/Button"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 
 import { ActiveToolChips } from "./ActiveToolChips"
 import { ToolsMenu } from "./ToolsMenu"
 
 export interface ComposerProps {
+  modelPicker?: ReactNode
   draft: string
   onDraftChange: (value: string) => void
   onSubmit: (event: FormEvent) => void
@@ -24,28 +26,9 @@ export interface ComposerProps {
   toggleMcpServer: (id: string, isOn: boolean) => void
 }
 
-/**
- * The composer: attached-tool chips, the message field, the tools menu, and
- * send.
- *
- * One component used in two places, centred under the greeting before the first
- * question and pinned to the bottom afterwards, which is why it takes no
- * position of its own: the page places it.
- *
- * The field is a bare `<textarea>` rather than the shared `TextArea`, and this
- * is the exception the components rule allows for. That primitive is a labelled
- * form field: it renders its own label, its own bordered box, and reserves a
- * row for a validation message. Here the *frame* is the control, holding the
- * chips above and the tool and send controls below, so the primitive's box would
- * be a second border inside it and its label row would sit above the chips. The
- * field carries an `aria-label` and the frame draws the focus ring with
- * `focus-within`.
- *
- * While a reply is streaming, send becomes Stop. The same slot rather than a
- * second control beside it: there is exactly one thing to do to a request in
- * flight, and a disabled send next to a stop is two controls for one decision.
- */
+/** The frame owns the field edge; the textarea remains a labeled native input. */
 export function PlaygroundComposer({
+  modelPicker,
   draft,
   onDraftChange,
   onSubmit,
@@ -63,7 +46,7 @@ export function PlaygroundComposer({
 }: ComposerProps) {
   return (
     <form onSubmit={onSubmit} className="w-full">
-      <div className="flex flex-col gap-2 rounded-3xl border border-border bg-surface p-2.5 transition-colors focus-within:border-accent">
+      <div className="flex flex-col gap-3 border border-[var(--field-border)] bg-[var(--field-background)] p-3 has-[textarea:focus-visible]:otari-focus-ring">
         <ActiveToolChips
           isWebSearchOn={isWebSearchOn}
           isCodeExecutionOn={isCodeExecutionOn}
@@ -78,15 +61,19 @@ export function PlaygroundComposer({
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder={canChat ? "Ask anything" : "Pick a model to start"}
-          rows={1}
+          placeholder={
+            canChat
+              ? "Write a message to test your model…"
+              : "Pick a model to start"
+          }
+          rows={2}
           disabled={!canChat}
           // `field-sizing-content` grows the box with what is typed and caps it,
           // which is what a chat composer does; without the cap a pasted essay
           // pushes the conversation off the screen.
-          className="max-h-48 w-full resize-none bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-subtle focus:outline-none disabled:cursor-not-allowed [field-sizing:content]"
+          className="min-h-13 max-h-48 w-full resize-none bg-transparent text-base leading-[1.625rem] text-foreground placeholder:text-subtle focus:outline-none disabled:cursor-not-allowed md:min-h-16 [field-sizing:content]"
         />
-        <div className="flex items-center justify-between gap-2 px-1">
+        <Toolbar className="min-h-11 flex-nowrap gap-2 md:gap-3">
           <ToolsMenu
             tools={tools}
             isWebSearchOn={isWebSearchOn}
@@ -97,28 +84,34 @@ export function PlaygroundComposer({
             onToggleMcpServer={toggleMcpServer}
             isDisabled={isBusy}
           />
+          <div className="min-w-0 flex-1">{modelPicker}</div>
           {isBusy ? (
-            <IconButton
-              label="Stop generating"
+            <Button
+              aria-label="Stop generating"
               variant="primary"
-              className="rounded-full"
+              className="w-[5.6875rem] min-w-[5.6875rem] shrink-0"
               onPress={onStop}
             >
               <FiSquare aria-hidden className="size-4" />
-            </IconButton>
+              Stop
+            </Button>
           ) : (
-            <IconButton
-              label="Send message"
+            <Button
+              aria-label="Send message"
               variant="primary"
               type="submit"
-              className="rounded-full"
+              className="w-[5.6875rem] min-w-[5.6875rem] shrink-0"
               isDisabled={!draft.trim() || !canChat}
             >
-              <FiSend aria-hidden className="size-4" />
-            </IconButton>
+              <FiArrowUp aria-hidden className="size-4" />
+              Send
+            </Button>
           )}
-        </div>
+        </Toolbar>
       </div>
+      <p className="mt-2 hidden text-caption md:block">
+        Enter to send · Shift + Enter for a new line
+      </p>
     </form>
   )
 }

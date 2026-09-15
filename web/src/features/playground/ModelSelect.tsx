@@ -52,7 +52,7 @@ export function ModelSelect({
 
   const unavailable = new Set(unavailableKeys ?? [])
   const pinned = new Set(pinnedKeys)
-  const selectedLabel = models.find((model) => model.key === value)?.key ?? ""
+  const selectedLabel = models.find((model) => model.key === value)?.label ?? ""
   const groups = groupPlaygroundModels({ models, pinnedKeys, search })
 
   const select = (key: string) => {
@@ -71,10 +71,7 @@ export function ModelSelect({
       }}
       placement="bottom"
       trigger={
-        <Button
-          aria-label={label}
-          className={`justify-between font-normal ${className}`}
-        >
+        <Button aria-label={label} className={`justify-between ${className}`}>
           <span className="truncate">{selectedLabel || "Select a model"}</span>
           <FiChevronDown aria-hidden className="size-4 shrink-0 text-muted" />
         </Button>
@@ -132,9 +129,7 @@ export function ModelSelect({
                         aria-pressed={isPinned}
                         onClick={() => onTogglePin(model.key)}
                         className={`flex size-11 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface hover:text-foreground ${
-                          isPinned
-                            ? "text-link"
-                            : "md:opacity-0 md:group-hover/row:opacity-100 md:group-focus-within/row:opacity-100"
+                          isPinned ? "text-link" : ""
                         }`}
                       >
                         <FiStar
