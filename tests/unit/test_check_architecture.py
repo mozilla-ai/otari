@@ -299,3 +299,94 @@ def test_main_discovers_tests_root_and_fails_on_overlay_import(tmp_path: Path, m
 
 def test_real_gateway_tree_is_clean() -> None:
     assert check.main() == 0
+
+
+@pytest.mark.parametrize(
+    "forbidden",
+    ["gateway.packages", "gateway.main", "gateway.container", "gateway.api.main", "gateway.api.routes.users"],
+)
+def test_a_feature_package_may_not_reach_the_registry_or_the_composition_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, forbidden: str
+) -> None:
+    # A package that imports the registry is a package that registers itself,
+    # which is discovery by another name; the entry point and the container are
+    # what wire it, not what it wires.
+    monkeypatch.setattr(check, "FEATURE_PACKAGES", ("probe",))
+    file_path = _write(tmp_path, "gateway/probe/routes.py", f"from {forbidden} import thing\n")
+    assert check.check_file(file_path, tmp_path) == [(1, forbidden, "Forbidden import in Feature package probe")]
+
+
+def test_a_feature_package_may_use_the_layers_below_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "FEATURE_PACKAGES", ("probe",))
+    file_path = _write(
+        tmp_path,
+        "gateway/probe/routes.py",
+        "from gateway.api.deps import get_db\n"
+        "from gateway.services.budget_service import reserve\n"
+        "from gateway.models.entities import User\n"
+        "from gateway.core.config import GatewayConfig\n",
+    )
+    assert check.check_file(file_path, tmp_path) == []
+
+
+def _feature_package_on_disk(src_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "FEATURE_PACKAGES", ("probe",))
+    _write(src_root, "gateway/probe/__init__.py", "")
+    _write(src_root, "gateway/probe/models.py", "")
+    _write(src_root, "gateway/probe/service.py", "")
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "from gateway.probe.service import evaluate\n",
+        "import gateway.probe.service\n",
+        "from gateway.probe import service\n",
+    ],
+)
+def test_a_private_module_of_a_feature_package_is_not_imported_from_outside_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, statement: str
+) -> None:
+    # The third spelling binds the submodule through the package, which is the
+    # same reach; it is told apart from a public name by the file on disk.
+    _feature_package_on_disk(tmp_path, monkeypatch)
+    file_path = _write(tmp_path, "gateway/services/thing.py", statement)
+    assert check.check_file(file_path, tmp_path) == [
+        (1, "gateway.probe.service", "Private module of feature package probe")
+    ]
+
+
+@pytest.mark.parametrize(
+    "statement",
+    ["from gateway.probe import PACKAGE\n", "from gateway.probe.models import Rule\n", "import gateway.probe\n"],
+)
+def test_a_feature_package_public_surface_may_be_imported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, statement: str
+) -> None:
+    # The package itself, and its models module (the models package's import
+    # list must reach that one so the tables land on core's metadata).
+    _feature_package_on_disk(tmp_path, monkeypatch)
+    file_path = _write(tmp_path, "gateway/services/thing.py", statement)
+    assert check.check_file(file_path, tmp_path) == []
+
+
+def test_a_feature_package_may_import_its_own_private_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _feature_package_on_disk(tmp_path, monkeypatch)
+    file_path = _write(tmp_path, "gateway/probe/routes.py", "from gateway.probe.service import evaluate\n")
+    assert check.check_file(file_path, tmp_path) == []
+
+
+def test_a_test_may_import_a_feature_package_private_module(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The test suite exercises a package's internals the way it does any other
+    # layer's; the private-surface rule is about the gateway tree.
+    _feature_package_on_disk(tmp_path / "src", monkeypatch)
+    file_path = _write(tmp_path, "tests/unit/test_probe.py", "from gateway.probe.service import evaluate\n")
+    assert check.check_file(file_path, tmp_path) == []
+
+
+@pytest.mark.parametrize("relative_path", ["gateway/packages.py", "gateway/main.py", "gateway/services/thing.py"])
+def test_entry_point_discovery_is_forbidden_anywhere_under_gateway(tmp_path: Path, relative_path: str) -> None:
+    # The registry is a literal tuple on purpose; importlib.metadata is how the
+    # alternative gets written.
+    file_path = _write(tmp_path, relative_path, "from importlib.metadata import entry_points\n")
+    assert check.check_file(file_path, tmp_path) == [(1, "importlib.metadata", "Forbidden import in OSS base")]
