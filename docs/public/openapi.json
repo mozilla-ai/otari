@@ -1,6 +1,54 @@
 {
   "components": {
     "schemas": {
+      "AbandonUpload": {
+        "properties": {
+          "cleanup_token": {
+            "format": "password",
+            "title": "Cleanup Token",
+            "type": "string",
+            "writeOnly": true
+          },
+          "deleted": {
+            "default": false,
+            "title": "Deleted",
+            "type": "boolean"
+          },
+          "file_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Id"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome_unknown": {
+            "default": false,
+            "title": "Outcome Unknown",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cleanup_token"
+        ],
+        "title": "AbandonUpload",
+        "type": "object"
+      },
       "AcceptInvitationRequest": {
         "properties": {
           "token": {
@@ -1635,6 +1683,12 @@
       },
       "Body_files-create_file": {
         "properties": {
+          "expires_in_seconds": {
+            "description": "Hybrid provider retention, capped by the control-plane maximum.",
+            "maximum": 7776000,
+            "minimum": 3600,
+            "type": "integer"
+          },
           "file": {
             "contentMediaType": "application/octet-stream",
             "title": "File",
@@ -3362,6 +3416,39 @@
           "messages"
         ],
         "title": "ChatCompletionRequest",
+        "type": "object"
+      },
+      "CleanupClaim": {
+        "properties": {
+          "limit": {
+            "default": 20,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "CleanupClaim",
+        "type": "object"
+      },
+      "CleanupResult": {
+        "properties": {
+          "cleanup_token": {
+            "format": "password",
+            "title": "Cleanup Token",
+            "type": "string",
+            "writeOnly": true
+          },
+          "deleted": {
+            "title": "Deleted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cleanup_token",
+          "deleted"
+        ],
+        "title": "CleanupResult",
         "type": "object"
       },
       "ConfigField": {
@@ -5479,6 +5566,172 @@
         "title": "ExternalUsageEvent",
         "type": "object"
       },
+      "FileListRequest": {
+        "properties": {
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 255,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ids"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          }
+        },
+        "title": "FileListRequest",
+        "type": "object"
+      },
+      "FileMetadata": {
+        "additionalProperties": true,
+        "description": "Anthropic's public metadata, without provider-neutral-only fields.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "downloadable": {
+            "title": "Downloadable",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "filename": {
+            "maxLength": 1024,
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Id",
+            "type": "string"
+          },
+          "mime_type": {
+            "maxLength": 255,
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "size_bytes": {
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "type": {
+            "const": "file",
+            "default": "file",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "mime_type",
+          "size_bytes",
+          "created_at",
+          "downloadable"
+        ],
+        "title": "FileMetadata",
+        "type": "object"
+      },
+      "FilePage": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/FileMetadata"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "FilePage",
+        "type": "object"
+      },
+      "FinalizeUpload": {
+        "properties": {
+          "expires_in_seconds": {
+            "anyOf": [
+              {
+                "maximum": 7776000.0,
+                "minimum": 3600.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires In Seconds"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/FileMetadata"
+          }
+        },
+        "required": [
+          "metadata"
+        ],
+        "title": "FinalizeUpload",
+        "type": "object"
+      },
       "GateResultResponse": {
         "properties": {
           "detail": {
@@ -6551,6 +6804,33 @@
           "default_target"
         ],
         "title": "LearnedPolicy",
+        "type": "object"
+      },
+      "LeaseResult": {
+        "properties": {
+          "results": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "maxProperties": 20,
+            "propertyNames": {
+              "format": "uuid"
+            },
+            "title": "Results",
+            "type": "object"
+          },
+          "token": {
+            "format": "password",
+            "title": "Token",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "token",
+          "results"
+        ],
+        "title": "LeaseResult",
         "type": "object"
       },
       "MailSettings": {
@@ -7744,6 +8024,25 @@
           "flagged"
         ],
         "title": "ModerationResult",
+        "type": "object"
+      },
+      "NativeFileDeleted": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "file_deleted",
+            "default": "file_deleted",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "NativeFileDeleted",
         "type": "object"
       },
       "OAuthCallbackRequest": {
@@ -9690,6 +9989,56 @@
         "title": "OrganizationScopedBudgetsPublic",
         "type": "object"
       },
+      "OutputPrepare": {
+        "properties": {
+          "attempt_id": {
+            "maxLength": 255,
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "generation_id": {
+            "format": "uuid",
+            "title": "Generation Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "format": "uuid",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "request_id": {
+            "maxLength": 255,
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "request_id",
+          "attempt_id",
+          "generation_id"
+        ],
+        "title": "OutputPrepare",
+        "type": "object"
+      },
+      "OutputRegister": {
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/FileMetadata"
+          },
+          "operation_id": {
+            "format": "uuid",
+            "title": "Operation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "metadata"
+        ],
+        "title": "OutputRegister",
+        "type": "object"
+      },
       "OutputShape": {
         "description": "The decision form a guardrail produces (aligns with the populated ``GuardrailOutput`` fields).\n\n``SCORE`` and ``RUBRIC`` are also the queryable signal for whether\n``GuardrailOutput.score`` can ever be populated: a guardrail declaring\n**neither** always leaves ``score`` as ``None`` (it only emits a\ncategorical/binary verdict, not a calibrated risk value). A guardrail\ndeclaring **either** populates ``score`` in the common, successfully-parsed\ncase, but individual guardrails may still leave it ``None`` in specific\nedge cases (e.g. a fail-closed parse-failure path, or a guardrail that\nflags something but has nothing to score) \u2014 consult the guardrail's own\ndocstring for those exceptions.",
         "enum": [
@@ -10607,6 +10956,39 @@
         "title": "PoolStatus",
         "type": "object"
       },
+      "PrepareUpload": {
+        "properties": {
+          "expires_in_seconds": {
+            "anyOf": [
+              {
+                "maximum": 7776000.0,
+                "minimum": 3600.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires In Seconds"
+          },
+          "operation_id": {
+            "format": "uuid",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "size_bytes": {
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "operation_id",
+          "size_bytes"
+        ],
+        "title": "PrepareUpload",
+        "type": "object"
+      },
       "PricingDriftRow": {
         "description": "A stored deployment rate beside the default it shadows.",
         "properties": {
@@ -11366,6 +11748,27 @@
         "title": "ReencryptSearchToolsResponse",
         "type": "object"
       },
+      "References": {
+        "properties": {
+          "ids": {
+            "items": {
+              "maxLength": 255,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "References",
+        "type": "object"
+      },
       "RegisterPasskeyRequest": {
         "description": "A completed registration ceremony, with the label to file it under.",
         "properties": {
@@ -11573,6 +11976,24 @@
           "new_password"
         ],
         "title": "ResetPasswordRequest",
+        "type": "object"
+      },
+      "ResolveFile": {
+        "properties": {
+          "operation": {
+            "enum": [
+              "metadata",
+              "download",
+              "delete"
+            ],
+            "title": "Operation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "title": "ResolveFile",
         "type": "object"
       },
       "ResourceLink": {
@@ -20424,7 +20845,7 @@
     },
     "/api/v1/files": {
       "get": {
-        "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.",
+        "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
         "operationId": "files-list_files",
         "parameters": [
           {
@@ -20475,6 +20896,37 @@
               ],
               "title": "Workspace Id"
             }
+          },
+          {
+            "description": "Required in hybrid provider-native mode.",
+            "in": "header",
+            "name": "anthropic-version",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Hybrid GA cursor.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Hybrid IDs filter; mutually exclusive with page and limit.",
+            "in": "query",
+            "name": "ids[]",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "type": "array"
+            }
           }
         ],
         "responses": {
@@ -20482,9 +20934,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Files-List Files",
-                  "type": "object"
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "title": "Response Files-List Files",
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/FilePage"
+                    }
+                  ]
                 }
               }
             },
@@ -20515,8 +20974,19 @@
         ]
       },
       "post": {
-        "description": "OpenAI-compatible file upload endpoint.",
+        "description": "OpenAI-compatible file upload endpoint.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
         "operationId": "files-create_file",
+        "parameters": [
+          {
+            "description": "Required in hybrid provider-native mode.",
+            "in": "header",
+            "name": "anthropic-version",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "multipart/form-data": {
@@ -20532,9 +21002,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Files-Create File",
-                  "type": "object"
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "title": "Response Files-Create File",
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/FileMetadata"
+                    }
+                  ]
                 }
               }
             },
@@ -20567,7 +21044,7 @@
     },
     "/api/v1/files/{file_id}": {
       "delete": {
-        "description": "Soft-delete a file's metadata and remove its bytes from the backend.",
+        "description": "Soft-delete a file's metadata and remove its bytes from the backend.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
         "operationId": "files-delete_file",
         "parameters": [
           {
@@ -20594,6 +21071,15 @@
               ],
               "title": "User"
             }
+          },
+          {
+            "description": "Required in hybrid provider-native mode.",
+            "in": "header",
+            "name": "anthropic-version",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -20601,9 +21087,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Files-Delete File",
-                  "type": "object"
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "title": "Response Files-Delete File",
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/NativeFileDeleted"
+                    }
+                  ]
                 }
               }
             },
@@ -20634,7 +21127,7 @@
         ]
       },
       "get": {
-        "description": "Retrieve metadata for a single file.",
+        "description": "Retrieve metadata for a single file.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
         "operationId": "files-get_file",
         "parameters": [
           {
@@ -20661,6 +21154,15 @@
               ],
               "title": "User"
             }
+          },
+          {
+            "description": "Required in hybrid provider-native mode.",
+            "in": "header",
+            "name": "anthropic-version",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -20668,9 +21170,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Files-Get File",
-                  "type": "object"
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "title": "Response Files-Get File",
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/FileMetadata"
+                    }
+                  ]
                 }
               }
             },
@@ -20703,7 +21212,7 @@
     },
     "/api/v1/files/{file_id}/content": {
       "get": {
-        "description": "Download the raw bytes of a file, streamed rather than buffered whole.",
+        "description": "Download the raw bytes of a file, streamed rather than buffered whole.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
         "operationId": "files-get_file_content",
         "parameters": [
           {
@@ -20729,6 +21238,15 @@
                 }
               ],
               "title": "User"
+            }
+          },
+          {
+            "description": "Required in hybrid provider-native mode.",
+            "in": "header",
+            "name": "anthropic-version",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -20780,6 +21298,775 @@
         "summary": "Get File Content",
         "tags": [
           "files"
+        ]
+      }
+    },
+    "/api/v1/gateway/files/cleanup/claim": {
+      "post": {
+        "operationId": "provider-files-claim",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupClaim"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Provider-Files-Claim"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Claim",
+        "tags": [
+          "provider-files"
+        ]
+      }
+    },
+    "/api/v1/gateway/files/cleanup/{lease_id}/result": {
+      "post": {
+        "operationId": "provider-files-complete_lease",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lease_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Lease Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeaseResult"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Provider-Files-Complete Lease",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Complete Lease",
+        "tags": [
+          "provider-files"
+        ]
+      }
+    },
+    "/api/v1/gateway/files/list": {
+      "post": {
+        "operationId": "provider-files-list_files",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileListRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Provider-Files-List Files"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Files",
+        "tags": [
+          "provider-files"
+        ]
+      }
+    },
+    "/api/v1/gateway/files/outputs/prepare": {
+      "post": {
+        "operationId": "provider-files-prepare_output",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutputPrepare"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Provider-Files-Prepare Output"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Prepare Output",
+        "tags": [
+          "provider-files"
+        ]
+      }
+    },
+    "/api/v1/gateway/files/outputs/register": {
+      "post": {
+        "operationId": "provider-files-register_output",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutputRegister"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Provider-Files-Register Output"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Register Output",
+        "tags": [
+          "provider-files"
+        ]
+      }
+    },
+    "/api/v1/gateway/files/outputs/{operation_id}/abandon": {
+      "post": {
+        "operationId": "provider-files-abandon_output",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AbandonUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Provider-Files-Abandon Output"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Abandon Output",
+        "tags": [
+          "provider-files"
+        ]
+      }
+    },
+    "/api/v1/gateway/files/outputs/{operation_id}/complete": {
+      "post": {
+        "operationId": "provider-files-complete_output",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupResult"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Provider-Files-Complete Output",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Complete Output",
+        "tags": [
+          "provider-files"
+        ]
+      }
+    },
+    "/api/v1/gateway/files/references/resolve": {
+      "post": {
+        "operationId": "provider-files-references",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/References"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Provider-Files-References"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "References",
+        "tags": [
+          "provider-files"
+        ]
+      }
+    },
+    "/api/v1/gateway/files/status": {
+      "get": {
+        "operationId": "provider-files-backlog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Provider-Files-Backlog",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Backlog",
+        "tags": [
+          "provider-files"
+        ]
+      }
+    },
+    "/api/v1/gateway/files/uploads/prepare": {
+      "post": {
+        "operationId": "provider-files-prepare",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrepareUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Provider-Files-Prepare"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Prepare",
+        "tags": [
+          "provider-files"
+        ]
+      }
+    },
+    "/api/v1/gateway/files/uploads/{binding_id}/abandon": {
+      "post": {
+        "operationId": "provider-files-abandon",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "binding_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Binding Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AbandonUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Provider-Files-Abandon",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Abandon",
+        "tags": [
+          "provider-files"
+        ]
+      }
+    },
+    "/api/v1/gateway/files/uploads/{binding_id}/finalize": {
+      "post": {
+        "operationId": "provider-files-finalize",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "binding_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Binding Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalizeUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Provider-Files-Finalize"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Finalize",
+        "tags": [
+          "provider-files"
+        ]
+      }
+    },
+    "/api/v1/gateway/files/{binding_id}/cleanup-result": {
+      "post": {
+        "operationId": "provider-files-cleanup_result",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "binding_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Binding Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupResult"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Provider-Files-Cleanup Result",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Cleanup Result",
+        "tags": [
+          "provider-files"
+        ]
+      }
+    },
+    "/api/v1/gateway/files/{file_id}/resolve": {
+      "post": {
+        "operationId": "provider-files-resolve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveFile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Provider-Files-Resolve"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Resolve",
+        "tags": [
+          "provider-files"
         ]
       }
     },

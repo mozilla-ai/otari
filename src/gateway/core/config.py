@@ -876,6 +876,40 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         default=True,
         description="Enable the /api/v1/files upload/storage endpoints (standalone mode).",
     )
+    files_provider_native_enabled: Annotated[bool, Shown(SettingsGroup.FILES)] = Field(
+        default=False,
+        description="Enable hybrid Anthropic Files after provider and control-plane contract verification.",
+    )
+    files_transfer_timeout_seconds: Annotated[int, Shown(SettingsGroup.FILES)] = Field(default=300, ge=1)
+    files_idle_timeout_seconds: Annotated[int, Shown(SettingsGroup.FILES)] = Field(default=30, ge=1)
+    files_rate_limit_rpm: Annotated[int, Shown(SettingsGroup.FILES)] = Field(default=60, ge=1)
+    files_max_count: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(default=None, ge=1)
+    files_max_outstanding_bytes: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(default=None, ge=1)
+    files_temporary_capacity_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=2 * 1024 * 1024 * 1024, ge=1
+    )
+    files_operation_timeout_seconds: Annotated[int, Shown(SettingsGroup.FILES)] = Field(default=600, ge=1)
+    files_diagnostic_retention_days: Annotated[int, Shown(SettingsGroup.FILES)] = Field(default=30, ge=1, le=365)
+
+    @model_validator(mode="after")
+    def validate_provider_file_limits(self) -> "GatewayConfig":
+        if (
+            (self.is_hybrid_mode or self.files_provider_native_enabled)
+            and self.files_retention_hours is not None
+            and self.files_retention_hours > 2160
+        ):
+            raise ValueError("Hybrid file retention cannot exceed 90 days")
+        if self.files_provider_native_enabled and self.files_temporary_capacity_bytes < self.files_max_bytes + 65536:
+            raise ValueError(
+                "Temporary upload capacity must admit one maximum-size file plus 64 KiB multipart overhead"
+            )
+        if self.is_hosted_mode and self.files_provider_native_enabled:
+            if self.files_max_count is None or self.files_max_outstanding_bytes is None:
+                raise ValueError("Hosted provider files require explicit file-count and outstanding-byte quotas")
+            if self.files_max_outstanding_bytes < self.files_max_bytes:
+                raise ValueError("Outstanding-byte quota must admit one maximum-size file")
+        return self
+
     files_backend: Annotated[str, Shown(SettingsGroup.FILES)] = Field(
         default="local",
         description="Blob backend for uploaded file bytes: 'local' (filesystem) or 's3'. Future: 'gcs'.",
@@ -1112,8 +1146,7 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
     mcp_allow_loopback: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=True,
         description=(
-            "SSRF gate: allow MCP server URLs that resolve to loopback (useful for same-host "
-            "sidecars). On by default."
+            "SSRF gate: allow MCP server URLs that resolve to loopback (useful for same-host sidecars). On by default."
         ),
     )
     mcp_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
@@ -1538,8 +1571,7 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
                 raise ValueError(msg)
             if ":" in name or "/" in name:
                 msg = (
-                    f"routing policy name '{name}' must not contain ':' or '/' "
-                    "(it would shadow a real model selector)."
+                    f"routing policy name '{name}' must not contain ':' or '/' (it would shadow a real model selector)."
                 )
                 raise ValueError(msg)
             if name in self.providers:
@@ -1632,10 +1664,7 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
                 try:
                     LLMProvider(impl)
                 except ValueError as exc:
-                    msg = (
-                        f"providers.{instance}.provider_type '{declared}' is not a known provider "
-                        "implementation."
-                    )
+                    msg = f"providers.{instance}.provider_type '{declared}' is not a known provider implementation."
                     raise ValueError(msg) from exc
             models = entry.get("models")
             if models is not None and not (isinstance(models, list) and all(isinstance(m, str) for m in models)):
@@ -2068,9 +2097,7 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
             try:
                 inline_timeout = int(raw_inline_timeout)
             except (TypeError, ValueError):
-                raise ValueError(
-                    f"{inline_key} must be a positive integer, got {raw_inline_timeout!r}"
-                ) from None
+                raise ValueError(f"{inline_key} must be a positive integer, got {raw_inline_timeout!r}") from None
             if (
                 isinstance(raw_inline_timeout, bool)
                 or (isinstance(raw_inline_timeout, float) and not raw_inline_timeout.is_integer())

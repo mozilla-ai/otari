@@ -16,6 +16,7 @@ two-row insert here.
 """
 
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +36,7 @@ from gateway.models.tenancy import (
     WorkspaceUpdate,
 )
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
+from gateway.repositories.tenancy.provider_file_repository import ProviderFileRepository
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.errors import (
     InvalidRoleError,
@@ -298,6 +300,12 @@ class WorkspaceService:
         try:
             member_ids = await self.members.ids_for_workspace(workspace_id)
             await self._membership_listener.workspace_deleted(workspace_id, member_ids)
+            await ProviderFileRepository(self.db).revoke(
+                datetime.now(UTC),
+                "workspace_deletion",
+                organization_id=organization.id,
+                workspace_id=workspace_id,
+            )
             await self.workspaces.delete_workspace(workspace)
             await self.db.commit()
         except IntegrityError:
