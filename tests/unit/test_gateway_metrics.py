@@ -15,7 +15,6 @@ from gateway.metrics import (
     metrics_endpoint,
     record_abandoned_attempt,
     record_auth_failure,
-    record_budget_exceeded,
     record_cost,
     record_inline_cost_settlement,
     record_tokens,
@@ -69,14 +68,6 @@ def test_record_inline_cost_settlement_increments_counter(outcome: str) -> None:
     record_inline_cost_settlement(outcome)
 
     assert _sample("gateway_inline_cost_settlements_total", labels) - before == 1.0
-
-
-def test_record_budget_exceeded_increments_counter() -> None:
-    before = _sample("gateway_budget_exceeded_total")
-
-    record_budget_exceeded()
-
-    assert _sample("gateway_budget_exceeded_total") - before == 1.0
 
 
 def test_record_auth_failure_increments_counter() -> None:

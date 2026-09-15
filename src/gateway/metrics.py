@@ -77,12 +77,6 @@ INLINE_COST_SETTLEMENTS = Counter(
     registry=REGISTRY,
 )
 
-BUDGET_EXCEEDED = Counter(
-    "gateway_budget_exceeded",
-    "Total number of budget exceeded events",
-    registry=REGISTRY,
-)
-
 AUTH_FAILURES = Counter(
     "gateway_auth_failures",
     "Total number of authentication failures",
@@ -226,11 +220,6 @@ def record_abandoned_attempt(provider: str, model: str, reason: str, position: i
 def record_inline_cost_settlement(outcome: str) -> None:
     """Record an attached, unattached, or timed-out inline settlement."""
     INLINE_COST_SETTLEMENTS.labels(outcome=outcome).inc()
-
-
-def record_budget_exceeded() -> None:
-    """Record a budget exceeded event."""
-    BUDGET_EXCEEDED.inc()
 
 
 def record_auth_failure(reason: str) -> None:
