@@ -278,7 +278,7 @@ def test_every_surface_names_a_route_the_gateway_mounts(
     mounted = {getattr(route, "path", "") for route in app.routes}
 
     # The fixed tuple and what the endpoint publishes, which adds each enabled
-    # registry package's surface: a package whose route is not mounted fails here.
+    # registry feature's surface: a package whose route is not mounted fails here.
     for surface in {*surfaces, *hosted_surfaces(config)}:
         prefix = SURFACE_ROUTE_PREFIXES.get(surface, f"{API_ROOT}/{surface}")
         assert any(path.startswith(prefix) for path in mounted), f"surface {surface!r} names no mounted /api/v1/ route"
