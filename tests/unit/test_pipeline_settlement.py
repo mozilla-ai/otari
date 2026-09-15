@@ -58,6 +58,7 @@ from gateway.models.mcp import McpServerConfig
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budget_service import ReservationHandle
 from gateway.services.tenancy.errors import WorkspaceMcpServerNotFoundError
+from gateway.services.tool_usage import ToolUsageTally
 
 ADAPTERS = [
     pytest.param(chat._ADAPTER, id="chat"),
@@ -135,8 +136,8 @@ def test_all_settlement_callbacks_wired_for_every_format_and_path(
 ) -> None:
     """Every streaming response, regardless of format and of single-attempt vs
     platform-fallback path, must wire on_complete / on_error / on_no_usage /
-    on_incomplete. Both paths build through ``build_streaming_response``, so
-    asserting here covers them uniformly.
+    on_incomplete / on_first_chunk. Both paths build through
+    ``build_streaming_response``, so asserting here covers them uniformly.
     """
     captured: dict[str, Any] = {}
 
@@ -170,7 +171,7 @@ def test_all_settlement_callbacks_wired_for_every_format_and_path(
         platform_request_id="req-1" if hybrid_path else None,
     )
 
-    for callback_name in ("on_complete", "on_error", "on_no_usage", "on_incomplete"):
+    for callback_name in ("on_complete", "on_error", "on_no_usage", "on_incomplete", "on_first_chunk"):
         assert callable(captured.get(callback_name)), f"{callback_name} not wired"
     assert captured["fmt"] is adapter.stream_format
     if hybrid_path:
@@ -395,6 +396,8 @@ def _build(
     config: GatewayConfig,
     *,
     workspace_id: uuid.UUID | None = None,
+    started_at: float | None = None,
+    tool_tally: ToolUsageTally | None = None,
 ) -> Any:
     return build_streaming_response(
         adapter=chat._ADAPTER,
@@ -409,6 +412,8 @@ def _build(
         rate_limit_info=None,
         reservation=_reservation(),
         workspace_id=workspace_id,
+        started_at=started_at,
+        tool_tally=tool_tally,
     )
 
 
@@ -493,6 +498,41 @@ async def test_client_disconnect_refunds(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert settlement.refunded == 1
     assert settlement.reconciled == []
+
+
+@pytest.mark.asyncio
+async def test_client_disconnect_with_tool_work_records_ttft(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_on_incomplete only reaches log_usage when there is tool work to bill
+    for (a non-empty tool_tally). That is also the one settlement path this
+    PR's own coverage missed: it should still record ttft_ms from the same
+    on_first_chunk mark every other path uses.
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    tally = ToolUsageTally()
+    tally.record_result("search", "ok")
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk()
+        yield _chunk()
+
+    response = _build(
+        stream(),
+        GatewayConfig(),
+        started_at=time.monotonic(),
+        tool_tally=tally,
+    )
+    iterator = response.body_iterator
+    await iterator.__anext__()
+    # Closing the generator mid-stream simulates a client disconnect.
+    await iterator.aclose()
+
+    assert len(settlement.logged) == 1
+    logged = settlement.logged[0]
+    assert logged["ttft_ms"] is not None
+    assert logged["ttft_ms"] >= 0
+    assert logged["ttft_ms"] <= logged["latency_ms"]
 
 
 class _FakeLogWriter:
