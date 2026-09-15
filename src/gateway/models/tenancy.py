@@ -223,8 +223,9 @@ class UpdatedAtMixin:
 
 
 # The column width of the name an identity goes by, and therefore the bound
-# every request that writes one has to share: signup fills it in, and
-# ``PATCH /api/v1/auth/profile`` is where it is changed afterwards.
+# every request that writes one has to share. One number rather than a literal
+# per schema: a bound stated in three places is one that two of them stop
+# matching.
 MAX_FULL_NAME_LENGTH = 255
 
 
