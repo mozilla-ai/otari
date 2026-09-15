@@ -91,6 +91,25 @@ afterEach(() => {
 })
 
 describe("AccountMenu", () => {
+  it("keeps Playground reachable on mobile before Documentation", async () => {
+    mockCaller(OPERATOR)
+    await openMenu()
+    const link = screen.getByRole("link", { name: "Playground" })
+    expect(link).toHaveAttribute("href", "/playground")
+    expect(link).toHaveClass("md:hidden")
+    expect(link.nextElementSibling).toBe(
+      screen.getByRole("link", { name: "Documentation" }),
+    )
+  })
+
+  it("omits Playground from the mobile menu when unavailable", async () => {
+    mockCaller(OPERATOR)
+    await openMenu({ surfaces: [] })
+    expect(
+      screen.queryByRole("link", { name: "Playground" }),
+    ).not.toBeInTheDocument()
+  })
+
   it("opens the account page, rather than naming a destination it cannot reach", async () => {
     mockCaller(OPERATOR)
     await openMenu()

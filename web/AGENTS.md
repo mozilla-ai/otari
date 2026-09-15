@@ -88,7 +88,7 @@ These gates combine with AND. Organization and workspace authorization still
 comes from server responses.
 
 The workspace and organization rails have separate registries. A sidebar item
-points to a real page, never a redirect. `/docs` and `/account` are chrome
+points to a real page, never a redirect. `/playground`, `/docs`, and `/account` are chrome
 destinations and do not belong in a rail.
 
 Overlay navigation uses the empty seam modules under `src/app/nav/` for new

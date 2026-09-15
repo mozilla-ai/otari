@@ -5,7 +5,7 @@ import type { PlaygroundComparison } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { IconButton } from "@/design-system/actions/IconButton"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
-import { Dialog } from "@/design-system/feedback/Dialog"
+import { Dialog, DialogSection } from "@/design-system/feedback/Dialog"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { formatDateTime } from "@/shared/helpers/format"
 
@@ -54,38 +54,40 @@ export function ComparisonHistoryDialog({
         description="Ratings you recorded in this workspace. Only you can see them."
         actions={<Button onPress={() => onOpenChange(false)}>Close</Button>}
       >
-        {comparisons.length === 0 ? (
-          <EmptyMessage>No saved comparisons yet.</EmptyMessage>
-        ) : (
-          <ul className="flex flex-col">
-            {comparisons.map((comparison) => (
-              <li
-                key={comparison.id}
-                className="flex items-center gap-2 border-border-subtle border-b py-3 last:border-b-0"
-              >
-                <div className="min-w-0 flex-1 px-2">
-                  <span className="block truncate text-emphasis">
-                    {comparison.user_question}
-                  </span>
-                  <span className="block truncate text-caption">
-                    {comparison.model_a} vs {comparison.model_b} ·{" "}
-                    {PREFERENCE_LABEL[comparison.preference] ??
-                      comparison.preference}{" "}
-                    · {formatDateTime(comparison.created_at)}
-                  </span>
-                </div>
-                <IconButton
-                  label="Delete comparison"
-                  variant="danger"
-                  onPress={() => setPendingDelete(comparison)}
-                  isDisabled={isDeleting}
+        <DialogSection>
+          {comparisons.length === 0 ? (
+            <EmptyMessage>No saved comparisons yet.</EmptyMessage>
+          ) : (
+            <ul className="flex flex-col">
+              {comparisons.map((comparison) => (
+                <li
+                  key={comparison.id}
+                  className="flex items-center gap-4 border-border-subtle border-b py-3 first:pt-0 last:border-b-0 last:pb-0"
                 >
-                  <FiTrash2 aria-hidden className="size-4" />
-                </IconButton>
-              </li>
-            ))}
-          </ul>
-        )}
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <span className="block break-words text-emphasis">
+                      {comparison.user_question}
+                    </span>
+                    <span className="block break-words text-caption">
+                      {comparison.model_a} vs {comparison.model_b} ·{" "}
+                      {PREFERENCE_LABEL[comparison.preference] ??
+                        comparison.preference}{" "}
+                      · {formatDateTime(comparison.created_at)}
+                    </span>
+                  </div>
+                  <IconButton
+                    label="Delete comparison"
+                    variant="danger"
+                    onPress={() => setPendingDelete(comparison)}
+                    isDisabled={isDeleting}
+                  >
+                    <FiTrash2 aria-hidden className="size-4" />
+                  </IconButton>
+                </li>
+              ))}
+            </ul>
+          )}
+        </DialogSection>
       </Dialog>
 
       <ConfirmDialog

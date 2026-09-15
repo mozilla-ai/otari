@@ -6,15 +6,15 @@ import {
 } from "react"
 import { FiRotateCcw } from "react-icons/fi"
 import type { Components } from "react-markdown"
-
+import { Button } from "@/design-system/actions/Button"
 import { CopyButton } from "@/design-system/actions/CopyButton"
-import { IconButton } from "@/design-system/actions/IconButton"
 import { CodeBlock } from "@/design-system/content/CodeBlock"
 import { Markdown } from "@/design-system/content/Markdown"
-import { Tooltip } from "@/design-system/overlays/Tooltip"
-
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Toolbar } from "@/design-system/layout/Toolbar"
 import { parseThinkTags } from "./helpers/parseThinkTags"
 import { formatTurnStats } from "./helpers/playgroundCost"
+import { splitModelKey } from "./helpers/playgroundModels"
 import type { ChatTurn } from "./helpers/playgroundTypes"
 import { ThinkingBlock } from "./ThinkingBlock"
 
@@ -64,19 +64,13 @@ const ANSWER_MARKDOWN: Components = {
   ),
 }
 
-/**
- * One turn of the conversation.
- *
- * A question is a bubble on the right, because it is short and the reader wrote
- * it. An answer is full width with no bubble at all: it is the thing being read,
- * often long and often containing a code fence, and a tinted container around
- * it both narrows the measure and fights the fence's own frame.
- */
 export function MessageBubble({
   turn,
+  model,
   onRegenerate,
   areActionsVisible = true,
 }: {
+  model: string
   turn: ChatTurn
   /** Given only on the latest finished answer. */
   onRegenerate?: () => void
@@ -85,10 +79,11 @@ export function MessageBubble({
 }) {
   if (turn.role === "user") {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg bg-primary-subtle px-4 py-3 text-primary-subtle-foreground">
-          <p className="whitespace-pre-wrap text-sm">{turn.content}</p>
-        </div>
+      <div className="flex flex-col gap-2 border-b border-border pb-6">
+        <p className="text-overline">You</p>
+        <p className="whitespace-pre-wrap break-words text-base leading-[1.625rem]">
+          {turn.content}
+        </p>
       </div>
     )
   }
@@ -97,9 +92,16 @@ export function MessageBubble({
   // A model streams reasoning in a field of its own or inline in `<think>`
   // tags, never both, so whichever arrived goes in the same block.
   const reasoning = turn.reasoning ?? inlineThinking
+  const identity = splitModelKey(model)
 
   return (
-    <div className="group flex flex-col gap-1">
+    <div className="flex min-w-0 flex-col gap-4 break-words">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <p className="text-overline">{identity.label}</p>
+        {identity.instance ? (
+          <span className="text-caption">{identity.instance}</span>
+        ) : null}
+      </div>
       {reasoning ? <ThinkingBlock content={reasoning} /> : null}
       {response ? (
         <Markdown components={ANSWER_MARKDOWN}>{response}</Markdown>
@@ -108,31 +110,28 @@ export function MessageBubble({
         // Inline rather than a toast: a failure belongs where the answer would
         // have been, so a transcript still reads in order afterwards and a
         // failure scrolled past is still findable.
-        <p className="text-sm text-danger">{turn.errorMessage}</p>
+        <ErrorBanner error={new Error(turn.errorMessage)} />
       ) : null}
       {turn.usage ? (
-        <p className="text-caption">{formatTurnStats(turn.usage)}</p>
+        <p className="text-mono-caption tabular-nums text-muted">
+          {formatTurnStats(turn.usage)}
+        </p>
       ) : null}
       {/* Shown for a failed turn too, not only a successful one. A stream that
           died before its first token leaves `content` empty, so gating on the
           response alone hid the whole row at the one moment somebody wants
           Regenerate. Copy still needs something to copy. */}
       {areActionsVisible && (response || turn.errorMessage) ? (
-        // Always visible on a touch screen and revealed on hover from `md` up:
-        // a hover-only control is unreachable on a phone, which the
-        // responsiveness rule forbids outright.
-        <div className="flex items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+        <Toolbar className="gap-2">
           {response ? (
-            <CopyButton value={response} label="Copy response" />
+            <CopyButton value={response} label="response" showLabel />
           ) : null}
           {onRegenerate ? (
-            <Tooltip content="Regenerate">
-              <IconButton label="Regenerate response" onPress={onRegenerate}>
-                <FiRotateCcw aria-hidden className="size-4" />
-              </IconButton>
-            </Tooltip>
+            <Button aria-label="Regenerate response" onPress={onRegenerate}>
+              <FiRotateCcw aria-hidden className="size-4" /> Regenerate
+            </Button>
           ) : null}
-        </div>
+        </Toolbar>
       ) : null}
     </div>
   )

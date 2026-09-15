@@ -9,6 +9,19 @@ describe("CopyButton", () => {
     vi.restoreAllMocks()
   })
 
+  it("acknowledges a labeled copy without changing its accessible name", async () => {
+    const user = userEvent.setup()
+    render(
+      <CopyButton value="A complete response" label="response" showLabel />,
+    )
+    const button = screen.getByRole("button", { name: "Copy response" })
+    expect(button).toHaveTextContent("Copy")
+    await user.click(button)
+    expect(await navigator.clipboard.readText()).toBe("A complete response")
+    expect(button).toHaveTextContent("Copied")
+    expect(screen.getByRole("button", { name: "Copy response" })).toBe(button)
+  })
+
   it("writes the value to the clipboard and confirms over the icon", async () => {
     const user = userEvent.setup()
     render(<CopyButton value="anthropic:claude-opus-4" label="model id" />)

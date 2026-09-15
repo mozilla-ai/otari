@@ -48,7 +48,7 @@ export function PlaygroundConversation({
 }) {
   if (!isComparing) {
     return (
-      <div className="flex pt-4 pb-2">
+      <div className="mx-auto flex w-full max-w-[47.5rem] pt-8 pb-6">
         <ChatPanel
           panel={panelA}
           onRegenerate={() => onRegenerate(panelA, setPanelA)}
@@ -58,8 +58,9 @@ export function PlaygroundConversation({
   }
 
   return (
-    <div className="flex flex-col gap-4 pt-4 pb-2 md:flex-row md:items-start">
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
+    <div className="flex flex-col gap-8 pt-6 pb-6 md:flex-row md:items-start">
+      <div className="flex min-w-0 flex-1 flex-col gap-6">
+        <h2 className="text-overline">Model A</h2>
         <ModelSelect
           label="Model A"
           value={panelA.model}
@@ -77,11 +78,11 @@ export function PlaygroundConversation({
         />
         <ChatPanel
           panel={panelA}
-          isBordered
           onRegenerate={() => onRegenerate(panelA, setPanelA)}
         />
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
+      <div className="flex min-w-0 flex-1 flex-col gap-6">
+        <h2 className="text-overline">Model B</h2>
         <ModelSelect
           label="Model B"
           value={panelB.model}
@@ -96,7 +97,6 @@ export function PlaygroundConversation({
         />
         <ChatPanel
           panel={panelB}
-          isBordered
           onRegenerate={() => onRegenerate(panelB, setPanelB)}
         />
       </div>

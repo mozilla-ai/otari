@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { FiPlus, FiServer, FiTool } from "react-icons/fi"
 import type { PlaygroundTools } from "@/client"
-import { IconButton } from "@/design-system/actions/IconButton"
+import { Button } from "@/design-system/actions/Button"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { Divider } from "@/design-system/layout/Divider"
 import { Popover } from "@/design-system/overlays/Popover"
@@ -60,13 +60,14 @@ export function ToolsMenu({
       onOpenChange={setIsOpen}
       placement="top"
       trigger={
-        <IconButton
-          label="Add tools"
-          className="rounded-full"
+        <Button
+          aria-label="Add tools"
+          className="min-h-11 min-w-11 shrink-0"
           isDisabled={isDisabled}
         >
           <FiPlus aria-hidden className="size-4" />
-        </IconButton>
+          <span className="hidden md:inline">Tools</span>
+        </Button>
       }
     >
       <div className="flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-3 p-3">

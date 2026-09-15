@@ -25,6 +25,16 @@ import type {
 } from "./types"
 
 describe("nav registry", () => {
+  it("gates the Playground route without placing it in a sidebar", () => {
+    expect(
+      NAV_SECTIONS.flatMap((section) => section.items).some(
+        (item) => item.to === "/playground",
+      ),
+    ).toBe(false)
+    expect(navItemForPath("/playground")?.surface).toBe("playground")
+    expect(isPathVisible("/playground", () => false)).toBe(false)
+  })
+
   it("exposes the base sections in display order", () => {
     expect(NAV_SECTIONS.map((section) => section.id)).toEqual([
       "index",
@@ -59,10 +69,10 @@ describe("nav registry", () => {
     // Both rails, because NAV_ITEMS is what answers "which entry is this
     // pathname" and a route is gated the same way whichever sidebar links it.
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
+      "Playground",
       "Overview",
       "Activity",
       "Usage",
-      "Playground",
       "Models",
       "Routing",
       "Tools",

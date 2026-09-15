@@ -322,7 +322,7 @@ describe("the Playground before the first question", () => {
     expect(await screen.findByText("What can I help with?")).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent(
-        "openai:gpt-4o",
+        "gpt-4o",
       )
     })
   })
@@ -333,7 +333,9 @@ describe("the Playground before the first question", () => {
     await screen.findByText("What can I help with?")
 
     await userEvent.click(await screen.findByRole("button", { name: "Model" }))
-    expect(await screen.findByText("gpt-4o")).toBeInTheDocument()
+    expect(
+      await screen.findByRole("button", { name: /gpt-4o.*Selected/ }),
+    ).toBeInTheDocument()
     expect(screen.queryByText("text-embedding-3-small")).not.toBeInTheDocument()
   })
 
@@ -567,7 +569,7 @@ describe("comparing two models", () => {
     // itself produces two answers nobody can tell apart.
     expect(
       screen.getByRole("button", { name: "Model B" }),
-    ).not.toHaveTextContent("openai:gpt-4o")
+    ).not.toHaveTextContent("gpt-4o")
 
     await user.type(screen.getByLabelText("Message"), "which?")
     await user.click(screen.getByRole("button", { name: "Send message" }))
@@ -780,12 +782,12 @@ describe("state that must not outlive what produced it", () => {
     ).toBeInTheDocument()
     // Still the old model until they confirm.
     expect(screen.getByLabelText("Model", { exact: true })).toHaveTextContent(
-      "openai:gpt-4o",
+      "gpt-4o",
     )
 
     await user.click(screen.getByRole("button", { name: "Switch model" }))
     expect(screen.getByLabelText("Model", { exact: true })).toHaveTextContent(
-      "anthropic:claude-sonnet-4",
+      "claude-sonnet-4",
     )
     expect(screen.queryByText("first answer")).not.toBeInTheDocument()
   })
@@ -803,7 +805,7 @@ describe("state that must not outlive what produced it", () => {
       screen.queryByText("Switch model and start over?"),
     ).not.toBeInTheDocument()
     expect(screen.getByLabelText("Model", { exact: true })).toHaveTextContent(
-      "anthropic:claude-sonnet-4",
+      "claude-sonnet-4",
     )
   })
 })
@@ -883,22 +885,25 @@ describe("when a write fails", () => {
 })
 
 describe("history", () => {
-  it("hides the history control until there is history", async () => {
+  it("opens an empty history before the first save", async () => {
     mockApi()
     renderPage()
     await screen.findByText("What can I help with?")
 
+    await userEvent.click(
+      screen.getByRole("button", { name: "Conversation history" }),
+    )
     expect(
-      screen.queryByRole("button", { name: "Conversation history" }),
-    ).not.toBeInTheDocument()
+      await screen.findByText("No saved conversations yet."),
+    ).toBeInTheDocument()
   })
 
-  it("loads a saved transcript into the conversation", async () => {
+  it("loads a saved transcript with its model and exits comparison", async () => {
     const SAVED = {
       id: "conv-1",
       workspace_id: WORKSPACE_ID,
       title: "How does OAuth work",
-      model: "openai:gpt-4o",
+      model: "anthropic:claude-sonnet-4",
       message_count: 2,
       created_at: "2026-01-01T00:00:00Z",
     }
@@ -915,6 +920,7 @@ describe("history", () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText("What can I help with?")
+    await user.click(screen.getByRole("button", { name: "Compare two models" }))
 
     await user.click(
       await screen.findByRole("button", { name: "Conversation history" }),
@@ -928,6 +934,15 @@ describe("history", () => {
 
     expect(
       await screen.findByText("It delegates authorization."),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent(
+      "claude-sonnet-4",
+    )
+    expect(
+      screen.queryByRole("button", { name: "Model B" }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Compare two models" }),
     ).toBeInTheDocument()
   })
 })

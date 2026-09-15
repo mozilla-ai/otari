@@ -38,7 +38,7 @@ export function ComparisonRatingBar({
   }
 
   return (
-    <div className="flex shrink-0 items-center gap-4 py-2">
+    <div className="flex shrink-0 items-center gap-2 border-t border-border py-3">
       <div className="flex min-w-0 flex-1 justify-center">
         <Button
           size="sm"
@@ -47,6 +47,7 @@ export function ComparisonRatingBar({
           isDisabled={isPending}
         >
           <FiThumbsUp aria-hidden className="size-4" />
+          Model A
         </Button>
       </div>
       <div className="flex shrink-0 flex-col items-center gap-1">
@@ -68,6 +69,7 @@ export function ComparisonRatingBar({
           isDisabled={isPending}
         >
           <FiThumbsUp aria-hidden className="size-4" />
+          Model B
         </Button>
       </div>
     </div>
