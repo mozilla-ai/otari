@@ -175,7 +175,7 @@ catching them after the fact rather than preventing them.
            "hooks": [
              {
                "type": "command",
-               "command": "otari hook"
+               "command": "otari hook --harness claude-code"
              }
            ]
          }
