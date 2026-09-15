@@ -165,16 +165,6 @@ export const Concealed: Story = {
   ),
 }
 
-/**
- * `fieldRef` hands the field's element to the caller, so something outside it
- * can put the caret in the value.
- *
- * The Keys page uses it for the one-time reveal: the key appears and the field
- * is selected, so Ctrl/Cmd-C works without aiming at the button. That matters
- * because the Clipboard API is undefined on the non-secure origins this
- * dashboard is routinely served from, which is the same reason the field
- * selects on click.
- */
 /** Explicit opt-in for an uncontrolled field that starts visible. */
 export const RevealedOnArrival: Story = {
   render: () => (
@@ -225,6 +215,7 @@ export const CoupledReveal: Story = {
   },
 }
 
+/** The caller can focus the field through `fieldRef`. */
 export const WithFieldRef: Story = {
   render: () => {
     const fieldRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
