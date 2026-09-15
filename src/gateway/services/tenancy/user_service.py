@@ -51,6 +51,7 @@ below is what gives it a way to sign in.
 
 from datetime import UTC, datetime, timedelta
 
+from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -240,6 +241,7 @@ async def create_user_for_signup(
     db: AsyncSession,
     config: GatewayConfig,
     *,
+    background_tasks: BackgroundTasks,
     email: str,
     password: str,
     full_name: str | None = None,
@@ -286,10 +288,14 @@ async def create_user_for_signup(
     Refuses before writing anything if this deployment cannot mail the
     verification link: a signup that could never be verified would strand the
     caller in the unverified, hard-blocked state #650's sign-in gate enforces.
-    The mail send after commit is not guarded by a ``try`` on purpose, the same
-    reason ``organization_service.invite_active_organization_member_for_user``
-    does not guard its own: ``Mailer.send`` never raises, so the account this
-    call creates is durable whether or not the message actually goes out.
+    The mail send is handed to ``background_tasks`` rather than awaited here,
+    the same reason ``GrowthSignalPort`` is: an unauthenticated caller can
+    measure how long this call takes, and an awaited SMTP round-trip on the
+    claim branch alone would let them tell it apart from the enumeration-safe
+    early return above by wall-clock time even though both answer the caller
+    identically. Scheduling after the commit keeps the account durable
+    whether or not the message actually goes out, the same guarantee the
+    previous inline, unguarded ``await`` gave (``Mailer.send`` never raises).
     """
     mailer = Mailer(config)
     mailer.require_ready()
@@ -351,7 +357,8 @@ async def create_user_for_signup(
     db.add(identity)
     await db.commit()
 
-    await mailer.send(
+    background_tasks.add_task(
+        mailer.send,
         to=address,
         message=render_verification_email(
             verify_link=mailer.link(f"/#/verify-email?token={token}"),
@@ -401,7 +408,9 @@ async def verify_email(db: AsyncSession, *, token: str) -> User:
     return identity
 
 
-async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, email: str) -> None:
+async def resend_verification_email(
+    db: AsyncSession, config: GatewayConfig, *, background_tasks: BackgroundTasks, email: str
+) -> None:
     """Mail a fresh verification link, or do nothing: the caller cannot tell which.
 
     Enumeration-safe by construction rather than by a caller-side generic
@@ -414,9 +423,12 @@ async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, 
     The early return still pays a bcrypt-equivalent cost first
     (``verify_absent_password_async``), the same reason ``authenticate`` pays
     one for an address with no stored hash: without it, the ineligible path
-    returns after one SELECT while the eligible one goes on to a commit and an
-    awaited mail send, and that gap is measurable enough to narrow down which
-    case a given address fell into.
+    returns after one SELECT while the eligible one goes on to a commit, and
+    that gap is measurable enough to narrow down which case a given address
+    fell into. The mail send itself is handed to ``background_tasks`` rather
+    than awaited, for the same reason: an awaited SMTP round-trip on the
+    eligible path alone would reopen the gap the bcrypt-equivalent cost above
+    exists to close.
     """
     mailer = Mailer(config)
     mailer.require_ready()
@@ -440,7 +452,8 @@ async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, 
     db.add(identity)
     await db.commit()
 
-    await mailer.send(
+    background_tasks.add_task(
+        mailer.send,
         to=address,
         message=render_verification_email(
             verify_link=mailer.link(f"/#/verify-email?token={token}"),
@@ -449,15 +462,17 @@ async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, 
     )
 
 
-async def request_password_reset(db: AsyncSession, config: GatewayConfig, *, email: str) -> None:
+async def request_password_reset(
+    db: AsyncSession, config: GatewayConfig, *, background_tasks: BackgroundTasks, email: str
+) -> None:
     """Mail a password-reset link, or do nothing: the caller cannot tell which.
 
     Enumeration-safe the same way ``resend_verification_email`` is, including
-    paying the same timing-equalizing cost on the early return, and refusing a
-    deactivated identity for the same reason. Works on an unverified identity
-    too, deliberately: forgetting a password predates ever verifying it, so
-    gating this on ``email_verified_at`` would strand exactly the caller it
-    exists to help.
+    paying the same timing-equalizing cost on the early return, backgrounding
+    the mail send the same way, and refusing a deactivated identity for the
+    same reason. Works on an unverified identity too, deliberately: forgetting
+    a password predates ever verifying it, so gating this on
+    ``email_verified_at`` would strand exactly the caller it exists to help.
     """
     mailer = Mailer(config)
     mailer.require_ready()
@@ -474,7 +489,8 @@ async def request_password_reset(db: AsyncSession, config: GatewayConfig, *, ema
     db.add(identity)
     await db.commit()
 
-    await mailer.send(
+    background_tasks.add_task(
+        mailer.send,
         to=address,
         message=render_password_reset_email(
             reset_link=mailer.link(f"/#/reset-password?token={token}"),
