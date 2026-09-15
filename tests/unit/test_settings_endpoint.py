@@ -225,6 +225,7 @@ def test_settings_includes_full_config_view(tmp_path: Path) -> None:
     for name in (
         "mcp_allow_private_hosts",
         "web_search_allow_private_hosts",
+        "web_retrieval_trust_env_proxy",
         "provider_allow_private_hosts",
         "sandbox_url",
         "guardrails_url",

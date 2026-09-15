@@ -32,6 +32,7 @@ from enum import StrEnum, auto
 from typing import TYPE_CHECKING, Any
 
 from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
+from gateway.core.config import parse_bool_env
 from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.services.tool_usage import ToolUsageTally
@@ -405,7 +406,15 @@ def _build_web_search_backend(
     ``base_url`` may be ``None`` when the deployment configured a licensed
     search provider instead, which the backend then calls directly.
     """
-    kwargs: dict[str, Any] = {"base_url": base_url, "tally": tally}
+    kwargs: dict[str, Any] = {
+        "base_url": base_url,
+        "tally": tally,
+        "trust_env_proxy": (
+            config.web_retrieval_trust_env_proxy
+            if config is not None
+            else parse_bool_env(otari_env("WEB_RETRIEVAL_TRUST_ENV_PROXY", "false"))
+        ),
+    }
 
     # A licensed provider this deployment holds the key for wins over the URL,
     # and is how a deployment searches with no backend service in front of it.

@@ -141,7 +141,7 @@ def _decode_text(response: httpx.Response, content: bytes) -> str:
 
 
 class WebFetchService:
-    """Retrieve one URL through a pinned client and return bounded text."""
+    """Retrieve one URL through a policy-enforcing client and return bounded text."""
 
     def __init__(
         self,

@@ -1233,6 +1233,15 @@ class GatewayConfig(BaseSettings):
             "gateway, and every other keyword reaches the provider untouched. Requires web_search_url."
         ),
     )
+    web_retrieval_trust_env_proxy: bool = Field(
+        default=False,
+        description=(
+            "Trust HTTP_PROXY, HTTPS_PROXY, and ALL_PROXY for web retrieval. The proxy must enforce "
+            "address safety when resolving and connecting to destinations. Local URL, domain, and "
+            "address checks remain enabled; direct requests, including NO_PROXY matches, remain IP-pinned. "
+            "Off by default. Only enable for an operator-controlled SSRF-filtering proxy."
+        ),
+    )
     web_search_allow_private_hosts: bool = Field(
         default=False,
         description=(

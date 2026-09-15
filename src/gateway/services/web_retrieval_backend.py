@@ -2,8 +2,9 @@
 
 Search execution uses its configured trusted backend. Public result-page
 retrieval is separate: every destination is canonicalized, resolved, validated,
-and dialed through the pinned transport before bounded extraction. Per-page
-failures remain best effort and fall back to provider snippets.
+and retrieved before bounded extraction. Connections are pinned unless the
+operator explicitly trusts an environment proxy to enforce address safety.
+Per-page failures remain best effort and fall back to provider snippets.
 """
 
 from __future__ import annotations
@@ -17,7 +18,11 @@ from opentelemetry import trace
 
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.web_fetch_service import WebFetchService
-from gateway.services.web_retrieval_network import PinnedAsyncHTTPTransport, truncate_utf8
+from gateway.services.web_retrieval_network import (
+    PinnedAsyncHTTPTransport,
+    TrustedProxyAsyncHTTPTransport,
+    truncate_utf8,
+)
 from gateway.services.web_retrieval_policy import (
     DomainPolicy,
     WebURLValidationError,
@@ -107,7 +112,7 @@ class WebSearchNotReachableError(RuntimeError):
 
 
 class WebRetrievalBackend:
-    """Own the trusted Search client and pinned public retrieval client."""
+    """Own the trusted Search client and bounded public retrieval client."""
 
     def __init__(
         self,
@@ -127,6 +132,7 @@ class WebRetrievalBackend:
         auth_token: str | None = None,
         tally: ToolUsageTally | None = None,
         retrieval_service: WebFetchService | None = None,
+        trust_env_proxy: bool = False,
     ) -> None:
         # Exactly one of the two search paths, checked here rather than at the
         # first query: a backend with neither would raise mid-completion, after
@@ -171,6 +177,7 @@ class WebRetrievalBackend:
         self._auth_token = auth_token
         self._client: httpx.AsyncClient | None = None
         self._retrieval_service = retrieval_service
+        self._trust_env_proxy = trust_env_proxy
         self._stack: AsyncExitStack = AsyncExitStack()
         # Structured hits from the most recent ``call_tool``, kept so a caller that
         # speaks a native server-tool vocabulary can turn them into citation blocks
@@ -180,17 +187,22 @@ class WebRetrievalBackend:
         self._last_results: list[dict[str, Any]] = []
 
     async def __aenter__(self) -> WebRetrievalBackend:
-        self._client = await self._stack.enter_async_context(httpx.AsyncClient(timeout=self._search_timeout_s))
-        if self._retrieval_service is None:
-            retrieval_client = await self._stack.enter_async_context(
-                httpx.AsyncClient(
-                    transport=PinnedAsyncHTTPTransport(),
-                    timeout=None,
-                    follow_redirects=False,
-                    trust_env=False,
+        try:
+            self._client = await self._stack.enter_async_context(httpx.AsyncClient(timeout=self._search_timeout_s))
+            if self._retrieval_service is None:
+                transport = TrustedProxyAsyncHTTPTransport() if self._trust_env_proxy else PinnedAsyncHTTPTransport()
+                retrieval_client = await self._stack.enter_async_context(
+                    httpx.AsyncClient(
+                        transport=transport,
+                        timeout=None,
+                        follow_redirects=False,
+                        trust_env=False,
+                    )
                 )
-            )
-            self._retrieval_service = WebFetchService(retrieval_client)
+                self._retrieval_service = WebFetchService(retrieval_client)
+        except BaseException:
+            await self._stack.aclose()
+            raise
         return self
 
     async def __aexit__(

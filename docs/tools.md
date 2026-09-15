@@ -170,6 +170,23 @@ at most five redirects, and applies one five-second network deadline across DNS,
 connection setup, redirects, and body streaming. The decoded response body is
 limited to 5 MiB.
 
+Result-page retrieval ignores environment proxies by default. To use an
+operator-controlled proxy that blocks unsafe destination addresses, set
+`web_retrieval_trust_env_proxy: true` in the gateway configuration or
+`OTARI_WEB_RETRIEVAL_TRUST_ENV_PROXY=true`. Retrieval then honors `HTTP_PROXY`,
+`HTTPS_PROXY`, and the `ALL_PROXY` fallback (including lowercase forms), with
+`NO_PROXY` exclusions. Only HTTP(S) proxy URLs are supported. Proxy settings
+are read when the retrieval client is created.
+
+This opt-in delegates connection-time address safety to the proxy, which must
+block internal and other unsafe addresses after resolving each destination.
+A general forwarding proxy does not provide this protection automatically.
+Otari still applies local DNS/address checks, domain policy, redirect checks,
+and response limits, so destination DNS must also work on the gateway.
+Requests without an applicable proxy, including `NO_PROXY` matches, remain
+IP-pinned. A failed proxy request never falls back to a direct connection.
+This deployment-only setting cannot be enabled by a tool request or workspace.
+
 Otari extracts HTML, textual formats (including Markdown, JSON, XML, and
 JavaScript), and text-bearing PDFs. HTML and PDF parsing runs in a supervised
 single-worker process with fixed time, memory, queue, page, and intermediate
