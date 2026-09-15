@@ -279,12 +279,16 @@ describe("KeysPage", () => {
     expect(within(reveal).getByLabelText("Secret key")).toHaveValue(
       "gw-NEWSE••••••••0000",
     )
-    expect(within(reveal).getByLabelText("curl")).not.toHaveValue(
-      expect.stringContaining(NEW_SECRET),
-    )
     expect(
-      within(reveal).getByLabelText("Python (OpenAI SDK)"),
-    ).not.toHaveValue(expect.stringContaining(NEW_SECRET))
+      (within(reveal).getByLabelText("curl") as HTMLTextAreaElement).value,
+    ).not.toContain(NEW_SECRET)
+    expect(
+      (
+        within(reveal).getByLabelText(
+          "Python (OpenAI SDK)",
+        ) as HTMLTextAreaElement
+      ).value,
+    ).not.toContain(NEW_SECRET)
     await user.click(
       within(reveal).getByRole("button", { name: "Show Secret key" }),
     )
@@ -642,9 +646,9 @@ describe("KeysPage", () => {
     expect(within(reveal).getByLabelText("Secret key")).toHaveValue(
       "gw-REGEN••••••••0000",
     )
-    expect(within(reveal).getByLabelText("curl")).not.toHaveValue(
-      expect.stringContaining(REGEN_SECRET),
-    )
+    expect(
+      (within(reveal).getByLabelText("curl") as HTMLTextAreaElement).value,
+    ).not.toContain(REGEN_SECRET)
   })
 
   it("keeps the page's create action visible while the dialog is open", async () => {

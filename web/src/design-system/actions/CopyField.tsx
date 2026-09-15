@@ -65,6 +65,28 @@ export function CopyableValue({
  */
 export const CONCEALED_SECRET = "••••••••••••••••"
 
+/**
+ * A credential's stand-in that still identifies it: the first eight characters,
+ * a fixed bullet run, then the last four.
+ *
+ * Shown where an operator has to tell one key from another while it is
+ * concealed. The bullet run is fixed for `CONCEALED_SECRET`'s reason, so the
+ * length of the key stays off the screen; a value too short to keep those two
+ * ends apart falls back to the plain stand-in rather than showing most of
+ * itself.
+ */
+export function concealedFingerprint(value: string): string {
+  return value.length >= 16
+    ? `${value.slice(0, 8)}••••••••${value.slice(-4)}`
+    : CONCEALED_SECRET
+}
+
+// A 44x44 target below `md` for an icon-only control, back to the button's own
+// 32px where a pointer is doing the pressing. A `before:` bleed is unavailable
+// here: the two controls sit a `gap-1` apart, so their bleeds would overlap and
+// a press near the seam would land on the wrong one.
+const ICON_CONTROL_BOX = "min-h-11 min-w-11 md:min-h-8 md:min-w-8"
+
 // A readonly, always-selectable field with a copy button: how a value an
 // operator has to paste elsewhere is handed over. Shared by the Keys page's
 // one-time reveal and the setup guide, which hand out the same key and the same
@@ -96,8 +118,12 @@ type CopyFieldProps = {
        * has been asked for, while Copy copies the real value either way, so a
        * key can be handed over without being read off the screen (otari-ai#2111).
        *
-       * A secret field passes `CONCEALED_SECRET` or a partial fingerprint.
-       * A snippet uses a stand-in for the key while keeping the request readable.
+       * A whole-value field passes `CONCEALED_SECRET`, or
+       * `concealedFingerprint` where the operator has to tell one credential
+       * from another. A snippet passes the same snippet built around whichever
+       * of those the field beside it shows, so what is hidden is the key rather
+       * than the request that explains it, and one credential does not wear two
+       * stand-ins on one screen.
        */
       concealed?: string
       /**
@@ -355,6 +381,9 @@ export function CopyField({
       size="sm"
       variant="ghost"
       isIconOnly
+      // `size` alone is 32px, under the 44px touch floor. Grow the box below
+      // `md` and let it settle back to the button's own size on a pointer.
+      className={ICON_CONTROL_BOX}
       aria-label={`${revealed ? "Hide" : "Show"} ${label}`}
       onPress={() => setRevealed(!revealed)}
     >
@@ -372,6 +401,7 @@ export function CopyField({
       size="sm"
       variant="ghost"
       isIconOnly={inlineControls}
+      className={inlineControls ? ICON_CONTROL_BOX : "min-h-11 md:min-h-8"}
       aria-label={inlineControls ? `Copy ${label}` : undefined}
       onPress={copy}
     >

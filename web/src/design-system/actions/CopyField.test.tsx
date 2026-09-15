@@ -5,6 +5,7 @@ import {
   CONCEALED_SECRET,
   CopyableValue,
   CopyField,
+  concealedFingerprint,
 } from "@/design-system/actions/CopyField"
 
 describe("CopyField", () => {
@@ -285,6 +286,27 @@ describe("CopyField, concealed", () => {
 
     await user.click(screen.getByRole("button", { name: "Hide Secret key" }))
     expect(field).toHaveValue(CONCEALED_SECRET)
+  })
+
+  it("gives the in-field controls a 44px target below the pointer breakpoint", () => {
+    // `size="sm"` is 32px and `isIconOnly` zeroes the padding that would
+    // otherwise grow it, so the floor has to be asked for. The two controls
+    // take real boxes rather than the `before:` bleed a lone control can use:
+    // they sit a `gap-1` apart, so overlapping bleeds would send a press near
+    // the seam to the wrong one.
+    render(
+      <CopyField
+        label="Secret key"
+        value="gw-real-secret"
+        concealed={CONCEALED_SECRET}
+      />,
+    )
+
+    for (const name of ["Show Secret key", "Copy Secret key"]) {
+      const control = screen.getByRole("button", { name })
+      expect(control.className).toContain("min-h-11")
+      expect(control.className).toContain("min-w-11")
+    }
   })
 
   it("copies the real value while it is concealed", async () => {
@@ -634,5 +656,25 @@ describe("CopyableValue", () => {
     // Selectable in its own right, so an inherited `user-select: none` from a
     // press elsewhere in the row cannot suppress it.
     expect(value.className).toContain("select-text")
+  })
+})
+
+describe("concealedFingerprint", () => {
+  it("keeps both ends of a key and a fixed run between them", () => {
+    // Fixed rather than a bullet per character: the length of a key is itself
+    // something not to put on screen.
+    expect(concealedFingerprint("gw-NEWSECRETVALUE0000")).toBe(
+      "gw-NEWSE••••••••0000",
+    )
+    expect(concealedFingerprint("0123456789abcdef")).toBe(
+      "01234567••••••••cdef",
+    )
+  })
+
+  it("falls back to the plain stand-in when the ends would meet", () => {
+    // Below sixteen characters the two slices overlap, so the fingerprint would
+    // show more of the value than it hides.
+    expect(concealedFingerprint("0123456789abcde")).toBe(CONCEALED_SECRET)
+    expect(concealedFingerprint("")).toBe(CONCEALED_SECRET)
   })
 })

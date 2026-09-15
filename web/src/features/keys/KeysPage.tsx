@@ -19,7 +19,10 @@ import type {
   UpdateOwnKeyRequest,
   User,
 } from "@/client"
-import { CONCEALED_SECRET, CopyField } from "@/design-system/actions/CopyField"
+import {
+  CopyField,
+  concealedFingerprint,
+} from "@/design-system/actions/CopyField"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { BulkActionBar } from "@/design-system/data/BulkActionBar"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
@@ -126,7 +129,9 @@ function KeySecretStep({
   // the API. Undefined when it has not said where its gateway is (otari#823).
   const baseUrl = resolveSnippetBaseUrl(useDeployment())
   const secret = result.key
-  const concealedSecret = `${secret.slice(0, 8)}••••••••${secret.slice(-4)}`
+  // The key and both snippets show one stand-in, so the credential on this
+  // screen reads as one thing rather than three.
+  const concealedSecret = concealedFingerprint(secret)
   // The snippets carry the same credential, so all three fields share visibility.
   const [isSecretRevealed, setIsSecretRevealed] = useState(false)
 
@@ -142,10 +147,10 @@ function KeySecretStep({
         // snippets show whenever the key is concealed. Without them concealing
         // the key would leave it in plain sight twice over, in the requests
         // that explain it.
-        concealedCurl: buildCurlSnippet({ baseUrl, apiKey: CONCEALED_SECRET }),
+        concealedCurl: buildCurlSnippet({ baseUrl, apiKey: concealedSecret }),
         concealedPython: buildPythonSnippet({
           baseUrl,
-          apiKey: CONCEALED_SECRET,
+          apiKey: concealedSecret,
         }),
       }
     : undefined
@@ -704,6 +709,8 @@ function RegeneratedSecretDialog({
       isOpen
       onOpenChange={onClose}
       size="lg"
+      // A stray backdrop click here loses the key forever: this is the one
+      // message in the product that cannot be shown again.
       isDismissable={false}
       title={title}
       submitLabel="I’ve saved this key"

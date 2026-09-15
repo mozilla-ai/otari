@@ -3,7 +3,12 @@ import { useRef, useState } from "react"
 
 import { Button as ActionButton } from "./Button"
 import { CopyButton } from "./CopyButton"
-import { CONCEALED_SECRET, CopyableValue, CopyField } from "./CopyField"
+import {
+  CONCEALED_SECRET,
+  CopyableValue,
+  CopyField,
+  concealedFingerprint,
+} from "./CopyField"
 
 /**
  * The three ways a value an operator has to paste elsewhere is handed over.
@@ -198,7 +203,7 @@ export const CoupledReveal: Story = {
         <CopyField
           label="Secret key"
           value={key}
-          concealed={`${key.slice(0, 8)}••••••••${key.slice(-4)}`}
+          concealed={concealedFingerprint(key)}
           isRevealed={isRevealed}
           onRevealChange={setIsRevealed}
         />
@@ -206,7 +211,7 @@ export const CoupledReveal: Story = {
           label="Example request"
           multiline
           value={request(key)}
-          concealed={request(CONCEALED_SECRET)}
+          concealed={request(concealedFingerprint(key))}
           isRevealed={isRevealed}
           onRevealChange={setIsRevealed}
         />
