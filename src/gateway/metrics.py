@@ -77,13 +77,6 @@ INLINE_COST_SETTLEMENTS = Counter(
     registry=REGISTRY,
 )
 
-AUTH_FAILURES = Counter(
-    "gateway_auth_failures",
-    "Total number of authentication failures",
-    ["reason"],
-    registry=REGISTRY,
-)
-
 
 _PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
@@ -193,8 +186,3 @@ def record_abandoned_attempt(provider: str, model: str, reason: str, position: i
 def record_inline_cost_settlement(outcome: str) -> None:
     """Record an attached, unattached, or timed-out inline settlement."""
     INLINE_COST_SETTLEMENTS.labels(outcome=outcome).inc()
-
-
-def record_auth_failure(reason: str) -> None:
-    """Record an authentication failure."""
-    AUTH_FAILURES.labels(reason=reason).inc()

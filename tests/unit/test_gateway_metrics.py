@@ -14,7 +14,6 @@ from gateway.metrics import (
     _endpoint_label,
     metrics_endpoint,
     record_abandoned_attempt,
-    record_auth_failure,
     record_cost,
     record_inline_cost_settlement,
     record_tokens,
@@ -68,15 +67,6 @@ def test_record_inline_cost_settlement_increments_counter(outcome: str) -> None:
     record_inline_cost_settlement(outcome)
 
     assert _sample("gateway_inline_cost_settlements_total", labels) - before == 1.0
-
-
-def test_record_auth_failure_increments_counter() -> None:
-    labels = {"reason": "unit-test-reason"}
-    before = _sample("gateway_auth_failures_total", labels)
-
-    record_auth_failure("unit-test-reason")
-
-    assert _sample("gateway_auth_failures_total", labels) - before == 1.0
 
 
 def test_record_abandoned_attempt_increments_counter() -> None:
