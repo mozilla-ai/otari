@@ -147,20 +147,41 @@ function KnownProviderForm({
   isOpen,
   onClose,
   tabs,
+  providerId,
+  setProviderId,
+  apiKey,
+  setApiKey,
+  showAdvanced,
+  setShowAdvanced,
+  apiBase,
+  setApiBase,
+  name,
+  setName,
+  clientArgsText,
+  setClientArgsText,
+  credentials,
+  setCredentials,
 }: {
   isOpen: boolean
   onClose: () => void
   tabs: ReactNode
+  providerId: string
+  setProviderId: (v: string) => void
+  apiKey: string
+  setApiKey: (v: string) => void
+  showAdvanced: boolean
+  setShowAdvanced: (v: boolean) => void
+  apiBase: string
+  setApiBase: (v: string) => void
+  name: string
+  setName: (v: string) => void
+  clientArgsText: string
+  setClientArgsText: (v: string) => void
+  credentials: CredentialFieldValues
+  setCredentials: (v: CredentialFieldValues) => void
 }) {
   const create = useCreateStoredProvider()
   const test = useTestProviderCredentials()
-  const [providerId, setProviderId] = useState("")
-  const [apiKey, setApiKey] = useState("")
-  const [showAdvanced, setShowAdvanced] = useState(false)
-  const [apiBase, setApiBase] = useState("")
-  const [name, setName] = useState("")
-  const [clientArgsText, setClientArgsText] = useState("")
-  const [credentials, setCredentials] = useState<CredentialFieldValues>({})
   const clientArgs = parseClientArgs(clientArgsText)
   const credentialFields = credentialFieldsFor(providerId)
   const credentialErrors = validateCredentialFields(
@@ -178,7 +199,7 @@ function KnownProviderForm({
   // provider so it fires once per selection and does not clobber later edits.
   useEffect(() => {
     if (selected) setApiBase(selected.default_api_base ?? "")
-  }, [selected])
+  }, [selected, setApiBase])
   const envKeyPresent = selected?.env_key_present ?? false
   // The key is only mandatory when the provider needs one and its env var is not
   // already set on the server; any-llm falls back to that env var otherwise.
@@ -308,7 +329,7 @@ function KnownProviderForm({
       <button
         type="button"
         className="self-start text-xs font-medium text-link hover:text-link-hover"
-        onClick={() => setShowAdvanced((v) => !v)}
+        onClick={() => setShowAdvanced(!showAdvanced)}
       >
         {advancedOpen
           ? "Hide advanced"
@@ -358,18 +379,33 @@ function CustomProviderForm({
   isOpen,
   onClose,
   tabs,
+  name,
+  setName,
+  providerType,
+  setProviderType,
+  apiBase,
+  setApiBase,
+  apiKey,
+  setApiKey,
+  clientArgsText,
+  setClientArgsText,
 }: {
   isOpen: boolean
   onClose: () => void
   tabs: ReactNode
+  name: string
+  setName: (v: string) => void
+  providerType: string
+  setProviderType: (v: string) => void
+  apiBase: string
+  setApiBase: (v: string) => void
+  apiKey: string
+  setApiKey: (v: string) => void
+  clientArgsText: string
+  setClientArgsText: (v: string) => void
 }) {
   const create = useCreateStoredProvider()
   const test = useTestProviderCredentials()
-  const [name, setName] = useState("")
-  const [providerType, setProviderType] = useState("openai-compatible")
-  const [apiBase, setApiBase] = useState("")
-  const [apiKey, setApiKey] = useState("")
-  const [clientArgsText, setClientArgsText] = useState("")
   const clientArgs = parseClientArgs(clientArgsText)
 
   const nameHasDelimiter = /[:/]/.test(name)
@@ -502,8 +538,8 @@ type ProviderTab = "known" | "custom"
  *
  * What is shared is the frame. Each half renders the same `FormDialog` with the
  * same title, size and tab row, so switching tabs changes the fields and
- * nothing else, and a half-filled tab still does not survive a switch away from
- * it, which is what it did as a panel.
+ * nothing else. Only the active tab's `FormDialog` is mounted; field values for
+ * both tabs are lifted into this component so they survive a switch away.
  */
 function AddProviderForm({
   isOpen,
@@ -513,6 +549,25 @@ function AddProviderForm({
   onClose: () => void
 }) {
   const [tab, setTab] = useState<ProviderTab>("known")
+
+  // Known-tab field values — lifted so they survive when the tab is inactive.
+  const [knownProviderId, setKnownProviderId] = useState("")
+  const [knownApiKey, setKnownApiKey] = useState("")
+  const [knownShowAdvanced, setKnownShowAdvanced] = useState(false)
+  const [knownApiBase, setKnownApiBase] = useState("")
+  const [knownName, setKnownName] = useState("")
+  const [knownClientArgsText, setKnownClientArgsText] = useState("")
+  const [knownCredentials, setKnownCredentials] =
+    useState<CredentialFieldValues>({})
+
+  // Custom-tab field values — lifted for the same reason.
+  const [customName, setCustomName] = useState("")
+  const [customProviderType, setCustomProviderType] =
+    useState("openai-compatible")
+  const [customApiBase, setCustomApiBase] = useState("")
+  const [customApiKey, setCustomApiKey] = useState("")
+  const [customClientArgsText, setCustomClientArgsText] = useState("")
+
   const tabs = (
     <TabRow>
       {(
@@ -528,10 +583,47 @@ function AddProviderForm({
     </TabRow>
   )
 
-  return tab === "known" ? (
-    <KnownProviderForm isOpen={isOpen} onClose={onClose} tabs={tabs} />
-  ) : (
-    <CustomProviderForm isOpen={isOpen} onClose={onClose} tabs={tabs} />
+  return (
+    <>
+      {tab === "known" && (
+        <KnownProviderForm
+          isOpen={isOpen}
+          onClose={onClose}
+          tabs={tabs}
+          providerId={knownProviderId}
+          setProviderId={setKnownProviderId}
+          apiKey={knownApiKey}
+          setApiKey={setKnownApiKey}
+          showAdvanced={knownShowAdvanced}
+          setShowAdvanced={setKnownShowAdvanced}
+          apiBase={knownApiBase}
+          setApiBase={setKnownApiBase}
+          name={knownName}
+          setName={setKnownName}
+          clientArgsText={knownClientArgsText}
+          setClientArgsText={setKnownClientArgsText}
+          credentials={knownCredentials}
+          setCredentials={setKnownCredentials}
+        />
+      )}
+      {tab === "custom" && (
+        <CustomProviderForm
+          isOpen={isOpen}
+          onClose={onClose}
+          tabs={tabs}
+          name={customName}
+          setName={setCustomName}
+          providerType={customProviderType}
+          setProviderType={setCustomProviderType}
+          apiBase={customApiBase}
+          setApiBase={setCustomApiBase}
+          apiKey={customApiKey}
+          setApiKey={setCustomApiKey}
+          clientArgsText={customClientArgsText}
+          setClientArgsText={setCustomClientArgsText}
+        />
+      )}
+    </>
   )
 }
 
