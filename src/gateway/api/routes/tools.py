@@ -29,7 +29,7 @@ from gateway.api.routes._tools import Tool, web_search_declaration_forms
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
 from gateway.services.sandbox_backend import code_execution_tool_definition
-from gateway.services.web_retrieval_backend import web_search_tool_definition
+from gateway.services.web_retrieval_backend import web_fetch_tool_definition, web_search_tool_definition
 
 router = APIRouter(
     tags=["tools"],
@@ -45,7 +45,7 @@ class ManagedTool(BaseModel):
     description: str = Field(description="What the tool does, as the model is told.")
     available: bool = Field(
         description=(
-            "Whether this deployment has a backend configured for the tool. A request "
+            "Whether this deployment has enabled and configured the tool. A request "
             "declaring an unavailable tool is rejected with 400."
         )
     )
@@ -71,12 +71,21 @@ class ToolsResponse(BaseModel):
 
 def _managed_tools(config: GatewayConfig) -> list[ManagedTool]:
     web_search = web_search_tool_definition()["function"]
+    web_fetch = web_fetch_tool_definition()["function"]
     code_execution = code_execution_tool_definition()["function"]
     # Same resolution the request path uses: the effective config value, falling back
     # to the env var so a pure-env deployment reports accurately.
     sandbox_configured = bool(config.sandbox_url or otari_env("SANDBOX_URL"))
     can_web_search = config.web_search_configured()
     return [
+        ManagedTool(
+            id=Tool.WEB_FETCH,
+            description=web_fetch["description"],
+            available=config.web_fetch_enabled,
+            accepted_types=[str(Tool.WEB_FETCH)],
+            input_schema=web_fetch["parameters"],
+            example={"type": Tool.WEB_FETCH},
+        ),
         ManagedTool(
             id=Tool.WEB_SEARCH,
             description=web_search["description"],

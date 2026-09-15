@@ -17,7 +17,7 @@ Otari calls these endpoints, all rooted at the configured platform base URL:
 | `POST {base}/gateway/provider-keys/resolve` | Authorize a request and return one or more provider credentials to try |
 | `POST {base}/gateway/usage`                 | Report the outcome of an attempt back to the platform |
 | `POST {base}/gateway/mcp-servers/resolve`   | Authorize MCP access and swap workspace-scoped MCP server ids for inline server configs |
-| `POST {base}/gateway/web-search/resolve`    | Resolve the workspace's web-search policy (called only when a request uses the `otari_web_search` tool) |
+| `POST {base}/gateway/web-search/resolve`    | Resolve the workspace's Web Access policy when a request uses `otari_web_search` or `otari_web_fetch` |
 
 `{base}` means Otari platform `base_url` setting. Otari concatenates literally. The peer service is responsible for including any API-version prefix it exposes its own routes under. For the reference otari deployment that prefix is `/api/v1`, so the base URL is `http://backend:8000/api/v1` and Otari ends up POSTing to `http://backend:8000/api/v1/gateway/provider-keys/resolve`.
 
@@ -304,11 +304,12 @@ or a stored server. Statuses remain meaningful: `401` becomes
 `Retry-After` as `rate_limit_exceeded`. Other platform resolution failures become
 `502 mcp_resolution_failed`. See [MCP](mcp.md#caller-orchestrated-mcp).
 
-## Web search resolution
+## Web Access resolution
 
-Called only when a request uses the `otari_web_search` tool. The platform owns
-the per-workspace web-search policy: whether it is enabled at all, plus the
-workspace-default limits and filters.
+Called once when a request uses `otari_web_search`, `otari_web_fetch`, or both.
+The platform owns the per-workspace Web Access policy: whether it is enabled,
+which requested capabilities are authorized, and the workspace limits and
+domain rules.
 
 ### Request
 
@@ -318,16 +319,20 @@ X-Gateway-Token: gw_...
 X-User-Token: tk_...
 Content-Type: application/json
 
-{}
+{"requested_tools": ["web_search", "web_fetch"]}
 ```
 
-The request body is empty; the workspace is identified by `X-User-Token`.
+`requested_tools` identifies exactly the managed web capabilities declared by
+the request, in Search-then-Fetch order. The workspace is identified by
+`X-User-Token`. For backward compatibility, `{}` means a legacy Search-only
+request.
 
 ### Response
 
 ```json
 {
   "enabled": true,
+  "authorized_tools": ["web_search", "web_fetch"],
   "provider": "searxng",
   "max_results": 5,
   "purpose_hint": "Background research",
@@ -337,15 +342,19 @@ The request body is empty; the workspace is identified by `X-User-Token`.
 }
 ```
 
-If `enabled` is falsy, Otari rejects the request with `403`. The remaining
-fields are workspace defaults that apply only where the request did not supply
-its own value: `max_results`, `allowed_domains`, `blocked_domains`, and
-`purpose_hint` fill in when the per-request tool entry omits them (an empty list
-or empty string reads as "no preference" and does not clear the workspace
-value), and `provider_options` is shallow-merged with per-request keys winning.
-`provider` is informational: the active web-search backend is configured on the
-gateway itself via `OTARI_WEB_SEARCH_URL`, so Otari does not switch backends based on
-this field.
+Otari requires `enabled` to be a boolean and `authorized_tools` to be a list of
+strings. Every requested tool must be explicitly authorized; in particular, a
+legacy response that omits `authorized_tools` never permits Fetch. Recognized
+domain-list fields must be lists of valid strings. A malformed recognized field
+fails closed with `502` instead of being coerced.
+
+For Search, `max_results`, `allowed_domains`, `blocked_domains`, and
+`purpose_hint` remain workspace defaults where the request supplies no value;
+`provider_options` is shallow-merged with request keys winning. For Fetch,
+allowed and blocked domains form a mandatory policy that request-supplied Search
+filters may only narrow when both tools are declared. Fetch authorization does
+not depend on a Search provider, credential, or backend URL. `provider` is
+informational: the active Search backend is configured on the gateway itself.
 
 ### Failure
 

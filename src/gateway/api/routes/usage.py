@@ -46,7 +46,7 @@ from gateway.services.usage_admin_service import (
     delete_usage,
     set_usage_price,
 )
-from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
+from gateway.services.web_retrieval_backend import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 
 # Two routers under one prefix, because the two planes that meet here
 # authenticate differently. Reading or amending every tenant's usage rows is
@@ -149,9 +149,13 @@ _ERROR_TAXONOMY_DIMENSION = "status_code"
 # tool names come from a caller-supplied server, so they are unbounded and appear
 # only in a row's own detail, never as a dimension of their own. The ``any``
 # selector still matches them, because it tests the meter namespace itself.
-GATEWAY_TOOL_NAMES: tuple[str, ...] = (WEB_SEARCH_TOOL_NAME, CODE_EXECUTION_TOOL_NAME)
+GATEWAY_TOOL_NAMES: tuple[str, ...] = (
+    WEB_SEARCH_TOOL_NAME,
+    WEB_FETCH_TOOL_NAME,
+    CODE_EXECUTION_TOOL_NAME,
+)
 _ANY_TOOL = "any"
-ToolFilter = Literal["any", "web_search", "code_execution"]
+ToolFilter = Literal["any", "web_search", "web_fetch", "code_execution"]
 
 # Keep in step with _SUMMARY_DIMENSIONS; the extra ``none`` is the explicit empty
 # selection (a repeated query param cannot express an empty list on the wire).

@@ -26,7 +26,7 @@ from openai.types.responses import (
 )
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GatewayConfig
 
 _MODEL = "openai:gpt-4o-mini"
 
@@ -403,11 +403,15 @@ def test_code_execution_dispatches_through_sandbox_backend(
     assert pool_seen == [fake_backend]
 
 
-def test_web_search_dispatches_through_web_search_backend(
+@pytest.mark.parametrize("tool_type", ["otari_web_search", "otari_web_fetch"])
+def test_managed_web_tool_dispatches_through_web_retrieval_backend(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    test_config: GatewayConfig,
+    tool_type: str,
 ) -> None:
+    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
 
     pool_seen: list[Any] = []
@@ -426,14 +430,14 @@ def test_web_search_dispatches_through_web_search_backend(
 
     with (
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline._build_web_search_backend", return_value=fake_builder_result),
+        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
     ):
         resp = client.post(
             f"{API_ROOT}/responses",
             json={
                 "model": _MODEL,
                 "input": "search",
-                "tools": [{"type": "otari_web_search"}],
+                "tools": [{"type": tool_type}],
             },
             headers=api_key_header,
         )
@@ -478,7 +482,7 @@ def test_web_search_max_uses_reaches_the_responses_tool_loop(
 
     with (
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
-        patch("gateway.api.routes._pipeline._build_web_search_backend", return_value=fake_builder_result),
+        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
     ):
         resp = client.post(
             f"{API_ROOT}/responses",
@@ -556,15 +560,17 @@ def test_provider_code_execution_passes_through_to_upstream(
     assert {t["type"] for t in forwarded} == {tool_type}
 
 
-@pytest.mark.parametrize("tool_type", ["web_search", "web_search_20250305"])
-def test_provider_web_search_passes_through_to_upstream(
+@pytest.mark.parametrize(
+    "tool_type",
+    ["web_search", "web_search_20250305", "web_fetch_20250910", "web_fetch_20260209"],
+)
+def test_provider_web_tool_passes_through_to_upstream(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     tool_type: str,
 ) -> None:
-    """Provider-named web_search keywords pass through to the provider even
-    when no gateway web_search backend is configured."""
+    """Provider-native web declarations pass through to the provider."""
     monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
     captured: dict[str, Any] = {}
 
@@ -647,7 +653,7 @@ def test_web_search_combined_with_sandbox_returns_400(
         headers=api_key_header,
     )
     assert resp.status_code == 400
-    assert "otari_web_search cannot be combined" in resp.json()["detail"]
+    assert "cannot be combined with otari_code_execution" in resp.json()["detail"]
 
 
 # ---------- gateway-side runtime errors ----------
@@ -839,16 +845,8 @@ def test_stream_context_management_and_compaction_events_pass_through(
 
     assert resp.status_code == 200, resp.text
     assert captured["context_management"] == context_management
-    payloads = [
-        json.loads(line.removeprefix("data: "))
-        for line in resp.iter_lines()
-        if line.startswith("data: {")
-    ]
-    compactions = [
-        payload
-        for payload in payloads
-        if payload.get("item", {}).get("type") == "compaction"
-    ]
+    payloads = [json.loads(line.removeprefix("data: ")) for line in resp.iter_lines() if line.startswith("data: {")]
+    compactions = [payload for payload in payloads if payload.get("item", {}).get("type") == "compaction"]
     assert [payload["type"] for payload in compactions] == [
         "response.output_item.added",
         "response.output_item.done",
