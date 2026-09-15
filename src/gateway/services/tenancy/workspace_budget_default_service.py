@@ -36,7 +36,7 @@ from gateway.models.entities import Budget, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.money import as_float
 from gateway.models.tenancy import User, Workspace, WorkspaceMember
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
-from gateway.services.budget_periods import period_window
+from gateway.services.budget_periods import ProviderNarrowing, period_window
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.errors import (
     WorkspaceBudgetDefaultAlreadyExistsError,
@@ -74,24 +74,12 @@ class WorkspaceMemberBudgetPolicyCreate(BaseModel):
         max_length=255,
         description="The budget this workspace hands to every member",
     )
-    # Absent means every provider; a present value must name a real instance.
-    # Constrained rather than only length-checked because this template is
-    # materialized verbatim into a ceiling per member, and a ceiling whose
-    # `provider_key_id` is a blank string binds to nothing: resolution matches
-    # `provider_key_id == provider_instance OR IS NULL` and blank is neither, so
-    # every member would get a cap that is stored, listed, and never enforced.
-    # Reachable by an organization or workspace owner/admin, not only an operator,
-    # which is why it is refused here rather than left to the dashboard.
-    provider_key_id: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=255,
-        pattern=r"^\S+$",
-        description=(
-            "Narrow the default to one provider instance; omit or null to apply to every provider. "
-            "Must name a real instance: a blank value would materialize ceilings that never bind"
-        ),
-    )
+    # Absent means every provider; a blank value is refused rather than folded
+    # into null. Constrained because this template is materialized verbatim into a
+    # ceiling per member, and a blank one would bind to nothing for every one of
+    # them. Constraint and wording live on `ProviderNarrowing`; #918 notes a
+    # present value naming no configured instance is still not checked here.
+    provider_key_id: ProviderNarrowing = None
 
 
 class WorkspaceMemberBudgetPolicyUpdate(BaseModel):

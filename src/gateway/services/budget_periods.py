@@ -15,7 +15,9 @@ Nothing here imports from the gateway, so both sides can depend on it and
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import Literal, get_args
+from typing import Annotated, Literal, get_args
+
+from pydantic import Field
 
 ALIGN_DAY = "calendar_day"
 ALIGN_WEEK = "calendar_week"
@@ -36,6 +38,35 @@ RESET_ALIGNMENTS: tuple[ResetAlignment, ...] = get_args(ResetAlignment)
 # raises ``OverflowError`` (a 500) instead of the 422 an out-of-range period
 # should be.
 MAX_BUDGET_DURATION_SEC = 10 * 365 * 24 * 3600
+
+
+# The resource axis a ceiling can be narrowed to, and the one place its
+# constraint is written. A request either omits it (null, the wider cap across
+# every provider) or names one provider instance. The three create-request
+# models that carry it — the deployment route's ``CreateScopedBudgetRequest``,
+# ``OrganizationScopedBudgetCreate`` and ``WorkspaceMemberBudgetPolicyCreate`` —
+# used to spell the same ``min_length``/``pattern`` and description out three
+# times, and the two tenant-facing copies claimed the value "must name a real
+# instance" while no code resolves it (otari#918). Hoisted here, a leaf both the
+# route and the tenancy services already import, so the constraint cannot drift
+# and the description says only what the blank/whitespace refusal actually
+# guarantees. The refusal is of a blank or whitespace value, which resolution
+# (``provider_key_id == provider_instance OR IS NULL``) would store, list, and
+# never bind; it is deliberately not an existence check.
+ProviderNarrowing = Annotated[
+    str | None,
+    Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        pattern=r"^\S+$",
+        description=(
+            "Narrow the cap to one provider instance; omit or null to cap spend across every provider. "
+            "A blank value would store a ceiling that never binds, so it is refused; this does not check "
+            "that the value names a configured provider instance"
+        ),
+    ),
+]
 
 
 def aligned_window(alignment: str, now: datetime) -> tuple[datetime, datetime]:
@@ -99,6 +130,7 @@ __all__ = [
     "ALIGN_MONTH",
     "ALIGN_WEEK",
     "MAX_BUDGET_DURATION_SEC",
+    "ProviderNarrowing",
     "RESET_ALIGNMENTS",
     "ResetAlignment",
     "aligned_window",
