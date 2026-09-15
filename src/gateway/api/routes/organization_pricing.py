@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, ModelProviderPortDep, get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import OrganizationModelPricing
 from gateway.models.money import as_float
@@ -212,9 +212,16 @@ class OrganizationModelPricingsPublic(BaseModel):
 def get_organization_pricing_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    model_provider: ModelProviderPortDep,
 ) -> OrganizationPricingService:
-    """Build the pricing service on the request's session and provider map."""
-    return OrganizationPricingService(db, config)
+    """Build the pricing service on the request's session, provider map, and hosted-credential port.
+
+    The port is what lets the deployment-supplied-model refusal see past
+    ``config.providers``: a build with no configured instances can still serve a
+    bare ``provider:model`` key on a hosted credential an overlay's adapter owns,
+    and only the port knows that.
+    """
+    return OrganizationPricingService(db, config, model_provider)
 
 
 ServiceDep = Annotated[OrganizationPricingService, Depends(get_organization_pricing_service)]
@@ -308,9 +315,11 @@ async def create_organization_pricing(
 
     Refused with a 409 when the period overlaps one already stored for that model,
     naming the period it collides with, rather than shadowing it. Refused with a
-    403 when the model is addressed through one of the deployment's own provider
-    instances: the deployment holds that credential and settles its upstream bill,
-    so its rate is the deployment price list's rather than a tenant's.
+    403 when the deployment, not the caller's organization, holds the credential
+    that serves the model, whether through one of its own provider instances or a
+    hosted credential the bound port supplies with no BYO key on file: either way
+    the deployment settles the upstream bill, so its rate is the deployment price
+    list's rather than a tenant's.
 
     The key is normalized to its canonical ``instance:model`` form first, the same
     call ``POST /api/v1/pricing`` makes, and that is what makes one model one row
