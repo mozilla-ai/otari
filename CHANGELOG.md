@@ -4,6 +4,23 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.6.1](https://github.com/mozilla-ai/otari/releases/tag/v0.6.1) - 2026-09-15
+
+
+
+### Bug Fixes
+
+- **users:** Scope the users router to the caller's organization in [#1182](https://github.com/mozilla-ai/otari/pull/1182) by [@khaledosman](https://github.com/khaledosman) ([`e80d4d3`](https://github.com/mozilla-ai/otari/commit/e80d4d36c80b50432531a3762e9d4f785a321765))
+- **dashboard:** Scope the key owner picker to the caller's organization in [#1180](https://github.com/mozilla-ai/otari/pull/1180) by [@khaledosman](https://github.com/khaledosman) ([`25dd554`](https://github.com/mozilla-ai/otari/commit/25dd5542951646fa07a58aeec0337400513c8cb6))
+- **dashboard:** Scope the routing list to the selected workspace in [#1181](https://github.com/mozilla-ai/otari/pull/1181) by [@khaledosman](https://github.com/khaledosman) ([`957909e`](https://github.com/mozilla-ai/otari/commit/957909e5d52c065723242142d2c945310076a557))
+
+
+### Features
+
+- **dashboard:** Compose the deployment rail through the overlay seams in [#1183](https://github.com/mozilla-ai/otari/pull/1183) by [@khaledosman](https://github.com/khaledosman) ([`f6b7657`](https://github.com/mozilla-ai/otari/commit/f6b76571fa0524b863e5d0c791bf082b0b6a4a01))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.6.0...v0.6.1
 ## [0.6.0](https://github.com/mozilla-ai/otari/releases/tag/v0.6.0) - 2026-09-15
 
 
