@@ -8,6 +8,7 @@ from pathlib import Path
 
 import click
 import uvicorn
+from sqlalchemy.engine.url import make_url
 from uvicorn.config import logger
 
 from gateway.core.config import API_ROOT, load_config
@@ -166,7 +167,8 @@ def init_db(config: str | None, database_url: str | None) -> None:
     if database_url:
         gateway_config.database_url = database_url
 
-    click.echo(f"Initializing database: {gateway_config.database_url}")
+    safe_url = make_url(gateway_config.database_url).render_as_string(hide_password=True)
+    click.echo(f"Initializing database: {safe_url}")
 
     db_init(gateway_config)
 
@@ -193,7 +195,8 @@ def migrate(config: str | None, database_url: str | None, revision: str) -> None
         click.echo("alembic command not found in PATH", err=True)
         sys.exit(1)
 
-    click.echo(f"Running migrations on: {gateway_config.database_url}")
+    safe_url = make_url(gateway_config.database_url).render_as_string(hide_password=True)
+    click.echo(f"Running migrations on: {safe_url}")
     click.echo(f"Target revision: {revision}")
 
     env = os.environ.copy()
