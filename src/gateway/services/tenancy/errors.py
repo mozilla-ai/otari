@@ -1247,6 +1247,7 @@ __all__ = [
     "OAuthNotConfiguredError",
     "OAuthStateError",
     "OrganizationNotFoundError",
+    "OrganizationPricingManagedModelError",
     "OrganizationPricingNotFoundError",
     "OrganizationScopeNotFoundError",
     "OrganizationScopedBudgetAlreadyExistsError",

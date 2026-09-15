@@ -221,7 +221,7 @@ def get_organization_pricing_service(
     bare ``provider:model`` key on a hosted credential an overlay's adapter owns,
     and only the port knows that.
     """
-    return OrganizationPricingService(db, config, model_provider)
+    return OrganizationPricingService(db, config, model_provider=model_provider)
 
 
 ServiceDep = Annotated[OrganizationPricingService, Depends(get_organization_pricing_service)]

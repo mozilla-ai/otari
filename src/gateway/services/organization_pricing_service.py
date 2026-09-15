@@ -50,8 +50,9 @@ from gateway.models.entities import OrganizationModelPricing
 from gateway.models.money import to_usd, to_usd_or_none
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
+from gateway.repositories.tenancy import OrgProviderKeyRepository
 from gateway.services.pricing_service import normalize_effective_at
-from gateway.services.provider_kwargs import is_deployment_instance_key, split_selector
+from gateway.services.provider_kwargs import is_deployment_instance_key, provider_key, split_selector
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.errors import (
     OrganizationPricingManagedModelError,
@@ -59,6 +60,7 @@ from gateway.services.tenancy.errors import (
     OrganizationPricingOverlapError,
     TenancyValidationError,
 )
+from gateway.services.tenancy.org_provider_key_service import key_is_usable
 from gateway.services.tenancy.organization_service import OrganizationService
 
 
@@ -101,17 +103,19 @@ class OrganizationPricingService:
         self,
         db: AsyncSession,
         config: GatewayConfig,
+        *,
         model_provider: ModelProviderPort | None = None,
     ):
         self.db = db
         self.config = config
         self.organizations = OrganizationService(db)
-        # Optional and unbuilt when omitted, rather than defaulted to the core
-        # adapter here: services depend on ports, never on a concrete adapter
-        # (``check_architecture.py``), so a caller that does not pass one (most
-        # tests, and any construction outside the route's own DI) gets exactly
-        # the config.providers-only check that existed before this port was
-        # consulted at all. The route always passes the bound one.
+        # Keyword-only and nullable rather than defaulted to the core adapter
+        # here: services depend on ports, never on a concrete adapter
+        # (``check_architecture.py``), and every construction site has to say
+        # explicitly whether it is passing one, rather than silently getting
+        # the weaker config.providers-only check by omission. A caller with a
+        # real reason to omit it (most tests) writes ``model_provider=None``.
+        # The route always passes the bound one.
         self.model_provider = model_provider
 
     async def _writable_organization_id(self, user: TenancyUser) -> uuid.UUID:
@@ -152,25 +156,35 @@ class OrganizationPricingService:
         serving tenants who did not pay for the upstream capacity, an override on a
         deployment-supplied instance would let a tenant name its own cost basis,
         and a zero would make the model free and spend no budget.
+
+        Checked first, before the (possibly remote) determination below: an
+        operator is exempt unconditionally, so there is no reason to spend a port
+        round trip finding out what they are exempt from.
         """
-        if not await self._is_deployment_supplied(organization_id, model_key):
-            return
         if await DeploymentUserService(self.db).has_administration_access(user):
             return
-        raise OrganizationPricingManagedModelError(model_key)
+        if await self._is_deployment_supplied(organization_id, model_key):
+            raise OrganizationPricingManagedModelError(model_key)
 
     async def _is_deployment_supplied(self, organization_id: uuid.UUID, model_key: str) -> bool:
         """Whether the deployment, not the organization, would settle ``model_key``'s upstream bill.
 
-        Two independent mechanisms answer "the deployment pays for this", checked
-        in order so the common case takes no I/O: a ``config.providers`` instance
-        (this build's own admin-configured credential), or a hosted credential the
-        bound ``ModelProviderPort`` would still serve the candidate on when it
-        carries no BYO key (an overlay's managed-inference fleet, e.g. mzai). A
-        refusal from the port counts too, because it still means this candidate
-        resolves on a deployment-owned upstream; it is just one this organization
-        may not use, which is a reason to keep the rate off this organization's
-        table, not a reason to let it set one.
+        A ``config.providers`` instance (this build's own admin-configured
+        credential) always answers yes, with no I/O. Otherwise, this organization's
+        own BYO key is what the dispatch ladder tries next (`AGENTS.md`: a hosted
+        credential is asked for "only after local and tenant BYO sources fail"), so
+        one on file answers no before the bound ``ModelProviderPort`` is ever asked:
+        asking it first, unconditionally, would refuse an organization pricing
+        traffic that already dispatches on its own key just because a hosted fleet
+        also happens to exist for the same provider name.
+
+        Only once both of those come up empty does the port get asked whether it
+        would still serve this candidate on a hosted credential (an overlay's
+        managed-inference fleet, e.g. mzai). A refusal from the port counts as a
+        yes too, because it still means this candidate resolves on a
+        deployment-owned upstream; it is just one this organization may not use,
+        which is a reason to keep the rate off this organization's table, not a
+        reason to let it set one.
         """
         if is_deployment_instance_key(self.config, model_key):
             return True
@@ -180,6 +194,8 @@ class OrganizationPricingService:
         if split is None:
             return False
         provider, model = split
+        if await self._organization_has_byo_credential(organization_id, provider):
+            return False
         try:
             credential = await self.model_provider.resolve_hosted_credential(
                 organization_id=organization_id,
@@ -190,6 +206,27 @@ class OrganizationPricingService:
         except HostedAccessDeniedError:
             return True
         return credential is not None
+
+    async def _organization_has_byo_credential(self, organization_id: uuid.UUID, provider: str) -> bool:
+        """Whether this organization holds any usable key of its own for ``provider``.
+
+        Mirrors the existence check `organization_model_access.resolve_session_catalog_scope`
+        already uses to build an owner/admin's BYO catalog allowlist: any live,
+        decryptable key for the provider counts, in any workspace. Pricing is
+        organization-wide, not workspace-scoped, so that is the right question here
+        too, rather than `resolve_active_key`'s per-workspace tiering (which would
+        need a workspace this surface does not have).
+
+        A key a workspace has disabled for itself still counts: the row still
+        means the organization holds a BYO credential for the provider, which is
+        the thing this check is answering. A key disabled in *every* workspace, so
+        that no request actually dispatches on it, is the one case this cannot
+        tell apart from a live one; closing that is future work, not a reason to
+        hold up the much larger gap this method exists to close.
+        """
+        normalized = provider_key(provider)
+        keys = await OrgProviderKeyRepository(self.db).list_live_keys(organization_id)
+        return any(provider_key(key.provider) == normalized and key_is_usable(key) for key in keys)
 
     async def raise_if_overlapping(
         self,

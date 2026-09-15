@@ -27,6 +27,7 @@ from gateway.ports.model_provider_port import HostedAccessDeniedError, HostedCre
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
+    OrgProviderKeyRepository,
     UserRepository,
     WorkspaceRepository,
 )
@@ -525,9 +526,7 @@ async def _operator(db: AsyncSession, organization: Organization) -> User:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("role", ["owner", "admin"])
-async def test_an_organization_may_not_price_a_model_the_deployment_supplies(
-    async_db: AsyncSession, role: str
-) -> None:
+async def test_an_organization_may_not_price_a_model_the_deployment_supplies(async_db: AsyncSession, role: str) -> None:
     """The deployment holds that credential, so it settles the bill and sets the rate.
 
     Without this an organization admin could store a zero for a model the
@@ -652,12 +651,45 @@ async def test_an_organization_may_not_price_a_model_a_hosted_credential_serves(
         name="Acme", slug=f"acme-hosted-{role}", created_by_user_id=None
     )
     identity = await _identity(async_db, organization, role=role, name=f"{role} person")
-    service = OrganizationPricingService(async_db, GatewayConfig(), _FakeHostedModelProvider(served="openai"))
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="openai")
+    )
 
     with pytest.raises(OrganizationPricingManagedModelError) as refused:
         await service.create_for_caller(identity, _MODEL_KEY, _rates(input_price_per_million=0.0))
 
     assert _MODEL_KEY in str(refused.value)
+
+
+@pytest.mark.asyncio
+async def test_an_organization_with_its_own_byo_key_may_still_price_it(async_db: AsyncSession) -> None:
+    """A hosted fleet existing for the same provider name does not reach an org with its own key.
+
+    The dispatch ladder tries the organization's own BYO key before it ever asks
+    the hosted-credential port, so an organization holding one for ``openai``
+    prices its own traffic exactly as it always could, even on a deployment that
+    also happens to run a hosted ``openai`` fleet for organizations with none.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-hosted-byo", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role="admin", name="admin person")
+    await OrgProviderKeyRepository(async_db).create_key(
+        organization_id=organization.id,
+        provider="openai",
+        name="prod",
+        encrypted_api_key=None,
+        last4=None,
+        api_base=None,
+        client_args=None,
+    )
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="openai")
+    )
+
+    created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
+
+    assert created.model_key == _MODEL_KEY
 
 
 @pytest.mark.asyncio
@@ -672,7 +704,9 @@ async def test_a_hosted_access_refusal_still_counts_as_deployment_supplied(async
         name="Acme", slug="acme-hosted-denied", created_by_user_id=None
     )
     identity = await _identity(async_db, organization, role="admin", name="admin person")
-    service = OrganizationPricingService(async_db, GatewayConfig(), _FakeHostedModelProvider(denied="openai"))
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(denied="openai")
+    )
 
     with pytest.raises(OrganizationPricingManagedModelError):
         await service.create_for_caller(identity, _MODEL_KEY, _rates())
@@ -685,7 +719,9 @@ async def test_a_deployment_operator_may_price_a_model_a_hosted_credential_serve
         name="Acme", slug="acme-hosted-operator", created_by_user_id=None
     )
     identity = await _operator(async_db, organization)
-    service = OrganizationPricingService(async_db, GatewayConfig(), _FakeHostedModelProvider(served="openai"))
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="openai")
+    )
 
     created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
 
@@ -699,7 +735,9 @@ async def test_an_organization_may_price_a_model_no_hosted_credential_serves(asy
         name="Acme", slug="acme-hosted-unserved", created_by_user_id=None
     )
     identity = await _identity(async_db, organization, role="admin", name="admin person")
-    service = OrganizationPricingService(async_db, GatewayConfig(), _FakeHostedModelProvider(served="anthropic"))
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="anthropic")
+    )
 
     created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
 
