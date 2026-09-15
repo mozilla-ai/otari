@@ -104,18 +104,19 @@ class OrganizationPricingService:
         db: AsyncSession,
         config: GatewayConfig,
         *,
-        model_provider: ModelProviderPort | None = None,
+        model_provider: ModelProviderPort | None,
     ):
         self.db = db
         self.config = config
         self.organizations = OrganizationService(db)
-        # Keyword-only and nullable rather than defaulted to the core adapter
-        # here: services depend on ports, never on a concrete adapter
-        # (``check_architecture.py``), and every construction site has to say
-        # explicitly whether it is passing one, rather than silently getting
-        # the weaker config.providers-only check by omission. A caller with a
-        # real reason to omit it (most tests) writes ``model_provider=None``.
-        # The route always passes the bound one.
+        # Keyword-only with no default, and nullable rather than defaulted to
+        # the core adapter here: services depend on ports, never on a concrete
+        # adapter (``check_architecture.py``), and every construction site has
+        # to say explicitly whether it is passing one, so omitting it can never
+        # silently fall back to the weaker config.providers-only check. A
+        # caller with a real reason to omit the port (most tests) writes
+        # ``model_provider=None`` deliberately. The route always passes the
+        # bound one.
         self.model_provider = model_provider
 
     async def _writable_organization_id(self, user: TenancyUser) -> uuid.UUID:
