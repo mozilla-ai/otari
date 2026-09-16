@@ -17,7 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.metered_pricing import estimate_metered_cost
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
-from gateway.models.entities import MAX_COUNT_LIMIT, Budget, BudgetResetLog, ModelPricing, User
+from gateway.models.budgets import MAX_COUNT_LIMIT, Budget, BudgetResetLog
+from gateway.models.entities import ModelPricing, User
 from gateway.models.money import to_usd
 from gateway.repositories.users_repository import get_active_user
 from gateway.services import budget_reservation_ledger as ledger

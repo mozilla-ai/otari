@@ -19,7 +19,8 @@ from gateway.api.deps import (
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import Budget, UsageLog, User
+from gateway.models.budgets import Budget
+from gateway.models.entities import UsageLog, User
 from gateway.models.money import as_float
 from gateway.repositories.users_repository import in_organization
 from gateway.services.budget_periods import budget_window

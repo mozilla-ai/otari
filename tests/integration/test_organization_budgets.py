@@ -30,7 +30,7 @@ from sqlmodel import col
 
 from gateway.core.config import API_ROOT
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.budgets import Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.entities import (
     User as ApiUser,
 )

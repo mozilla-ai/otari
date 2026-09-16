@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_db, require_deployment_operator
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import Budget, ScopedBudget
+from gateway.models.budgets import Budget, ScopedBudget
 from gateway.models.money import as_float
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
 

@@ -9,7 +9,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
-from gateway.models.entities import BudgetResetLog, ScopedBudget, User, WorkspaceBudgetDefault
+from gateway.models.budgets import BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.entities import User
 from gateway.models.tenancy import Organization, Workspace
 
 

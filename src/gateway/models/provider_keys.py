@@ -14,7 +14,7 @@ bare ``provider:model`` selector never consults ``config.providers`` for a
 workspace that has an org-scoped key. See mozilla-ai/otari#643.
 
 Three tables, named to avoid a collision that already exists in this
-codebase: ``ScopedBudget.provider_key_id`` (`models/entities.py`) already
+codebase: ``ScopedBudget.provider_key_id`` (`models/budgets.py`) already
 means "an instance-name string, no FK". These tables use ``org_provider_key``
 throughout so no column here is ever ambiguously named ``provider_key_id``.
 

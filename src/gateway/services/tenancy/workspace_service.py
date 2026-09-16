@@ -22,7 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.models.entities import ScopedBudget
+from gateway.models.budgets import ScopedBudget
 from gateway.models.tenancy import (
     MANAGEMENT_ROLES,
     WORKSPACE_MEMBER_ROLES,

@@ -32,7 +32,7 @@ from datetime import UTC, datetime
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.entities import ScopedBudget
+from gateway.models.budgets import ScopedBudget
 from gateway.services.budget_periods import period_window
 
 __all__ = ["cadence_of", "retime_ceilings_for_budget"]
