@@ -1220,13 +1220,11 @@ export interface paths {
          * @description Readiness probe endpoint.
          *
          *     Checks if the gateway is ready to serve requests by validating:
-         *     - Database connection pool headroom
          *     - Database connectivity
          *     - Service availability
          *
          *     Used by Kubernetes/container orchestrators for readiness probes.
-         *     Returns HTTP 503 if any dependency is unavailable, or if the database
-         *     connection pool has no capacity left to serve a request.
+         *     Returns HTTP 503 if any dependency is unavailable.
          *
          *     Returns:
          *         dict: Status object with health details

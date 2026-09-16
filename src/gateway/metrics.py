@@ -1,4 +1,4 @@
-"""Prometheus registry, metric types, HTTP request instrumentation, and database pool gauges for the gateway.
+"""Prometheus registry, metric types, and HTTP request instrumentation for the gateway.
 
 The metric types are re-exported so that code declaring a metric need not depend on ``prometheus_client`` directly.
 """
@@ -16,16 +16,26 @@ from prometheus_client import (
     ProcessCollector,
     generate_latest,
 )
+from prometheus_client.core import GaugeMetricFamily
+from prometheus_client.registry import Collector
 from starlette.responses import Response
 
 from gateway.core.config import API_ROOT, API_VERSION
-from gateway.core.database import pool_stats
 
 if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-__all__ = ["Counter", "Gauge", "Histogram", "MetricsMiddleware", "REGISTRY", "metrics_endpoint"]
+__all__ = [
+    "REGISTRY",
+    "Collector",
+    "Counter",
+    "Gauge",
+    "GaugeMetricFamily",
+    "Histogram",
+    "MetricsMiddleware",
+    "metrics_endpoint",
+]
 
 REGISTRY = CollectorRegistry()
 
@@ -54,35 +64,6 @@ ACTIVE_REQUESTS = Gauge(
     "Number of currently in-flight requests",
     registry=REGISTRY,
 )
-
-DB_POOL_CONNECTIONS_CHECKED_OUT = Gauge(
-    "gateway_db_pool_connections_checked_out",
-    "Pooled database connections currently checked out",
-    ["pool"],
-    registry=REGISTRY,
-)
-
-DB_POOL_CONNECTIONS_IDLE = Gauge(
-    "gateway_db_pool_connections_idle",
-    "Pooled database connections checked in and available",
-    ["pool"],
-    registry=REGISTRY,
-)
-
-DB_POOL_OVERFLOW_CONNECTIONS = Gauge(
-    "gateway_db_pool_overflow_connections",
-    "Database connections open beyond the base pool size",
-    ["pool"],
-    registry=REGISTRY,
-)
-
-DB_POOL_CAPACITY = Gauge(
-    "gateway_db_pool_capacity",
-    "Most database connections the pool will hand out at once (size plus max overflow)",
-    ["pool"],
-    registry=REGISTRY,
-)
-
 
 _PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
@@ -117,26 +98,8 @@ def _endpoint_label(scope: Scope) -> tuple[str, str]:
     return template, _NO_VERSION
 
 
-def refresh_db_pool_metrics() -> None:
-    """Read the connection pools into their gauges.
-
-    Called at scrape time rather than from a background task: the counters are
-    already maintained by SQLAlchemy, so reading them costs nothing and a timer
-    would only add a way for the exported value to lag the pool. A pool that
-    reports nothing (SQLite's ``NullPool``, or an engine that was never built)
-    leaves its gauges untouched instead of publishing a zero that would read as
-    an idle pool.
-    """
-    for name, stats in pool_stats().items():
-        DB_POOL_CONNECTIONS_CHECKED_OUT.labels(pool=name).set(stats.checked_out)
-        DB_POOL_CONNECTIONS_IDLE.labels(pool=name).set(stats.checked_in)
-        DB_POOL_OVERFLOW_CONNECTIONS.labels(pool=name).set(stats.overflow)
-        DB_POOL_CAPACITY.labels(pool=name).set(stats.capacity)
-
-
 async def metrics_endpoint(request: Request) -> Response:
     """Serve Prometheus metrics."""
-    refresh_db_pool_metrics()
     body = generate_latest(REGISTRY)
     return Response(content=body, media_type=_PROMETHEUS_CONTENT_TYPE)
 

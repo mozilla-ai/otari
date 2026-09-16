@@ -30,15 +30,17 @@ reports the pool directly, labeled by `pool` (`request` for request traffic,
 | --- | --- |
 | `gateway_db_pool_connections_checked_out` | Connections in use right now |
 | `gateway_db_pool_connections_idle` | Connections available to hand out |
-| `gateway_db_pool_overflow_connections` | Connections open beyond `db_pool_size` |
-| `gateway_db_pool_capacity` | Ceiling: `db_pool_size` plus `db_max_overflow` |
+| `gateway_db_pool_overflow_connections` | Connections open beyond the pool's base size |
+| `gateway_db_pool_capacity` | Ceiling on connections the pool hands out at once |
+
+The `request` pool is sized by `db_pool_size` and may open `db_max_overflow`
+connections beyond it, so its capacity is the two added together. The `log`
+pool is sized by `db_log_pool_size` and has no overflow, so its capacity is
+that value.
 
 Alert on checked-out connections approaching capacity for a sustained period.
-`/api/v1/health/readiness` also answers `503` immediately, with a `database`
-state of `pool_exhausted`, once the pool has nothing left to hand out, so an
-orchestrator takes the pod out of rotation rather than waiting out the pool
-timeout. These metrics do not appear on SQLite, which opens a connection per
-use and keeps no pool.
+These metrics do not appear on SQLite, which opens a connection per use and
+keeps no pool.
 
 ## Docker Compose
 

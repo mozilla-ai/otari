@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +20,7 @@ from sqlalchemy.pool import NullPool
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.metrics import REGISTRY, Collector, GaugeMetricFamily
 
 _engine: AsyncEngine | None = None
 _SessionLocal: async_sessionmaker[AsyncSession] | None = None
@@ -197,10 +198,14 @@ async def release_session(session: AsyncSession | None) -> bool:
     return True
 
 
-# The name each pool reports under, in metrics and in anything that iterates
-# :func:`pool_stats`.
 REQUEST_POOL = "request"
 LOG_POOL = "log"
+
+# The configured ``max_overflow`` of each live pool, by pool name. ``QueuePool``
+# has no public accessor for it, and the gateway is the side that chose the
+# value, so it is recorded here at :func:`init_db` time rather than read back
+# off the pool.
+_pool_max_overflow: dict[str, int] = {}
 
 
 @runtime_checkable
@@ -228,50 +233,28 @@ class PoolStats:
         """The most connections this pool will ever hand out at once."""
         return self.size + self.max_overflow
 
-    @property
-    def is_saturated(self) -> bool:
-        """Whether every connection the pool can hand out is already out.
 
-        A caller checking out here would queue for ``db_pool_timeout`` and then
-        fail, so this is what lets the readiness probe answer immediately
-        instead of holding the orchestrator open for the full timeout.
-        """
-        return self.capacity > 0 and self.checked_out >= self.capacity
+def _engine_pool_stats(engine: AsyncEngine | None, max_overflow: int) -> PoolStats | None:
+    """Read *engine*'s pool.
 
-
-def _engine_pool_stats(engine: AsyncEngine | None) -> PoolStats | None:
-    """Read *engine*'s pool, or ``None`` when there is nothing to read.
-
-    Returns ``None`` for an engine that was never built and for one on
-    ``NullPool``, which is SQLite's pool here and implements none of the
-    counters below: it opens a connection per checkout and keeps no pool to
-    saturate. Callers treat ``None`` as "no pool ceiling applies" rather than
-    as an error, so this never raises.
-
-    ``max_overflow`` has no public accessor on ``QueuePool``, so it is read
-    defensively and falls back to ``0``, which understates capacity rather than
-    inventing it.
+    Returns ``None`` when there is no pool to read: no engine yet, or a pool
+    with no counters (``NullPool``, which SQLite uses).
     """
     if engine is None:
         return None
     pool = engine.pool
     if not isinstance(pool, _CountingPool):
         return None
-    # Negative until the pool has created its full complement of base
-    # connections, which would read as "overflow in use" the wrong way round.
+    # ``QueuePool`` reports a negative overflow until it has opened its base
+    # connections.
     overflow = max(pool.overflow(), 0)
     return PoolStats(
         checked_out=pool.checkedout(),
         checked_in=pool.checkedin(),
         overflow=overflow,
         size=pool.size(),
-        max_overflow=max(getattr(pool, "_max_overflow", 0), 0),
+        max_overflow=max_overflow,
     )
-
-
-def request_pool_stats() -> PoolStats | None:
-    """Pool stats for the engine that serves request-scoped sessions."""
-    return _engine_pool_stats(_engine)
 
 
 def pool_stats() -> dict[str, PoolStats]:
@@ -281,10 +264,54 @@ def pool_stats() -> dict[str, PoolStats]:
     :func:`init_db` runs and on SQLite.
     """
     readings = {
-        REQUEST_POOL: _engine_pool_stats(_engine),
-        LOG_POOL: _engine_pool_stats(_log_engine),
+        REQUEST_POOL: _engine_pool_stats(_engine, _pool_max_overflow.get(REQUEST_POOL, 0)),
+        LOG_POOL: _engine_pool_stats(_log_engine, _pool_max_overflow.get(LOG_POOL, 0)),
     }
     return {name: stats for name, stats in readings.items() if stats is not None}
+
+
+class _PoolCollector(Collector):
+    """Publish the connection-pool counters at scrape time.
+
+    A collector rather than gauges refreshed on a timer: the counters are
+    already maintained by SQLAlchemy, so every scrape reads the live pool with
+    no way to lag it, and a pool that reports nothing emits no series at all
+    rather than leaving a stale value behind.
+    """
+
+    def collect(self) -> Iterator[GaugeMetricFamily]:
+        checked_out = GaugeMetricFamily(
+            "gateway_db_pool_connections_checked_out",
+            "Pooled database connections currently checked out",
+            labels=["pool"],
+        )
+        idle = GaugeMetricFamily(
+            "gateway_db_pool_connections_idle",
+            "Pooled database connections checked in and available",
+            labels=["pool"],
+        )
+        overflow = GaugeMetricFamily(
+            "gateway_db_pool_overflow_connections",
+            "Database connections open beyond the base pool size",
+            labels=["pool"],
+        )
+        capacity = GaugeMetricFamily(
+            "gateway_db_pool_capacity",
+            "Most database connections the pool will hand out at once (size plus max overflow)",
+            labels=["pool"],
+        )
+        for name, stats in pool_stats().items():
+            checked_out.add_metric([name], stats.checked_out)
+            idle.add_metric([name], stats.checked_in)
+            overflow.add_metric([name], stats.overflow)
+            capacity.add_metric([name], stats.capacity)
+        yield checked_out
+        yield idle
+        yield overflow
+        yield capacity
+
+
+REGISTRY.register(_PoolCollector())
 
 
 def engine_kwargs(
@@ -357,6 +384,7 @@ def init_db(config: GatewayConfig) -> None:
     )
     _install_timeout_translation(_engine)
     _SessionLocal = async_sessionmaker(_engine, expire_on_commit=False)
+    _pool_max_overflow[REQUEST_POOL] = config.db_max_overflow
 
     if is_sqlite:
         _configure_sqlite_pragmas(_engine)
@@ -389,6 +417,7 @@ def init_db(config: GatewayConfig) -> None:
         )
         _install_timeout_translation(_log_engine)
         _LogSessionLocal = async_sessionmaker(_log_engine, expire_on_commit=False)
+        _pool_max_overflow[LOG_POOL] = 0
 
     if config.auto_migrate:
         _run_migrations(database_url)
@@ -443,6 +472,7 @@ def _take_engines() -> list[AsyncEngine]:
     _SessionLocal = None
     _log_engine = None
     _LogSessionLocal = None
+    _pool_max_overflow.clear()
     return engines
 
 
@@ -489,7 +519,6 @@ __all__ = [
     "init_db",
     "pool_stats",
     "release_session",
-    "request_pool_stats",
     "reset_db",
     "translate_timeout_error",
 ]

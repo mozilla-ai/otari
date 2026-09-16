@@ -20519,7 +20519,7 @@
     },
     "/api/v1/health/readiness": {
       "get": {
-        "description": "Readiness probe endpoint.\n\nChecks if the gateway is ready to serve requests by validating:\n- Database connection pool headroom\n- Database connectivity\n- Service availability\n\nUsed by Kubernetes/container orchestrators for readiness probes.\nReturns HTTP 503 if any dependency is unavailable, or if the database\nconnection pool has no capacity left to serve a request.\n\nReturns:\n    dict: Status object with health details\n\nRaises:\n    HTTPException: 503 if service is not ready",
+        "description": "Readiness probe endpoint.\n\nChecks if the gateway is ready to serve requests by validating:\n- Database connectivity\n- Service availability\n\nUsed by Kubernetes/container orchestrators for readiness probes.\nReturns HTTP 503 if any dependency is unavailable.\n\nReturns:\n    dict: Status object with health details\n\nRaises:\n    HTTPException: 503 if service is not ready",
         "operationId": "health-health_readiness",
         "responses": {
           "200": {

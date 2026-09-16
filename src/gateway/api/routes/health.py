@@ -7,17 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed
 from gateway.core.config import DEFAULT_PLATFORM_HEALTH_PATH, GatewayConfig
-from gateway.core.database import request_pool_stats
 from gateway.log_config import logger
 from gateway.version import __version__
 
 router = APIRouter(prefix="/health", tags=["health"])
-
-# The ``database`` state the readiness probe reports when every pooled
-# connection is already checked out. Its own state rather than "unavailable":
-# the database is reachable, this process has run out of ways to reach it, and
-# an operator restarts or rescales on that rather than paging the database.
-POOL_EXHAUSTED = "pool_exhausted"
 
 
 async def _check_platform_reachability(config: GatewayConfig) -> bool:
@@ -92,13 +85,11 @@ async def health_readiness(
     """Readiness probe endpoint.
 
     Checks if the gateway is ready to serve requests by validating:
-    - Database connection pool headroom
     - Database connectivity
     - Service availability
 
     Used by Kubernetes/container orchestrators for readiness probes.
-    Returns HTTP 503 if any dependency is unavailable, or if the database
-    connection pool has no capacity left to serve a request.
+    Returns HTTP 503 if any dependency is unavailable.
 
     Returns:
         dict: Status object with health details
@@ -130,22 +121,6 @@ async def health_readiness(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "unhealthy", "database": "unavailable", "version": __version__},
-        )
-
-    pool = request_pool_stats()
-    if pool is not None and pool.is_saturated:
-        logger.error(
-            "Readiness check refused: database pool saturated, %s of %s connections checked out",
-            pool.checked_out,
-            pool.capacity,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "status": "unhealthy",
-                "database": POOL_EXHAUSTED,
-                "version": __version__,
-            },
         )
 
     try:
