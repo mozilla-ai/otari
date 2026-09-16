@@ -3,9 +3,14 @@
 The ``/api/v1/providers`` endpoint reports static, network-free metadata for every
 configured provider. The ``/api/v1/provider-credentials`` endpoints manage the
 ``provider_credentials`` table: providers an operator adds at runtime through the
-dashboard, encrypted at rest and merged over config.yml providers. Every route
-here describes or changes the gateway's own configuration, so the router is
-operator-gated; standalone-mode only (it is not mounted in hybrid).
+dashboard, encrypted at rest and merged over config.yml providers. Those describe or
+change the gateway's own configuration, so their router is operator-gated;
+standalone-mode only (it is not mounted in hybrid).
+
+``/api/v1/providers/catalog`` is the exception, on ``catalog_router``: it lists the
+providers any-llm knows, which is a property of the build rather than of this
+deployment, and the organization provider-key form needs it to offer a BYO provider
+at all.
 """
 
 import asyncio
@@ -17,7 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator
+from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_catalog_reader
 from gateway.core.config import PROVIDER_TYPE_ALIASES, RESERVED_PROVIDER_INSTANCE_NAMES, GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import ProviderCredential
@@ -56,6 +61,15 @@ from gateway.services.url_safety import UnsafeURLError, validate_provider_api_ba
 router = APIRouter(
     tags=["providers"],
     dependencies=[Depends(require_deployment_operator)],
+)
+# The registry reads, which name providers any-llm knows rather than anything this
+# deployment configured. A tenant reaches them: the organization provider-key form
+# is the picker's other caller, and it is owners and admins who fill it, never an
+# operator. Gated like the other catalog reads so admitting a session is spelled at
+# the router (see ``deps.verify_catalog_reader``).
+catalog_router = APIRouter(
+    tags=["providers"],
+    dependencies=[Depends(verify_catalog_reader)],
 )
 
 
@@ -169,7 +183,7 @@ def _to_known_schema(provider: KnownProvider) -> KnownProviderSchema:
     )
 
 
-@router.get("/providers/catalog")
+@catalog_router.get("/providers/catalog")
 async def provider_catalog() -> list[KnownProviderSummarySchema]:
     """List every known provider for the add-provider picker: id and name only.
 
@@ -181,7 +195,7 @@ async def provider_catalog() -> list[KnownProviderSummarySchema]:
     return [_to_summary_schema(summary) for summary in list_known_provider_summaries()]
 
 
-@router.get("/providers/catalog/{provider_id}")
+@catalog_router.get("/providers/catalog/{provider_id}")
 async def provider_catalog_detail(provider_id: str) -> KnownProviderSchema:
     """Autofill hints for one provider the add-provider form has selected.
 

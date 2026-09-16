@@ -282,18 +282,25 @@ export function ProviderComboBox({
           className="max-h-72 overflow-auto"
           renderEmptyState={() => (
             <ComboBoxEmpty
-              // A loading catalog counts as an empty source, so a query that
-              // matches none of `extra` says the catalog is still coming rather
-              // than that nothing matches. Both halves are gated on
+              // A loading or failed catalog counts as an empty source, so a
+              // query that matches none of `extra` says why the list is short
+              // rather than that nothing matches. All three are gated on
               // `includeCatalog`: a picker offering only the API dialects must
               // not report a catalog it excludes.
               isSourceEmpty={
-                options.length === 0 || (includeCatalog && catalog.isLoading)
+                options.length === 0 ||
+                (includeCatalog && (catalog.isLoading || catalog.isError))
               }
               emptyMessage={
                 includeCatalog && catalog.isLoading
                   ? "Loading the provider catalog…"
-                  : "No provider to offer here."
+                  : // A refused or failed read leaves `data` undefined, which is
+                    // the same empty array a deployment with no providers would
+                    // give. Saying so separately is the difference between "there
+                    // are none" and "we could not find out".
+                    includeCatalog && catalog.isError
+                    ? "The provider catalog could not be loaded. Reload the page to try again."
+                    : "No provider to offer here."
               }
               noMatchesMessage="No provider matches what you typed."
             />

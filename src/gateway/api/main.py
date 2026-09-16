@@ -202,6 +202,7 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig, enabled_featur
         # (otari#822); ``hosted_mode.DATA_PLANE_PREFIXES`` answers its prefix
         # there with the 404 that names the data plane.
         api.include_router(playground.router)
+    api.include_router(providers.catalog_router)
     api.include_router(providers.router)
     api.include_router(keys.router)
     api.include_router(users.router)

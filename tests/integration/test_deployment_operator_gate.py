@@ -248,6 +248,46 @@ def test_an_organization_owner_is_still_not_a_deployment_operator(
     assert keys == 200
 
 
+def test_a_member_reads_the_provider_catalog_the_byo_form_offers(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """The registry read the organization provider-key form cannot do without.
+
+    It names the providers any-llm knows, which is a property of the build and
+    not of this deployment, so it is a catalog read like ``/api/v1/models``
+    rather than a description of the gateway's own configuration. It sat on the
+    operator router regardless, which left the form's provider picker empty for
+    every caller entitled to fill it: an owner or admin passes the
+    organization-management gate on the keys themselves and then had nothing to
+    choose from. The detail route goes with it, since picking a provider is what
+    asks for the autofill hints.
+
+    Probed at member because the gate being tested is the deployment one; the
+    form's own owner/admin check lives on the provider-keys router and is
+    asserted above.
+    """
+    _provision(client, master_key_header)
+    organization_id = _default_organization_id(db_session_factory)
+    token = _session_for(db_session_factory, organization_id=organization_id, email="ada@example.com")
+
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        listed = client.get(f"{API_ROOT}/providers/catalog")
+        detail = _call(client, "GET", f"{API_ROOT}/providers/catalog/openai")
+        # The rest of the module stays operator-gated: the catalog moving off it
+        # is a route split, not the router opening up.
+        configured = _call(client, "GET", f"{API_ROOT}/providers")
+    finally:
+        client.cookies.clear()
+
+    assert listed.status_code == 200
+    assert any(entry["id"] == "openai" for entry in listed.json())
+    assert detail == 200
+    assert configured == 403
+
+
 # =============================================================================
 # Who still gets through
 # =============================================================================
