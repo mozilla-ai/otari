@@ -269,7 +269,7 @@ class OrganizationPricingService:
         if not matching_keys:
             return False
 
-        workspace_ids = await self._all_workspace_ids(organization_id)
+        workspace_ids = await WorkspaceRepository(self.db).get_ids_by_organization(organization_id)
         if not workspace_ids:
             return True
 
@@ -288,19 +288,6 @@ class OrganizationPricingService:
             if active is None or active.id not in matching_key_ids:
                 return False
         return True
-
-    async def _all_workspace_ids(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
-        """Every workspace id this organization has, paged past `WorkspaceRepository`'s default limit."""
-        workspace_repository = WorkspaceRepository(self.db)
-        ids: list[uuid.UUID] = []
-        skip = 0
-        limit = 100
-        while True:
-            page, total = await workspace_repository.get_by_organization(organization_id, skip=skip, limit=limit)
-            ids.extend(workspace.id for workspace in page)
-            skip += limit
-            if skip >= total:
-                return ids
 
     async def raise_if_overlapping(
         self,
