@@ -2,7 +2,7 @@ import type { FormEvent, KeyboardEvent, ReactNode } from "react"
 import { FiArrowUp, FiSquare } from "react-icons/fi"
 
 import type { PlaygroundTools } from "@/client"
-import { Button } from "@/design-system/actions/Button"
+import { IconButton } from "@/design-system/actions/IconButton"
 
 import { ActiveToolChips } from "./ActiveToolChips"
 import { ToolsMenu } from "./ToolsMenu"
@@ -60,7 +60,7 @@ export function PlaygroundComposer({
 
   return (
     <form onSubmit={onSubmit} className="w-full">
-      <div className="flex flex-col gap-2 border border-[var(--field-border)] bg-[var(--field-background)] px-3 pt-3 pb-2 has-[textarea:focus-visible]:otari-focus-ring">
+      <div className="otari-composer flex flex-col gap-2 px-3 pt-3 pb-2 has-[textarea:focus-visible]:otari-focus-ring">
         <ActiveToolChips
           isWebSearchOn={isWebSearchOn}
           isCodeExecutionOn={isCodeExecutionOn}
@@ -105,28 +105,28 @@ export function PlaygroundComposer({
             {hint}
           </span>
           {isBusy ? (
-            <Button
-              aria-label="Stop generating"
+            <IconButton
+              label="Stop generating"
               variant="primary"
               size="sm"
               isIconOnly
-              className="ml-auto min-h-11 min-w-11 shrink-0 lg:ml-0 md:min-h-8 md:min-w-8"
+              className="ml-auto shrink-0 lg:ml-0 md:min-h-8 md:min-w-8"
               onPress={onStop}
             >
               <FiSquare aria-hidden className="size-4" />
-            </Button>
+            </IconButton>
           ) : (
-            <Button
-              aria-label="Send message"
+            <IconButton
+              label="Send message"
               variant="primary"
               type="submit"
               size="sm"
               isIconOnly
-              className="ml-auto min-h-11 min-w-11 shrink-0 lg:ml-0 md:min-h-8 md:min-w-8"
+              className="ml-auto shrink-0 lg:ml-0 md:min-h-8 md:min-w-8"
               isDisabled={!draft.trim() || !canChat || !!missingModel}
             >
               <FiArrowUp aria-hidden className="size-4" />
-            </Button>
+            </IconButton>
           )}
         </div>
       </div>

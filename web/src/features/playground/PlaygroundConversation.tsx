@@ -69,10 +69,19 @@ export function PlaygroundConversation({
                 pinnedKeys={pinnedKeys}
                 onTogglePin={onTogglePin}
                 unavailableKeys={other.model ? [other.model] : undefined}
+                // A panel's turns belong to the model that produced them, so
+                // changing either model drops that column's transcript. B is
+                // cleared as well when A takes its model, or its answers would
+                // sit under an unchosen picker and be sent to whatever is
+                // chosen next.
                 onChange={(key) => {
-                  setPanel((prev) => ({ ...prev, model: key }))
+                  setPanel((prev) =>
+                    prev.model === key
+                      ? prev
+                      : { ...prev, model: key, turns: [] },
+                  )
                   if (name === "A" && key === panelB.model)
-                    setPanelB((prev) => ({ ...prev, model: "" }))
+                    setPanelB((prev) => ({ ...prev, model: "", turns: [] }))
                 }}
                 className="min-w-0 flex-1"
               />

@@ -1780,6 +1780,21 @@ main {
    why. It appears inside tables, inside the models detail panel, inside
    banners and standalone on a page, so no container can reach it, and a rule
    keyed on what the control IS cannot be forgotten by a call site either. */
+/* The playground composer, which is a field the way an input is a field but is
+   built as a frame around a bare textarea: it holds the tool chips, the model
+   picker and send inside its own edge, so the shared `TextArea` would draw a
+   second border within it. Naming it here is what lets it read the same
+   `--field-*` variables every other field reads, rather than a call site
+   reaching for them through an arbitrary class (frontend-standards #2). The
+   border width comes from the token too, so a theme that changes it moves this
+   with the rest. */
+.otari-composer {
+  background: var(--field-background);
+  border-style: solid;
+  border-width: var(--field-border-width);
+  border-color: var(--field-border);
+}
+
 .otari-toolbar .button--ghost,
 .otari-actions .button--ghost,
 .otari-pagination .button--ghost,

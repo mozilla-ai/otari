@@ -7,7 +7,7 @@ import { Popover } from "./Popover"
 it("has one trigger and returns keyboard focus after Escape", async () => {
   const user = userEvent.setup()
   render(
-    <Popover trigger={<Button>Choose model</Button>}>
+    <Popover label="Models" trigger={<Button>Choose model</Button>}>
       <Button>Model option</Button>
     </Popover>,
   )

@@ -56,6 +56,7 @@ export function ToolsMenu({
 
   return (
     <Popover
+      label="Tools"
       isOpen={isOpen}
       onOpenChange={setIsOpen}
       placement="top"

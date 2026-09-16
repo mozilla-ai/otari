@@ -519,7 +519,7 @@ describe("retention consent", () => {
     await screen.findByText("ok")
 
     await user.click(screen.getByRole("button", { name: "History" }))
-    await user.click(screen.getByRole("button", { name: "Save conversation" }))
+    await user.click(screen.getByRole("button", { name: "Save current chat" }))
     expect(
       await screen.findByText("Save this conversation?"),
     ).toBeInTheDocument()
@@ -562,7 +562,7 @@ describe("retention consent", () => {
     await screen.findByText("ok")
 
     await user.click(screen.getByRole("button", { name: "History" }))
-    await user.click(screen.getByRole("button", { name: "Save conversation" }))
+    await user.click(screen.getByRole("button", { name: "Save current chat" }))
 
     await waitFor(() => {
       expect(
@@ -730,7 +730,7 @@ describe("comparing two models", () => {
     await user.click(await screen.findByRole("radio", { name: "Compare" }))
     await screen.findByRole("button", { name: "Model A" })
     expect(
-      screen.queryByRole("button", { name: "Save conversation" }),
+      screen.queryByRole("button", { name: "Save current chat" }),
     ).not.toBeInTheDocument()
   })
 })
@@ -892,7 +892,7 @@ describe("when a write fails", () => {
     })
 
     await user.click(screen.getByRole("button", { name: "History" }))
-    await user.click(screen.getByRole("button", { name: "Save conversation" }))
+    await user.click(screen.getByRole("button", { name: "Save current chat" }))
 
     expect(
       await screen.findByText("Saving conversations requires consent."),
@@ -945,6 +945,41 @@ describe("history", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "History" }))
     expect(await screen.findByText("No saved history yet.")).toBeInTheDocument()
+  })
+
+  it("falls back to a servable model when the saved one is gone", async () => {
+    mockApi({
+      consent: { store_conversations: true, store_comparisons: true },
+      conversations: {
+        data: [
+          {
+            id: "conv-2",
+            workspace_id: WORKSPACE_ID,
+            title: "Asked a retired model",
+            // Not in CATALOG, which is what a transcript outliving its model
+            // looks like: restoring the key would leave the picker blank while
+            // Send still dispatched it.
+            model: "openai:gpt-4-retired",
+            message_count: 1,
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+      },
+      messages: { data: [{ role: "user", content: "Asked a retired model" }] },
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    await user.click(await screen.findByRole("button", { name: "History" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.click(
+      within(dialog).getByRole("button", { name: /^Asked a retired model/ }),
+    )
+
+    const picker = await screen.findByRole("button", { name: "Model" })
+    expect(picker).toHaveTextContent("gpt-4o")
+    expect(picker).not.toHaveTextContent("gpt-4-retired")
   })
 
   it("loads a saved transcript with its model and exits comparison", async () => {

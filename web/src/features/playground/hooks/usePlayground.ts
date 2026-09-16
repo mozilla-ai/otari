@@ -368,14 +368,16 @@ export function usePlayground() {
     setPanelB(EMPTY_PANEL)
     setPanelA({
       ...EMPTY_PANEL,
-      model: saved.model,
+      // Through the same guard the seeding effect uses: a transcript can
+      // outlive the model that produced it, and restoring a key the catalog no
+      // longer serves leaves the picker blank while Send still dispatches it.
+      model: pickInitialModel(saved.model, models),
       turns: loaded.data.map((message) => ({
         role: message.role === "assistant" ? "assistant" : "user",
         content: message.content,
         reasoning: message.reasoning ?? undefined,
       })),
     })
-    setIsHistoryOpen(false)
     // A loaded transcript is already stored, so Save is disarmed rather than
     // offering to store a second copy of it.
     setIsConversationSaved(true)

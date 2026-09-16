@@ -8,12 +8,14 @@ import {
 } from "react-icons/fi"
 import type { PlaygroundComparison, PlaygroundConversation } from "@/client"
 import { Button } from "@/design-system/actions/Button"
+import { IconButton } from "@/design-system/actions/IconButton"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { Dialog, DialogSection } from "@/design-system/feedback/Dialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import { Popover } from "@/design-system/overlays/Popover"
+import { formatDateGroup } from "@/shared/helpers/format"
 import { splitModelKey } from "./helpers/playgroundModels"
 
 interface HistoryEntry {
@@ -28,22 +30,6 @@ const PREFERENCE: Record<string, string> = {
   model_a: "A is better",
   model_b: "B is better",
   tie: "Tie",
-}
-
-function dateGroup(value: string) {
-  const date = new Date(value)
-  const today = new Date()
-  const yesterday = new Date(today)
-  yesterday.setDate(today.getDate() - 1)
-  if (date.toDateString() === today.toDateString()) return "Today"
-  if (date.toDateString() === yesterday.toDateString()) return "Yesterday"
-  return date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    ...(date.getFullYear() !== today.getFullYear()
-      ? { year: "numeric" as const }
-      : {}),
-  })
 }
 
 export function PlaygroundHistory({
@@ -76,6 +62,9 @@ export function PlaygroundHistory({
   const [filter, setFilter] = useState("all")
   const [search, setSearch] = useState("")
   const [isAllOpen, setIsAllOpen] = useState(false)
+  // Once per render pass rather than per row, so every heading in one list is
+  // measured against the same clock.
+  const now = new Date()
   const [pendingDelete, setPendingDelete] = useState<HistoryEntry>()
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<unknown>()
@@ -108,7 +97,7 @@ export function PlaygroundHistory({
   // of the group it names.
   const groups = visible.reduce<{ label: string; entries: HistoryEntry[] }[]>(
     (acc, entry) => {
-      const label = dateGroup(entry.createdAt)
+      const label = formatDateGroup(entry.createdAt, now)
       const last = acc[acc.length - 1]
       if (last?.label === label) last.entries.push(entry)
       else acc.push({ label, entries: [entry] })
@@ -188,7 +177,7 @@ export function PlaygroundHistory({
                       <span className="w-full truncate text-emphasis">
                         {entry.title}
                       </span>
-                      <span className="w-full truncate text-mono-caption text-subtle">
+                      <span className="w-full truncate text-caption text-subtle">
                         {entry.description}
                       </span>
                     </button>
@@ -201,25 +190,25 @@ export function PlaygroundHistory({
                         {entry.title}
                       </span>
                       <span
-                        className="w-full truncate text-mono-caption text-subtle"
+                        className="w-full truncate text-caption text-subtle"
                         title={entry.description}
                       >
                         {entry.description}
                       </span>
                     </div>
                   )}
-                  <Button
+                  <IconButton
                     isIconOnly
                     size="sm"
-                    aria-label={`Delete ${entry.kind} "${entry.title}"`}
-                    className="min-h-11 min-w-11 shrink-0"
+                    label={`Delete ${entry.kind} "${entry.title}"`}
+                    className="shrink-0"
                     onPress={() => {
                       setDeleteError(undefined)
                       setPendingDelete(entry)
                     }}
                   >
                     <FiTrash2 aria-hidden className="size-3.5" />
-                  </Button>
+                  </IconButton>
                 </li>
               ))}
             </ul>
@@ -231,7 +220,6 @@ export function PlaygroundHistory({
   const save = onSave ? (
     <Button
       size="sm"
-      aria-label="Save conversation"
       isDisabled={isSaveDisabled}
       isPending={isSavePending}
       onPress={() => {
@@ -247,6 +235,7 @@ export function PlaygroundHistory({
   return (
     <>
       <Popover
+        label="History"
         padding="none"
         placement="bottom end"
         isOpen={isOpen && !isAllOpen}

@@ -70,6 +70,7 @@ export function ModelSelect({
 
   return (
     <Popover
+      label={label}
       isOpen={isOpen}
       onOpenChange={(next) => {
         setIsOpen(next)

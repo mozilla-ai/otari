@@ -103,6 +103,36 @@ export function formatDateTime(iso: string | null | undefined): string {
   return date.toLocaleString()
 }
 
+// The heading a dated row sits under in a history list: "Today", "Yesterday",
+// or the date, with the year only when it is not the current one.
+//
+// `now` is a parameter rather than a `new Date()` read inside, so a list left
+// open across midnight relabels when its caller re-reads the clock instead of
+// keeping yesterday's rows under "Today" until something else rerenders it.
+export function formatDateGroup(
+  iso: string | null | undefined,
+  now: Date = new Date(),
+): string {
+  if (!iso) {
+    return "\u2014"
+  }
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    return iso
+  }
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (date.toDateString() === now.toDateString()) return "Today"
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday"
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() !== now.getFullYear()
+      ? { year: "numeric" as const }
+      : {}),
+  })
+}
+
 // Compact USD for aggregate tiles: cents precision (not the per-request 4dp that
 // formatCost uses), so four+ figure totals stay readable. Non-null: callers guard
 // nullable per-request costs (e.g. `cost === null ? "—" : formatUsd(cost)`).

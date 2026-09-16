@@ -6,8 +6,8 @@ import {
 } from "react"
 import { FiRotateCcw } from "react-icons/fi"
 import type { Components } from "react-markdown"
-import { Button } from "@/design-system/actions/Button"
 import { CopyButton } from "@/design-system/actions/CopyButton"
+import { IconButton } from "@/design-system/actions/IconButton"
 import { CodeBlock } from "@/design-system/content/CodeBlock"
 import { Markdown } from "@/design-system/content/Markdown"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -115,15 +115,15 @@ export function MessageBubble({
           <div className="otari-actions flex shrink-0 items-center gap-3">
             {response ? <CopyButton value={response} label="response" /> : null}
             {onRegenerate ? (
-              <Button
+              <IconButton
                 isIconOnly
                 size="sm"
-                aria-label="Regenerate response"
-                className="min-h-11 min-w-11 md:min-h-8 md:min-w-8"
+                label="Regenerate response"
+                className="md:min-h-8 md:min-w-8"
                 onPress={onRegenerate}
               >
                 <FiRotateCcw aria-hidden className="size-3.5" />
-              </Button>
+              </IconButton>
             ) : null}
           </div>
         ) : null}

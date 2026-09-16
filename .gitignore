@@ -5,9 +5,7 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
-# No trailing slash: a worktree may symlink this at another checkout's
-# environment, and a directory pattern does not match a symlink.
-.venv
+.venv/
 venv/
 dist/
 build/
