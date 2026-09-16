@@ -1279,7 +1279,8 @@ class GatewayConfig(BaseSettings):
     mcp_allow_loopback: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=True,
         description=(
-            "SSRF gate: allow MCP server URLs that resolve to loopback (useful for same-host sidecars). On by default."
+            "SSRF gate: allow MCP server URLs that resolve to loopback (useful for same-host "
+            "sidecars). On by default."
         ),
     )
     mcp_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
@@ -1704,7 +1705,8 @@ class GatewayConfig(BaseSettings):
                 raise ValueError(msg)
             if ":" in name or "/" in name:
                 msg = (
-                    f"routing policy name '{name}' must not contain ':' or '/' (it would shadow a real model selector)."
+                    f"routing policy name '{name}' must not contain ':' or '/' "
+                    "(it would shadow a real model selector)."
                 )
                 raise ValueError(msg)
             if name in self.providers:
@@ -1797,7 +1799,10 @@ class GatewayConfig(BaseSettings):
                 try:
                     LLMProvider(impl)
                 except ValueError as exc:
-                    msg = f"providers.{instance}.provider_type '{declared}' is not a known provider implementation."
+                    msg = (
+                        f"providers.{instance}.provider_type '{declared}' is not a known provider "
+                        "implementation."
+                    )
                     raise ValueError(msg) from exc
             models = entry.get("models")
             if models is not None and not (isinstance(models, list) and all(isinstance(m, str) for m in models)):
@@ -2232,7 +2237,9 @@ class GatewayConfig(BaseSettings):
             try:
                 inline_timeout = int(raw_inline_timeout)
             except (TypeError, ValueError):
-                raise ValueError(f"{inline_key} must be a positive integer, got {raw_inline_timeout!r}") from None
+                raise ValueError(
+                    f"{inline_key} must be a positive integer, got {raw_inline_timeout!r}"
+                ) from None
             if (
                 isinstance(raw_inline_timeout, bool)
                 or (isinstance(raw_inline_timeout, float) and not raw_inline_timeout.is_integer())
