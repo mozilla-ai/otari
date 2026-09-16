@@ -10,6 +10,7 @@ import {
   FiTrash2,
 } from "react-icons/fi"
 import type { ApiKey } from "@/client"
+import { TOOLTIP_OPEN_DELAY_MS } from "@/design-system/overlays/Tooltip"
 import { formatDateTime } from "@/shared/helpers/format"
 import { keyFingerprint } from "./secretCaption"
 
@@ -18,7 +19,7 @@ export function KeyActionsMenu({
   triggerRef,
   onAction,
   owner,
-  showDetails,
+  hasDetails,
   isPending,
   onToggle,
   onEdit,
@@ -34,7 +35,7 @@ export function KeyActionsMenu({
    * they leave the row, and the menu is the only place they can still be read
    * whole.
    */
-  showDetails?: boolean
+  hasDetails?: boolean
   isPending: boolean
   onToggle: () => void
   onEdit: () => void
@@ -49,7 +50,7 @@ export function KeyActionsMenu({
       label: apiKey.is_active ? "Disable" : "Enable",
       hint: apiKey.is_active ? "Callers get 401" : "Allow requests",
       icon: apiKey.is_active ? FiPause : FiPlay,
-      disabled: isPending,
+      isDisabled: isPending,
       run: onToggle,
     },
     {
@@ -57,7 +58,7 @@ export function KeyActionsMenu({
       label: "Edit…",
       hint: undefined,
       icon: FiEdit2,
-      disabled: false,
+      isDisabled: false,
       run: onEdit,
     },
     {
@@ -65,7 +66,7 @@ export function KeyActionsMenu({
       label: "Regenerate…",
       hint: "Replaces the secret",
       icon: FiRefreshCw,
-      disabled: isPending,
+      isDisabled: isPending,
       run: onRegenerate,
     },
     {
@@ -73,13 +74,16 @@ export function KeyActionsMenu({
       label: "Delete…",
       hint: apiKey.is_active ? "Disable it first" : "Cannot be undone",
       icon: FiTrash2,
-      disabled: apiKey.is_active || isPending,
+      isDisabled: apiKey.is_active || isPending,
       run: onDelete,
     },
   ]
   return (
     <Dropdown>
-      <Tooltip.Root>
+      {/* HeroUI reads `--tooltip-delay` off the root, which this app never
+          declares, so an unset delay is react-aria's 1.5s warmup. The tooltip
+          is the only visible label this trigger has. */}
+      <Tooltip.Root delay={TOOLTIP_OPEN_DELAY_MS}>
         <Dropdown.Trigger
           ref={(element) => {
             trigger.current = element
@@ -102,7 +106,7 @@ export function KeyActionsMenu({
           <p className="break-all text-mono-caption text-muted">
             {keyFingerprint(apiKey) ?? "No key prefix"}
           </p>
-          {showDetails ? (
+          {hasDetails ? (
             <dl className="flex flex-col gap-1 pt-2 text-caption">
               <div>
                 <dt className="inline">Created: </dt>
@@ -163,10 +167,10 @@ export function KeyActionsMenu({
             <Dropdown.Item
               id={action.id}
               textValue={action.label}
-              isDisabled={action.disabled}
+              isDisabled={action.isDisabled}
             >
               <action.icon aria-hidden className="size-3.5 shrink-0" />
-              <Label>{action.label}</Label>
+              <Label className="text-body">{action.label}</Label>
               {action.hint ? (
                 <Text slot="description" className="text-caption">
                   {action.hint}

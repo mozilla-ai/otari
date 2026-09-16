@@ -3193,11 +3193,6 @@ main {
 .otari-keys-table .table__column[data-key="actions"] {
   width: 5rem;
 }
-.otari-keys-list label[data-rac] {
-  min-width: 2.75rem;
-  min-height: 2.75rem;
-  justify-content: center;
-}
 .otari-key-actions-trigger {
   padding: 0;
   display: inline-flex;
@@ -3212,9 +3207,12 @@ main {
   color: var(--color-text);
   background: var(--color-surface-muted);
 }
+/* The ring is `otari-focus-ring` on the trigger; only the offset is local. The
+   trigger is flush with the row's right edge, where the utility's outward 2px
+   would be clipped by the table's own overflow. */
 .otari-key-actions-trigger[data-focus-visible],
 .otari-key-actions-trigger[aria-expanded="true"] {
-  outline: 2px solid var(--color-focus);
+  outline: 2px solid var(--focus-ring-ink, var(--color-focus));
   outline-offset: -2px;
 }
 /* HeroUI has no prop for the menu's density or its two text lanes. */
@@ -3234,11 +3232,9 @@ main {
   color: var(--color-text-muted);
 }
 .otari-key-actions-menu .menu-item .label {
-  font-size: var(--text-sm);
   white-space: nowrap;
 }
 .otari-key-actions-menu .menu-item [slot="description"] {
-  font-size: var(--text-xs);
   margin-left: auto;
   text-align: right;
 }

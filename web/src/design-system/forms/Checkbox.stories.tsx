@@ -143,3 +143,42 @@ export const NamedForScreenReaders: Story = {
     )
   },
 }
+
+/**
+ * `hasTouchTarget` for a list a thumb operates.
+ *
+ * The box stays 16px and nothing beside it moves; the label claims 44px so the
+ * press has somewhere to land. `CopyButton`'s pseudo-element bleed is the usual
+ * answer to the same problem and is wrong here: a 16px box needs 14px each way
+ * to reach 44, which in a list of hairline-divided rows would overlap the row
+ * above and below and send a press near the seam to the wrong one.
+ */
+export const TouchTarget: Story = {
+  render: () => {
+    const [picked, setPicked] = useState<string[]>([])
+    return (
+      <ul className="flex w-64 flex-col">
+        {["prod-gateway", "ci-bot", "analytics-ro"].map((key) => (
+          <li
+            key={key}
+            className="flex items-center gap-2 border-b border-border-subtle"
+          >
+            <Checkbox
+              hasTouchTarget
+              isSelected={picked.includes(key)}
+              onChange={(on) =>
+                setPicked((current) =>
+                  on ? [...current, key] : current.filter((n) => n !== key),
+                )
+              }
+              ariaLabel={`Select ${key}`}
+            >
+              <span className="sr-only">Select {key}</span>
+            </Checkbox>
+            <span className="text-body">{key}</span>
+          </li>
+        ))}
+      </ul>
+    )
+  },
+}

@@ -1,3 +1,4 @@
+import { Spinner } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import {
   type RefObject,
@@ -25,6 +26,7 @@ import {
 import { BulkActionBar } from "@/design-system/data/BulkActionBar"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
+import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
@@ -1008,6 +1010,10 @@ export function KeysPage() {
   const [pendingRegenerate, setPendingRegenerate] = useState<ApiKey>()
   const [pendingDelete, setPendingDelete] = useState<ApiKey>()
   const [lastAction, setLastAction] = useState<string>()
+  // Still load-bearing, though `confirmRef` goes unused: a menu closes on choice,
+  // so the item that was focused is unmounted before the dialog opens and
+  // react-aria's own restore has no target left. Measured, not assumed: dropping
+  // this strands focus in both the regenerate-cancel and edit-close tests.
   const { triggerRef: actionTriggerRef } = useConfirmationFocus(
     !!(pendingRegenerate || pendingDelete || editing || regenerated),
   )
@@ -1056,7 +1062,7 @@ export function KeysPage() {
         owner={isDeploymentWide ? ownerLabel(k) : undefined}
         // Those lanes are off the row below `wide`, so the menu is the only
         // place left that can show them whole.
-        showDetails={layout !== "wide"}
+        hasDetails={layout !== "wide"}
         isPending={updateKey.isPending || rotateKey.isPending}
         onToggle={() => setActive(k, !k.is_active)}
         onEdit={() => {
@@ -1401,13 +1407,14 @@ export function KeysPage() {
       {/* Suppress the table (and its own empty message) while the onboarding
           panel owns the empty state, so a fresh gateway shows one call to action,
           not a panel stacked over a redundant "no rows" table. */}
-      {showOnboarding ? null : layout === "mobile" && !loading ? (
+      {showOnboarding ? null : layout === "mobile" ? (
         <section
           aria-label="API keys"
           className="otari-keys-list flex flex-col"
         >
           <div className="flex min-h-11 items-center gap-2 border-b border-border-subtle">
             <Checkbox
+              hasTouchTarget
               ariaLabel="Select all keys"
               isSelected={rows.length > 0 && selectedIds.length === rows.length}
               onChange={(checked) =>
@@ -1423,6 +1430,15 @@ export function KeysPage() {
             </span>
             <span className="text-overline">Actions</span>
           </div>
+          {/* The list owns loading too: falling through to the table here painted
+              a seven-column skeleton on a phone and then swapped it for this. */}
+          {loading ? (
+            <EmptyMessage>
+              <span className="inline-flex items-center gap-2">
+                <Spinner size="sm" aria-hidden="true" /> Loading…
+              </span>
+            </EmptyMessage>
+          ) : null}
           <ul className="flex flex-col">
             {rows.map((k) => (
               <li
@@ -1431,6 +1447,7 @@ export function KeysPage() {
               >
                 <div className="flex min-h-11 shrink-0 items-center">
                   <Checkbox
+                    hasTouchTarget
                     ariaLabel={`Select ${label(k)}`}
                     isSelected={selectedIds.includes(k.id)}
                     onChange={(checked) => {

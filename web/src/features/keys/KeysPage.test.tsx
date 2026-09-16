@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { screen, waitFor, within } from "@testing-library/react"
+import { act, screen, waitFor, within } from "@testing-library/react"
 import userEvent, { type UserEvent } from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -44,15 +44,19 @@ function stubRegionWidth(width: number) {
     "ResizeObserver",
     class extends OriginalObserver {
       constructor(callback: ResizeObserverCallback) {
-        super((entries, observer) =>
-          callback(
-            entries.map((entry) => ({
-              ...entry,
-              contentRect: { ...entry.contentRect, width },
-            })),
-            observer,
-          ),
-        )
+        // Acted: the callback drives `setLayout`, and forwarding it raw left
+        // every layout change as an unacted update.
+        super((entries, observer) => {
+          act(() => {
+            callback(
+              entries.map((entry) => ({
+                ...entry,
+                contentRect: { ...entry.contentRect, width },
+              })),
+              observer,
+            )
+          })
+        })
       }
     },
   )
@@ -302,6 +306,29 @@ describe("KeysPage", () => {
     await usr.click(screen.getByRole("button", { name: "Actions for named" }))
     await screen.findByRole("menu")
     expect(screen.queryByText("Created:")).not.toBeInTheDocument()
+  })
+
+  it("loads inside the list on a phone rather than painting the table first", async () => {
+    stubRegionWidth(390)
+    let release: (() => void) | undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const base = mockApi({ keys: [apiKey({ key_name: "held" })] })
+    const inner = base.getMockImplementation()!
+    base.mockImplementation(async (input, init) => {
+      if (KEYS_URL.test(String(input))) await held
+      return inner(input, init)
+    })
+    renderPage(<KeysPage />)
+
+    // The seven-column skeleton is what used to appear here for the whole load.
+    expect(await screen.findByText("Loading…")).toBeInTheDocument()
+    expect(screen.queryByRole("grid")).not.toBeInTheDocument()
+
+    release?.()
+    await screen.findByRole("button", { name: "Actions for held" })
+    expect(screen.queryByRole("grid")).not.toBeInTheDocument()
   })
 
   it("shows a single empty state (onboarding panel, not also the table fallback)", async () => {
