@@ -126,6 +126,16 @@ test.describe("standalone tenancy", () => {
     await pickOption(page, "Role", "Member", addDialog)
     await addDialog.getByRole("button", { name: "Add member" }).click()
 
+    // No mail transport in the parity gateway, so the add always answers with a
+    // claim link and the dialog re-titles itself to report it. Scope to the new
+    // title: `addDialog` no longer resolves, and this dialog is not dismissable
+    // while a link is on it, so its backdrop blocks the roster underneath until
+    // Done is pressed.
+    const addedDialog = page.getByRole("dialog", { name: "Member added" })
+    await expect(addedDialog).toBeVisible()
+    await addedDialog.getByRole("button", { name: "Done" }).click()
+    await expect(addedDialog).toBeHidden()
+
     // Nothing is emailed and nothing has to be accepted: this edition answers
     // on the "active" arm of the platform's result union, so the row is live
     // immediately. Re-running revives the membership suspended below rather
@@ -156,6 +166,10 @@ test.describe("standalone tenancy", () => {
     const readdDialog = page.getByRole("dialog", { name: "New member" })
     await readdDialog.getByLabel("Email address").fill(MEMBER_EMAIL)
     await readdDialog.getByRole("button", { name: "Add member" }).click()
+    const readdedDialog = page.getByRole("dialog", { name: "Member added" })
+    await expect(readdedDialog).toBeVisible()
+    await readdedDialog.getByRole("button", { name: "Done" }).click()
+    await expect(readdedDialog).toBeHidden()
     await expect(memberRow(page, MEMBER_EMAIL)).toHaveCount(1)
 
     // Leave the roster as this spec found it.
