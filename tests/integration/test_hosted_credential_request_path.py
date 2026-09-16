@@ -58,6 +58,9 @@ class FleetModelProviderAdapter:
             response_provider="together",
         )
 
+    async def hosted_providers(self, *, organization_id):
+        return frozenset({"together"})
+
 
 def register(container: Container) -> None:
     container.bind(ModelProviderPort, FleetModelProviderAdapter)

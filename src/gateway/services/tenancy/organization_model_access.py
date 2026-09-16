@@ -16,12 +16,15 @@ Two disjoint addressing schemes decide it, and the split is
   contributes ``instance:*``.
 * A bare ``provider:model`` selector resolves through the organization's own BYO
   keys for the request's workspace, so it contributes only where the caller has
-  one.
+  one. Where the workspace has none, dispatch asks the bound ``ModelProviderPort``
+  for a deployment-owned credential, so every provider the port would serve this
+  organization contributes ``provider:*`` too.
 
 An organization holding no BYO key still gets every configured instance, which on
-a standalone deployment is the whole catalog. Opening this filter therefore
-changes nothing for a single-tenant deployment and narrows only where a tenant's
-reach is actually narrower.
+a standalone deployment is the whole catalog, and every hosted provider, which on
+the core build is none. Opening this filter therefore changes nothing for a
+single-tenant deployment and narrows only where a tenant's reach is actually
+narrower.
 
 The scope also answers one thing the allow-list cannot. Aliases and stored
 policies are workspace-scoped rows, and the catalog reads them for a workspace
@@ -39,7 +42,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
+from gateway.log_config import logger
 from gateway.models.tenancy import User, Workspace
+from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.repositories.tenancy.org_provider_key_repository import (
     Candidate,
     OrgProviderKeyRepository,
@@ -75,6 +80,41 @@ class SessionCatalogScope:
     tenant may reach. True only when this caller may actually see that workspace,
     which on a single-tenant deployment is everyone in it.
     """
+
+    deployment_supplied_providers: frozenset[str]
+    """Bare providers the deployment's own credential serves this caller.
+
+    The hosted providers no BYO key of the caller's covers, so a request on
+    them dispatches on a deployment-owned credential and is billed at the
+    deployment's rate. The catalog flags their models ``deployment_managed`` for
+    the same reason it flags a configured instance's: the organization may not
+    set its own rate for a bill the deployment pays
+    (``OrganizationPricingService.raise_if_deployment_supplied``).
+    """
+
+
+async def _hosted_providers(model_provider: ModelProviderPort | None, organization_id: uuid.UUID) -> frozenset[str]:
+    """The providers the bound port would serve this organization, or none.
+
+    Degrades to none rather than failing the read: the adapter is another
+    build's code dialing its own store, and a catalog that loses its hosted rung
+    is still the configured-plus-BYO view every caller had before, where a 500
+    is a page that does not render. Logged, because a hosted deployment whose
+    members suddenly see fewer models has an adapter to look at.
+    """
+    if model_provider is None:
+        return frozenset()
+    try:
+        hosted = await model_provider.hosted_providers(organization_id=organization_id)
+    except Exception:
+        logger.exception("Hosted providers could not be resolved for organization %s", organization_id)
+        return frozenset()
+    return frozenset(provider_key(provider) for provider in hosted)
+
+
+def _providers_of(entries: set[str]) -> set[str]:
+    """The provider prefix of each ``model_access`` entry."""
+    return {entry.split(":", 1)[0] for entry in entries}
 
 
 async def _byo_entries_for_workspaces(
@@ -147,6 +187,7 @@ async def resolve_session_catalog_scope(
     *,
     user: User,
     organizations: OrganizationService | None = None,
+    model_provider: ModelProviderPort | None = None,
 ) -> SessionCatalogScope:
     """What this session identity may be shown. Unrestricted is the caller's own call.
 
@@ -155,35 +196,47 @@ async def resolve_session_catalog_scope(
     (a workspace's disable or model restriction is theirs to lift) and cheaper by
     a query.
 
+    ``model_provider`` is the port this build bound; ``None`` reads as a build
+    that serves nothing hosted. A hosted provider the organization also holds a
+    BYO key for is reachable either way and listed once, but it is the BYO key
+    that dispatch would use, so it is not flagged as deployment-supplied.
+
     A caller with no live organization membership is answered with the configured
     instances rather than refused. That is the same rule applied to an empty
     tenant, not a fallback around one: they reach no BYO key because there is no
-    organization holding any, and the configured instances are deployment-wide.
-    The routers that exist to answer "which organization" still refuse such a
-    caller; a catalog read is not one of them.
+    organization holding any, the configured instances are deployment-wide, and
+    the hosted rung is keyed on an organization they do not have. The routers
+    that exist to answer "which organization" still refuse such a caller; a
+    catalog read is not one of them.
     """
     services = organizations if organizations is not None else OrganizationService(db)
     entries = {f"{instance}:*" for instance in config.providers}
     try:
         scope = await resolve_visible_workspace_scope(db, user=user, organizations=services)
     except (TenancyForbiddenError, TenancyNotFoundError):
-        return SessionCatalogScope(allowlist=sorted(entries), reads_default_workspace=False)
+        return SessionCatalogScope(
+            allowlist=sorted(entries), reads_default_workspace=False, deployment_supplied_providers=frozenset()
+        )
 
     if scope.sees_every_workspace:
-        entries.update(
+        byo_entries = {
             f"{provider_key(key.provider)}:*"
             for key in await OrgProviderKeyRepository(db).list_live_keys(scope.organization.id)
             if key_is_usable(key)
-        )
+        }
     else:
-        entries |= await _byo_entries_for_workspaces(
+        byo_entries = await _byo_entries_for_workspaces(
             db,
             organization_id=scope.organization.id,
             workspace_ids=scope.workspace_ids or [],
         )
+    hosted = await _hosted_providers(model_provider, scope.organization.id)
+    entries |= byo_entries
+    entries.update(f"{provider}:*" for provider in hosted)
     return SessionCatalogScope(
         allowlist=sorted(entries),
         reads_default_workspace=await _sees_default_workspace(db, scope),
+        deployment_supplied_providers=hosted - _providers_of(byo_entries),
     )
 
 
@@ -193,6 +246,7 @@ async def resolve_session_model_allowlist(
     *,
     user: User,
     organizations: OrganizationService | None = None,
+    model_provider: ModelProviderPort | None = None,
 ) -> list[str]:
     """The allow-list half of :func:`resolve_session_catalog_scope`.
 
@@ -201,7 +255,9 @@ async def resolve_session_model_allowlist(
     stored, so the alias and policy scoping the full result carries says nothing
     about it.
     """
-    scope = await resolve_session_catalog_scope(db, config, user=user, organizations=organizations)
+    scope = await resolve_session_catalog_scope(
+        db, config, user=user, organizations=organizations, model_provider=model_provider
+    )
     return scope.allowlist
 
 

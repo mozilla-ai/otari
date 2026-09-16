@@ -28,6 +28,7 @@ from gateway.models.pricing import ModelPricing
 from gateway.models.pricing_schemas import PricingTier
 from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
+from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.alias_service import effective_aliases
 from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
 from gateway.services.model_discovery_service import background_discovery_enabled, discover_all_models
@@ -43,7 +44,7 @@ from gateway.services.pricing_service import (
     pricing_key_forms,
     resolve_organization_override,
 )
-from gateway.services.provider_kwargs import is_deployment_instance_key, normalize_pricing_key
+from gateway.services.provider_kwargs import is_deployment_instance_key, normalize_pricing_key, split_selector
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.organization_model_access import resolve_session_catalog_scope
 
@@ -118,25 +119,32 @@ class ModelObject(BaseModel):
     # knows the model. Metadata only (independent of the default_pricing toggle);
     # ``None`` when the dataset has no value for the model.
     context_window: int | None = None
-    # True when this model is addressed through one of the deployment's own
-    # provider instances, so the deployment holds the upstream credential and its
-    # rate is the deployment price list's. False for a bare ``provider:model``
-    # key, which resolves against an organization's own BYO credential, and for
-    # an alias or policy, which is a name rather than a model. It is what lets the
-    # dashboard withhold a rate-override control the gateway would refuse anyway
+    # True when the deployment holds the upstream credential this model runs on,
+    # so its rate is the deployment price list's: a model addressed through one
+    # of the deployment's own provider instances, or a bare ``provider:model``
+    # key the bound ``ModelProviderPort`` serves the viewer's organization for
+    # because no BYO key of theirs covers it. False for a bare key the
+    # organization's own BYO credential serves, and for an alias or policy, which
+    # is a name rather than a model. It is what lets the dashboard withhold a
+    # rate-override control the gateway would refuse anyway
     # (``OrganizationPricingService.raise_if_deployment_supplied``).
     deployment_managed: bool = False
 
 
-
-def mark_deployment_managed(config: GatewayConfig, model: ModelObject) -> ModelObject:
+def mark_deployment_managed(
+    config: GatewayConfig, model: ModelObject, *, hosted_providers: frozenset[str] = frozenset()
+) -> ModelObject:
     """Stamp ``deployment_managed`` from the entry's own id, and hand it back.
 
     Applied in one pass rather than at each construction site: the answer depends
-    only on the id and the provider map, so deriving it once is what keeps the
-    phases from disagreeing about a model they both build.
+    only on the id, the provider map and the viewer's hosted providers
+    (``CatalogScope.deployment_supplied_providers``), so deriving it once is what
+    keeps the phases from disagreeing about a model they both build.
     """
-    model.deployment_managed = is_deployment_instance_key(config, model.id)
+    split = split_selector(model.id)
+    model.deployment_managed = is_deployment_instance_key(config, model.id) or (
+        split is not None and split[0] in hosted_providers
+    )
     return model
 
 
@@ -384,6 +392,15 @@ class CatalogScope:
     which is where its own writes land.
     """
 
+    deployment_supplied_providers: frozenset[str] = frozenset()
+    """Bare providers whose models run on the deployment's own credential for this caller.
+
+    See ``SessionCatalogScope.deployment_supplied_providers``. Empty for every
+    caller but a member session: an operator and a master key are exempt from
+    the pricing rule this flags for, and an API key's catalog has always been
+    stamped from the provider map alone.
+    """
+
 
 async def catalog_scope(
     db: AsyncSession,
@@ -392,6 +409,7 @@ async def catalog_scope(
     auth: tuple[APIKey | None, bool],
     session_identity: TenancyUser | None,
     anonymous: bool = False,
+    model_provider: ModelProviderPort | None = None,
 ) -> CatalogScope:
     """What this caller may be shown, by the rule that fits how they authenticated.
 
@@ -399,9 +417,10 @@ async def catalog_scope(
     has always done. A header master key is the deployment credential itself, so
     it is unrestricted. A dashboard session is unrestricted only while it
     operates the deployment; otherwise it is answered by its membership, so a
-    member sees the providers their own organization holds rather than every
-    tenant's, and the workspace-scoped rows only where that workspace is theirs
-    (otari-ai#1969).
+    member sees the providers their own organization holds, plus the ones the
+    bound ``model_provider`` would serve it on the deployment's credential,
+    rather than every tenant's, and the workspace-scoped rows only where that
+    workspace is theirs (otari-ai#1969).
     """
     # A visitor, while the catalog is public: the deployment's configured
     # instances and nothing that belongs to a tenant. Not a member of anything,
@@ -411,10 +430,11 @@ async def catalog_scope(
     if session_identity is not None:
         if await DeploymentUserService(db).has_administration_access(session_identity):
             return CatalogScope(allowlist=None, reads_workspace_layer=True)
-        scope = await resolve_session_catalog_scope(db, config, user=session_identity)
+        scope = await resolve_session_catalog_scope(db, config, user=session_identity, model_provider=model_provider)
         return CatalogScope(
             allowlist=scope.allowlist,
             reads_workspace_layer=scope.reads_default_workspace,
+            deployment_supplied_providers=scope.deployment_supplied_providers,
         )
     api_key, is_master_key = auth
     return CatalogScope(
@@ -448,6 +468,7 @@ async def build_merged_catalog(
     provider: str | None = None,
     anonymous: bool = False,
     cached_only: bool = False,
+    model_provider: ModelProviderPort | None = None,
 ) -> MergedCatalog:
     """Merge discovery, stored prices, defaults, aliases and policies for one caller.
 
@@ -456,6 +477,10 @@ async def build_merged_catalog(
 
     ``cached_only`` builds the view without dialing any provider, for a caller
     that runs off the request path; see :func:`discover_all_models`.
+
+    ``model_provider`` is the port this build bound, consulted for a member
+    session's hosted providers; see :func:`catalog_scope`. A caller that passes
+    none is answered as on a build that serves nothing hosted.
     """
     # Aliases are scoped, so the catalog is too: a caller sees their workspace's
     # aliases and the configured ones, plus their own user-scoped layer, never
@@ -467,7 +492,9 @@ async def build_merged_catalog(
     # Resolved before the alias and policy layers are read, not only before they
     # are filtered: it decides whether the workspace-scoped rows may be read at
     # all, which no filter over targets can decide afterwards.
-    scope = await catalog_scope(db, config, auth=auth, session_identity=session_identity, anonymous=anonymous)
+    scope = await catalog_scope(
+        db, config, auth=auth, session_identity=session_identity, anonymous=anonymous, model_provider=model_provider
+    )
     pricing_map = await get_pricing_map(db, provider_filter=provider)
     # Snapshot before phase 1 mutates ``pricing_map`` (it pops matched keys), so
     # alias pricing can still be looked up by the target's canonical key. Keys are
@@ -612,7 +639,7 @@ async def build_merged_catalog(
         merged = {mid: obj for mid, obj in merged.items() if _permitted(mid)}
 
     for obj in merged.values():
-        mark_deployment_managed(config, obj)
+        mark_deployment_managed(config, obj, hosted_providers=scope.deployment_supplied_providers)
 
     return MergedCatalog(
         models=merged,

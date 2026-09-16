@@ -639,6 +639,10 @@ class _FakeHostedModelProvider:
             return HostedCredential(api_key="x", api_base=None, response_provider=provider)
         return None
 
+    async def hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
+        del organization_id
+        return frozenset({self._served} if self._served is not None else ())
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("role", ["owner", "admin"])

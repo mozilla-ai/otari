@@ -89,3 +89,21 @@ class ModelProviderPort(Protocol):
 
         """
         ...
+
+    async def hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
+        """The providers this build would serve ``organization_id`` a candidate for.
+
+        Bare any-llm provider names (``openai``, never a selector). This is the
+        set :meth:`resolve_hosted_credential` would answer for, stated up front,
+        so a catalog can list what the organization may call and flag it as
+        deployment-supplied the way the pricing gate will treat it. A provider
+        the organization is refused (a resolve would raise
+        ``HostedAccessDeniedError``) is left out.
+
+        Returns:
+            The empty set when this build has no hosted-inference path, which is
+            the core answer, and an overlay's answer when none of its
+            credentials is usable.
+
+        """
+        ...

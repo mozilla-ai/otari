@@ -10,7 +10,9 @@ matcher:
 * a session that operates the deployment is unrestricted;
 * any other session is answered by its membership, which is every
   ``config.providers`` instance (deployment-wide, so every tenant reaches them)
-  plus the organization's own BYO providers.
+  plus the organization's own BYO providers, plus every provider the bound
+  ``ModelProviderPort`` would serve the organization on the deployment's own
+  credential.
 
 The test deployment configures no ``providers:`` block, so every entry a caller
 is shown here comes from a BYO key. That is the sharp case: a deployment with
@@ -22,6 +24,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from fastapi import status
@@ -31,6 +34,7 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_ROOT
 from gateway.models.provider_keys import OrgProviderKey, WorkspaceProviderModelRestriction
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
+from gateway.ports.model_provider_port import HostedCredential, ModelProviderPort
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 
@@ -212,14 +216,47 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
         session.close()
 
 
-def _catalog_as(client: TestClient, world: _World, who: str) -> set[str]:
+def _listing_as(client: TestClient, world: _World, who: str) -> dict[str, dict[str, Any]]:
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
     try:
         response = client.get(f"{API_ROOT}/models")
         assert response.status_code == status.HTTP_200_OK, response.text
-        return {model["id"] for model in response.json()["data"]}
+        return {model["id"]: model for model in response.json()["data"]}
     finally:
         client.cookies.clear()
+
+
+def _catalog_as(client: TestClient, world: _World, who: str) -> set[str]:
+    return set(_listing_as(client, world, who))
+
+
+class _HostedPort:
+    """A stand-in for an overlay's adapter: serves the named providers on the deployment's credential."""
+
+    def __init__(self, *providers: str, error: Exception | None = None) -> None:
+        self.providers = frozenset(providers)
+        self.error = error
+        self.asked_for: list[uuid.UUID] = []
+
+    async def resolve_hosted_credential(
+        self, *, organization_id: uuid.UUID, workspace_id: uuid.UUID | None, provider: str, model: str | None
+    ) -> HostedCredential | None:
+        del organization_id, workspace_id, model
+        if provider in self.providers:
+            return HostedCredential(api_key="fleet", api_base=None, response_provider=provider)
+        return None
+
+    async def hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
+        self.asked_for.append(organization_id)
+        if self.error is not None:
+            raise self.error
+        return self.providers
+
+
+def _bind_hosted(client: TestClient, port: _HostedPort) -> None:
+    """Rebind the port on the app under test. The conftest rebuilds the container per test."""
+    container: Any = client.app.state.container  # type: ignore[attr-defined]
+    container.bind(ModelProviderPort, lambda session: port)
 
 
 def test_the_master_key_still_sees_every_priced_model(
@@ -368,3 +405,89 @@ def test_a_provider_whose_only_key_will_not_decrypt_is_withheld(
     listed = _catalog_as(client, world, "beta_member")
     assert _ANTHROPIC_MODEL in listed, "beta's decryptable key still counts"
     assert _MISTRAL_MODEL not in listed, "the undecryptable key's provider is withheld"
+
+
+def test_a_hosted_provider_is_listed_for_a_member_of_an_organization_holding_no_key_for_it(
+    client: TestClient, world: _World
+) -> None:
+    """The deployment serves mistral on its own credential, so every tenant may call it (otari-ai#1969 follow-up).
+
+    Alpha holds a BYO key for openai only. Without the hosted rung the member is
+    shown openai alone, though a request for the mistral model would be served.
+    """
+    port = _HostedPort("mistral")
+    _bind_hosted(client, port)
+
+    listed = _listing_as(client, world, "alpha_member")
+    assert set(listed) == {_OPENAI_MODEL, _OPENAI_OTHER, _MISTRAL_MODEL}
+    assert listed[_MISTRAL_MODEL]["deployment_managed"] is True, "the deployment pays the mistral bill"
+    assert listed[_OPENAI_MODEL]["deployment_managed"] is False, "alpha's own key pays the openai bill"
+    assert port.asked_for == [world.alpha], "the port is asked for the caller's organization, once"
+
+
+def test_a_hosted_provider_the_organization_also_holds_a_key_for_is_the_organizations_to_price(
+    client: TestClient, world: _World
+) -> None:
+    """BYO wins at dispatch, so the catalog does not flag the model as deployment-supplied.
+
+    Same provider, two tenants: Alpha's openai runs on Alpha's key and Beta's on
+    the deployment's, so the same model id carries a different flag for each,
+    which is the flag the dashboard reads to offer or withhold the rate override.
+    """
+    _bind_hosted(client, _HostedPort("openai"))
+
+    alpha = _listing_as(client, world, "alpha_member")
+    assert alpha[_OPENAI_MODEL]["deployment_managed"] is False
+
+    beta = _listing_as(client, world, "beta_member")
+    assert set(beta) == {_OPENAI_MODEL, _OPENAI_OTHER, _ANTHROPIC_MODEL}
+    assert beta[_OPENAI_MODEL]["deployment_managed"] is True
+    assert beta[_ANTHROPIC_MODEL]["deployment_managed"] is False
+
+
+def test_the_single_model_read_agrees_with_the_listing_about_a_hosted_model(client: TestClient, world: _World) -> None:
+    _bind_hosted(client, _HostedPort("mistral"))
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
+    try:
+        response = client.get(f"{API_ROOT}/models/{_MISTRAL_MODEL}")
+        assert response.status_code == status.HTTP_200_OK, response.text
+        assert response.json()["deployment_managed"] is True
+        assert client.get(f"{API_ROOT}/models/{_ANTHROPIC_MODEL}").status_code == status.HTTP_404_NOT_FOUND
+    finally:
+        client.cookies.clear()
+
+
+def test_the_grouped_catalog_lists_a_hosted_model_for_a_member(client: TestClient, world: _World) -> None:
+    """The dashboard's Models page reads the grouped catalog, which builds the same merged view."""
+    _bind_hosted(client, _HostedPort("mistral"))
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
+    try:
+        response = client.get(f"{API_ROOT}/catalog/models")
+        assert response.status_code == status.HTTP_200_OK, response.text
+        selectors = {selector for model in response.json()["models"] for selector in model["selectors"]}
+        assert _MISTRAL_MODEL in selectors
+        assert _ANTHROPIC_MODEL not in selectors
+    finally:
+        client.cookies.clear()
+
+
+def test_an_operator_session_is_not_flagged_by_the_hosted_rung(client: TestClient, world: _World) -> None:
+    """The operator is exempt from the pricing rule, and their catalog was never narrowed."""
+    _bind_hosted(client, _HostedPort("mistral"))
+    listed = _listing_as(client, world, "superuser")
+    assert set(listed) == set(_ALL_MODELS)
+    assert listed[_MISTRAL_MODEL]["deployment_managed"] is False
+
+
+def test_a_hosted_port_that_fails_degrades_the_catalog_to_the_byo_view(client: TestClient, world: _World) -> None:
+    """A read must not 500 because another build's adapter could not answer; it loses the hosted rung."""
+    _bind_hosted(client, _HostedPort("mistral", error=RuntimeError("fleet store unreachable")))
+    assert _catalog_as(client, world, "alpha_member") == {_OPENAI_MODEL, _OPENAI_OTHER}
+
+
+def test_an_identity_with_no_live_membership_is_not_shown_hosted_models(client: TestClient, world: _World) -> None:
+    """The hosted rung is keyed on an organization, which this caller does not have."""
+    port = _HostedPort("mistral")
+    _bind_hosted(client, port)
+    assert _catalog_as(client, world, "orphan") == set()
+    assert port.asked_for == []

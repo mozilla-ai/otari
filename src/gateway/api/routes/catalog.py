@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.api.deps import (
+    ModelProviderPortDep,
     get_config,
     get_db,
     get_session_identity,
@@ -49,6 +50,7 @@ from gateway.models.pricing import PricingSnapshot
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
 from gateway.models.usage import UsageLog
+from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.catalog_selectors import (
     current_selector_index,
     model_selector_for_slug,
@@ -595,11 +597,17 @@ def _elsewhere(grouped: _Grouped, key: str, offered_types: set[str]) -> list[Cat
 
 
 async def _merged_for(
-    db: AsyncSession, config: GatewayConfig, caller: CatalogCaller, session_identity: TenancyUser | None
+    db: AsyncSession,
+    config: GatewayConfig,
+    caller: CatalogCaller,
+    session_identity: TenancyUser | None,
+    model_provider: ModelProviderPort,
 ) -> MergedCatalog:
     if caller is None:
         return await build_merged_catalog(db, config, auth=(None, False), session_identity=None, anonymous=True)
-    return await build_merged_catalog(db, config, auth=caller, session_identity=session_identity)
+    return await build_merged_catalog(
+        db, config, auth=caller, session_identity=session_identity, model_provider=model_provider
+    )
 
 
 @router.get("/models")
@@ -608,6 +616,7 @@ async def list_catalog(
     config: Annotated[GatewayConfig, Depends(get_config)],
     caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    model_provider: ModelProviderPortDep,
     at_context: Annotated[
         int | None,
         Query(
@@ -627,7 +636,7 @@ async def list_catalog(
     the catalog is public, sees the configured instances at the deployment's
     rates and nothing that belongs to a tenant.
     """
-    merged = await _merged_for(db, config, caller, session_identity)
+    merged = await _merged_for(db, config, caller, session_identity, model_provider)
     grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity)
     models = [
         _summary(identity, [grouped.offerings[selector] for selector in identity.selectors], at_context)
@@ -648,6 +657,7 @@ async def get_catalog_model(
     config: Annotated[GatewayConfig, Depends(get_config)],
     caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    model_provider: ModelProviderPortDep,
 ) -> CatalogModelDetail:
     """One model and every offering of it this caller may use.
 
@@ -662,7 +672,7 @@ async def get_catalog_model(
     A signed-in caller's offerings also carry their organization's own usage of
     each over the last 30 days.
     """
-    merged = await _merged_for(db, config, caller, session_identity)
+    merged = await _merged_for(db, config, caller, session_identity, model_provider)
     grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity)
     identity = next((identity for identity in grouped.identities.values() if identity.id == model_id), None)
     if identity is None:
