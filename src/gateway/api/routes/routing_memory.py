@@ -52,7 +52,7 @@ from gateway.api.deps import get_config, get_db, require_deployment_operator
 from gateway.api.routes._helpers import resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.models.entities import RouterPreference, RoutingMemory
+from gateway.models.routing import RouterPreference, RoutingMemory
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.policy_store import effective_policies
 from gateway.services.provider_kwargs import resolve_provider_selector

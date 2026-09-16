@@ -28,7 +28,7 @@ import pytest
 
 from gateway.api.routes._helpers import conversation_opening_text, first_user_text, latest_user_text
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import RoutingMemory
+from gateway.models.routing import RoutingMemory
 from gateway.services import alias_service
 from gateway.services.routing import knn
 from gateway.services.routing.backends import RoutingContext
