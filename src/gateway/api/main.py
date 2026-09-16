@@ -202,6 +202,9 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig, enabled_featur
         # (otari#822); ``hosted_mode.DATA_PLANE_PREFIXES`` answers its prefix
         # there with the 404 that names the data plane.
         api.include_router(playground.router)
+    # The provider registry, which the organization provider-key form reads to
+    # offer its BYO choices. Split off the operator router because that form's
+    # audience is a tenant's owners and admins, who operate nothing.
     api.include_router(providers.catalog_router)
     api.include_router(providers.router)
     api.include_router(keys.router)
