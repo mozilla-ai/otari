@@ -79,8 +79,10 @@ def test_the_registry_is_a_literal_tuple() -> None:
     ]
     assert len(assignments) == 1, "CORE_FEATURES is assigned once, with its annotation"
     value = assignments[0].value
-    assert isinstance(value, ast.Tuple)
-    assert all(isinstance(element, ast.Attribute | ast.Name) for element in value.elts)
+    assert isinstance(value, ast.Tuple), "CORE_FEATURES is a tuple literal, not a computed value"
+    assert all(isinstance(element, ast.Attribute | ast.Name) for element in value.elts), (
+        "each entry names the CoreFeature its own module declares; none is constructed in the registry"
+    )
 
 
 def test_registry_features_have_distinct_names_and_surfaces() -> None:
