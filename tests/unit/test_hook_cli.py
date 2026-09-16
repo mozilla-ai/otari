@@ -264,6 +264,47 @@ def test_invalid_config_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Pa
     assert "could not load config" in result.output
 
 
+@pytest.mark.parametrize(
+    ("body", "case"),
+    [
+        (ValueError("Expecting value: line 1 column 1 (char 0)"), "not JSON at all"),
+        ({"results": [{"gate_id": "g", "outcome": "fail"}]}, "JSON with no 'blocked'"),
+        ({"blocked": True}, "JSON with no 'results'"),
+        ({"results": "not-a-list", "blocked": True}, "'results' of the wrong type"),
+    ],
+)
+def test_unreadable_response_does_not_block(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, body: object, case: str
+) -> None:
+    """A response this command cannot read fails open like an unreachable one.
+
+    The command's contract is that it blocks on a required gate failing and on
+    nothing else. A body that is not JSON, or JSON of an unexpected shape, used
+    to escape the ``httpx.HTTPError`` handler as a bare ValueError/KeyError and
+    surface as a traceback.
+    """
+
+    class _Unreadable:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> Any:
+            if isinstance(body, Exception):
+                raise body
+            return body
+
+    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: _Unreadable())
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 0, f"{case}: {result.output}"
+    assert "unreadable response" in result.output, case
+
+
 def test_unreachable_gateway_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
         raise httpx.ConnectError("connection refused")
@@ -300,7 +341,10 @@ def test_falls_back_to_configured_master_key_and_localhost(
     result = CliRunner().invoke(gateway_cli.hook, [], input=json.dumps(payload))
     assert result.exit_code == 0, result.output
     assert captured["url"] == "http://localhost:8000/api/v1/hooks/check"
-    assert captured["headers"]["Otari-Key"] == "Bearer test-master-key"
+    # The bare token, not a ``Bearer `` prefix: deps._extract_bearer_token
+    # tolerates the prefix for back-compat, but a header named for the key
+    # carries the raw token.
+    assert captured["headers"]["Otari-Key"] == "test-master-key"
 
 
 def test_advisory_only_failure_warns_without_blocking(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:

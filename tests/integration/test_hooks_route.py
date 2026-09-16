@@ -5,10 +5,14 @@ Covers auth, the pass/fail/blocked shapes, and the parser's strictness
 """
 
 import time
+from collections.abc import Generator
 
+import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, PLATFORM_TOKEN_ENV_VAR, GatewayConfig
+
+from .conftest import build_test_client
 
 _VALID_POLICY = """\
 schema_version: "1.0"
@@ -179,3 +183,65 @@ def test_many_distinct_short_globs_and_paths_trip_the_comparisons_bound(
     )
     assert response.status_code == 422
     assert "comparisons" in response.json()["detail"]
+
+
+class TestHybridMode:
+    """The Hook Server answers on a hybrid gateway too.
+
+    A gate evaluates only the policy and evidence the caller sent in the same
+    request, so it needs no local tenancy, no provider and no database. Mounted
+    on the standalone side of ``_register_core_routers``' hybrid early return,
+    the endpoint 404s on a hybrid gateway and ``otari hook`` fails open against
+    it forever, which is silent: fail-open is what the command promises for an
+    unreachable gateway, so nothing tells the caller their gates stopped
+    running.
+    """
+
+    @pytest.fixture(scope="class")
+    def hybrid_client(self, postgres_url: str) -> Generator[TestClient]:
+        # The platform token is resolved once and cached on the config, so it
+        # need only be in the environment until that resolution happens, which
+        # is what the explicit ``_resolve_platform_token()`` forces here (it is
+        # otherwise lazy, and would fire later against an environment the
+        # context has already restored). Left set for the whole fixture, it
+        # would make the next standalone app built in this process refuse to
+        # start.
+        with pytest.MonkeyPatch.context() as env:
+            env.setenv(PLATFORM_TOKEN_ENV_VAR, "test-platform-token")
+            config = GatewayConfig(
+                mode="hybrid",
+                database_url=postgres_url,
+                master_key="test-master-key",
+                auto_migrate=False,
+                require_pricing=False,
+                model_discovery=False,
+                bootstrap_api_key=False,
+                platform={"base_url": "http://localhost:8100/api/v1"},
+            )
+            config._resolve_platform_token()
+        yield from build_test_client(config)
+
+    def test_is_mounted_and_evaluates(self, hybrid_client: TestClient) -> None:
+        response = hybrid_client.post(
+            f"{API_ROOT}/hooks/check",
+            json={"policy_yaml": _VALID_POLICY, "changed_paths": ["scratch/notes.txt"]},
+            headers={"Authorization": "Bearer any-platform-user-token"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["blocked"] is True
+        assert body["results"][0]["outcome"] == "fail"
+
+    def test_still_requires_a_token(self, hybrid_client: TestClient) -> None:
+        """Hybrid cannot validate the token locally, but it does require one.
+
+        The same thing the stateless MCP route does in this mode. Weaker than
+        the standalone check on purpose: this endpoint reads no tenant data and
+        bills nothing, and what one request can cost is bounded by the route's
+        own work budgets rather than by who sent it.
+        """
+        response = hybrid_client.post(
+            f"{API_ROOT}/hooks/check",
+            json={"policy_yaml": _VALID_POLICY, "changed_paths": ["README.md"]},
+        )
+        assert response.status_code == 401

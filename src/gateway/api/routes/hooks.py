@@ -17,20 +17,61 @@ plan's audit of the old POC calls out).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.agent_runtime.domain.evaluators import evaluate_changed_path
 from gateway.agent_runtime.domain.policy import MAX_POLICY_BYTES, PolicyError, parse_policy
 from gateway.agent_runtime.domain.types import ChangedPathEvidence
-from gateway.api.deps import verify_api_key_or_master_key
+from gateway.api.deps import get_config, get_db_if_needed, verify_api_key_or_master_key
+from gateway.api.routes._platform import _extract_platform_user_token
+from gateway.core.config import GatewayConfig
+
+
+# ``AsyncSession`` and ``GatewayConfig`` are imported at runtime rather than
+# under ``TYPE_CHECKING``, for the reason mcp.py spells out: this module uses
+# postponed annotations, and FastAPI resolves a dependency's signature at
+# import time to decide what each parameter is. Left as strings it cannot
+# resolve, it reads both as query parameters and every request 422s before the
+# handler runs.
+async def verify_hook_caller(
+    request: Request,
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> None:
+    """Authenticate a Hook Server caller in whichever mode this gateway runs.
+
+    Standalone and hosted validate an API key or the master key against the
+    local database, exactly as ``POST /api/v1/usage/external-events`` does.
+
+    Hybrid has no local tenancy to validate against, so it only requires a
+    bearer token to be present, the same thing the stateless MCP route does
+    there. That is weaker on purpose and it is all this endpoint needs: it
+    reads no tenant data, writes nothing, bills nothing, and evaluates only
+    the policy and evidence the caller sent in the same request. What a
+    request can cost is bounded by the work budgets below, not by who sent it.
+    """
+    if config.is_hybrid_mode:
+        _extract_platform_user_token(request)
+        return
+
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication temporarily unavailable, please retry",
+        )
+    await verify_api_key_or_master_key(request, db, config)
+
 
 # The gate lives on the router, not the route: matches usage.ingest_router, so
 # a route added here later inherits it rather than needing to remember it.
 router = APIRouter(
     prefix="/hooks",
     tags=["hooks"],
-    dependencies=[Depends(verify_api_key_or_master_key)],
+    dependencies=[Depends(verify_hook_caller)],
 )
 
 # A submitted evidence list is caller-observed, not Otari-observed, but it is

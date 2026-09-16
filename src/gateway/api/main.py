@@ -148,6 +148,13 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
         # database; standalone uses the ordinary API/master-key path.
         api.include_router(mcp.router)
 
+    # Agent Gates' Hook Server, mounted in every mode. It evaluates only the
+    # policy and evidence the caller sent in the same request, so it needs no
+    # local tenancy, no provider and no database, and a hybrid gateway is as
+    # able to answer it as a standalone one. ``hooks.verify_hook_caller``
+    # authenticates per mode.
+    api.include_router(hooks.router)
+
     if config.is_hybrid_mode:
         # The hybrid stub router is mounted by register_routers, after the
         # contributed routers; see the note there.
@@ -194,7 +201,6 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
         # (otari#822); ``hosted_mode.DATA_PLANE_PREFIXES`` answers its prefix
         # there with the 404 that names the data plane.
         api.include_router(playground.router)
-    api.include_router(hooks.router)
     api.include_router(providers.router)
     api.include_router(keys.router)
     api.include_router(users.router)

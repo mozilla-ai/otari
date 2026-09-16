@@ -11,7 +11,7 @@ import click
 import uvicorn
 from uvicorn.config import logger
 
-from gateway.core.config import API_ROOT, load_config
+from gateway.core.config import API_KEY_HEADER, API_ROOT, load_config
 from gateway.log_config import setup_logger
 from gateway.main import create_app
 
@@ -375,19 +375,27 @@ def hook(harness: str, config: str | None, url: str | None, api_key: str | None)
         response = httpx.post(
             f"{resolved_url.rstrip('/')}{API_ROOT}/hooks/check",
             json={"policy_yaml": gates_file.read_text(encoding="utf-8"), "changed_paths": changed_paths},
-            headers={"Otari-Key": f"Bearer {resolved_key}"},
+            headers={API_KEY_HEADER: resolved_key},
             timeout=15.0,
         )
         response.raise_for_status()
         result = response.json()
+        failing = [gate for gate in result["results"] if gate["outcome"] not in ("pass", "not_applicable")]
+        blocked = result["blocked"]
     except httpx.HTTPError as exc:
         click.echo(f"otari hook: could not reach {resolved_url} ({exc}), not blocking.", err=True)
         return
+    except (ValueError, TypeError, KeyError) as exc:
+        # A body that is not JSON, or is JSON of a shape this command does not
+        # recognize. Same fail-open contract as an unreachable gateway: this
+        # command blocks on a required gate failing and on nothing else, so a
+        # response it cannot read must not surface as a traceback.
+        click.echo(f"otari hook: unreadable response from {resolved_url} ({exc!r}), not blocking.", err=True)
+        return
 
-    # Mirrors Outcome's own non-blocking set (types.py), not just "pass":
-    # a future gate type's not_applicable is a clean result too, and must not
-    # get reported here as something the caller needs to look at.
-    failing = [gate for gate in result["results"] if gate["outcome"] not in ("pass", "not_applicable")]
+    # `failing` mirrors Outcome's own non-blocking set (types.py), not just
+    # "pass": a future gate type's not_applicable is a clean result too, and
+    # must not get reported here as something the caller needs to look at.
     if not failing:
         return
 
@@ -395,7 +403,7 @@ def hook(harness: str, config: str | None, url: str | None, api_key: str | None)
         f"  [{'x' if gate['enforcement'] == 'required' else '!'}] {gate['gate_id']}: {gate['message']}"
         for gate in failing
     )
-    if result.get("blocked"):
+    if blocked:
         click.echo(f"otari hook: blocked ({harness}, {event}):\n{summary}", err=True)
         raise SystemExit(2)
     # An advisory gate failed but nothing required did: warn without

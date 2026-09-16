@@ -89,7 +89,7 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("tool_settings.reader", tool_settings.reader_router, verify_master_key),
     ("tools", tools.router, verify_catalog_reader),
     ("usage.ingest", usage.ingest_router, verify_api_key_or_master_key),
-    ("hooks", hooks.router, verify_api_key_or_master_key),
+    ("hooks", hooks.router, hooks.verify_hook_caller),
 ]
 
 
@@ -137,6 +137,7 @@ _UNGATED_ROUTERS: dict[str, str] = {
 # then authorize the caller against the organization or workspace themselves.
 _ROUTER_LEVEL_GATES: frozenset[Callable[..., Any]] = frozenset(
     {
+        hooks.verify_hook_caller,
         require_deployment_operator,
         verify_api_key_or_master_key,
         verify_catalog_reader,
