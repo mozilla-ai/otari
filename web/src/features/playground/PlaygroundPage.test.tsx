@@ -625,7 +625,12 @@ describe("comparing two models", () => {
     // rating bar, because the failure this catches is specifically one panel
     // cancelling the other: the two streams run at once, and an earlier version
     // shared one abort controller, so starting B stopped A mid-sentence.
-    expect(await screen.findAllByText("an answer")).toHaveLength(2)
+    // `waitFor` on the count, not `findAllByText` then a length assertion:
+    // the two panels stream independently, so a `find` resolves on whichever
+    // answered first and the length is then read one short.
+    await waitFor(() =>
+      expect(screen.getAllByText("an answer")).toHaveLength(2),
+    )
     expect(
       await screen.findByRole("button", { name: "Model A answered better" }),
     ).toBeInTheDocument()
