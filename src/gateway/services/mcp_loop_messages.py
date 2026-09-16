@@ -95,6 +95,11 @@ WEB_SEARCH_TOOL_USE_ID_PREFIX = "otari_srvtoolu_"
 # includes the beta-only MCP activity block vocabulary.
 MCP_CLIENT_BETA = "mcp-client-2025-11-20"
 
+# Backend-supplied titles are unbounded. Generous for a real page title, and
+# small enough that a full result set of them cannot approach the tool-result
+# byte limit on its own.
+_CITATION_TITLE_MAX_BYTES = 512
+
 
 def _web_search_result_block(
     tool_use_id: str,
@@ -120,36 +125,22 @@ def _append_bounded_citation(
     title: str,
     page_age: str | None,
 ) -> None:
-    def citation(candidate_title: str) -> WebSearchResultBlock:
-        return WebSearchResultBlock(
-            type="web_search_result",
-            url=url,
-            title=candidate_title,
-            page_age=page_age,
-            encrypted_content="",
-        )
+    """Append one citation, keeping the whole result block inside its byte limit.
 
-    complete = citation(title)
-    if _web_search_result_size(tool_use_id, [*citations, complete]) <= WEB_RETRIEVAL_RESULT_MAX_BYTES:
-        citations.append(complete)
+    Capping the title is what keeps a normal result set well under the limit,
+    since the backend bounds the hit count and ``page_age`` is already capped.
+    The size check is the backstop for the remaining unbounded field, the URL.
+    """
+    candidate = WebSearchResultBlock(
+        type="web_search_result",
+        url=url,
+        title=truncate_utf8(title, _CITATION_TITLE_MAX_BYTES, suffix="…").text,
+        page_age=page_age,
+        encrypted_content="",
+    )
+    if _web_search_result_size(tool_use_id, [*citations, candidate]) > WEB_RETRIEVAL_RESULT_MAX_BYTES:
         return
-
-    minimal = citation("")
-    if _web_search_result_size(tool_use_id, [*citations, minimal]) > WEB_RETRIEVAL_RESULT_MAX_BYTES:
-        return
-
-    best = minimal
-    low = 0
-    high = min(len(title.encode("utf-8")), WEB_RETRIEVAL_RESULT_MAX_BYTES)
-    while low <= high:
-        midpoint = (low + high) // 2
-        candidate = citation(truncate_utf8(title, midpoint, suffix="…").text)
-        if _web_search_result_size(tool_use_id, [*citations, candidate]) <= WEB_RETRIEVAL_RESULT_MAX_BYTES:
-            best = candidate
-            low = midpoint + 1
-        else:
-            high = midpoint - 1
-    citations.append(best)
+    citations.append(candidate)
 
 
 def _native_web_search_blocks(query: str, results: list[dict[str, Any]]) -> list[Any]:

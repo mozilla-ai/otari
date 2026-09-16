@@ -91,23 +91,33 @@ class InvalidStoredWebSearchDomainError(ValueError):
     """A legacy workspace row contains a domain rule that cannot be enforced."""
 
 
+def _canonical_host(raw: str) -> str:
+    """Canonicalize one domain-list entry, accepting cookie-style leading dots.
+
+    A leading dot is stripped rather than refused: ``.example.com`` has exactly
+    one reading, and an entry here already covers its subdomains, so it is the
+    same rule written in cookie syntax. Raises
+    :class:`DomainRuleValidationError` for anything that is not a bare host.
+    """
+    candidate = raw.strip()
+    if candidate.startswith("."):
+        candidate = candidate[1:]
+    return canonicalize_domain_rule(candidate).value
+
+
 def _normalize_domains(value: list[str] | None) -> list[str] | None:
     """Canonicalize, drop empty entries, and de-duplicate a domain list.
 
-    An all-blank list becomes ``None``. A leading dot is accepted as cookie-style
-    notation for the same DNS suffix rule.
+    An all-blank list becomes ``None``.
     """
     if value is None:
         return None
     seen: dict[str, None] = {}
     for raw in value:
-        candidate = raw.strip()
-        if not candidate:
+        if not raw.strip():
             continue
-        if candidate.startswith("."):
-            candidate = candidate[1:]
         try:
-            host = canonicalize_domain_rule(candidate).value
+            host = _canonical_host(raw)
         except DomainRuleValidationError as exc:
             raise ValueError(
                 f"{raw.strip()!r} is not a bare valid hostname; give a domain such as 'example.com', "
@@ -379,11 +389,8 @@ def _as_tuple(value: list[str] | None, *, stored: bool = False) -> tuple[str, ..
             if stored:
                 raise InvalidStoredWebSearchDomainError("stored web-search domain rule is invalid")
             continue
-        candidate = raw.strip()
-        if candidate.startswith("."):
-            candidate = candidate[1:]
         try:
-            host = canonicalize_domain_rule(candidate).value
+            host = _canonical_host(raw)
         except DomainRuleValidationError as exc:
             if stored:
                 raise InvalidStoredWebSearchDomainError("stored web-search domain rule is invalid") from exc
