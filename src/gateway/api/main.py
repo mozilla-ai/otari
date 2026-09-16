@@ -9,16 +9,19 @@ from gateway.api.routes import (
     auth_oauth,
     auth_password,
     auth_password_reset,
+    auth_profile,
     auth_session,
     auth_signup,
     auth_webauthn,
     batches,
     bootstrap,
     budgets,
+    catalog,
     chat,
     embeddings,
     files,
     health,
+    hooks,
     hosted_mode,
     hybrid_mode,
     images,
@@ -145,6 +148,13 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
         # database; standalone uses the ordinary API/master-key path.
         api.include_router(mcp.router)
 
+    # Agent Gates' Hook Server, mounted in every mode. It evaluates only the
+    # policy and evidence the caller sent in the same request, so it needs no
+    # local tenancy, no provider and no database, and a hybrid gateway is as
+    # able to answer it as a standalone one. ``hooks.verify_hook_caller``
+    # authenticates per mode.
+    api.include_router(hooks.router)
+
     if config.is_hybrid_mode:
         # The hybrid stub router is mounted by register_routers, after the
         # contributed routers; see the note there.
@@ -153,6 +163,7 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
     api.include_router(admin.router)
     api.include_router(auth_session.router)
     api.include_router(auth_password.router)
+    api.include_router(auth_profile.router)
     api.include_router(auth_signup.router)
     api.include_router(auth_password_reset.router)
     api.include_router(auth_webauthn.router)
@@ -177,6 +188,10 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
     # /api/v1/models/{model_id:path} catch-all the catalog router ends with.
     api.include_router(models.operator_router)
     api.include_router(models.catalog_router)
+    # The same merged catalog, folded by model for a chooser rather than listed
+    # flat for an SDK. Same reader gate as /v1/models.
+    api.include_router(catalog.router)
+    api.include_router(catalog.operator_router)
     if serves_data_plane:
         # Both planes at once, which is why it is mounted here rather than with
         # the data plane above: the Playground page reads the management surface

@@ -5,6 +5,7 @@ import {
   formatCost,
   formatNumber,
   formatPct,
+  formatRate,
   formatRelative,
   formatReleaseDate,
   formatTokens,
@@ -83,6 +84,19 @@ describe("formatCost", () => {
   it("uses two decimals for normal amounts", () => {
     expect(formatCost(12.5)).toBe("$12.50")
     expect(formatCost(null)).toBe("$0.00")
+  })
+})
+
+describe("formatRate", () => {
+  it("keeps the fourth decimal a published rate can carry", () => {
+    expect(formatRate(0.075)).toBe("$0.075")
+    expect(formatRate(0.0125)).toBe("$0.0125")
+    expect(formatRate(0.037)).toBe("$0.037")
+  })
+
+  it("still reads a whole-dollar rate as money", () => {
+    expect(formatRate(3)).toBe("$3.00")
+    expect(formatRate(15)).toBe("$15.00")
   })
 })
 

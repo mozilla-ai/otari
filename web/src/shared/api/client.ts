@@ -27,6 +27,16 @@ let unauthorizedHandler: (() => void) | null = null
 // once, so moving the API again is a change here and nowhere else.
 export const API_ROOT = "/api/v1"
 
+/**
+ * The gateway's build id, served beside the dashboard rather than under the API.
+ *
+ * Named here rather than spelled at the one call site so the e2e spec that
+ * proves the gateway answers it reads the same constant the poll does. The two
+ * drifting apart is the defect: a caller that moves back under `API_ROOT` gets
+ * a 404 that nothing reports, because a failed poll means "no answer yet".
+ */
+export const DASHBOARD_BUILD_PATH = "/dashboard-build.json"
+
 function apiUrl(path: string): string {
   return `${API_ROOT}${path}`
 }
@@ -389,6 +399,47 @@ export function longRequestSignal(): AbortSignal {
 // stalls trips the same deadline on the JSON read instead.
 function isTimeout(error: unknown): boolean {
   return error instanceof DOMException && error.name === "TimeoutError"
+}
+
+/**
+ * Read something the gateway serves at its own root rather than under the API.
+ *
+ * A handful of things are not API resources and are mounted beside the
+ * dashboard itself: the page, its assets, and `/dashboard-build.json`, which is
+ * `include_in_schema=False` and has no place in the OpenAPI surface. `apiFetch`
+ * prepends `API_ROOT` to everything it is given, which is right for a resource
+ * and wrong for these, so they come through here instead.
+ *
+ * That difference is the whole reason this exists. When the API moved under
+ * `/api/v1` (#1026) every caller was rewritten to drop the version and let
+ * `apiFetch` add the root; the build path was rewritten with them, and has
+ * asked for `/api/v1/dashboard-build.json` ever since, which is a 404. Nothing
+ * surfaced it, because the one caller treats a failed poll as "no answer yet".
+ *
+ * Unauthenticated by design, like the page it describes, so it has no 401
+ * sign-out path: there is nothing here a session could authorize. The
+ * credential is omitted explicitly rather than left to `fetch`, whose default
+ * is `same-origin` and would therefore attach the session cookie to every poll
+ * for the life of an open tab. Nothing reads it, so nothing should send it.
+ */
+export async function siteFetch<T>(path: string): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(path, {
+      credentials: "omit",
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+  } catch (error) {
+    if (isTimeout(error)) {
+      throw new ApiError(0, TIMEOUT_MESSAGE)
+    }
+    throw new ApiError(0, "Network error: could not reach the gateway.")
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response))
+  }
+  return (await response.json()) as T
 }
 
 export async function apiFetch<T>(

@@ -284,6 +284,7 @@ class OrganizationService:
                 user_id=user.id,
                 email=user.email,
                 full_name=user.full_name,
+                has_password=user.hashed_password is not None,
             ),
             # The platform answers "does this org have a self-hosted gateway
             # attached". A standalone deployment reading this *is* that gateway,

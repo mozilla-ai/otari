@@ -25,8 +25,16 @@ row has a reason:
 | --- | --- | --- |
 | Master key, in a header | no | nothing further: the claim |
 | Master key, in a header | yes | nothing further: operator recovery |
-| Session cookie | no | nothing further: only a master-key sign-in could have minted that session |
+| Session cookie | no | nothing further: the session itself is the proof |
 | Session cookie | yes | the current password |
+
+A cookie-authenticated caller with no password is the ordinary state of somebody
+who signs in through Google, GitHub or a passkey, and of a roster entry that
+never set one. There is no old password to prove, and the session in hand is
+already a completed sign-in, so this is where such an identity gains a password
+rather than a wall it cannot get past (mozilla-ai/otari-ai#2099). The dashboard
+renders that form from ``has_password`` on the membership context's ``caller``,
+which is the same question asked ahead of the request.
 
 The master key never has to present the current one because it is the
 deployment-wide credential: a caller holding it can already do anything the

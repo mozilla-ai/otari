@@ -69,6 +69,14 @@ export type SetPasswordRequest = Schemas["SetPasswordRequest"]
 export type PasswordResponse = Schemas["PasswordResponse"]
 
 // ---------------------------------------------------------------------------
+// The one thing about itself an identity may change that is not a credential:
+// the name it goes by. `PATCH /v1/auth/profile` answers with the same
+// `CallerIdentity` the membership context carries, so the account page can seat
+// the new name where the shell read the old one.
+// ---------------------------------------------------------------------------
+export type UpdateProfileRequest = Schemas["UpdateProfileRequest"]
+
+// ---------------------------------------------------------------------------
 // The public auth flows (otari#650): signup, email verification, and password
 // recovery. Every one of them answers a caller who holds neither the master key
 // nor a session, so the address or the token in the request is the whole of
@@ -258,6 +266,16 @@ export type DiscoverableProvider = Schemas["DiscoverableProvider"]
 export type DiscoverableModelsResponse = Schemas["DiscoverableModelsResponse"]
 export type PricingResponse = Schemas["PricingResponse"]
 export type PricingTier = Schemas["PricingTier"]
+
+// The catalog folded by model (`/v1/catalog`): one summary per model in the
+// list, and one detail carrying every offering of it the caller may use.
+export type CatalogResponse = Schemas["CatalogResponse"]
+export type CatalogModelSummary = Schemas["CatalogModelSummary"]
+export type CatalogModelDetail = Schemas["CatalogModelDetail"]
+export type CatalogOffering = Schemas["CatalogOffering"]
+export type CatalogCapabilities = Schemas["CatalogCapabilities"]
+export type CatalogElsewhere = Schemas["CatalogElsewhere"]
+export type CatalogOfferingUsage = Schemas["OfferingUsage"]
 /** A tier as stored, which may be a shape this client cannot read (see the spec). */
 export type StoredPricingTier = NonNullable<
   ModelPricingInfo["pricing_tiers"]
@@ -272,7 +290,9 @@ export function isPricingTier(tier: StoredPricingTier): tier is PricingTier {
     typeof (tier as PricingTier).min_input_tokens === "number"
   )
 }
-export type SetPricingRequest = Schemas["SetPricingRequest"]
+// `unit` carries a schema default, so the generator emits it as required; the
+// callers that price a model omit it and the gateway reads tokens.
+export type SetPricingRequest = Defaulted<Schemas["SetPricingRequest"], "unit">
 // Per-organization rate overrides, which sit above the deployment price list
 // above. Same DTO names as otari.ai's own endpoint, so the two clients stay
 // recognizable side by side.
@@ -280,10 +300,14 @@ export type OrganizationPricingOverride =
   Schemas["OrganizationModelPricingPublic"]
 export type OrganizationPricingOverrides =
   Schemas["OrganizationModelPricingsPublic"]
-export type CreateOrganizationPricingOverride =
-  Schemas["OrganizationModelPricingCreate"]
-export type UpdateOrganizationPricingOverride =
-  Schemas["OrganizationModelPricingUpdate"]
+export type CreateOrganizationPricingOverride = Defaulted<
+  Schemas["OrganizationModelPricingCreate"],
+  "unit"
+>
+export type UpdateOrganizationPricingOverride = Defaulted<
+  Schemas["OrganizationModelPricingUpdate"],
+  "unit"
+>
 // The organization's own budgets and the ceilings enforcing them, which are the
 // tenant-scoped counterparts to `Budget` and `ScopedBudget` above. Separate
 // types rather than the same ones: these carry an owner and, on a ceiling,
@@ -298,6 +322,8 @@ export type UpdateOrganizationSpendCeiling =
   Schemas["OrganizationScopedBudgetUpdate"]
 export type PricingRefreshChange = Schemas["PricingRefreshChangeResponse"]
 export type PricingRefreshPreview = Schemas["PricingRefreshPreviewResponse"]
+export type AcceptedPricingSnapshot = Schemas["AcceptedSnapshotResponse"]
+export type PricingDriftRow = Schemas["PricingDriftRow"]
 export type ProviderInfo = Schemas["ProviderInfoSchema"]
 export type ProviderCapabilities = Schemas["ProviderCapabilitiesSchema"]
 export type ProvidersResponse = Schemas["ProvidersResponse"]
@@ -423,6 +449,8 @@ export type SwitchOrganizationRequest =
   Schemas["SwitchActiveOrganizationRequest"]
 /** An organization plus the caller's standing in it: what every tenancy page reads first. */
 export type OrganizationContext = Schemas["OrganizationMembershipContextPublic"]
+/** Who is signed in, as against what they may do: the person the chrome draws. */
+export type CallerIdentity = Schemas["CallerIdentityPublic"]
 // The caller's own workspace memberships, carried on the context so the shell
 // can seed its switcher from the call it already makes. Not a directory of the
 // organization's workspaces: listing those is a separate authorized read.

@@ -2193,6 +2193,117 @@ describe("RoutingPage", () => {
   })
 })
 
+// otari-ai#2087: the page showed an operator every tenant's stored rows and an
+// admin every workspace of their organization's, while resolution is scoped to
+// one workspace. Both reads and both writes name the selected workspace now,
+// and the surface they land on is still the caller's role.
+describe("RoutingPage scoped to the selected workspace", () => {
+  const OPERATOR_WORKSPACE = ADMIN_WORKSPACE
+
+  function operatorInWorkspace(): OrganizationContext {
+    return organizationContext({
+      workspace_memberships: [
+        { workspace_id: OPERATOR_WORKSPACE, name: "Alpha one", role: "owner" },
+      ],
+    })
+  }
+
+  it("names the selected workspace on the operator's list read", async () => {
+    const { calls } = mockApi([policy("fast", CHAIN)], null, [], {
+      context: operatorInWorkspace(),
+    })
+    renderInWorkspace(<RoutingPage />)
+
+    await screen.findByText("fast")
+    const listed = calls.filter(
+      (call) =>
+        call.method === "GET" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
+    )
+    expect(listed.length).toBeGreaterThan(0)
+    for (const call of listed) {
+      expect(call.url).toContain(`workspace_id=${OPERATOR_WORKSPACE}`)
+    }
+  })
+
+  it("names the selected workspace on an admin's list read", async () => {
+    const { calls } = mockApi([], null, [], {
+      context: adminContext(),
+      memberPolicies: [policy("tenant-fast", CHAIN)],
+    })
+    renderInWorkspace(<RoutingPage />)
+
+    await screen.findByText("tenant-fast")
+    const listed = calls.filter(
+      (call) =>
+        call.method === "GET" &&
+        call.url.includes(`${API_ROOT}/organizations/me/routing-policies`),
+    )
+    expect(listed.length).toBeGreaterThan(0)
+    for (const call of listed) {
+      expect(call.url).toContain(`workspace_id=${ADMIN_WORKSPACE}`)
+    }
+  })
+
+  it("lands an operator's create in the workspace they are looking at", async () => {
+    // Without this the write omitted the workspace, so the row went to the
+    // deployment's default one and the page it was created from never showed it.
+    const { calls } = mockApi([], null, [], { context: operatorInWorkspace() })
+    const user = userEvent.setup()
+    renderInWorkspace(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    await user.type(
+      screen.getByRole("textbox", { name: /policy name/i }),
+      "scoped",
+    )
+    await user.type(
+      screen.getByRole("combobox", { name: /^serves$/i }),
+      "openai:gpt-5-mini",
+    )
+    await user.keyboard("{Escape}")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Create policy",
+      }),
+    )
+
+    const written = calls.find(
+      (call) =>
+        call.method === "POST" &&
+        call.url.endsWith(`${API_ROOT}/routing/policies`),
+    )
+    expect(written?.body).toMatchObject({
+      name: "scoped",
+      workspace_id: OPERATOR_WORKSPACE,
+    })
+  })
+
+  it("names the row's workspace on an operator's delete", async () => {
+    const OTHER_WORKSPACE = "66666666-6666-6666-6666-666666666666"
+    const { calls } = mockApi(
+      [policy("doomed", CHAIN, { workspace_id: OTHER_WORKSPACE })],
+      null,
+      [],
+      { context: operatorInWorkspace() },
+    )
+    const user = userEvent.setup()
+    renderInWorkspace(<RoutingPage />)
+
+    await screen.findByText("doomed")
+    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Delete policy",
+      }),
+    )
+
+    const deleted = calls.find((call) => call.method === "DELETE")
+    expect(deleted?.url).toContain(`${API_ROOT}/routing/policies/doomed`)
+    expect(deleted?.url).toContain(`workspace_id=${OTHER_WORKSPACE}`)
+  })
+})
+
 // otari-ai#1969: the Build pages are Edit for admins. An organization admin
 // writes the tenant-scoped routers, which name the workspace and take no user
 // scope; an operator keeps the deployment-wide ones, unchanged above.

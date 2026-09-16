@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any
@@ -8,12 +9,18 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import TelemetryStoragePortDep, get_config, get_db, require_deployment_operator
+from gateway.api.deps import (
+    CallerOrganization,
+    TelemetryStoragePortDep,
+    get_config,
+    get_db,
+    require_deployment_operator,
+)
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, Budget, UsageLog, User
 from gateway.models.money import as_float
-from gateway.repositories.users_repository import get_active_user
+from gateway.repositories.users_repository import in_organization
 from gateway.services.budget_periods import budget_window
 from gateway.services.model_access import validate_allowed_models
 
@@ -153,6 +160,31 @@ def _require_assignable_budget(budget: Budget | None, budget_id: str) -> Budget:
     return budget
 
 
+async def _load_user_in_organization(
+    db: AsyncSession,
+    user_id: str,
+    organization_id: uuid.UUID,
+    *,
+    include_deleted: bool = False,
+) -> User:
+    """Load one user the caller's organization can name, or answer 404.
+
+    Scope and existence answer the same 404, for the reason ``keys.py`` gives
+    for a workspace: otherwise this router reports which ids another
+    organization holds.
+    """
+    statement = select(User).where(User.user_id == user_id, in_organization(organization_id))
+    if not include_deleted:
+        statement = statement.where(User.deleted_at.is_(None))
+    user = (await db.execute(statement)).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with id '{user_id}' not found",
+        )
+    return user
+
+
 @router.post("")
 async def create_user(
     request: CreateUserRequest,
@@ -227,11 +259,24 @@ async def create_user(
 @router.get("")
 async def list_users(
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[UserResponse]:
-    """List all users with pagination."""
-    result = await db.execute(select(User).where(User.deleted_at.is_(None)).offset(skip).limit(limit))
+    """List the users the caller's organization can name, with pagination.
+
+    ``users`` is deployment-global and has no organization column, so which of
+    them this organization can name is derived: a key, usage, or a roster row
+    puts one in reach, and one reached from nowhere at all (the shared
+    ``default`` owner, or a user just created) is shared rather than hidden.
+    See ``repositories.users_repository.in_organization``.
+    """
+    result = await db.execute(
+        select(User)
+        .where(User.deleted_at.is_(None), in_organization(organization_id))
+        .offset(skip)
+        .limit(limit)
+    )
     users = result.scalars().all()
 
     return [UserResponse.from_model(user) for user in users]
@@ -241,15 +286,10 @@ async def list_users(
 async def get_user(
     user_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
 ) -> UserResponse:
-    """Get details of a specific user."""
-    user = await get_active_user(db, user_id)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with id '{user_id}' not found",
-        )
+    """Get details of a user in the caller's organization."""
+    user = await _load_user_in_organization(db, user_id, organization_id)
 
     return UserResponse.from_model(user)
 
@@ -260,15 +300,10 @@ async def update_user(
     request: UpdateUserRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    organization_id: CallerOrganization,
 ) -> UserResponse:
-    """Update a user."""
-    user = await get_active_user(db, user_id)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with id '{user_id}' not found",
-        )
+    """Update a user in the caller's organization."""
+    user = await _load_user_in_organization(db, user_id, organization_id)
 
     # Tri-state like the per-key list: omit leaves it unchanged, a supplied null
     # clears to unrestricted, [] denies all, a list restricts. Note this default
@@ -325,15 +360,10 @@ async def delete_user(
     user_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
     storage: TelemetryStoragePortDep,
+    organization_id: CallerOrganization,
 ) -> None:
-    """Delete a user, and erase the telemetry captured under their name."""
-    user = await get_active_user(db, user_id)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with id '{user_id}' not found",
-        )
+    """Delete a user in the caller's organization, and erase their telemetry."""
+    user = await _load_user_in_organization(db, user_id, organization_id)
 
     # Explicit erasure, not a database ON DELETE cascade: this endpoint
     # soft-deletes the user (deleted_at), so the users row is never hard-deleted
@@ -385,17 +415,12 @@ async def delete_user(
 async def get_user_usage(
     user_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[UsageLogResponse]:
-    """Get usage history for a specific user."""
-    result = await db.execute(select(User).where(User.user_id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with id '{user_id}' not found",
-        )
+    """Get usage history for a user in the caller's organization."""
+    await _load_user_in_organization(db, user_id, organization_id, include_deleted=True)
 
     usage_result = await db.execute(
         select(UsageLog)

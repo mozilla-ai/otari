@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import GrowthSignalPortDep, get_config, get_db
 from gateway.api.routes._public_auth import mail_unavailable, throttle_public_auth
 from gateway.core.config import GatewayConfig
+from gateway.models.tenancy import MAX_FULL_NAME_LENGTH
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.user_service import (
@@ -60,7 +61,9 @@ class SignupRequest(BaseModel):
         max_length=_MAX_SUBMITTED_PASSWORD,
         description="The password to sign in with once verified. At least 8 characters, at most 72 bytes.",
     )
-    full_name: str | None = Field(default=None, max_length=255, description="Filled in only if not already set.")
+    full_name: str | None = Field(
+        default=None, max_length=MAX_FULL_NAME_LENGTH, description="Filled in only if not already set."
+    )
     terms_accepted: bool = Field(default=False, description="Whether the caller accepted this deployment's terms.")
 
 

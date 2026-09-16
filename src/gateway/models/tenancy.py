@@ -222,13 +222,20 @@ class UpdatedAtMixin:
 # =============================================================================
 
 
+# The column width of the name an identity goes by, and therefore the bound
+# every request that writes one has to share. One number rather than a literal
+# per schema: a bound stated in three places is one that two of them stop
+# matching.
+MAX_FULL_NAME_LENGTH = 255
+
+
 class UserBase(SQLModel):
     """Fields an identity carries on the wire."""
 
     email: str | None = Field(default=None, max_length=255)
     is_active: bool = True
     is_superuser: bool = False
-    full_name: str | None = Field(default=None, max_length=255)
+    full_name: str | None = Field(default=None, max_length=MAX_FULL_NAME_LENGTH)
 
 
 class UserCreate(UserBase):
@@ -507,9 +514,9 @@ class CallerIdentityPublic(SQLModel):
     names. Publishing it costs nothing either, since it is the caller's own
     identity and they are holding the credential that resolved to it.
 
-    Both fields are nullable, and for opposite reasons. A local operator
-    identity has no address, because first boot provisions it with a name and
-    nothing to sign in with but the master key; a member added to the roster by
+    ``email`` and ``full_name`` are nullable for opposite reasons. A local
+    operator identity has no address, because first boot provisions it with a
+    name and nothing to sign in with but the master key; a member added by
     address has no name until they claim the identity and supply one. So a shell
     has to be ready to draw either one alone.
     """
@@ -517,6 +524,23 @@ class CallerIdentityPublic(SQLModel):
     user_id: uuid.UUID
     email: str | None = None
     full_name: str | None = None
+    # Whether a password exists, never anything derived from its value. It is
+    # here rather than left to the deployment-wide ``sign_in_methods``, which
+    # answers what this gateway accepts and not what the caller holds: somebody
+    # who signed in with Google, GitHub or a passkey has no current password to
+    # type into the change form (mozilla-ai/otari-ai#2099).
+    #
+    # Required rather than defaulted, because the safe-looking default is the
+    # wrong one: "no password" for an identity that holds one selects the form
+    # the gateway refuses.
+    has_password: bool = Field(
+        description=(
+            "Whether this identity holds a dashboard password. False for one that signs in "
+            "only through an OAuth provider or a passkey, and for a roster entry nobody has "
+            "claimed yet. PUT /api/v1/auth/password requires current_password from a "
+            "cookie-authenticated caller exactly while this is true."
+        ),
+    )
 
 
 class OrganizationMembershipContextPublic(SQLModel):

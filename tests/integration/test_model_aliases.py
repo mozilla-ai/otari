@@ -204,6 +204,7 @@ def test_get_model_alias_surfaces_target_pricing(client: TestClient) -> None:
         "cache_write_price_per_million": None,
         "cache_write_1h_price_per_million": None,
         "pricing_tiers": [],
+        "unit": "tokens",
     }
 
 
@@ -331,7 +332,7 @@ def test_discovered_alias_target_is_hidden_from_the_listing(alias_config: Gatewa
     from any_llm.types.model import Model
 
     discovered = [("anthropic", Model(id="claude-opus-4", created=1_700_000_000, object="model", owned_by="anthropic"))]
-    with patch("gateway.api.routes.models.discover_all_models", new=AsyncMock(return_value=discovered)):
+    with patch("gateway.services.merged_catalog_service.discover_all_models", new=AsyncMock(return_value=discovered)):
         client_gen = build_test_client(alias_config.model_copy(update={"model_discovery": True}))
         discovery_client = next(client_gen)
         try:

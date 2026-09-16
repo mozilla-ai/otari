@@ -277,11 +277,18 @@ def test_the_migration_round_trips_on_postgresql_with_rows_in_the_table(
         command.downgrade(config, _BEFORE_MONEY)
         command.upgrade(config, _MONEY_REVISION)
 
-        stored = test_db.execute(select(ModelPricing)).scalars().one()
-        # One column rather than the whole entity: the mapped class tracks the
+        # Columns rather than the whole entity: the mapped class tracks the
         # current schema and this database is pinned to an older revision, so
         # loading every mapped column would fail on whichever column was added
-        # after this one. The typed ``cost`` column is what the assertion is about.
+        # after this one. The typed rate and ``cost`` columns are what the
+        # assertion is about.
+        stored = test_db.execute(
+            select(
+                ModelPricing.input_price_per_million,
+                ModelPricing.cache_read_price_per_million,
+                ModelPricing.cache_write_price_per_million,
+            )
+        ).one()
         settled_cost = test_db.execute(select(UsageLog.cost).where(UsageLog.id == "round-trip")).scalar_one()
 
         assert stored.input_price_per_million == Decimal("3")

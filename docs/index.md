@@ -47,6 +47,8 @@ Calling the gateway from your own code.
   or drive them from your own application through the caller-orchestrated endpoints.
 - [Files](files.md): file uploads and document understanding for local models.
 - [Guardrails](guardrails.md): request-level checks like prompt-injection detection.
+- [Agent Gates](agent-gates.md): repo-owned policy checks against evidence a coding
+  agent's session reports, served by Otari's Hook Server at `POST /api/v1/hooks/check`.
 - [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.
 - [Use with Codex](use-with-codex.md): route the Codex CLI through Otari over the Responses API, or import its usage without routing.
 - [Use with opencode](use-with-opencode.md): point the opencode CLI at Otari.

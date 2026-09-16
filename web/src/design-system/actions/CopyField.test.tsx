@@ -330,7 +330,13 @@ describe("CopyField, concealed", () => {
     // gets the key and the field still shows the stand-in.
     expect(writeText).toHaveBeenCalledWith("gw-real-secret")
     expect(screen.getByLabelText("Secret key")).toHaveValue(CONCEALED_SECRET)
-    expect(await screen.findByText("Copied to clipboard.")).toBeInTheDocument()
+    expect(await screen.findByText("Copied to clipboard.")).toHaveClass(
+      "sr-only",
+    )
+    expect(screen.getByText("Copied to clipboard.")).toHaveAttribute(
+      "aria-live",
+      "polite",
+    )
   })
 
   it("reveals and selects when no clipboard path will take it", async () => {

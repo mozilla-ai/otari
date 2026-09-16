@@ -123,3 +123,21 @@ export const Invalid: Story = {
 export const Required: Story = {
   args: { value: "", isRequired: true, className: "w-96" },
 }
+
+/**
+ * `hideLabel` keeps the accessible name and takes the visible one away, for a
+ * group whose surroundings already say what it chooses: the catalog's filter
+ * rail heads each group itself, and would otherwise print every label twice.
+ */
+export const LabelHidden: Story = {
+  args: {
+    label: "Model age",
+    hideLabel: true,
+    value: "365",
+    options: [
+      { value: "0", label: "Any" },
+      { value: "365", label: "Past year" },
+    ],
+    className: "w-96",
+  },
+}

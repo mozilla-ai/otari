@@ -163,6 +163,41 @@ provider for production. `web_search_url` points at any other backend exposing
 a SearXNG-compatible `/search?format=json` endpoint, and a configured provider
 wins over it.
 
+When content extraction is enabled, Otari retrieves each result through its
+bounded public-web client. It validates and pins the resolved address before
+connecting, validates every redirect, rejects HTTPS-to-HTTP downgrades, follows
+at most five redirects, and applies one five-second network deadline across DNS,
+connection setup, redirects, and body streaming. The decoded response body is
+limited to 5 MiB.
+
+Result-page retrieval ignores environment proxies by default. To use an
+operator-controlled proxy that blocks unsafe destination addresses, set
+`web_retrieval_trust_env_proxy: true` in the gateway configuration or
+`OTARI_WEB_RETRIEVAL_TRUST_ENV_PROXY=true`. Retrieval then honors `HTTP_PROXY`,
+`HTTPS_PROXY`, and the `ALL_PROXY` fallback (including lowercase forms), with
+`NO_PROXY` exclusions. Only HTTP(S) proxy URLs are supported. Proxy settings
+are read when the retrieval client is created.
+
+This opt-in delegates connection-time address safety to the proxy, which must
+block internal and other unsafe addresses after resolving each destination.
+A general forwarding proxy does not provide this protection automatically.
+Otari still applies local DNS/address checks, domain policy, redirect checks,
+and response limits, so destination DNS must also work on the gateway.
+Requests without an applicable proxy, including `NO_PROXY` matches, remain
+IP-pinned. A failed proxy request never falls back to a direct connection.
+This deployment-only setting cannot be enabled by a tool request or workspace.
+
+Otari extracts HTML, textual formats (including Markdown, JSON, XML, and
+JavaScript), and text-bearing PDFs. HTML and PDF parsing runs in a supervised
+single-worker process with fixed time, memory, queue, page, and intermediate
+output limits. Unsafe, unreachable, unsupported, empty, timed-out, or
+unextractable results fall back to the search provider's snippet. A provider's
+own `extracted_content` still takes precedence and is not fetched locally.
+
+Each complete `web_search` tool result is limited to 50 KiB of valid UTF-8,
+including any truncation notice. The existing 1,500-character per-result content
+limit still applies before this overall result limit.
+
 Where the search key must not sit on the machine serving traffic, a deployment
 can also serve the search itself at `GET /api/v1/web-search/search`. This is the
 hosted shape: the control plane holds the key and runs the query, and its

@@ -347,6 +347,7 @@ export function PolicyForm({
   initialTarget = "",
   isOpen = true,
   returnFocusRef,
+  deploymentWide,
   workspaceId,
   onClose,
 }: {
@@ -366,12 +367,18 @@ export function PolicyForm({
    *  trigger is gone by the time the dialog closes. */
   returnFocusRef?: RefObject<HTMLElement | null>
   /**
-   * The workspace a tenant admin's write lands in, or null for an operator.
+   * Which of the two surfaces this write goes to: the deployment-wide pair for
+   * an operator, the tenant-scoped one for an organization admin, which refuses
+   * a user scope. Both mutation pairs are always created, as hooks must be, and
+   * only the pair this names is ever mutated.
+   */
+  deploymentWide: boolean
+  /**
+   * The workspace the write lands in, on either surface.
    *
-   * Null is the deployment-wide surface, which defaults the workspace itself;
-   * a string is the tenant-scoped one, which requires it named and refuses a
-   * user scope. Both mutation pairs are always created, as hooks must be, and
-   * only the pair this says is ever mutated.
+   * Null is only a caller who belongs to no workspace: the tenant surface
+   * refuses that outright, and the deployment-wide one falls back to the
+   * deployment's default workspace, which is where its rows already lived.
    */
   workspaceId: string | null
   onClose: () => void
@@ -380,7 +387,7 @@ export function PolicyForm({
   const saveAlias = useCreateAlias()
   const saveOrgPolicy = useSetOrganizationRoutingPolicy()
   const saveOrgAlias = useCreateOrganizationAlias()
-  const tenantScoped = workspaceId !== null
+  const tenantScoped = !deploymentWide
   const editing = existing !== null
   // Editing an alias writes back through the alias API: it is still a row in
   // model_aliases, and silently rewriting it as a policy would leave the original
@@ -659,7 +666,12 @@ export function PolicyForm({
     for (const scope of scopes) {
       if (done.includes(scope)) continue
       try {
-        await save.mutateAsync({ name: name.trim(), spec, user_id: scope })
+        await save.mutateAsync({
+          name: name.trim(),
+          spec,
+          user_id: scope,
+          workspace_id: workspaceId,
+        })
         done.push(scope)
       } catch (caught) {
         failed.push({ userId: scope, reason: errorMessage(caught) })
@@ -682,7 +694,7 @@ export function PolicyForm({
     setPartialFailure(undefined)
     const scope = userIds === null ? null : (userIds[0] ?? null)
     if (editingAlias) {
-      if (workspaceId !== null) {
+      if (tenantScoped && workspaceId !== null) {
         saveOrgAlias.mutate(
           {
             name: name.trim(),
@@ -694,12 +706,17 @@ export function PolicyForm({
         return
       }
       saveAlias.mutate(
-        { name: name.trim(), target: effectiveTarget.trim(), user_id: scope },
+        {
+          name: name.trim(),
+          target: effectiveTarget.trim(),
+          user_id: scope,
+          workspace_id: workspaceId,
+        },
         { onSuccess: onClose },
       )
       return
     }
-    if (workspaceId !== null) {
+    if (tenantScoped && workspaceId !== null) {
       saveOrgPolicy.mutate(
         {
           name: name.trim(),
@@ -722,6 +739,7 @@ export function PolicyForm({
         name: name.trim(),
         spec,
         user_id: scope,
+        workspace_id: workspaceId,
         ...(renaming ? { rename_from: previousName } : {}),
       },
       { onSuccess: onClose },

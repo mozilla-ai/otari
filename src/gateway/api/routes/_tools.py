@@ -32,10 +32,15 @@ from enum import StrEnum, auto
 from typing import TYPE_CHECKING, Any
 
 from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
+from gateway.core.config import parse_bool_env
 from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.services.tool_usage import ToolUsageTally
-from gateway.services.web_search_backend import DEFAULT_MAX_RESULTS, WEB_SEARCH_TOOL_NAME, WebSearchBackend
+from gateway.services.web_retrieval_backend import (
+    DEFAULT_MAX_RESULTS,
+    WEB_SEARCH_TOOL_NAME,
+    WebRetrievalBackend,
+)
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
@@ -385,8 +390,8 @@ def _build_web_search_backend(
     auth_token: str | None = None,
     config: GatewayConfig | None = None,
     tally: ToolUsageTally | None = None,
-) -> WebSearchBackend:
-    """Construct a WebSearchBackend honoring env-level + per-tool config.
+) -> WebRetrievalBackend:
+    """Construct a WebRetrievalBackend honoring env-level + per-tool config.
 
     Per-tool entry fields (``max_results``, ``allowed_domains``,
     ``blocked_domains``, ``purpose_hint``) override env-level defaults.
@@ -394,14 +399,22 @@ def _build_web_search_backend(
 
       * ``OTARI_WEB_SEARCH_ENGINES`` — comma-separated SearXNG engine list
       * ``OTARI_WEB_SEARCH_MAX_RESULTS`` — default cap on returned hits
-      * ``OTARI_WEB_SEARCH_EXTRACT`` — "0"/"false" to disable in-process
-        content extraction (snippet-only mode).
+      * ``OTARI_WEB_SEARCH_EXTRACT``: "0"/"false" disables local result-page
+        extraction (snippet-only mode).
       * ``OTARI_WEB_SEARCH_PURPOSE_HINT`` — per-deployment hint override.
 
     ``base_url`` may be ``None`` when the deployment configured a licensed
     search provider instead, which the backend then calls directly.
     """
-    kwargs: dict[str, Any] = {"base_url": base_url, "tally": tally}
+    kwargs: dict[str, Any] = {
+        "base_url": base_url,
+        "tally": tally,
+        "trust_env_proxy": (
+            config.web_retrieval_trust_env_proxy
+            if config is not None
+            else parse_bool_env(otari_env("WEB_RETRIEVAL_TRUST_ENV_PROXY", "false"))
+        ),
+    }
 
     # A licensed provider this deployment holds the key for wins over the URL,
     # and is how a deployment searches with no backend service in front of it.
@@ -453,4 +466,4 @@ def _build_web_search_backend(
     if auth_token:
         kwargs["auth_token"] = auth_token
 
-    return WebSearchBackend(**kwargs)
+    return WebRetrievalBackend(**kwargs)

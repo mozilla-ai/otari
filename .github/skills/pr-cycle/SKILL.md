@@ -113,17 +113,23 @@ PR with almost no CI, and neither of them reports anything:
   live with the inherited diff until its parent merges.
 - **A `CONFLICTING` PR.** A `pull_request` workflow builds the PR's merge ref, and a conflicting
   PR has none, so nothing runs until the conflict is resolved. The tell is
-  `mergeStateStatus: DIRTY` beside a check count that has stopped growing.
+  `mergeStateStatus: DIRTY` beside a check set that is not growing, and read that tell as "not
+  growing" rather than as "small": a PR that was mergeable when its checks ran and conflicted
+  afterwards keeps every one of those rows, so `DIRTY` beside a **complete** green set is the
+  same fault from the other end. Checks attach to the SHA used by that workflow run, so nothing
+  about them changes when the mergeability underneath them does; four PRs based on `main` but
+  stacked in content showed a full green set for the parent's pre-merge state within a minute of that parent
+  squashing. `DIRTY` plus finished means re-verify after the rebase, and until then the set says
+  only that the content merged with an earlier `main`.
 
 A child PR hits the second case as soon as its parent is squash-merged, because its own
 unsquashed commits and the squash on `main` are the same content twice.
 `git rebase --onto origin/main <the parent's old head>` drops the absorbed commits and clears it.
 
-**"Green" means the full expected set is present and none of it is pending**, which is not the
-same as nothing being pending. Both situations above produce a `gh pr checks` that lists one or
-two passing rows, and a passing row reads as a clean result to anyone who does not already know
-what the set should be. Check the names rather than only the buckets: on a dashboard change the
-substantive ones are `build`, `dashboard`, `e2e`, `catalog` and `serving`, and a run without
+**"Green" means the PR is mergeable and the full expected set has passed**, not merely that
+nothing is pending. A base other than `main` can produce a `gh pr checks` that lists only one or
+two passing rows, which can look complete to someone who does not know what the set should be.
+Check the names rather than only the buckets: on a dashboard change the substantive ones are `build`, `dashboard`, `e2e`, `catalog` and `serving`, and a run without
 them has covered nothing.
 
 A small set is not always one of the two faults above, though. Every one of these workflows also
@@ -158,8 +164,9 @@ attempt fails silently rather than erroring: `POST /pulls/<n>/requested_reviewer
 poll for its review waits out the timeout on a bot that was never coming.
 
 - **Team.** `gh pr edit <n> --add-reviewer mozilla-ai/otari-team`. CODEOWNERS auto-requests that
-  team only on the open-core guardrail paths (`ARCHITECTURE.md`, `scripts/check_architecture.py`,
-  `.github/CODEOWNERS`), so every other PR needs the request made explicitly.
+  team only on the open-core guardrail paths it lists (`.github/CODEOWNERS`), so every other PR
+  needs the request made explicitly. Once the `main` ruleset requires code-owner review, a PR
+  touching one of those paths cannot merge on an approval from anyone else.
 
 ## Handling the review
 

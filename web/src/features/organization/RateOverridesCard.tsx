@@ -1,5 +1,5 @@
 import { Button } from "@heroui/react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { FiEdit2, FiTrash2 } from "react-icons/fi"
 
 import type { OrganizationPricingOverride } from "@/client"
@@ -11,15 +11,22 @@ import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Dot } from "@/design-system/indicators/Dot"
 import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { UNIT_LABELS } from "@/features/pricing/units"
+import { useModels } from "@/shared/api/models"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useDeleteOrganizationPricing,
   useOrganizationPricing,
 } from "@/shared/api/pricing"
-import { formatCost, formatDateTime } from "@/shared/helpers/format"
+import { formatDateTime, formatRate } from "@/shared/helpers/format"
+import { useUrlValue } from "@/shared/helpers/urlState"
 import { PricingOverrideDialog } from "./PricingOverrideDialog"
-import { overrideStatus } from "./pricingOverride"
-import { canManage } from "./roles"
+import {
+  deploymentManagedPrefixes,
+  managedModelReason,
+  overrideStatus,
+} from "./pricingOverride"
+import { canManage, isDeploymentOperator } from "./roles"
 
 // What this organization pays for a model, above the catalog the rest of this
 // page shows.
@@ -60,15 +67,14 @@ const STATUS_DOT: Record<ReturnType<typeof overrideStatus>, string> = {
 }
 
 function rate(value: number | null | undefined): string {
-  // `formatCost` is the page's one money formatter, shared with the catalog
-  // table above so the same quantity cannot render two ways on one page. The
-  // absent check stays in front of it rather than being folded into it: a blank
-  // optional rate means the tokens are priced as fresh input, and `formatCost`
-  // renders null as "$0.00", which would claim the organization negotiated a
-  // free cache read. The em dash is the glyph the catalog column already uses
-  // for the same "no rate stored" state.
+  // `formatRate`, the one formatter for a per-million rate, shared with the
+  // catalog table above so the same quantity cannot render two ways on one
+  // page. The absent check stays in front of it: a blank optional rate means
+  // the tokens are priced as fresh input, and rendering it as $0.00 would claim
+  // the organization negotiated a free cache read. The em dash is the glyph the
+  // catalog column already uses for the same "no rate stored" state.
   if (value === null || value === undefined) return "—"
-  return formatCost(value)
+  return formatRate(value)
 }
 
 function period(override: OrganizationPricingOverride): string {
@@ -91,13 +97,44 @@ export function RateOverridesCard() {
     useState<OrganizationPricingOverride>()
 
   const canEdit = canManage(context.data)
+  const isOperator = isDeploymentOperator(context.data)
+  // Only asked for when there is a control to withhold: a reader's Edit is
+  // already disabled by the role, so a viewer costs the page no catalog read.
+  // It also warms the query the dialog reads on open, which shares the key.
+  const catalog = useModels(canEdit)
+  const managedPrefixes = deploymentManagedPrefixes(catalog.data?.data)
+
   const rows = overrides.data ?? []
+
+  // Why this row's rate is not this organization's to change, or undefined. A
+  // row can predate the rule, so the table asks per row rather than assuming its
+  // contents are all still writable.
+  const managedReason = (override: OrganizationPricingOverride) =>
+    managedModelReason({
+      modelKey: override.model_key,
+      managedPrefixes,
+      isDeploymentOperator: isOperator,
+    })
 
   const openAdd = () => {
     setOpenCount((count) => count + 1)
     setEditing(undefined)
     setDialogOpen(true)
   }
+
+  // The catalog's "Set your rate" link lands here with the selector in
+  // `?override=`, so an admin who may not set a deployment price still gets
+  // from a row they were comparing to the one editor that is theirs.
+  const requestedKey = useUrlValue("override")
+  useEffect(() => {
+    if (requestedKey && canEdit) {
+      // Bumped like the two openers below it: the dialog seeds its draft on
+      // mount, so an open that does not remount would show a blank model key.
+      setOpenCount((count) => count + 1)
+      setEditing(undefined)
+      setDialogOpen(true)
+    }
+  }, [requestedKey, canEdit])
 
   const openEdit = (override: OrganizationPricingOverride) => {
     setOpenCount((count) => count + 1)
@@ -137,6 +174,13 @@ export function RateOverridesCard() {
       cell: (row) => rate(row.cache_write_price_per_million),
     },
     {
+      id: "unit",
+      header: "Per 1M",
+      cell: (row) => (
+        <span className="text-muted">{UNIT_LABELS[row.unit] ?? row.unit}</span>
+      ),
+    },
+    {
       id: "period",
       header: "Period",
       cell: (row) => <span className="text-caption">{period(row)}</span>,
@@ -162,24 +206,35 @@ export function RateOverridesCard() {
     {
       id: "actions",
       header: "",
-      cell: (row) => (
-        // Both controls stay mounted and disabled for a reader rather than
-        // vanishing, so the page does not reflow between roles.
-        <RowActionRow>
-          <RowAction
-            icon={FiEdit2}
-            label="Edit"
-            isDisabled={!canEdit}
-            onPress={() => openEdit(row)}
-          />
-          <RowAction
-            icon={FiTrash2}
-            label="Delete"
-            isDisabled={!canEdit}
-            onPress={() => setPendingDelete(row)}
-          />
-        </RowActionRow>
-      ),
+      cell: (row) => {
+        // Editing is refused for a model the deployment supplies the credential
+        // for; deleting is not, because it returns the model to the catalog rate,
+        // which is the direction the rule wants.
+        const refused = managedReason(row)
+        return (
+          // Both controls stay mounted and disabled for a reader rather than
+          // vanishing, so the page does not reflow between roles.
+          <RowActionRow>
+            <RowAction
+              icon={FiEdit2}
+              label="Edit"
+              // A disabled control takes no focus, so the reason has to live in
+              // the accessible name rather than in a tooltip.
+              ariaLabel={
+                refused ? `Edit ${row.model_key}. ${refused}` : undefined
+              }
+              isDisabled={!canEdit || refused !== undefined}
+              onPress={() => openEdit(row)}
+            />
+            <RowAction
+              icon={FiTrash2}
+              label="Delete"
+              isDisabled={!canEdit}
+              onPress={() => setPendingDelete(row)}
+            />
+          </RowActionRow>
+        )
+      },
     },
   ]
 
@@ -213,6 +268,9 @@ export function RateOverridesCard() {
           This organization&rsquo;s own rate for a model, applied ahead of the
           catalog above. A model with no override here is priced by that
           catalog.
+          {isOperator
+            ? null
+            : " An override covers a model your organization supplies the provider key for; this deployment's own providers are priced by the catalog."}
         </p>
       </Section>
 
@@ -245,6 +303,7 @@ export function RateOverridesCard() {
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}
+        initialModelKey={requestedKey}
         existing={rows}
         onSaved={() => setDialogOpen(false)}
       />

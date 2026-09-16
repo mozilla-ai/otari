@@ -1,0 +1,35 @@
+# Seed for demo/catalog-smoke/run.sh. The placeholders are filled by the
+# script; everything else is a normal config.yml, and the copy the script
+# writes to .state/config.yml is yours to edit between runs.
+#
+# No providers and no prices: the catalog is empty until you add a provider,
+# either here (an instance with a real key, restart) or on the dashboard's
+# Providers page as the platform admin, which stores the key encrypted.
+# Discovery is on, so a real key lists that provider's models, priced from the
+# genai-prices defaults until you set a rate.
+
+master_key: __MASTER_KEY__
+database_url: sqlite:///__DB__
+# Where the links in mail point, and what passkeys bind to. The script fills
+# in the LAN address it found at first run; change it if the host moves.
+public_base_url: __PUBLIC_BASE_URL__
+
+model_discovery: true
+models_dev_metadata: true
+require_pricing: false
+default_pricing: true
+# The catalog before sign-in, at #/models, for the smoke. Off by default in a
+# real deployment.
+public_catalog: true
+# Mail is logged rather than sent, so the seed can read the verification link
+# for the people it creates. An invitation you send from the dashboard lands
+# in .state/gateway.log the same way, link included.
+mail_transport: console
+
+# For example:
+#
+# providers:
+#   openai:
+#     api_key: sk-...
+#   fireworks:
+#     api_key: fw-...

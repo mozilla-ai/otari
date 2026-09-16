@@ -2,12 +2,12 @@ import { render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import App from "@/app/App"
 import { Provider } from "@/app/provider"
-import { apiFetch } from "@/shared/api/client"
+import { API_ROOT, apiFetch, siteFetch } from "@/shared/api/client"
 import { bootstrap } from "@/tests/fixtures"
 
 vi.mock("@/shared/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/shared/api/client")>()
-  return { ...actual, apiFetch: vi.fn() }
+  return { ...actual, apiFetch: vi.fn(), siteFetch: vi.fn() }
 })
 
 vi.mock("@/features/overview/OverviewPage", async () => {
@@ -32,10 +32,14 @@ describe("App", () => {
 
   it("shows a loading state while the current route loads", async () => {
     window.localStorage.setItem("otari.dashboard.hasSession", "1")
+    // The build poll goes through `siteFetch`, not `apiFetch`: it is served at
+    // the gateway's own root rather than under the API. Stubbed here so the
+    // shell's poll does not reach a real fetch under jsdom.
+    vi.mocked(siteFetch).mockResolvedValue({
+      build: "test-build",
+      version: "1.0.0",
+    } as never)
     vi.mocked(apiFetch).mockImplementation(async (path) => {
-      if (path === "/dashboard-build.json") {
-        return { build: "test-build" } as never
-      }
       if (path === "/settings") {
         return { default_pricing: true, require_pricing: false } as never
       }
@@ -124,6 +128,38 @@ describe("App", () => {
     expect(await screen.findByText("Acme")).toBeInTheDocument()
     expect(document.title).toBe("Accept invitation · Otari")
     expect(screen.queryByRole("heading", { name: "Otari" })).toBeNull()
+  })
+
+  it("renders the public catalog ahead of the sign-in screen where the deployment opens it", async () => {
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      if (String(path).startsWith(`${API_ROOT}/catalog/models`)) {
+        return {
+          default_pricing: true,
+          defaults_as_of: null,
+          metadata_available: false,
+          models: [],
+        } as never
+      }
+      return [] as never
+    })
+    window.location.hash = "#/models"
+
+    renderApp(bootstrap({ public_catalog: true }))
+
+    expect(
+      await screen.findByRole("heading", { name: "Models" }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Sign in" })).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Otari" })).toBeNull()
+  })
+
+  it("keeps the catalog behind the sign-in screen by default", () => {
+    window.location.hash = "#/models"
+
+    renderApp(bootstrap())
+
+    expect(screen.getByRole("heading", { name: "Otari" })).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Models" })).toBeNull()
   })
 
   it("renders a public auth page ahead of the sign-in screen", async () => {

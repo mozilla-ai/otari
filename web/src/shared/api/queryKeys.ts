@@ -13,7 +13,18 @@
  */
 
 export const MODELS = "models"
+// The same selectors as MODELS, folded by model and priced for the viewer. Its
+// own key so the two reads can be cached apart, and every pricing mutation
+// invalidates both: a rate change moves a row in each.
+export const CATALOG = "catalog"
 export const PRICING = "pricing"
+// The three operator reads beside the price list: an update the scheduled
+// refresh left waiting, the accepted-snapshot history, and each stored rate
+// against today's default. Children of PRICING, so a confirm or a price write
+// refetches them with the list.
+export const PRICING_PENDING = [PRICING, "pending"] as const
+export const PRICING_SNAPSHOTS = [PRICING, "snapshots"] as const
+export const PRICING_DRIFT = [PRICING, "drift"] as const
 export const SETTINGS = "settings"
 export const MAIL_SETTINGS = "mail-settings"
 export const MAINTENANCE_MODE = "maintenance-mode"
@@ -28,13 +39,11 @@ export const SEARCH_PROVIDERS = "search-providers"
 // remote service's answer, so a settings save that changes that URL invalidates
 // it, while every other tool-settings write must not re-dial the sidecar.
 export const GUARDRAIL_PROFILES = "guardrail-profiles"
+// Both carry the surface they were read from and the workspace they were scoped
+// to as trailing key segments, so the deployment-wide list and its tenant-scoped
+// sibling share a head that one invalidation covers. See `useRoutingScope`.
 export const ALIASES = "aliases"
 export const ROUTING_POLICIES = "routing-policies"
-// The tenant-scoped sibling of ROUTING_POLICIES. Its own key: the two lists
-// answer different endpoints for different callers, and an operator's policy
-// write invalidates the deployment-wide one it changed.
-export const ORGANIZATION_ROUTING_POLICIES = "organization-routing-policies"
-export const ORGANIZATION_ALIASES = "organization-aliases"
 export const ROUTER_STATUS = "router-status"
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the

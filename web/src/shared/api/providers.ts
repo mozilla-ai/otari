@@ -12,6 +12,7 @@ import type {
 } from "@/client"
 import { apiFetch, longRequestSignal } from "@/shared/api/client"
 import {
+  CATALOG,
   DISCOVERABLE,
   MODELS,
   NO_RETRY,
@@ -109,6 +110,7 @@ function invalidateProviderViews(
   void queryClient.invalidateQueries({ queryKey: [STORED_PROVIDERS] })
   void queryClient.invalidateQueries({ queryKey: [PROVIDERS] })
   void queryClient.invalidateQueries({ queryKey: [MODELS] })
+  void queryClient.invalidateQueries({ queryKey: [CATALOG] })
   void queryClient.invalidateQueries({ queryKey: [DISCOVERABLE] })
   // A credential change can flip a provider's reachability, so the health view
   // must re-check rather than show a verdict from the old key.

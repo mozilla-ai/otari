@@ -1,11 +1,5 @@
-/**
- * The burst thrown from the success mark when a workspace's first request
- * lands.
- *
- * The numbers are tuned for a restrained payoff: 14 pieces is where the burst
- * reads as a celebration and still leaves the screen quiet. Denser turns it
- * into a party popper, sparser looks like a rendering bug.
- */
+/** A restrained burst from the center of the settled success dialog. */
+// Fourteen pieces read as a celebration without crowding the success message.
 const CONFIG = {
   particleCount: 14,
   spread: 100,
@@ -44,7 +38,7 @@ function paletteFromTheme(): string[] {
 }
 
 /** Viewport-relative center of an element, the way canvas-confetti wants it. */
-export function confettiOriginOf(element: Element): { x: number; y: number } {
+function confettiOriginOf(element: Element): { x: number; y: number } {
   const { left, top, width, height } = element.getBoundingClientRect()
   return {
     x: (left + width / 2) / window.innerWidth,
@@ -68,25 +62,38 @@ export function resetSetupConfetti(): void {
   hasFired = false
 }
 
-/**
- * Fire the burst, loading the library on the way.
- *
- * Dynamically imported because this is the only screen in the product that
- * celebrates anything, and `disableForReducedMotion` is what makes it a no-op
- * for a reader who asked for less motion. That also keeps the Playwright
- * renders deterministic, since those runs force the preference.
- */
-export async function fireSetupConfetti(origin: {
-  x: number
-  y: number
-}): Promise<void> {
-  if (hasFired) return
+/** Measure the settled dialog, after its entrance and the lazy import finish. */
+export async function fireSetupConfetti(
+  element: Element,
+  signal: AbortSignal,
+): Promise<void> {
+  if (hasFired || signal.aborted) return
+  const animations: Animation[] = []
+  // canvas-confetti's own default layer, the floor when no ancestor sets one.
+  let overlayZIndex = 100
+  for (let node: Element | null = element; node; node = node.parentElement) {
+    animations.push(...(node.getAnimations?.() ?? []))
+    const zIndex = Number(getComputedStyle(node).zIndex)
+    if (Number.isFinite(zIndex)) overlayZIndex = Math.max(overlayZIndex, zIndex)
+  }
+  const [{ default: confetti }] = await Promise.all([
+    import("canvas-confetti"),
+    Promise.allSettled(
+      animations
+        .filter(
+          (animation) => animation.effect?.getTiming().iterations !== Infinity,
+        )
+        .map((animation) => animation.finished),
+    ),
+  ])
+  if (hasFired || signal.aborted || !element.isConnected) return
   hasFired = true
   const colors = paletteFromTheme()
-  const { default: confetti } = await import("canvas-confetti")
   await confetti({
     ...CONFIG,
-    origin,
+    origin: confettiOriginOf(element),
+    // HeroUI's overlay sits above canvas-confetti's default layer.
+    zIndex: overlayZIndex + 1,
     ...(colors.length > 0 ? { colors } : {}),
     shapes: ["square"],
     disableForReducedMotion: true,

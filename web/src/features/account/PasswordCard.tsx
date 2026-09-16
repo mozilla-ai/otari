@@ -1,289 +1,141 @@
-import { Button, Description, Input, Label, TextField } from "@heroui/react"
 import { useState } from "react"
+import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { FieldMessages } from "@/design-system/forms/FieldMessages"
+import { Skeleton } from "@/design-system/feedback/Skeleton"
 import { Section } from "@/design-system/layout/Section"
-import { useSetPassword } from "@/shared/api/auth"
-import {
-  MAX_PASSWORD_BYTES,
-  MIN_PASSWORD_LENGTH,
-  newPasswordProblem,
-} from "@/shared/helpers/password"
-import {
-  useDeployment,
-  useRetireMasterKeySignIn,
-} from "@/shared/hooks/useDeployment"
+import { useOrganizationContext } from "@/shared/api/organizations"
 
-interface PasswordFieldProps {
-  label: string
-  value: string
-  onChange: (next: string) => void
-  autoComplete: "current-password" | "new-password"
-  description?: string
-}
-
-function PasswordField({
-  label,
-  value,
-  onChange,
-  autoComplete,
-  description,
-}: PasswordFieldProps) {
-  return (
-    <TextField
-      value={value}
-      onChange={onChange}
-      type="password"
-      isRequired
-      className="flex max-w-md flex-col gap-1"
-    >
-      <Label className="text-body">{label}</Label>
-      <Input autoComplete={autoComplete} />
-      {description ? (
-        // HeroUI's Description renders through the TextField's "description"
-        // slot, so it reaches the input as aria-describedby; a raw span does
-        // not, and a policy the field states only to sighted users is a policy
-        // half the people typing into it cannot read.
-        <FieldMessages>
-          <Description className="text-muted">{description}</Description>
-        </FieldMessages>
-      ) : null}
-    </TextField>
-  )
-}
+import { PasswordDialog } from "./PasswordDialog"
+import {
+  passwordAction,
+  passwordFormShape,
+  passwordSummary,
+} from "./passwordForm"
 
 /**
  * The password this identity signs in to the dashboard with: set it for the
  * first time, or change it.
  *
- * One endpoint (`PUT /v1/auth/password`) behind two forms, because the two acts
- * ask for different things and mean different things to the operator reading
- * them:
+ * One endpoint (`PUT /v1/auth/password`) behind three readings of one form, and
+ * which one applies is read off the *caller*, not off the deployment. That is
+ * the correction: `sign_in_methods` describes the gateway, and the question
+ * here is what the person signed in right now holds, which `caller.has_password`
+ * and `caller.email` on the membership context answer.
  *
  * - **Claiming.** First boot leaves the operator identity with no address and
  *   no password, and the master key as the dashboard login. Supplying an
  *   address and a password is the single act that retires master-key sign-in on
- *   this deployment (mozilla-ai/otari-ai#1716). No current password is asked
- *   for, because there is none.
- * - **Changing.** From then on the identity has both, and the server requires
- *   the current password from a cookie-authenticated caller. This dashboard is
- *   always cookie-authenticated, so that field is always required here.
+ *   this deployment (mozilla-ai/otari-ai#1716).
+ * - **Setting a first password.** Somebody who signs in through Google, GitHub
+ *   or a passkey holds no password, and neither does a roster entry nobody has
+ *   claimed. They have an address already, so only a new password is asked for.
+ *   Keying this off the deployment is what used to strand them: a claimed
+ *   deployment showed everybody the change form, which asks for a current
+ *   password they could never supply and offered no other way through
+ *   (mozilla-ai/otari-ai#2099).
+ * - **Changing.** From then on the server requires the current password from a
+ *   cookie-authenticated caller.
  *
- * Which of the two applies is read from the bootstrap's `sign_in_methods`
- * rather than probed: `master_key` is published exactly while this deployment's
- * operator identity holds no password (otari#702).
+ * The form is a dialog rather than three fields sitting open on the page. It is
+ * a credential change reached by deliberate act, it is the one thing on this
+ * page that is not safe to half-fill and wander away from, and the card can then
+ * say in a line what the account currently signs in with.
  *
- * That is a fact about the operator and not about the reader, and the gap shows
- * here: a member who signed up on a deployment its operator never claimed is
- * shown the claim form, and no input to it can succeed (their own address wants
- * a `current_password` the form does not render; any other address is refused
- * as a change). The copy below says so up front rather than letting them find
- * out by submitting, which is as far as this can go without a route for asking
- * what the *signed-in* identity holds; the management API has none, and
- * inferring it from a refusal would be guessing at a 400. Reaching this state
- * at all means having gone around the sign-in screen, which offers such a
- * member no password form either. That context cannot be refetched, so a
- * successful claim reports itself through `useRetireMasterKeySignIn` and the
- * provider serves the corrected value from then on. This card therefore reads
- * the context on every render and keeps no mode of its own: the fact belongs to
- * the deployment, not to this component, and the account menu's session line
- * and the sign-in screen a later sign-out lands on read the same one.
+ * A successful call moves two things this component does not own. The address
+ * and the new `has_password` are seated back onto the membership context by
+ * `useSetPassword`, so this card re-reads its own shape rather than keeping a
+ * mode of its own; and a claim reports itself through `useRetireMasterKeySignIn`,
+ * because the bootstrap is a context read once per load and no invalidation
+ * reaches it.
  */
 export function PasswordCard() {
-  const { sign_in_methods } = useDeployment()
-  const retireMasterKeySignIn = useRetireMasterKeySignIn()
-  const setPassword = useSetPassword()
-
-  // Read from the context on every render rather than seeded into local state.
-  // A claim corrects the context (see `useRetireMasterKeySignIn`), so this card
-  // switching forms, the account menu's session line, and the sign-in screen a
-  // later sign-out lands on all move at once, and navigating away and back does
-  // not return to a claim form for a deployment already claimed.
-  const isClaimed = !sign_in_methods.includes("master_key")
-  const [email, setEmail] = useState("")
-  const [currentPassword, setCurrentPassword] = useState("")
-  const [newPassword, setNewPassword] = useState("")
-  const [confirmPassword, setConfirmPassword] = useState("")
-  // What the last successful call did, kept because neither fact survives it
-  // otherwise: the address comes back in the response and is the only way this
-  // page ever learns one (the management API exposes no "who am I" route yet),
-  // and whether it was the claim cannot be read off `isClaimed` afterwards,
-  // since claiming is what sets that.
+  const context = useOrganizationContext()
+  const caller = context.data?.caller
+  const [isOpen, setIsOpen] = useState(false)
+  // Bumped on every open and used as the dialog's key, so a draft credential is
+  // cleared on the way in rather than left in memory on the way out
+  // (`SpendCeilingsCard` is the pattern).
+  const [openCount, setOpenCount] = useState(0)
+  // What the last successful call did. Neither fact survives it otherwise: the
+  // address comes back in the response, and whether that call was the claim
+  // cannot be read off the shape afterwards, since claiming is what changes it.
   const [outcome, setOutcome] = useState<{
     email: string
     claimed: boolean
-  } | null>(null)
+  }>()
 
-  const problem = newPasswordProblem(newPassword, confirmPassword)
-  const unchanged =
-    isClaimed && newPassword !== "" && newPassword === currentPassword
-  const complete = isClaimed
-    ? currentPassword !== "" && newPassword !== "" && confirmPassword !== ""
-    : email.trim() !== "" && newPassword !== "" && confirmPassword !== ""
-  // Deliberately not gated on `isPending`: that is the Button's own prop, which
-  // keeps it focusable and announces it busy, where `isDisabled` would drop
-  // focus out of the form mid-request. Double submission is stopped in
-  // `submit` instead, which is where it has to be anyway (a form submits on
-  // Enter, not only through the button).
-  const canSubmit = complete && problem === null && !unchanged
-
-  // A refusal and the line reporting the last success both describe a call that
-  // is no longer the one being made, so typing clears them together.
-  //
-  // Never while one is in flight. `reset()` returns the observer to idle
-  // without canceling the request, so resetting mid-call would clear the
-  // `isPending` that `submit` guards on and let a keystroke reopen the form to
-  // a second, concurrent password change.
-  const clearResult = () => {
-    if (setPassword.isPending) {
-      return
-    }
-    setOutcome(null)
-    setPassword.reset()
-  }
-
-  const submit = () => {
-    if (!canSubmit || setPassword.isPending) {
-      return
-    }
-    setPassword.mutate(
-      isClaimed
-        ? { current_password: currentPassword, new_password: newPassword }
-        : { email: email.trim(), new_password: newPassword },
-      {
-        onSuccess: (result) => {
-          setOutcome({ email: result.email, claimed: !isClaimed })
-          // The server's own assertion, not an inference from which form was
-          // submitted: it answers this on a change as well, and it is the fact
-          // the rest of the tab has to act on.
-          if (result.master_key_sign_in_retired) {
-            retireMasterKeySignIn()
-          }
-          setEmail("")
-          setCurrentPassword("")
-          setNewPassword("")
-          setConfirmPassword("")
-        },
-      },
-    )
-  }
+  const shape = caller ? passwordFormShape(caller) : undefined
 
   return (
     <Section
+      aria-labelledby="account-password-title"
       className="border-t border-border pt-6 pb-5"
       contentClassName="flex flex-col gap-4"
     >
-      <h2 className="text-title">
-        {isClaimed ? "Dashboard password" : "Claim this deployment"}
+      <h2 id="account-password-title" className="text-title">
+        Dashboard password
       </h2>
 
-      <p className="max-w-3xl text-sm text-muted">
-        {isClaimed
-          ? "The password you sign in to this dashboard with. Changing it ends every other session this identity holds; this one stays signed in."
-          : "This gateway still signs in with its master key. Set an address and a password to sign in as yourself from now on. The master key stays the credential for the management API, and it can still reset this password if you forget it. Claiming is the operator's to do: if your own account already has a password, this form will refuse it, and your password changes once they have claimed."}
-      </p>
+      {context.isPending && !context.data ? (
+        <Skeleton
+          className="h-20 w-full max-w-md"
+          ariaLabel="Loading your sign-in details"
+        />
+      ) : !shape ? (
+        // No guessed form. Which of the three readings applies is a fact about
+        // the signed-in identity, and a form built on the wrong guess is what
+        // this card was fixing: the change form asks for a password an OAuth
+        // sign-in never had, and the claim form's address is refused for
+        // anybody who already holds one.
+        <>
+          <p className="max-w-3xl text-sm text-muted">
+            Who is signed in could not be read, so there is nothing here to
+            change yet.
+          </p>
+          <ErrorBanner error={context.error} />
+        </>
+      ) : (
+        <>
+          <p className="max-w-3xl text-sm text-muted">
+            {passwordSummary(shape)}
+          </p>
 
-      {outcome ? (
-        <p
-          role="status"
-          aria-live="polite"
-          className="max-w-3xl text-sm text-success"
-        >
-          {outcome.claimed
-            ? `Saved. Sign in as ${outcome.email} from now on: the master key no longer signs in to this dashboard, and it stays the credential for the management API.`
-            : `Saved. Your other sessions have ended; sign in as ${outcome.email} next time.`}
-        </p>
-      ) : null}
+          {outcome ? (
+            <p
+              role="status"
+              aria-live="polite"
+              className="max-w-3xl text-sm text-success"
+            >
+              {outcome.claimed
+                ? `Saved. Sign in as ${outcome.email} from now on: the master key no longer signs in to this dashboard, and it stays the credential for the management API.`
+                : `Saved. Your other sessions have ended; sign in as ${outcome.email} next time.`}
+            </p>
+          ) : null}
 
-      <form
-        className="flex flex-col gap-4"
-        onSubmit={(event) => {
-          event.preventDefault()
-          submit()
-        }}
-      >
-        {isClaimed ? (
-          <PasswordField
-            label="Current password"
-            value={currentPassword}
-            onChange={(next) => {
-              setCurrentPassword(next)
-              clearResult()
-            }}
-            autoComplete="current-password"
+          <div>
+            <Button
+              variant="primary"
+              onPress={() => {
+                // The saved line describes a call that is not the one about to
+                // be made, so it goes with the form that replaces it.
+                setOutcome(undefined)
+                setOpenCount((count) => count + 1)
+                setIsOpen(true)
+              }}
+            >
+              {passwordAction(shape)}
+            </Button>
+          </div>
+
+          <PasswordDialog
+            key={openCount}
+            isOpen={isOpen}
+            onOpenChange={setIsOpen}
+            shape={shape}
+            onSaved={setOutcome}
           />
-        ) : (
-          <TextField
-            value={email}
-            onChange={(next) => {
-              setEmail(next)
-              clearResult()
-            }}
-            type="email"
-            isRequired
-            className="flex max-w-md flex-col gap-1"
-          >
-            <Label className="text-body">Email</Label>
-            {/* autoComplete="username" and not "email": this is the handle
-                the sign-in form will ask for, so a password manager should
-                file it against the credential it is being set beside. */}
-            {/* No autoFocus: this is a page, not a dialog, and focusing
-                a field on mount raises the soft keyboard over the
-                explanation above it before the operator has asked to
-                type. */}
-            <Input placeholder="you@example.com" autoComplete="username" />
-            <FieldMessages>
-              <Description className="text-muted">
-                Changing this address later is not supported yet, so pick the
-                one you will keep.
-              </Description>
-            </FieldMessages>
-          </TextField>
-        )}
-
-        <PasswordField
-          label="New password"
-          value={newPassword}
-          onChange={(next) => {
-            setNewPassword(next)
-            clearResult()
-          }}
-          autoComplete="new-password"
-          description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
-        />
-        <PasswordField
-          label="Confirm new password"
-          value={confirmPassword}
-          onChange={(next) => {
-            setConfirmPassword(next)
-            clearResult()
-          }}
-          autoComplete="new-password"
-        />
-
-        {problem ? (
-          <p role="alert" className="text-caption text-danger">
-            {problem}
-          </p>
-        ) : null}
-        {unchanged ? (
-          <p role="alert" className="text-caption text-danger">
-            The new password cannot be the one you already use.
-          </p>
-        ) : null}
-        <ErrorBanner error={setPassword.error} />
-
-        <div>
-          <Button
-            type="submit"
-            variant="primary"
-            isPending={setPassword.isPending}
-            isDisabled={!canSubmit}
-          >
-            {isClaimed ? "Change password" : "Set password"}
-          </Button>
-        </div>
-      </form>
+        </>
+      )}
     </Section>
   )
 }

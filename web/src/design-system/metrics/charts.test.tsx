@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import {
@@ -18,6 +18,48 @@ const STACK_SERIES: SeriesDef[] = [
 ]
 
 describe("TrendChart", () => {
+  it("tracks hovered buckets without a tooltip movement transition", async () => {
+    const { container } = render(
+      <TrendChart
+        data={[
+          { x: "Jul 19", cost: 400 },
+          { x: "Jul 20", cost: 840.5 },
+        ]}
+        series={COST_SERIES}
+        formatValue={(value) => `$${value}`}
+        ariaLabel="cost per day"
+      />,
+    )
+    const chart = container.querySelector(".recharts-wrapper")!
+    vi.spyOn(chart, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 0, 800, 300),
+    )
+    try {
+      for (const [clientX, value] of [
+        [200, "$400"],
+        [600, "$840.5"],
+      ] as const) {
+        await act(async () => {
+          fireEvent.mouseMove(chart, { clientX, clientY: 40 })
+          await new Promise(requestAnimationFrame)
+        })
+        expect(screen.getByText(value)).toBeVisible()
+        // Recharts owns the positioned wrapper, outside our tooltip content.
+        expect(
+          container.querySelector(".recharts-tooltip-wrapper"),
+        ).toHaveStyle({
+          transition: "",
+        })
+      }
+      fireEvent.mouseLeave(chart)
+      expect(
+        container.querySelector(".recharts-tooltip-wrapper"),
+      ).not.toBeVisible()
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
   it("sets axis ticks from the type scale rather than a raw px size", () => {
     const { container } = render(
       <TrendChart
@@ -116,13 +158,34 @@ describe("TrendChart", () => {
 })
 
 describe("Sparkline", () => {
-  it("renders a recharts sparkline line for KPI tiles", () => {
+  it("renders a static recharts sparkline for KPI tiles", async () => {
     const { container } = render(
       <Sparkline values={[1, 3, 2, 5]} ariaLabel="Spend trend" />,
     )
 
     expect(screen.getByRole("img", { name: "Spend trend" })).toBeInTheDocument()
     expect(container.querySelector(".recharts-line")).not.toBeNull()
+    expect(screen.getByRole("img", { name: "Spend trend" })).toHaveClass(
+      "pointer-events-none",
+    )
+    expect(container.querySelector("svg")).not.toHaveAttribute("tabindex")
+    expect(screen.queryByRole("application")).not.toBeInTheDocument()
+
+    const chart = container.querySelector(".recharts-wrapper")!
+    vi.spyOn(chart, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 0, 400, 32),
+    )
+    try {
+      await act(async () => {
+        fireEvent.mouseMove(chart, { clientX: 150, clientY: 16 })
+        await new Promise(requestAnimationFrame)
+      })
+      expect(
+        container.querySelector(".recharts-active-dot"),
+      ).not.toBeInTheDocument()
+    } finally {
+      vi.restoreAllMocks()
+    }
   })
 })
 

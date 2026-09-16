@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { API_ROOT } from "@/shared/api/client"
+import { API_ROOT, DASHBOARD_BUILD_PATH } from "@/shared/api/client"
 
 // The shell reads /v1/bootstrap before it renders anything, so every other spec
 // here already depends on it answering: a failure paints an error banner in
@@ -64,9 +64,36 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // No SMTP configured in this e2e environment, so invitations are
     // creatable but not emailed; see docs/configuration.md#mail.
     mail_ready: false,
+    // The catalog stays behind the sign-in screen unless an operator opens it
+    // with public_catalog; see docs/configuration.md#a-public-catalog.
+    public_catalog: false,
     // Closed, which is the default and is what mail_ready above would force
     // anyway: signup sends a verification link, so a deployment that cannot
     // send one registers nobody.
     open_signup: false,
   })
+})
+
+// The stale-tab check, asserted against the real gateway because it is the one
+// place the two halves meet: the route is mounted beside the dashboard at the
+// gateway's own root, and the poll reaches it through `siteFetch` rather than
+// `apiFetch` for exactly that reason. Built the same way the client builds it,
+// so a caller moved back under the API root fails here rather than silently
+// polling a 404, which is how this went unnoticed from #1026 until now.
+test("the dashboard build id is served at the gateway's own root", async ({
+  request,
+}) => {
+  const response = await request.get(DASHBOARD_BUILD_PATH)
+
+  expect(response.status()).toBe(200)
+  const body = await response.json()
+  expect(typeof body.build).toBe("string")
+  expect(body.build.length).toBeGreaterThan(0)
+  expect(typeof body.version).toBe("string")
+  expect(body.version.length).toBeGreaterThan(0)
+
+  // And not under the API root, which is where it was being asked for.
+  expect(
+    (await request.get(`${API_ROOT}${DASHBOARD_BUILD_PATH}`)).status(),
+  ).toBe(404)
 })

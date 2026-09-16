@@ -600,6 +600,7 @@ async def discover_all_models(
     provider_filter: str | None = None,
     *,
     serve_stale: bool = False,
+    cached_only: bool = False,
 ) -> list[tuple[str, Model]]:
     """Discover models from the configured providers with caching.
 
@@ -611,6 +612,13 @@ async def discover_all_models(
     Args:
         config: Gateway configuration with provider credentials.
         provider_filter: If set, only discover models for this provider.
+        serve_stale: Accept a cached result of any age rather than waiting on a dial.
+        cached_only: Never dial; answer from whatever the cache holds, and report
+            a provider with no entry as having no models. For a caller that runs
+            off the request path and must not fan out to every provider (the
+            selector index refresher), which is also what keeps
+            ``model_cache_ttl_seconds = 0`` meaning "reads dial for themselves"
+            rather than gaining a second dialer.
 
     Returns:
         List of (provider_name, Model) tuples so callers can build model_key
@@ -623,15 +631,24 @@ async def discover_all_models(
     else:
         instances = discoverable
 
-    # Each instance goes through the shared cache + single-flight path, so a
-    # failing provider is dialed at most once per negative-TTL window and the
-    # concurrent discoverable listing reuses the same in-flight call.
-    # return_exceptions so a single provider cannot abort the catalog build; real
-    # cancellation still bubbles.
-    results = await asyncio.gather(
-        *(discover_provider_models(config, name, serve_stale=serve_stale) for name in instances),
-        return_exceptions=True,
-    )
+    results: list[ProviderDiscovery | BaseException]
+    if cached_only:
+        # ``stale`` never dials and returns None for a provider never dialed,
+        # which reads here as "no models" rather than as a reason to go and ask.
+        cache = get_model_cache()
+        results = [cache.stale(name) or ProviderDiscovery(provider=name, models=[]) for name in instances]
+    else:
+        # Each instance goes through the shared cache + single-flight path, so a
+        # failing provider is dialed at most once per negative-TTL window and the
+        # concurrent discoverable listing reuses the same in-flight call.
+        # return_exceptions so a single provider cannot abort the catalog build; real
+        # cancellation still bubbles.
+        results = list(
+            await asyncio.gather(
+                *(discover_provider_models(config, name, serve_stale=serve_stale) for name in instances),
+                return_exceptions=True,
+            )
+        )
 
     result_models: list[tuple[str, Model]] = []
     for name, discovery in zip(instances, results, strict=True):

@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, require_deployment_operator
-from gateway.core.config import PROVIDER_TYPE_ALIASES, GatewayConfig
+from gateway.core.config import PROVIDER_TYPE_ALIASES, RESERVED_PROVIDER_INSTANCE_NAMES, GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import ProviderCredential
 from gateway.services.model_discovery_service import (
@@ -393,6 +393,14 @@ def _validate_instance(instance: str, provider_type: str | None) -> None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Provider instance name must not contain ':' or '/'.",
+        )
+    if instance in RESERVED_PROVIDER_INSTANCE_NAMES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Provider instance name '{instance}' is reserved: 'otari' prices the gateway's own "
+                "tools and 'hosted' names a deployment-owned offering."
+            ),
         )
     if provider_type:
         impl = PROVIDER_TYPE_ALIASES.get(provider_type, provider_type)

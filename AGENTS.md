@@ -44,7 +44,7 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 
 ## Lint / Typecheck
 - Run lint checks with `make lint`; it runs the architecture check and then Ruff. **Ruff alone is not equivalent.**
-- The architecture check (`scripts/check_architecture.py`, also `make check-architecture`) enforces the `src/gateway/` layer rules: services must not import the API layer, repositories must not import services or the API layer, API routes must not import `sqlalchemy.orm`, and repository modules end in `_repository.py`.
+- The architecture check (`scripts/check_architecture.py`, also `make check-architecture`) enforces the `src/gateway/` layer rules: services must not import the API layer, repositories must not import services or the API layer, API routes must not import `sqlalchemy.orm`, `gateway/main.py` must not import a route module, and repository modules end in `_repository.py`.
 - **`make lint` does not touch the dashboard.** `pnpm --dir web run lint` is its counterpart (Biome: formatting, recommended rules, and the `web/src/` layer boundaries), run separately in CI. See [web/AGENTS.md](web/AGENTS.md) for what those boundaries are and why the config mirrors `otari-ai/frontend`.
 - If introducing a formatter/linter, keep changes in a separate PR unless requested.
 

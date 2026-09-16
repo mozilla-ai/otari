@@ -31,6 +31,7 @@ export interface RadioOption {
  */
 export function RadioGroup({
   label,
+  hideLabel = false,
   value,
   onChange,
   options,
@@ -43,6 +44,8 @@ export function RadioGroup({
   className = "",
 }: {
   label: string
+  /** Keep the label for assistive technology where the surrounding UI already shows it. */
+  hideLabel?: boolean
   value: string
   onChange: (value: string) => void
   options: readonly RadioOption[]
@@ -65,7 +68,7 @@ export function RadioGroup({
       isInvalid={isInvalid}
       className={`flex flex-col gap-2 ${className}`}
     >
-      <Label className="text-body">{label}</Label>
+      <Label className={hideLabel ? "sr-only" : "text-body"}>{label}</Label>
       {description ? (
         // Outside `FieldMessages` and with no reserve: this describes the whole
         // group and is never replaced by an error, so it is supporting text

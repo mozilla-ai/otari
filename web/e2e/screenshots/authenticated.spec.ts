@@ -26,6 +26,12 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     heading: /what can i help with/i,
   },
   { route: "/models", name: "models", heading: /models/i },
+  {
+    route: "/models/openai/gpt-parity-priced",
+    name: "model-detail",
+    // The page's own title, so a 404 does not pass for a model.
+    heading: /parity/i,
+  },
   { route: "/routing", name: "routing", heading: /routing/i },
   { route: "/providers", name: "providers", heading: /provider/i },
   { route: "/keys", name: "keys", heading: /keys/i },

@@ -1,11 +1,12 @@
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { PasskeysCard } from "@/features/account/PasskeysCard"
 import { PasswordCard } from "@/features/account/PasswordCard"
+import { ProfileCard } from "@/features/account/ProfileCard"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 /**
- * Account settings: what the signed-in identity can change about how it signs
- * in.
+ * Account settings: what the signed-in identity can change about itself, which
+ * is its name and how it signs in.
  *
  * Deliberately not folded into the Settings page, which is the deployment's
  * configuration: every row there is a gateway-wide setting an operator changes
@@ -21,11 +22,13 @@ export function AccountPage() {
   return (
     <div className="flex flex-col">
       <PageIntro title="Account settings">
-        How you sign in to this dashboard. Every setting here is yours alone;
-        the gateway&rsquo;s own configuration is on the Settings page.
+        Who you are on this deployment, and how you sign in to it. Every setting
+        here is yours alone; the gateway&rsquo;s own configuration is on the
+        Settings page.
       </PageIntro>
       {session_type === "local_operator" ? (
         <>
+          <ProfileCard />
           <PasswordCard />
           <PasskeysCard />
         </>

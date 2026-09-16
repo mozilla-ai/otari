@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { API_ROOT } from "@/shared/api/client"
-import { ApiError, apiFetch, createSession, deleteSession } from "./client"
+import { API_ROOT, DASHBOARD_BUILD_PATH } from "@/shared/api/client"
+import {
+  ApiError,
+  apiFetch,
+  createSession,
+  deleteSession,
+  siteFetch,
+} from "./client"
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -110,6 +116,65 @@ describe("apiFetch", () => {
     await expect(apiFetch(`${API_ROOT}/models`)).rejects.toMatchObject({
       message: expect.stringContaining("could not reach the gateway"),
     })
+  })
+})
+
+describe("siteFetch", () => {
+  it("asks for the path as given, with no API root in front of it", async () => {
+    // The whole point of the helper, and the regression it exists for: the
+    // build poll went through `apiFetch` after the API moved under /api/v1
+    // (#1026), so it asked for /api/v1/dashboard-build.json against a route
+    // mounted at the gateway's own root, and 404d for months without anything
+    // reporting it.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ build: "abc", version: "1.0.0" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+
+    await expect(siteFetch(DASHBOARD_BUILD_PATH)).resolves.toEqual({
+      build: "abc",
+      version: "1.0.0",
+    })
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe(DASHBOARD_BUILD_PATH)
+    expect(String(fetchSpy.mock.calls[0]?.[0])).not.toContain(API_ROOT)
+  })
+
+  it("sends no credential, which fetch would otherwise attach", async () => {
+    // `fetch` defaults to `credentials: "same-origin"`, so leaving it unset
+    // puts the session cookie on a public poll that runs once a minute for the
+    // life of every open tab. Nothing reads it there.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ build: "abc", version: "1.0.0" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+
+    await siteFetch(DASHBOARD_BUILD_PATH)
+
+    expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({ credentials: "omit" })
+  })
+
+  it("reports a refusal as an ApiError rather than resolving with nothing", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("gone", { status: 404 }),
+    )
+
+    await expect(siteFetch(DASHBOARD_BUILD_PATH)).rejects.toBeInstanceOf(
+      ApiError,
+    )
+  })
+
+  it("reports an unreachable gateway rather than throwing a raw fetch failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("nope"))
+
+    await expect(siteFetch(DASHBOARD_BUILD_PATH)).rejects.toThrow(
+      "Network error: could not reach the gateway.",
+    )
   })
 })
 

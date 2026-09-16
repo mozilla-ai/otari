@@ -1,10 +1,11 @@
 import { RouterProvider } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { lazy, Suspense, useEffect, useState } from "react"
 import { HybridLanding } from "@/app/HybridLanding"
 import { PublicPageTitle } from "@/app/PublicPageTitle"
 import { router } from "@/app/router"
 import { ErrorBoundary } from "@/design-system/feedback/ErrorBoundary"
 import { PageError } from "@/design-system/feedback/PageError"
+import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
 import { PublicAuthPage } from "@/features/auth/PublicAuthPage"
@@ -13,6 +14,7 @@ import {
   publicAuthPath,
 } from "@/features/auth/publicAuthPaths"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
+import { publicCatalogPath } from "@/features/models/publicCatalog"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import { normalizeBootstrap } from "@/shared/helpers/bootstrap"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
@@ -26,6 +28,16 @@ import { DeploymentProvider, useDeployment } from "@/shared/hooks/useDeployment"
  * in `App` and passed down rather than called in both, so one listener decides
  * which branch renders and when the boundary around it resets.
  */
+// Split out of the entry chunk: it pulls the whole Models feature (both views,
+// the drawer, the table), which every visitor of every deployment would
+// otherwise download, `public_catalog: false` included. The route tree already
+// splits the signed-in copy; this is the same split from the other side.
+const PublicCatalogPage = lazy(() =>
+  import("@/features/models/PublicCatalogPage").then((module) => ({
+    default: module.PublicCatalogPage,
+  })),
+)
+
 function useHashPath(): string {
   const [hash, setHash] = useState(() => window.location.hash)
   useEffect(() => {
@@ -86,7 +98,7 @@ export default function App({
  * again.
  */
 function DeploymentRoot({ hash }: { hash: string }) {
-  const { deployment_type, session_type } = useDeployment()
+  const { deployment_type, session_type, public_catalog } = useDeployment()
   const { isAuthenticated } = useAuth()
 
   // A hybrid gateway is data-plane only: otari.ai owns its organizations,
@@ -139,6 +151,21 @@ function DeploymentRoot({ hash }: { hash: string }) {
     return (
       <PublicPageTitle page={PUBLIC_AUTH_TITLES[publicAuth]}>
         <PublicAuthPage path={publicAuth} hash={hash} key={hash} />
+      </PublicPageTitle>
+    )
+  }
+
+  // The catalog, where the deployment has opened it to visitors. Only for a
+  // visitor: a signed-in caller reaches the same pages through the router,
+  // priced for their organization. Keyed on the hash so a second model opened
+  // in the tab remounts the view with its own selection.
+  const publicCatalog = publicCatalogPath(hash)
+  if (public_catalog && !isAuthenticated && publicCatalog !== null) {
+    return (
+      <PublicPageTitle page="Models">
+        <Suspense fallback={<PageLoading label="Loading models…" />}>
+          <PublicCatalogPage key={hash} modelId={publicCatalog.modelId} />
+        </Suspense>
       </PublicPageTitle>
     )
   }

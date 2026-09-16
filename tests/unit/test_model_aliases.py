@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 from any_llm import LLMProvider
 
-from gateway.api.routes.models import _alias_target_keys
 from gateway.core.config import GatewayConfig
 from gateway.model_labeling import relabel_model
+from gateway.services.merged_catalog_service import alias_target_keys
 from gateway.services.provider_kwargs import normalize_pricing_key, resolve_provider_selector
 
 # ---------------------------------------------------------------------------
@@ -180,8 +180,8 @@ def test_alias_target_keys_are_canonical() -> None:
         providers={"anthropic": {"api_key": "sk-ant"}},
         aliases={"myopusmodel": "anthropic:claude-opus-4"},
     )
-    assert _alias_target_keys(config, config.aliases) == {"anthropic:claude-opus-4"}
-    assert normalize_pricing_key(config, "anthropic/claude-opus-4") in _alias_target_keys(config, config.aliases)
+    assert alias_target_keys(config, config.aliases) == {"anthropic:claude-opus-4"}
+    assert normalize_pricing_key(config, "anthropic/claude-opus-4") in alias_target_keys(config, config.aliases)
 
 
 def test_relabel_top_level_model() -> None:

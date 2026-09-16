@@ -9,6 +9,7 @@ import type {
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import {
+  CATALOG,
   DISCOVERABLE,
   MAIL_SETTINGS,
   MAINTENANCE_MODE,
@@ -38,6 +39,7 @@ export function useUpdateSettings() {
       queryClient.setQueryData([SETTINGS], data)
       // Toggling discovery changes which models the catalog and picker report.
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
+      void queryClient.invalidateQueries({ queryKey: [CATALOG] })
       void queryClient.invalidateQueries({ queryKey: [DISCOVERABLE] })
     },
   })

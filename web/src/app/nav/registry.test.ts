@@ -4,6 +4,7 @@ import { BASE_CAPABILITIES } from "@/shared/hooks/useEntitlements"
 import { HOSTED_SURFACES } from "@/tests/fixtures"
 import { OVERLAY_NAV_LABEL_OVERRIDES } from "./overlayLabelOverrides"
 import { OVERLAY_NAV_ITEMS } from "./overlayNavItems"
+import { OVERLAY_DEPLOYMENT_NAV_SECTIONS } from "./overlaySections"
 import {
   applyNavLabelOverrides,
   composeNavItems,
@@ -415,13 +416,15 @@ describe("nav registry", () => {
     expect(general?.items.map((item) => item.label)).toContain("Org settings")
   })
 
-  it("keeps section ids unique across the two rails", () => {
-    // What lets one override list and one contribution list address both
-    // rails: an id that appeared on each would rename two sections, or land one
+  it("keeps section ids unique across all three rails", () => {
+    // What lets one override list and one contribution list address every
+    // rail: an id that appeared on two would rename both sections, or land one
     // contribution's rows twice, from a single entry.
-    const ids = [...NAV_SECTIONS, ...ORG_NAV_SECTIONS].map(
-      (section) => section.id,
-    )
+    const ids = [
+      ...NAV_SECTIONS,
+      ...ORG_NAV_SECTIONS,
+      ...DEPLOYMENT_NAV_SECTIONS,
+    ].map((section) => section.id)
     expect(ids).toEqual([...new Set(ids)])
   })
 
@@ -429,6 +432,7 @@ describe("nav registry", () => {
     // The overlay tree lives in another repo; the seams here stay empty.
     expect(composeNavSections(NAV_SECTIONS, [])).toEqual(NAV_SECTIONS)
     expect(OVERLAY_NAV_ITEMS).toEqual([])
+    expect(OVERLAY_DEPLOYMENT_NAV_SECTIONS).toEqual([])
   })
 })
 

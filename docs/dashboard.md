@@ -50,6 +50,12 @@ a password, which can be before the operator claims the deployment: a member
 added to the roster and signed up signs in there. While both credentials still
 work, the page offers the master-key box beside the form.
 
+Account settings also carries the name you are known by, which is not a
+credential: it is what the account menu, the organization roster and the user
+column on Usage and Activity show. Someone an admin added to the roster by
+address has no name until they set one here. Clearing it puts those surfaces
+back to naming you by your sign-in address.
+
 ## First-run walkthrough
 
 1. Start Otari in standalone mode.
@@ -79,7 +85,11 @@ created. Set `activation_guide: false` to disable the flow for the deployment.
 The workspace view contains day-to-day gateway operations:
 
 - Overview, Activity, and Usage
-- Playground, Models, and Routing
+- Playground, Models, and Routing. Models is the catalog grouped by model: a
+  list of cards with a rail of filters beside it, and a page per model where
+  every offering of it is compared, one per provider, each with its own limits
+  and the price your organization is charged. It is read-only; a rate is set on
+  Model pricing.
 - Tools
 - API keys, providers, and workspace members
 
@@ -102,7 +112,13 @@ admin manages their own organization's budgets and the spend ceilings holding
 them, while a deployment operator gets the deployment-wide budgets and the
 gateway users assigned to them. Model pricing splits the same way, with the
 default pricing catalog kept to an operator and the organization's own rate
-overrides open to its admins.
+overrides open to its admins. An override covers a model the organization
+supplies the provider key for; a model reached through one of the deployment's
+own provider instances is priced by the catalog, because the deployment holds
+that credential and settles its upstream bill. For an operator that section
+also shows the update a scheduled genai-prices check has left for review, when
+the defaults were last accepted and by whom, and how far each stored rate sits
+from today's default.
 
 Exact page names and availability can change with deployment mode and installed
 extensions. The running dashboard is the source of truth.
