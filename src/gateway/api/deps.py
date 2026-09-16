@@ -535,13 +535,9 @@ async def get_db_if_needed(
         yield None
         return
 
-    # ``aclosing`` rather than a bare ``async for``: ``async for`` never closes
-    # the iterator it drives, so tearing this dependency down would abandon
-    # ``get_db``'s generator with its ``async with`` block unfinished. The
-    # session would then be closed only when the garbage collector finalized
-    # that generator, at an arbitrary later moment in an unrelated task, and its
-    # pooled connection stays checked out until then. Under load that outruns
-    # the pool.
+    # A bare ``async for`` leaves ``get_db`` open when an error or cancellation
+    # is thrown in at teardown, so its session would hold a pooled connection
+    # until garbage collection.
     async with aclosing(get_db()) as sessions:
         async for db in sessions:
             yield db

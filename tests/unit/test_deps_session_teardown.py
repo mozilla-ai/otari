@@ -1,14 +1,6 @@
-"""Regression coverage for the pooled connection leak in ``get_db_if_needed``.
+"""Teardown of ``get_db_if_needed`` closes its session whether the request succeeds, fails or is canceled."""
 
-The dependency used to consume ``get_db`` with a bare ``async for``. An
-``async for`` never closes the iterator it drives, so tearing the dependency
-down abandoned ``get_db``'s generator with its ``async with`` block unfinished.
-The session was then closed only when the garbage collector finalized that
-generator, at an arbitrary later moment in an unrelated task, leaving its
-pooled connection checked out until then. Under sustained traffic that outran
-the pool and every request failed with a ``QueuePool`` timeout.
-"""
-
+import asyncio
 from types import TracebackType
 from typing import Any
 
@@ -47,23 +39,28 @@ async def test_teardown_closes_the_session_it_borrowed(monkeypatch: pytest.Monke
     assert yielded is session
     assert not session.closed, "the session must stay open for the life of the request"
 
-    await dependency.aclose()
+    with pytest.raises(StopAsyncIteration):
+        await anext(dependency)
 
     assert session.closed, "tearing the dependency down must return the connection to the pool"
 
 
 @pytest.mark.asyncio
-async def test_teardown_closes_the_session_when_the_request_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The connection goes back even when the handler raises, which is the path a
-    cancelled or erroring request takes."""
+@pytest.mark.parametrize(
+    "error", [RuntimeError("handler blew up"), asyncio.CancelledError()], ids=["error", "canceled"]
+)
+async def test_teardown_closes_the_session_when_the_request_fails(
+    error: BaseException, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The connection goes back when the request raises or is canceled."""
     session = _FakeSession()
     monkeypatch.setattr(database, "_SessionLocal", lambda: session)
 
     dependency = get_db_if_needed(GatewayConfig(database_url="sqlite:///./test.db"))
     await anext(dependency)
 
-    with pytest.raises(RuntimeError):
-        await dependency.athrow(RuntimeError("handler blew up"))
+    with pytest.raises(type(error)):
+        await dependency.athrow(error)
 
     assert session.closed
 
