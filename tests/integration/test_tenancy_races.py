@@ -21,7 +21,8 @@ from sqlmodel import col
 
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import APIKey, WorkspaceActivationState
+from gateway.models.api_keys import APIKey
+from gateway.models.entities import WorkspaceActivationState
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberUpdateRequest,  # noqa: E402

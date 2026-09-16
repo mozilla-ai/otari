@@ -15,7 +15,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT
-from gateway.models.entities import APIKey
+from gateway.models.api_keys import APIKey
 
 # The shape otari-ai mints: it fails both the ``gw-``/``gw_`` prefix check and the
 # ``gw[-_][A-Za-z0-9_-]+`` charset check the old validator applied.

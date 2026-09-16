@@ -49,7 +49,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.auth.models import generate_api_key, hash_key, key_prefix, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.usage_source import integration_traffic, served_here
-from gateway.models.entities import APIKey, UsageLog, WorkspaceActivationState
+from gateway.models.api_keys import APIKey
+from gateway.models.entities import UsageLog, WorkspaceActivationState
 from gateway.models.money import as_float
 from gateway.models.tenancy import User, Workspace
 from gateway.repositories.users_repository import get_or_create_attribution_user

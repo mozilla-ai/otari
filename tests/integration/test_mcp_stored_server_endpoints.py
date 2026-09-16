@@ -30,7 +30,8 @@ from gateway.api.routes import mcp as mcp_route
 from gateway.core.config import API_ROOT
 from gateway.core.database import release_session
 from gateway.inflight import InFlightRegistry
-from gateway.models.entities import APIKey, User, WorkspaceMcpServer
+from gateway.models.api_keys import APIKey
+from gateway.models.entities import User, WorkspaceMcpServer
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tenancy import Organization, Workspace
 from gateway.services import mcp_stateless

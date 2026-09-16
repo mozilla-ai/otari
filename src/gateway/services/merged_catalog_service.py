@@ -22,7 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.models.entities import APIKey, ModelPricing
+from gateway.models.api_keys import APIKey
+from gateway.models.entities import ModelPricing
 from gateway.models.money import as_float
 from gateway.models.pricing_schemas import PricingTier
 from gateway.models.routing import PolicySpec

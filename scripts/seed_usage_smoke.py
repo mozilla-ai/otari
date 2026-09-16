@@ -19,7 +19,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import col
 
-from gateway.models.entities import APIKey, ModelPricing, UsageLog, User
+from gateway.models.api_keys import APIKey
+from gateway.models.entities import ModelPricing, UsageLog, User
 from gateway.models.tenancy import Organization, Workspace
 from gateway.services.pricing_service import gateway_tool_pricing_key
 from gateway.services.tool_usage import TOOL_METER_NAMESPACE

@@ -28,7 +28,8 @@ from sqlalchemy.orm import Session
 
 from gateway.auth.models import generate_api_key, hash_key, key_prefix
 from gateway.core.config import API_ROOT
-from gateway.models.entities import APIKey, DashboardSession
+from gateway.models.api_keys import APIKey
+from gateway.models.entities import DashboardSession
 from gateway.models.entities import User as BillingUser
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token

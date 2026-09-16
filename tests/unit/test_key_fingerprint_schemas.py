@@ -11,7 +11,7 @@ import uuid
 from datetime import UTC, datetime
 
 from gateway.api.routes.keys import CreateKeyResponse, KeyInfo
-from gateway.models.entities import APIKey
+from gateway.models.api_keys import APIKey
 from gateway.services.tenancy.workspace_activation_service import ActivationApiKeyPublic
 
 

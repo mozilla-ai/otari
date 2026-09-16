@@ -15,7 +15,8 @@ from gateway.api.deps import (
     verify_catalog_reader,
 )
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import APIKey, ModelPricing
+from gateway.models.api_keys import APIKey
+from gateway.models.entities import ModelPricing
 from gateway.models.tenancy import User as TenancyUser
 from gateway.services.merged_catalog_service import (
     ModelObject,

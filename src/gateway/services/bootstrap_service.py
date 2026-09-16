@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.auth import generate_api_key, hash_key, key_prefix, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.log_config import log_secret
-from gateway.models.entities import APIKey
+from gateway.models.api_keys import APIKey
 from gateway.repositories.users_repository import get_or_create_default_user
 from gateway.services.workspace_scope import default_workspace_id
 

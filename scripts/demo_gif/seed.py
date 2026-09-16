@@ -27,14 +27,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import col
 
-from gateway.models.entities import (
-    APIKey,
-    Budget,
-    ModelAlias,
-    ModelPricing,
-    UsageLog,
-    User,
-)
+from gateway.models.api_keys import APIKey
+from gateway.models.entities import Budget, ModelAlias, ModelPricing, UsageLog, User
 from gateway.models.money import to_usd
 from gateway.models.tenancy import Organization, Workspace
 

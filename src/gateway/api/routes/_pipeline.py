@@ -121,7 +121,8 @@ from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Histogram
 from gateway.metrics import Counter as PrometheusCounter
 from gateway.model_labeling import relabel_model
-from gateway.models.entities import APIKey, ModelPricing, UsageLog
+from gateway.models.api_keys import APIKey
+from gateway.models.entities import ModelPricing, UsageLog
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd

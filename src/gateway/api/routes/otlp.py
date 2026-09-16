@@ -64,7 +64,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import TelemetryStoragePortDep, get_config, get_db, verify_api_key_or_master_key
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.models.entities import APIKey
+from gateway.models.api_keys import APIKey
 from gateway.ports.telemetry_storage_port import TelemetryRecord
 from gateway.services.agent_telemetry_service import (
     CUMULATIVE,

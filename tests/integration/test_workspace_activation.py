@@ -18,7 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import APIKey, UsageLog, WorkspaceActivationState
+from gateway.models.api_keys import APIKey
+from gateway.models.entities import UsageLog, WorkspaceActivationState
 from gateway.models.tenancy import Organization, User, Workspace
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,

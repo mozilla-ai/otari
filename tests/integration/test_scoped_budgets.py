@@ -19,7 +19,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.core.config import API_ROOT
-from gateway.models.entities import APIKey, Budget, ScopedBudget, User
+from gateway.models.api_keys import APIKey
+from gateway.models.entities import Budget, ScopedBudget, User
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
 from gateway.models.tenancy import User as TenancyUser
 from gateway.services.budget_service import (

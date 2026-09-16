@@ -16,7 +16,7 @@ from gateway.core.database import DATABASE_ERRORS, create_session, get_db
 from gateway.core.feature import CoreFeature
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
-from gateway.models.entities import APIKey
+from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.entitlement_port import EntitlementPort

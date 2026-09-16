@@ -63,7 +63,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
-from gateway.models.entities import MAX_COUNT_LIMIT, APIKey, Budget, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.api_keys import APIKey
+from gateway.models.entities import MAX_COUNT_LIMIT, Budget, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.entities import User as GatewayUser
 from gateway.models.money import MAX_USD_LIMIT, as_float, to_usd_or_none
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember

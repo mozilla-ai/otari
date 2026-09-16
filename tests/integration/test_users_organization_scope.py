@@ -31,7 +31,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
-from gateway.models.entities import APIKey, DashboardSession, UsageLog, User
+from gateway.models.api_keys import APIKey
+from gateway.models.entities import DashboardSession, UsageLog, User
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace
 from gateway.models.tenancy import User as TenancyUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token

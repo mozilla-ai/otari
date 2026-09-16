@@ -18,7 +18,8 @@ from gateway.api.deps import reset_config
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
-from gateway.models.entities import AgentTelemetry, APIKey, UsageLog, User
+from gateway.models.api_keys import APIKey
+from gateway.models.entities import AgentTelemetry, UsageLog, User
 
 SUMMARY_PATH = f"{API_ROOT}/agent-telemetry/summary"
 COUNT_PATH = f"{API_ROOT}/agent-telemetry/count"
