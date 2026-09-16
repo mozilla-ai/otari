@@ -460,10 +460,17 @@ const TABLE_COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
   },
 ]
 
+const CATALOG_VIEWS = ["list", "table"] as const
+type CatalogView = (typeof CATALOG_VIEWS)[number]
+
 const VIEW_OPTIONS = [
   { value: "list", label: "List" },
   { value: "table", label: "Table" },
-]
+] as const satisfies { value: CatalogView; label: string }[]
+
+function isCatalogView(value: string | null): value is CatalogView {
+  return (CATALOG_VIEWS as readonly string[]).includes(value ?? "")
+}
 
 // Hoisted beside the columns: DataTable caches its rendered rows on these two,
 // and an inline arrow would rebuild every row on each render.
@@ -471,12 +478,11 @@ const rowKey = (row: CatalogModelSummary) => row.id
 
 const VIEW_STORAGE_KEY = "otari.dashboard.modelsView"
 
-function readStoredView(): string {
+function readStoredView(): CatalogView {
   if (typeof window === "undefined") return "list"
   try {
-    return window.localStorage.getItem(VIEW_STORAGE_KEY) === "table"
-      ? "table"
-      : "list"
+    const stored = window.localStorage.getItem(VIEW_STORAGE_KEY)
+    return isCatalogView(stored) ? stored : "list"
   } catch {
     // Private-mode Safari and a disabled-storage policy both throw. The list is
     // the view a first visit gets, so it is what a blocked read falls back to.
@@ -506,11 +512,14 @@ export function ModelCatalogView({
     providers: initialProvider ? [initialProvider] : [],
   })
   const [sort, setSort] = useState("newest")
-  const [view, setView] = useState(readStoredView)
+  const [view, setView] = useState<CatalogView>(readStoredView)
+  // `Segmented` hands back a plain string, so the union is re-established here,
+  // on the same default a stored value nobody recognizes falls to.
   const changeView = (next: string) => {
-    setView(next)
+    const chosen = isCatalogView(next) ? next : "list"
+    setView(chosen)
     try {
-      window.localStorage.setItem(VIEW_STORAGE_KEY, next)
+      window.localStorage.setItem(VIEW_STORAGE_KEY, chosen)
     } catch {
       // Keep the control usable when browser storage is unavailable.
     }
