@@ -122,7 +122,7 @@ export function MessageBubble({
                 className="min-h-11 min-w-11 md:min-h-8 md:min-w-8"
                 onPress={onRegenerate}
               >
-                <FiRotateCcw aria-hidden className="size-4" />
+                <FiRotateCcw aria-hidden className="size-3.5" />
               </Button>
             ) : null}
           </div>
