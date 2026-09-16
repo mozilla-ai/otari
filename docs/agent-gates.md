@@ -91,7 +91,12 @@ is what keeps `forbidden: ["npm"]` from matching inside `pnpm`, and
 `forbidden: ["git push --force"]` from matching inside the deliberately safer
 `git push --force-with-lease`; a plain substring check would get both wrong.
 
-Two things this gate does not do, on purpose, for now:
+A phrase matches a token run in any position, not just at the head of a
+command, so a one-word phrase also matches where that word is an argument:
+`forbidden: ["npm"]` refuses `grep -rn npm web/`. Prefer a phrase that names
+a real invocation (`npm install`, `npm ci`) over a bare tool name.
+
+Three things this gate does not do, on purpose, for now:
 
 - It sees only the literal command text of one tool call. It does not, and
   cannot, see what a script or program that command invokes does internally:
@@ -99,8 +104,16 @@ Two things this gate does not do, on purpose, for now:
   runs `git push --force`. This is a footgun-catcher for a cooperative agent,
   not a sandbox against one deliberately working around it.
 - It only splits a command into segments on `&&`/`;`/`|`/`||` when they are
-  whitespace-separated. `cmd1&&cmd2` (no spaces) is not split into two
-  segments.
+  whitespace-separated, and it **fails open** when they are not. `cd
+  web;npm install` tokenizes to `web;npm`, which equals no phrase, so a gate
+  forbidding `npm install` reports `pass` on it. Write compound commands with
+  spaces around the operator if you want them checked.
+- A command it cannot tokenize as a shell command (an unbalanced quote, or a
+  heredoc carrying another language) falls back to a plain whitespace split.
+  That still catches a forbidden phrase spelled as bare words, and it can
+  report a phrase that only appears inside what would have been a quoted
+  argument. The alternative, refusing to judge, blocks every heredoc a real
+  session runs.
 
 ### Not built yet
 
@@ -156,7 +169,7 @@ resolves `pass` and `blocked` is `false`. Request/response fields:
 | Field | Meaning |
 | --- | --- |
 | `policy_yaml` | The full text of the caller's `.otari-gates.yml`, read and submitted by the caller. |
-| `changed_paths` | Repo-relative paths the caller observed changed. Send `[]` if there's nothing to check yet. |
+| `changed_paths` | Repo-relative paths the caller observed changed. Send `[]` if evidence was collected and there is none (a `changed_path` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects path evidence at all (a required `changed_path` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
 | `commands` | Shell commands the caller observed run or is about to run. Send `[]` if evidence was collected and there is none right now (a `command_match` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects command evidence at all (a required `command_match` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
 | `blocked` | `true` when a `required` gate's outcome is not `pass`/`not_applicable`. An unresolved gate never counts as a pass. |
 | `results[].outcome` | `pass`, `fail`, `unknown`, `error`, `not_applicable`, or `not_run`. |

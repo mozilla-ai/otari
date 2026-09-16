@@ -126,14 +126,36 @@ def test_quoted_argument_containing_operator_text_is_not_split() -> None:
     assert result.outcome is Outcome.PASS
 
 
-def test_unbalanced_quotes_do_not_crash_and_do_not_match() -> None:
-    """A command shlex cannot tokenize becomes its own opaque single token,
+def test_unbalanced_quotes_do_not_crash_and_still_match_bare_words() -> None:
+    """A command shlex cannot tokenize falls back to a whitespace split.
 
-    never equal to a real multi-token forbidden phrase.
+    The old fallback kept it as one opaque token, which could never equal a
+    forbidden phrase: `npm install "unterminated` silently passed a required
+    gate forbidding `npm`. A whitespace split still finds a phrase spelled as
+    bare words, and a token that carries the stray quote (`"--force`) still
+    does not equal the phrase's own `--force`.
     """
-    gate = _gate(forbidden=("git push --force",))
-    result = evaluate_command_match(gate, CommandEvidence(commands=('git push "--force',)))
-    assert result.outcome is Outcome.PASS
+    gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
+    assert evaluate_command_match(gate, CommandEvidence(commands=('npm install "unterminated',))).outcome is (
+        Outcome.FAIL
+    )
+
+    force_gate = _gate(forbidden=("git push --force",))
+    assert evaluate_command_match(force_gate, CommandEvidence(commands=('git push "--force',))).outcome is (
+        Outcome.PASS
+    )
+
+
+def test_an_unparseable_heredoc_does_not_block_an_unrelated_command() -> None:
+    """The reason the fallback is a whitespace split rather than `unknown`.
+
+    A Bash call carrying a heredoc of another language is routinely
+    unparseable to shlex. Reporting `unknown` there blocks a required gate on
+    every such call, which is every ordinary session, not the forbidden ones.
+    """
+    gate = _gate(id="use-pnpm", forbidden=("npm install",), message="Use pnpm, not npm.")
+    heredoc = "python3 - <<'EOF'\ns = \"it's fine\"\nprint(s)\nEOF"
+    assert evaluate_command_match(gate, CommandEvidence(commands=(heredoc,))).outcome is Outcome.PASS
 
 
 def test_operators_glued_with_no_surrounding_whitespace_are_a_known_gap() -> None:
@@ -163,8 +185,8 @@ def test_command_segments_keeps_a_quoted_operator_as_one_token() -> None:
     assert _command_segments('echo "a && b"') == [["echo", "a && b"]]
 
 
-def test_command_segments_falls_back_to_one_token_on_unbalanced_quotes() -> None:
-    assert _command_segments('git push "--force') == [['git push "--force']]
+def test_command_segments_falls_back_to_a_whitespace_split_on_unbalanced_quotes() -> None:
+    assert _command_segments('git push "--force') == [["git", "push", '"--force']]
 
 
 def test_contains_subsequence_finds_the_phrase_anywhere() -> None:

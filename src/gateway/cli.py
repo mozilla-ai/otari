@@ -236,6 +236,13 @@ _HOOK_EDIT_TOOL_PATH_FIELDS = {"Edit": "file_path", "Write": "file_path", "Noteb
 # command_match gate gets before the command runs; see docs/agent-gates.md.
 _HOOK_COMMAND_TOOL_FIELDS = {"Bash": "command"}
 
+# Mirrors the Hook Server's own per-command bound (routes/hooks.py's
+# _MAX_COMMAND_LENGTH). A literal rather than an import: this command talks to
+# a gateway over HTTP that may be a different build, so the number it truncates
+# to is its own best guess at the far side's limit, not a shared constant that
+# would imply the two are always one process.
+_HOOK_MAX_COMMAND_LENGTH = 4096
+
 
 def _hook_find_repo_root(start: Path) -> Path | None:
     current = start.resolve()
@@ -367,6 +374,20 @@ def hook(harness: str, config: str | None, url: str | None, api_key: str | None)
             command = tool_input.get(command_field)
             if not command:
                 return
+            # Truncated rather than sent whole: the Hook Server rejects an
+            # oversize command with a 422, and a 422 fails the *whole* check
+            # open, taking every changed_path gate in the same policy with it.
+            # A Bash call carrying a heredoc clears this limit routinely, so
+            # that is the common case rather than a pathological one. A tool
+            # name is argv[0], so keeping the head is what preserves detection
+            # for the shape this gate is actually for.
+            if len(command) > _HOOK_MAX_COMMAND_LENGTH:
+                click.echo(
+                    f"otari hook: command is {len(command):,} characters, checking only the first "
+                    f"{_HOOK_MAX_COMMAND_LENGTH:,}.",
+                    err=True,
+                )
+                command = command[:_HOOK_MAX_COMMAND_LENGTH]
             commands = [command]
         else:
             return  # A tool this harness integration does not check yet.
@@ -412,6 +433,18 @@ def hook(harness: str, config: str | None, url: str | None, api_key: str | None)
         result = response.json()
         failing = [gate for gate in result["results"] if gate["outcome"] not in ("pass", "not_applicable")]
         blocked = result["blocked"]
+    except httpx.HTTPStatusError as exc:
+        # Split from the transport branch below on purpose: the request did
+        # arrive and was answered, so "could not reach" would send whoever
+        # debugs this to the network instead of to the status and body that
+        # say what was actually wrong (a policy this build cannot parse, or
+        # evidence over one of the route's limits).
+        detail = exc.response.text[:500]
+        click.echo(
+            f"otari hook: {resolved_url} rejected the check ({exc.response.status_code}: {detail}), not blocking.",
+            err=True,
+        )
+        return
     except httpx.HTTPError as exc:
         click.echo(f"otari hook: could not reach {resolved_url} ({exc}), not blocking.", err=True)
         return

@@ -27,7 +27,7 @@ from gateway.agent_runtime.domain.evaluators import (
     evaluate_changed_path,
     evaluate_command_match,
     tokenize_commands,
-    tokenize_phrase,
+    tokenize_phrases,
 )
 from gateway.agent_runtime.domain.policy import MAX_POLICY_BYTES, PolicyError, parse_policy
 from gateway.agent_runtime.domain.types import ChangedPathEvidence, ChangedPathGate, CommandEvidence, CommandMatchGate
@@ -166,8 +166,15 @@ class PolicyCheckRequest(BaseModel):
     # is a cheap early rejection, not the authoritative bound: parse_policy
     # re-checks the real byte length against the same MAX_POLICY_BYTES.
     policy_yaml: str = Field(min_length=1, max_length=MAX_POLICY_BYTES)
-    changed_paths: list[str] = Field(
-        default_factory=list,
+    # Tri-state, for the same reason `commands` below is: None (omitted, or an
+    # explicit `null`) means this caller never collects path evidence at all,
+    # and evaluate_changed_path reports `unknown`, blocking a required gate
+    # rather than reading absent evidence as a pass; `[]` means it was
+    # collected and there is none (`not_applicable`). This used to default to
+    # `[]`, which collapsed the two and let an omitted field certify every
+    # changed_path gate as passing.
+    changed_paths: list[str] | None = Field(
+        default=None,
         max_length=_MAX_CHANGED_PATHS,
         description="Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).",
     )
@@ -185,11 +192,13 @@ class PolicyCheckRequest(BaseModel):
     )
 
     @property
-    def changed_path_evidence(self) -> ChangedPathEvidence:
+    def changed_path_evidence(self) -> ChangedPathEvidence | None:
         # A duplicate path adds nothing a single copy wouldn't already tell a
         # gate; collapsing it here means the work-budget check below and the
         # actual matching agree on the same, cheaper count rather than one
         # estimating off raw input and the other paying for the duplicates.
+        if self.changed_paths is None:
+            return None
         return ChangedPathEvidence(changed_paths=tuple(dict.fromkeys(self.changed_paths)))
 
     @property
@@ -230,7 +239,7 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     except PolicyError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    for path in request.changed_paths:
+    for path in request.changed_paths or []:
         if len(path) > _MAX_PATH_LENGTH:
             raise HTTPException(status_code=422, detail=f"changed_paths entry exceeds {_MAX_PATH_LENGTH} characters.")
     for command in request.commands or []:
@@ -247,10 +256,11 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     # deduplicate their evidence lists the same way, so each estimate and its
     # matching evaluation below always agree on the same, cheaper counts.
     changed_path_evidence = request.changed_path_evidence
+    changed_paths = changed_path_evidence.changed_paths if changed_path_evidence is not None else ()
     pattern_count = sum(len(gate.forbidden) for gate in changed_path_gates)
     total_pattern_length = sum(len(glob) for gate in changed_path_gates for glob in gate.forbidden)
-    path_count = len(changed_path_evidence.changed_paths)
-    total_path_length = sum(len(path) for path in changed_path_evidence.changed_paths)
+    path_count = len(changed_paths)
+    total_path_length = sum(len(path) for path in changed_paths)
     estimated_work = pattern_count * total_path_length + path_count * total_pattern_length
     comparisons = pattern_count * path_count
     if estimated_work > _MAX_MATCH_WORK or comparisons > _MAX_COMPARISONS:
@@ -273,6 +283,7 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     # omitted from the request means command_evidence is None, and there is
     # nothing to tokenize or bound in that case either.
     segment_cache: dict[str, list[list[str]]] | None = None
+    phrase_cache: dict[str, list[str]] | None = None
     if command_match_gates and command_evidence is not None:
         total_command_chars = sum(len(command) for command in command_evidence.commands)
         if total_command_chars > _MAX_TOTAL_COMMAND_CHARS:
@@ -298,11 +309,15 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
         segment_cache = tokenize_commands(command_evidence.commands)
 
         # Policy parsing already proved every forbidden phrase tokenizes
-        # (domain.policy's own validation), so this cannot raise.
-        phrase_count = sum(len(gate.forbidden) for gate in command_match_gates)
-        total_phrase_tokens = sum(
-            len(tokenize_phrase(phrase)) for gate in command_match_gates for phrase in gate.forbidden
+        # (domain.policy's own validation), so this cannot raise. Shared with
+        # the evaluation below via phrase_cache for the same reason
+        # segment_cache is: tokenized here for the estimate and then again
+        # inside every evaluate_command_match call is the same work twice.
+        phrase_cache = tokenize_phrases(
+            tuple(phrase for gate in command_match_gates for phrase in gate.forbidden)
         )
+        phrase_count = sum(len(gate.forbidden) for gate in command_match_gates)
+        total_phrase_tokens = sum(len(tokens) for tokens in phrase_cache.values())
         command_count = len(command_evidence.commands)
         total_command_tokens = sum(len(segment) for segments in segment_cache.values() for segment in segments)
         estimated_command_work = total_phrase_tokens * total_command_tokens
@@ -323,7 +338,9 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     results = [
         evaluate_changed_path(gate, changed_path_evidence)
         if isinstance(gate, ChangedPathGate)
-        else evaluate_command_match(gate, command_evidence, segment_cache=segment_cache)
+        else evaluate_command_match(
+            gate, command_evidence, segment_cache=segment_cache, phrase_cache=phrase_cache
+        )
         for gate in spec.gates
     ]
     blocked = any(result.enforcement == "required" and result.outcome.is_blocking for result in results)

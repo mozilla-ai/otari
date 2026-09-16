@@ -135,6 +135,69 @@ def test_pretooluse_submits_a_bash_command_for_command_match(monkeypatch: pytest
     assert captured["json"]["changed_paths"] == []
 
 
+def test_an_oversize_bash_command_is_truncated_rather_than_rejected(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """The Hook Server 422s a command over its limit, and a 422 fails the whole
+    check open, taking every changed_path gate in the same policy with it. A
+    Bash call carrying a heredoc clears that limit routinely, so the head is
+    sent (where a tool name lives) instead of the request being lost.
+    """
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    command = "npm install " + "x" * 8000
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    sent = captured["json"]["commands"]
+    assert len(sent[0]) == gateway_cli._HOOK_MAX_COMMAND_LENGTH
+    assert sent[0].startswith("npm install ")
+    assert "checking only the first" in result.output
+
+
+def test_a_rejected_check_does_not_block_and_does_not_blame_the_network(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """A 4xx means the request arrived and was answered. Reporting it as
+    "could not reach" sends whoever debugs it to the network rather than to
+    the status and body that say what was actually wrong.
+    """
+
+    class _RejectingResponse:
+        status_code = 422
+        text = "commands entry exceeds 4096 characters."
+
+        def raise_for_status(self) -> None:
+            request = httpx.Request("POST", "http://gw.test/api/v1/hooks/check")
+            response = httpx.Response(422, text=self.text, request=request)
+            raise httpx.HTTPStatusError("422", request=request, response=response)
+
+        def json(self) -> dict[str, Any]:  # pragma: no cover - never reached
+            raise AssertionError("json() must not be called on a rejected check")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _RejectingResponse())
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": "npm install"},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert "rejected the check (422" in result.output
+    assert "could not reach" not in result.output
+
+
 def test_pretooluse_ignores_a_bash_call_with_no_command(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     called = False
 

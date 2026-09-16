@@ -59,16 +59,39 @@ def test_blocks_on_a_forbidden_change(client: TestClient, master_key_header: dic
     assert body["results"][0]["detail"] == "scratch/notes.txt"
 
 
-def test_no_changed_paths_means_no_evidence_to_match(
+def test_an_empty_changed_paths_list_is_not_applicable_not_a_pass(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
+    """`[]` says evidence was collected and there is none: non-blocking, but
+    reported as not_applicable rather than as a check that ran and passed.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _VALID_POLICY, "changed_paths": []},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "not_applicable"
+
+
+def test_omitted_changed_paths_blocks_rather_than_passing(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Omitting the field says this caller never collects path evidence at
+    all, which must not read as a pass. It used to default to `[]` and
+    certify every changed_path gate in the policy.
+    """
     response = client.post(
         f"{API_ROOT}/hooks/check",
         json={"policy_yaml": _VALID_POLICY},
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
-    assert response.json()["blocked"] is False
+    body = response.json()
+    assert body["results"][0]["outcome"] == "unknown"
+    assert body["blocked"] is True
 
 
 def test_unsupported_gate_type_is_rejected_not_skipped(
@@ -389,7 +412,7 @@ def test_a_policy_with_no_command_match_gate_never_tokenizes_commands(
     start = time.time()
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _VALID_POLICY, "commands": commands},
+        json={"policy_yaml": _VALID_POLICY, "changed_paths": [], "commands": commands},
         headers=master_key_header,
     )
     assert time.time() - start < 1.0

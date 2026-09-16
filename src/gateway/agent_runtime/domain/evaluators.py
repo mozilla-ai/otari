@@ -236,11 +236,23 @@ def _command_segments(command: str) -> list[list[str]]:
     exactly one of `&&`, `||`, `;`, `|`: a quoted argument that happens to
     contain that text, like `"a && b"`, survives as a single token from
     shlex and is never mistaken for a separator, since this only looks at
-    whole tokens, never substrings of one. A command shlex still cannot
-    tokenize after comment-stripping (an unbalanced quote outside any
-    comment) becomes its own single-token, single-segment command: whatever
-    it is, it is not equal to any multi-token forbidden phrase, so it can
-    only fail to match, never match something it shouldn't.
+    whole tokens, never substrings of one.
+
+    A command shlex cannot tokenize even after comment-stripping (an
+    unbalanced quote outside any comment) falls back to a plain whitespace
+    split. Keeping it as one opaque token instead was a silent fail-open:
+    `npm install "unterminated` never equals the single-token phrase `npm`,
+    so a required gate forbidding it reported `pass`. Reporting the command
+    as unreadable instead is worse: a Bash call carrying a heredoc of Python
+    or SQL is routinely unparseable to shlex, and an `unknown` there blocks
+    every ordinary tool call rather than the forbidden ones.
+
+    The whitespace split is deliberately degraded, not equivalent: it cannot
+    tell a quoted argument from a bare word, so a forbidden phrase inside a
+    quoted string in an already-unparseable command matches where it would
+    not have in a parseable one. That trade is the right way round. It costs
+    a false positive on a command that was malformed to begin with, and it
+    buys back detection on the shape an evasion would actually take.
 
     An empty segment (two separators back to back, or one at either end,
     e.g. `";" * n`) is dropped rather than returned: `_contains_subsequence`
@@ -251,10 +263,11 @@ def _command_segments(command: str) -> list[list[str]]:
     separators and no real content, ";" * 500 against 500 forbidden
     phrases, measured ~25,000,000 such comparisons and ~1.1s before this.
     """
+    stripped = _strip_shell_comment(command)
     try:
-        tokens = shlex.split(_strip_shell_comment(command), posix=True)
+        tokens = shlex.split(stripped, posix=True)
     except ValueError:
-        return [[command]]
+        tokens = stripped.split()
 
     segments: list[list[str]] = [[]]
     for token in tokens:
@@ -277,6 +290,20 @@ def tokenize_phrase(phrase: str) -> list[str]:
     same exception a raw `shlex.split` would.
     """
     return shlex.split(_strip_shell_comment(phrase), posix=True)
+
+
+def tokenize_phrases(phrases: tuple[str, ...]) -> dict[str, list[str]]:
+    """Tokenize every forbidden phrase once, for every gate and the cost estimate to share.
+
+    The phrase-side counterpart to `tokenize_commands`, and shared the same
+    way (`phrase_cache`): without it hooks.py tokenizes every phrase for its
+    cost estimate, discards the result, and each `evaluate_command_match`
+    call then tokenizes that gate's phrases again. Bounded by policy size
+    rather than by evidence, so the cost is small either way; sharing it
+    keeps the estimate and the evaluation reading from one set of tokens
+    instead of two computed the same way in two places.
+    """
+    return {phrase: tokenize_phrase(phrase) for phrase in phrases}
 
 
 def tokenize_commands(commands: tuple[str, ...]) -> dict[str, list[list[str]]]:
@@ -306,16 +333,17 @@ def evaluate_command_match(
     evidence: CommandEvidence | None,
     *,
     segment_cache: dict[str, list[list[str]]] | None = None,
+    phrase_cache: dict[str, list[str]] | None = None,
 ) -> GateResult:
     """Fail when a submitted command matches one of the gate's forbidden phrases.
 
-    `segment_cache` is optional and defaults to tokenizing locally, so a
-    caller evaluating a single gate in isolation (a unit test, a one-off
-    check) needs nothing extra. A caller evaluating several command_match
-    gates against the same evidence, like hooks.py's ``check_policy``,
-    should build one cache with ``tokenize_commands`` and pass the same dict
-    to every call, so tokenizing each command costs once per request rather
-    than once per gate.
+    `segment_cache` and `phrase_cache` are both optional and default to
+    tokenizing locally, so a caller evaluating a single gate in isolation (a
+    unit test, a one-off check) needs nothing extra. A caller evaluating
+    several command_match gates against the same evidence, like hooks.py's
+    ``check_policy``, should build each cache once (``tokenize_commands``,
+    ``tokenize_phrases``) and pass the same dicts to every call, so
+    tokenizing costs once per request rather than once per gate.
     """
     if evidence is None:
         return GateResult(
@@ -340,8 +368,10 @@ def evaluate_command_match(
             message="No commands were submitted to check.",
         )
 
-    forbidden_phrases = [tokenize_phrase(phrase) for phrase in gate.forbidden]
+    phrases_by_text = phrase_cache if phrase_cache is not None else tokenize_phrases(gate.forbidden)
+    forbidden_phrases = [phrases_by_text[phrase] for phrase in gate.forbidden]
     segments_by_command = segment_cache if segment_cache is not None else tokenize_commands(evidence.commands)
+
     matched = sorted(
         command
         for command in evidence.commands
@@ -375,6 +405,20 @@ def evaluate_changed_path(gate: ChangedPathGate, evidence: ChangedPathEvidence |
             enforcement=gate.enforcement,
             outcome=Outcome.UNKNOWN,
             message="Change evidence was not submitted.",
+        )
+
+    if not evidence.changed_paths:
+        # Mirrors evaluate_command_match: a caller submits an empty list for
+        # exactly the events that carry no path evidence at all (a PreToolUse
+        # call for Bash rather than an edit tool), and PASS there reads as a
+        # check that ran and found nothing when this gate never had anything
+        # to check. Both outcomes are non-blocking, so this changes what is
+        # reported rather than what is enforced.
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.NOT_APPLICABLE,
+            message="No changed paths were submitted to check.",
         )
 
     matched = sorted(path for path in evidence.changed_paths if _matches_any(path, gate.forbidden) is not None)

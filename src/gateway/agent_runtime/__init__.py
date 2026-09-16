@@ -11,5 +11,5 @@ but the evidence passed in.
 Evaluation results are ``client_reported``: Otari did not observe the
 repository itself, only what the caller claims about it. See
 docs/agent-gates.md for the request/response contract, and
-docs/agent-gates-production-plan.md for where this is going.
+docs/agent-gates.md for where this is going.
 """

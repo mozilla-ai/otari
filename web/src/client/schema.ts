@@ -9903,7 +9903,7 @@ export interface components {
              * Changed Paths
              * @description Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).
              */
-            changed_paths?: string[];
+            changed_paths?: string[] | null;
             /**
              * Commands
              * @description Shell commands the caller observed run or is about to run.

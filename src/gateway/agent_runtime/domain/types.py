@@ -16,7 +16,7 @@ Enforcement = Literal["required", "advisory"]
 # Gate results that mean "no objection". Every other outcome blocks a required
 # gate: unknown and error are deliberately on the blocking side, not the
 # passing one, so a check that could not run is never mistaken for one that
-# passed. See docs/agent-gates-production-plan.md#5-evidence-and-decision-semantics.
+# passed. See docs/agent-gates.md.
 _NON_BLOCKING = frozenset({"pass", "not_applicable"})
 
 
@@ -69,9 +69,13 @@ class CommandMatchGate:
     -separated segment of the submitted command. Token-based matching is what
     keeps ``"npm"`` from matching inside ``"pnpm"``, and ``"--force"`` from
     matching inside the deliberately-safer ``"--force-with-lease"``; a plain
-    substring check would get both wrong. See domain/evaluators.py for the
-    tokenizer and its known gap (operators glued with no surrounding
-    whitespace, e.g. ``"a&&b"``, are not split into separate segments).
+    substring check would get both wrong. A phrase matches a token run in any
+    position, not only at the head, so a one-word phrase also matches where
+    that word is an argument; prefer a phrase naming a real invocation
+    (``"npm install"``) over a bare tool name. See domain/evaluators.py for
+    the tokenizer, its known gap (operators glued with no surrounding
+    whitespace, e.g. ``"a&&b"``, are not split into separate segments), and
+    its whitespace-split fallback for a command shlex cannot parse.
 
     This gate sees only the literal command text of one tool call; it does
     not, and cannot, see what a script or program that command invokes does
