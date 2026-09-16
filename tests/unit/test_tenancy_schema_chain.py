@@ -39,7 +39,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the shared metadata)
-from gateway.models.tenancy import UtcDateTime
+from gateway.models.base import UtcDateTime
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _TENANCY_REVISION = "c4b6d8e0f2a3"
@@ -192,7 +192,7 @@ def test_upgrade_downgrade_upgrade_round_trips(sqlite_at_head: tuple[Config, Eng
 def test_naming_one_model_module_registers_them_all() -> None:
     """``Base.metadata`` is whole however few model modules the caller imported.
 
-    ``alembic/env.py`` names only ``gateway.models.entities`` and relies on the
+    ``alembic/env.py`` names only ``gateway.models.base`` and relies on the
     package ``__init__`` to pull in the rest. If that import chain breaks, the
     metadata silently loses the tenancy tables and autogenerate proposes
     ``DROP TABLE`` for them, which is data-loss-class and invisible until
@@ -200,7 +200,7 @@ def test_naming_one_model_module_registers_them_all() -> None:
     a test runs in this one every model module is already imported.
     """
     source = (
-        "from gateway.models.entities import Base;"
+        "from gateway.models.base import Base;"
         "import json,sys;"
         "sys.stdout.write(json.dumps(sorted(Base.metadata.tables)))"
     )

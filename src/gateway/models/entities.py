@@ -19,15 +19,11 @@ from sqlalchemy import (
     text,
     true,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlmodel import SQLModel
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-# The timezone-aware timestamp type the tenancy tables already use. Imported
-# rather than redefined: it exists because the engines disagree about
-# ``timezone=True``, and two copies of that reasoning would drift.
+from gateway.models.base import Base, UtcDateTime
 from gateway.models.money import UsdCost, UsdRate
 from gateway.models.secret_fields import redact_secret_like_values
-from gateway.models.tenancy import UtcDateTime
 
 # The vocabulary of ``ModelPricing.unit`` and ``OrganizationModelPricing.unit``.
 # Every per-unit reader (``services/pricing_service`` helpers, the catalog) keys
@@ -36,21 +32,6 @@ PRICING_UNITS: tuple[str, ...] = ("tokens", "requests", "images")
 
 # The vocabulary of ``origin`` on the same two tables.
 PRICING_ORIGINS: tuple[str, ...] = ("config", "api", "migration")
-
-
-class Base(DeclarativeBase):
-    """Base class for SQLAlchemy models.
-
-    Shares ``SQLModel.metadata`` so the reconciled control plane's SQLModel
-    tables (`gateway.models.tenancy`) and the gateway's own declarative tables
-    land in one collection. That is what lets Alembic keep a single
-    ``target_metadata``, and ``create_all``/``drop_all`` cover the whole schema,
-    without either style having to know the other exists. The two classes keep
-    separate declarative *registries*, so a same-named model on either side
-    (``User``, during the strangle) resolves unambiguously.
-    """
-
-    metadata = SQLModel.metadata
 
 
 def _epoch_seconds(value: datetime | None) -> int | None:

@@ -11,10 +11,9 @@ from sqlalchemy.engine import Engine
 
 from gateway.core.database import to_sync_url
 
-# Importing anything from gateway.models registers every model module on this
-# metadata (see gateway/models/__init__.py), which is what makes the comparison
-# below cover the whole schema rather than the half this file names.
-from gateway.models.entities import Base
+# Importing any gateway.models module registers every table, so autogenerate
+# compares against the whole schema.
+from gateway.models.base import Base
 
 logger = logging.getLogger("alembic")
 

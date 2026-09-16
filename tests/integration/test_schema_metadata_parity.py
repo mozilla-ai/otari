@@ -27,7 +27,7 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 
 import gateway.models  # noqa: F401  # populates the metadata with every model module
-from gateway.models.entities import Base
+from gateway.models.base import Base
 
 if TYPE_CHECKING:
     from collections.abc import Generator

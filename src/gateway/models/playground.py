@@ -58,7 +58,7 @@ from typing import Annotated, Literal
 from sqlalchemy import Column, Index, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
-from gateway.models.tenancy import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin
+from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin
 
 # What one save may carry. Each ceiling is enforced at the request schema, so an
 # oversized save is a 422 naming the field rather than a database error, and the

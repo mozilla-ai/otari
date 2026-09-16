@@ -2,7 +2,7 @@
 
 Importing any module in this package runs this file first, which imports every
 model module in turn. That is what keeps ``Base.metadata`` (shared with
-``SQLModel.metadata``, see `entities`) complete for the three operations that
+``SQLModel.metadata``, see `base`) complete for the three operations that
 are only correct against the entire schema: Alembic's autogenerate comparison,
 ``create_all``, and ``drop_all``. Without it, whether a table exists in the
 metadata would depend on which model modules the caller happened to import, so

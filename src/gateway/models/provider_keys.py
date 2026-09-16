@@ -57,8 +57,8 @@ from typing import Any
 from sqlalchemy import JSON, Column, ForeignKeyConstraint, Index, UniqueConstraint, text
 from sqlmodel import Field, SQLModel
 
+from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
 from gateway.models.secret_fields import redact_secret_like_values
-from gateway.models.tenancy import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
 
 # ``client_args`` is arbitrary JSON, and this gateway's own Bedrock support is
 # the reason a credential-shaped entry in it cannot simply be rejected outright:
