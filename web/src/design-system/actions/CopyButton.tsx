@@ -1,6 +1,6 @@
 import { Tooltip } from "@heroui/react"
 import { useEffect, useRef, useState } from "react"
-import { FiCheck, FiCopy } from "react-icons/fi"
+import { FiCopy } from "react-icons/fi"
 import { copyToClipboard } from "@/design-system/helpers/clipboard"
 import { Button } from "./Button"
 
@@ -22,10 +22,7 @@ export function CopyButton({
   value,
   label,
   selectOnFailure,
-  showLabel = false,
 }: {
-  /** Show a stable-width label for actions outside dense tables. */
-  showLabel?: boolean
   value: string
   label: string
   /**
@@ -65,9 +62,9 @@ export function CopyButton({
   return (
     <Tooltip.Root isOpen={state !== "idle"}>
       <Button
-        size={showLabel ? "md" : "sm"}
+        size="sm"
         variant="ghost"
-        isIconOnly={!showLabel}
+        isIconOnly
         aria-label={`Copy ${label}`}
         onPress={copy}
         // 32px is under the 44px floor motion-and-access.md sets, and this
@@ -75,18 +72,9 @@ export function CopyButton({
         // target without moving anything, which is the same device the toggle
         // track uses; 6px each way is the gap a 32px control already has inside
         // a 44px row, so no two of these overlap.
-        className={
-          showLabel
-            ? "w-[6.5rem] min-w-[6.5rem]"
-            : "relative before:absolute before:-inset-1.5 before:content-['']"
-        }
+        className="relative before:absolute before:-inset-1.5 before:content-['']"
       >
-        {state === "copied" && showLabel ? (
-          <FiCheck aria-hidden className="size-4" />
-        ) : (
-          <FiCopy aria-hidden className={showLabel ? "size-4" : "size-3.5"} />
-        )}
-        {showLabel ? (state === "copied" ? "Copied" : "Copy") : null}
+        <FiCopy aria-hidden className="size-3.5" />
       </Button>
       <Tooltip.Content placement="top" showArrow>
         {state === "failed"

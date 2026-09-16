@@ -398,7 +398,12 @@ export function usePlayground() {
     stop()
     setIsComparing(next)
     if (next) {
-      // Both models need the same empty history for a fair comparison.
+      // Both columns start empty, which is where this port departs from the
+      // hosted original: that one kept panel A's transcript. Each model is sent
+      // its own panel's history, so a column carrying an earlier conversation
+      // answers a different prompt from the one beside it, and the rating would
+      // be a judgment over an unequal contest. A saved transcript is still in
+      // the history.
       setPanelA((prev) => ({ ...prev, turns: [] }))
       setPanelB((prev) => ({ ...prev, model: "", turns: [] }))
       invalidateSavedState()

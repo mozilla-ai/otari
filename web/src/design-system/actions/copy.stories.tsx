@@ -270,14 +270,3 @@ export const FieldWithAction: Story = {
     </div>
   ),
 }
-
-/** A stable-width text action for a conversation or a reading surface. */
-export const LabeledButton: Story = {
-  render: () => (
-    <CopyButton
-      value="The complete model response."
-      label="response"
-      showLabel
-    />
-  ),
-}

@@ -10,7 +10,8 @@ import { ToolsMenu } from "./ToolsMenu"
 export interface ComposerProps {
   modelPicker?: ReactNode
   hasTranscript?: boolean
-  missingModel?: "A" | "B"
+  /** Set while comparing and B is unchosen, which is the only panel that can be. */
+  missingModel?: "B"
   draft: string
   onDraftChange: (value: string) => void
   onSubmit: (event: FormEvent) => void
@@ -51,6 +52,12 @@ export function PlaygroundComposer({
   toggleCodeExecution,
   toggleMcpServer,
 }: ComposerProps) {
+  // Narrow enough to fit beside the controls from `lg` up, and under the frame
+  // below it, so the two nodes say the same thing at one width each.
+  const hint = missingModel
+    ? `Choose model ${missingModel} to send`
+    : "Enter to send · Shift + Enter for a new line"
+
   return (
     <form onSubmit={onSubmit} className="w-full">
       <div className="flex flex-col gap-2 border border-[var(--field-border)] bg-[var(--field-background)] px-3 pt-3 pb-2 has-[textarea:focus-visible]:otari-focus-ring">
@@ -95,9 +102,7 @@ export function PlaygroundComposer({
           />
           <div className="min-w-0">{modelPicker}</div>
           <span className="ml-auto hidden pr-2 text-caption lg:block">
-            {missingModel
-              ? `Choose model ${missingModel} to send`
-              : "Enter to send · Shift + Enter for a new line"}
+            {hint}
           </span>
           {isBusy ? (
             <Button
@@ -126,9 +131,7 @@ export function PlaygroundComposer({
         </div>
       </div>
       {missingModel ? (
-        <p className="mt-2 text-caption lg:hidden">
-          Choose model {missingModel} to send
-        </p>
+        <p className="mt-2 text-caption lg:hidden">{hint}</p>
       ) : null}
     </form>
   )

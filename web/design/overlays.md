@@ -91,14 +91,13 @@ cost, and #2123 is where that is written down rather than solved.
 
 ## Popover
 
-The default panel owns its padding. For sectioned content with full-width
-rules, use `padding="none"` and put padding on each child section. Use
-`placement="bottom end"` to align the panel's right edge with its trigger.
-
-
 Anchored to its trigger, takes focus, and is dismissed deliberately. Right for a
 column picker, a small confirm about one row, a panel of detail about the thing
 that opened it.
+
+The default panel owns its padding. For sectioned content with full-width
+rules, use `padding="none"` and put padding on each child section. Use
+`placement="bottom end"` to align the panel's right edge with its trigger.
 
 Uncontrolled by default, which is the opposite of the dialogs and deliberate: a
 popover's trigger is inside it, so it can own that state. Pass `isOpen` and

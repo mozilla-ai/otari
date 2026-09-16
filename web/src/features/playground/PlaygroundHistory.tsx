@@ -104,6 +104,18 @@ export function PlaygroundHistory({
         .includes(search.trim().toLowerCase()),
   )
   const visible = isAllOpen ? matching : matching.slice(0, 5)
+  // One heading over its own list, rather than a heading inside the first row
+  // of the group it names.
+  const groups = visible.reduce<{ label: string; entries: HistoryEntry[] }[]>(
+    (acc, entry) => {
+      const label = dateGroup(entry.createdAt)
+      const last = acc[acc.length - 1]
+      if (last?.label === label) last.entries.push(entry)
+      else acc.push({ label, entries: [entry] })
+      return acc
+    },
+    [],
+  )
   const controls = (
     <>
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
@@ -142,76 +154,77 @@ export function PlaygroundHistory({
           {search ? "No matching history." : "No saved history yet."}
         </p>
       ) : (
-        <ul>
-          {visible.map((entry, index) => (
-            <li key={`${entry.kind}:${entry.id}`}>
-              {index === 0 ||
-              dateGroup(visible[index - 1].createdAt) !==
-                dateGroup(entry.createdAt) ? (
-                <h3 className="border-t border-border px-4 py-2 text-overline">
-                  {dateGroup(entry.createdAt)}
-                </h3>
-              ) : null}
-              <div className="flex items-center gap-2 border-t border-border-subtle px-4 py-2 hover:bg-surface-alt">
-                {entry.kind === "chat" ? (
-                  <FiMessageSquare
-                    aria-hidden
-                    className="size-4 shrink-0 text-muted"
-                  />
-                ) : (
-                  <FiColumns
-                    aria-hidden
-                    className="size-4 shrink-0 text-muted"
-                  />
-                )}
-                {entry.kind === "chat" ? (
-                  <button
-                    type="button"
-                    className="flex min-h-11 min-w-0 flex-1 flex-col justify-center gap-0.5 text-left"
-                    onClick={async () => {
-                      await onLoad(entry.id)
-                      setIsAllOpen(false)
+        groups.map((group) => (
+          <section key={group.label}>
+            <h3 className="border-t border-border px-4 py-2 text-overline">
+              {group.label}
+            </h3>
+            <ul>
+              {group.entries.map((entry) => (
+                <li
+                  key={`${entry.kind}:${entry.id}`}
+                  className="flex items-center gap-2 border-t border-border-subtle px-4 py-2 hover:bg-surface-alt"
+                >
+                  {entry.kind === "chat" ? (
+                    <FiMessageSquare
+                      aria-hidden
+                      className="size-4 shrink-0 text-muted"
+                    />
+                  ) : (
+                    <FiColumns
+                      aria-hidden
+                      className="size-4 shrink-0 text-muted"
+                    />
+                  )}
+                  {entry.kind === "chat" ? (
+                    <button
+                      type="button"
+                      className="flex min-h-11 min-w-0 flex-1 flex-col justify-center gap-0.5 text-left"
+                      onClick={async () => {
+                        await onLoad(entry.id)
+                        setIsAllOpen(false)
+                      }}
+                    >
+                      <span className="w-full truncate text-emphasis">
+                        {entry.title}
+                      </span>
+                      <span className="w-full truncate text-mono-caption text-subtle">
+                        {entry.description}
+                      </span>
+                    </button>
+                  ) : (
+                    <div className="flex min-h-11 min-w-0 flex-1 flex-col justify-center gap-0.5">
+                      <span
+                        className="w-full truncate text-emphasis"
+                        title={entry.title}
+                      >
+                        {entry.title}
+                      </span>
+                      <span
+                        className="w-full truncate text-mono-caption text-subtle"
+                        title={entry.description}
+                      >
+                        {entry.description}
+                      </span>
+                    </div>
+                  )}
+                  <Button
+                    isIconOnly
+                    size="sm"
+                    aria-label={`Delete ${entry.kind} "${entry.title}"`}
+                    className="min-h-11 min-w-11 shrink-0"
+                    onPress={() => {
+                      setDeleteError(undefined)
+                      setPendingDelete(entry)
                     }}
                   >
-                    <span className="w-full truncate text-emphasis">
-                      {entry.title}
-                    </span>
-                    <span className="w-full truncate text-mono-caption text-subtle">
-                      {entry.description}
-                    </span>
-                  </button>
-                ) : (
-                  <div className="flex min-h-11 min-w-0 flex-1 flex-col justify-center gap-0.5">
-                    <span
-                      className="w-full truncate text-emphasis"
-                      title={entry.title}
-                    >
-                      {entry.title}
-                    </span>
-                    <span
-                      className="w-full truncate text-mono-caption text-subtle"
-                      title={entry.description}
-                    >
-                      {entry.description}
-                    </span>
-                  </div>
-                )}
-                <Button
-                  isIconOnly
-                  size="sm"
-                  aria-label={`Delete ${entry.kind} "${entry.title}"`}
-                  className="min-h-11 min-w-11 shrink-0"
-                  onPress={() => {
-                    setDeleteError(undefined)
-                    setPendingDelete(entry)
-                  }}
-                >
-                  <FiTrash2 aria-hidden className="size-3.5" />
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
+                    <FiTrash2 aria-hidden className="size-3.5" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))
       )}
     </div>
   )
@@ -239,15 +252,12 @@ export function PlaygroundHistory({
         isOpen={isOpen && !isAllOpen}
         onOpenChange={onOpenChange}
         trigger={
-          <span className="inline-flex size-11 shrink-0 border border-control-border md:size-9">
-            <Button
-              isIconOnly
-              aria-label="History"
-              className="size-full min-w-0"
-            >
-              <FiClock aria-hidden className="size-4" />
-            </Button>
-          </span>
+          // Labeled rather than icon-only, which is what gives it the edge the
+          // header draws: an icon-only ghost never takes one, wherever it
+          // renders (globals.css).
+          <Button className="min-h-11 shrink-0 md:min-h-9">
+            <FiClock aria-hidden className="size-4" /> History
+          </Button>
         }
       >
         <div className="flex w-[23.75rem] max-w-[calc(100vw-2rem)] flex-col">
