@@ -45,7 +45,7 @@ unreadable to the operator who backs them up. Secrets that *are* encrypted here
 are credentials, and none of these tables holds one.
 
 Style follows ``models/tenancy.py`` and ``models/provider_keys.py``: SQLModel
-rather than `entities.py`'s declarative style, because the ``Public`` schemas
+rather than the declarative ``Base`` style, because the ``Public`` schemas
 below are the endpoint contracts the generated dashboard client is built from,
 and no ``relationship()`` is declared (lazy loading raises ``MissingGreenlet``
 on an ``AsyncSession``), so the routes join explicitly.

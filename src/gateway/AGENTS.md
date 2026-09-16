@@ -209,12 +209,16 @@ endpoints.
 
 ## Data and migrations
 
-Gateway ORM entities live in `models/entities.py`. Reconciled control-plane
-SQLModel tables live in `models/tenancy.py`, and the newer tenancy-scoped
-gateway tables whose `Public` schemas are endpoint contracts follow its style in
-their own modules (`models/provider_keys.py`, `models/playground.py`). All of
-them share `SQLModel.metadata`; `models/__init__.py` imports every table module
-before Alembic uses it.
+Put a table in its domain's model module (`models/budgets.py`,
+`models/tenancy.py`, and so on). `models/base.py` holds `Base` and the shared
+column types and mixins. Tables use the declarative `Base`, except those whose
+`Public` schemas are endpoint contracts, which use SQLModel (`models/tenancy.py`,
+`models/provider_keys.py`, `models/playground.py`). A new table module must join
+the import list in `models/__init__.py`, or Alembic proposes dropping its tables.
+
+Two classes are named `User`: `models/users.py` is the billing identity that
+keys, budgets, and usage attach to; `models/tenancy.py` is the dashboard sign-in
+identity.
 
 Request code gets a session through `get_db`; non-request code uses
 `create_session()`; the usage-log writer uses `create_log_session()`, which

@@ -6,7 +6,7 @@ description: Backend conventions for the otari gateway (`src/gateway/`), async S
 # Backend Standards: otari gateway (`src/gateway/`)
 
 The gateway is an async FastAPI service: request handlers in `api/routes/`, business logic in
-`services/`, ORM in `models/` (`entities.py` plus `tenancy.py`), migrations in
+`services/`, ORM in `models/` (one module per domain), migrations in
 `alembic/versions/`. This guide is the backend counterpart to the frontend skill and to the
 path-scoped review instructions in
 `.github/instructions/` (performance and security). `AGENTS.md` is the source of truth for
@@ -40,7 +40,7 @@ count = (await db.execute(select(func.count()).select_from(ModelPricing))).scala
 ## The SQLModel half: the reconciled control plane's tables
 
 `models/tenancy.py` (organizations, workspaces, identities, memberships) is SQLModel rather
-than `entities.py`'s declarative style, because its `Create`/`Update`/`Public` schemas are the
+than the declarative `Base` style of the other domain modules, because its `Create`/`Update`/`Public` schemas are the
 endpoint contracts the generated dashboard client is built from. Same session, same chain, three
 extra rules:
 
