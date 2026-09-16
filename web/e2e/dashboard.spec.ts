@@ -73,9 +73,11 @@ test.describe("dashboard core flows", () => {
     // picks up the field's own "Show API key" toggle.
     const key = sheet.getByRole("textbox", { name: "Your API key" })
     await expect(key).toBeVisible()
-    await expect(key).toHaveValue(/^gw-.{5}•{8}.{4}$/)
-    const concealedKey = await key.inputValue()
-    await expect(key).not.toHaveValue(fullKey)
+    // The fingerprint the key-creation dialog shows, derived from the key the
+    // mint returned rather than matched by shape: a stand-in built from another
+    // key would have the same shape.
+    const concealedKey = `${fullKey.slice(0, 8)}${"•".repeat(8)}${fullKey.slice(-4)}`
+    await expect(key).toHaveValue(concealedKey)
 
     // The examples are tabs, and the agent prompt is the one offered first.
     await expect(
@@ -92,7 +94,7 @@ test.describe("dashboard core flows", () => {
     await expect(key).toHaveValue(fullKey)
     await expect(curl).toContainText(`Otari-Key: ${fullKey}`)
     await sheet.getByRole("button", { name: "Hide Your API key" }).click()
-    await expect(key).toHaveValue(/^gw-.{5}•{8}.{4}$/)
+    await expect(key).toHaveValue(concealedKey)
     await expect(curl).toContainText(`Otari-Key: ${concealedKey}`)
     await expect(curl).not.toContainText(fullKey)
 

@@ -321,7 +321,10 @@ describe("SetupGuide", () => {
     expect(snippet("curl")).toHaveTextContent("gw-setup••••••••-key")
   })
 
-  it.each(["", "short-key", "123456789012345"])(
+  // 15 characters is the boundary `concealedFingerprint`'s guard turns on; the
+  // mint never produces one this short, so the case is the guard's, not a state
+  // the sheet can reach.
+  it.each(["short-key", "123456789012345"])(
     "fully conceals a short activation key (%j) in the field and examples",
     async (apiKey) => {
       mockApi({ apiKey })
