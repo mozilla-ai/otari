@@ -7882,6 +7882,11 @@
               }
             ],
             "title": "Updated At"
+          },
+          "usable": {
+            "description": "False when the stored credential cannot be decrypted on this deployment, so the key supplies nothing at dispatch and the catalog withholds its provider. A row this deployment cannot read is still listed, because deleting or replacing it is what fixes it.",
+            "title": "Usable",
+            "type": "boolean"
           }
         },
         "required": [
@@ -7890,6 +7895,7 @@
           "provider",
           "name",
           "is_org_default",
+          "usable",
           "created_at"
         ],
         "title": "OrgProviderKeyPublic",
@@ -16986,6 +16992,10 @@
             "title": "Org Provider Key Id",
             "type": "string"
           },
+          "usable": {
+            "title": "Usable",
+            "type": "boolean"
+          },
           "workspace_id": {
             "format": "uuid",
             "title": "Workspace Id",
@@ -16999,6 +17009,7 @@
           "disabled",
           "is_effective_default",
           "is_effective_enabled",
+          "usable",
           "allowed_models"
         ],
         "title": "WorkspaceProviderKeyOverridePublic",

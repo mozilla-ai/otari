@@ -161,6 +161,26 @@ describe("WorkspaceProviderKeys", () => {
     ).toBeNull()
   })
 
+  it("says a key is unreadable even while it is the one in use", async () => {
+    // "In use" is about which key resolves, which an unreadable one still does.
+    // The two facts have to be able to appear together, because that pairing is
+    // exactly the broken state: the workspace is pointed at a credential the
+    // deployment cannot read.
+    mockApi({
+      overrides: [
+        workspaceProviderKeyOverride({
+          is_effective_default: true,
+          is_effective_enabled: true,
+          usable: false,
+        }),
+      ],
+    })
+    renderSection()
+
+    expect(await screen.findByText("Unreadable credential")).toBeInTheDocument()
+    expect(screen.getByText("In use")).toBeInTheDocument()
+  })
+
   it("reads the allow-list off the row rather than asking per key", async () => {
     // The narrowing travels with the flags, so the section makes one read for
     // the workspace instead of one more for every key it holds.

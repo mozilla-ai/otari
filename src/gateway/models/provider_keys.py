@@ -112,6 +112,13 @@ class OrgProviderKeyPublic(SQLModel):
     client_args: dict[str, Any] | None = None
     last4: str | None = None
     is_org_default: bool
+    usable: bool = Field(
+        description=(
+            "False when the stored credential cannot be decrypted on this deployment, so the key "
+            "supplies nothing at dispatch and the catalog withholds its provider. A row this deployment "
+            "cannot read is still listed, because deleting or replacing it is what fixes it."
+        )
+    )
     archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime | None = None
@@ -161,8 +168,13 @@ class OrgProviderKey(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
     archived_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
     is_org_default: bool = Field(default=False, nullable=False)
 
-    def to_public(self) -> OrgProviderKeyPublic:
+    def to_public(self, *, usable: bool) -> OrgProviderKeyPublic:
         """Serialize for the API. Never includes the key, only ``last4``.
+
+        ``usable`` is passed in rather than derived here: answering it means
+        decrypting, which belongs to the service layer that owns the secret box.
+        Required rather than defaulted so a caller cannot report a key as working
+        without having asked.
 
         ``client_args`` is arbitrary JSON an admin can set (Bedrock's
         ``region_name``, other client kwargs), and a credential-shaped field
@@ -182,6 +194,7 @@ class OrgProviderKey(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
             client_args=redact_secret_like_values(self.client_args),
             last4=self.last4,
             is_org_default=self.is_org_default,
+            usable=usable,
             archived_at=self.archived_at,
             created_at=self.created_at,
             updated_at=self.updated_at,
@@ -216,7 +229,12 @@ class WorkspaceProviderKeyOverridePublic(SQLModel):
     is_default: bool
     disabled: bool
     is_effective_default: bool
+    # Whether this workspace disabled the key, and nothing more. A key it left
+    # alone reads as enabled even when the deployment cannot decrypt it, which is
+    # what `usable` is for: the two answer different questions and a caller
+    # deciding whether the key will serve needs both.
     is_effective_enabled: bool
+    usable: bool
     # Carried on the row rather than left to the per-key route: a caller
     # summarizing a workspace wants the narrowing alongside the flags, and
     # fetching it per key turns one read into one per key. Empty is the common

@@ -406,7 +406,7 @@ class OrgProviderKeyService:
         rows, count = await self.keys.list_for_organization(
             organization.id, include_archived=include_archived, skip=skip, limit=limit
         )
-        return OrgProviderKeysPublic(data=[row.to_public() for row in rows], count=count)
+        return OrgProviderKeysPublic(data=[row.to_public(usable=key_is_usable(row)) for row in rows], count=count)
 
     async def create_key_for_user(
         self,
@@ -447,7 +447,7 @@ class OrgProviderKeyService:
             raise OrgProviderKeyAlreadyExistsError(provider, name) from None
 
         await refresh_org_provider_cache(self.db)
-        return key.to_public()
+        return key.to_public(usable=key_is_usable(key))
 
     async def update_key_for_user(
         self,
@@ -498,7 +498,7 @@ class OrgProviderKeyService:
             raise OrgProviderKeyAlreadyExistsError(key.provider, str(update_data.get("name", key.name))) from None
 
         await refresh_org_provider_cache(self.db)
-        return updated.to_public()
+        return updated.to_public(usable=key_is_usable(updated))
 
     async def archive_key_for_user(self, *, user: User, key_id: uuid.UUID) -> OrgProviderKeyPublic:
         """Archive a key. Organization owners and admins only.
@@ -517,7 +517,7 @@ class OrgProviderKeyService:
         updated = await self.keys.update_key(key, {"archived_at": datetime.now(UTC), "is_org_default": False})
         await self.db.commit()
         await refresh_org_provider_cache(self.db)
-        return updated.to_public()
+        return updated.to_public(usable=key_is_usable(updated))
 
     async def restore_key_for_user(self, *, user: User, key_id: uuid.UUID) -> OrgProviderKeyPublic:
         """Restore an archived key. Organization owners and admins only."""
@@ -531,7 +531,7 @@ class OrgProviderKeyService:
         updated = await self.keys.update_key(key, {"archived_at": None})
         await self.db.commit()
         await refresh_org_provider_cache(self.db)
-        return updated.to_public()
+        return updated.to_public(usable=key_is_usable(updated))
 
     async def delete_key_for_user(self, *, user: User, key_id: uuid.UUID) -> None:
         """Permanently delete an archived key. Organization owners and admins only.
@@ -570,7 +570,7 @@ class OrgProviderKeyService:
             raise OrgDefaultProviderKeyConflictError(key.provider) from None
 
         await refresh_org_provider_cache(self.db)
-        return updated.to_public()
+        return updated.to_public(usable=key_is_usable(updated))
 
     # ------------------------------------------------------------------
     # Workspace overrides
@@ -612,6 +612,13 @@ class OrgProviderKeyService:
                     disabled=override.disabled if override else False,
                     is_effective_default=key.id in effective_ids,
                     is_effective_enabled=not (override.disabled if override else False),
+                    # The override flags say what this workspace chose; they say
+                    # nothing about whether the credential behind the key can be
+                    # read. Without this a key the deployment cannot decrypt
+                    # reads here as enabled and in use while the catalog withholds
+                    # its provider, so the two surfaces disagree with no way to
+                    # tell from this one.
+                    usable=key_is_usable(key),
                     allowed_models=restrictions.get((workspace.id, key.id), []),
                 )
                 for key, override in candidates
@@ -718,6 +725,7 @@ class OrgProviderKeyService:
             disabled=result_disabled,
             is_effective_default=active is not None and active.id == key.id,
             is_effective_enabled=not result_disabled,
+            usable=key_is_usable(key),
             allowed_models=allowed_models,
         )
 

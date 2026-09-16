@@ -97,6 +97,32 @@ describe("OrganizationProviderKeysPage", () => {
     expect(trigger).toBeInTheDocument()
   })
 
+  it("marks a key the deployment cannot decrypt and says how to fix it", async () => {
+    // Every other signal on the row reads normal: the key is stored, it has a
+    // last4, nothing disabled it. What is wrong is that the ciphertext no longer
+    // decrypts, so it serves nothing and its models leave the catalog. Without
+    // this the page is indistinguishable from a working one.
+    mockApi({ keys: [orgProviderKey({ name: "Production", usable: false })] })
+    renderPage(<OrganizationProviderKeysPage />)
+
+    expect(await screen.findByText("UNREADABLE")).toBeInTheDocument()
+    expect(
+      screen.getByText(/can't be decrypted on this deployment/i),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Re-enter the API key/i)).toBeInTheDocument()
+  })
+
+  it("says nothing about decryption when every key is readable", async () => {
+    mockApi({ keys: [orgProviderKey({ name: "Production" })] })
+    renderPage(<OrganizationProviderKeysPage />)
+
+    await screen.findByText("Production")
+    expect(screen.queryByText("UNREADABLE")).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/can't be decrypted on this deployment/i),
+    ).not.toBeInTheDocument()
+  })
+
   it("opens on a blank draft after a create", async () => {
     // Nothing unmounts this form, so the remount on the way in is the only
     // thing that clears it, and what it holds includes the plaintext secret.

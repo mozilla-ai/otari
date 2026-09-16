@@ -8705,6 +8705,11 @@ export interface components {
             provider: string;
             /** Updated At */
             updated_at?: string | null;
+            /**
+             * Usable
+             * @description False when the stored credential cannot be decrypted on this deployment, so the key supplies nothing at dispatch and the catalog withholds its provider. A row this deployment cannot read is still listed, because deleting or replacing it is what fixes it.
+             */
+            usable: boolean;
         };
         /**
          * OrgProviderKeyUpdateRequest
@@ -12656,6 +12661,8 @@ export interface components {
              * Format: uuid
              */
             org_provider_key_id: string;
+            /** Usable */
+            usable: boolean;
             /**
              * Workspace Id
              * Format: uuid

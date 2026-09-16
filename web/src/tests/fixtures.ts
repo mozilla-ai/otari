@@ -624,6 +624,9 @@ export function orgProviderKey(
     // the server and only the tail of the key is ever published.
     last4: "abcd",
     is_org_default: false,
+    // The default is a key this deployment can actually read. A test wanting the
+    // other case says so, because that is the state the dashboard has to show.
+    usable: true,
     archived_at: null,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,
@@ -644,6 +647,7 @@ export function workspaceProviderKeyOverride(
     disabled: false,
     is_effective_default: true,
     is_effective_enabled: true,
+    usable: true,
     // Empty is the answer "every model this key serves", never "no model".
     allowed_models: [],
     ...overrides,

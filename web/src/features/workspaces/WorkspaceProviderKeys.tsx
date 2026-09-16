@@ -366,6 +366,15 @@ export function WorkspaceProviderKeys({
                   {row.is_effective_default ? (
                     <span className="text-caption">In use</span>
                   ) : null}
+                  {/* "In use" is about resolution and says nothing about whether
+                      the credential can be read. An unreadable key still
+                      resolves, so without this the row reads as the one serving
+                      the workspace while every request through it fails. */}
+                  {row.usable ? null : (
+                    <span className="text-caption text-danger">
+                      Unreadable credential
+                    </span>
+                  )}
                 </div>
                 <FilterSelect
                   ariaLabel={`This workspace's use of ${name}`}

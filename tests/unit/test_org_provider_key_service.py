@@ -181,7 +181,7 @@ def test_to_public_redacts_credential_shaped_client_arg_keys() -> None:
         "Authorization": "Bearer xyz",
     }
 
-    public = key.to_public()
+    public = key.to_public(usable=True)
 
     assert public.client_args == {
         "region_name": "us-east-1",
@@ -196,10 +196,10 @@ def test_to_public_with_no_credential_shaped_keys_is_unchanged() -> None:
     key = _key(name="openai-primary")
     key.client_args = {"region_name": "us-east-1", "timeout": 30}
 
-    assert key.to_public().client_args == {"region_name": "us-east-1", "timeout": 30}
+    assert key.to_public(usable=True).client_args == {"region_name": "us-east-1", "timeout": 30}
 
 
 def test_to_public_client_args_none_stays_none() -> None:
     key = _key(name="plain")
     assert key.client_args is None
-    assert key.to_public().client_args is None
+    assert key.to_public(usable=True).client_args is None
