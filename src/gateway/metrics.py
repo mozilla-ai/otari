@@ -1,32 +1,119 @@
 """Prometheus registry, metric types, and HTTP request instrumentation for the gateway.
 
-The metric types are re-exported so that code declaring a metric need not depend on ``prometheus_client`` directly.
+The metric types are re-exported so that code declaring a metric need not depend
+on ``prometheus_client`` directly. That re-export is also what makes the library
+an optional extra (``gateway[metrics]``): when it is absent the names below are
+no-op stands-in, so every declaration and every increment elsewhere still runs
+unguarded. A deployment that does not scrape pays neither the import
+(``prometheus_client.exposition`` pulls in ``http.server`` and
+``wsgiref.simple_server``, which nothing else here needs) nor the collection, and
+one that asks for a scrape (``enable_metrics``) is refused at startup rather than
+served an empty body; see ``_validate_metrics_support`` in :mod:`gateway.main`.
 """
 
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from prometheus_client import (
-    CollectorRegistry,
-    Counter,
-    Gauge,
-    Histogram,
-    ProcessCollector,
-    generate_latest,
-)
-from prometheus_client.core import GaugeMetricFamily
-from prometheus_client.registry import Collector
 from starlette.responses import Response
 
 from gateway.core.config import API_ROOT, API_VERSION
 
 if TYPE_CHECKING:
+    # Types come from the real library, which the dev group always installs, so
+    # the declarations below are checked against it whether or not the runtime
+    # environment has the extra.
+    from prometheus_client import (
+        CollectorRegistry,
+        Counter,
+        Gauge,
+        Histogram,
+        ProcessCollector,
+        generate_latest,
+    )
+    from prometheus_client.core import GaugeMetricFamily
+    from prometheus_client.registry import Collector
     from starlette.requests import Request
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+    PROMETHEUS_AVAILABLE = True
+else:
+    try:
+        from prometheus_client import (
+            CollectorRegistry,
+            Counter,
+            Gauge,
+            Histogram,
+            ProcessCollector,
+            generate_latest,
+        )
+        from prometheus_client.core import GaugeMetricFamily
+        from prometheus_client.registry import Collector
+
+        PROMETHEUS_AVAILABLE = True
+    except ImportError:
+        PROMETHEUS_AVAILABLE = False
+
+        class _NoopMetric:
+            """Accepts every call a Counter, Gauge, or Histogram takes, and records nothing.
+
+            ``labels()`` returns the same object rather than a child so a chained
+            ``.labels(...).inc()`` works without allocating per label set.
+            """
+
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            def labels(self, *args: Any, **kwargs: Any) -> _NoopMetric:
+                return self
+
+            def inc(self, amount: float = 1) -> None:
+                pass
+
+            def dec(self, amount: float = 1) -> None:
+                pass
+
+            def set(self, value: float) -> None:
+                pass
+
+            def observe(self, amount: float) -> None:
+                pass
+
+        Counter = Gauge = Histogram = _NoopMetric
+
+        class GaugeMetricFamily(_NoopMetric):
+            """Stands in for the custom-collector sample type.
+
+            A collector that builds one still runs; nothing collects it, since
+            ``generate_latest`` below yields an empty body.
+            """
+
+            def add_metric(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+        class Collector:
+            """Base class for the custom collectors, so their ``collect`` still type-checks."""
+
+        class CollectorRegistry:  # noqa: D101
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            def register(self, collector: Any) -> None:
+                pass
+
+            def unregister(self, collector: Any) -> None:
+                pass
+
+        class ProcessCollector:  # noqa: D101
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+        def generate_latest(registry: Any = None) -> bytes:  # noqa: D103
+            return b""
+
 __all__ = [
+    "PROMETHEUS_AVAILABLE",
     "REGISTRY",
     "Collector",
     "Counter",

@@ -82,7 +82,7 @@ the corresponding startup value after the database is available.
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
-| `enable_metrics` | Serve Prometheus metrics at `/metrics`. |
+| `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
 | `mode` | `standalone`, `hosted`, or `hybrid`. See [Modes](modes.md). |
 
