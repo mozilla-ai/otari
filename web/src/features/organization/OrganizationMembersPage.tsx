@@ -175,9 +175,8 @@ function StatusMark({ status }: { status: string }) {
 // nothing else knows yet, which is the handle a future sign-in flow claims it
 // by; until then the row is a place to hang a role, which is the point.
 //
-// The form a deployment with no mail transport gets, and the only one it gets.
-// An invitation nobody can be sent is an acceptance step with no way through it,
-// so where `mail_ready` is false the membership is made active here instead.
+// The form a deployment with no mail transport gets, and the only one it gets:
+// an invitation nobody can be sent is an acceptance step with no way through.
 function AddMemberForm({
   isOpen,
   onClose,
@@ -1221,12 +1220,11 @@ export function OrganizationMembersPage() {
         title="Members"
         action={
           manages ? (
-            // One way in, because the deployment has already decided which of
-            // the two it is: an invitation is an email plus an acceptance step,
-            // and neither exists without a mail transport. Offering both asked
-            // the operator to choose on a fact about the server that the page
-            // knows and they do not. It stays on screen while its dialog is
-            // open: the dialog is over the page rather than in place of it.
+            // One way in: an invitation is an email plus an acceptance step,
+            // and neither exists without a mail transport, so offering both
+            // asked the operator to choose on a fact the page already knows.
+            // It stays on screen while its dialog is open, which sits over the
+            // page rather than in place of it.
             <Button
               variant="primary"
               onPress={() => {
