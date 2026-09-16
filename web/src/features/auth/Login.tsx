@@ -103,6 +103,11 @@ function LabelRow({
 }) {
   const message = error ? errorMessage(error) : null
 
+  // Content-sized where a caller nests this in a flex row of its own, which
+  // makes the `justify-between` below inert and sits a refusal beside its label
+  // rather than at the field's right edge. Deliberate: the password row shares
+  // its line with the recovery link, so stretching this to reach that edge only
+  // wraps the refusal onto a second line and grows the row as it appears.
   return (
     <div className="flex min-h-5 flex-wrap items-center justify-between gap-x-3">
       <span className="flex shrink-0 items-center">
@@ -860,7 +865,7 @@ export function Login() {
           ) : null}
           <AuthHelp
             offersRecovery={offersRecovery}
-            usesPassword={usesPassword}
+            credential={usesPassword ? "password" : "master-key"}
           />
         </div>
       </div>

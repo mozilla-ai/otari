@@ -115,7 +115,7 @@ describe("Login", () => {
     )
   })
 
-  it("offers no signup or recovery link on a gateway that cannot send mail", () => {
+  it("offers no signup or recovery link on a gateway that cannot send mail", async () => {
     render(
       <Mounted signInMethods={["password"]}>
         <Harness />
@@ -128,6 +128,10 @@ describe("Login", () => {
     expect(
       screen.queryByRole("link", { name: /Forgot your password/ }),
     ).toBeNull()
+    // Opened last: the verification link lives in the Help popover, which
+    // renders nothing while closed, so asserting its absence from the closed
+    // page would pass whatever the bootstrap said.
+    await userEvent.setup().click(screen.getByRole("button", { name: "Help" }))
     expect(screen.queryByRole("link", { name: /verification link/ })).toBeNull()
   })
 
@@ -150,21 +154,26 @@ describe("Login", () => {
     ).toHaveAttribute("href", "#/resend-verification")
   })
 
-  it("hides recovery on an unclaimed deployment, where no password exists to reset", () => {
+  it("hides recovery on an unclaimed deployment, where no password exists to reset", async () => {
     render(
       <Mounted mailReady>
         <Harness />
       </Mounted>,
     )
 
+    // Signup still stands: a member an admin added by address claims it here.
+    // Asserted before Help opens, because the open popover is a dialog and
+    // takes the rest of the page out of the accessibility tree behind it.
+    expect(
+      screen.getByRole("link", { name: /Set your password/ }),
+    ).toBeInTheDocument()
+    // Both recovery links sit in the Help popover on this branch, so it has to
+    // be open for their absence to mean anything.
+    await userEvent.setup().click(screen.getByRole("button", { name: "Help" }))
     expect(
       screen.queryByRole("link", { name: /Forgot your password/ }),
     ).toBeNull()
     expect(screen.queryByRole("link", { name: /verification link/ })).toBeNull()
-    // Signup still stands: a member an admin added by address claims it here.
-    expect(
-      screen.getByRole("link", { name: /Set your password/ }),
-    ).toBeInTheDocument()
   })
 
   // otari-ai#2100. A deployment publishes both typed credentials whenever a
