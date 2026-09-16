@@ -142,6 +142,45 @@ describe("SignupPage", () => {
     })
   })
 
+  it("opens the terms without ticking the box that links to them", async () => {
+    // The link sits inside the checkbox's label, which react-aria makes
+    // pressable: without the guard on the anchor, reading the terms accepted
+    // them (otari-ai#2146).
+    const opened = vi.spyOn(window, "open").mockReturnValue(null)
+    const user = userEvent.setup()
+    renderPage("#/signup", { termsUrl: "https://otari.example.com/terms" })
+
+    await user.click(screen.getByRole("link", { name: "terms of service" }))
+
+    expect(screen.getByRole("checkbox")).not.toBeChecked()
+    // The half of the sentence that stayed in the label still toggles it.
+    await user.click(screen.getByText("I accept the"))
+    expect(screen.getByRole("checkbox")).toBeChecked()
+    opened.mockRestore()
+  })
+
+  it("shows a password problem in the field's own message line", async () => {
+    // One line, not two: the message takes the description's place rather than
+    // stacking under it, so the card is the same height whether or not the
+    // field is speaking. A card that changes height moves the animated
+    // background measured against it (otari-ai#2146).
+    const user = userEvent.setup()
+    renderPage()
+    const description = "At least 8 characters, and at most 72 bytes."
+    expect(screen.getByText(description)).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText("Password"), "short")
+
+    expect(
+      await screen.findByText("At least 8 characters."),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(description)).toBeNull()
+    expect(screen.getByLabelText("Password")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    )
+  })
+
   it("keeps the button disabled until the two passwords agree", async () => {
     const user = userEvent.setup()
     renderPage()

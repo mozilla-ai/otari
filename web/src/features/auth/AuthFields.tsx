@@ -1,4 +1,4 @@
-import { Description, Input, Label, TextField } from "@heroui/react"
+import { Description, FieldError, Input, Label, TextField } from "@heroui/react"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 
 /**
@@ -77,12 +77,23 @@ export function AuthPasswordField({
   onChange,
   autoComplete,
   description,
+  errorMessage,
 }: {
   label: string
   value: string
   onChange: (next: string) => void
   autoComplete: "current-password" | "new-password"
   description?: string
+  /**
+   * Why the password cannot be used yet, shown in the description's place
+   * rather than under it. A form in front of a session sits on the animated
+   * background, whose bar grid is measured from the card: a message that
+   * mounts and unmounts as the password is typed resizes the card and moves
+   * the whole field behind it (otari-ai#2146). Sharing one line means the
+   * card is the same height whether or not the field is speaking, so give
+   * this to a field that carries a description.
+   */
+  errorMessage?: string | null
 }) {
   return (
     <TextField
@@ -90,13 +101,21 @@ export function AuthPasswordField({
       onChange={onChange}
       type="password"
       isRequired
+      isInvalid={Boolean(errorMessage)}
       className="flex flex-col gap-1"
     >
       <Label className="text-body">{label}</Label>
       <Input autoComplete={autoComplete} />
-      {description ? (
+      {description || errorMessage ? (
         <FieldMessages>
-          <Description className="text-muted">{description}</Description>
+          {/* `FieldError` renders through the field's error slot, so the
+              message is announced on the input rather than sitting in the form
+              as a loose paragraph; `isInvalid` above is what lets it render. */}
+          {errorMessage ? (
+            <FieldError className="text-danger">{errorMessage}</FieldError>
+          ) : (
+            <Description className="text-muted">{description}</Description>
+          )}
         </FieldMessages>
       ) : null}
     </TextField>

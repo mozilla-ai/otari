@@ -74,6 +74,27 @@ export const Passwords: Story = {
   },
 }
 
+/**
+ * The message takes the description's line rather than a line of its own, so
+ * the card the field sits in is the same height either way. That matters more
+ * here than on a settings page: these forms sit on the animated background,
+ * which is measured from the card and redraws when it moves.
+ */
+export const PasswordWithProblem: Story = {
+  render: () => (
+    <div className="w-[22rem]">
+      <AuthPasswordField
+        label="New password"
+        value="short"
+        onChange={() => {}}
+        autoComplete="new-password"
+        description="At least 12 characters, and at most 72 bytes."
+        errorMessage="At least 12 characters."
+      />
+    </div>
+  ),
+}
+
 /** The generic one, for the master key on a gateway that has not been claimed. */
 export const Text: Story = {
   render: () => {
