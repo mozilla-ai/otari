@@ -9904,6 +9904,11 @@ export interface components {
              * @description Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).
              */
             changed_paths?: string[];
+            /**
+             * Commands
+             * @description Shell commands the caller observed run or is about to run.
+             */
+            commands?: string[];
             /** Policy Yaml */
             policy_yaml: string;
         };

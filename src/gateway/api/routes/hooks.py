@@ -17,15 +17,16 @@ plan's audit of the old POC calls out).
 
 from __future__ import annotations
 
+import shlex
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.agent_runtime.domain.evaluators import evaluate_changed_path
+from gateway.agent_runtime.domain.evaluators import evaluate_changed_path, evaluate_command_match
 from gateway.agent_runtime.domain.policy import MAX_POLICY_BYTES, PolicyError, parse_policy
-from gateway.agent_runtime.domain.types import ChangedPathEvidence
+from gateway.agent_runtime.domain.types import ChangedPathEvidence, ChangedPathGate, CommandEvidence, CommandMatchGate
 from gateway.api.deps import get_config, get_db_if_needed, verify_api_key_or_master_key
 from gateway.api.routes._platform import _extract_platform_user_token
 from gateway.core.config import GatewayConfig
@@ -111,6 +112,60 @@ _MAX_MATCH_WORK = 50_000_000
 # path_count.
 _MAX_COMPARISONS = 1_000_000
 
+_MAX_COMMANDS = 10_000
+_MAX_COMMAND_LENGTH = 4096
+
+# command_match's per-(phrase, command) match cost is a product, not a sum:
+# matching one forbidden phrase against one command segment is
+# O(len(segment tokens) * len(phrase tokens)) (domain/evaluators.py's
+# _contains_subsequence checks every candidate start position, each an
+# O(len(phrase)) slice comparison). Summed over every phrase against every
+# command, that product distributes into a single multiplication:
+# total_pattern_tokens * total_command_tokens. This is a different shape from
+# _MAX_MATCH_WORK's sum-of-cross-terms (changed_path's per-comparison cost is
+# a *sum* of lengths, not a product), so it needs its own bound and its own
+# calibration: 2,000 one-token forbidden phrases against 2,000 one-token
+# commands (4,000,000 estimated work) measured ~0.7s; chosen with margin
+# under that.
+_MAX_COMMAND_MATCH_WORK = 2_000_000
+
+# Independent of token length, for the same reason _MAX_COMPARISONS exists
+# alongside _MAX_MATCH_WORK: many short phrases against many near-empty
+# commands (e.g. all-whitespace strings, which tokenize to zero tokens each,
+# so _MAX_COMMAND_MATCH_WORK's product is zero regardless of phrase count)
+# is still one Python-level comparison per pair. 2,000 phrases against 10,000
+# such commands (20,000,000 comparisons, 0 estimated work) measured ~4.7s.
+# Chosen with margin under the ~1,000,000-comparisons / ~0.2s point measured
+# at the same degenerate shape.
+_MAX_COMMAND_COMPARISONS = 500_000
+
+# Computing _token_count itself is not free: shlex.split costs roughly
+# 100-350ns per character it tokenizes, regardless of content, which is
+# 50-150x the cost of a plain len() check. That is irrelevant at the scale of
+# one command, but _MAX_COMMANDS * _MAX_COMMAND_LENGTH allows up to
+# ~41,000,000 characters in one request, and tokenizing all of it measured
+# several seconds before either budget above ever saw a token count to
+# reject: a policy with zero command_match gates would still pay this cost
+# computing total_command_tokens, since that sum is what proves there is
+# nothing to bound. This caps the raw character total *before* any command is
+# tokenized, using only len() (uniformly cheap regardless of content).
+# 2,000,000 characters measured ~0.17s; chosen with margin under that.
+_MAX_TOTAL_COMMAND_CHARS = 2_000_000
+
+
+def _token_count(text: str) -> int:
+    """An upper bound on how many tokens `text` costs to match against.
+
+    Mirrors domain/evaluators.py's own fallback: a string shlex cannot
+    tokenize (unbalanced quotes) becomes a single-token command there, so it
+    costs the same here rather than this estimate disagreeing with what
+    evaluation actually does.
+    """
+    try:
+        return len(shlex.split(text, posix=True))
+    except ValueError:
+        return 1
+
 
 class PolicyCheckRequest(BaseModel):
     """A policy body plus the evidence to check it against, both caller-supplied."""
@@ -126,6 +181,11 @@ class PolicyCheckRequest(BaseModel):
         max_length=_MAX_CHANGED_PATHS,
         description="Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).",
     )
+    commands: list[str] = Field(
+        default_factory=list,
+        max_length=_MAX_COMMANDS,
+        description="Shell commands the caller observed run or is about to run.",
+    )
 
     @property
     def changed_path_evidence(self) -> ChangedPathEvidence:
@@ -134,6 +194,10 @@ class PolicyCheckRequest(BaseModel):
         # actual matching agree on the same, cheaper count rather than one
         # estimating off raw input and the other paying for the duplicates.
         return ChangedPathEvidence(changed_paths=tuple(dict.fromkeys(self.changed_paths)))
+
+    @property
+    def command_evidence(self) -> CommandEvidence:
+        return CommandEvidence(commands=tuple(dict.fromkeys(self.commands)))
 
 
 class GateResultResponse(BaseModel):
@@ -170,16 +234,24 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     for path in request.changed_paths:
         if len(path) > _MAX_PATH_LENGTH:
             raise HTTPException(status_code=422, detail=f"changed_paths entry exceeds {_MAX_PATH_LENGTH} characters.")
+    for command in request.commands:
+        if len(command) > _MAX_COMMAND_LENGTH:
+            raise HTTPException(
+                status_code=422, detail=f"commands entry exceeds {_MAX_COMMAND_LENGTH} characters."
+            )
+
+    changed_path_gates = [gate for gate in spec.gates if isinstance(gate, ChangedPathGate)]
+    command_match_gates = [gate for gate in spec.gates if isinstance(gate, CommandMatchGate)]
 
     # Built once and reused below: gate.forbidden is already deduplicated at
-    # parse time (domain.policy), and changed_path_evidence deduplicates
-    # changed_paths the same way, so this estimate and the actual evaluation
-    # below always agree on the same, cheaper counts.
-    evidence = request.changed_path_evidence
-    pattern_count = sum(len(gate.forbidden) for gate in spec.gates)
-    total_pattern_length = sum(len(glob) for gate in spec.gates for glob in gate.forbidden)
-    path_count = len(evidence.changed_paths)
-    total_path_length = sum(len(path) for path in evidence.changed_paths)
+    # parse time (domain.policy), and changed_path_evidence/command_evidence
+    # deduplicate their evidence lists the same way, so each estimate and its
+    # matching evaluation below always agree on the same, cheaper counts.
+    changed_path_evidence = request.changed_path_evidence
+    pattern_count = sum(len(gate.forbidden) for gate in changed_path_gates)
+    total_pattern_length = sum(len(glob) for gate in changed_path_gates for glob in gate.forbidden)
+    path_count = len(changed_path_evidence.changed_paths)
+    total_path_length = sum(len(path) for path in changed_path_evidence.changed_paths)
     estimated_work = pattern_count * total_path_length + path_count * total_pattern_length
     comparisons = pattern_count * path_count
     if estimated_work > _MAX_MATCH_WORK or comparisons > _MAX_COMPARISONS:
@@ -193,7 +265,48 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
             ),
         )
 
-    results = [evaluate_changed_path(gate, evidence) for gate in spec.gates]
+    command_evidence = request.command_evidence
+    # Gated on there being a command_match gate at all: computing a token
+    # count means tokenizing, and tokenizing is exactly the cost
+    # _MAX_TOTAL_COMMAND_CHARS below exists to bound. A policy with none
+    # (every policy shipped before this gate type existed) must not pay that
+    # cost just to prove there is nothing to bound it against.
+    if command_match_gates:
+        total_command_chars = sum(len(command) for command in command_evidence.commands)
+        if total_command_chars > _MAX_TOTAL_COMMAND_CHARS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Submitted commands total {total_command_chars:,} characters, over the "
+                    f"{_MAX_TOTAL_COMMAND_CHARS:,} limit. Narrow the submitted commands."
+                ),
+            )
+
+        phrase_count = sum(len(gate.forbidden) for gate in command_match_gates)
+        total_phrase_tokens = sum(_token_count(phrase) for gate in command_match_gates for phrase in gate.forbidden)
+        command_count = len(command_evidence.commands)
+        total_command_tokens = sum(_token_count(command) for command in command_evidence.commands)
+        estimated_command_work = total_phrase_tokens * total_command_tokens
+        command_comparisons = phrase_count * command_count
+        if estimated_command_work > _MAX_COMMAND_MATCH_WORK or command_comparisons > _MAX_COMMAND_COMPARISONS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"This policy and evidence would take an estimated {estimated_command_work:,} command match "
+                    f"operations across {command_comparisons:,} phrase/command comparisons, over this build's "
+                    f"limits ({_MAX_COMMAND_MATCH_WORK:,} and {_MAX_COMMAND_COMPARISONS:,} respectively). Narrow "
+                    "the policy's forbidden phrases or the submitted commands."
+                ),
+            )
+
+    # Evaluated in declaration order (not grouped by type) so a caller reading
+    # `results` positionally sees the same order as the policy it submitted.
+    results = [
+        evaluate_changed_path(gate, changed_path_evidence)
+        if isinstance(gate, ChangedPathGate)
+        else evaluate_command_match(gate, command_evidence)
+        for gate in spec.gates
+    ]
     blocked = any(result.enforcement == "required" and result.outcome.is_blocking for result in results)
 
     return PolicyCheckResponse(

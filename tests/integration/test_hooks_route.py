@@ -76,7 +76,7 @@ def test_unsupported_gate_type_is_rejected_not_skipped(
 ) -> None:
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: command_match\n    enforcement: required\n    message: m\n"
+        "  - id: g\n    type: judge\n    enforcement: required\n    message: m\n"
     )
     response = client.post(
         f"{API_ROOT}/hooks/check",
@@ -245,3 +245,139 @@ class TestHybridMode:
             json={"policy_yaml": _VALID_POLICY, "changed_paths": ["README.md"]},
         )
         assert response.status_code == 401
+
+
+_COMMAND_MATCH_POLICY = """\
+schema_version: "1.0"
+policy:
+  id: test/no-force-push
+gates:
+  - id: no-force-push
+    type: command_match
+    enforcement: required
+    forbidden: ["git push --force", "git push -f"]
+    message: Force-pushing is not allowed.
+"""
+
+
+def test_command_match_passes_when_no_forbidden_command_run(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _COMMAND_MATCH_POLICY, "commands": ["git push"]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["blocked"] is False
+
+
+def test_command_match_blocks_on_a_forbidden_command(client: TestClient, master_key_header: dict[str, str]) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _COMMAND_MATCH_POLICY, "commands": ["git push --force"]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is True
+    assert body["results"][0]["outcome"] == "fail"
+    assert body["results"][0]["detail"] == "git push --force"
+
+
+def test_changed_path_and_command_match_gates_preserve_declaration_order(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: no-force-push\n    type: command_match\n    enforcement: required\n"
+        '    forbidden: ["git push --force"]\n    message: no force push\n'
+        "  - id: no-scratch-files\n    type: changed_path\n    enforcement: required\n"
+        '    forbidden: ["scratch/**"]\n    message: no scratch files\n'
+    )
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": policy, "commands": ["git push --force"], "changed_paths": ["scratch/x.txt"]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [result["gate_id"] for result in body["results"]] == ["no-force-push", "no-scratch-files"]
+    assert body["blocked"] is True
+
+
+def test_command_match_oversized_workload_is_rejected(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """Distinct, short forbidden phrases against many short, distinct commands:
+
+    little token content (cheap by _MAX_COMMAND_MATCH_WORK) but a large
+    number of phrase/command pairs, mirroring changed_path's own comparisons
+    finding for the same reason: a byte/token-weighted budget alone
+    understates many-short-items requests.
+    """
+    forbidden = [f'"p{i:04d}"' for i in range(500)]
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: command_match\n    enforcement: required\n"
+        f"    forbidden: [{', '.join(forbidden)}]\n    message: m\n"
+    )
+    commands = [f"q{i:04d}" for i in range(2000)]
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": policy, "commands": commands},
+        headers=master_key_header,
+    )
+    assert response.status_code == 422
+    assert "comparisons" in response.json()["detail"]
+
+
+def test_many_whitespace_only_commands_do_not_stall_tokenizing(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """shlex.split costs meaningfully more per character than a plain len()
+
+    check, regardless of content, so a request built from many long,
+    all-whitespace commands (which tokenize to zero tokens each, keeping
+    _MAX_COMMAND_MATCH_WORK's estimate at zero no matter how many there are)
+    can still cost real seconds just computing that estimate. This must be
+    caught by a raw character-total budget before any command is tokenized,
+    not discovered only after tokenizing all of them.
+    """
+    # Distinct (a trailing index) so evidence deduplication does not collapse
+    # this back down to one command and hide the aggregate-length case.
+    commands = [" " * 4000 + str(i) for i in range(600)]
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: command_match\n    enforcement: required\n"
+        '    forbidden: ["npm"]\n    message: m\n'
+    )
+    start = time.time()
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": policy, "commands": commands},
+        headers=master_key_header,
+    )
+    assert time.time() - start < 1.0
+    assert response.status_code == 422
+    assert "characters" in response.json()["detail"]
+
+
+def test_a_policy_with_no_command_match_gate_never_tokenizes_commands(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Submitting `commands` evidence against a policy with no command_match
+
+    gate must not pay any tokenizing cost at all: the result is moot
+    regardless, so this must resolve quickly and successfully rather than
+    being rejected by a budget meant for command_match gates that do not
+    exist here.
+    """
+    commands = [" " * 4000 for _ in range(600)]
+    start = time.time()
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _VALID_POLICY, "commands": commands},
+        headers=master_key_header,
+    )
+    assert time.time() - start < 1.0
+    assert response.status_code == 200, response.text
+    assert response.json()["blocked"] is False

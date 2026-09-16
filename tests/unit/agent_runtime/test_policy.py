@@ -1,7 +1,7 @@
 import pytest
 
 from gateway.agent_runtime.domain.policy import PolicyError, parse_policy
-from gateway.agent_runtime.domain.types import ChangedPathGate
+from gateway.agent_runtime.domain.types import ChangedPathGate, CommandMatchGate
 
 VALID_POLICY = """\
 schema_version: "1.0"
@@ -50,7 +50,24 @@ def test_parses_a_valid_policy() -> None:
         # Unsupported gate type: never silently skipped.
         (
             'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            "  - id: g\n    type: judge\n    enforcement: required\n    message: m\n"
+        ),
+        # Missing forbidden list on a command_match gate.
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
             "  - id: g\n    type: command_match\n    enforcement: required\n    message: m\n"
+        ),
+        # A forbidden phrase that is not a valid shell phrase (unbalanced quote).
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            '  - id: g\n    type: command_match\n    enforcement: required\n'
+            '    forbidden: ["git push \\"--force"]\n    message: m\n'
+        ),
+        # A forbidden phrase that tokenizes to nothing (all whitespace).
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            '  - id: g\n    type: command_match\n    enforcement: required\n'
+            '    forbidden: ["   "]\n    message: m\n'
         ),
         # Missing forbidden list on a changed_path gate.
         (
@@ -119,6 +136,29 @@ def test_duplicate_forbidden_globs_collapse_to_one() -> None:
     )
     spec = parse_policy(policy, source="test.yml")
     assert spec.gates[0].forbidden == ("a", "b")
+
+
+def test_parses_a_valid_command_match_policy() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        '  - id: no-force-push\n    type: command_match\n    enforcement: required\n'
+        '    forbidden: ["git push --force", "git push -f"]\n    message: m\n'
+    )
+    spec = parse_policy(policy, source="test.yml")
+    assert len(spec.gates) == 1
+    gate = spec.gates[0]
+    assert isinstance(gate, CommandMatchGate)
+    assert gate.forbidden == ("git push --force", "git push -f")
+
+
+def test_duplicate_forbidden_phrases_collapse_to_one() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        '  - id: g\n    type: command_match\n    enforcement: required\n'
+        '    forbidden: ["npm", "npm", "yarn"]\n    message: m\n'
+    )
+    spec = parse_policy(policy, source="test.yml")
+    assert spec.gates[0].forbidden == ("npm", "yarn")
 
 
 def test_unhashable_yaml_mapping_key_is_rejected_not_a_500() -> None:

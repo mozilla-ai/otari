@@ -59,11 +59,37 @@ class ChangedPathGate:
     type: Literal["changed_path"] = "changed_path"
 
 
-# The only gate type this first slice ships. Extend this alias (a Union, once
-# there is a second member) as command_match, check_passed, and judge land;
-# do not let a new gate type skip it, or the policy loader's dispatch on
-# ``type`` silently stops covering it.
-GateSpec = ChangedPathGate
+@dataclass(frozen=True, slots=True)
+class CommandMatchGate:
+    """A gate that fails when a caller-submitted command matches a forbidden phrase.
+
+    A ``forbidden`` entry is a shell phrase (``"git push --force"``,
+    ``"npm"``); matching is token-based, not substring: the phrase's own
+    tokens must appear as a contiguous run within one ``&&``/``;``/``|``/``||``
+    -separated segment of the submitted command. Token-based matching is what
+    keeps ``"npm"`` from matching inside ``"pnpm"``, and ``"--force"`` from
+    matching inside the deliberately-safer ``"--force-with-lease"``; a plain
+    substring check would get both wrong. See domain/evaluators.py for the
+    tokenizer and its known gap (operators glued with no surrounding
+    whitespace, e.g. ``"a&&b"``, are not split into separate segments).
+
+    This gate sees only the literal command text of one tool call; it does
+    not, and cannot, see what a script or program that command invokes does
+    internally. It is a footgun-catcher for a cooperative agent, not a
+    sandbox against one deliberately working around it.
+    """
+
+    id: str
+    enforcement: Enforcement
+    forbidden: tuple[str, ...]
+    message: str
+    type: Literal["command_match"] = "command_match"
+
+
+# Extend this alias as check_passed and judge land; do not let a new gate
+# type skip it, or the policy loader's dispatch on ``type`` silently stops
+# covering it.
+GateSpec = ChangedPathGate | CommandMatchGate
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +109,16 @@ class ChangedPathEvidence:
     """
 
     changed_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CommandEvidence:
+    """Shell commands the caller reports as run or about to run.
+
+    Otari does not collect or verify this itself; see the module docstring.
+    """
+
+    commands: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)

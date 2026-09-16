@@ -9,12 +9,22 @@ as a clean result.
 
 from __future__ import annotations
 
+import shlex
+
 from gateway.agent_runtime.domain.types import (
     ChangedPathEvidence,
     ChangedPathGate,
+    CommandEvidence,
+    CommandMatchGate,
     GateResult,
     Outcome,
 )
+
+# Tokens that separate one simple command from the next within a shell
+# command line. Only recognized as a *whole token* (see _command_segments):
+# an operator glued to a word with no surrounding whitespace, e.g. "a&&b",
+# is a known gap this does not close (domain/types.py's CommandMatchGate).
+_COMMAND_SEPARATORS = frozenset({"&&", "||", ";", "|"})
 
 
 def _segment_matches(pattern: str, text: str) -> bool:
@@ -103,6 +113,76 @@ def _matches_any(path: str, patterns: tuple[str, ...]) -> str | None:
         if _segments_match(pattern.split("/"), path_segments):
             return pattern
     return None
+
+
+def _command_segments(command: str) -> list[list[str]]:
+    """Split a command into simple-command segments, each already tokenized.
+
+    Tokenizes with `shlex` (POSIX quoting rules), then splits the resulting
+    token list on any token that is exactly one of `&&`, `||`, `;`, `|`: a
+    quoted argument that happens to contain that text, like `"a && b"`,
+    survives as a single token from shlex and is never mistaken for a
+    separator, since this only looks at whole tokens, never substrings of
+    one. A command shlex cannot tokenize (unbalanced quotes) becomes its own
+    single-token, single-segment command: whatever it is, it is not equal to
+    any multi-token forbidden phrase, so it can only fail to match, never
+    match something it shouldn't.
+    """
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return [[command]]
+
+    segments: list[list[str]] = [[]]
+    for token in tokens:
+        if token in _COMMAND_SEPARATORS:
+            segments.append([])
+        else:
+            segments[-1].append(token)
+    return segments
+
+
+def _contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
+    """Whether `phrase`'s tokens appear, in order and unbroken, inside `segment`."""
+    if not phrase or len(phrase) > len(segment):
+        return False
+    return any(segment[start : start + len(phrase)] == phrase for start in range(len(segment) - len(phrase) + 1))
+
+
+def evaluate_command_match(gate: CommandMatchGate, evidence: CommandEvidence | None) -> GateResult:
+    """Fail when a submitted command matches one of the gate's forbidden phrases."""
+    if evidence is None:
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.UNKNOWN,
+            message="Command evidence was not submitted.",
+        )
+
+    forbidden_phrases = [shlex.split(phrase, posix=True) for phrase in gate.forbidden]
+    matched = sorted(
+        command
+        for command in evidence.commands
+        if any(
+            _contains_subsequence(segment, phrase)
+            for segment in _command_segments(command)
+            for phrase in forbidden_phrases
+        )
+    )
+    if matched:
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.FAIL,
+            message=gate.message,
+            detail=", ".join(matched),
+        )
+    return GateResult(
+        gate_id=gate.id,
+        enforcement=gate.enforcement,
+        outcome=Outcome.PASS,
+        message="No forbidden commands run.",
+    )
 
 
 def evaluate_changed_path(gate: ChangedPathGate, evidence: ChangedPathEvidence | None) -> GateResult:

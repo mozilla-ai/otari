@@ -231,6 +231,11 @@ def gen_secret_key() -> None:
 # Claude Code's own edit tools and the tool_input field naming their target.
 _HOOK_EDIT_TOOL_PATH_FIELDS = {"Edit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
 
+# Claude Code's shell tool and the tool_input field naming the command it is
+# about to run. A PreToolUse call for this tool is the only evidence a
+# command_match gate gets before the command runs; see docs/agent-gates.md.
+_HOOK_COMMAND_TOOL_FIELDS = {"Bash": "command"}
+
 
 def _hook_find_repo_root(start: Path) -> Path | None:
     current = start.resolve()
@@ -335,21 +340,36 @@ def hook(harness: str, config: str | None, url: str | None, api_key: str | None)
     if not gates_file.is_file():
         return
 
-    changed_paths: list[str]
+    changed_paths: list[str] = []
+    commands: list[str] = []
     if event == "PreToolUse":
-        field = _HOOK_EDIT_TOOL_PATH_FIELDS.get(payload.get("tool_name", ""))
-        target = (payload.get("tool_input") or {}).get(field) if field else None
-        if not target:
-            return
-        try:
-            # as_posix(), not str(): a forbidden glob is a repo-relative POSIX
-            # path and the evaluator splits it on "/", so a WindowsPath's
-            # native "docs\\foo.md" spelling matches nothing. That fails open
-            # and silently, a passing gate being indistinguishable from no
-            # forbidden change, so every PreToolUse gate would pass on Windows.
-            changed_paths = [Path(target).resolve().relative_to(root).as_posix()]
-        except ValueError:
-            return  # Outside the repo: nothing this policy can name.
+        tool_name = payload.get("tool_name", "")
+        tool_input = payload.get("tool_input") or {}
+        # A tool call is either an edit or a shell command, never both, so at
+        # most one of these evidence lists is ever populated per call.
+        path_field = _HOOK_EDIT_TOOL_PATH_FIELDS.get(tool_name)
+        command_field = _HOOK_COMMAND_TOOL_FIELDS.get(tool_name)
+        if path_field:
+            target = tool_input.get(path_field)
+            if not target:
+                return
+            try:
+                # as_posix(), not str(): a forbidden glob is a repo-relative
+                # POSIX path and the evaluator splits it on "/", so a
+                # WindowsPath's native "docs\\foo.md" spelling matches
+                # nothing. That fails open and silently, a passing gate being
+                # indistinguishable from no forbidden change, so every
+                # PreToolUse gate would pass on Windows.
+                changed_paths = [Path(target).resolve().relative_to(root).as_posix()]
+            except ValueError:
+                return  # Outside the repo: nothing this policy can name.
+        elif command_field:
+            command = tool_input.get(command_field)
+            if not command:
+                return
+            commands = [command]
+        else:
+            return  # A tool this harness integration does not check yet.
     elif event == "Stop":
         collected = _hook_collect_changed_paths(root)
         if collected is None:
@@ -380,7 +400,11 @@ def hook(harness: str, config: str | None, url: str | None, api_key: str | None)
     try:
         response = httpx.post(
             f"{resolved_url.rstrip('/')}{API_ROOT}/hooks/check",
-            json={"policy_yaml": gates_file.read_text(encoding="utf-8"), "changed_paths": changed_paths},
+            json={
+                "policy_yaml": gates_file.read_text(encoding="utf-8"),
+                "changed_paths": changed_paths,
+                "commands": commands,
+            },
             headers={API_KEY_HEADER: resolved_key},
             timeout=15.0,
         )

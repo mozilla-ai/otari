@@ -88,7 +88,7 @@ def test_pretooluse_allows_when_not_blocked(monkeypatch: pytest.MonkeyPatch, rep
     assert result.exit_code == 0, result.output
 
 
-def test_pretooluse_ignores_non_edit_tools(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+def test_pretooluse_ignores_unhandled_tools(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     called = False
 
     def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
@@ -100,12 +100,54 @@ def test_pretooluse_ignores_non_edit_tools(monkeypatch: pytest.MonkeyPatch, repo
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
-        "tool_name": "Bash",
-        "tool_input": {"command": "echo hi"},
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(repo / "README.md")},
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert not called, "a non-edit tool call must never reach the Hook Server"
+    assert not called, "a tool call this integration does not name must never reach the Hook Server"
+
+
+def test_pretooluse_submits_a_bash_command_for_command_match(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse(
+            {
+                "blocked": True,
+                "results": [
+                    {"gate_id": "no-force-push", "enforcement": "required", "outcome": "fail", "message": "no"}
+                ],
+            }
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": "git push --force"},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 2, result.output
+    assert captured["json"]["commands"] == ["git push --force"]
+    assert captured["json"]["changed_paths"] == []
+
+
+def test_pretooluse_ignores_a_bash_call_with_no_command(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    called = False
+
+    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
+        nonlocal called
+        called = True
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "PreToolUse", "cwd": str(repo), "tool_name": "Bash", "tool_input": {}}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert not called
 
 
 def test_stop_event_blocks_on_git_status(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:

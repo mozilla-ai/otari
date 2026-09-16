@@ -9,11 +9,12 @@ into a validated :class:`PolicySpec`.
 
 from __future__ import annotations
 
+import shlex
 from typing import Any, cast
 
 import yaml
 
-from gateway.agent_runtime.domain.types import ChangedPathGate, Enforcement, GateSpec, PolicySpec
+from gateway.agent_runtime.domain.types import ChangedPathGate, CommandMatchGate, Enforcement, GateSpec, PolicySpec
 
 # A policy body is a developer-edited text file, not a data export; this bounds
 # a pathological input (and an accidental binary) before it ever reaches the
@@ -24,7 +25,7 @@ from gateway.agent_runtime.domain.types import ChangedPathGate, Enforcement, Gat
 MAX_POLICY_BYTES = 256 * 1024
 
 _SUPPORTED_SCHEMA_VERSIONS = {"1.0"}
-_SUPPORTED_GATE_TYPES = {"changed_path"}
+_SUPPORTED_GATE_TYPES = {"changed_path", "command_match"}
 _SUPPORTED_ENFORCEMENTS = {"required", "advisory"}
 
 # A `**` in a forbidden glob crosses path segments by recursing over every
@@ -136,26 +137,50 @@ def _parse_gate(raw: Any) -> GateSpec:
         or not forbidden
         or not all(isinstance(item, str) and item for item in forbidden)
     ):
-        raise PolicyError(f"Gate {gate_id!r} (type 'changed_path') needs a non-empty list of 'forbidden' globs.")
-    # A duplicate glob matches nothing a single copy wouldn't; collapsing it
-    # here (once, at parse time) is what keeps a caller who repeats one glob
+        raise PolicyError(f"Gate {gate_id!r} (type {gate_type!r}) needs a non-empty list of 'forbidden' entries.")
+    # A duplicate entry matches nothing a single copy wouldn't; collapsing it
+    # here (once, at parse time) is what keeps a caller who repeats one entry
     # many times from multiplying the Hook Server's per-request match work
     # for zero effect on the result. Order doesn't matter to matching, so
     # first-seen order (what dict.fromkeys preserves) is as good as any.
     forbidden = list(dict.fromkeys(forbidden))
-    for glob in forbidden:
-        # Only a segment that is exactly "**" crosses directories and recurses
-        # in _segments_match; "a****b" is a literal-with-stars pattern the
-        # linear intra-segment matcher handles safely, however many '*' it
-        # has, and must not be counted here.
-        double_star_segments = sum(1 for segment in glob.split("/") if segment == "**")
-        if double_star_segments > _MAX_DOUBLE_STAR_PER_GLOB:
-            raise PolicyError(
-                f"Gate {gate_id!r}: forbidden glob {glob!r} uses '**' as its own path "
-                f"segment more than {_MAX_DOUBLE_STAR_PER_GLOB} time(s)."
-            )
 
-    return ChangedPathGate(
+    if gate_type == "changed_path":
+        for glob in forbidden:
+            # Only a segment that is exactly "**" crosses directories and
+            # recurses in _segments_match; "a****b" is a literal-with-stars
+            # pattern the linear intra-segment matcher handles safely,
+            # however many '*' it has, and must not be counted here.
+            double_star_segments = sum(1 for segment in glob.split("/") if segment == "**")
+            if double_star_segments > _MAX_DOUBLE_STAR_PER_GLOB:
+                raise PolicyError(
+                    f"Gate {gate_id!r}: forbidden glob {glob!r} uses '**' as its own path "
+                    f"segment more than {_MAX_DOUBLE_STAR_PER_GLOB} time(s)."
+                )
+        return ChangedPathGate(
+            id=gate_id,
+            enforcement=enforcement_value,
+            forbidden=tuple(forbidden),
+            message=message,
+        )
+
+    # command_match: each forbidden entry is a shell phrase the evaluator
+    # tokenizes at match time (domain/evaluators.py's _command_segments).
+    # Validating that it tokenizes, and to at least one token, here rather
+    # than there means a malformed phrase is a 422 at policy-load time, not
+    # an unhandled error the first time a command happens to be evaluated
+    # against it.
+    for phrase in forbidden:
+        try:
+            phrase_tokens = shlex.split(phrase, posix=True)
+        except ValueError as exc:
+            raise PolicyError(
+                f"Gate {gate_id!r}: forbidden phrase {phrase!r} is not a valid shell phrase: {exc}"
+            ) from exc
+        if not phrase_tokens:
+            raise PolicyError(f"Gate {gate_id!r}: forbidden phrase {phrase!r} has no tokens to match.")
+
+    return CommandMatchGate(
         id=gate_id,
         enforcement=enforcement_value,
         forbidden=tuple(forbidden),

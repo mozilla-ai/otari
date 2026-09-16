@@ -10200,6 +10200,15 @@
             "title": "Changed Paths",
             "type": "array"
           },
+          "commands": {
+            "description": "Shell commands the caller observed run or is about to run.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10000,
+            "title": "Commands",
+            "type": "array"
+          },
           "policy_yaml": {
             "maxLength": 262144,
             "minLength": 1,
