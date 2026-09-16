@@ -12,8 +12,7 @@ from pydantic import BaseModel
 
 from gateway.core.config import GatewayConfig, load_config
 
-# A setting's name is its config.yml key and, upper-cased after OTARI_, its
-# environment variable. Deployments configure it by that name.
+# Each name is a config.yml key, and OTARI_<NAME> is its environment variable.
 _SETTING_NAMES = frozenset(
     {
         "activation_guide",
@@ -139,7 +138,7 @@ _SETTING_NAMES = frozenset(
 
 @pytest.fixture(autouse=True)
 def _isolated_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Load with no OTARI_ variables and no .env file, and undo what loading writes."""
+    """Hide OTARI_ variables and .env files, and restore os.environ, which loading writes to."""
     monkeypatch.chdir(tmp_path)
     with mock.patch.dict(os.environ):
         for key in [key for key in os.environ if key.startswith("OTARI_")]:
@@ -182,7 +181,7 @@ def test_every_setting_is_read_from_its_yaml_key(name: str, tmp_path: Path) -> N
 
 @pytest.mark.parametrize("name", sorted(name for name in GatewayConfig.model_fields if _default(name) is not None))
 def test_every_setting_with_a_default_is_read_from_its_environment_variable(name: str) -> None:
-    """The value written is the default, and an environment variable cannot hold a default of None."""
+    """Skips settings whose default is None: an environment variable cannot hold None."""
     os.environ[f"OTARI_{name.upper()}"] = _environment_value(_default(name))
 
     assert name in load_config().model_fields_set

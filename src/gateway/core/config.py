@@ -130,10 +130,7 @@ ENV_BRIDGED_FIELDS = (
 )
 
 
-# Allowed values for the enum config fields. Defined once so the field
-# validators and the runtime-settings layer (which lets the dashboard hot-change
-# these) agree on the accepted set.
-VISION_STRATEGIES = ("describe", "ocr", "off")
+VISION_STRATEGIES =("describe", "ocr", "off")
 ROUTER_GRANULARITIES = ("trace_sticky", "step")
 # Selectable mail transports, plus the two states that are not a transport:
 # "auto" derives one from whether SMTP is configured, "none" turns mail off
@@ -324,8 +321,8 @@ class RelyingParty(NamedTuple):
         return host == self.rp_id or host.endswith(f".{self.rp_id}")
 
 
-# Declaration order runs from the last base to this class's own fields. It is
-# also the order each settings view group shows its fields in.
+# Gotcha: fields are ordered last base first, then this class's own.
+# The settings view keeps that order, so moving a base reorders it.
 class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
     """Gateway configuration with support for YAML files and environment variables."""
 
