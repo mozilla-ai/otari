@@ -5,6 +5,8 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+# No trailing slash: a worktree may symlink this at another checkout's
+# environment, and a directory pattern does not match a symlink.
 .venv
 venv/
 dist/
@@ -31,7 +33,7 @@ otari-smoke.db
 .idea/
 
 # Stray node_modules from running npx at the repo root (web has its own)
-node_modules
+node_modules/
 
 # Built dashboard bundle (`make dashboard`). Deliberately not committed: Vite
 # content-hashes every asset filename, so any change under web/src renamed the
