@@ -186,10 +186,13 @@ print(urllib.request.urlopen(request).read().decode())
 ```
 
 The example policy has one `changed_path` gate and one `command_match` gate,
-so the response carries one result per gate. With no forbidden path in
-`changed_paths`, no forbidden command in `commands` (or both sent as empty
-lists), every gate resolves `pass` and `blocked` is `false`. Omitting either
-field instead of sending `[]` resolves that field's gates to `unknown`
+so the response carries one result per gate. A non-empty `changed_paths`/
+`commands` list that names nothing forbidden resolves every gate `pass`;
+an empty list instead resolves that field's gates `not_applicable`
+(evidence was collected and there was none to check, not "checked, found
+nothing"). Both are non-blocking, so `blocked` is `false` either way.
+Omitting either field instead of sending `[]` resolves that field's gates
+to `unknown`
 instead (see the tri-state note in the field table below), which blocks a
 required gate rather than passing it. Request/response fields:
 

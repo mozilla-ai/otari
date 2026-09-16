@@ -268,9 +268,16 @@ def _normalize_bare_newlines(command: str) -> str:
     rewritten Bash's `$'...'` quoting into plain `'...'`, so this only needs
     to track plain single/double quotes and backslash escaping, not ANSI-C
     quoting a second time. A quoted newline (inside `'...'` or `"..."`) is
-    real content, not a boundary, and a backslash-escaped one is a line
-    continuation; both are left untouched, matching how neither ends a
-    command in a real shell.
+    real content, not a boundary, and is left untouched. A backslash before
+    a newline, outside single quotes, is a line continuation: a real shell
+    deletes both characters, joining the two physical lines with nothing
+    between them, so this does too, rather than leaving the pair for shlex.
+    Left alone, shlex only treats that escaped newline as "not a word
+    break," not as deleted: `shlex.split("git \\\npush --force")` gives
+    `["git", "\\npush", "--force"]`, a literal newline still embedded in
+    the second token, which then never equals the plain word `push` a
+    forbidden phrase names, letting `git push --force` typed across two
+    continued lines pass a gate forbidding exactly that.
     """
     if "\n" not in command:
         # The overwhelmingly common case, and cheap to rule out up front:
@@ -279,35 +286,46 @@ def _normalize_bare_newlines(command: str) -> str:
         # on top of `_strip_shell_comment`'s own pass over the same string.
         return command
     quote: str | None = None
-    escaped = False
     result: list[str] = []
-    for char in command:
-        if escaped:
-            escaped = False
-            result.append(char)
-            continue
+    index = 0
+    length = len(command)
+    while index < length:
+        char = command[index]
         if quote == "'":
             result.append(char)
             if char == "'":
                 quote = None
+            index += 1
             continue
         if char == "\\":
-            escaped = True
+            if command[index + 1 : index + 2] == "\n":
+                index += 2  # Delete the line continuation entirely.
+                continue
+            if index + 1 < length:
+                result.append(char)
+                result.append(command[index + 1])
+                index += 2
+                continue
             result.append(char)
+            index += 1
             continue
         if quote == '"':
             result.append(char)
             if char == '"':
                 quote = None
+            index += 1
             continue
         if char in "'\"":
             quote = char
             result.append(char)
+            index += 1
             continue
         if char == "\n":
             result.append(" ; ")
+            index += 1
             continue
         result.append(char)
+        index += 1
     return "".join(result)
 
 
@@ -367,7 +385,12 @@ def _command_segments(command: str) -> list[list[str]]:
     try:
         tokens = shlex.split(_normalize_bare_newlines(stripped), posix=True)
     except ValueError:
-        tokens = stripped.replace("\n", " ; ").split()
+        # Same blind, non-quote-aware treatment as the newline replacement
+        # right after it: strip a line continuation first (a backslash
+        # right before a newline), or the newline that follows it gets the
+        # bare-newline treatment instead and turns one continued line into
+        # two segments that were never meant to be split.
+        tokens = stripped.replace("\\\n", "").replace("\n", " ; ").split()
 
     segments: list[list[str]] = [[]]
     for token in tokens:

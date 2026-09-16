@@ -384,6 +384,31 @@ def test_backslash_escaped_newline_is_not_a_boundary() -> None:
     assert len(segments) == 1
 
 
+def test_backslash_escaped_newline_is_deleted_not_embedded_in_the_next_token() -> None:
+    """A real shell deletes a line continuation entirely, joining `git ` and
+
+    `push --force` into `git push --force`. Left to shlex alone, an escaped
+    newline is treated as "not a word break" but not as deleted, giving
+    `["git", "\\npush", "--force"]`: a literal newline still inside the
+    second token, which then never equals the plain word `push` a forbidden
+    phrase names, letting this exact command evade a gate forbidding it.
+    """
+    assert _command_segments("git \\\npush --force") == [["git", "push", "--force"]]
+    gate = _gate(forbidden=("git push --force",))
+    result = evaluate_command_match(gate, CommandEvidence(commands=("git \\\npush --force",)))
+    assert result.outcome is Outcome.FAIL
+
+
+def test_backslash_escaped_newline_fallback_also_deletes_the_pair() -> None:
+    """Same fix, malformed-command fallback: a line continuation is deleted
+
+    before a bare newline is turned into a segment boundary, or the
+    continuation's own newline would wrongly split one command in two.
+    """
+    segments = _command_segments('npm install "unterminated git \\\npush --force')
+    assert segments == [["npm", "install", '"unterminated', "git", "push", "--force"]]
+
+
 def test_newline_boundary_also_applies_to_the_malformed_command_fallback() -> None:
     """The plain-`.split()` fallback (an unbalanced quote) also collapses a
     bare newline to whitespace unless normalized the same way; this fallback
