@@ -9,11 +9,11 @@ into a validated :class:`PolicySpec`.
 
 from __future__ import annotations
 
-import shlex
 from typing import Any, cast
 
 import yaml
 
+from gateway.agent_runtime.domain.evaluators import tokenize_phrase
 from gateway.agent_runtime.domain.types import ChangedPathGate, CommandMatchGate, Enforcement, GateSpec, PolicySpec
 
 # A policy body is a developer-edited text file, not a data export; this bounds
@@ -172,7 +172,7 @@ def _parse_gate(raw: Any) -> GateSpec:
     # against it.
     for phrase in forbidden:
         try:
-            phrase_tokens = shlex.split(phrase, posix=True)
+            phrase_tokens = tokenize_phrase(phrase)
         except ValueError as exc:
             raise PolicyError(
                 f"Gate {gate_id!r}: forbidden phrase {phrase!r} is not a valid shell phrase: {exc}"

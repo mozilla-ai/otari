@@ -1,7 +1,11 @@
+import time
+
 from gateway.agent_runtime.domain.evaluators import (
     _command_segments,
     _contains_subsequence,
+    _strip_shell_comment,
     evaluate_command_match,
+    tokenize_commands,
 )
 from gateway.agent_runtime.domain.types import CommandEvidence, CommandMatchGate, Outcome
 
@@ -162,3 +166,174 @@ def test_contains_subsequence_requires_contiguous_order() -> None:
 
 def test_contains_subsequence_rejects_an_empty_phrase() -> None:
     assert _contains_subsequence(["npm", "install"], []) is False
+
+
+# --- Shell comments: word-boundary-aware, not shlex's own comments=True ----
+#
+# shlex.split(..., comments=True) treats *any* '#' as starting a comment,
+# even mid-word ("echo a#b" -> ["echo", "a"], where real bash prints "a#b"
+# unchanged). That is unsafe here: a mid-word '#' (a URL fragment, a
+# --flag=value#123) would silently swallow everything after it, including a
+# genuinely separate, later command joined by &&/;/|. _strip_shell_comment
+# only treats a '#' as a comment at a real POSIX word boundary.
+
+
+def test_strip_shell_comment_cases() -> None:
+    cases = [
+        ("npm install # don't use yarn", "npm install "),
+        ('npm install # a comment with a stray " quote', "npm install "),
+        ('git commit -m "fix #123"', 'git commit -m "fix #123"'),
+        ("curl https://x.com/#frag && git push --force", "curl https://x.com/#frag && git push --force"),
+        ("echo a#b", "echo a#b"),
+        ("echo a #b", "echo a "),
+        ("#just a comment", ""),
+        ("git commit -m 'has a # inside single quotes'", "git commit -m 'has a # inside single quotes'"),
+        # A comment ends at its own line, not at the end of the string: an
+        # earlier comment must not swallow a later, real command.
+        ("# install dependencies\nnpm install", "\nnpm install"),
+        ("echo ready # setup\nnpm install", "echo ready \nnpm install"),
+        # A backslash-escaped double quote does not close the quote it is
+        # inside, so the '#' right after it is still inside quotes, not a
+        # comment start; nothing after it is discarded.
+        ('echo "a\\" # b" && npm install', 'echo "a\\" # b" && npm install'),
+    ]
+    for command, expected in cases:
+        assert _strip_shell_comment(command) == expected, command
+
+
+def test_a_comment_on_an_earlier_line_does_not_swallow_a_later_real_command() -> None:
+    """A multi-line command's own comment only extends to its own line.
+
+    A prior version of _strip_shell_comment truncated everything from the
+    first comment to the end of the whole string, so a leading comment line
+    silently discarded every real command after it.
+    """
+    gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
+    for command in [
+        "# install dependencies\nnpm install",
+        "echo ready # setup\nnpm install",
+    ]:
+        result = evaluate_command_match(gate, CommandEvidence(commands=(command,)))
+        assert result.outcome is Outcome.FAIL, command
+
+
+def test_an_escaped_quote_does_not_end_double_quoting_early() -> None:
+    r"""'echo "a\" # b" && npm install' is one double-quoted argument
+
+    (`a" # b`, via the escaped quote) followed by a real, separate `&&
+    npm install`. A prior version treated the backslash-escaped `"` as the
+    real closing quote, so the `#` right after it looked unquoted and
+    word-start, discarding "&& npm install" as a bogus comment.
+    """
+    gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
+    result = evaluate_command_match(gate, CommandEvidence(commands=('echo "a\\" # b" && npm install',)))
+    assert result.outcome is Outcome.FAIL
+
+
+# --- Empty segments: two separators back to back, or at either end --------
+
+
+def test_empty_segments_are_dropped_not_matched_or_iterated() -> None:
+    # Space-separated, so shlex sees three distinct ";" tokens rather than
+    # gluing them into one literal "; ; ;"-shaped token (the already-known,
+    # separately documented gap for operators with no surrounding whitespace).
+    assert _command_segments("; ; ;") == []
+    assert _command_segments("npm install ; ; git status") == [["npm", "install"], ["git", "status"]]
+
+
+def test_many_separators_with_no_real_content_resolve_quickly() -> None:
+    """A command built from many separators and no real tokens (";" * n) used
+
+    to keep an empty segment per separator gap, each compared against every
+    forbidden phrase for a guaranteed-False result: 500 forbidden phrases
+    against 100 such commands (~50,000 empty segments, ~25,000,000
+    comparisons) measured ~1.1s. Dropping empty segments at the source
+    collapses this, since there is nothing left to iterate.
+    """
+    gate = _gate(forbidden=tuple(f"p{i}" for i in range(500)))
+    commands = tuple("; " * 500 + " " * i for i in range(100))
+    evidence = CommandEvidence(commands=commands)
+    start = time.time()
+    result = evaluate_command_match(gate, evidence, segment_cache=tokenize_commands(commands))
+    elapsed = time.time() - start
+    assert elapsed < 0.5
+    assert result.outcome is Outcome.PASS
+
+
+def test_apostrophe_in_a_trailing_comment_no_longer_evades_the_gate() -> None:
+    """A '#'-comment with an apostrophe used to raise ValueError from shlex
+
+    (comments=False, the default, does not strip it, and the apostrophe is
+    an unbalanced quote), falling back to one opaque token that could never
+    match a real forbidden phrase: 'npm install # don't use yarn' silently
+    passed a required gate forbidding 'npm'.
+    """
+    gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
+    result = evaluate_command_match(gate, CommandEvidence(commands=("npm install # don't use yarn",)))
+    assert result.outcome is Outcome.FAIL
+
+
+def test_unmatched_quote_inside_a_comment_does_not_crash_or_evade() -> None:
+    gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
+    result = evaluate_command_match(
+        gate, CommandEvidence(commands=('npm install # a comment with a stray " quote',))
+    )
+    assert result.outcome is Outcome.FAIL
+
+
+def test_quoted_literal_hash_is_preserved_not_treated_as_a_comment() -> None:
+    """The quoted message is one token, "fix #123 with npm", not stripped at
+
+    the '#' and not split into separate words: it is not itself an npm
+    invocation, so this must not match a phrase forbidding the standalone
+    word "npm", the same way a real shell keeps a quoted argument intact.
+    """
+    gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
+    result = evaluate_command_match(gate, CommandEvidence(commands=('git commit -m "fix #123 with npm"',)))
+    assert result.outcome is Outcome.PASS
+
+
+def test_mid_word_hash_does_not_swallow_a_later_forbidden_command() -> None:
+    """A URL fragment ('#frag') is a mid-word '#', not a comment start in
+
+    real bash; everything after it, including a chained && command, must
+    still be visible to this gate.
+    """
+    gate = _gate(forbidden=("git push --force",))
+    result = evaluate_command_match(
+        gate, CommandEvidence(commands=("curl https://x.com/page#frag && git push --force",))
+    )
+    assert result.outcome is Outcome.FAIL
+
+
+# --- Tokenizing once per request, shared across command_match gates --------
+
+
+def test_segment_cache_produces_the_same_result_as_computing_internally() -> None:
+    gate = _gate(forbidden=("git push --force",))
+    evidence = CommandEvidence(commands=("git push --force", "git status"))
+    without_cache = evaluate_command_match(gate, evidence)
+    with_cache = evaluate_command_match(gate, evidence, segment_cache=tokenize_commands(evidence.commands))
+    assert without_cache == with_cache
+
+
+def test_shared_segment_cache_avoids_retokenizing_per_gate() -> None:
+    """Review's P1 repro: 100 command_match gates forbidding "npm" against
+
+    250 distinct, mostly-whitespace ~4,000-character commands passed every
+    request-level budget (low token content, few phrases) yet measured ~7s,
+    because each of the 100 gates independently re-tokenized every command
+    from scratch. Tokenizing once and sharing the result, as
+    tests/integration/test_hooks_route.py's route-level counterpart
+    exercises through the real endpoint, collapses this to a fraction of a
+    second.
+    """
+    gates = [_gate(id=f"g{i}", forbidden=("npm",)) for i in range(100)]
+    commands = tuple(" " * 4000 + str(i) for i in range(250))
+    evidence = CommandEvidence(commands=commands)
+    cache = tokenize_commands(commands)
+    start = time.time()
+    for gate in gates:
+        evaluate_command_match(gate, evidence, segment_cache=cache)
+    elapsed = time.time() - start
+    assert elapsed < 1.0

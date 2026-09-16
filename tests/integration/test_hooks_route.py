@@ -381,3 +381,130 @@ def test_a_policy_with_no_command_match_gate_never_tokenizes_commands(
     assert time.time() - start < 1.0
     assert response.status_code == 200, response.text
     assert response.json()["blocked"] is False
+
+
+def test_many_command_match_gates_do_not_retokenize_per_gate(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Review's repro: 100 command_match gates, each forbidding "npm", against
+
+    250 distinct ~4,000-character mostly-whitespace commands passed every
+    request-level budget (low token content, few phrases per gate) yet
+    measured ~7s of synchronous blocking in check_policy, because
+    evaluate_command_match was called once per gate and each call
+    independently re-tokenized every command from scratch. Tokenizing once
+    per request and sharing the result across every command_match gate's
+    evaluation collapses this to well under a second.
+    """
+    gates_yaml = "".join(
+        f'  - id: g{i}\n    type: command_match\n    enforcement: required\n'
+        f'    forbidden: ["npm"]\n    message: m\n'
+        for i in range(100)
+    )
+    policy = 'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n' + gates_yaml
+    commands = [" " * 4000 + str(i) for i in range(250)]
+    start = time.time()
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": policy, "commands": commands},
+        headers=master_key_header,
+    )
+    assert time.time() - start < 1.0
+    assert response.status_code == 200, response.text
+
+
+def test_apostrophe_in_a_trailing_comment_does_not_evade_a_required_gate(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """shlex's default (comments=False) does not strip a trailing '#'
+
+    comment, so an apostrophe inside one ("don't") used to raise a
+    ValueError that fell back to one opaque, never-matching token: a
+    required gate forbidding "npm" silently passed "npm install # don't
+    use yarn".
+    """
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: command_match\n    enforcement: required\n"
+        '    forbidden: ["npm"]\n    message: m\n'
+    )
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": policy, "commands": ["npm install # don't use yarn"]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is True
+    assert body["results"][0]["outcome"] == "fail"
+
+
+def test_many_separator_only_commands_resolve_quickly(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """Review's repro: one gate with 500 forbidden phrases against 100 commands
+
+    built from 500 semicolons each (no real content) passed every request
+    budget (the token count correctly counts 0 real tokens) yet measured
+    ~1.1s, because evaluation still compared every one of ~50,000 resulting
+    empty segments against every phrase. Dropping empty segments at the
+    source, since a non-empty phrase can never match one, collapses this.
+    """
+    forbidden = [f'"p{i}"' for i in range(500)]
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: command_match\n    enforcement: required\n"
+        f"    forbidden: [{', '.join(forbidden)}]\n    message: m\n"
+    )
+    commands = ["; " * 500 + " " * i for i in range(100)]
+    start = time.time()
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": policy, "commands": commands},
+        headers=master_key_header,
+    )
+    assert time.time() - start < 0.5
+    assert response.status_code == 200, response.text
+    assert response.json()["blocked"] is False
+
+
+def test_multiline_command_with_a_leading_comment_still_blocks(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A comment on an earlier line must not swallow a real command on a
+
+    later line: "# install dependencies\\nnpm install" is a comment, then a
+    real, separate npm invocation.
+    """
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: command_match\n    enforcement: required\n"
+        '    forbidden: ["npm"]\n    message: m\n'
+    )
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": policy, "commands": ["# install dependencies\nnpm install"]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["blocked"] is True
+
+
+def test_escaped_quote_does_not_hide_a_later_command_as_a_bogus_comment(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    r"""'echo "a\" # b" && npm install' is one quoted argument (via the
+
+    escaped quote) followed by a real, separate npm invocation; the '#'
+    inside the quote must not be treated as a comment that discards it.
+    """
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: command_match\n    enforcement: required\n"
+        '    forbidden: ["npm"]\n    message: m\n'
+    )
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": policy, "commands": ['echo "a\\" # b" && npm install']},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["blocked"] is True

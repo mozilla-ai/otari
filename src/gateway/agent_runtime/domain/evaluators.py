@@ -115,21 +115,113 @@ def _matches_any(path: str, patterns: tuple[str, ...]) -> str | None:
     return None
 
 
+def _strip_shell_comment(command: str) -> str:
+    """Remove every shell comment, at a real POSIX word boundary.
+
+    A `#` starts a comment only at the start of a word (the start of the
+    command, or right after unquoted whitespace) and only outside any
+    quoting. `shlex`'s own `comments=True` is not used here: it treats *any*
+    `#` as starting a comment, even mid-word, which is not what a shell does
+    (`echo a#b` prints `a#b`, not `a`) and is not safe for this purpose: a
+    URL fragment or a `--flag=value#123` mid-command would silently swallow
+    everything after it, including a genuinely separate, later command
+    joined by `&&`/`;`/`|`. `git commit -m "fix #123"` (a `#` inside a
+    quoted argument) is not a comment either way, POSIX or `comments=True`;
+    what differs is exactly this word-boundary rule.
+
+    A comment extends only to the end of its own physical line, not to the
+    end of the whole string: a multi-line command's own earlier comment
+    (`# a note\nnpm install`) must not swallow a real, later command on the
+    next line. The newline itself is kept (shlex already treats it as
+    ordinary whitespace), so scanning continues normally right after it,
+    including into a comment of its own on that next line.
+
+    A backslash escapes the character right after it wherever it appears
+    outside single quotes (unquoted, or inside double quotes), so an
+    escaped double quote cannot end the quote it is inside, and an escaped
+    `#` cannot start a comment. This is a deliberate over-approximation of
+    the narrower real rule for what a backslash escapes inside double
+    quotes (`$`, `` ` ``, `"`, `\\`, or a newline): it only matters here for
+    whether a character is a real closing `"` or a real comment `#`, and
+    treating any other escaped character as "not that" changes nothing.
+    """
+    quote: str | None = None
+    at_word_start = True
+    escaped = False
+    result: list[str] = []
+    index = 0
+    length = len(command)
+    while index < length:
+        char = command[index]
+        if escaped:
+            escaped = False
+            result.append(char)
+            index += 1
+            continue
+        if quote == "'":
+            # Nothing is special inside single quotes, not even backslash.
+            result.append(char)
+            if char == "'":
+                quote = None
+            index += 1
+            continue
+        if char == "\\":
+            escaped = True
+            at_word_start = False
+            result.append(char)
+            index += 1
+            continue
+        if quote == '"':
+            result.append(char)
+            if char == '"':
+                quote = None
+            index += 1
+            continue
+        if char in "'\"":
+            quote = char
+            at_word_start = False
+            result.append(char)
+            index += 1
+            continue
+        if char == "#" and at_word_start:
+            newline_index = command.find("\n", index)
+            if newline_index == -1:
+                break
+            result.append("\n")
+            index = newline_index + 1
+            at_word_start = True
+            continue
+        at_word_start = char.isspace()
+        result.append(char)
+        index += 1
+    return "".join(result)
+
+
 def _command_segments(command: str) -> list[list[str]]:
     """Split a command into simple-command segments, each already tokenized.
 
-    Tokenizes with `shlex` (POSIX quoting rules), then splits the resulting
-    token list on any token that is exactly one of `&&`, `||`, `;`, `|`: a
-    quoted argument that happens to contain that text, like `"a && b"`,
-    survives as a single token from shlex and is never mistaken for a
-    separator, since this only looks at whole tokens, never substrings of
-    one. A command shlex cannot tokenize (unbalanced quotes) becomes its own
-    single-token, single-segment command: whatever it is, it is not equal to
-    any multi-token forbidden phrase, so it can only fail to match, never
-    match something it shouldn't.
+    Strips a trailing comment, then tokenizes with `shlex` (POSIX quoting
+    rules), then splits the resulting token list on any token that is
+    exactly one of `&&`, `||`, `;`, `|`: a quoted argument that happens to
+    contain that text, like `"a && b"`, survives as a single token from
+    shlex and is never mistaken for a separator, since this only looks at
+    whole tokens, never substrings of one. A command shlex still cannot
+    tokenize after comment-stripping (an unbalanced quote outside any
+    comment) becomes its own single-token, single-segment command: whatever
+    it is, it is not equal to any multi-token forbidden phrase, so it can
+    only fail to match, never match something it shouldn't.
+
+    An empty segment (two separators back to back, or one at either end,
+    e.g. `";" * n`) is dropped rather than returned: `_contains_subsequence`
+    can never match a non-empty forbidden phrase against it (every phrase is
+    non-empty by construction, `domain.policy` rejects one that isn't), so
+    keeping it around costs a phrase-count's worth of guaranteed-`False`
+    comparisons for nothing. A caller-controlled string built from many
+    separators and no real content, ";" * 500 against 500 forbidden
+    phrases, measured ~25,000,000 such comparisons and ~1.1s before this.
     """
     try:
-        tokens = shlex.split(command, posix=True)
+        tokens = shlex.split(_strip_shell_comment(command), posix=True)
     except ValueError:
         return [[command]]
 
@@ -139,7 +231,36 @@ def _command_segments(command: str) -> list[list[str]]:
             segments.append([])
         else:
             segments[-1].append(token)
-    return segments
+    return [segment for segment in segments if segment]
+
+
+def tokenize_phrase(phrase: str) -> list[str]:
+    """Tokenize one forbidden phrase, comment-aware and consistent with commands.
+
+    Shared by evaluation (`evaluate_command_match`), parse-time validation
+    (`domain.policy`), and the Hook Server route's cost estimate, so a
+    phrase is judged the same way everywhere it is tokenized. Raises
+    `ValueError` on an unbalanced quote outside any comment, exactly what
+    `domain.policy` already rejects at parse time for a gate's own forbidden
+    phrases; a caller that has not gone through that validation gets the
+    same exception a raw `shlex.split` would.
+    """
+    return shlex.split(_strip_shell_comment(phrase), posix=True)
+
+
+def tokenize_commands(commands: tuple[str, ...]) -> dict[str, list[list[str]]]:
+    """Tokenize every command once, for every command_match gate to share.
+
+    `evaluate_command_match` is called once per command_match gate against
+    the same evidence; without this, each call would re-tokenize every
+    command from scratch, multiplying `shlex`'s per-character cost (real,
+    not negligible: ~100-350ns/char regardless of content) by the number of
+    gates. A request well within every per-request budget in hooks.py, since
+    none of them accounted for that multiplication, measured several seconds
+    of synchronous blocking before this existed. Pass the result to every
+    `evaluate_command_match` call for one request via `segment_cache`.
+    """
+    return {command: _command_segments(command) for command in commands}
 
 
 def _contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
@@ -149,8 +270,22 @@ def _contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
     return any(segment[start : start + len(phrase)] == phrase for start in range(len(segment) - len(phrase) + 1))
 
 
-def evaluate_command_match(gate: CommandMatchGate, evidence: CommandEvidence | None) -> GateResult:
-    """Fail when a submitted command matches one of the gate's forbidden phrases."""
+def evaluate_command_match(
+    gate: CommandMatchGate,
+    evidence: CommandEvidence | None,
+    *,
+    segment_cache: dict[str, list[list[str]]] | None = None,
+) -> GateResult:
+    """Fail when a submitted command matches one of the gate's forbidden phrases.
+
+    `segment_cache` is optional and defaults to tokenizing locally, so a
+    caller evaluating a single gate in isolation (a unit test, a one-off
+    check) needs nothing extra. A caller evaluating several command_match
+    gates against the same evidence, like hooks.py's ``check_policy``,
+    should build one cache with ``tokenize_commands`` and pass the same dict
+    to every call, so tokenizing each command costs once per request rather
+    than once per gate.
+    """
     if evidence is None:
         return GateResult(
             gate_id=gate.id,
@@ -159,13 +294,14 @@ def evaluate_command_match(gate: CommandMatchGate, evidence: CommandEvidence | N
             message="Command evidence was not submitted.",
         )
 
-    forbidden_phrases = [shlex.split(phrase, posix=True) for phrase in gate.forbidden]
+    forbidden_phrases = [tokenize_phrase(phrase) for phrase in gate.forbidden]
+    segments_by_command = segment_cache if segment_cache is not None else tokenize_commands(evidence.commands)
     matched = sorted(
         command
         for command in evidence.commands
         if any(
             _contains_subsequence(segment, phrase)
-            for segment in _command_segments(command)
+            for segment in segments_by_command[command]
             for phrase in forbidden_phrases
         )
     )

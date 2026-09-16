@@ -17,14 +17,18 @@ plan's audit of the old POC calls out).
 
 from __future__ import annotations
 
-import shlex
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.agent_runtime.domain.evaluators import evaluate_changed_path, evaluate_command_match
+from gateway.agent_runtime.domain.evaluators import (
+    evaluate_changed_path,
+    evaluate_command_match,
+    tokenize_commands,
+    tokenize_phrase,
+)
 from gateway.agent_runtime.domain.policy import MAX_POLICY_BYTES, PolicyError, parse_policy
 from gateway.agent_runtime.domain.types import ChangedPathEvidence, ChangedPathGate, CommandEvidence, CommandMatchGate
 from gateway.api.deps import get_config, get_db_if_needed, verify_api_key_or_master_key
@@ -139,32 +143,18 @@ _MAX_COMMAND_MATCH_WORK = 2_000_000
 # at the same degenerate shape.
 _MAX_COMMAND_COMPARISONS = 500_000
 
-# Computing _token_count itself is not free: shlex.split costs roughly
-# 100-350ns per character it tokenizes, regardless of content, which is
-# 50-150x the cost of a plain len() check. That is irrelevant at the scale of
-# one command, but _MAX_COMMANDS * _MAX_COMMAND_LENGTH allows up to
-# ~41,000,000 characters in one request, and tokenizing all of it measured
-# several seconds before either budget above ever saw a token count to
-# reject: a policy with zero command_match gates would still pay this cost
-# computing total_command_tokens, since that sum is what proves there is
-# nothing to bound. This caps the raw character total *before* any command is
+# Tokenizing itself is not free: shlex.split costs roughly 100-350ns per
+# character it tokenizes, regardless of content, which is 50-150x the cost
+# of a plain len() check. That is irrelevant at the scale of one command,
+# but _MAX_COMMANDS * _MAX_COMMAND_LENGTH allows up to ~41,000,000
+# characters in one request, and tokenizing all of it measured several
+# seconds before either budget below ever saw a token count to reject: a
+# policy with zero command_match gates would still pay this cost computing
+# total_command_tokens, since that sum is what proves there is nothing to
+# bound. This caps the raw character total *before* any command is
 # tokenized, using only len() (uniformly cheap regardless of content).
 # 2,000,000 characters measured ~0.17s; chosen with margin under that.
 _MAX_TOTAL_COMMAND_CHARS = 2_000_000
-
-
-def _token_count(text: str) -> int:
-    """An upper bound on how many tokens `text` costs to match against.
-
-    Mirrors domain/evaluators.py's own fallback: a string shlex cannot
-    tokenize (unbalanced quotes) becomes a single-token command there, so it
-    costs the same here rather than this estimate disagreeing with what
-    evaluation actually does.
-    """
-    try:
-        return len(shlex.split(text, posix=True))
-    except ValueError:
-        return 1
 
 
 class PolicyCheckRequest(BaseModel):
@@ -266,11 +256,12 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
         )
 
     command_evidence = request.command_evidence
-    # Gated on there being a command_match gate at all: computing a token
-    # count means tokenizing, and tokenizing is exactly the cost
-    # _MAX_TOTAL_COMMAND_CHARS below exists to bound. A policy with none
-    # (every policy shipped before this gate type existed) must not pay that
-    # cost just to prove there is nothing to bound it against.
+    # Gated on there being a command_match gate at all: tokenizing a command
+    # is exactly the cost _MAX_TOTAL_COMMAND_CHARS below exists to bound. A
+    # policy with none (every policy shipped before this gate type existed)
+    # must not pay that cost just to prove there is nothing to bound it
+    # against.
+    segment_cache: dict[str, list[list[str]]] | None = None
     if command_match_gates:
         total_command_chars = sum(len(command) for command in command_evidence.commands)
         if total_command_chars > _MAX_TOTAL_COMMAND_CHARS:
@@ -282,10 +273,27 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
                 ),
             )
 
+        # Tokenized exactly once here and reused for both the estimate below
+        # and the real evaluation further down (passed to every
+        # evaluate_command_match call as segment_cache): evaluate_command_match
+        # is called once per command_match gate against this same evidence,
+        # and without sharing this, each call would re-tokenize every command
+        # from scratch, multiplying the already-checked cost above by the
+        # number of gates. A request with 100 command_match gates each
+        # forbidding "npm" against 250 distinct ~4,000-character commands
+        # passed every budget here (low token content, few phrases, under
+        # _MAX_TOTAL_COMMAND_CHARS) yet measured ~7s of synchronous blocking
+        # from exactly that multiplication before this was shared.
+        segment_cache = tokenize_commands(command_evidence.commands)
+
+        # Policy parsing already proved every forbidden phrase tokenizes
+        # (domain.policy's own validation), so this cannot raise.
         phrase_count = sum(len(gate.forbidden) for gate in command_match_gates)
-        total_phrase_tokens = sum(_token_count(phrase) for gate in command_match_gates for phrase in gate.forbidden)
+        total_phrase_tokens = sum(
+            len(tokenize_phrase(phrase)) for gate in command_match_gates for phrase in gate.forbidden
+        )
         command_count = len(command_evidence.commands)
-        total_command_tokens = sum(_token_count(command) for command in command_evidence.commands)
+        total_command_tokens = sum(len(segment) for segments in segment_cache.values() for segment in segments)
         estimated_command_work = total_phrase_tokens * total_command_tokens
         command_comparisons = phrase_count * command_count
         if estimated_command_work > _MAX_COMMAND_MATCH_WORK or command_comparisons > _MAX_COMMAND_COMPARISONS:
@@ -304,7 +312,7 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     results = [
         evaluate_changed_path(gate, changed_path_evidence)
         if isinstance(gate, ChangedPathGate)
-        else evaluate_command_match(gate, command_evidence)
+        else evaluate_command_match(gate, command_evidence, segment_cache=segment_cache)
         for gate in spec.gates
     ]
     blocked = any(result.enforcement == "required" and result.outcome.is_blocking for result in results)
