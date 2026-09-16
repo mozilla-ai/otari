@@ -132,6 +132,39 @@ def test_stop_event_blocks_on_git_status(monkeypatch: pytest.MonkeyPatch, repo: 
     assert captured["json"]["changed_paths"] == ["CHANGELOG.md"]
 
 
+def test_pretooluse_submits_a_posix_relative_path(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """A nested target is submitted "/"-separated, whatever the platform.
+
+    A forbidden glob is a repo-relative POSIX path and the evaluator splits it
+    on "/", so a WindowsPath's native ``docs\\foo.md`` spelling would match
+    nothing and every PreToolUse gate would pass on Windows. This asserts the
+    separator directly rather than the equality alone, so the intent survives a
+    reader on a POSIX box, where ``str()`` and ``as_posix()`` agree and only a
+    Windows run can tell the two apart.
+    """
+    nested = repo / "docs" / "guide" / "page.md"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("x", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(nested)},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    submitted = captured["json"]["changed_paths"]
+    assert submitted == ["docs/guide/page.md"]
+    assert "\\" not in submitted[0]
+
+
 def test_stop_event_parses_a_rename_as_its_new_path(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     """-z reports a rename/copy as two consecutive tokens: new path, then old path."""
     captured: dict[str, Any] = {}

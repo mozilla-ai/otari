@@ -341,7 +341,12 @@ def hook(harness: str, config: str | None, url: str | None, api_key: str | None)
         if not target:
             return
         try:
-            changed_paths = [str(Path(target).resolve().relative_to(root))]
+            # as_posix(), not str(): a forbidden glob is a repo-relative POSIX
+            # path and the evaluator splits it on "/", so a WindowsPath's
+            # native "docs\\foo.md" spelling matches nothing. That fails open
+            # and silently, a passing gate being indistinguishable from no
+            # forbidden change, so every PreToolUse gate would pass on Windows.
+            changed_paths = [Path(target).resolve().relative_to(root).as_posix()]
         except ValueError:
             return  # Outside the repo: nothing this policy can name.
     elif event == "Stop":
