@@ -12,6 +12,7 @@ import threading
 from collections.abc import Generator
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import APIRouter
@@ -247,6 +248,43 @@ async def test_a_worker_that_dies_is_reported_when_it_dies(
             assert "probe worker stopped with an unexpected error" in caplog.text
     finally:
         gateway_logger.removeHandler(caplog.handler)
+
+
+@pytest.mark.asyncio
+async def test_a_worker_that_will_not_stop_is_abandoned_and_named_as_a_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Shutdown still finishes under the shared bound, and its warning says what it gave up on."""
+    started = asyncio.Event()
+    tasks: list[asyncio.Task[Any]] = []
+
+    async def stubborn(_config: GatewayConfig) -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        tasks.append(task)
+        started.set()
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            # Absorbed once, as a nested cancel scope around an outbound call can.
+            task.uncancel()
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True, worker=stubborn),))
+    app = create_app(_standalone(tmp_path))
+    gateway_logger = logging.getLogger("gateway")
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        async with _create_lifespan()(app):
+            await asyncio.wait_for(started.wait(), timeout=5)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    assert "probe worker did not stop within" in caplog.text
 
 
 @pytest.mark.asyncio
