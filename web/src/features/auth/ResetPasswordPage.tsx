@@ -120,7 +120,7 @@ export function ResetPasswordPage({ hash }: { hash: string }) {
           }}
           autoComplete="new-password"
           description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
-          errorMessage={problem}
+          errorMessage={problem ?? undefined}
         />
         <AuthPasswordField
           label="Confirm new password"

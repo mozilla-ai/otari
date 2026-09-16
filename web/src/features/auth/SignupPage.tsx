@@ -203,7 +203,7 @@ export function SignupPage({ hash }: { hash: string }) {
           }}
           autoComplete="new-password"
           description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
-          errorMessage={problem}
+          errorMessage={problem ?? undefined}
         />
         <AuthPasswordField
           label="Confirm password"
@@ -219,17 +219,14 @@ export function SignupPage({ hash }: { hash: string }) {
             deployment's `terms_url` says. Required rather than optional: an
             acceptance the form would have submitted either way records nothing.
             A plain anchor and not a router `Link`, because the target is an
-            address an operator configured and is usually off this origin.
-
-            The anchor sits beside the control rather than inside its label,
-            which is the one arrangement that lets the terms be read. HTML
-            exempts an interactive descendant from a label's own activation,
-            but react-aria makes the whole label pressable through a
-            document-level handler that knows no such exemption, so nested the
-            link only ticked the box (otari-ai#2146): no guard on the anchor
-            reaches that handler, because it runs before anything the anchor
-            could stop. `ariaLabel` carries the whole sentence, since the
-            visible label is now only the half that stayed inside. */}
+            address an operator configured and is usually off this origin, and
+            beside the control rather than inside its label, which is the only
+            arrangement that lets the terms be read: HTML exempts an
+            interactive descendant from a label's own activation, but
+            react-aria presses the label from a document-level handler that
+            knows no such exemption and that nothing on the anchor can stop, so
+            nested the link only ticked the box (otari-ai#2146). `ariaLabel`
+            carries the sentence the visible label no longer holds in full. */}
         {terms_url !== null ? (
           <div className="flex flex-wrap items-center gap-x-1 text-caption">
             <Checkbox

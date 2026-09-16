@@ -85,15 +85,13 @@ export function AuthPasswordField({
   autoComplete: "current-password" | "new-password"
   description?: string
   /**
-   * Why the password cannot be used yet, shown in the description's place
-   * rather than under it. A form in front of a session sits on the animated
-   * background, whose bar grid is measured from the card: a message that
-   * mounts and unmounts as the password is typed resizes the card and moves
-   * the whole field behind it (otari-ai#2146). Sharing one line means the
-   * card is the same height whether or not the field is speaking, so give
-   * this to a field that carries a description.
+   * Why the password cannot be used yet, taking the description's line rather
+   * than one of its own. The card these forms sit in is what the animated
+   * background measures its bar grid from, so a message that changes the
+   * card's height moves the whole field behind it (otari-ai#2146). Give this
+   * to a field that carries a description, or it takes a line after all.
    */
-  errorMessage?: string | null
+  errorMessage?: string
 }) {
   return (
     <TextField
