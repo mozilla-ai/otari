@@ -564,6 +564,49 @@ describe("OrganizationMembersPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("confirms the send, and names who it went to, when the email went out", async () => {
+    // The ordinary outcome now that the invitation is only offered where mail
+    // is configured: no link to copy, because the one that matters is in the
+    // message. The acknowledgement is one way out of two here, since a
+    // delivered invitation leaves nothing behind that only this dialog holds.
+    mockApi({
+      members: [OWNER],
+      inviteResult: {
+        invitation_id: "invitation-1",
+        organization_member_id: "invited-membership",
+        email: "ada@example.com",
+        role: "member",
+        status: "invited",
+        mail_sent: true,
+        accept_link: "/#/accept-invitation?token=abc123",
+        expires_at: "2026-01-08T00:00:00+00:00",
+        created_at: "2026-01-01T00:00:00+00:00",
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Invite member" }),
+    )
+    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Invite member",
+      }),
+    )
+
+    const sent = await screen.findByText(
+      /An email with an accept link was sent/,
+    )
+    expect(within(sent).getByText("ada@example.com")).toBeInTheDocument()
+    expect(screen.queryByText(/Otari did not send the email/)).toBeNull()
+    expect(screen.queryByLabelText("Accept link")).toBeNull()
+
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  })
+
   it("says the email will be sent when mail is configured", async () => {
     mockApi({ members: [OWNER] })
     const user = userEvent.setup()
