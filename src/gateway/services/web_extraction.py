@@ -289,13 +289,12 @@ class ExtractionSupervisor:
                 if pending is None:
                     return
                 if monotonic() >= pending.expires_at:
-                    error = ExtractionError("extraction deadline exceeded")
-                    failure_cutoff = self._failure_cutoff()
-                    self._stop_worker(process, connection)
-                    process = None
-                    connection = None
-                    self._finish(pending, error=error)
-                    self._fail_queued(error, up_to_identifier=failure_cutoff)
+                    # Expired while queued, so it never reached the worker and
+                    # says nothing about the worker's health. Failing it alone
+                    # keeps a backlog from restarting a process that is still
+                    # serving jobs; the ones behind it carry their own
+                    # deadlines and are checked as they reach the front.
+                    self._finish(pending, error=ExtractionError("extraction deadline exceeded"))
                     continue
                 if process is None or not process.is_alive() or connection is None:
                     self._stop_worker(process, connection)

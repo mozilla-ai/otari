@@ -10,6 +10,7 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import Future
 from multiprocessing.connection import Connection
+from multiprocessing.process import BaseProcess
 from time import monotonic
 
 import pytest
@@ -58,6 +59,18 @@ class _PausedQueueDrainSupervisor(ExtractionSupervisor):
         self.drain_started.set()
         self.allow_drain.wait(timeout=2)
         super()._fail_queued(error, up_to_identifier=up_to_identifier)
+
+
+class _CountingStartSupervisor(ExtractionSupervisor):
+    """Records how many times the supervisor has had to start a worker process."""
+
+    def __init__(self) -> None:
+        self.worker_starts = 0
+        super().__init__()
+
+    def _start_worker(self) -> tuple[BaseProcess, Connection]:
+        self.worker_starts += 1
+        return super()._start_worker()
 
 
 class _CancelOnCompletionFuture(Future[ExtractedText]):
@@ -146,6 +159,41 @@ async def test_timeout_fails_current_and_queued_jobs_then_recovers() -> None:
         supervisor.close()
 
     assert "recovered" in recovered.text
+
+
+@pytest.mark.asyncio
+async def test_job_expiring_in_the_queue_does_not_restart_a_healthy_worker() -> None:
+    supervisor = _CountingStartSupervisor()
+    try:
+        first = await supervisor.extract_html("<html><body><p>first job</p></body></html>")
+        assert supervisor.worker_starts == 1
+
+        # A job whose deadline passed while it waited its turn, which under a
+        # backlog is the common case rather than a sign the worker is stuck.
+        expired: Future[ExtractedText] = Future()
+        with supervisor._state_lock:  # noqa: SLF001
+            identifier = supervisor._next_identifier  # noqa: SLF001
+            supervisor._next_identifier += 1  # noqa: SLF001
+            supervisor._pending_count += 1  # noqa: SLF001
+        supervisor._queue.put(  # noqa: SLF001
+            _PendingExtraction(
+                identifier=identifier,
+                kind="html",
+                payload="<html><body><p>too late</p></body></html>",
+                expires_at=monotonic() - 1,
+                future=expired,
+            )
+        )
+        with pytest.raises(ExtractionError, match="deadline"):
+            await asyncio.wrap_future(expired)
+
+        second = await supervisor.extract_html("<html><body><p>second job</p></body></html>")
+    finally:
+        supervisor.close()
+
+    assert "first job" in first.text
+    assert "second job" in second.text
+    assert supervisor.worker_starts == 1
 
 
 @pytest.mark.asyncio
