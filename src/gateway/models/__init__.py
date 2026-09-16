@@ -11,8 +11,8 @@ Alembic would propose dropping the tables it could not see, and a test's
 with.
 
 A new model module that declares tables belongs in the import list below; the
-schema-less request/response modules beside them (`guardrails`, `mcp`,
-`routing`) contribute nothing to the metadata and stay out of it.
+schema-less request/response modules beside them (`mcp`, `routing`)
+contribute nothing to the metadata and stay out of it.
 """
 
-from gateway.models import api_keys, budgets, entities, playground, provider_keys, tenancy  # noqa: F401
+from gateway.models import api_keys, budgets, entities, guardrails, playground, provider_keys, tenancy  # noqa: F401

@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.entities import OrganizationGuardrail, OrganizationGuardrailWorkspace
+from gateway.models.guardrails import OrganizationGuardrail, OrganizationGuardrailWorkspace
 from gateway.models.tenancy import Organization, User, Workspace
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
