@@ -429,8 +429,15 @@ def hook(harness: str, config: str | None, url: str | None, api_key: str | None)
     if not failing:
         return
 
+    # .get(), not [...]: the try/except above only protects the shape checks
+    # that build `failing` itself (result["results"], gate["outcome"]), not a
+    # gate dict's other fields. A gate missing 'enforcement'/'gate_id'/
+    # 'message' (an older or otherwise mismatched otari serve behind --url)
+    # must not raise KeyError here, outside that protection, and surface as a
+    # traceback in place of the fail-open message this command promises.
     summary = "\n".join(
-        f"  [{'x' if gate['enforcement'] == 'required' else '!'}] {gate['gate_id']}: {gate['message']}"
+        f"  [{'x' if gate.get('enforcement') == 'required' else '!'}] "
+        f"{gate.get('gate_id', '?')}: {gate.get('message', '(no message)')}"
         for gate in failing
     )
     if blocked:

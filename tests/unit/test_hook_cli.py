@@ -380,6 +380,35 @@ def test_unreadable_response_does_not_block(
     assert "unreadable response" in result.output, case
 
 
+def test_a_gate_result_missing_display_fields_does_not_crash(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """The try/except around reading the response only covers what builds
+
+    `failing` (result["results"], gate["outcome"]); it does not, on its own,
+    cover the later step that formats each failing gate for display, which
+    reads gate['enforcement']/['gate_id']/['message']. A gate result that is
+    well-formed enough to build `failing` (has 'outcome') but is missing one
+    of those other fields, as an older or otherwise mismatched otari serve
+    behind --url might send, must not raise KeyError there and surface as a
+    traceback instead of this command's own fail-open contract.
+    """
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *a, **k: _FakeResponse({"blocked": True, "results": [{"outcome": "fail"}]}),
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 2, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
 def test_unreachable_gateway_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
         raise httpx.ConnectError("connection refused")
