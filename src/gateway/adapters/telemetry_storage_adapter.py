@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.sql import bucket_expr, canonical_bucket, dialect_name, match_any, utc_bound
 from gateway.log_config import logger
-from gateway.models.entities import AgentTelemetry
+from gateway.models.usage import AgentTelemetry
 from gateway.ports.telemetry_storage_port import (
     BehaviorCounts,
     BehaviorGroup,

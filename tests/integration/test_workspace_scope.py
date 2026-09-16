@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import UsageLog
+from gateway.models.usage import UsageLog
 
 
 def _default_workspace(client: TestClient, headers: dict[str, str]) -> str:

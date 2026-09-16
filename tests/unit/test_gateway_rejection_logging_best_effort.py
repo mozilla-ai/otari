@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from gateway.api.routes._pipeline import log_gateway_rejection
-from gateway.models.entities import UsageLog
+from gateway.models.usage import UsageLog
 
 
 class _BoomWriter:

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from gateway.models.entities import UsageLog
+from gateway.models.usage import UsageLog
 from gateway.services.log_writer import SingleLogWriter
 
 

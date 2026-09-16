@@ -13,7 +13,8 @@ from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageA
 from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import BudgetResetLog
-from gateway.models.entities import UsageLog, User
+from gateway.models.entities import User
+from gateway.models.usage import UsageLog
 
 from .conftest import MODEL_NAME
 

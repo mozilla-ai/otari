@@ -83,9 +83,10 @@ from gateway.api.routes.usage import (
 )
 from gateway.core.sql import MAX_FILTER_VALUES
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import UsageLog, User
+from gateway.models.entities import User
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
+from gateway.models.usage import UsageLog
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import (
     resolve_visible_workspace_scope,

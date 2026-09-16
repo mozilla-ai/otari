@@ -45,10 +45,10 @@ from gateway.api.deps import (
 from gateway.core.config import HOSTED_OFFERING_INSTANCE, GatewayConfig
 from gateway.core.metered_pricing import effective_rates
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import UsageLog
 from gateway.models.pricing import PricingSnapshot
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
+from gateway.models.usage import UsageLog
 from gateway.services.catalog_selectors import (
     current_selector_index,
     model_selector_for_slug,

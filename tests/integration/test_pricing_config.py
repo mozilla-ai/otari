@@ -14,7 +14,7 @@ from gateway.api.routes.chat import log_usage
 from gateway.core.config import API_ROOT, GatewayConfig, PricingConfig
 from gateway.db import ModelPricing, get_db
 from gateway.main import create_app
-from gateway.models.entities import UsageLog
+from gateway.models.usage import UsageLog
 
 from .conftest import build_async_session_override
 

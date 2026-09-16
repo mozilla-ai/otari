@@ -476,8 +476,8 @@ def test_a_signed_in_caller_sees_their_own_usage_of_an_offering(
     """The listed rate is what a token costs; this is what the tokens cost."""
     from sqlmodel import select
 
-    from gateway.models.entities import UsageLog
     from gateway.models.tenancy import Workspace
+    from gateway.models.usage import UsageLog
 
     # The master key acts in the default workspace, which boot provisioned.
     assert priced.get(f"{API_ROOT}/organizations/me", headers=master_header).status_code == status.HTTP_200_OK

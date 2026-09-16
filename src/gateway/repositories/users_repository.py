@@ -8,8 +8,9 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import UsageLog, User
+from gateway.models.entities import User
 from gateway.models.tenancy import OrganizationMember, Workspace
+from gateway.models.usage import UsageLog
 
 # The owner a key falls back to when it is created without a user_id (the API's
 # convenience path, and the first-run bootstrap key). One shared, visible,
