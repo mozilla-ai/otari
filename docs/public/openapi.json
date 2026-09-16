@@ -2017,7 +2017,7 @@
         "type": "object"
       },
       "CallerIdentityPublic": {
-        "description": "Who the caller is, as against what they may do.\n\nThe account control at the foot of the dashboard's sidebar draws a person,\nand no authenticated route reported the caller's own name or address, so it\ndrew a role for everybody who could reach it: \"Operator\", which is not a\nname and on a multi-tenant deployment was not even true\n(mozilla-ai/otari#832).\n\nCarried on the membership context for the reason ``deployment_operator`` is:\nthe shell reads that context before it paints, so an identity taken from it\nneeds no request of its own and cannot arrive a beat after the chrome it\nnames. Publishing it costs nothing either, since it is the caller's own\nidentity and they are holding the credential that resolved to it.\n\nBoth fields are nullable, and for opposite reasons. A local operator\nidentity has no address, because first boot provisions it with a name and\nnothing to sign in with but the master key; a member added to the roster by\naddress has no name until they claim the identity and supply one. So a shell\nhas to be ready to draw either one alone.",
+        "description": "Who the caller is, as against what they may do.\n\nThe account control at the foot of the dashboard's sidebar draws a person,\nand no authenticated route reported the caller's own name or address, so it\ndrew a role for everybody who could reach it: \"Operator\", which is not a\nname and on a multi-tenant deployment was not even true\n(mozilla-ai/otari#832).\n\nCarried on the membership context for the reason ``deployment_operator`` is:\nthe shell reads that context before it paints, so an identity taken from it\nneeds no request of its own and cannot arrive a beat after the chrome it\nnames. Publishing it costs nothing either, since it is the caller's own\nidentity and they are holding the credential that resolved to it.\n\nBoth nullable fields are nullable for opposite reasons. A local operator\nidentity has no address, because first boot provisions it with a name and\nnothing to sign in with but the master key; a member added to the roster by\naddress has no name until they claim the identity and supply one. So a shell\nhas to be ready to draw either one alone.",
         "properties": {
           "email": {
             "anyOf": [
@@ -2041,6 +2041,11 @@
             ],
             "title": "Full Name"
           },
+          "has_password": {
+            "description": "Whether this identity holds a dashboard password. False for one that signs in only through an OAuth provider or a passkey, and for a roster entry nobody has claimed yet. PUT /api/v1/auth/password requires current_password from a cookie-authenticated caller exactly while this is true.",
+            "title": "Has Password",
+            "type": "boolean"
+          },
           "user_id": {
             "format": "uuid",
             "title": "User Id",
@@ -2048,7 +2053,8 @@
           }
         },
         "required": [
-          "user_id"
+          "user_id",
+          "has_password"
         ],
         "title": "CallerIdentityPublic",
         "type": "object"

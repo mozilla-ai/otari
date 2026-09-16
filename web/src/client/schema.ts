@@ -5947,7 +5947,7 @@ export interface components {
          *     names. Publishing it costs nothing either, since it is the caller's own
          *     identity and they are holding the credential that resolved to it.
          *
-         *     Both fields are nullable, and for opposite reasons. A local operator
+         *     Both nullable fields are nullable for opposite reasons. A local operator
          *     identity has no address, because first boot provisions it with a name and
          *     nothing to sign in with but the master key; a member added to the roster by
          *     address has no name until they claim the identity and supply one. So a shell
@@ -5958,6 +5958,11 @@ export interface components {
             email?: string | null;
             /** Full Name */
             full_name?: string | null;
+            /**
+             * Has Password
+             * @description Whether this identity holds a dashboard password. False for one that signs in only through an OAuth provider or a passkey, and for a roster entry nobody has claimed yet. PUT /api/v1/auth/password requires current_password from a cookie-authenticated caller exactly while this is true.
+             */
+            has_password: boolean;
             /**
              * User Id
              * Format: uuid

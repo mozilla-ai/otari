@@ -199,6 +199,7 @@ export function organizationContext(
       user_id: "33333333-3333-3333-3333-333333333333",
       email: null,
       full_name: "Operator",
+      has_password: false,
     },
     role: "owner",
     status: "active",

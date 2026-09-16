@@ -260,6 +260,56 @@ def test_a_verified_provider_address_lifts_the_local_verification_gate(
     assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
 
 
+def test_a_provider_sign_in_reports_that_it_holds_no_password_and_can_set_one(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """mozilla-ai/otari-ai#2099: the account page has to be able to tell, and the way out has to exist.
+
+    Somebody who signs in with Google or GitHub holds no password, so the change
+    form asks them for a current one they can never supply. The dashboard picks
+    its form from ``caller.has_password`` rather than from the deployment-wide
+    ``sign_in_methods``, and this pins both halves: the flag is what this
+    identity actually holds, and a cookie-authenticated caller who holds none
+    sets a first password with nothing further to prove.
+    """
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch)
+    assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
+
+    before = client.get(f"{API_ROOT}/organizations/me")
+    assert before.status_code == 200, before.text
+    assert before.json()["caller"]["has_password"] is False
+
+    set_password = client.put(f"{API_ROOT}/auth/password", json={"new_password": PASSWORD})
+
+    assert set_password.status_code == 200, set_password.text
+    assert set_password.json() == {"email": "ada@example.com", "master_key_sign_in_retired": False}
+    after = client.get(f"{API_ROOT}/organizations/me")
+    assert after.json()["caller"]["has_password"] is True
+
+
+def test_a_second_change_from_that_session_asks_for_the_password_it_now_holds(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The other side of the flag: once it is true the change form is the right
+    # one, and the gateway refuses the shape that was correct a moment earlier.
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch)
+    client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+    assert client.put(f"{API_ROOT}/auth/password", json={"new_password": PASSWORD}).status_code == 200
+
+    again = client.put(f"{API_ROOT}/auth/password", json={"new_password": "another-password"})
+
+    assert again.status_code == 400
+    assert "current password" in again.json()["detail"].lower()
+
+
 def test_an_address_nobody_put_on_the_roster_is_refused_rather_than_provisioned(
     client: TestClient, oauth_configured: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:

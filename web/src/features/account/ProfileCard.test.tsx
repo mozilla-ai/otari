@@ -13,6 +13,7 @@ const CALLER: CallerIdentity = {
   user_id: "33333333-3333-3333-3333-333333333333",
   email: "ada@example.com",
   full_name: "Operator",
+  has_password: true,
 }
 
 /**

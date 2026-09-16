@@ -36,7 +36,12 @@ describe("AccountPage", () => {
     expect(
       screen.getByRole("heading", { name: "Account settings" }),
     ).toBeInTheDocument()
-    expect(screen.getByLabelText("New password")).toBeInTheDocument()
+    // The heading rather than a field: the password form is a dialog now, and
+    // which of its three readings applies is the signed-in identity's, not this
+    // page's.
+    expect(
+      screen.getByRole("heading", { name: "Dashboard password" }),
+    ).toBeInTheDocument()
     expect(
       await screen.findByRole("heading", { name: "Your name" }),
     ).toBeInTheDocument()
@@ -45,7 +50,9 @@ describe("AccountPage", () => {
   it("says why there is nothing to change when another control plane owns the session", () => {
     renderPage("hosted_user")
 
-    expect(screen.queryByLabelText("New password")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { name: "Dashboard password" }),
+    ).not.toBeInTheDocument()
     expect(
       screen.queryByRole("heading", { name: "Your name" }),
     ).not.toBeInTheDocument()

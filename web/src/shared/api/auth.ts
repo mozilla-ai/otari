@@ -43,13 +43,20 @@ export function useRotateMasterKey() {
  * first call on a deployment supplies an address as well, which is the act that
  * claims it and retires master-key sign-in (otari-ai#1716).
  *
- * Two things this changes are cached elsewhere, and they are cached
+ * Three things this changes are cached elsewhere, and they are cached
  * differently. The bootstrap's `sign_in_methods` is a context read once per
  * load rather than a query, so no invalidation could reach it: the caller
  * reports the claim through `useRetireMasterKeySignIn` instead. The roster is
  * an ordinary query, and a claim writes `user.email` from null to the address,
  * so the Members page would otherwise show the row it fetched before the claim
  * for the rest of its `staleTime`. That one is invalidated here.
+ *
+ * The third is the membership context's `caller`, which carries the two facts
+ * the account page builds its form from: the address, and `has_password`. Both
+ * move on this call and the account page has to see them move, or the card that
+ * just set a first password goes on offering to set one. Seeded from the
+ * response before being invalidated, for the reason `useUpdateProfile` does the
+ * same: the page settles on the same tick rather than a round trip later.
  *
  * Every *other* session this identity holds is revoked server-side; this one is
  * kept, so no 401 follows.
@@ -62,7 +69,24 @@ export function useSetPassword() {
         method: "PUT",
         body: JSON.stringify(body),
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      queryClient.setQueryData<OrganizationContext>(
+        [ORGANIZATIONS, "context"],
+        (previous) =>
+          previous?.caller
+            ? {
+                ...previous,
+                caller: {
+                  ...previous.caller,
+                  email: result.email,
+                  has_password: true,
+                },
+              }
+            : previous,
+      )
+      void queryClient.invalidateQueries({
+        queryKey: [ORGANIZATIONS, "context"],
+      })
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
     },
   })

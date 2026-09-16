@@ -76,7 +76,12 @@ async def update_own_profile(
     the whole membership context.
     """
     updated = await update_full_name(db, identity, full_name=body.full_name)
-    return CallerIdentityPublic(user_id=updated.id, email=updated.email, full_name=updated.full_name)
+    return CallerIdentityPublic(
+        user_id=updated.id,
+        email=updated.email,
+        full_name=updated.full_name,
+        has_password=updated.hashed_password is not None,
+    )
 
 
 __all__ = ["router"]
