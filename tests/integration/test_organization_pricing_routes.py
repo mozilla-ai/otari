@@ -8,7 +8,7 @@ request actually bills at the override rate.
 """
 
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -18,12 +18,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.models.entities import APIKey, ModelPricing, OrganizationModelPricing
-from gateway.models.tenancy import Organization, User, Workspace
-from gateway.ports.model_provider_port import HostedAccessDeniedError, HostedCredential
+from gateway.models.entities import APIKey, DashboardSession, ModelPricing, OrganizationModelPricing
+from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace
+from gateway.ports.model_provider_port import HostedAccessDeniedError, HostedCredential, ModelProviderPort
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -32,6 +33,7 @@ from gateway.repositories.tenancy import (
     WorkspaceProviderKeyOverrideRepository,
     WorkspaceRepository,
 )
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.organization_pricing_service import (
     OrganizationPricingService,
     PricingOverrideInput,
@@ -825,6 +827,57 @@ async def test_an_organization_may_price_a_model_no_hosted_credential_serves(asy
     created = await service.create_for_caller(identity, _MODEL_KEY, _rates())
 
     assert created.model_key == _MODEL_KEY
+
+
+def test_the_route_asks_the_port_this_build_bound(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """The route builds the service with the container's bound port.
+
+    Gotcha: the master key acts as the deployment operator, who is exempt, so the caller is an admin session.
+    """
+    assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
+    container: Any = client.app.state.container  # type: ignore[attr-defined]
+    container.bind(ModelProviderPort, lambda session: _FakeHostedModelProvider(served="openai"))
+
+    token = "otari-sess-admin@tenant.test"
+    session = db_session_factory()
+    try:
+        organization = Organization(name="Tenant", slug="tenant-hosted-route")
+        session.add(organization)
+        session.commit()
+        session.refresh(organization)
+        admin = User(email="admin@tenant.test", full_name="Admin", active_organization_id=organization.id)
+        session.add(admin)
+        session.commit()
+        session.refresh(admin)
+        session.add(
+            OrganizationMember(organization_id=organization.id, user_id=admin.id, role="admin", status="active")
+        )
+        session.add(
+            DashboardSession(
+                token_hash=hash_session_token(token),
+                user_id=admin.id,
+                created_at=datetime.now(UTC),
+                expires_at=datetime.now(UTC) + timedelta(hours=12),
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        unserved = client.post(_ENDPOINT, json=_body(model_key="anthropic:claude-3-5-haiku-latest"))
+        served = client.post(_ENDPOINT, json=_body())
+    finally:
+        client.cookies.clear()
+
+    assert unserved.status_code == status.HTTP_201_CREATED, unserved.text
+    assert served.status_code == status.HTTP_403_FORBIDDEN, served.text
+    assert _MODEL_KEY in served.json()["detail"]
 
 
 @pytest.mark.asyncio
