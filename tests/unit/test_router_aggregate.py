@@ -48,7 +48,7 @@ def _standalone() -> GatewayConfig:
 def _mounted_on(aggregate: APIRouter) -> Operations:
     """Mount the gateway onto ``aggregate`` and report the operations that reach an app."""
     config = _standalone()
-    _register_core_routers(aggregate, config)
+    _register_core_routers(aggregate, config, ())
     _register_contributed_routers(aggregate, build_container(config.bootstrap))
 
     app = FastAPI()
@@ -67,6 +67,7 @@ def test_a_prefix_on_the_aggregate_moves_every_route() -> None:
 def test_register_routers_hands_the_app_the_aggregate_and_the_otlp_sibling() -> None:
     app = FastAPI()
     app.state.container = build_container(None)
+    app.state.enabled_features = ()
 
     register_routers(app, _standalone())
 
@@ -79,6 +80,7 @@ def _mount_order(config: GatewayConfig) -> list[str]:
     """Every operation the app serves, in the order Starlette will try to match it."""
     app = FastAPI()
     app.state.container = build_container(config.bootstrap)
+    app.state.enabled_features = ()
     register_routers(app, config)
     return [route.path for route in app.routes if isinstance(route, APIRoute)]
 
@@ -122,6 +124,7 @@ def test_a_contributed_route_is_matched_before_a_mode_stub() -> None:
 
     app = FastAPI()
     app.state.container = container
+    app.state.enabled_features = ()
     register_routers(app, GatewayConfig(mode="hosted", bootstrap=None))
     routes = [route for route in app.routes if isinstance(route, APIRoute)]
 

@@ -27,9 +27,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway import features
-from gateway.api.deps import get_config, get_db_if_needed
+from gateway.api.deps import get_config, get_db_if_needed, get_enabled_features
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.feature import CoreFeature
 from gateway.log_config import logger
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy.user_service import operator_has_password, password_sign_in_possible
@@ -144,18 +144,16 @@ HOSTED_SURFACES: tuple[str, ...] = (
 )
 
 
-def published_surfaces(config: GatewayConfig) -> list[str]:
+def published_surfaces(config: GatewayConfig, enabled_features: tuple[CoreFeature, ...]) -> list[str]:
     """The surfaces this deployment publishes, sorted.
 
-    The edition's fixed set plus the surface of each enabled registry feature.
+    The edition's fixed set plus the surface of each enabled feature.
     Empty for hybrid, which hosts none.
     """
     if config.is_hybrid_mode:
         return []
     fixed = HOSTED_SURFACES if config.is_hosted_mode else STANDALONE_SURFACES
-    featured = [
-        feature.surface for feature in features.CORE_FEATURES if feature.surface is not None and feature.enabled(config)
-    ]
+    featured = [feature.surface for feature in enabled_features if feature.surface is not None]
     return sorted((*fixed, *featured))
 
 
@@ -317,6 +315,7 @@ class DeploymentBootstrap(BaseModel):
 async def get_bootstrap(
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    enabled_features: Annotated[tuple[CoreFeature, ...], Depends(get_enabled_features)],
 ) -> DeploymentBootstrap:
     """Return the deployment context the dashboard shell renders from.
 
@@ -334,7 +333,7 @@ async def get_bootstrap(
         return DeploymentBootstrap(
             deployment_type="hybrid",
             session_type="none",
-            surfaces=published_surfaces(config),
+            surfaces=published_surfaces(config, enabled_features),
             sign_in_methods=[],
             management_url=config.platform_management_url,
             # This gateway *is* the data plane, so the address that reached this
@@ -360,7 +359,7 @@ async def get_bootstrap(
     return DeploymentBootstrap(
         deployment_type="hosted" if hosted else "standalone",
         session_type="local_operator",
-        surfaces=published_surfaces(config),
+        surfaces=published_surfaces(config, enabled_features),
         sign_in_methods=await _sign_in_methods(db, config),
         management_url=None,
         # Standalone is its own data plane and answers null; a hosted control

@@ -492,13 +492,13 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                         retention_sec=config.budget_reservation_retention_sec,
                     )
                 )
-            # Workers of the features the registry lists. Same
-            # supervisor as the refreshers above: created here, cancelled
-            # together in ``finally`` under one shared bound.
+            # Workers of the enabled features. Same supervisor as the
+            # refreshers above: created here, cancelled together in ``finally``
+            # under one shared bound.
             feature_workers = [
                 (asyncio.create_task(_run_feature_worker(feature.name, feature.worker, config)), feature.name)
-                for feature in features.CORE_FEATURES
-                if feature.worker is not None and feature.enabled(config)
+                for feature in app.state.enabled_features
+                if feature.worker is not None
             ]
 
         # Start the writer inside the try so a failure here still runs the cleanup
@@ -847,6 +847,9 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     app.state.config = config
     app.state.gateway_mode = config.effective_mode
+    # Asked once, so the routers, the workers and the published surfaces cannot
+    # disagree when a setting changes after this point.
+    app.state.enabled_features = tuple(feature for feature in features.CORE_FEATURES if feature.enabled(config))
 
     # The composition root, built before the routers because a bootstrap may
     # contribute some of them. Per app rather than module-global, for the same

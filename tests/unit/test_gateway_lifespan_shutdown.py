@@ -149,6 +149,7 @@ async def test_lifespan_shutdown_completes_despite_a_stuck_refresher(
     lifespan = _create_lifespan()
     app = FastAPI()
     app.state.config = config
+    app.state.enabled_features = ()
 
     # No asyncio.timeout wrapper: if shutdown regresses this hangs, and the
     # suite-wide pytest timeout reports it. A short bound here would be

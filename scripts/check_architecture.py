@@ -116,8 +116,7 @@ RULES: dict[str, LayerRule] = {
             "gateway.core",
             "gateway.auth",
         ],
-        # gateway.features for the reason services forbid it; the one route
-        # that reads the registry is exempted below (REGISTRY_READER).
+        # gateway.features for the reason services forbid it.
         "forbidden": ["sqlalchemy.orm", "gateway.features"],
         "description": "API routes",
     },
@@ -180,13 +179,6 @@ COMPOSITION_ROOT = "gateway/container.py"
 ADAPTERS_PACKAGE = "gateway/adapters/"
 ADAPTER_IMPORT = "gateway.adapters"
 
-# The one route allowed to read the feature registry: the deployment bootstrap
-# publishes which surfaces this deployment hosts, and a listed feature's
-# surface is one of them. Everything else under gateway/api/routes and
-# gateway/services answers to the ban in its layer rule.
-REGISTRY_READER = "gateway/api/routes/bootstrap.py"
-REGISTRY_IMPORT = "gateway.features"
-
 
 def _matches(module: str, prefix: str) -> bool:
     """Return whether a module path is the prefix module itself or lives inside it."""
@@ -239,8 +231,6 @@ def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
         forbidden = [(prefix, file_rule["description"]) for prefix in file_rule["forbidden"]] + forbidden
     if relative_path == COMPOSITION_ROOT or relative_path.startswith(ADAPTERS_PACKAGE):
         forbidden = [entry for entry in forbidden if entry[0] != ADAPTER_IMPORT]
-    if relative_path == REGISTRY_READER:
-        forbidden = [entry for entry in forbidden if entry[0] != REGISTRY_IMPORT]
     if not forbidden:
         return []
 

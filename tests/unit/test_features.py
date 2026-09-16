@@ -1,4 +1,4 @@
-"""The core feature registry and the three wiring points that read it.
+"""The core feature registry and the three wiring points that share one reading of it.
 
 A listed feature mounts its routers as core routes, hosts its surface, and runs
 its worker under the lifespan's supervisor, each only when its own ``enabled``
@@ -8,11 +8,13 @@ says so. The registry is empty today, so a probe feature stands in for one.
 import ast
 import asyncio
 import logging
+import threading
 from collections.abc import Generator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
@@ -118,22 +120,25 @@ def test_a_hybrid_gateway_mounts_no_feature_routers(monkeypatch: pytest.MonkeyPa
     assert f"{API_ROOT}/probe" not in mounted
 
 
-def test_an_enabled_feature_hosts_its_surface_beside_the_fixed_set(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True),))
-    assert published_surfaces(_standalone(tmp_path)) == sorted((*STANDALONE_SURFACES, "probe"))
-    assert published_surfaces(_hosted(tmp_path)) == sorted((*HOSTED_SURFACES, "probe"))
+def test_an_enabled_feature_hosts_its_surface_beside_the_fixed_set(tmp_path: Path) -> None:
+    enabled = (_probe(enabled=True),)
+    assert published_surfaces(_standalone(tmp_path), enabled) == sorted((*STANDALONE_SURFACES, "probe"))
+    assert published_surfaces(_hosted(tmp_path), enabled) == sorted((*HOSTED_SURFACES, "probe"))
 
 
 def test_a_disabled_feature_hosts_no_surface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=False),))
-    assert published_surfaces(_standalone(tmp_path)) == sorted(STANDALONE_SURFACES)
+    app = create_app(_standalone(tmp_path))
+
+    with TestClient(app) as client:
+        surfaces = client.get(f"{API_ROOT}/bootstrap").json()["surfaces"]
+
+    assert surfaces == sorted(STANDALONE_SURFACES)
 
 
-def test_a_feature_with_no_page_hosts_no_surface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True, surface=None),))
-    assert published_surfaces(_standalone(tmp_path)) == sorted(STANDALONE_SURFACES)
+def test_a_feature_with_no_page_hosts_no_surface(tmp_path: Path) -> None:
+    enabled = (_probe(enabled=True, surface=None),)
+    assert published_surfaces(_standalone(tmp_path), enabled) == sorted(STANDALONE_SURFACES)
 
 
 def test_a_hybrid_gateway_publishes_no_surface_whatever_the_registry_says(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -180,8 +185,7 @@ async def test_the_lifespan_starts_an_enabled_worker_and_stops_it_at_shutdown(
 ) -> None:
     probe = _Probe()
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True, worker=probe.run),))
-    app = FastAPI()
-    app.state.config = _standalone(tmp_path)
+    app = create_app(_standalone(tmp_path))
 
     async with _create_lifespan()(app):
         await asyncio.wait_for(probe.started.wait(), timeout=5)
@@ -195,8 +199,7 @@ async def test_the_lifespan_starts_an_enabled_worker_and_stops_it_at_shutdown(
 async def test_the_lifespan_leaves_a_disabled_worker_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     probe = _Probe()
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=False, worker=probe.run),))
-    app = FastAPI()
-    app.state.config = _standalone(tmp_path)
+    app = create_app(_standalone(tmp_path))
 
     async with _create_lifespan()(app):
         await asyncio.sleep(0)
@@ -216,8 +219,7 @@ async def test_a_worker_that_dies_is_reported_when_it_dies(
         raise RuntimeError("probe worker blew up")
 
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True, worker=worker),))
-    app = FastAPI()
-    app.state.config = _standalone(tmp_path)
+    app = create_app(_standalone(tmp_path))
     gateway_logger = logging.getLogger("gateway")
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.ERROR, logger="gateway")
@@ -236,10 +238,40 @@ async def test_a_hybrid_gateway_starts_no_feature_worker(monkeypatch: pytest.Mon
     monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
     probe = _Probe()
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True, worker=probe.run),))
-    app = FastAPI()
-    app.state.config = _hybrid()
+    app = create_app(_hybrid())
 
     async with _create_lifespan()(app):
         await asyncio.sleep(0)
 
     assert not probe.started.is_set()
+
+
+@pytest.mark.parametrize("built_enabled", [True, False], ids=["switched-off-later", "switched-on-later"])
+def test_a_switch_changed_after_the_app_is_built_moves_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_enabled: bool
+) -> None:
+    """The routers, the surface and the worker all keep the answer ``enabled`` gave when the app was built.
+
+    A setting that changes later, as a stored dashboard override does at startup, must not move one of them
+    without the others: a feature switched off there would otherwise keep answering and working with no page.
+    """
+    switch = {"on": built_enabled}
+    started = threading.Event()
+
+    async def worker(_config: GatewayConfig) -> None:
+        started.set()
+        await asyncio.sleep(3600)
+
+    feature = replace(_probe(enabled=True, worker=worker), enabled=lambda _config: switch["on"])
+    monkeypatch.setattr(features, "CORE_FEATURES", (feature,))
+    app = create_app(_standalone(tmp_path))
+    switch["on"] = not built_enabled
+
+    with TestClient(app) as client:
+        probe_status = client.get(f"{API_ROOT}/probe").status_code
+        surfaces = client.get(f"{API_ROOT}/bootstrap").json()["surfaces"]
+        worker_started = started.is_set()
+
+    assert probe_status == (200 if built_enabled else 404)
+    assert ("probe" in surfaces) is built_enabled
+    assert worker_started is built_enabled

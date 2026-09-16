@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, FastAPI
 
-from gateway import features
 from gateway.api.deps import require_capability
 from gateway.api.routes import (
     admin,
@@ -68,6 +67,7 @@ from gateway.api.routes import (
 )
 from gateway.container import Container
 from gateway.core.config import API_ROOT, OTLP_ROOT, GatewayConfig
+from gateway.core.feature import CoreFeature
 
 
 def register_routers(app: FastAPI, config: GatewayConfig) -> None:
@@ -80,7 +80,7 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     contributed router serves.
     """
     api = APIRouter(prefix=API_ROOT)
-    _register_core_routers(api, config)
+    _register_core_routers(api, config, app.state.enabled_features)
     _register_contributed_routers(api, app.state.container)
     if config.is_hybrid_mode:
         api.include_router(hybrid_mode.router)
@@ -116,7 +116,7 @@ def _register_contributed_routers(api: APIRouter, container: Container) -> None:
         )
 
 
-def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
+def _register_core_routers(api: APIRouter, config: GatewayConfig, enabled_features: tuple[CoreFeature, ...]) -> None:
     # Whether this deployment serves inference at all. False only for a hosted
     # control plane, which owns many tenants' wallets and credentials but runs
     # none of their traffic: that belongs on a hybrid data-plane gateway, whose
@@ -259,11 +259,10 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig) -> None:
     api.include_router(tool_settings.reader_router)
     api.include_router(search_tools.router)
     api.include_router(tools.router)
-    # Features the registry lists, mounted as core routes: no capability gate,
-    # because a listed feature is part of this build. Management plane only,
-    # after the hybrid return above; a feature that serves inference is not a
-    # shape the registry has yet.
-    for feature in features.CORE_FEATURES:
-        if feature.enabled(config):
-            for router in feature.routers(config):
-                api.include_router(router)
+    # Enabled features, mounted as core routes: no capability gate, because a
+    # listed feature is part of this build. Management plane only, after the
+    # hybrid return above; a feature that serves inference is not a shape the
+    # registry has yet.
+    for feature in enabled_features:
+        for router in feature.routers(config):
+            api.include_router(router)

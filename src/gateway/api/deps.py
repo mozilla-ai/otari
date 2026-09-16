@@ -12,6 +12,7 @@ from gateway.auth.models import hash_key
 from gateway.container import Container
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, create_session, get_db
+from gateway.core.feature import CoreFeature
 from gateway.log_config import logger
 from gateway.metrics import record_auth_failure
 from gateway.models.entities import APIKey
@@ -88,6 +89,15 @@ def reset_config() -> None:
     # decision cache, so a test that swaps config must not inherit the previous
     # one's trace stickiness.
     clear_router_backend_cache()
+
+
+def get_enabled_features(request: Request) -> tuple[CoreFeature, ...]:
+    """Return the core features this app enabled when it was built."""
+    enabled: tuple[CoreFeature, ...] | None = getattr(request.app.state, "enabled_features", None)
+    if enabled is None:
+        msg = "Enabled features not initialized"
+        raise RuntimeError(msg)
+    return enabled
 
 
 def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:

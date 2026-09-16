@@ -15,13 +15,13 @@ Worker = Callable[[GatewayConfig], Coroutine[Any, Any, None]]
 class CoreFeature:
     """One feature the build ships.
 
-    ``enabled`` is read at startup, when routers are mounted and workers are
-    created, and again whenever the deployment bootstrap publishes the
-    surfaces it hosts. It must therefore answer from startup-only settings;
-    a runtime-settable field would let the published surface set drift from
-    what is mounted and running.
-    ``surface`` is the dashboard surface the feature hosts when enabled, or
-    ``None`` for a feature with no page.
+    ``enabled`` is asked once per app, before the dashboard's stored settings are applied,
+    and its answer holds for the life of the process.
+    ``surface`` is the dashboard surface the feature hosts when enabled, or ``None`` for a feature with no page.
+
+    NOTE: ``enabled`` must read only settings the dashboard cannot change.
+    A switch the dashboard can change never takes effect, not even after a restart:
+    a feature switched off there keeps its routes, its page and its worker, and one switched on gets none of them.
     """
 
     name: str
