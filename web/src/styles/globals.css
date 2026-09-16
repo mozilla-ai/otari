@@ -1817,6 +1817,9 @@ main {
    44px target and their quiet, and the row reads as one family rather than a box
    beside a link. The fills go transparent here rather than at the call site,
    which is the only place `--button-*` is reachable at all.
+   `min-height` is alignment, not a touch target: the floor below 767px already
+   raises every button to 44, and this is what makes the two controls the same
+   height on a desktop, where the link is 44 and an `md` button is 36.
    The two `:not()`s are specificity, not intent: the padding rule below is
    three classes deep and comes later in the file, so a selector that does not
    out-count it loses. Its 15px is the inset a drawn edge eats back; there is no

@@ -125,7 +125,8 @@ An edge that would be too loud is suppressed by **naming the container**, so a c
 site never has to remember. Inside one of these, a ghost renders edgeless:
 
 `.otari-toolbar` · `.otari-table` · `.otari-pagination` · `.otari-bulk-bar` ·
-`.otari-breakdown` · `.otari-rail` · `.otari-setup-actions`
+`.otari-breakdown` · `.otari-rail` · `.otari-setup-actions` ·
+`.otari-auth-actions`
 
 `.otari-setup-actions` is the one that holds a single button rather than a row:
 the first-run sheet's Skip, which is the screen's one way out and is quieted on
@@ -134,6 +135,13 @@ button is otherwise not a reason to name a container.
 
 `.otari-actions` groups inline actions or a list of suggested actions. It drops
 ghost edges without imposing the field density of a filter toolbar.
+
+`.otari-auth-actions` is the public auth pages' footer row, and it is the one
+place that does more than drop the edge. The row is text links plus a single
+button, which is a button only because a popover trigger has to be a react-aria
+pressable (`AuthHelp`), so there the ghost also takes the links' ink and their
+44px height. That is why it is not `.otari-actions`: giving the link ink to
+every inline action row would restyle pages that want a button to read as one.
 
 Put the class on the container, not on the button. If you are building a new
 container that holds a row of ghosts and the edges read as a grid of boxes, add a
