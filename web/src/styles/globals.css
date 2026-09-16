@@ -2290,16 +2290,22 @@ main {
    * `width: fit-content`, so its cross size is never `auto` and stretch cannot
    * reach it. Measured, the two buttons stayed 110px and 83px in a 373px
    * column. HeroUI's `fullWidth` prop is the other way to get here and it is a
-   * prop, so it would take the desktop with it. */
-  .otari-form-dialog__actions > button,
-  .otari-dialog__actions > button {
+   * prop, so it would take the desktop with it.
+   *
+   * A descendant rather than a child: a footer whose actions are wrapped (the
+   * first-run sheet wraps Skip to name a place) would otherwise lose the width
+   * and the suppression below, and the `w-full` utility that looks like the
+   * obvious replacement is keyed on the class rather than the computed width,
+   * so it would take the desktop's press with it. */
+  .otari-form-dialog__actions button,
+  .otari-dialog__actions button {
     width: 100%;
   }
   /* Full width earns the same press suppression `.button` already gives
    * `.w-full` and HeroUI's `fullWidth` class: the transform displaces a wide
    * button by 7.07px, and this one spans the sheet. */
-  .otari-form-dialog__actions > button:is(:active, [data-pressed="true"]),
-  .otari-dialog__actions > button:is(:active, [data-pressed="true"]) {
+  .otari-form-dialog__actions button:is(:active, [data-pressed="true"]),
+  .otari-dialog__actions button:is(:active, [data-pressed="true"]) {
     transform: none;
   }
   .otari-form-dialog__footer button,

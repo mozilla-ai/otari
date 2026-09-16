@@ -139,16 +139,11 @@ export function SetupSheet({
         </p>
       }
       actions={
-        // `w-full` is load-bearing, not cosmetic: this wrapper is what the
-        // footer's `.otari-dialog__actions > button` rules stop matching, and
-        // those are where the phone sheet's full width and its press
-        // suppression came from.
+        // The wrapper names a place (see actions.md), which is all it does:
+        // the footer's own rules reach Skip through it and still give the phone
+        // sheet its full width and its press suppression.
         <div className="otari-setup-actions flex w-full">
-          <Button
-            className="w-full sm:w-auto"
-            isPending={isSkipping}
-            onPress={onSkip}
-          >
+          <Button isPending={isSkipping} onPress={onSkip}>
             Skip
           </Button>
         </div>

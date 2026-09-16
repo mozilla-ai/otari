@@ -138,5 +138,9 @@ optimization: the body of a form dialog holds controlled inputs, and leaving
 them mounted carries one row's draft into the next row's dialog.
 
 `isDismissable` is on by default. Turning it off takes away Escape and the
-outside click, and the only honest reason is unsaved work that would be lost;
-even then the better fix is usually to keep the dismiss and confirm the discard.
+outside click, and there are two honest reasons. Unsaved work that would be
+lost, where even then the better fix is usually to keep the dismiss and confirm
+the discard. And a frame whose only dismissal is recorded on the server: the
+first-run sheet retires on Skip and nothing else, so an Escape that put it away
+for one page load would come back on the next one and read as a dismissal that
+did not take. A frame with neither reason keeps its Escape.
