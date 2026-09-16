@@ -9,6 +9,11 @@ import { API_ROOT } from "@/shared/api/client"
 // Matches web/e2e/otari.yml. The login step needs a known key.
 export const MASTER_KEY = "e2e-master-key"
 
+// Independent of the UI helper so these assertions can catch its regressions.
+export function expectedKeyFingerprint(key: string): string {
+  return `${key.slice(0, 8)}${"•".repeat(8)}${key.slice(-4)}`
+}
+
 // Scope link lookups to the sidebar navigation landmark. The Overview landing
 // page has tile-links whose names substring-collide with sidebar items
 // ("Providers healthy", "No budgets configured"), so an unscoped

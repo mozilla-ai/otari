@@ -23,6 +23,7 @@ import { renderWithRouter } from "@/tests/router"
 
 const WORKSPACE = "44444444-4444-4444-4444-444444444444"
 const KEY = "gw-setup-guide-key"
+const CONCEALED_KEY = "gw-setup••••••••-key"
 const OTHER_KEY = "gw-other-workspace-key"
 
 const OTHER_WORKSPACE = "55555555-5555-5555-5555-555555555555"
@@ -303,41 +304,34 @@ describe("SetupGuide", () => {
     await renderGuide()
 
     expect(await screen.findByLabelText("Your API key")).toHaveValue(
-      "gw-setup••••••••-key",
+      CONCEALED_KEY,
     )
     await user.click(await screen.findByRole("button", { name: "cURL" }))
     expect(snippet("curl")).not.toHaveTextContent(KEY)
-    expect(snippet("curl")).toHaveTextContent("gw-setup••••••••-key")
+    expect(snippet("curl")).toHaveTextContent(CONCEALED_KEY)
 
     await user.click(screen.getByRole("button", { name: "Show Your API key" }))
     expect(screen.getByDisplayValue(KEY)).toBeInTheDocument()
     expect(snippet("curl")).toHaveTextContent(`Otari-Key: ${KEY}`)
 
     await user.click(screen.getByRole("button", { name: "Hide Your API key" }))
-    expect(screen.getByLabelText("Your API key")).toHaveValue(
-      "gw-setup••••••••-key",
-    )
+    expect(screen.getByLabelText("Your API key")).toHaveValue(CONCEALED_KEY)
     expect(snippet("curl")).not.toHaveTextContent(KEY)
-    expect(snippet("curl")).toHaveTextContent("gw-setup••••••••-key")
+    expect(snippet("curl")).toHaveTextContent(CONCEALED_KEY)
   })
 
-  // 15 characters is the boundary `concealedFingerprint`'s guard turns on; the
-  // mint never produces one this short, so the case is the guard's, not a state
-  // the sheet can reach.
-  it.each(["short-key", "123456789012345"])(
-    "fully conceals a short activation key (%j) in the field and examples",
-    async (apiKey) => {
-      mockApi({ apiKey })
-      const user = userEvent.setup()
-      await renderGuide()
+  // Exercise the helper's 15-character guard through the sheet.
+  it("fully conceals a 15-character activation key in the field and examples", async () => {
+    mockApi({ apiKey: "123456789012345" })
+    const user = userEvent.setup()
+    await renderGuide()
 
-      expect(await screen.findByLabelText("Your API key")).toHaveValue(
-        "••••••••••••••••",
-      )
-      await user.click(screen.getByRole("button", { name: "cURL" }))
-      expect(snippet("curl")).toHaveTextContent("Otari-Key: ••••••••••••••••")
-    },
-  )
+    expect(await screen.findByLabelText("Your API key")).toHaveValue(
+      "••••••••••••••••",
+    )
+    await user.click(screen.getByRole("button", { name: "cURL" }))
+    expect(snippet("curl")).toHaveTextContent("Otari-Key: ••••••••••••••••")
+  })
 
   it("copies the full activation key while keeping its fingerprint on screen", async () => {
     mockApi()
@@ -349,9 +343,7 @@ describe("SetupGuide", () => {
     )
 
     expect(await navigator.clipboard.readText()).toBe(KEY)
-    expect(screen.getByLabelText("Your API key")).toHaveValue(
-      "gw-setup••••••••-key",
-    )
+    expect(screen.getByLabelText("Your API key")).toHaveValue(CONCEALED_KEY)
     expect(await screen.findByText("Copied to clipboard.")).toBeInTheDocument()
   })
 

@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test"
 import { API_ROOT } from "@/shared/api/client"
 import {
   dismissComboBoxInDialog,
+  expectedKeyFingerprint,
   login,
   MASTER_KEY,
   nav,
@@ -76,7 +77,7 @@ test.describe("dashboard core flows", () => {
     // The fingerprint the key-creation dialog shows, derived from the key the
     // mint returned rather than matched by shape: a stand-in built from another
     // key would have the same shape.
-    const concealedKey = `${fullKey.slice(0, 8)}${"•".repeat(8)}${fullKey.slice(-4)}`
+    const concealedKey = expectedKeyFingerprint(fullKey)
     await expect(key).toHaveValue(concealedKey)
 
     // The examples are tabs, and the agent prompt is the one offered first.
