@@ -16,7 +16,7 @@ export function LoginPageShell({ children }: { children: ReactNode }) {
     preference === "system" ? FiMonitor : preference === "dark" ? FiMoon : FiSun
 
   return (
-    <div className="relative isolate flex min-h-svh flex-col bg-background">
+    <div className="relative isolate flex min-h-dvh flex-col bg-background">
       <header className="relative z-10 flex min-h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-background px-4 md:px-6">
         <div className="flex items-center gap-3">
           <img
@@ -37,12 +37,11 @@ export function LoginPageShell({ children }: { children: ReactNode }) {
           <ThemeIcon aria-hidden />
         </Button>
       </header>
-      {/* The viewport sets the top offset; disclosures and errors grow downward. */}
-      <main className="relative isolate flex flex-1 flex-col items-center px-4 pt-8 pb-8 md:pt-[max(3rem,calc(50vh-17.5rem))] md:pb-12">
+      <main className="relative isolate flex flex-1 flex-col items-center justify-center px-4 py-4">
         <LoginBackground panelRef={panelRef} config={savedBackground} />
         <div
           ref={panelRef}
-          className="relative z-10 flex w-full max-w-md flex-col gap-6 border border-border-strong bg-surface p-6 md:p-8"
+          className="relative z-10 flex w-full max-w-md shrink-0 flex-col gap-4 border border-border-strong bg-surface p-6 md:px-8"
         >
           <span
             aria-hidden

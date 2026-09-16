@@ -1,4 +1,4 @@
-import { Button, Input, Label, Link, TextField } from "@heroui/react"
+import { Button, Input, Label, TextField } from "@heroui/react"
 import { useState } from "react"
 import { FiAlertCircle, FiChevronRight, FiEye, FiEyeOff } from "react-icons/fi"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
@@ -21,6 +21,7 @@ import {
 } from "@/shared/telemetry/errorCode"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
+import { AuthHelp } from "./AuthHelp"
 import { LoginPageShell } from "./LoginPageShell"
 import { rememberOAuthState } from "./OAuthCallbackPage"
 import {
@@ -54,7 +55,7 @@ const ERROR_IDS: Record<CredentialField, string> = {
   masterKey: "login-master-key-error",
 }
 
-const CARD = "flex flex-col gap-6"
+const CARD = "flex flex-col gap-4"
 
 const CARD_FLAT = "flex flex-col gap-4"
 
@@ -575,22 +576,17 @@ export function Login() {
   return (
     <LoginPageShell>
       <div className={CARD}>
-        <div className="flex flex-col gap-1.5">
-          <h1 className={HEADING}>Otari</h1>
+        <div className="flex flex-col gap-1.5 text-center">
+          <h1 className={HEADING}>Sign in to Otari</h1>
           <p className="text-sm text-pretty text-muted">
             {usesPassword
-              ? "Sign in to browse models, set pricing, and manage settings."
+              ? "One account for every model."
               : "Sign in with your master key to browse models, set pricing, and manage settings."}
           </p>
         </div>
 
-        {/* Section boundaries read 24px on screen throughout. A 44px row
-              carries 12px of invisible padding above and below its own text, so
-              the column next to one runs at 12px to land on the same 24px: the
-              master-key branch has the disclosure's summary row in it, and the
-              password branch has no such row and spaces at the full 24px. */}
         <form
-          className={`flex flex-col ${usesPassword ? "gap-6" : "gap-3"}`}
+          className={`flex flex-col ${usesPassword ? "gap-4" : "gap-3"}`}
           noValidate
           onSubmit={(event) => {
             event.preventDefault()
@@ -641,11 +637,18 @@ export function Login() {
                 isInvalid={errorField === "password"}
                 className="flex flex-col gap-2"
               >
-                <LabelRow
-                  label="Password"
-                  error={errorField === "password" ? error : null}
-                  errorId={ERROR_IDS.password}
-                />
+                <div className="flex flex-wrap items-center justify-between gap-x-2">
+                  <LabelRow
+                    label="Password"
+                    error={errorField === "password" ? error : null}
+                    errorId={ERROR_IDS.password}
+                  />
+                  {offersRecovery ? (
+                    <PublicAuthLink to="#/recover-password">
+                      Forgot your password?
+                    </PublicAuthLink>
+                  ) : null}
+                </div>
                 <Input
                   autoComplete="current-password"
                   aria-describedby={
@@ -809,110 +812,58 @@ export function Login() {
                   : "Use a passkey"}
               </Button>
             ) : null}
-            {oauthProviders.map((provider) => {
-              const Mark = OAUTH_PROVIDER_ICONS[provider]
-              const isRedirecting = pendingProvider === provider
-              return (
-                <Button
-                  key={provider}
-                  type="button"
-                  variant="ghost"
-                  fullWidth
-                  isDisabled={
-                    isSubmitting ||
-                    isSigningOut ||
-                    isPasskeyPending ||
-                    pendingProvider !== null
-                  }
-                  onPress={() => void submitOAuth(provider)}
-                  className="h-11"
-                >
-                  {/* The mark is decorative: the label beside it already
+            <div className="flex gap-3">
+              {oauthProviders.map((provider) => {
+                const Mark = OAUTH_PROVIDER_ICONS[provider]
+                const isRedirecting = pendingProvider === provider
+                return (
+                  <Button
+                    key={provider}
+                    type="button"
+                    variant="ghost"
+                    fullWidth
+                    isDisabled={
+                      isSubmitting ||
+                      isSigningOut ||
+                      isPasskeyPending ||
+                      pendingProvider !== null
+                    }
+                    onPress={() => void submitOAuth(provider)}
+                    aria-label={
+                      isRedirecting
+                        ? "Redirecting…"
+                        : `Sign in with ${oauthProviderLabel(provider)}`
+                    }
+                    className="h-11 min-w-0 flex-1"
+                  >
+                    {/* The mark is decorative: the label beside it already
                         names the provider, so announcing it again would read
                         the button's own text twice. Dropped while redirecting,
                         so the row does not keep a logo beside a label that no
                         longer names a provider to press. */}
-                  {isRedirecting ? null : (
-                    <Mark className="text-xl" aria-hidden />
-                  )}
-                  {isRedirecting
-                    ? "Redirecting…"
-                    : `Sign in with ${oauthProviderLabel(provider)}`}
-                </Button>
-              )
-            })}
+                    {isRedirecting ? null : (
+                      <Mark className="text-xl" aria-hidden />
+                    )}
+                    {isRedirecting
+                      ? "Redirecting…"
+                      : oauthProviderLabel(provider)}
+                  </Button>
+                )
+              })}
+            </div>
           </div>
         ) : null}
 
-        {/* Under a rule of its own: what becomes of the credential is a
-                note about the form above rather than a step of it, and the
-                separator is what says so now that no card edge does.
-                Left-aligned with the column, like everything else in it. */}
-        <div className="flex flex-col gap-3 border-t border-border pt-5">
-          {/* Names the credential the form above actually took. Only the
-              master-key branch links to /welcome: a claimed deployment signs in
-              with a password, so pointing at the bootstrap guide there would
-              explain the wrong credential. The master key itself is not gone,
-              it stays an API credential and the recovery path
-              (docs/access-control.md), which is why the two service-unavailable
-              screens above still say the management API accepts it. */}
-          {usesPassword ? (
-            <p className="text-xs text-muted">
-              Your password is sent once and exchanged for a session cookie. It
-              is never stored in the browser.
-            </p>
-          ) : (
-            <p className="text-xs text-muted">
-              Your{" "}
-              <a
-                href="/welcome"
-                className="font-medium text-link hover:text-link-hover"
-              >
-                master key
-              </a>{" "}
-              is sent once and exchanged for a session cookie. It is never
-              stored in the browser.
-            </p>
-          )}
-          {/* The rows
-                themselves take no gap, because each is 44px around a 20px line
-                and so already sits 24px from its neighbor's text. */}
-          <div className="flex flex-col">
-            {/* Deployment-neutral wording (otari#835): "this gateway" read as
-                  a self-hosted process on a hosted control plane, where the same
-                  screen is the sign-in for an invited tenant. */}
-            {/* One link, two sentences, because the page behind it does two
-                different things (`open_signup` in the bootstrap) and the wrong
-                sentence strands whoever reads it: a stranger invited to create
-                an account on a closed deployment gets nothing, and a member of
-                an open one is left waiting for an admin who is not coming. */}
-            {offersSignup ? (
-              <PublicAuthLink to="#/signup">
-                {open_signup
-                  ? "New to this deployment? Create an account"
-                  : "Invited or added by an admin? Set your password"}
-              </PublicAuthLink>
-            ) : null}
-            {offersRecovery ? (
-              <PublicAuthLink to="#/recover-password">
-                Forgot your password?
-              </PublicAuthLink>
-            ) : null}
-            {offersRecovery ? (
-              <PublicAuthLink to="#/resend-verification">
-                Need a new verification link?
-              </PublicAuthLink>
-            ) : null}
-            {/* Not a `PublicAuthLink`: `/welcome` is a page the gateway
-                  serves, so this one really is a navigation and not a hash
-                  change. Sized to match the links above it. */}
-            <Link
-              href="/welcome"
-              className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
-            >
-              New to Otari? Open the welcome guide
-            </Link>
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 border-t border-border pt-2">
+          {offersSignup ? (
+            <PublicAuthLink to="#/signup">
+              {open_signup ? "Create an account" : "Set your password"}
+            </PublicAuthLink>
+          ) : null}
+          <AuthHelp
+            offersRecovery={offersRecovery}
+            usesPassword={usesPassword}
+          />
         </div>
       </div>
     </LoginPageShell>

@@ -131,7 +131,7 @@ describe("Login", () => {
     expect(screen.queryByRole("link", { name: /verification link/ })).toBeNull()
   })
 
-  it("links to signup, recovery and a fresh verification link once mail works", () => {
+  it("links to signup, recovery and a fresh verification link once mail works", async () => {
     render(
       <Mounted signInMethods={["password"]} mailReady>
         <Harness />
@@ -144,6 +144,7 @@ describe("Login", () => {
     expect(
       screen.getByRole("link", { name: /Forgot your password/ }),
     ).toHaveAttribute("href", "#/recover-password")
+    await userEvent.setup().click(screen.getByRole("button", { name: "Help" }))
     expect(
       screen.getByRole("link", { name: /verification link/ }),
     ).toHaveAttribute("href", "#/resend-verification")
@@ -268,13 +269,14 @@ describe("Login", () => {
     expect(screen.queryByRole("link", { name: /Set your password/ })).toBeNull()
   })
 
-  it("links to the auth-free welcome page", () => {
+  it("links to the auth-free welcome page", async () => {
     render(
       <Mounted>
         <Harness />
       </Mounted>,
     )
 
+    await userEvent.setup().click(screen.getByRole("button", { name: "Help" }))
     const link = screen.getByRole("link", { name: /welcome/i })
     expect(link).toHaveAttribute("href", "/welcome")
   })
@@ -283,26 +285,28 @@ describe("Login", () => {
   // to name the credential the form above actually took. One block served both
   // branches before, telling anyone signing in with an email and password that
   // their "master key" was exchanged for a cookie.
-  it("names the master key in the credential note on an unclaimed deployment", () => {
+  it("names the master key in the credential note on an unclaimed deployment", async () => {
     render(
       <Mounted>
         <Harness />
       </Mounted>,
     )
 
+    await userEvent.setup().click(screen.getByRole("button", { name: "Help" }))
     expect(
       screen.getByText(/master key/, { selector: "a" }),
     ).toBeInTheDocument()
     expect(screen.queryByText(/^Your password is sent once/)).toBeNull()
   })
 
-  it("names the password in the credential note once the deployment is claimed", () => {
+  it("names the password in the credential note once the deployment is claimed", async () => {
     render(
       <Mounted signInMethods={["password"]}>
         <Harness />
       </Mounted>,
     )
 
+    await userEvent.setup().click(screen.getByRole("button", { name: "Help" }))
     expect(
       screen.getByText(/Your password is sent once and exchanged/),
     ).toBeInTheDocument()

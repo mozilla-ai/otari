@@ -15,6 +15,7 @@ import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 import { AuthEmailField, AuthPasswordField, AuthTextField } from "./AuthFields"
+import { AuthHelp } from "./AuthHelp"
 import {
   goToPublicAuthPage,
   PublicAuthLayout,
@@ -140,22 +141,18 @@ export function SignupPage({ hash }: { hash: string }) {
       title={open_signup ? "Create your account" : "Claim your account"}
       description={
         open_signup
-          ? "Pick an address and a password. You will confirm the address by email before your first sign-in."
+          ? "Create an account, then verify your email to sign in."
           : "Set a password for the address an admin invited or added. You will confirm the address by email before your first sign-in."
       }
       footer={
-        <>
-          <PublicAuthLink to="#/">
-            Already have a password? Sign in
-          </PublicAuthLink>
-          <PublicAuthLink to="#/resend-verification">
-            Need a new verification link?
-          </PublicAuthLink>
-        </>
+        <div className="flex flex-wrap items-center justify-between gap-x-4">
+          <PublicAuthLink to="#/">Sign in instead</PublicAuthLink>
+          <AuthHelp offersRecovery />
+        </div>
       }
     >
       <form
-        className="flex flex-col gap-4"
+        className="flex flex-col gap-3"
         onSubmit={(event) => {
           event.preventDefault()
           submit()
@@ -172,7 +169,7 @@ export function SignupPage({ hash }: { hash: string }) {
             invitedEmail
               ? "The address your invitation was sent to, which is the one it can claim."
               : open_signup
-                ? "Where the verification link goes, and the address you will sign in with."
+                ? undefined
                 : "The address an admin added or invited. Another address has nothing to claim."
           }
         />

@@ -19,7 +19,7 @@ export function PublicAuthLayout({
 }) {
   return (
     <LoginPageShell>
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-1.5 text-center">
         <h1 className="text-display">{title}</h1>
         {description ? (
           <p className="text-sm text-pretty text-muted">{description}</p>
@@ -29,7 +29,7 @@ export function PublicAuthLayout({
       {children}
 
       {footer ? (
-        <div className="flex flex-col border-t border-border pt-5">
+        <div className="flex flex-col border-t border-border pt-2">
           {footer}
         </div>
       ) : null}
