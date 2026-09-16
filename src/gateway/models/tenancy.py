@@ -514,9 +514,9 @@ class CallerIdentityPublic(SQLModel):
     names. Publishing it costs nothing either, since it is the caller's own
     identity and they are holding the credential that resolved to it.
 
-    Both nullable fields are nullable for opposite reasons. A local operator
-    identity has no address, because first boot provisions it with a name and
-    nothing to sign in with but the master key; a member added to the roster by
+    ``email`` and ``full_name`` are nullable for opposite reasons. A local
+    operator identity has no address, because first boot provisions it with a
+    name and nothing to sign in with but the master key; a member added by
     address has no name until they claim the identity and supply one. So a shell
     has to be ready to draw either one alone.
     """
@@ -524,17 +524,15 @@ class CallerIdentityPublic(SQLModel):
     user_id: uuid.UUID
     email: str | None = None
     full_name: str | None = None
-    # The one fact here that is about a credential rather than about a person,
-    # and it is published for the same reason the address is: the account page
-    # has to render the form this identity can actually complete, and the
-    # deployment-wide ``sign_in_methods`` cannot answer it. Somebody who signed
-    # in with Google, GitHub or a passkey holds no password, so the change form
-    # asks them for a current one they can never supply and there is no way out
-    # of it (mozilla-ai/otari-ai#2099). Whether a password exists, never
-    # anything derived from its value.
-    # Required rather than defaulted: a producer that forgets it would publish
-    # "no password" for an identity that holds one, and the form that answer
-    # selects is the one the gateway refuses.
+    # Whether a password exists, never anything derived from its value. It is
+    # here rather than left to the deployment-wide ``sign_in_methods``, which
+    # answers what this gateway accepts and not what the caller holds: somebody
+    # who signed in with Google, GitHub or a passkey has no current password to
+    # type into the change form (mozilla-ai/otari-ai#2099).
+    #
+    # Required rather than defaulted, because the safe-looking default is the
+    # wrong one: "no password" for an identity that holds one selects the form
+    # the gateway refuses.
     has_password: bool = Field(
         description=(
             "Whether this identity holds a dashboard password. False for one that signs in "

@@ -5947,9 +5947,9 @@ export interface components {
          *     names. Publishing it costs nothing either, since it is the caller's own
          *     identity and they are holding the credential that resolved to it.
          *
-         *     Both nullable fields are nullable for opposite reasons. A local operator
-         *     identity has no address, because first boot provisions it with a name and
-         *     nothing to sign in with but the master key; a member added to the roster by
+         *     ``email`` and ``full_name`` are nullable for opposite reasons. A local
+         *     operator identity has no address, because first boot provisions it with a
+         *     name and nothing to sign in with but the master key; a member added by
          *     address has no name until they claim the identity and supply one. So a shell
          *     has to be ready to draw either one alone.
          */
