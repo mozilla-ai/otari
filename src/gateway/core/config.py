@@ -130,7 +130,7 @@ ENV_BRIDGED_FIELDS = (
 )
 
 
-VISION_STRATEGIES =("describe", "ocr", "off")
+VISION_STRATEGIES = ("describe", "ocr", "off")
 ROUTER_GRANULARITIES = ("trace_sticky", "step")
 # Selectable mail transports, plus the two states that are not a transport:
 # "auto" derives one from whether SMTP is configured, "none" turns mail off
