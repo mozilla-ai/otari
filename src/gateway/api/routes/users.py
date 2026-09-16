@@ -17,6 +17,7 @@ from gateway.api.deps import (
     require_deployment_operator,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.surface import Surface
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget
@@ -32,6 +33,8 @@ router = APIRouter(
     tags=["users"],
     dependencies=[Depends(require_deployment_operator)],
 )
+
+SURFACE = Surface("users")
 
 
 class CreateUserRequest(BaseModel):

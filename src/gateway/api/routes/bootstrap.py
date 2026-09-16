@@ -28,6 +28,20 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_enabled_features
+from gateway.api.routes import (
+    admin,
+    budgets,
+    keys,
+    models,
+    organizations,
+    pricing,
+    routing,
+    settings,
+    tools,
+    usage,
+    users,
+    workspaces,
+)
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.feature import CoreFeature
 from gateway.core.surface import Surface
@@ -56,29 +70,30 @@ SessionType = Literal["local_operator", "hosted_user", "none"]
 # this list stays the set of methods that need no further qualification.
 SignInMethod = Literal["master_key", "password", "passkey"]
 
+# A route module's ``SURFACE`` is published only once listed here.
 _DECLARED_SURFACES: tuple[Surface, ...] = (
-    Surface("admin"),
-    Surface("budgets"),
-    Surface("keys"),
-    Surface("models"),
+    admin.SURFACE,
+    budgets.SURFACE,
+    keys.SURFACE,
+    models.SURFACE,
     # Hosted replacement for ``providers``. Not named after its prefix, since
     # ``organizations`` is already a surface.
     Surface("organization_providers", standalone=False),
     # Hosted only: on standalone the organization is the deployment, so ``usage`` already shows it.
     Surface("organization_usage", standalone=False),
-    Surface("organizations"),
+    organizations.SURFACE,
     # A hosted deployment serves no inference, and the Playground sends completions.
     Surface("playground", hosted=False),
-    Surface("pricing"),
+    pricing.SURFACE,
     # Not hosted: a stored provider is shared by every organization and overrides their own keys.
     # Hiding the page does not stop the API from writing one.
     Surface("providers", hosted=False),
-    Surface("routing"),
-    Surface("settings"),
-    Surface("tools"),
-    Surface("usage"),
-    Surface("users"),
-    Surface("workspaces"),
+    routing.SURFACE,
+    settings.SURFACE,
+    tools.SURFACE,
+    usage.SURFACE,
+    users.SURFACE,
+    workspaces.SURFACE,
 )
 
 STANDALONE_SURFACES: tuple[str, ...] = tuple(surface.name for surface in _DECLARED_SURFACES if surface.standalone)

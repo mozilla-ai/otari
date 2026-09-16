@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.api.deps import get_db, require_deployment_operator
+from gateway.core.surface import Surface
 from gateway.models.budgets import MAX_COUNT_LIMIT, Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.money import MAX_USD_LIMIT, as_float, to_usd, to_usd_or_none
 from gateway.models.tenancy import Workspace
@@ -22,6 +23,8 @@ router = APIRouter(
     tags=["budgets"],
     dependencies=[Depends(require_deployment_operator)],
 )
+
+SURFACE = Surface("budgets")
 
 # The rollup below sums exact counters, so its coalesce default is exact too.
 _ZERO = Decimal(0)

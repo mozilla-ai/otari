@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db, get_session_identity, require_deployment_operator, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.core.settings_view import derive_view
+from gateway.core.surface import Surface
 from gateway.models.tenancy import User as TenancyUser
 from gateway.services.dashboard_session_service import (
     apply_session_cookie,
@@ -55,6 +56,8 @@ router = APIRouter(
     tags=["settings"],
     dependencies=[Depends(require_deployment_operator)],
 )
+
+SURFACE = Surface("settings")
 
 # The view each field declares on itself (``core/settings_view.py``), laid out
 # in display order. A field's ``settable`` flag is derived from SETTABLE_KEYS,

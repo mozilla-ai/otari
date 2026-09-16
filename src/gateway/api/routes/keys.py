@@ -12,6 +12,7 @@ from sqlmodel import col
 from gateway.api.deps import CallerOrganization, get_config, get_db, require_deployment_operator
 from gateway.auth.models import generate_api_key, hash_key, key_prefix, key_suffix
 from gateway.core.config import GatewayConfig
+from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import Workspace
 from gateway.models.users import User
@@ -31,6 +32,8 @@ router = APIRouter(
     tags=["keys"],
     dependencies=[Depends(require_deployment_operator)],
 )
+
+SURFACE = Surface("keys")
 
 
 

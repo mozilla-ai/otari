@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
+from gateway.core.surface import Surface
 from gateway.models.tenancy import (
     AcceptInvitationResultPublic,
     ActiveOrganizationMemberCreateRequest,
@@ -65,6 +66,8 @@ router = APIRouter(
     tags=["organizations"],
     dependencies=[Depends(verify_master_key)],
 )
+
+SURFACE = Surface("organizations")
 
 
 class Message(BaseModel):

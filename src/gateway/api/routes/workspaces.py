@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
 from gateway.api.routes.organizations import Message
+from gateway.core.surface import Surface
 from gateway.models.tenancy import (
     WorkspaceCreate,
     WorkspaceMemberPublic,
@@ -32,6 +33,8 @@ router = APIRouter(
     tags=["workspaces"],
     dependencies=[Depends(verify_master_key)],
 )
+
+SURFACE = Surface("workspaces")
 
 WORKSPACE_ROLE_DESCRIPTION = "Role to assign in this workspace."
 

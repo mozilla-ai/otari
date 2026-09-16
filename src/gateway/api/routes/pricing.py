@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_catalog_reader
 from gateway.core.config import GatewayConfig
+from gateway.core.surface import Surface
 from gateway.models.money import as_float, to_usd, to_usd_or_none
 from gateway.models.pricing import ModelPricing
 from gateway.models.pricing_schemas import PricingTier
@@ -50,6 +51,8 @@ catalog_router = APIRouter(
     tags=["pricing"],
     dependencies=[Depends(verify_catalog_reader)],
 )
+
+SURFACE = Surface("pricing")
 
 
 class SetPricingRequest(BaseModel):
