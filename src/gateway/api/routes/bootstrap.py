@@ -101,14 +101,16 @@ HOSTED_SURFACES: tuple[str, ...] = tuple(surface.name for surface in _DECLARED_S
 def published_surfaces(config: GatewayConfig, enabled_features: tuple[CoreFeature, ...]) -> list[str]:
     """The surfaces this deployment publishes, sorted.
 
-    The edition's fixed set plus the surface of each enabled feature.
+    Covers the fixed set and each enabled feature's surface.
     Empty for hybrid, which hosts none.
     """
     if config.is_hybrid_mode:
         return []
-    fixed = HOSTED_SURFACES if config.is_hosted_mode else STANDALONE_SURFACES
     featured = [feature.surface for feature in enabled_features if feature.surface is not None]
-    return sorted({*fixed, *featured})
+    surfaces = (*_DECLARED_SURFACES, *featured)
+    if config.is_hosted_mode:
+        return sorted({surface.name for surface in surfaces if surface.hosted})
+    return sorted({surface.name for surface in surfaces if surface.standalone})
 
 
 class DeploymentBootstrap(BaseModel):

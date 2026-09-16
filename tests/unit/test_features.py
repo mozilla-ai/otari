@@ -25,6 +25,7 @@ from gateway.api.routes.bootstrap import HOSTED_SURFACES, STANDALONE_SURFACES, p
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.core.feature import CoreFeature, Worker
+from gateway.core.surface import Surface
 from gateway.main import _create_lifespan, create_app
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -54,7 +55,7 @@ def _hybrid() -> GatewayConfig:
     return GatewayConfig(mode="hybrid", platform={"base_url": "http://localhost:8100/api/v1"})
 
 
-def _probe(*, enabled: bool, surface: str | None = "probe", worker: Worker | None = None) -> CoreFeature:
+def _probe(*, enabled: bool, surface: Surface | None = Surface("probe"), worker: Worker | None = None) -> CoreFeature:
     router = APIRouter(prefix="/probe")
 
     @router.get("")
@@ -89,7 +90,7 @@ def test_the_registry_is_a_literal_tuple() -> None:
 def test_registry_features_have_distinct_names_and_surfaces() -> None:
     """A collision is a mistake to catch here, not one for the published set to merge away."""
     names = [feature.name for feature in features.CORE_FEATURES]
-    surfaces = [feature.surface for feature in features.CORE_FEATURES if feature.surface is not None]
+    surfaces = [feature.surface.name for feature in features.CORE_FEATURES if feature.surface is not None]
     assert len(set(names)) == len(names), "two features share a name"
     assert len(set(surfaces)) == len(surfaces), "two features share a surface"
     assert not set(surfaces) & {*STANDALONE_SURFACES, *HOSTED_SURFACES}, "a feature surface repeats an edition's own"
@@ -138,9 +139,15 @@ def test_an_enabled_feature_hosts_its_surface_beside_the_fixed_set(tmp_path: Pat
     assert published_surfaces(_hosted(tmp_path), enabled) == sorted((*HOSTED_SURFACES, "probe"))
 
 
+def test_a_feature_surface_is_published_only_by_the_deployments_it_names(tmp_path: Path) -> None:
+    enabled = (_probe(enabled=True, surface=Surface("probe", standalone=False)),)
+    assert "probe" not in published_surfaces(_standalone(tmp_path), enabled)
+    assert "probe" in published_surfaces(_hosted(tmp_path), enabled)
+
+
 def test_a_surface_the_edition_already_hosts_is_published_once(tmp_path: Path) -> None:
     """The published surfaces are a set, whatever the registry repeats."""
-    enabled = (_probe(enabled=True, surface=STANDALONE_SURFACES[0]),)
+    enabled = (_probe(enabled=True, surface=Surface(STANDALONE_SURFACES[0])),)
     assert published_surfaces(_standalone(tmp_path), enabled) == sorted(STANDALONE_SURFACES)
 
 
