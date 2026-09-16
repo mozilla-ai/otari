@@ -168,13 +168,13 @@ export default defineConfig({
     // Vitest owns the component tests under src/; the Playwright specs in e2e/
     // run in a real browser and must not be collected here.
     //
-    // `.storybook/` is in the list for one file. That directory is outside every
+    // `.storybook/` is in the list because that directory is outside every
     // tsconfig and outside biome's includes, so nothing checked it at all, and
     // the catalog's fetch stub turned out to be sending every story's
     // organization query to the real network. Its routing now lives in a module
-    // with no side effects (`apiRouting.ts`) and is tested here, which is what
-    // makes that a pull request gate rather than something the main-only smoke
-    // run finds later.
+    // with no side effects (`apiRouting.ts`) and is tested here, as is the theme
+    // decorator, which is what makes those pull request gates rather than
+    // something the main-only smoke run finds later.
     include: [
       "src/**/*.{test,spec}.{ts,tsx}",
       ".storybook/**/*.{test,spec}.{ts,tsx}",

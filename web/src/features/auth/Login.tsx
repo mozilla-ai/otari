@@ -857,7 +857,7 @@ export function Login() {
           </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center justify-between gap-x-4 border-t border-border pt-2">
+        <div className="otari-auth-actions flex flex-wrap items-center justify-between gap-x-4 border-t border-border pt-2">
           {offersSignup ? (
             <PublicAuthLink to="#/signup">
               {open_signup ? "Create an account" : "Set your password"}

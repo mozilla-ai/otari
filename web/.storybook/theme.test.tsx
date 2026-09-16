@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { Decorator } from "@storybook/react-vite"
+import type { ReactNode } from "react"
 import { afterEach, expect, it } from "vitest"
 import { useTheme } from "@/shared/hooks/useTheme"
 import { withTheme } from "./theme"
@@ -14,11 +14,17 @@ function ThemeConsumer() {
   )
 }
 
+// The decorator reads `context.globals.theme` and nothing else, and renders the
+// story as `<Story />`. Narrowing it once says that; asserting a story function
+// and a whole `StoryContext` at the call site only says the arguments are not
+// what `Decorator` describes.
+const decorate = withTheme as unknown as (
+  Story: () => ReactNode,
+  context: { globals: { theme: string } },
+) => ReactNode
+
 function Catalog({ theme }: { theme: string }) {
-  return withTheme(
-    ThemeConsumer as Parameters<Decorator>[0],
-    { globals: { theme } } as Parameters<Decorator>[1],
-  )
+  return decorate(ThemeConsumer, { globals: { theme } })
 }
 
 afterEach(() => {

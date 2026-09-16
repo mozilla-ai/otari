@@ -145,7 +145,7 @@ export function SignupPage({ hash }: { hash: string }) {
           : "Set a password for the address an admin invited or added. You will confirm the address by email before your first sign-in."
       }
       footer={
-        <div className="flex flex-wrap items-center justify-between gap-x-4">
+        <div className="otari-auth-actions flex flex-wrap items-center justify-between gap-x-4">
           <PublicAuthLink to="#/">Sign in instead</PublicAuthLink>
           <AuthHelp offersRecovery />
         </div>

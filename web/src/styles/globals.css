@@ -1806,8 +1806,34 @@ main {
 .otari-breakdown .button--ghost,
 .otari-rail .button--ghost,
 .otari-setup-actions .button--ghost,
+.otari-auth-actions .button--ghost,
 .button--ghost.button--icon-only {
   border-color: transparent;
+}
+
+/* The public auth pages' footer row, which holds plain text links and one
+   control that has to be a button: Help opens a popover, and a popover trigger
+   must be a react-aria pressable. So the button takes the links' ink, their
+   44px target and their quiet, and the row reads as one family rather than a box
+   beside a link. The fills go transparent here rather than at the call site,
+   which is the only place `--button-*` is reachable at all.
+   The two `:not()`s are specificity, not intent: the padding rule below is
+   three classes deep and comes later in the file, so a selector that does not
+   out-count it loses. Its 15px is the inset a drawn edge eats back; there is no
+   drawn edge here, and the 3px moved the label off where the page shipped it. */
+.otari-auth-actions .button--ghost:not(.button--sm):not(.button--icon-only) {
+  min-height: 2.75rem;
+  padding-inline: 12px;
+  --button-fg: var(--color-link);
+  --button-bg-hover: transparent;
+  --button-bg-pressed: transparent;
+}
+.otari-auth-actions
+  .button--ghost:not(.button--sm):not(.button--icon-only):is(
+    :hover,
+    [data-hovered="true"]
+  ) {
+  --button-fg: var(--color-link-hover);
 }
 
 /* An edge is drawn INSIDE the box, so it eats a pixel of the inset the other
