@@ -57,8 +57,6 @@ const ERROR_IDS: Record<CredentialField, string> = {
 
 const CARD = "flex flex-col gap-4"
 
-const CARD_FLAT = "flex flex-col gap-4"
-
 /** The screen's one page-defining line. */
 const HEADING = "text-display"
 
@@ -518,7 +516,7 @@ export function Login() {
   if (signInUnavailable) {
     return (
       <LoginPageShell>
-        <div className={CARD_FLAT}>
+        <div className={CARD}>
           <h1 className={HEADING}>Otari sign-in is unavailable</h1>
           {/* Two causes, because reloading only answers one of them. An empty
               `sign_in_methods` is what the gateway sends when it cannot reach
@@ -557,7 +555,7 @@ export function Login() {
   if (maintenance_mode) {
     return (
       <LoginPageShell>
-        <div className={CARD_FLAT}>
+        <div className={CARD}>
           <h1 className={HEADING}>Otari is under maintenance</h1>
           <p className="text-sm text-muted">
             This gateway is not starting new dashboard sessions while it is

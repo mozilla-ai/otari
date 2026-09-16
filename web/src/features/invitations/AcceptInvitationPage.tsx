@@ -208,12 +208,12 @@ export function AcceptInvitationPage() {
         </>
       ) : null}
 
-      <div className="border-t border-border pt-5">
+      <div className="flex border-t border-border pt-2">
         <Link
           href="/welcome"
-          className="text-sm font-medium text-link hover:text-link-hover"
+          className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
         >
-          New to Otari? Open the welcome guide
+          Open the welcome guide
         </Link>
       </div>
     </LoginPageShell>

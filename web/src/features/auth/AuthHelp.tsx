@@ -42,7 +42,7 @@ export function AuthHelp({
             ) : (
               <>
                 Your{" "}
-                <a href="/welcome" className="text-link">
+                <a href="/welcome" className="text-link hover:text-link-hover">
                   master key
                 </a>{" "}
                 is sent once and exchanged for a session cookie. It is never

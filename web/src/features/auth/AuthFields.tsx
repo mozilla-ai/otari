@@ -61,6 +61,9 @@ export function AuthEmailField({
       />
       {description ? (
         <FieldMessages>
+          {/* HeroUI's Description reaches the input as aria-describedby
+              through the TextField's "description" slot, which a raw span
+              does not. */}
           <Description className="text-muted">{description}</Description>
         </FieldMessages>
       ) : null}
