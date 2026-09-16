@@ -26,7 +26,7 @@ from sqlalchemy.orm import sessionmaker
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
-from gateway.models.entities import DashboardSession
+from gateway.models.tenancy import DashboardSession
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 from gateway.services.password_service import MAX_PASSWORD_BYTES, MIN_PASSWORD_LENGTH, hash_password
 from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY

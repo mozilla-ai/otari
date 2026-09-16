@@ -24,9 +24,8 @@ from sqlmodel import col
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import DashboardSession
 from gateway.models.pricing import ModelPricing, OrganizationModelPricing
-from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace
+from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace
 from gateway.ports.model_provider_port import HostedAccessDeniedError, HostedCredential, ModelProviderPort
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,

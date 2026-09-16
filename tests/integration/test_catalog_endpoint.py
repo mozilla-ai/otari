@@ -17,9 +17,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.models.entities import DashboardSession
 from gateway.models.pricing import OrganizationModelPricing
-from gateway.models.tenancy import Organization, OrganizationMember, User
+from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
 from gateway.services import model_catalog_service as mcs
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 

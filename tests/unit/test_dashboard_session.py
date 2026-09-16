@@ -25,7 +25,7 @@ from gateway.api import deps
 from gateway.api.routes import auth_session as auth_session_route
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
-from gateway.models.entities import DashboardSession
+from gateway.models.tenancy import DashboardSession
 from gateway.services import dashboard_session_service, master_key_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY

@@ -32,8 +32,8 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import DashboardSession, User
-from gateway.models.tenancy import Organization, OrganizationMember, Workspace
+from gateway.models.entities import User
+from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, Workspace
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.usage import UsageLog
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
