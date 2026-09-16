@@ -246,6 +246,11 @@ field with its settings view (`core/settings_view.py`): shown in a group,
 omitted, or secret. The settings endpoint derives its view from that, and a
 field without one fails at import.
 
+A domain's settings live in `core/settings/<domain>.py`. `GatewayConfig`
+inherits them rather than nesting them, because a nested model does not read
+a flat `OTARI_<FIELD>` variable. A new setting goes in its domain's module
+where one exists.
+
 ## Usage filters
 
 Usage list, count, series, and bulk mutation must share filter semantics through
