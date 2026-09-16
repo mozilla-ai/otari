@@ -265,7 +265,7 @@ def _warn_if_hosted_has_no_data_plane(config: GatewayConfig) -> None:
     )
 
 
-# How long shutdown waits for refreshers to acknowledge cancellation.
+# How long shutdown waits for refreshers and feature workers to acknowledge cancellation.
 #
 # Cancelling a task is a request, not a guarantee. The CancelledError is
 # delivered at whatever the task is awaiting, and a nested cancel scope there can
@@ -276,13 +276,14 @@ def _warn_if_hosted_has_no_data_plane(config: GatewayConfig) -> None:
 # unbounded ``await task`` never returns, so the lifespan never finishes and
 # uvicorn's shutdown hangs behind a background refresh. Bounding the wait and
 # moving on is the right trade: the event loop is torn down immediately after,
-# and no refresher owns state that a late tick could corrupt.
+# and no refresher owns state that a late tick could corrupt. A feature worker
+# shares the bound, so ``CoreFeature`` asks the same of it.
 _REFRESHER_STOP_TIMEOUT_SECONDS = 5.0
 
 
 def _log_abandoned_refresher(name: str) -> None:
     logger.warning(
-        "%s refresher did not stop within %.0fs; abandoning it so shutdown can finish",
+        "%s did not stop within %.0fs; abandoning it so shutdown can finish",
         name,
         _REFRESHER_STOP_TIMEOUT_SECONDS,
     )
@@ -290,7 +291,7 @@ def _log_abandoned_refresher(name: str) -> None:
 
 def _log_refresher_stop(task: asyncio.Task[None], name: str) -> None:
     if not task.cancelled() and (error := task.exception()) is not None:
-        logger.warning("%s refresher stopped with an unexpected error", name, exc_info=error)
+        logger.warning("%s stopped with an unexpected error", name, exc_info=error)
 
 
 async def _wait_for_refresher_stop(task: asyncio.Task[None], name: str) -> None:
@@ -496,7 +497,10 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # refreshers above: created here, cancelled together in ``finally``
             # under one shared bound.
             feature_workers = [
-                (asyncio.create_task(_run_feature_worker(feature.name, feature.worker, config)), feature.name)
+                (
+                    asyncio.create_task(_run_feature_worker(feature.name, feature.worker, config)),
+                    f"{feature.name} worker",
+                )
                 for feature in app.state.enabled_features
                 if feature.worker is not None
             ]
@@ -523,7 +527,9 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 (selector_refresher, "catalog selectors"),
                 (reservation_sweeper, "budget reservation sweep"),
             ]
-            await _stop_refreshers([(task, name) for task, name in refreshers if task is not None] + feature_workers)
+            await _stop_refreshers(
+                [(task, f"{name} refresher") for task, name in refreshers if task is not None] + feature_workers
+            )
             if alias_refresher is not None:
                 reset_alias_cache()
             if policy_refresher is not None:

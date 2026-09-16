@@ -18,6 +18,10 @@ class CoreFeature:
     ``enabled`` is asked once per app, before the dashboard's stored settings are applied,
     and its answer holds for the life of the process.
     ``surface`` is the dashboard surface the feature hosts when enabled, or ``None`` for a feature with no page.
+    ``worker``, when set, runs in the background while the app serves and is cancelled at shutdown.
+    It must let that cancellation through and leave no write half done:
+    shutdown waits only a few seconds before it abandons a worker and closes the database.
+    A worker that raises is logged once and not restarted, and the feature's routes and page stay up.
 
     NOTE: ``enabled`` must read only settings the dashboard cannot change.
     A switch the dashboard can change never takes effect, not even after a restart:
