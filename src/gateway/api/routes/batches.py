@@ -25,7 +25,8 @@ from gateway.core.metered_pricing import calculate_token_cost, quantize_cost
 from gateway.core.usage import cache_read_tokens_of
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import BatchRecord, UsageLog
+from gateway.models.entities import UsageLog
+from gateway.models.inference import BatchRecord
 from gateway.rate_limit import check_rate_limit
 from gateway.services.batch_service import (
     claim_batch_accounting,

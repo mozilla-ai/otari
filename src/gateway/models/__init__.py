@@ -15,4 +15,13 @@ schema-less request/response modules beside them (`mcp`, `routing`)
 contribute nothing to the metadata and stay out of it.
 """
 
-from gateway.models import api_keys, budgets, entities, guardrails, playground, provider_keys, tenancy  # noqa: F401
+from gateway.models import (  # noqa: F401
+    api_keys,
+    budgets,
+    entities,
+    guardrails,
+    inference,
+    playground,
+    provider_keys,
+    tenancy,
+)

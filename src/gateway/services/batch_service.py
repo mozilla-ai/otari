@@ -15,7 +15,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.log_config import logger
-from gateway.models.entities import BatchRecord
+from gateway.models.inference import BatchRecord
 
 if TYPE_CHECKING:
     import uuid
