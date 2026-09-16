@@ -202,13 +202,17 @@ test.describe("api keys", () => {
     await expect(key).toContainText(PARITY.users.heavy)
     // Permanent delete is withheld while a key is live, so a caller in production
     // cannot be broken (and its audit trail erased) in a single click.
-    await expect(key.getByRole("button", { name: "Delete" })).toHaveCount(0)
+    await key.getByRole("button", { name: /^Actions for / }).click()
+    await expect(page.getByRole("menuitem", { name: /^Delete/ })).toBeDisabled()
+    await page.keyboard.press("Escape")
 
-    await key.getByRole("button", { name: "Disable" }).click()
+    await key.getByRole("button", { name: /^Actions for / }).click()
+    await page.getByRole("menuitem", { name: /^Disable/ }).click()
     await expect(key).toContainText("Disabled")
-    await expect(key.getByRole("button", { name: "Enable" })).toBeVisible()
+    await key.getByRole("button", { name: /^Actions for / }).click()
+    await expect(page.getByRole("menuitem", { name: /^Enable/ })).toBeVisible()
 
-    await key.getByRole("button", { name: "Delete" }).click()
+    await page.getByRole("menuitem", { name: /^Delete/ }).click()
     // Scoped to the dialog rather than to `key`: the confirmation is a modal
     // now, outside the table entirely.
     const confirmKey = page.getByRole("alertdialog")
