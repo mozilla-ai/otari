@@ -82,6 +82,7 @@ from gateway.api.routes.usage import (
     _usage_filters,
 )
 from gateway.core.sql import MAX_FILTER_VALUES
+from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
@@ -102,6 +103,9 @@ router = APIRouter(
     # deployment operator gate does not belong here.
     dependencies=[Depends(verify_master_key)],
 )
+
+# Hosted only: on standalone the organization is the deployment, so ``usage`` already shows it.
+SURFACE = Surface("organization_usage", standalone=False)
 
 
 async def _scope_condition(
