@@ -27,6 +27,17 @@ from gateway.agent_runtime.domain.types import (
 _COMMAND_SEPARATORS = frozenset({"&&", "||", ";", "|"})
 
 
+def _basename(token: str) -> str:
+    """The final path component of `token`, or `token` itself if that's empty.
+
+    `token.rsplit("/", 1)[-1]` already returns `token` unchanged when it has
+    no `/`; the `or token` fallback only matters for the rare token that
+    *is* a path but ends in `/` (e.g. a bare `/usr/bin/`), where the split
+    would otherwise silently produce `""`.
+    """
+    return token.rsplit("/", 1)[-1] or token
+
+
 def _segment_matches(pattern: str, text: str) -> bool:
     """Match `*` (zero or more characters) within one path segment against text.
 
@@ -228,15 +239,84 @@ def _strip_shell_comment(command: str) -> str:
     return "".join(result)
 
 
+def _normalize_bare_newlines(command: str) -> str:
+    """Replace every unquoted, unescaped newline with a whitespace-padded `;`.
+
+    A newline outside any quoting ends one command and starts the next, the
+    same as `;`, but `shlex.split` treats it as ordinary whitespace: without
+    this, `git push\\ngit status` tokenizes as one segment
+    `["git", "push", "git", "status"]`, so a gate forbidding `git push`
+    (with nothing after it) never matches a real two-line script that runs
+    it as its own complete command. `_command_segments` only recognizes a
+    separator as a *whole token* (module docstring above), and shlex only
+    isolates `;` as one when whitespace surrounds it (`"a;b"` stays one
+    token, `"a ; b"` becomes three), so this inserts `" ; "`, never a bare
+    `;`, to guarantee the substitution is always its own token regardless of
+    what is adjacent to the original newline.
+
+    Meant to run on `_strip_shell_comment`'s own output, which has already
+    rewritten Bash's `$'...'` quoting into plain `'...'`, so this only needs
+    to track plain single/double quotes and backslash escaping, not ANSI-C
+    quoting a second time. A quoted newline (inside `'...'` or `"..."`) is
+    real content, not a boundary, and a backslash-escaped one is a line
+    continuation; both are left untouched, matching how neither ends a
+    command in a real shell.
+    """
+    quote: str | None = None
+    escaped = False
+    result: list[str] = []
+    for char in command:
+        if escaped:
+            escaped = False
+            result.append(char)
+            continue
+        if quote == "'":
+            result.append(char)
+            if char == "'":
+                quote = None
+            continue
+        if char == "\\":
+            escaped = True
+            result.append(char)
+            continue
+        if quote == '"':
+            result.append(char)
+            if char == '"':
+                quote = None
+            continue
+        if char in "'\"":
+            quote = char
+            result.append(char)
+            continue
+        if char == "\n":
+            result.append(" ; ")
+            continue
+        result.append(char)
+    return "".join(result)
+
+
 def _command_segments(command: str) -> list[list[str]]:
     """Split a command into simple-command segments, each already tokenized.
 
-    Strips a trailing comment, then tokenizes with `shlex` (POSIX quoting
-    rules), then splits the resulting token list on any token that is
-    exactly one of `&&`, `||`, `;`, `|`: a quoted argument that happens to
-    contain that text, like `"a && b"`, survives as a single token from
-    shlex and is never mistaken for a separator, since this only looks at
-    whole tokens, never substrings of one.
+    Strips a trailing comment, normalizes a bare newline into the same kind
+    of separator as `;` (`_normalize_bare_newlines`), then tokenizes with
+    `shlex` (POSIX quoting rules), then splits the resulting token list on
+    any token that is exactly one of `&&`, `||`, `;`, `|`: a quoted argument
+    that happens to contain that text, like `"a && b"`, survives as a single
+    token from shlex and is never mistaken for a separator, since this only
+    looks at whole tokens, never substrings of one.
+
+    Each segment's own first token, the command actually being invoked for
+    that segment, is normalized to its path basename (`/usr/bin/npm` and
+    `./node_modules/.bin/npm` both become `npm`): a policy author writes a
+    forbidden phrase against the name they would type, and a path-qualified
+    invocation of the same executable is not a different command. Only that
+    one position is normalized, never an argument token, since a path in
+    argument position (`npm install ./local-package`) is real content a
+    normalization there would corrupt. This does not follow indirection
+    through a prefix command (`sudo /usr/bin/npm install` still has `sudo`,
+    not `npm`, as segment[0]); that is a separate, harder problem this does
+    not attempt to solve.
 
     A command shlex cannot tokenize even after comment-stripping (an
     unbalanced quote outside any comment) falls back to a plain whitespace
@@ -252,7 +332,15 @@ def _command_segments(command: str) -> list[list[str]]:
     quoted string in an already-unparseable command matches where it would
     not have in a parseable one. That trade is the right way round. It costs
     a false positive on a command that was malformed to begin with, and it
-    buys back detection on the shape an evasion would actually take.
+    buys back detection on the shape an evasion would actually take. Newline
+    normalization degrades the same way in this fallback: `_normalize_bare_newlines`
+    is quote-aware, but a command that reaches this branch has an unbalanced
+    quote, which leaves its state machine believing every character from the
+    opening quote onward, including any real newline, is still inside it, so
+    it converts none of them. This branch instead replaces every newline
+    unconditionally, on the original comment-stripped text rather than that
+    already-attempted, possibly-incomplete normalization, matching how this
+    fallback already cannot tell a quoted newline from a bare one either.
 
     An empty segment (two separators back to back, or one at either end,
     e.g. `";" * n`) is dropped rather than returned: `_contains_subsequence`
@@ -265,9 +353,9 @@ def _command_segments(command: str) -> list[list[str]]:
     """
     stripped = _strip_shell_comment(command)
     try:
-        tokens = shlex.split(stripped, posix=True)
+        tokens = shlex.split(_normalize_bare_newlines(stripped), posix=True)
     except ValueError:
-        tokens = stripped.split()
+        tokens = stripped.replace("\n", " ; ").split()
 
     segments: list[list[str]] = [[]]
     for token in tokens:
@@ -275,7 +363,10 @@ def _command_segments(command: str) -> list[list[str]]:
             segments.append([])
         else:
             segments[-1].append(token)
-    return [segment for segment in segments if segment]
+    non_empty = [segment for segment in segments if segment]
+    for segment in non_empty:
+        segment[0] = _basename(segment[0])
+    return non_empty
 
 
 def tokenize_phrase(phrase: str) -> list[str]:

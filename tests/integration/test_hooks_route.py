@@ -365,6 +365,41 @@ def test_command_match_oversized_workload_is_rejected(client: TestClient, master
     assert "comparisons" in response.json()["detail"]
 
 
+def test_command_match_work_estimate_charges_a_shared_phrase_per_gate(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Many gates sharing one identical, moderately long forbidden phrase.
+
+    phrase_cache tokenizes identical phrase text once, since gate.forbidden
+    entries are validated up front and never change per gate; the cost
+    estimate used to sum tokens per *distinct* phrase text
+    (`sum(len(tokens) for tokens in phrase_cache.values())`), so 50 gates
+    sharing one 20-token phrase counted as if only one gate carried it, while
+    evaluate_command_match still runs _contains_subsequence once per gate.
+    Chosen so the buggy estimate (a single phrase's 20 tokens times the
+    commands' 50,000 total tokens, 1,000,000) clears _MAX_COMMAND_MATCH_WORK,
+    while the real, per-occurrence estimate (multiplied by all 50 gates,
+    50,000,000) does not; command_comparisons (50 phrases * 500 commands =
+    25,000) stays far under its own budget, isolating this to the token-work
+    estimate rather than the comparison-count one.
+    """
+    shared_phrase = " ".join(["a"] * 20)
+    gates_yaml = "".join(
+        f'  - id: g{i}\n    type: command_match\n    enforcement: required\n'
+        f'    forbidden: ["{shared_phrase}"]\n    message: m\n'
+        for i in range(50)
+    )
+    policy = 'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n' + gates_yaml
+    commands = [f"{'b ' * 99}c{i}" for i in range(500)]
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": policy, "commands": commands},
+        headers=master_key_header,
+    )
+    assert response.status_code == 422
+    assert "50,000,000" in response.json()["detail"]
+
+
 def test_many_whitespace_only_commands_do_not_stall_tokenizing(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:

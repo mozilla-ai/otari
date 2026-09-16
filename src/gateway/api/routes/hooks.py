@@ -317,7 +317,16 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
             tuple(phrase for gate in command_match_gates for phrase in gate.forbidden)
         )
         phrase_count = sum(len(gate.forbidden) for gate in command_match_gates)
-        total_phrase_tokens = sum(len(tokens) for tokens in phrase_cache.values())
+        # Per gate occurrence, not per distinct phrase text: phrase_cache
+        # dedupes identical phrase text across gates so each is tokenized
+        # once, but evaluate_command_match still runs _contains_subsequence
+        # for every gate that carries it. Summing len(phrase_cache.values())
+        # counted a shared phrase's tokens once regardless of how many gates
+        # forbid it, undercounting the real per-gate matching work whenever
+        # gates share phrase text.
+        total_phrase_tokens = sum(
+            len(phrase_cache[phrase]) for gate in command_match_gates for phrase in gate.forbidden
+        )
         command_count = len(command_evidence.commands)
         total_command_tokens = sum(len(segment) for segments in segment_cache.values() for segment in segments)
         estimated_command_work = total_phrase_tokens * total_command_tokens
