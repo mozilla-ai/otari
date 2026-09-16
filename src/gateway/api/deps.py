@@ -1,6 +1,7 @@
 import secrets
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import aclosing
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -534,8 +535,12 @@ async def get_db_if_needed(
         yield None
         return
 
-    async for db in get_db():
-        yield db
+    # A bare ``async for`` leaves ``get_db`` open when an error or cancellation
+    # is thrown in at teardown, so its session would hold a pooled connection
+    # until garbage collection.
+    async with aclosing(get_db()) as sessions:
+        async for db in sessions:
+            yield db
 
 
 async def get_current_identity(
