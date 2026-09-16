@@ -214,13 +214,7 @@ def get_organization_pricing_service(
     config: Annotated[GatewayConfig, Depends(get_config)],
     model_provider: ModelProviderPortDep,
 ) -> OrganizationPricingService:
-    """Build the pricing service on the request's session, provider map, and hosted-credential port.
-
-    The port is what lets the deployment-supplied-model refusal see past
-    ``config.providers``: a build with no configured instances can still serve a
-    bare ``provider:model`` key on a hosted credential an overlay's adapter owns,
-    and only the port knows that.
-    """
+    """Build the pricing service on the request's session, provider map, and hosted-credential port."""
     return OrganizationPricingService(db, config, model_provider=model_provider)
 
 

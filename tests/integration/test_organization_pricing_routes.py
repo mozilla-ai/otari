@@ -611,12 +611,7 @@ async def test_an_override_stored_before_the_rule_cannot_be_edited_by_an_organiz
 
 
 class _FakeHostedModelProvider:
-    """A stub ``ModelProviderPort`` that serves or refuses one fixed provider.
-
-    Stands in for an overlay's hosted-inference adapter: ``config.providers``
-    knows nothing about it, which is the point, because these tests are for the
-    refusal path ``is_deployment_instance_key`` cannot see on its own.
-    """
+    """A stub ``ModelProviderPort`` that serves or refuses one fixed provider."""
 
     def __init__(self, *, served: str | None = None, denied: str | None = None) -> None:
         """Name the one provider this stub serves, or the one it refuses; both default to neither."""
@@ -645,13 +640,7 @@ class _FakeHostedModelProvider:
 async def test_an_organization_may_not_price_a_model_a_hosted_credential_serves(
     async_db: AsyncSession, role: str
 ) -> None:
-    """A bare key still refuses when no BYO credential is what actually serves it.
-
-    ``_MODEL_KEY`` names no configured instance, so ``is_deployment_instance_key``
-    alone would wave this through. The bound port answering "I would serve
-    'openai' myself" is what otherwise lets an organization undercut a hosted
-    fleet it never supplied the key for.
-    """
+    """A bare key the port serves is refused when the organization has no BYO key."""
     organization = await OrganizationRepository(async_db).create_organization(
         name="Acme", slug=f"acme-hosted-{role}", created_by_user_id=None
     )
@@ -668,19 +657,12 @@ async def test_an_organization_may_not_price_a_model_a_hosted_credential_serves(
 
 @pytest.mark.asyncio
 async def test_an_organization_with_its_own_byo_key_may_still_price_it(async_db: AsyncSession) -> None:
-    """A hosted fleet existing for the same provider name does not reach an org with its own key.
-
-    The dispatch ladder tries the organization's own BYO key before it ever asks
-    the hosted-credential port, so an organization holding one for ``openai``
-    prices its own traffic exactly as it always could, even on a deployment that
-    also happens to run a hosted ``openai`` fleet for organizations with none.
-    """
+    """An organization with its own BYO key may price the model even when the port also serves it."""
     organization = await OrganizationRepository(async_db).create_organization(
         name="Acme", slug="acme-hosted-byo", created_by_user_id=None
     )
     identity = await _identity(async_db, organization, role="admin", name="admin person")
-    # A workspace with no override at all: it inherits the organization's key by
-    # default, so it must not by itself defeat the exemption.
+    # A workspace with no override inherits the organization's key, so it stays covered.
     await WorkspaceRepository(async_db).create_workspace(
         name="Platform", organization_id=organization.id, created_by_user_id=None
     )
@@ -690,8 +672,7 @@ async def test_an_organization_with_its_own_byo_key_may_still_price_it(async_db:
         name="prod",
         encrypted_api_key=None,
         last4=None,
-        # A keyless-backend credential still counts as BYO: the base URL is
-        # what dispatch would actually send the request to.
+        # A base URL with no API key still counts as BYO.
         api_base="https://openai.example.test/v1",
         client_args=None,
     )
@@ -708,13 +689,7 @@ async def test_an_organization_with_its_own_byo_key_may_still_price_it(async_db:
 async def test_a_workspace_that_disabled_its_only_byo_key_defeats_the_organizations_exemption(
     async_db: AsyncSession,
 ) -> None:
-    """One workspace disabling the org's only matching key reopens the hosted-credential question.
-
-    Pricing is organization-wide, so an override this method allowed would then
-    price that workspace's hosted-served traffic at the organization's own rate
-    too. The key still exists and is otherwise live; only this one workspace has
-    turned it off for itself.
-    """
+    """A workspace that disables the organization's only matching key removes the exemption."""
     organization = await OrganizationRepository(async_db).create_organization(
         name="Acme", slug="acme-hosted-disabled", created_by_user_id=None
     )
@@ -750,12 +725,7 @@ async def test_a_workspace_that_disabled_its_only_byo_key_defeats_the_organizati
 async def test_a_key_row_with_no_credential_material_does_not_exempt_the_organization(
     async_db: AsyncSession,
 ) -> None:
-    """A row with neither a key nor a base URL cannot serve a request, so it does not count.
-
-    Otherwise an organization could mint a key row purely to satisfy the BYO
-    check while every real request for the provider still dispatches on the
-    deployment's hosted credential, pricing traffic it never actually paid for.
-    """
+    """A key row with neither an API key nor a base URL cannot serve a request, so it does not count."""
     organization = await OrganizationRepository(async_db).create_organization(
         name="Acme", slug="acme-hosted-decoy", created_by_user_id=None
     )
@@ -779,12 +749,7 @@ async def test_a_key_row_with_no_credential_material_does_not_exempt_the_organiz
 
 @pytest.mark.asyncio
 async def test_a_hosted_access_refusal_still_counts_as_deployment_supplied(async_db: AsyncSession) -> None:
-    """``HostedAccessDeniedError`` means the port owns this key too, just for someone else.
-
-    The candidate still resolves on a deployment-owned upstream; the
-    organization not being entitled to it is a reason to keep the rate off this
-    table, not a loophole into setting one.
-    """
+    """A port refusal counts as deployment-supplied, because the model still runs on a deployment-owned upstream."""
     organization = await OrganizationRepository(async_db).create_organization(
         name="Acme", slug="acme-hosted-denied", created_by_user_id=None
     )
@@ -799,7 +764,7 @@ async def test_a_hosted_access_refusal_still_counts_as_deployment_supplied(async
 
 @pytest.mark.asyncio
 async def test_a_deployment_operator_may_price_a_model_a_hosted_credential_serves(async_db: AsyncSession) -> None:
-    """The same operator exemption applies through this door as through config.providers."""
+    """The operator exemption also covers a model the port serves."""
     organization = await OrganizationRepository(async_db).create_organization(
         name="Acme", slug="acme-hosted-operator", created_by_user_id=None
     )
@@ -815,7 +780,7 @@ async def test_a_deployment_operator_may_price_a_model_a_hosted_credential_serve
 
 @pytest.mark.asyncio
 async def test_an_organization_may_price_a_model_no_hosted_credential_serves(async_db: AsyncSession) -> None:
-    """A port bound but silent on this provider leaves the BYO path untouched."""
+    """A port that does not serve the provider leaves the organization free to price it."""
     organization = await OrganizationRepository(async_db).create_organization(
         name="Acme", slug="acme-hosted-unserved", created_by_user_id=None
     )

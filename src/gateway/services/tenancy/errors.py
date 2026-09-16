@@ -816,15 +816,14 @@ class OrganizationPricingManagedModelError(TenancyForbiddenError):
     """An override aimed at a model the deployment, not the organization, pays for.
 
     An override is how an organization records what it pays for a model it
-    supplies the provider key for. Two things are not that, and either raises
-    this: a model addressed through one of the deployment's own ``config.providers``
-    instances, and a bare ``provider:model`` key that, with no BYO credential
-    stored, the bound ``ModelProviderPort`` would still serve on a hosted
-    credential the deployment owns (an overlay's managed-inference fleet). Both
-    mean the deployment holds the upstream credential and settles the upstream
-    bill, so the rate is the deployment price list's and a tenant-set rate would
-    decide what that deployment charges itself. A zero is the sharp end of it,
-    since cost is also what a budget counts down.
+    supplies the provider key for. Two cases raise this: a model addressed through
+    a ``config.providers`` instance, and a bare ``provider:model`` key that the
+    bound ``ModelProviderPort`` would serve on a deployment-owned hosted credential
+    because a workspace lacks a usable BYO key. Both mean the deployment holds the
+    upstream credential and settles the upstream bill, so the rate is the
+    deployment price list's and a tenant-set rate would decide what that
+    deployment charges itself. A zero is the sharp end of it, since cost is also
+    what a budget counts down.
 
     Withheld from an organization manager, not from everyone: a deployment
     operator is the party that pays, so the standalone deployment whose one

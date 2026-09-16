@@ -23,12 +23,9 @@ every writer and none of them can be expressed in the schema at all:
 - **A deployment-supplied model is not the organization's to re-price.** A key
   addressed through one of ``config.providers``' instances dispatches on the
   deployment's own credential, so the deployment settles its upstream bill and
-  owns its rate. A bare ``provider:model`` key usually resolves against the
-  organization's BYO credential instead, but not always: without a usable BYO
-  credential covering every one of its workspaces, the bound ``ModelProviderPort``
-  may still serve it on a hosted credential the deployment owns (an overlay's
-  managed-inference fleet), which pays the same bill through a different door
-  and gets the same refusal. See
+  owns its rate. A bare ``provider:model`` key gets the same refusal when a
+  workspace lacks a usable BYO key and the bound ``ModelProviderPort`` would
+  serve it on a deployment-owned hosted credential. See
   :meth:`OrganizationPricingService.raise_if_deployment_supplied`.
 
 Periods are half-open, ``[effective_from, effective_to)``. Two adjacent periods
@@ -114,19 +111,11 @@ class OrganizationPricingService:
     ):
         """Bind the request's session, provider map, and hosted-credential port.
 
-        ``model_provider`` has no default; see the inline comment below for why.
+        ``model_provider`` has no default, so a caller cannot drop the hosted-credential check by accident.
         """
         self.db = db
         self.config = config
         self.organizations = OrganizationService(db)
-        # Keyword-only with no default, and nullable rather than defaulted to
-        # the core adapter here: services depend on ports, never on a concrete
-        # adapter (``check_architecture.py``), and every construction site has
-        # to say explicitly whether it is passing one, so omitting it can never
-        # silently fall back to the weaker config.providers-only check. A
-        # caller with a real reason to omit the port (most tests) writes
-        # ``model_provider=None`` deliberately. The route always passes the
-        # bound one.
         self.model_provider = model_provider
 
     async def _writable_organization_id(self, user: TenancyUser) -> uuid.UUID:
@@ -168,19 +157,8 @@ class OrganizationPricingService:
         deployment-supplied instance would let a tenant name its own cost basis,
         and a zero would make the model free and spend no budget.
 
-        Checked first, before the (possibly remote) determination below: an
-        operator is exempt unconditionally, so there is no reason to spend a port
-        round trip finding out what they are exempt from.
-
-        A write-time answer, not a standing one: an override that passed this check
-        keeps applying even if the organization's BYO key is later archived or
-        disabled, because nothing on the read path (`services.pricing_service.find_model_pricing`)
-        re-asks the question. That is the existing shape of this rule, not a new
-        gap: a ``config.providers`` instance added after an override already exists
-        has the identical property (`test_an_override_stored_before_the_rule_cannot_be_edited_by_an_organization`
-        pins it for that case), and the constructor-level fix is a re-check on
-        every priced request rather than at every write, which is a larger change
-        than this refusal gate.
+        Gotcha: this runs at write time only.
+        A stored override still applies if the organization later loses BYO coverage.
         """
         if await DeploymentUserService(self.db).has_administration_access(user):
             return
@@ -188,24 +166,11 @@ class OrganizationPricingService:
             raise OrganizationPricingManagedModelError(model_key)
 
     async def _is_deployment_supplied(self, organization_id: uuid.UUID, model_key: str) -> bool:
-        """Whether the deployment, not the organization, would settle ``model_key``'s upstream bill.
+        """Whether the deployment, not the organization, pays the upstream bill for ``model_key``.
 
-        A ``config.providers`` instance (this build's own admin-configured
-        credential) always answers yes, with no I/O. Otherwise, this organization's
-        own BYO key is what the dispatch ladder tries next (`AGENTS.md`: a hosted
-        credential is asked for "only after local and tenant BYO sources fail"), so
-        one on file answers no before the bound ``ModelProviderPort`` is ever asked:
-        asking it first, unconditionally, would refuse an organization pricing
-        traffic that already dispatches on its own key just because a hosted fleet
-        also happens to exist for the same provider name.
-
-        Only once both of those come up empty does the port get asked whether it
-        would still serve this candidate on a hosted credential (an overlay's
-        managed-inference fleet, e.g. mzai). A refusal from the port counts as a
-        yes too, because it still means this candidate resolves on a
-        deployment-owned upstream; it is just one this organization may not use,
-        which is a reason to keep the rate off this organization's table, not a
-        reason to let it set one.
+        A ``config.providers`` instance always does.
+        A bare key does when a workspace lacks a usable BYO key and the port would serve it on a hosted credential.
+        A port refusal also counts, because the model still runs on a deployment-owned upstream.
         """
         if is_deployment_instance_key(self.config, model_key):
             return True
@@ -215,6 +180,7 @@ class OrganizationPricingService:
         if split is None:
             return False
         provider, model = split
+        # Gotcha: keep this before the port call. The port's contract only covers a candidate no BYO key serves.
         if await self._organization_has_byo_credential(organization_id, provider):
             return False
         try:
@@ -229,32 +195,10 @@ class OrganizationPricingService:
         return credential is not None
 
     async def _organization_has_byo_credential(self, organization_id: uuid.UUID, provider: str) -> bool:
-        """Whether every workspace in this organization would actually dispatch ``provider`` on its own key.
+        """Whether every workspace in the organization would dispatch ``provider`` on a usable BYO key.
 
-        Adapts the existence check `organization_model_access.resolve_session_catalog_scope`
-        already uses to build an owner/admin's BYO catalog allowlist, tightened twice
-        over for a money-relevant question rather than a visibility one.
-
-        First, a row is not enough on its own: `key_is_usable` only asks whether its
-        secret decrypts, which a row with neither (``encrypted_api_key`` and
-        ``api_base`` both unset) trivially passes despite dispatch having nothing to
-        send upstream with it. Requiring one of those two fields is what tells a
-        real credential (an encrypted key, or a keyless backend's own base URL)
-        apart from a row that cannot serve a request at all, so an organization
-        cannot mint a never-dispatchable key purely to satisfy this check.
-
-        Second, existing is not enough either: a workspace can disable an
-        otherwise-live key for itself (`WorkspaceProviderKeyOverride.disabled`), and
-        the request-path cache honors that, so a key this method saw as live can
-        still leave that one workspace's dispatch falling through to a hosted
-        credential. Pricing is organization-wide, so an override this method allows
-        would then price *that* workspace's hosted-served traffic at the
-        organization's own rate too. Closing that means asking the same question
-        `resolve_active_key` answers for a single workspace, for every workspace the
-        organization has: this counts the organization BYO only when none of them
-        would fall through. A workspace that never touches this provider at all
-        still passes, because with no override on file it inherits the
-        organization's default candidate the same as one that does.
+        A key counts only when it has an API key or a base URL, and its secret decrypts.
+        A workspace that disables the key for itself is not covered.
         """
         normalized = provider_key(provider)
         key_repository = OrgProviderKeyRepository(self.db)
