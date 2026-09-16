@@ -197,7 +197,6 @@ async def release_session(session: AsyncSession | None) -> bool:
     return True
 
 
-
 # The name each pool reports under, in metrics and in anything that iterates
 # :func:`pool_stats`.
 REQUEST_POOL = "request"
