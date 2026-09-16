@@ -324,7 +324,7 @@ Status codes:
 | Malformed request, or unknown tool kind | `400` or `422` |
 | Path outside the session workspace | `403` |
 | File larger than the backend's cap | `413` |
-| At capacity, session not leased | `503` |
+| Session creation or execution temporarily unavailable | `503` |
 
 A backend may include `Retry-After` delay-seconds with a `503`. Otari preserves
 that status and a valid delay-seconds hint for its caller. It does not retry

@@ -185,6 +185,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "503":
+          description: |
+            Temporarily unavailable. Otari preserves 503 and a valid Retry-After
+            delay-seconds hint for its caller, without automatically retrying
+            the request.
+          headers:
+            Retry-After:
+              description: Optional delay in seconds before another attempt.
+              schema:
+                type: string
+                pattern: "^[0-9]+$"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /sessions/{session_id}/files/list:
     parameters:
