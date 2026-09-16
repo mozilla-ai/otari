@@ -30,8 +30,10 @@ otari-smoke.db
 
 .idea/
 
-# Stray node_modules from running npx at the repo root (web has its own)
-node_modules/
+# Stray node_modules from running npx at the repo root (web has its own).
+# No trailing slash: a worktree may symlink one at another checkout's install,
+# and a directory pattern does not match a symlink (see web/.gitignore).
+node_modules
 
 # Built dashboard bundle (`make dashboard`). Deliberately not committed: Vite
 # content-hashes every asset filename, so any change under web/src renamed the

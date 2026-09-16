@@ -1,4 +1,8 @@
-node_modules/
+# Unanchored and without the trailing slash, which is load-bearing: a worktree
+# that saves disk by symlinking this at another checkout's install leaves a
+# symlink, not a directory, so `node_modules/` does not match it and `git add`
+# takes it. A committed symlink here fails every CI install at once.
+node_modules
 dist/
 *.local
 .vite/
