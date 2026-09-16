@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -297,7 +298,7 @@ def _hook_collect_changed_paths(repo_root: Path) -> list[str] | None:
     return paths
 
 
-@cli.command(name="hook")
+@cli.group(name="hook", invoke_without_command=True)
 @click.option(
     "--harness",
     type=click.Choice(["claude-code"]),
@@ -314,7 +315,8 @@ def _hook_collect_changed_paths(repo_root: Path) -> list[str] | None:
 )
 @click.option("--url", envvar="OTARI_URL", default=None, help="Base URL of the Otari gateway.")
 @click.option("--api-key", envvar="OTARI_API_KEY", default=None, help="Credential for the Hook Server.")
-def hook(harness: str, config: str | None, url: str | None, api_key: str | None) -> None:
+@click.pass_context
+def hook(ctx: click.Context, harness: str, config: str | None, url: str | None, api_key: str | None) -> None:
     """Native callback entry point for a supported agent's hook protocol.
 
     Reads one JSON hook payload on stdin, collects the evidence that payload
@@ -329,7 +331,13 @@ def hook(harness: str, config: str | None, url: str | None, api_key: str | None)
     required gate failing: a missing policy, an unreachable gateway, or a
     missing credential all exit 0, with a message on stderr where there is
     one worth surfacing.
+
+    A group, not a plain command, so `otari hook setup` can live alongside
+    it: invoked with no subcommand (the shape every existing settings file
+    already calls), it runs the callback above unchanged.
     """
+    if ctx.invoked_subcommand is not None:
+        return
     import httpx
 
     try:
@@ -484,6 +492,173 @@ def hook(harness: str, config: str | None, url: str | None, api_key: str | None)
     # the transcript or to the model. `systemMessage` on stdout is the
     # documented field for a visible, non-blocking hook message.
     click.echo(json.dumps({"systemMessage": f"otari hook: advisory warning(s) ({harness}, {event}):\n{summary}"}))
+
+
+def _otari_binary_path() -> str:
+    """Absolute path to this otari install's own binary.
+
+    Claude Code's hook subprocess does not inherit an activated shell's PATH,
+    so a bare "otari" often will not resolve. otari's own console-script
+    wrapper sits next to the interpreter running it (same venv/bin), which is
+    what sys.executable already names.
+    """
+    return str(Path(sys.executable).with_name("otari"))
+
+
+def _resolve_hook_credential() -> str | None:
+    """Whatever `otari hook` would resolve automatically at runtime, no flags given."""
+    try:
+        return load_config(None).master_key
+    except ValueError:
+        return None
+
+
+def _gates_file_allows_bash(gates_file: Path) -> bool:
+    """Whether the matcher should include Bash: only if a command_match gate exists.
+
+    Parses gates_file the same way the Hook Server does. A missing or
+    unparseable policy defaults to False, the narrower matcher: setup cannot
+    know what a broken policy would have wanted, and the round trip is
+    otherwise harmless but pointless to pay for nothing.
+    """
+    if not gates_file.is_file():
+        return False
+    from gateway.agent_runtime.domain.policy import PolicyError, parse_policy
+    from gateway.agent_runtime.domain.types import CommandMatchGate
+
+    try:
+        spec = parse_policy(gates_file.read_text(encoding="utf-8"), source=str(gates_file))
+    except PolicyError:
+        return False
+    return any(isinstance(gate, CommandMatchGate) for gate in spec.gates)
+
+
+def _starter_gates_yaml(repo_name: str) -> str:
+    return (
+        'schema_version: "1.0"\n'
+        "policy:\n"
+        f"  id: {repo_name}/gates\n"
+        "  description: Rules this repo checks on its own working tree.\n"
+        "\n"
+        "gates:\n"
+        "  - id: no-force-push\n"
+        "    type: command_match\n"
+        "    enforcement: advisory\n"
+        '    forbidden: ["git push --force"]\n'
+        "    message: >-\n"
+        "      Force-pushing rewrites shared history. Use --force-with-lease\n"
+        "      if you must.\n"
+    )
+
+
+def _merge_pretooluse_hook(settings_path: Path, matcher: str, command: str) -> bool:
+    """Add or update a PreToolUse hook entry pointing at otari hook.
+
+    Returns True if a new entry was appended, False if an existing one was
+    found (by its command already starting with this same otari binary
+    invoked as "hook", whatever flags it had) and updated in place instead of
+    duplicated. Every other key in the file, including other hooks and
+    permissions, and any sibling hook command under the same matcher, is
+    preserved untouched.
+    """
+    if settings_path.is_file():
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise click.ClickException(f"{settings_path} is not valid JSON: {exc}") from exc
+        if not isinstance(settings, dict):
+            raise click.ClickException(f"{settings_path} must contain a JSON object at the top level.")
+    else:
+        settings = {}
+
+    pretooluse = settings.setdefault("hooks", {}).setdefault("PreToolUse", [])
+    otari_hook_prefix = command.split(" --", 1)[0]  # "<path> hook", before any flags
+
+    updated = False
+    for entry in pretooluse:
+        if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+            continue
+        for hook_item in entry["hooks"]:
+            existing_command = hook_item.get("command") if isinstance(hook_item, dict) else None
+            if isinstance(existing_command, str) and existing_command.startswith(otari_hook_prefix):
+                entry["matcher"] = matcher
+                hook_item["command"] = command
+                updated = True
+                break
+        if updated:
+            break
+
+    if not updated:
+        pretooluse.append({"matcher": matcher, "hooks": [{"type": "command", "command": command}]})
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    return not updated
+
+
+@hook.command(name="setup")
+@click.option(
+    "--harness",
+    type=click.Choice(["claude-code"]),
+    default="claude-code",
+    show_default=True,
+    help="Agent integration to configure.",
+)
+@click.option(
+    "--api-key",
+    default=None,
+    help="Skip automatic/interactive credential resolution and use this.",
+)
+def hook_setup(harness: str, api_key: str | None) -> None:
+    """Register otari hook in a supported agent's own settings.
+
+    Writes or updates a PreToolUse hook entry in .claude/settings.local.json
+    (personal, gitignored, never committed) so registering the Hook Server is
+    not a manual JSON edit. Offers to scaffold a starter .otari-gates.yml
+    when this repo has none yet, and picks the matcher (whether it needs to
+    cover Bash) from whatever gates the policy turns out to have.
+    """
+    root = _hook_find_repo_root(Path.cwd())
+    if root is None:
+        raise click.ClickException("Not inside a Git repository.")
+
+    gates_file = root / ".otari-gates.yml"
+    if not gates_file.is_file():
+        if click.confirm(f"No {gates_file.name} found in {root}. Create a starter policy?", default=True):
+            gates_file.write_text(_starter_gates_yaml(root.name), encoding="utf-8")
+            click.echo(f"Wrote {gates_file}.")
+        else:
+            click.echo(
+                f"Skipping. otari hook will still be registered below, but every gate check "
+                f"passes until {gates_file.name} exists; see docs/agent-gates.md."
+            )
+
+    include_bash = _gates_file_allows_bash(gates_file)
+    matcher = "Edit|Write|NotebookEdit|Bash" if include_bash else "Edit|Write|NotebookEdit"
+
+    embedded_key = api_key
+    if not embedded_key:
+        resolved_key = _resolve_hook_credential()
+        if not resolved_key:
+            click.echo(
+                "Could not resolve a credential automatically (no master_key in config.yml, "
+                ".env, or the environment)."
+            )
+            embedded_key = click.prompt("Enter an Otari API key or master key", hide_input=True)
+        # A key resolved automatically is not embedded: the same resolution
+        # otari hook already does at runtime keeps working, and this repeats
+        # it rather than pinning today's value (e.g. a master key that later
+        # rotates).
+
+    command_parts = [_otari_binary_path(), "hook", "--harness", harness]
+    if embedded_key:
+        command_parts += ["--api-key", embedded_key]
+    command = shlex.join(command_parts)
+
+    settings_path = root / ".claude" / "settings.local.json"
+    created = _merge_pretooluse_hook(settings_path, matcher, command)
+    click.echo(f"{'Added' if created else 'Updated'} the PreToolUse hook in {settings_path}.")
+    click.echo(f"Matcher: {matcher}" + ("" if include_bash else " (add a command_match gate to also cover Bash)"))
 
 
 @cli.group()
