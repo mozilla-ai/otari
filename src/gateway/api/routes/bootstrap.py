@@ -33,6 +33,7 @@ from gateway.api.routes import (
     budgets,
     keys,
     models,
+    org_provider_keys,
     organizations,
     playground,
     pricing,
@@ -78,9 +79,7 @@ _DECLARED_SURFACES: tuple[Surface, ...] = (
     budgets.SURFACE,
     keys.SURFACE,
     models.SURFACE,
-    # Hosted replacement for ``providers``. Not named after its prefix, since
-    # ``organizations`` is already a surface.
-    Surface("organization_providers", standalone=False),
+    org_provider_keys.SURFACE,
     # Hosted only: on standalone the organization is the deployment, so ``usage`` already shows it.
     Surface("organization_usage", standalone=False),
     organizations.SURFACE,
