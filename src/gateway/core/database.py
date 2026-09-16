@@ -88,7 +88,12 @@ def _run_migrations(database_url: str) -> None:
     alembic_cfg = Config()
     alembic_dir = Path(__file__).resolve().parents[3] / "alembic"
     alembic_cfg.set_main_option("script_location", str(alembic_dir))
-    alembic_cfg.set_main_option("sqlalchemy.url", database_url)
+    # set_main_option stores the value in a configparser.ConfigParser, whose
+    # interpolation treats a lone "%" as the start of a variable reference. A
+    # URL-decoded password containing "%" (e.g. from an encoded "+") then
+    # fails with "invalid interpolation syntax" before any migration runs.
+    # Doubling it is configparser's own documented escape for a literal "%".
+    alembic_cfg.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
     alembic_cfg.attributes["configure_logger"] = False
     command.upgrade(alembic_cfg, "head")
 

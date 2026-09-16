@@ -56,7 +56,14 @@ if not database_url:
 # `otari migrate`, auto_migrate on startup, and a bare `alembic upgrade head`
 # reading OTARI_DATABASE_URL. Migrations run on a sync engine, so an async URL
 # (the form README documents for SQLite) would otherwise fail with MissingGreenlet.
-config.set_main_option("sqlalchemy.url", to_sync_url(database_url))
+#
+# set_main_option stores the value in a configparser.ConfigParser, whose
+# interpolation treats a lone "%" as the start of a variable reference. A
+# URL-decoded credential containing "%" (e.g. from an encoded "+") would
+# otherwise fail here with "invalid interpolation syntax" -- the get above
+# already reversed this same doubling, so re-doubling before this second set
+# is what keeps the round trip consistent.
+config.set_main_option("sqlalchemy.url", to_sync_url(database_url).replace("%", "%%"))
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

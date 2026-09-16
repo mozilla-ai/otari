@@ -22,6 +22,8 @@ from alembic.script import ScriptDirectory
 from alembic.util import CommandError
 from sqlalchemy import create_engine, inspect
 
+from gateway.core.database import _run_migrations
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ALEMBIC_DIR = _REPO_ROOT / "alembic"
 
@@ -133,3 +135,22 @@ def test_a_bare_alembic_run_refuses_a_foreign_database_url(tmp_path: Path) -> No
     assert "OTARI_DATABASE_URL" in result.stderr
     assert not foreign.exists(), "DATABASE_URL selected the database this chain connected to"
     assert list(tmp_path.iterdir()) == [], "a default URL migrated a database nobody named"
+
+
+def test_run_migrations_accepts_a_database_url_containing_a_percent_character(tmp_path: Path) -> None:
+    """A URL-decoded credential can itself contain "%" (e.g. from an encoded
+    "+"), and that must not crash startup before any migration runs.
+
+    ``_run_migrations`` hands the URL to ``configparser.ConfigParser`` (what
+    Alembic's ``Config`` stores options in) via ``set_main_option``, and that
+    parser's interpolation treats a lone "%" as the start of a variable
+    reference. Before escaping it, a URL like this one failed with
+    "ValueError: invalid interpolation syntax", not with anything naming a
+    migration or a database.
+    """
+    db_path = tmp_path / "prod%2Bcopy.db"
+
+    _run_migrations(f"sqlite:///{db_path}")
+
+    head = ScriptDirectory.from_config(_alembic_config("sqlite://")).get_current_head()
+    assert _version_rows(db_path) == [(head,)]
