@@ -702,6 +702,46 @@ async def test_report_platform_usage_forwards_session_label(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("ttft_ms", "expected"),
+    [
+        (42, 42),
+        (0, 0),
+        (None, None),  # omitted, same as session_label
+    ],
+)
+async def test_report_platform_usage_forwards_ttft_ms(
+    monkeypatch: pytest.MonkeyPatch,
+    ttft_ms: int | None,
+    expected: int | None,
+) -> None:
+    config = cast(
+        GatewayConfig,
+        SimpleNamespace(
+            platform={"base_url": "http://platform", "usage_max_retries": 3},
+            platform_token="gw-test",
+        ),
+    )
+    post_mock = AsyncMock(return_value=httpx.Response(204))
+    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+
+    await _platform._report_platform_usage(
+        config,
+        "corr-1",
+        "success",
+        None,
+        ttft_ms=ttft_ms,
+        is_final_attempt=True,
+    )
+
+    body = post_mock.call_args.kwargs["body"]
+    if expected is None:
+        assert "ttft_ms" not in body
+    else:
+        assert body["ttft_ms"] == expected
+
+
+@pytest.mark.asyncio
 async def test_report_platform_usage_omits_unavailable_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     config = cast(
         GatewayConfig,

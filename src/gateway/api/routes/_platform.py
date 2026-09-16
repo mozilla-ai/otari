@@ -1060,6 +1060,7 @@ async def _report_platform_usage(
     usage: CompletionUsage | None,
     error_class: str | None = None,
     session_label: str | None = None,
+    ttft_ms: int | None = None,
     *,
     is_final_attempt: bool,
 ) -> SettledCost | None:
@@ -1091,6 +1092,8 @@ async def _report_platform_usage(
     normalized_label = (session_label or "").strip()
     if normalized_label:
         payload["session_label"] = normalized_label
+    if ttft_ms is not None:
+        payload["ttft_ms"] = ttft_ms
     if outcome == "success":
         if usage is not None:
             cache_write_tokens = cache_write_tokens_of(usage)
