@@ -1,9 +1,25 @@
 """Surface declarations and the published surface lists."""
 
+import importlib
+import pkgutil
+
 import pytest
 
-from gateway.api.routes.bootstrap import HOSTED_SURFACES, STANDALONE_SURFACES
+import gateway.api.routes
+from gateway.api.routes.bootstrap import _DECLARED_SURFACES, HOSTED_SURFACES, STANDALONE_SURFACES
 from gateway.core.surface import Surface
+
+
+def test_every_route_module_surface_is_listed_in_bootstrap() -> None:
+    """An unlisted ``SURFACE`` is never published, and nothing else would notice."""
+    declared = set()
+    for module_info in pkgutil.iter_modules(gateway.api.routes.__path__):
+        module = importlib.import_module(f"gateway.api.routes.{module_info.name}")
+        surface = getattr(module, "SURFACE", None)
+        if isinstance(surface, Surface):
+            declared.add(surface)
+
+    assert declared == set(_DECLARED_SURFACES)
 
 
 def test_the_surface_lists_are_spelled_out() -> None:
