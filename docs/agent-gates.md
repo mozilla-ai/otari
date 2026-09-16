@@ -185,7 +185,7 @@ Git-status step.
            "hooks": [
              {
                "type": "command",
-               "command": "otari hook --harness claude-code"
+               "command": "/abs/path/to/.venv/bin/otari hook --harness claude-code -c /abs/path/to/config.yml"
              }
            ]
          }
@@ -194,11 +194,35 @@ Git-status step.
    }
    ```
 
-   With no `--url`/`--api-key`, `otari hook` resolves both from the same
-   `config.yml` (or `.env`) `otari serve` reads: the gateway's own
-   `host`/`port` and its `master_key`. That only works when the hook runs on
-   the same machine as the server; otherwise pass `--url`/`--api-key`
-   explicitly, or set `OTARI_URL`/`OTARI_API_KEY`.
+   Both paths are absolute on purpose. The hook subprocess does not inherit
+   an activated shell's `PATH`, so a bare `otari` often will not resolve, and
+   it does not reliably start in the directory the credential lookup below
+   reads from either.
+
+   With no `--url`/`--api-key`, `otari hook` resolves both the same way every
+   other Otari command does, reading the gateway's own `host`/`port` and its
+   `master_key`. It consults the config file `-c` names, the `.env` beside
+   that file, the `.env` in the working directory, and the environment, with
+   the environment taking precedence over the config file.
+
+   Nothing auto-discovers a `config.yml`. Without `-c`, a `config.yml`
+   sitting in the working directory is not read, exactly as for `otari
+   serve`. Pass `-c` whenever your `master_key` lives in `config.yml` rather
+   than in `.env` or the environment, or the hook finds no credential.
+
+   Getting that wrong is quiet. A hook with no credential does what it does
+   for any setup failure: prints to stderr and exits 0, and Claude Code shows
+   a non-blocking hook's stderr only in its own debug log. The gates stop
+   running and nothing in the transcript says so. After setting this up,
+   confirm it works by editing a forbidden path (step 2) rather than by
+   seeing no complaints.
+
+   All of this only applies when the hook runs on the same machine as the
+   server. Otherwise point it at the gateway with `--url`/`--api-key`, or
+   `OTARI_URL`/`OTARI_API_KEY`. Prefer an ordinary API key over the
+   `master_key` there: this endpoint accepts either, a hook needs nothing
+   the master key uniquely grants, and a credential written into a settings
+   file or a command line is one you should be able to rotate on its own.
 
 2. Try to edit something a gate forbids (for the starter policy: `Edit`
    `CHANGELOG.md`). The tool call itself is refused: `git status` shows
