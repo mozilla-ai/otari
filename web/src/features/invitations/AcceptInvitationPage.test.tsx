@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import type { DeploymentType } from "@/client"
 import { AuthProvider } from "@/features/auth/AuthContext"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
 import { ApiError, apiFetch } from "@/shared/api/client"
@@ -55,7 +56,11 @@ function mockApi(opts: {
 // and the test about that case names it.
 function renderPage(
   hash: string,
-  { mailReady = true, oauthProviders = [] as string[] } = {},
+  {
+    mailReady = true,
+    oauthProviders = [] as string[],
+    deploymentType = "standalone" as DeploymentType,
+  } = {},
 ) {
   window.location.hash = hash
   const client = new QueryClient({
@@ -69,6 +74,7 @@ function renderPage(
           <AuthProvider>
             <DeploymentProvider
               value={bootstrap({
+                deployment_type: deploymentType,
                 mail_ready: mailReady,
                 oauth_providers: oauthProviders,
               })}
@@ -321,5 +327,28 @@ describe("AcceptInvitationPage", () => {
     expect(
       screen.queryByRole("button", { name: "Set your password" }),
     ).toBeNull()
+  })
+
+  it("offers the welcome guide where the deployment serves it", async () => {
+    mockApi({})
+    renderPage("#/accept-invitation?token=abc123")
+
+    expect(
+      await screen.findByRole("link", { name: /welcome guide/ }),
+    ).toHaveAttribute("href", "/welcome")
+  })
+
+  // otari.ai serves the bundle from its own edge and `/welcome` from nowhere,
+  // so the footer would be a link out of the app to a 404. See
+  // `welcomeGuideHref`. Invitations are a hosted flow, which is what makes this
+  // the page the broken link was most likely to be clicked from.
+  it("offers no welcome guide on a hosted deployment, which serves none", async () => {
+    mockApi({})
+    renderPage("#/accept-invitation?token=abc123", {
+      deploymentType: "hosted",
+    })
+
+    expect(await screen.findByText("Acme")).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: /welcome guide/ })).toBeNull()
   })
 })

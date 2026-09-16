@@ -44,6 +44,7 @@ import {
   useValidateInvitation,
 } from "@/shared/api/organizations"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
+import { welcomeGuideHref } from "@/shared/helpers/welcomeGuide"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 export function AcceptInvitationPage() {
@@ -57,7 +58,12 @@ export function AcceptInvitationPage() {
   const preview = useValidateInvitation(token ?? "")
   const accept = useAcceptInvitation()
   const { isAuthenticated } = useAuth()
-  const { mail_ready, oauth_providers } = useDeployment()
+  const deployment = useDeployment()
+  const { mail_ready, oauth_providers } = deployment
+  // Absent on a hosted deployment, which serves no such page; see
+  // `welcomeGuideHref`. The rule above it goes with it, since a card ending in
+  // a bordered empty row reads as something that failed to load.
+  const welcomeHref = welcomeGuideHref(deployment)
   // Asked of `publicAuthPaths`' table rather than of `mail_ready` directly, so
   // this page follows the destination it is sending someone to if signup's
   // requirement ever moves. The gate exists because the claim mails a
@@ -208,14 +214,16 @@ export function AcceptInvitationPage() {
         </>
       ) : null}
 
-      <div className="flex border-t border-border pt-2">
-        <Link
-          href="/welcome"
-          className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
-        >
-          Open the welcome guide
-        </Link>
-      </div>
+      {welcomeHref ? (
+        <div className="flex border-t border-border pt-2">
+          <Link
+            href={welcomeHref}
+            className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
+          >
+            Open the welcome guide
+          </Link>
+        </div>
+      ) : null}
     </LoginPageShell>
   )
 }
