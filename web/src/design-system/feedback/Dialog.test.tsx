@@ -39,6 +39,14 @@ describe("Dialog", () => {
     },
   )
 
+  it("draws the arc in the tone the caller reports", async () => {
+    // The sweep says what the last attempt did, not only that one is awaited:
+    // a frame reporting a failure with an accent arc reads as all being well.
+    open({ isScanning: true, scanTone: "danger" })
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog).toHaveClass("[--scan-ink:var(--color-danger)]")
+  })
+
   it("names itself by its title and describes itself by its description", async () => {
     // What a screen reader announces on open is the dialog, so the sentence
     // under the title has to be the dialog's description rather than a

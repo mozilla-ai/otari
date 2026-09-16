@@ -118,6 +118,15 @@ export const Scanning: Story = {
   },
 }
 
+/** The wait continues after a failed attempt, and the arc reports it. */
+export const ScanningFailed: Story = {
+  args: {
+    ...Large.args,
+    isScanning: true,
+    scanTone: "danger",
+  },
+}
+
 /** The payoff shape: a mark beside the heading, and a receipt band under it. */
 export const WithMark: Story = {
   args: {

@@ -1775,6 +1775,9 @@ main {
    and a table row's Edit and Delete are `RowAction`, a plain caption button
    that is not part of this family at all. A place nobody consumes is a place
    that goes stale, so it is not carried.
+   `.otari-setup-actions` is the one that names a place holding a single button
+   rather than a row: the first-run sheet's Skip, quieted so the screen's one
+   way out does not compete with the request the screen is asking for.
    The last selector is the one exception to place, and it is deliberate: an
    icon-only ghost never takes the edge, wherever it renders. `CopyButton` is
    why. It appears inside tables, inside the models detail panel, inside
@@ -3249,10 +3252,10 @@ main {
  * between them. That is the standard way to paint a gradient border without a
  * second element.
  *
- * The element's own resting hairline is a real `border`, set by `ScanBorder`,
- * and this pseudo-element is painted over it. So the band still reads as a
- * bordered band when the arc is not running, and the arc is an overlay on that
- * edge rather than a replacement for it.
+ * Painted over whatever edge the element already has rather than in place of
+ * it: `Dialog` sets this on a frame that carries its own 1px border, so the
+ * frame still reads as a bordered frame when the arc is not running. An element
+ * with no edge of its own gets the arc and nothing between sweeps.
  *
  * `--scan-ink` is the traveling arc's color and defaults to the accent; a
  * caller overriding it is how the failed state turns the sweep red without this

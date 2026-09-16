@@ -464,6 +464,11 @@ describe("SetupGuide", () => {
     expect(
       screen.getByRole("button", { name: "Check now" }),
     ).toBeInTheDocument()
+    // And the sweep around the sheet reports it too: the wait continues, so
+    // the arc keeps running, in the ink the news is written in.
+    expect(screen.getByRole("dialog")).toHaveClass(
+      "[--scan-ink:var(--color-danger)]",
+    )
   })
 
   it("sends a malformed request to the example that answers it, without leaving", async () => {

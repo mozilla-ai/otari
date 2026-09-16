@@ -34,7 +34,7 @@ Is the operator creating or editing an object?
 Is it a frame that is neither a form nor a question?
  └── Dialog                 (a guided step, a receipt, a thing to read and copy)
 Is the product waiting on something to arrive?
- └── ScanBorder             (around the panel that is doing the waiting)
+ └── Dialog isScanning      (the frame doing the waiting sweeps its own border)
 ```
 
 ## Signatures
@@ -53,10 +53,9 @@ FormDialog: { isOpen, onOpenChange, title, description?, size = "md",
   submitLabel, onSubmit, isPending, error?, isDirty?, isDismissable = true,
   isSubmitDisabled?, returnFocusRef?, footerStart?, tabs?, children }
 Dialog: { isOpen, onOpenChange, title, description?, size = "md",
-  mark?, isAnnouncement?, isDismissable = true, status?, footerStart?,
-  actions?, children }
+  mark?, isAnnouncement?, isScanning?, scanTone = "accent" | "danger",
+  isDismissable = true, status?, footerStart?, actions?, children }
 DialogSection: { className?, children }
-ScanBorder: { isActive, tone = "accent" | "danger", className?, children }
 ErrorBoundary: { children, resetKey? }
 ```
 
@@ -180,31 +179,33 @@ get-started strip, a first-run panel".
 </Dialog>
 ```
 
-## ScanBorder
+## Dialog isScanning
 
 The one piece of decorative motion in this system, and it earns its place by
-being literally true: an arc travels the band's edge **only while the product is
+being literally true: an arc travels the frame's edge **only while the product is
 watching for something that has not arrived**, and stops when it has. Anywhere
 else, motion on an edge is noise.
 
 It is a masked conic gradient on an `::after`, with the angle animated through
 an `@property`, so there is no dependency behind it and at radius 0 there is no
-corner to get wrong. `tone` picks the arc's ink through a variable, which is how
-a failure turns the sweep red without the stylesheet knowing what a failure is.
+corner to get wrong. `scanTone` picks the arc's ink through a variable, which is
+how a failure turns the sweep red without the stylesheet knowing what a failure
+is.
 
 Under `prefers-reduced-motion` the arc holds still rather than disappearing: the
-band should still read as the thing on the page that is waiting.
+frame should still read as the thing on screen that is waiting.
+
+The frame rather than the band inside it, which is the one decision here worth
+stating. A sheet that exists to wait *is* the wait, so the edge that reports it
+is the sheet's own; drawing it around the status band instead would have made
+the waiting a component of the screen rather than the screen's subject.
 
 ```tsx
 // Correct: the wait is real, and the tone reports the last attempt
-<ScanBorder isActive={!checkFailed} tone={failure ? "danger" : "accent"}>
-  <ListeningRow />
-</ScanBorder>
+<Dialog isScanning={!checkFailed} scanTone={failure ? "danger" : "accent"}>
 
 // Incorrect: nothing is being awaited, so the motion says nothing
-<ScanBorder isActive>
-  <KpiStrip />
-</ScanBorder>
+<Dialog isScanning>
 ```
 
 ## ConfirmDialog

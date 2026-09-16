@@ -127,6 +127,11 @@ site never has to remember. Inside one of these, a ghost renders edgeless:
 `.otari-toolbar` · `.otari-table` · `.otari-pagination` · `.otari-bulk-bar` ·
 `.otari-breakdown` · `.otari-rail` · `.otari-setup-actions`
 
+`.otari-setup-actions` is the one that holds a single button rather than a row:
+the first-run sheet's Skip, which is the screen's one way out and is quieted on
+purpose so it does not compete with the request the screen is asking for. A lone
+button is otherwise not a reason to name a container.
+
 Put the class on the container, not on the button. If you are building a new
 container that holds a row of ghosts and the edges read as a grid of boxes, add a
 place rather than styling the buttons.

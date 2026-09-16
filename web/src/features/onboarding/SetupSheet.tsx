@@ -111,6 +111,7 @@ export function SetupSheet({
       isAnnouncement
       isDismissable={false}
       isScanning={!checkFailed}
+      scanTone={failure ? "danger" : "accent"}
       title="Send your first request"
       description={
         <>
@@ -138,6 +139,10 @@ export function SetupSheet({
         </p>
       }
       actions={
+        // `w-full` is load-bearing, not cosmetic: this wrapper is what the
+        // footer's `.otari-dialog__actions > button` rules stop matching, and
+        // those are where the phone sheet's full width and its press
+        // suppression came from.
         <div className="otari-setup-actions flex w-full">
           <Button
             className="w-full sm:w-auto"
