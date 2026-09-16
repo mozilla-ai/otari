@@ -104,9 +104,10 @@ export function SetupSheet({
   return (
     <Dialog
       isOpen
-      onOpenChange={(open) => {
-        if (!open) onDismiss()
-      }}
+      // Empty, because this sheet is not dismissable: `Dialog` gates the
+      // callback on that, so a handler here would be a dismissal path that
+      // cannot run. `onDismiss` reaches it from the guidance links instead.
+      onOpenChange={() => {}}
       size="lg"
       isAnnouncement
       isDismissable={false}
