@@ -4,6 +4,7 @@ import { ChatPanel } from "./ChatPanel"
 import type { PlaygroundModel } from "./helpers/playgroundModels"
 import type { PanelState } from "./helpers/playgroundTypes"
 import { ModelSelect } from "./ModelSelect"
+import { CHAT_COLUMN } from "./playgroundLayout"
 
 /**
  * The conversation area: one panel, or two side by side while comparing.
@@ -48,7 +49,7 @@ export function PlaygroundConversation({
 }) {
   if (!isComparing) {
     return (
-      <div className="mx-auto flex w-full max-w-[47.5rem] pt-8 pb-6">
+      <div className={`${CHAT_COLUMN} flex pt-8 pb-6`}>
         <ChatPanel
           panel={panelA}
           onRegenerate={() => onRegenerate(panelA, setPanelA)}

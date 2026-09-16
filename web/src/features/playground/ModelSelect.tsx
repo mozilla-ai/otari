@@ -52,7 +52,13 @@ export function ModelSelect({
 
   const unavailable = new Set(unavailableKeys ?? [])
   const pinned = new Set(pinnedKeys)
-  const selectedLabel = models.find((model) => model.key === value)?.label ?? ""
+  const selected = models.find((model) => model.key === value)
+  const isAmbiguous =
+    selected &&
+    models.some(
+      (model) => model.key !== value && model.label === selected.label,
+    )
+  const selectedLabel = isAmbiguous ? value : (selected?.label ?? "")
   const groups = groupPlaygroundModels({ models, pinnedKeys, search })
 
   const select = (key: string) => {

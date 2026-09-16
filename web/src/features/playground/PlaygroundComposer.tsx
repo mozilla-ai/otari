@@ -3,7 +3,6 @@ import { FiArrowUp, FiSquare } from "react-icons/fi"
 
 import type { PlaygroundTools } from "@/client"
 import { Button } from "@/design-system/actions/Button"
-import { Toolbar } from "@/design-system/layout/Toolbar"
 
 import { ActiveToolChips } from "./ActiveToolChips"
 import { ToolsMenu } from "./ToolsMenu"
@@ -26,7 +25,11 @@ export interface ComposerProps {
   toggleMcpServer: (id: string, isOn: boolean) => void
 }
 
-/** The frame owns the field edge; the textarea remains a labeled native input. */
+/**
+ * The frame groups tools, the model picker, and send with the input. A shared
+ * TextArea would add another field border and label row inside that frame, so
+ * a labeled native textarea supplies the editable area here.
+ */
 export function PlaygroundComposer({
   modelPicker,
   draft,
@@ -73,7 +76,7 @@ export function PlaygroundComposer({
           // pushes the conversation off the screen.
           className="min-h-13 max-h-48 w-full resize-none bg-transparent text-base leading-[1.625rem] text-foreground placeholder:text-subtle focus:outline-none disabled:cursor-not-allowed md:min-h-16 [field-sizing:content]"
         />
-        <Toolbar className="min-h-11 flex-nowrap gap-2 md:gap-3">
+        <div className="otari-actions flex min-h-11 items-center gap-2 md:gap-3">
           <ToolsMenu
             tools={tools}
             isWebSearchOn={isWebSearchOn}
@@ -107,7 +110,7 @@ export function PlaygroundComposer({
               Send
             </Button>
           )}
-        </Toolbar>
+        </div>
       </div>
       <p className="mt-2 hidden text-caption md:block">
         Enter to send · Shift + Enter for a new line

@@ -7,6 +7,7 @@ import {
 } from "react-icons/fi"
 
 import { Button } from "@/design-system/actions/Button"
+import { Section } from "@/design-system/layout/Section"
 import { Toolbar } from "@/design-system/layout/Toolbar"
 
 export function PlaygroundToolbar({
@@ -29,52 +30,54 @@ export function PlaygroundToolbar({
   hasTranscript: boolean
 }) {
   return (
-    <Toolbar className="-mx-4 min-h-15 border-y border-border px-4 py-2 md:-mx-6 md:px-6">
-      <Button
-        aria-label={
-          isComparing ? "Switch to single view" : "Compare two models"
-        }
-        aria-pressed={isComparing}
-        onPress={onToggleCompare}
-      >
-        {isComparing ? (
-          <FiMinimize2 aria-hidden className="size-4" />
-        ) : (
-          <FiColumns aria-hidden className="size-4" />
-        )}
-        <span className="hidden md:inline">
-          {isComparing ? "Single view" : "Compare models"}
-        </span>
-        <span className="md:hidden">{isComparing ? "Single" : "Compare"}</span>
-      </Button>
-      <Button
-        aria-label="Conversation history"
-        className="min-h-11 min-w-11"
-        onPress={onOpenHistory}
-      >
-        <FiClock aria-hidden className="size-4" />
-        <span className="hidden lg:inline">Conversation history</span>
-      </Button>
-      <Button
-        aria-label="Saved comparisons"
-        className="min-h-11 min-w-11"
-        onPress={onOpenComparisonHistory}
-      >
-        <FiBarChart2 aria-hidden className="size-4" />
-        <span className="hidden lg:inline">Comparison history</span>
-      </Button>
-      {!isComparing && hasTranscript ? (
+    <Section className="border-y border-border">
+      <Toolbar className="min-h-15 py-2">
         <Button
-          aria-label="Save conversation"
-          className="ml-auto min-h-11 min-w-11"
-          onPress={onSaveConversation}
-          isDisabled={isSaveDisabled && !isSavePending}
-          isPending={isSavePending}
+          aria-label={isComparing ? "Single view" : "Compare models"}
+          aria-pressed={isComparing}
+          onPress={onToggleCompare}
         >
-          <FiSave aria-hidden className="size-4" />
-          <span className="hidden md:inline">Save conversation</span>
+          {isComparing ? (
+            <FiMinimize2 aria-hidden className="size-4" />
+          ) : (
+            <FiColumns aria-hidden className="size-4" />
+          )}
+          <span className="hidden md:inline">
+            {isComparing ? "Single view" : "Compare models"}
+          </span>
+          <span className="md:hidden">
+            {isComparing ? "Single" : "Compare"}
+          </span>
         </Button>
-      ) : null}
-    </Toolbar>
+        <Button
+          aria-label="Conversation history"
+          className="min-h-11 min-w-11"
+          onPress={onOpenHistory}
+        >
+          <FiClock aria-hidden className="size-4" />
+          <span className="hidden lg:inline">Conversation history</span>
+        </Button>
+        <Button
+          aria-label="Comparison history"
+          className="min-h-11 min-w-11"
+          onPress={onOpenComparisonHistory}
+        >
+          <FiBarChart2 aria-hidden className="size-4" />
+          <span className="hidden lg:inline">Comparison history</span>
+        </Button>
+        {!isComparing && hasTranscript ? (
+          <Button
+            aria-label="Save conversation"
+            className="ml-auto min-h-11 min-w-11"
+            onPress={onSaveConversation}
+            isDisabled={isSaveDisabled}
+            isPending={isSavePending}
+          >
+            <FiSave aria-hidden className="size-4" />
+            <span className="hidden md:inline">Save conversation</span>
+          </Button>
+        ) : null}
+      </Toolbar>
+    </Section>
   )
 }

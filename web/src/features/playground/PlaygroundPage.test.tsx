@@ -315,6 +315,32 @@ afterEach(() => {
 })
 
 describe("the Playground before the first question", () => {
+  it("identifies the provider when model labels are shared", async () => {
+    mockApi({
+      catalog: {
+        ...CATALOG,
+        data: [...CATALOG.data, { ...CATALOG.data[0], id: "backup:gpt-4o" }],
+      } as ModelListResponse,
+    })
+    renderPage()
+    await screen.findByText("What can I help with?")
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent(
+      "openai:gpt-4o",
+    )
+  })
+
+  it("names comparison history as it appears on screen", async () => {
+    mockApi()
+    renderPage()
+    await screen.findByText("What can I help with?")
+    const history = screen.getByRole("button", { name: "Comparison history" })
+    expect(history).toHaveTextContent("Comparison history")
+    await userEvent.click(history)
+    expect(
+      await screen.findByText("No saved comparisons yet."),
+    ).toBeInTheDocument()
+  })
+
   it("greets, and offers the catalog's first chat model", async () => {
     mockApi()
     renderPage()
@@ -560,7 +586,7 @@ describe("comparing two models", () => {
     await screen.findByText("What can I help with?")
 
     await user.click(
-      await screen.findByRole("button", { name: "Compare two models" }),
+      await screen.findByRole("button", { name: "Compare models" }),
     )
     expect(
       await screen.findByRole("button", { name: "Model A" }),
@@ -593,7 +619,7 @@ describe("comparing two models", () => {
     renderPage()
     await screen.findByText("What can I help with?")
 
-    await user.click(screen.getByRole("button", { name: "Compare two models" }))
+    await user.click(screen.getByRole("button", { name: "Compare models" }))
     await user.type(screen.getByLabelText("Message"), "which?")
     await user.click(screen.getByRole("button", { name: "Send message" }))
     await user.click(
@@ -619,7 +645,7 @@ describe("comparing two models", () => {
     await screen.findByText("What can I help with?")
 
     await user.click(
-      await screen.findByRole("button", { name: "Compare two models" }),
+      await screen.findByRole("button", { name: "Compare models" }),
     )
     await user.type(screen.getByLabelText("Message"), "which?")
     await user.click(screen.getByRole("button", { name: "Send message" }))
@@ -658,7 +684,7 @@ describe("comparing two models", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }))
     expect(await screen.findByText("asked before")).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "Compare two models" }))
+    await user.click(screen.getByRole("button", { name: "Compare models" }))
     await screen.findByRole("button", { name: "Model A" })
 
     expect(screen.queryByText("asked before")).not.toBeInTheDocument()
@@ -674,7 +700,7 @@ describe("comparing two models", () => {
     await screen.findByText("What can I help with?")
 
     await user.click(
-      await screen.findByRole("button", { name: "Compare two models" }),
+      await screen.findByRole("button", { name: "Compare models" }),
     )
     await screen.findByRole("button", { name: "Model A" })
     expect(
@@ -728,7 +754,7 @@ describe("state that must not outlive what produced it", () => {
     await stream.push(delta("mid-flight"))
     await screen.findByText("mid-flight")
 
-    await user.click(screen.getByRole("button", { name: "Compare two models" }))
+    await user.click(screen.getByRole("button", { name: "Compare models" }))
     await screen.findByRole("button", { name: "Model A" })
 
     // The frame that matters: one delivered *after* the switch. An uncancelled
@@ -920,7 +946,7 @@ describe("history", () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText("What can I help with?")
-    await user.click(screen.getByRole("button", { name: "Compare two models" }))
+    await user.click(screen.getByRole("button", { name: "Compare models" }))
 
     await user.click(
       await screen.findByRole("button", { name: "Conversation history" }),
@@ -942,7 +968,7 @@ describe("history", () => {
       screen.queryByRole("button", { name: "Model B" }),
     ).not.toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Compare two models" }),
+      screen.getByRole("button", { name: "Compare models" }),
     ).toBeInTheDocument()
   })
 })

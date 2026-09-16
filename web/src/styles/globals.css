@@ -1781,6 +1781,7 @@ main {
    banners and standalone on a page, so no container can reach it, and a rule
    keyed on what the control IS cannot be forgotten by a call site either. */
 .otari-toolbar .button--ghost,
+.otari-actions .button--ghost,
 .otari-pagination .button--ghost,
 .otari-table .button--ghost,
 .otari-bulk-bar .button--ghost,

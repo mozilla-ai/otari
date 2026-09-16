@@ -8,6 +8,7 @@ import { useSurfaceVisibility } from "@/app/nav/useNavVisibility"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // Desktop destinations; the account menu keeps them reachable on mobile.
+// WalletNavSlot is empty in OSS; the hosted overlay supplies its balance control.
 
 const ACTION =
   "flex min-h-[2.125rem] items-center rounded-md px-1 text-shell-label font-medium text-muted transition-colors hover:text-foreground"

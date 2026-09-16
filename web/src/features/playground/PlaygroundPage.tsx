@@ -18,6 +18,7 @@ import { PlaygroundConversation } from "./PlaygroundConversation"
 import { PlaygroundGateNotice } from "./PlaygroundGateNotice"
 import { PlaygroundToolbar } from "./PlaygroundToolbar"
 import { PlaygroundWelcome } from "./PlaygroundWelcome"
+import { CHAT_COLUMN } from "./playgroundLayout"
 
 export function PlaygroundPage() {
   useDocumentTitle("Playground")
@@ -69,9 +70,9 @@ export function PlaygroundPage() {
 
   return (
     <div className="flex min-h-[calc(100dvh-6rem)] flex-col md:min-h-[calc(100dvh-6.5rem)]">
-      <div className="relative">
-        <PageIntro title="Playground" />
-        <div className="absolute right-0 top-0">
+      <PageIntro
+        title="Playground"
+        action={
           <Button
             aria-label="Start a new chat"
             onPress={() => playground.setIsNewChatConfirmOpen(true)}
@@ -81,18 +82,14 @@ export function PlaygroundPage() {
             <span className="hidden md:inline">New chat</span>
             <span className="md:hidden">New</span>
           </Button>
-        </div>
-      </div>
+        }
+      />
       <PlaygroundToolbar
         isComparing={playground.isComparing}
         hasTranscript={hasTranscript}
         onOpenHistory={() => playground.setIsHistoryOpen(true)}
         onSaveConversation={playground.requestSaveConversation}
-        isSaveDisabled={
-          !hasTranscript ||
-          playground.isSavePending ||
-          playground.isConversationSaved
-        }
+        isSaveDisabled={!hasTranscript || playground.isConversationSaved}
         isSavePending={playground.isSavePending}
         onOpenComparisonHistory={() =>
           playground.setIsComparisonHistoryOpen(true)
@@ -124,7 +121,9 @@ export function PlaygroundPage() {
             onRegenerate={playground.regenerate}
           />
           <div ref={follow.setEndMarker} aria-hidden className="h-0" />
-          <div className="-mb-5 sticky bottom-0 z-10 mx-auto mt-auto w-full max-w-[47.5rem] bg-background pt-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:-mb-6 md:pb-6">
+          <div
+            className={`${CHAT_COLUMN} -mb-5 sticky bottom-0 z-10 mt-auto bg-background pt-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:-mb-6 md:pb-6`}
+          >
             {playground.haveBothAnswered &&
             playground.ratingState !== "dismissed" ? (
               <ComparisonRatingBar

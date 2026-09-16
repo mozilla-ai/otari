@@ -11,7 +11,6 @@ import { CopyButton } from "@/design-system/actions/CopyButton"
 import { CodeBlock } from "@/design-system/content/CodeBlock"
 import { Markdown } from "@/design-system/content/Markdown"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { Toolbar } from "@/design-system/layout/Toolbar"
 import { parseThinkTags } from "./helpers/parseThinkTags"
 import { formatTurnStats } from "./helpers/playgroundCost"
 import { splitModelKey } from "./helpers/playgroundModels"
@@ -122,7 +121,7 @@ export function MessageBubble({
           response alone hid the whole row at the one moment somebody wants
           Regenerate. Copy still needs something to copy. */}
       {areActionsVisible && (response || turn.errorMessage) ? (
-        <Toolbar className="gap-2">
+        <div className="otari-actions flex flex-wrap items-center gap-2">
           {response ? (
             <CopyButton value={response} label="response" showLabel />
           ) : null}
@@ -131,7 +130,7 @@ export function MessageBubble({
               <FiRotateCcw aria-hidden className="size-4" /> Regenerate
             </Button>
           ) : null}
-        </Toolbar>
+        </div>
       ) : null}
     </div>
   )

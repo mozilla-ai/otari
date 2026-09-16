@@ -600,6 +600,7 @@ export const DEPLOYMENT_NAV_SECTIONS: readonly NavSection[] =
   DEPLOYMENT_SECTIONS
 
 // Kept in route lookup for surface gating, outside the sidebar sections.
+// Availability follows the gateway's inference surface, not a paid capability.
 export const PLAYGROUND_NAV_ITEM = {
   to: "/playground",
   label: "Playground",
@@ -607,6 +608,7 @@ export const PLAYGROUND_NAV_ITEM = {
   icon: FiMessageSquare,
 } as const satisfies NavItem
 
+/** Route lookup includes chrome destinations as well as all three sidebar scopes. */
 export const NAV_ITEMS: readonly NavItem[] = [
   PLAYGROUND_NAV_ITEM,
   ...[...NAV_SECTIONS, ...ORG_NAV_SECTIONS, ...DEPLOYMENT_NAV_SECTIONS].flatMap(
