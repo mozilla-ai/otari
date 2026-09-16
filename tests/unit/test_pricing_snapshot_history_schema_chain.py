@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the shared metadata)
-from gateway.models.entities import PricingSnapshotHistory
+from gateway.models.pricing import PricingSnapshotHistory
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _REVISION = "b2d4f6a8c0e2"

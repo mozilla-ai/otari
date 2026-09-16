@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger as gateway_logger
-from gateway.models.entities import ModelPricing
+from gateway.models.pricing import ModelPricing
 from gateway.services.pricing_init_service import (
     warn_if_require_pricing_without_pricing,
     warn_if_search_tools_lack_flat_pricing,

@@ -15,7 +15,7 @@ every writer and none of them can be expressed in the schema at all:
   which the OSS edition ships by default, has neither exclusion constraints nor
   range types. So the rule is checked here and the schema holds the part both
   engines can (a unique index on the period start); see
-  `models.entities.OrganizationModelPricing` for the race that leaves.
+  `models.pricing.OrganizationModelPricing` for the race that leaves.
 - **Only a management role may write.** Rates decide what every member of the
   organization is billed, so this is the same owner-or-admin gate the rest of the
   organization surface uses, delegated to ``OrganizationService`` rather than
@@ -44,8 +44,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import OrganizationModelPricing
 from gateway.models.money import to_usd, to_usd_or_none
+from gateway.models.pricing import OrganizationModelPricing
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.repositories.tenancy import (

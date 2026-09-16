@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_catalog_reader
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import ModelPricing
 from gateway.models.money import as_float, to_usd, to_usd_or_none
+from gateway.models.pricing import ModelPricing
 from gateway.models.pricing_schemas import PricingTier
 from gateway.services.alias_service import all_alias_names, resolve_effective_alias
 from gateway.services.policy_store import all_policy_names, resolve_effective_policy

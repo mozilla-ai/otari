@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import ModelPricing
+from gateway.models.pricing import ModelPricing
 from gateway.services.merged_catalog_service import ModelObject, ModelPricingInfo, alias_model, apply_default_pricing
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
 

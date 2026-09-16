@@ -52,7 +52,8 @@ from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import ModelPricing, UsageLog
+from gateway.models.entities import UsageLog
+from gateway.models.pricing import ModelPricing
 from gateway.rate_limit import check_rate_limit
 from gateway.services.budget_service import (
     ZERO,

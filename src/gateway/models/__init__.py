@@ -23,6 +23,7 @@ from gateway.models import (  # noqa: F401
     inference,
     platform,
     playground,
+    pricing,
     provider_keys,
     tenancy,
 )

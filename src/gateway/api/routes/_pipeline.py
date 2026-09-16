@@ -122,10 +122,11 @@ from gateway.metrics import REGISTRY, Histogram
 from gateway.metrics import Counter as PrometheusCounter
 from gateway.model_labeling import relabel_model
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import ModelPricing, UsageLog
+from gateway.models.entities import UsageLog
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
+from gateway.models.pricing import ModelPricing
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budget_service import (

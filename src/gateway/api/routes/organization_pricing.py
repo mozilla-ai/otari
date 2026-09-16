@@ -29,8 +29,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, ModelProviderPortDep, get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import OrganizationModelPricing
 from gateway.models.money import as_float
+from gateway.models.pricing import OrganizationModelPricing
 
 # The tier shape comes from the deployment pricing route rather than a second
 # copy here. An override resolves into a transient ``ModelPricing`` and is read by

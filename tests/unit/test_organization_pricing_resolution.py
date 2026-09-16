@@ -24,7 +24,7 @@ from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the shared metadata)
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import ModelPricing, OrganizationModelPricing
+from gateway.models.pricing import ModelPricing, OrganizationModelPricing
 from gateway.models.tenancy import Organization
 from gateway.services.external_usage_service import _load_pricing_index, _resolve_pricing
 from gateway.services.organization_pricing_service import (

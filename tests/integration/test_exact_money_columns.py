@@ -29,7 +29,8 @@ from sqlmodel import col
 from conftest import seed_workspace_id
 from gateway.core.metered_pricing import calculate_metered_cost
 from gateway.core.usage import GatewayUsage
-from gateway.models.entities import ModelPricing, OrganizationModelPricing, UsageLog
+from gateway.models.entities import UsageLog
+from gateway.models.pricing import ModelPricing, OrganizationModelPricing
 from gateway.models.tenancy import Organization
 from gateway.services.pricing_service import default_model_pricing
 

@@ -12,7 +12,7 @@ from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_
 from gateway.api.routes._passthrough import BillingMeters, run_passthrough
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import ModelPricing
+from gateway.models.pricing import ModelPricing
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import flat_request_cost, per_request_meters
 from gateway.services.provider_kwargs import ResolvedProvider
