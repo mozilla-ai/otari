@@ -460,7 +460,7 @@ export function ModelDetailView({
               {model.deprecated ? <Badge tone="warn">Deprecated</Badge> : null}
             </div>
           </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-3">
             {canPrice ? (
               <Link
                 to="/organization/pricing"

@@ -320,31 +320,17 @@ function ModelCard({
   publicView: boolean
 }) {
   const title = model.vendor ? `${model.vendor}: ${model.name}` : model.name
-  const titleClass = "text-heading text-link hover:text-link-hover break-words"
+  const titleClass =
+    "text-heading text-link group-hover:text-link-hover break-words"
   const providers =
     model.provider_count === 1
       ? "1 provider"
       : `${model.provider_count} providers`
-  return (
-    <article className="flex flex-col gap-2 border border-border bg-surface p-4">
+  const content = (
+    <>
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-          {publicView ? (
-            <a href={publicCatalogHref(model.id)} className={titleClass}>
-              {title}
-            </a>
-          ) : (
-            // No onClick: the link navigates on a plain click by itself, and
-            // intercepting one would take Cmd/Ctrl-click and middle-click
-            // (which opens a new tab) with it. `onOpen` is the table row's.
-            <Link
-              to="/models/$"
-              params={{ _splat: model.id }}
-              className={titleClass}
-            >
-              {title}
-            </Link>
-          )}
+          <span className={titleClass}>{title}</span>
           {model.open_weights ? <Badge tone="muted">Open weights</Badge> : null}
           {model.deprecated ? <Badge tone="warn">Deprecated</Badge> : null}
         </div>
@@ -382,6 +368,30 @@ function ModelCard({
           </>
         ) : null}
       </p>
+    </>
+  )
+  const cardClass =
+    "group flex cursor-pointer flex-col gap-2 border border-border bg-surface p-4 hover:bg-surface-alt"
+  return (
+    <article>
+      {publicView ? (
+        <a
+          href={publicCatalogHref(model.id)}
+          aria-label={title}
+          className={cardClass}
+        >
+          {content}
+        </a>
+      ) : (
+        <Link
+          to="/models/$"
+          params={{ _splat: model.id }}
+          aria-label={title}
+          className={cardClass}
+        >
+          {content}
+        </Link>
+      )}
     </article>
   )
 }
@@ -479,7 +489,23 @@ export function ModelCatalogView({
     providers: initialProvider ? [initialProvider] : [],
   })
   const [sort, setSort] = useState("newest")
-  const [view, setView] = useState("list")
+  const [view, setView] = useState(() => {
+    try {
+      return localStorage.getItem("otari.models.view") === "table"
+        ? "table"
+        : "list"
+    } catch {
+      return "list"
+    }
+  })
+  const changeView = (next: string) => {
+    setView(next)
+    try {
+      localStorage.setItem("otari.models.view", next)
+    } catch {
+      // Keep the control usable when browser storage is unavailable.
+    }
+  }
   const [railOpen, setRailOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
@@ -600,7 +626,7 @@ export function ModelCatalogView({
               label="View"
               options={VIEW_OPTIONS}
               value={view}
-              onChange={setView}
+              onChange={changeView}
             />
             <Button
               size="sm"
@@ -636,6 +662,7 @@ export function ModelCatalogView({
                 sortDescriptor={sortDescriptor}
                 onSortChange={onSortChange}
                 onRowAction={onOpen}
+                rowClassName={() => "cursor-pointer"}
                 emptyContent={
                   <EmptyMessage>
                     {models.length === 0
