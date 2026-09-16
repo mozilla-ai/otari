@@ -332,8 +332,7 @@ describe("SetupGuide", () => {
     } finally {
       vi.useRealTimers()
     }
-    // A second check is available after the animation ends.
-    await user.click(screen.getByRole("button", { name: "Close" }))
+    await user.click(screen.getByRole("button", { name: "Skip" }))
   })
 
   it("keeps snippet guidance unchanged when revealing and hiding the key", async () => {
@@ -346,11 +345,11 @@ describe("SetupGuide", () => {
       const hint =
         label === "Agent"
           ? screen.getByText(/Works with Claude Code/)
-          : screen.getByText(/Prefer to have an agent wire this up/)
+          : screen.getByText(/Hidden keys use a stand-in/)
       const original = hint.textContent
       if (label !== "Agent") {
-        expect(hint).toHaveTextContent("the example shows a stand-in")
-        expect(hint).toHaveTextContent("copying always includes your real key")
+        expect(hint).toHaveTextContent("Hidden keys use a stand-in")
+        expect(hint).toHaveTextContent("copies include your real key")
       }
       await user.click(
         screen.getByRole("button", { name: "Show Your API key" }),
@@ -541,10 +540,8 @@ describe("SetupGuide", () => {
   it("mints a fresh key per workspace, never carrying one across", async () => {
     // The key belongs to one workspace, and showing it under another
     // workspace's heading would offer a credential that bills somewhere else.
-    // The sheet traps focus, so the switcher is out of reach while it is open;
-    // closing it first is the path an operator has, and the guide being keyed
-    // on the workspace is what resets the state behind it.
-    mockApi()
+    // Skip leaves the workspace switcher accessible; the next workspace is fresh.
+    const api = mockApi()
     const user = userEvent.setup()
     await renderGuide()
 
@@ -553,7 +550,11 @@ describe("SetupGuide", () => {
     )
     expect(await screen.findByDisplayValue(KEY)).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "Close" }))
+    await user.click(screen.getByRole("button", { name: "Skip" }))
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    )
+    api.setActivation(workspaceActivation())
     await user.click(
       await screen.findByRole("button", { name: "switch to Research" }),
     )
@@ -586,21 +587,20 @@ describe("SetupGuide", () => {
     expect(dismissed?.[1]?.method).toBe("POST")
   })
 
-  it("closing the sheet is not the same as skipping it", async () => {
-    // Escape and the close control put the sheet away for this page load only.
-    // Retiring the guide is permanent and the server records it, so it takes a
-    // press on the control that says so.
+  it("offers Skip without a temporary close control", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
     await renderGuide()
 
-    await user.click(await screen.findByRole("button", { name: "Close" }))
-
-    await waitFor(() => {
-      expect(
-        screen.queryByRole("heading", { name: "Send your first request" }),
-      ).not.toBeInTheDocument()
+    const heading = await screen.findByRole("heading", {
+      name: "Send your first request",
     })
+    expect(
+      screen.queryByRole("button", { name: "Close" }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Skip" })).toBeInTheDocument()
+    await user.keyboard("{Escape}")
+    expect(heading).toBeInTheDocument()
     expect(
       fetchMock.mock.calls.some(([input]) =>
         String(input).includes("/activation/dismiss"),

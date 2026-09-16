@@ -125,7 +125,7 @@ An edge that would be too loud is suppressed by **naming the container**, so a c
 site never has to remember. Inside one of these, a ghost renders edgeless:
 
 `.otari-toolbar` · `.otari-table` · `.otari-pagination` · `.otari-bulk-bar` ·
-`.otari-breakdown` · `.otari-rail`
+`.otari-breakdown` · `.otari-rail` · `.otari-setup-actions`
 
 Put the class on the container, not on the button. If you are building a new
 container that holds a row of ghosts and the edges read as a grid of boxes, add a

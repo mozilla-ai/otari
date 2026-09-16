@@ -111,6 +111,13 @@ export const Large: Story = {
   },
 }
 
+export const Scanning: Story = {
+  args: {
+    ...Large.args,
+    isScanning: true,
+  },
+}
+
 /** The payoff shape: a mark beside the heading, and a receipt band under it. */
 export const WithMark: Story = {
   args: {

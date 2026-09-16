@@ -30,6 +30,15 @@ function open({
 }
 
 describe("Dialog", () => {
+  it.each([true, false])(
+    "scans the modal border when isScanning is %s",
+    async (isScanning) => {
+      open({ isScanning })
+      const dialog = await screen.findByRole("dialog")
+      expect(dialog.classList.contains("otari-scan-border")).toBe(isScanning)
+    },
+  )
+
   it("names itself by its title and describes itself by its description", async () => {
     // What a screen reader announces on open is the dialog, so the sentence
     // under the title has to be the dialog's description rather than a

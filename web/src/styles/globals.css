@@ -1786,6 +1786,7 @@ main {
 .otari-bulk-bar .button--ghost,
 .otari-breakdown .button--ghost,
 .otari-rail .button--ghost,
+.otari-setup-actions .button--ghost,
 .button--ghost.button--icon-only {
   border-color: transparent;
 }

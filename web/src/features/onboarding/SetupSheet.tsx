@@ -109,6 +109,8 @@ export function SetupSheet({
       }}
       size="lg"
       isAnnouncement
+      isDismissable={false}
+      isScanning={!checkFailed}
       title="Send your first request"
       description={
         <>
@@ -136,9 +138,15 @@ export function SetupSheet({
         </p>
       }
       actions={
-        <Button isPending={isSkipping} onPress={onSkip}>
-          Skip
-        </Button>
+        <div className="otari-setup-actions flex w-full">
+          <Button
+            className="w-full sm:w-auto"
+            isPending={isSkipping}
+            onPress={onSkip}
+          >
+            Skip
+          </Button>
+        </div>
       }
     >
       <DialogSection>
@@ -204,8 +212,8 @@ export function SetupSheet({
           </CodeBlock>
           <p className="text-caption text-subtle">
             {tab === "agent"
-              ? "Works with Claude Code, Codex, Cursor, and any agent that can edit files and run commands. It reads the key from your environment rather than carrying it."
-              : "Prefer to have an agent wire this up? The Agent tab is a paste-ready prompt. When the key is hidden, the example shows a stand-in; copying always includes your real key."}
+              ? "Works with Claude Code, Codex, and Cursor. Reads your key from the environment."
+              : "Hidden keys use a stand-in; copies include your real key."}
           </p>
           {model === undefined ? (
             <p className="text-caption text-subtle">

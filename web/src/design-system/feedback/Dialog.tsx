@@ -58,6 +58,8 @@ export interface DialogProps {
    * get-started strip, a first-run panel", and a first-run sheet is it.
    */
   isAnnouncement?: boolean
+  /** Sweeps the outer border while awaiting an external event. */
+  isScanning?: boolean
   /** Whether Escape, a backdrop press and the close control dismiss it. */
   isDismissable?: boolean
   /**
@@ -113,6 +115,7 @@ export function Dialog({
   size = "md",
   mark,
   isAnnouncement = false,
+  isScanning = false,
   isDismissable = true,
   status,
   footerStart,
@@ -151,7 +154,7 @@ export function Dialog({
         >
           <Modal.Dialog
             aria-describedby={description ? descriptionId : undefined}
-            className={`otari-dialog otari-dialog--${size} flex flex-col p-0`}
+            className={`otari-dialog otari-dialog--${size} relative flex flex-col p-0 ${isScanning ? "otari-scan-border" : ""}`}
           >
             <header
               className={`flex shrink-0 items-start justify-between gap-4 px-6 pt-5 pb-4 ${
