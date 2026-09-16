@@ -58,7 +58,9 @@ describe("App", () => {
     renderApp(bootstrap())
     expect(document.title).toBe("Sign in · Otari")
 
-    expect(screen.getByRole("heading", { name: "Otari" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Sign in to Otari" }),
+    ).toBeInTheDocument()
   })
 
   it("renders the data-plane landing page for a hybrid gateway", () => {
@@ -101,7 +103,9 @@ describe("App", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       /does not know what it is connected to/,
     )
-    expect(screen.queryByRole("heading", { name: "Otari" })).toBeNull()
+    expect(
+      screen.queryByRole("heading", { name: "Sign in to Otari" }),
+    ).toBeNull()
   })
 
   it("renders the accept-invitation page ahead of the sign-in screen", async () => {
@@ -127,7 +131,9 @@ describe("App", () => {
     // token in the link is this visitor's whole credential, not a session.
     expect(await screen.findByText("Acme")).toBeInTheDocument()
     expect(document.title).toBe("Accept invitation · Otari")
-    expect(screen.queryByRole("heading", { name: "Otari" })).toBeNull()
+    expect(
+      screen.queryByRole("heading", { name: "Sign in to Otari" }),
+    ).toBeNull()
   })
 
   it("renders the public catalog ahead of the sign-in screen where the deployment opens it", async () => {
@@ -150,7 +156,9 @@ describe("App", () => {
       await screen.findByRole("heading", { name: "Models" }),
     ).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Sign in" })).toBeInTheDocument()
-    expect(screen.queryByRole("heading", { name: "Otari" })).toBeNull()
+    expect(
+      screen.queryByRole("heading", { name: "Sign in to Otari" }),
+    ).toBeNull()
   })
 
   it("keeps the catalog behind the sign-in screen by default", () => {
@@ -158,7 +166,9 @@ describe("App", () => {
 
     renderApp(bootstrap())
 
-    expect(screen.getByRole("heading", { name: "Otari" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Sign in to Otari" }),
+    ).toBeInTheDocument()
     expect(screen.queryByRole("heading", { name: "Models" })).toBeNull()
   })
 
@@ -173,7 +183,9 @@ describe("App", () => {
     expect(
       await screen.findByRole("heading", { name: "Email verified" }),
     ).toBeInTheDocument()
-    expect(screen.queryByRole("heading", { name: "Otari" })).toBeNull()
+    expect(
+      screen.queryByRole("heading", { name: "Sign in to Otari" }),
+    ).toBeNull()
   })
 
   it("sends a completed OAuth sign-in on to the dashboard rather than leaving it on the callback page", async () => {
@@ -280,7 +292,9 @@ describe("a bootstrap from an older gateway", () => {
   it("still renders the sign-in screen without oauth_providers", () => {
     const { container } = renderApp(older("oauth_providers"))
 
-    expect(screen.getByRole("heading", { name: "Otari" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Sign in to Otari" }),
+    ).toBeInTheDocument()
     expect(container).not.toBeEmptyDOMElement()
   })
 
