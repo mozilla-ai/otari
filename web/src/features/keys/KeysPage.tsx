@@ -1,5 +1,12 @@
 import { Link } from "@tanstack/react-router"
-import { type RefObject, useCallback, useEffect, useRef, useState } from "react"
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import type {
   ApiKey,
   CreateKeyRequest,
@@ -60,7 +67,7 @@ import {
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { KeyActionsMenu } from "./KeyActionsMenu"
-import { isVirtualUser, secretCaption } from "./secretCaption"
+import { isVirtualUser, keyFingerprint, secretCaption } from "./secretCaption"
 
 // ---------- helpers ----------
 
@@ -80,6 +87,16 @@ function relative(iso: string | null): string | null {
     if (abs >= sec) return rtf.format(Math.round(diffSec / sec), unit)
   }
   return rtf.format(diffSec, "second")
+}
+
+type Layout = "wide" | "compact" | "mobile"
+
+// `md` and below is the list; between that and 1100 the lowest-priority lanes
+// fold into the row. The region's own width decides, except that a viewport
+// under `md` is the list whatever the region measures.
+function layoutFor(viewport: number, region = viewport): Layout {
+  if (viewport < 768 || region < 600) return "mobile"
+  return region < 1100 ? "compact" : "wide"
 }
 
 function isExpired(key: ApiKey): boolean {
@@ -828,7 +845,18 @@ function StatusMark({ apiKey }: { apiKey: ApiKey }) {
  * rather than merely narrow. `Selected models` is muted like its siblings and
  * deliberately not link ink: it is a label, and nothing here is clickable.
  */
-function KeyMetaLine({ apiKey }: { apiKey: ApiKey }) {
+function KeyMetaLine({
+  apiKey,
+  face = "text-mono-overline",
+}: {
+  apiKey: ApiKey
+  /**
+   * The overline's uppercase mono is right beside a 16px name and wrong inside
+   * the folded caption line, where it would sit between two runs of sentence-case
+   * body text.
+   */
+  face?: string
+}) {
   const { text, tone } = accessLabel(apiKey.allowed_models)
   // Surface the exact entries on hover; the count would mislead (a wildcard is many).
   const title =
@@ -863,7 +891,9 @@ function KeyMetaLine({ apiKey }: { apiKey: ApiKey }) {
     })
   }
   return (
-    <span className="inline-flex max-w-full gap-3 overflow-hidden whitespace-nowrap align-bottom text-mono-overline">
+    <span
+      className={`inline-flex max-w-full gap-3 overflow-hidden whitespace-nowrap align-bottom ${face}`}
+    >
       {facts.map((fact) => (
         <span
           key={fact.key}
@@ -982,154 +1012,233 @@ export function KeysPage() {
     !!(pendingRegenerate || pendingDelete || editing || regenerated),
   )
   const tableRegion = useRef<HTMLDivElement>(null)
-  const [layout, setLayout] = useState<"wide" | "compact" | "mobile">("wide")
+  // Seeded from the viewport rather than defaulting to "wide": the observer only
+  // reports after the first layout, so a phone would paint the desktop table for
+  // a frame and then swap to the list.
+  const [layout, setLayout] = useState<Layout>(() =>
+    typeof window === "undefined" ? "wide" : layoutFor(window.innerWidth),
+  )
   useEffect(() => {
     const region = tableRegion.current
     if (!region) return
-    const observer = new ResizeObserver(([entry]) => {
-      const width = entry.contentRect.width
-      if (width > 0)
-        setLayout(
-          window.innerWidth < 768 || width < 600
-            ? "mobile"
-            : width < 1100
-              ? "compact"
-              : "wide",
-        )
-    })
+    const measure = (width: number) => {
+      if (width > 0) setLayout(layoutFor(window.innerWidth, width))
+    }
+    const observer = new ResizeObserver(([entry]) =>
+      measure(entry.contentRect.width),
+    )
     observer.observe(region)
-    return () => observer.disconnect()
+    // The region can keep its width while the viewport crosses `md`, which the
+    // observer alone never reports.
+    const onResize = () => measure(region.getBoundingClientRect().width)
+    window.addEventListener("resize", onResize)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("resize", onResize)
+    }
   }, [])
 
-  const ownerLabel = (k: ApiKey) =>
-    isVirtualUser(k.user_id)
-      ? "virtual"
-      : k.user_id
-        ? (memberLabels.get(k.user_id) ?? k.user_id)
-        : "—"
-  const renderActions = (k: ApiKey) => (
-    <KeyActionsMenu
-      apiKey={k}
-      triggerRef={lastAction === k.id ? actionTriggerRef : undefined}
-      onAction={() => setLastAction(k.id)}
-      owner={isDeploymentWide ? ownerLabel(k) : undefined}
-      isPending={updateKey.isPending || rotateKey.isPending}
-      onToggle={() => setActive(k, !k.is_active)}
-      onEdit={() => {
-        setAddOpen(false)
-        setEditing(k.id)
-      }}
-      onRegenerate={() => setPendingRegenerate(k)}
-      onDelete={() => setPendingDelete(k)}
-    />
+  const ownerLabel = useCallback(
+    (k: ApiKey) =>
+      isVirtualUser(k.user_id)
+        ? "virtual"
+        : k.user_id
+          ? (memberLabels.get(k.user_id) ?? k.user_id)
+          : "—",
+    [memberLabels],
   )
-  const renderPrefix = (k: ApiKey) => (
-    <div className="flex items-center gap-1 whitespace-nowrap">
-      <code className="text-mono-caption text-muted">
-        {k.key_prefix ? `${k.key_prefix}…${k.key_suffix ?? ""}` : "—"}
-      </code>
-      {k.key_prefix ? (
-        <CopyButton value={k.key_prefix} label={`key prefix for ${label(k)}`} />
-      ) : null}
-    </div>
+  const renderActions = useCallback(
+    (k: ApiKey) => (
+      <KeyActionsMenu
+        apiKey={k}
+        triggerRef={lastAction === k.id ? actionTriggerRef : undefined}
+        onAction={() => setLastAction(k.id)}
+        owner={isDeploymentWide ? ownerLabel(k) : undefined}
+        // Those lanes are off the row below `wide`, so the menu is the only
+        // place left that can show them whole.
+        showDetails={layout !== "wide"}
+        isPending={updateKey.isPending || rotateKey.isPending}
+        onToggle={() => setActive(k, !k.is_active)}
+        onEdit={() => {
+          setAddOpen(false)
+          setEditing(k.id)
+        }}
+        onRegenerate={() => setPendingRegenerate(k)}
+        onDelete={() => setPendingDelete(k)}
+      />
+    ),
+    [
+      lastAction,
+      actionTriggerRef,
+      isDeploymentWide,
+      ownerLabel,
+      layout,
+      updateKey.isPending,
+      rotateKey.isPending,
+      setActive,
+    ],
+  )
+  const renderPrefix = useCallback(
+    (k: ApiKey) => (
+      <div className="flex items-center gap-1 whitespace-nowrap">
+        <code className="text-mono-caption text-muted">
+          {keyFingerprint(k) ?? "—"}
+        </code>
+        {k.key_prefix ? (
+          <CopyButton
+            value={k.key_prefix}
+            label={`key prefix for ${label(k)}`}
+          />
+        ) : null}
+      </div>
+    ),
+    [],
   )
 
-  const columns: DataTableColumn<ApiKey>[] = [
-    {
-      id: "name",
-      header: "Name",
-      isRowHeader: true,
-      cell: (k) => (
-        <div className="flex min-w-0 flex-col gap-1">
-          <span className="truncate text-base text-foreground">
-            {k.key_name ?? <span className="text-muted">(unnamed)</span>}
-          </span>
-          <div className="truncate text-caption">
-            {layout === "compact" && isDeploymentWide ? (
-              <>
-                <span>{ownerLabel(k)}</span>
-                {" · "}
-              </>
-            ) : null}
-            <KeyMetaLine apiKey={k} />
-            {layout === "compact"
-              ? ` · Used ${relative(k.last_used_at) ?? "never"}`
-              : null}
+  // Memoized on what the cells read, so DataTable's per-row cache holds across
+  // selection clicks; see its docstring.
+  const columns = useMemo<DataTableColumn<ApiKey>[]>(
+    () => [
+      {
+        id: "name",
+        header: "Name",
+        isRowHeader: true,
+        cell: (k) => (
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="truncate text-base text-foreground">
+              {k.key_name ?? <span className="text-muted">(unnamed)</span>}
+            </span>
+            {/* Folded, the line joins the owner and the last use to the meta
+              facts, so it takes one face throughout rather than setting an
+              uppercase mono run between two runs of body text. */}
+            <div className="truncate text-caption">
+              {layout === "compact" && isDeploymentWide ? (
+                <>
+                  <span>{ownerLabel(k)}</span>
+                  {" · "}
+                </>
+              ) : null}
+              <KeyMetaLine
+                apiKey={k}
+                face={layout === "compact" ? "text-caption" : undefined}
+              />
+              {layout === "compact"
+                ? ` · used ${relative(k.last_used_at) ?? "never"}`
+                : null}
+            </div>
           </div>
-        </div>
-      ),
-    },
-    {
-      id: "status",
-      header: "Status",
-      cell: (k) => <StatusMark apiKey={k} />,
-    },
-    // Every key on a member's page is their own, so an Owner column there
-    // would repeat one name down the table.
-    ...(isDeploymentWide
-      ? [
-          {
-            id: "owner",
-            header: "Owner",
-            cell: (k: ApiKey) => (
-              <span className="block truncate text-mono-caption text-muted">
-                {ownerLabel(k)}
-              </span>
-            ),
-          } satisfies DataTableColumn<ApiKey>,
-        ]
-      : []),
-    {
-      id: "key",
-      header: "Key",
-      cell: renderPrefix,
-    },
-    {
-      id: "created",
-      header: "Created",
-      cell: (k) => (
-        <span className="text-mono-caption text-muted">
-          {formatDate(k.created_at)}
-        </span>
-      ),
-    },
-    {
-      id: "last_used",
-      header: "Last used",
-      cell: (k) => (
-        <span className="text-mono-caption text-muted">
-          {relative(k.last_used_at) ?? "never"}
-        </span>
-      ),
-    },
-    {
-      id: "expires",
-      header: "Expires",
-      cell: (k) => (
-        <span
-          className="text-muted"
-          title={
-            k.expires_at ? new Date(k.expires_at).toLocaleString() : undefined
-          }
-        >
-          {k.expires_at ? formatDate(k.expires_at) : "never"}
-        </span>
-      ),
-    },
-    {
-      id: "actions",
-      header: "Actions",
-      align: "end",
-      cell: renderActions,
-    },
-  ]
-  const visibleColumns =
-    layout === "compact"
-      ? columns.filter(
-          (column) =>
-            !["owner", "created", "last_used", "expires"].includes(column.id),
-        )
-      : columns
+        ),
+      },
+      {
+        id: "status",
+        header: "Status",
+        cell: (k) => <StatusMark apiKey={k} />,
+      },
+      // Every key on a member's page is their own, so an Owner column there
+      // would repeat one name down the table.
+      ...(isDeploymentWide
+        ? [
+            {
+              id: "owner",
+              header: "Owner",
+              // One column, two faces, deliberately: a member is a person and
+              // takes the body face, while a raw id like `ci-bot` is an
+              // identifier and takes the mono one. The face is what tells the two
+              // apart, so neither needs a chip to say which it is. The id stays
+              // in the title, so the value actually sent on a request is
+              // recoverable from a truncated cell.
+              cell: (k: ApiKey) => {
+                const member =
+                  !isVirtualUser(k.user_id) && k.user_id
+                    ? memberLabels.get(k.user_id)
+                    : undefined
+                if (member) {
+                  return (
+                    <span
+                      className="block truncate text-sm text-foreground"
+                      title={k.user_id ?? ""}
+                    >
+                      {member}
+                    </span>
+                  )
+                }
+                return (
+                  <span
+                    className={`block truncate text-mono-caption ${
+                      isVirtualUser(k.user_id) ? "text-subtle" : "text-muted"
+                    }`}
+                    title={k.user_id ?? ""}
+                  >
+                    {ownerLabel(k)}
+                  </span>
+                )
+              },
+            } satisfies DataTableColumn<ApiKey>,
+          ]
+        : []),
+      {
+        id: "key",
+        header: "Key",
+        cell: renderPrefix,
+      },
+      {
+        id: "created",
+        header: "Created",
+        cell: (k) => (
+          <span className="text-mono-caption text-muted">
+            {formatDate(k.created_at)}
+          </span>
+        ),
+      },
+      {
+        id: "last_used",
+        header: "Last used",
+        cell: (k) => (
+          <span className="text-mono-caption text-muted">
+            {relative(k.last_used_at) ?? "never"}
+          </span>
+        ),
+      },
+      {
+        id: "expires",
+        header: "Expires",
+        cell: (k) => (
+          <span
+            className="text-muted"
+            title={
+              k.expires_at ? new Date(k.expires_at).toLocaleString() : undefined
+            }
+          >
+            {k.expires_at ? formatDate(k.expires_at) : "never"}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        align: "end",
+        cell: renderActions,
+      },
+    ],
+    [
+      layout,
+      isDeploymentWide,
+      memberLabels,
+      ownerLabel,
+      renderPrefix,
+      renderActions,
+    ],
+  )
+  const visibleColumns = useMemo(
+    () =>
+      layout === "compact"
+        ? columns.filter(
+            (column) =>
+              !["owner", "created", "last_used", "expires"].includes(column.id),
+          )
+        : columns,
+    [columns, layout],
+  )
 
   // Bulk delete targets only already-disabled keys, mirroring the per-row rule
   // that a live key must be disabled before it can be permanently deleted.
@@ -1350,7 +1459,7 @@ export function KeysPage() {
                     ) : null}
                   </div>
                   <div className="truncate text-caption">
-                    <KeyMetaLine apiKey={k} /> · Used{" "}
+                    <KeyMetaLine apiKey={k} face="text-caption" /> · used{" "}
                     {relative(k.last_used_at) ?? "never"}
                   </div>
                 </div>

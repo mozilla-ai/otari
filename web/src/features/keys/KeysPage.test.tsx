@@ -36,6 +36,28 @@ function user(overrides: Partial<User> = {}): User {
   }
 }
 
+// The page picks its layout from the region it is given, which jsdom reports as
+// 0 wide. Feeding the observer a width is what selects wide, compact or the list.
+function stubRegionWidth(width: number) {
+  const OriginalObserver = globalThis.ResizeObserver
+  vi.stubGlobal(
+    "ResizeObserver",
+    class extends OriginalObserver {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) =>
+          callback(
+            entries.map((entry) => ({
+              ...entry,
+              contentRect: { ...entry.contentRect, width },
+            })),
+            observer,
+          ),
+        )
+      }
+    },
+  )
+}
+
 async function chooseAction(user: UserEvent, row: HTMLElement, action: string) {
   await user.click(within(row).getByRole("button", { name: /^Actions for / }))
   await user.click(
@@ -208,23 +230,7 @@ describe("KeysPage", () => {
   })
 
   it("keeps selection, full identity, and prefix copying available in the mobile list", async () => {
-    const OriginalObserver = globalThis.ResizeObserver
-    vi.stubGlobal(
-      "ResizeObserver",
-      class extends OriginalObserver {
-        constructor(callback: ResizeObserverCallback) {
-          super((entries, observer) =>
-            callback(
-              entries.map((entry) => ({
-                ...entry,
-                contentRect: { ...entry.contentRect, width: 390 },
-              })),
-              observer,
-            ),
-          )
-        }
-      },
-    )
+    stubRegionWidth(390)
     const name = "prod-gateway-eu-west-1-primary-ingress-router"
     const owner = "alexandra.constantinescu@platform-engineering.example.com"
     mockApi({
@@ -261,6 +267,41 @@ describe("KeysPage", () => {
       screen.getByRole("button", { name: `Copy key prefix for ${name}` }),
     )
     expect(copy).toHaveBeenCalledWith("gw-prefix")
+  })
+
+  it("keeps two faces in Owner and folds the lanes into the menu only once they leave the row", async () => {
+    const member = "33333333-3333-3333-3333-333333333333"
+    stubRegionWidth(1440)
+    mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "named", user_id: member }),
+        apiKey({ id: "key-2", key_name: "raw", user_id: "ci-bot" }),
+      ],
+      users: [user({ user_id: member, alias: "alice@example.com" })],
+      members: [
+        organizationMember({
+          attribution_user_id: member,
+          full_name: "Alice Example",
+        }),
+      ],
+    })
+    const usr = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    // A member is a person and takes the body face; a raw id is an identifier
+    // and takes the mono one, which is the only thing telling the two apart.
+    const named = await screen.findByText("Alice Example")
+    expect(named).toHaveClass("text-sm", "text-foreground")
+    expect(named).toHaveAttribute("title", member)
+    expect(screen.getByText("ci-bot", { selector: "span" })).toHaveClass(
+      "text-mono-caption",
+    )
+
+    // Created, Last used and Expires are lanes here, so the menu does not
+    // repeat them.
+    await usr.click(screen.getByRole("button", { name: "Actions for named" }))
+    await screen.findByRole("menu")
+    expect(screen.queryByText("Created:")).not.toBeInTheDocument()
   })
 
   it("shows a single empty state (onboarding panel, not also the table fallback)", async () => {
@@ -639,10 +680,15 @@ describe("KeysPage", () => {
     renderPage(<KeysPage />)
 
     const row = (await screen.findByText("ci-bot")).closest("tr")!
-    // An active key offers no Delete (require-disable-first).
-    expect(
-      within(row).queryByRole("button", { name: "Delete" }),
-    ).not.toBeInTheDocument()
+    // An active key refuses Delete, in the menu and with its reason
+    // (require-disable-first).
+    await user.click(
+      within(row).getByRole("button", { name: "Actions for ci-bot" }),
+    )
+    const refused = await screen.findByRole("menuitem", { name: /^Delete/ })
+    expect(refused).toHaveAttribute("aria-disabled", "true")
+    expect(refused).toHaveTextContent("Disable it first")
+    await user.keyboard("{Escape}")
 
     await chooseAction(user, row, "Disable")
 
@@ -671,9 +717,11 @@ describe("KeysPage", () => {
 
     const row = (await screen.findByText("ci-bot")).closest("tr")!
     await chooseAction(user, row, "Regenerate")
-    const armed = await screen.findByRole("alertdialog")
-    expect(within(armed).getByText("ci-bot")).toBeInTheDocument()
-    await user.click(within(armed).getByRole("button", { name: "Regenerate" }))
+    const confirm = await screen.findByRole("alertdialog")
+    expect(within(confirm).getByText("ci-bot")).toBeInTheDocument()
+    await user.click(
+      within(confirm).getByRole("button", { name: "Regenerate" }),
+    )
 
     const reveal = await screen.findByRole("alert", {
       name: /API key created|New secret for/,
@@ -823,8 +871,10 @@ describe("KeysPage", () => {
 
     const row = (await screen.findByText("ci-bot")).closest("tr")!
     await chooseAction(user, row, "Regenerate")
-    const armed = await screen.findByRole("alertdialog")
-    await user.click(within(armed).getByRole("button", { name: "Regenerate" }))
+    const confirm = await screen.findByRole("alertdialog")
+    await user.click(
+      within(confirm).getByRole("button", { name: "Regenerate" }),
+    )
 
     const dialog = await screen.findByRole("dialog")
     expect(

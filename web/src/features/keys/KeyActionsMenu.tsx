@@ -11,12 +11,14 @@ import {
 } from "react-icons/fi"
 import type { ApiKey } from "@/client"
 import { formatDateTime } from "@/shared/helpers/format"
+import { keyFingerprint } from "./secretCaption"
 
 export function KeyActionsMenu({
   apiKey,
   triggerRef,
   onAction,
   owner,
+  showDetails,
   isPending,
   onToggle,
   onEdit,
@@ -27,6 +29,12 @@ export function KeyActionsMenu({
   triggerRef?: RefObject<HTMLButtonElement | null>
   onAction: () => void
   owner?: string
+  /**
+   * Created, Last used, Expires and Models are lanes on the wide table; below it
+   * they leave the row, and the menu is the only place they can still be read
+   * whole.
+   */
+  showDetails?: boolean
   isPending: boolean
   onToggle: () => void
   onEdit: () => void
@@ -92,54 +100,54 @@ export function KeyActionsMenu({
           <p className="break-words text-body">{name}</p>
           {owner ? <p className="break-all text-caption">{owner}</p> : null}
           <p className="break-all text-mono-caption text-muted">
-            {apiKey.key_prefix
-              ? `${apiKey.key_prefix}…${apiKey.key_suffix ?? ""}`
-              : "No key prefix"}
+            {keyFingerprint(apiKey) ?? "No key prefix"}
           </p>
-          <dl className="flex flex-col gap-1 pt-2 text-caption">
-            <div>
-              <dt className="inline">Created: </dt>
-              <dd className="inline">{formatDateTime(apiKey.created_at)}</dd>
-            </div>
-            <div>
-              <dt className="inline">Last used: </dt>
-              <dd className="inline">
-                {apiKey.last_used_at
-                  ? formatDateTime(apiKey.last_used_at)
-                  : "never"}
-              </dd>
-            </div>
-            <div>
-              <dt className="inline">Expires: </dt>
-              <dd className="inline">
-                {apiKey.expires_at
-                  ? formatDateTime(apiKey.expires_at)
-                  : "never"}
-              </dd>
-            </div>
-            <div>
-              <dt className="inline">Models: </dt>
-              <dd className="inline break-words">
-                {apiKey.allowed_models === null
-                  ? "All models"
-                  : apiKey.allowed_models.join(", ") || "No models"}
-              </dd>
-            </div>
-            {apiKey.exclude_from_budget ? (
+          {showDetails ? (
+            <dl className="flex flex-col gap-1 pt-2 text-caption">
               <div>
-                <dt className="inline">Budget: </dt>
-                <dd className="inline">Exempt</dd>
+                <dt className="inline">Created: </dt>
+                <dd className="inline">{formatDateTime(apiKey.created_at)}</dd>
               </div>
-            ) : null}
-            {apiKey.reject_user_mismatch !== null ? (
               <div>
-                <dt className="inline">User matching: </dt>
+                <dt className="inline">Last used: </dt>
                 <dd className="inline">
-                  {apiKey.reject_user_mismatch ? "Strict" : "Lenient"}
+                  {apiKey.last_used_at
+                    ? formatDateTime(apiKey.last_used_at)
+                    : "never"}
                 </dd>
               </div>
-            ) : null}
-          </dl>
+              <div>
+                <dt className="inline">Expires: </dt>
+                <dd className="inline">
+                  {apiKey.expires_at
+                    ? formatDateTime(apiKey.expires_at)
+                    : "never"}
+                </dd>
+              </div>
+              <div>
+                <dt className="inline">Models: </dt>
+                <dd className="inline break-words">
+                  {apiKey.allowed_models === null
+                    ? "All models"
+                    : apiKey.allowed_models.join(", ") || "No models"}
+                </dd>
+              </div>
+              {apiKey.exclude_from_budget ? (
+                <div>
+                  <dt className="inline">Budget: </dt>
+                  <dd className="inline">Exempt</dd>
+                </div>
+              ) : null}
+              {apiKey.reject_user_mismatch !== null ? (
+                <div>
+                  <dt className="inline">User matching: </dt>
+                  <dd className="inline">
+                    {apiKey.reject_user_mismatch ? "Strict" : "Lenient"}
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : null}
         </div>
         <Dropdown.Menu
           aria-label={`Actions for ${name}`}
