@@ -22,7 +22,7 @@ from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, default
 from gateway.core.config import GatewayConfig
 from gateway.metrics import REGISTRY
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
-from gateway.services.sandbox_backend import SandboxNotReachableError
+from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
 from gateway.services.web_search_backend import WebSearchNotReachableError
 
 
@@ -294,6 +294,7 @@ async def test_locked_in_retryable_failure_marks_attempt_final() -> None:
     [
         (MaxToolIterationsExceeded("iteration cap reached"), HTTPException),
         (SandboxNotReachableError("sandbox unavailable"), SandboxNotReachableError),
+        (SandboxUnavailableError("15"), SandboxUnavailableError),
         (WebSearchNotReachableError("web search unavailable"), WebSearchNotReachableError),
     ],
 )

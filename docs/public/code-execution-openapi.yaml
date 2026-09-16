@@ -93,9 +93,14 @@ paths:
         "503":
           description: |
             At capacity, no session leased. Distinct from a malformed request:
-            retryable in principle, though Otari surfaces it as a failed request
-            rather than backing off, so a backend should not rely on the client
-            re-offering the work.
+            Otari preserves 503 and a valid Retry-After delay-seconds hint for
+            its caller, without automatically retrying the request.
+          headers:
+            Retry-After:
+              description: Optional delay in seconds before another attempt.
+              schema:
+                type: string
+                pattern: "^[0-9]+$"
           content:
             application/json:
               schema:

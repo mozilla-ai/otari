@@ -2542,9 +2542,11 @@ def test_platform_mode_sandbox_applies_workspace_max_iterations_cap(
     assert captured["max_iterations"] == 2
 
 
+@pytest.mark.parametrize("unavailable", [False, True])
 def test_platform_mode_sandbox_unreachable_returns_502(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    unavailable: bool,
 ) -> None:
     """Hybrid non-streaming chat with the sandbox backend down surfaces the
     backend-specific 502, not a generic provider error or a 500. Regression
@@ -2553,8 +2555,8 @@ def test_platform_mode_sandbox_unreachable_returns_502(
     inherits it."""
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
 
-    from gateway.api.routes._pipeline import SANDBOX_UNREACHABLE_DETAIL
-    from gateway.services.sandbox_backend import SandboxNotReachableError
+    from gateway.api.routes._pipeline import SANDBOX_UNAVAILABLE_DETAIL, SANDBOX_UNREACHABLE_DETAIL
+    from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
 
     usage_reports: list[dict[str, Any]] = []
 
@@ -2573,6 +2575,8 @@ def test_platform_mode_sandbox_unreachable_returns_502(
             pass
 
         async def __aenter__(self) -> "_DownSandboxBackend":
+            if unavailable:
+                raise SandboxUnavailableError("15")
             raise SandboxNotReachableError("failed to create sandbox session at http://sandbox:8080")
 
         async def __aexit__(self, *exc: object) -> None:
@@ -2591,8 +2595,9 @@ def test_platform_mode_sandbox_unreachable_returns_502(
         headers={"Authorization": "Bearer user_test_token"},
     )
 
-    assert response.status_code == 502
-    assert response.json() == {"detail": SANDBOX_UNREACHABLE_DETAIL}
+    assert response.status_code == (503 if unavailable else 502)
+    assert response.headers.get("Retry-After") == ("15" if unavailable else None)
+    assert response.json() == {"detail": SANDBOX_UNAVAILABLE_DETAIL if unavailable else SANDBOX_UNREACHABLE_DETAIL}
     assert usage_reports == [
         {
             "correlation_id": "sbx-down",

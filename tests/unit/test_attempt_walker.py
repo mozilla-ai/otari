@@ -21,7 +21,7 @@ from gateway.api.routes._attempts import (
     walk_attempts,
 )
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
-from gateway.services.sandbox_backend import SandboxNotReachableError
+from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
 from gateway.types.attempt import Attempt
 
 
@@ -474,3 +474,10 @@ def test_an_unrouted_request_keeps_exactly_the_callers_guardrails() -> None:
     caller = [_guardrail("pii", mode="monitor")]
     assert merge_guardrail_layers(unrouted, caller, []).configs is caller
     assert merge_guardrail_layers(unrouted, None, []).configs is None
+
+
+@pytest.mark.asyncio
+async def test_capacity_failure_does_not_try_another_provider() -> None:
+    with pytest.raises(SandboxUnavailableError) as caught:
+        await _walk([_attempt(1, "a"), _attempt(2, "b")], [SandboxUnavailableError("15"), "ok"])
+    assert caught.value.retry_after == "15"

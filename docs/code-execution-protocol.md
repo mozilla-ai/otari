@@ -326,6 +326,11 @@ Status codes:
 | File larger than the backend's cap | `413` |
 | At capacity, session not leased | `503` |
 
+A backend may include `Retry-After` delay-seconds with a `503`. Otari preserves
+that status and a valid delay-seconds hint for its caller. It does not retry
+session creation or code execution automatically. Connection failures remain
+`502`; clients should not blindly replay an execution whose outcome is unknown.
+
 A bearer credential, where the deployment uses one, is sent as
 `Authorization: Bearer <token>`.
 

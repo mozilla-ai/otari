@@ -1014,18 +1014,24 @@ def test_max_tool_iterations_exceeded_returns_422_anthropic_body(
     )
 
 
+@pytest.mark.parametrize("unavailable", [False, True])
 def test_sandbox_unreachable_returns_502_anthropic_body(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    unavailable: bool,
 ) -> None:
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
-    from gateway.services.sandbox_backend import SandboxNotReachableError
+    from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
 
     with patch(
         "gateway.api.routes._pipeline.SandboxBackend",
-        return_value=AsyncMock(__aenter__=AsyncMock(side_effect=SandboxNotReachableError("boom"))),
+        return_value=AsyncMock(
+            __aenter__=AsyncMock(
+                side_effect=SandboxUnavailableError("15") if unavailable else SandboxNotReachableError("boom")
+            )
+        ),
     ):
         resp = client.post(
             f"{API_ROOT}/messages",
@@ -1038,8 +1044,13 @@ def test_sandbox_unreachable_returns_502_anthropic_body(
             headers=api_key_header,
         )
 
-    assert resp.status_code == 502
-    _assert_anthropic_error(resp.json(), error_type="api_error", message_substr="sandbox unreachable")
+    assert resp.status_code == (503 if unavailable else 502)
+    assert resp.headers.get("Retry-After") == ("15" if unavailable else None)
+    _assert_anthropic_error(
+        resp.json(),
+        error_type="api_error",
+        message_substr="sandbox temporarily unavailable" if unavailable else "sandbox unreachable",
+    )
 
 
 # ---------- streaming dispatch ----------
@@ -1609,10 +1620,12 @@ def test_stream_code_execution_dispatches_through_sandbox(
     assert pool_seen == [fake_backend], "tool loop didn't receive the SandboxBackend"
 
 
+@pytest.mark.parametrize("unavailable", [False, True])
 def test_stream_sandbox_unreachable_returns_502_anthropic_body(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    unavailable: bool,
 ) -> None:
     """Regression test for the eager-open error mapping bug: when the
     streaming sandbox eager-open fails, the route must return a 502 with the
@@ -1622,11 +1635,15 @@ def test_stream_sandbox_unreachable_returns_502_anthropic_body(
     """
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
-    from gateway.services.sandbox_backend import SandboxNotReachableError
+    from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
 
     with patch(
         "gateway.api.routes._pipeline.SandboxBackend",
-        return_value=AsyncMock(__aenter__=AsyncMock(side_effect=SandboxNotReachableError("boom"))),
+        return_value=AsyncMock(
+            __aenter__=AsyncMock(
+                side_effect=SandboxUnavailableError("15") if unavailable else SandboxNotReachableError("boom")
+            )
+        ),
     ):
         resp = client.post(
             f"{API_ROOT}/messages",
@@ -1640,8 +1657,13 @@ def test_stream_sandbox_unreachable_returns_502_anthropic_body(
             headers=api_key_header,
         )
 
-    assert resp.status_code == 502
-    _assert_anthropic_error(resp.json(), error_type="api_error", message_substr="sandbox unreachable")
+    assert resp.status_code == (503 if unavailable else 502)
+    assert resp.headers.get("Retry-After") == ("15" if unavailable else None)
+    _assert_anthropic_error(
+        resp.json(),
+        error_type="api_error",
+        message_substr="sandbox temporarily unavailable" if unavailable else "sandbox unreachable",
+    )
 
 
 # ---------- web-search interception (opt-in) ----------

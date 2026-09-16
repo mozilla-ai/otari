@@ -16,6 +16,7 @@ from gateway.services.sandbox_backend import (
     CODE_EXECUTION_TOOL_NAME,
     SandboxBackend,
     SandboxNotReachableError,
+    SandboxUnavailableError,
 )
 
 
@@ -891,3 +892,38 @@ async def test_served_tool_names_is_what_the_backend_actually_advertises() -> No
     advertised = tuple(tool["function"]["name"] for tool in backend.openai_tools)
 
     assert advertised == SERVED_TOOL_NAMES
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retry_after, expected", [("15", "15"), (None, None), ("invalid", None), ("9999999", None)])
+async def test_session_503_preserves_retry_hint_and_closes_client(
+    monkeypatch: pytest.MonkeyPatch, retry_after: str | None, expected: str | None
+) -> None:
+    headers = {"Retry-After": retry_after} if retry_after is not None else {}
+    transport = _patched_async_client(
+        {("POST", "/sessions"): httpx.Response(503, headers=headers, json={"detail": "private internals"})},
+        monkeypatch,
+    )
+    backend = SandboxBackend(sandbox_url="http://sandbox:8080")
+    with pytest.raises(SandboxUnavailableError) as caught:
+        await backend.__aenter__()
+    assert caught.value.retry_after == expected
+    assert "private internals" not in str(caught.value)
+    assert backend._client is not None and backend._client.is_closed
+    assert len(transport.captured) == 1
+
+
+@pytest.mark.asyncio
+async def test_exec_503_preserves_retry_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(503, headers={"Retry-After": "15"}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        with pytest.raises(SandboxUnavailableError) as caught:
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(42)"})
+    assert caught.value.retry_after == "15"

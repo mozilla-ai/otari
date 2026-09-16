@@ -119,6 +119,19 @@ class SandboxNotReachableError(RuntimeError):
     """Raised when the sandbox container can't be reached or returns malformed data."""
 
 
+class SandboxUnavailableError(SandboxNotReachableError):
+    """The sandbox is temporarily unable to accept a session."""
+
+    def __init__(self, retry_after: str | None = None) -> None:
+        super().__init__("sandbox temporarily unavailable")
+        # Accept delay-seconds only; never reflect arbitrary upstream headers.
+        self.retry_after = (
+            retry_after
+            if retry_after and retry_after.isascii() and retry_after.isdigit() and len(retry_after) <= 6
+            else None
+        )
+
+
 def _contract_violation(exc: ValidationError) -> str:
     """Summarise a schema violation without quoting the payload.
 
@@ -198,6 +211,9 @@ class SandboxBackend:
             )
             payload = {"image": self._image} if self._image else {}
             response = await self._client.post(f"{self._sandbox_url}/sessions", json=payload)
+            if response.status_code == 503:
+                await self._stack.aclose()
+                raise SandboxUnavailableError(response.headers.get("Retry-After"))
             response.raise_for_status()
             self._session_id = SessionHandle.model_validate(response.json()).session_id
         except ValidationError as exc:
@@ -291,6 +307,8 @@ class SandboxBackend:
                     # sandbox always gets to answer before the client read timeout fires.
                     timeout=self._timeout_s + _EXEC_TIMEOUT_BUFFER_S,
                 )
+                if response.status_code == 503:
+                    raise SandboxUnavailableError(response.headers.get("Retry-After"))
                 response.raise_for_status()
                 # A malformed body is a contract violation, indistinguishable to the
                 # caller from an unreachable backend: both mean this exec produced no

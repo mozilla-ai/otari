@@ -169,6 +169,7 @@ from gateway.services.sandbox_backend import (
     DEFAULT_EXEC_TIMEOUT_S,
     SandboxBackend,
     SandboxNotReachableError,
+    SandboxUnavailableError,
 )
 from gateway.services.scoped_budget_service import BudgetScopeRequest
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
@@ -308,6 +309,7 @@ SANDBOX_UNREACHABLE_DETAIL = (
     "code_execution sandbox unreachable. Check the sandbox URL in the dashboard's "
     "Tools settings, or OTARI_SANDBOX_URL, and that the container is running."
 )
+SANDBOX_UNAVAILABLE_DETAIL = "code_execution sandbox temporarily unavailable. Retry later."
 WEB_SEARCH_UNREACHABLE_DETAIL = (
     "web_search backend unreachable. Check the search URL in the dashboard's Tools "
     "settings, or OTARI_WEB_SEARCH_URL, and that the backend is running."
@@ -4049,13 +4051,10 @@ async def run_single_attempt_stream(
         await release_reservation(ctx)
         raise
     except SandboxNotReachableError as exc:
-        # The sandbox is part of the gateway's own infra, not the LLM
-        # provider; a distinct status stops operators chasing a "provider
-        # outage" that is actually the sandbox container being down. 502
-        # keeps "upstream dependency failed" semantics.
+        # Keep sandbox availability distinct from provider errors.
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
         await release_reservation(ctx)
-        raise adapter.error(502, SANDBOX_UNREACHABLE_DETAIL, ErrorKind.API) from exc
+        raise _sandbox_error(adapter, exc) from exc
     except WebSearchNotReachableError as exc:
         logger.error("Web search backend unreachable for %s:%s: %s", provider, model, exc)
         await release_reservation(ctx)
@@ -4333,6 +4332,13 @@ async def _stream_with_stack_cleanup(
         await backend_stack.aclose()
 
 
+def _sandbox_error(adapter: FormatAdapter[Any, Any], exc: SandboxNotReachableError) -> HTTPException:
+    if isinstance(exc, SandboxUnavailableError):
+        headers = {"Retry-After": exc.retry_after} if exc.retry_after is not None else None
+        return adapter.error(503, SANDBOX_UNAVAILABLE_DETAIL, ErrorKind.API, headers)
+    return adapter.error(502, SANDBOX_UNREACHABLE_DETAIL, ErrorKind.API)
+
+
 def raise_all_streaming_attempts_failed(
     adapter: FormatAdapter[Any, Any],
     exc: Exception,
@@ -4341,9 +4347,9 @@ def raise_all_streaming_attempts_failed(
     """Map a terminal :func:`run_streaming_with_fallback` failure (no attempt
     yielded a first chunk) onto the format's wire error.
 
-    Gateway-side backend failures (sandbox / web_search eager-open) get a 502
-    with a backend-specific detail so operators don't chase a fake provider
-    outage. A single attempt preserves its classified provider error. Once a
+    Sandbox capacity failures preserve 503 and Retry-After. Other backend
+    failures get 502 with a backend-specific detail. A single attempt preserves
+    its classified provider error. Once a
     multi-attempt route is exhausted, it surfaces the aggregate result: 504 when
     the last failure was a timeout, 429 when it was a rate limit, and 502
     otherwise. A 502 for an exhausted-by-rate-limit route would tell a client
@@ -4351,7 +4357,7 @@ def raise_all_streaming_attempts_failed(
     """
     if isinstance(exc, SandboxNotReachableError):
         logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
-        raise adapter.error(502, SANDBOX_UNREACHABLE_DETAIL, ErrorKind.API) from exc
+        raise _sandbox_error(adapter, exc) from exc
     if isinstance(exc, WebSearchNotReachableError):
         logger.error("Web search backend unreachable request_id=%s: %s", route.request_id, exc)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
@@ -4463,15 +4469,10 @@ async def run_platform_non_stream(
             max_tool_iterations=tool_ctx.max_tool_iterations,
         )
     except SandboxNotReachableError as exc:
-        # The sandbox is part of the gateway's own infra, not the LLM
-        # provider; a distinct status stops operators chasing a "provider
-        # outage" that is actually the sandbox container being down. 502
-        # keeps "upstream dependency failed" semantics. Runs through the
-        # inline flush below because the error response drops the queued
-        # BackgroundTasks for any earlier attempts' reports.
+        # Error responses drop queued tasks; flush earlier attempt reports.
         logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
         await _flush_pending_usage_reports(config, pending_error_reports, route.request_id, session_label)
-        raise adapter.error(502, SANDBOX_UNREACHABLE_DETAIL, ErrorKind.API) from exc
+        raise _sandbox_error(adapter, exc) from exc
     except WebSearchNotReachableError as exc:
         logger.error("Web search backend unreachable request_id=%s: %s", route.request_id, exc)
         await _flush_pending_usage_reports(config, pending_error_reports, route.request_id, session_label)
@@ -4774,7 +4775,7 @@ async def run_standalone_non_stream(
         # sandbox container being down.
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, e)
         await release_reservation(ctx)
-        raise adapter.error(502, SANDBOX_UNREACHABLE_DETAIL, ErrorKind.API) from e
+        raise _sandbox_error(adapter, e) from e
     except WebSearchNotReachableError as e:
         logger.error("Web search backend unreachable for %s:%s: %s", provider, model, e)
         await release_reservation(ctx)
