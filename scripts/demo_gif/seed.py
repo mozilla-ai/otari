@@ -29,9 +29,10 @@ from sqlmodel import col
 
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget
-from gateway.models.entities import ModelAlias, UsageLog, User
+from gateway.models.entities import UsageLog, User
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing
+from gateway.models.providers import ModelAlias
 from gateway.models.tenancy import Organization, Workspace
 
 URL = sys.argv[1] if len(sys.argv) > 1 else "sqlite:///./scripts/demo_gif/demo.db"

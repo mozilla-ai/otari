@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
-from gateway.models.entities import ProviderCredential
+from gateway.models.providers import ProviderCredential
 from gateway.models.secret_fields import restore_redacted_values
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,

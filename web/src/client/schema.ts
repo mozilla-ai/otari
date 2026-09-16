@@ -8654,7 +8654,7 @@ export interface components {
          *
          *     The plaintext key is never stored as sent: the service encrypts it
          *     (`services/secret_box.py`) and keeps only the ciphertext and ``last4``,
-         *     the same convention `entities.ProviderCredential` already uses.
+         *     the same convention `providers.ProviderCredential` already uses.
          */
         OrgProviderKeyCreateRequest: {
             /** Api Base */
@@ -8957,7 +8957,7 @@ export interface components {
          *
          *     ``credential`` is never stored as sent: it is encrypted with
          *     ``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention
-         *     `entities.WorkspaceMcpServer` and `entities.ProviderCredential` use. It is
+         *     `entities.WorkspaceMcpServer` and `providers.ProviderCredential` use. It is
          *     sent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,
          *     so it authenticates this gateway to the guardrails service the entry names.
          *     A guardrail *vendor's* own key is not this: the guardrails service builds
@@ -12434,7 +12434,7 @@ export interface components {
          *
          *     ``authorization_token`` is never stored as sent: it is encrypted with
          *     ``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention
-         *     `entities.ProviderCredential` and `OrgProviderKey` already use.
+         *     `providers.ProviderCredential` and `OrgProviderKey` already use.
          */
         WorkspaceMcpServerCreate: {
             /**

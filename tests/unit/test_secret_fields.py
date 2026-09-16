@@ -19,8 +19,9 @@ over the credential it was never shown.
 import uuid
 from datetime import UTC, datetime
 
-from gateway.models.entities import ProviderCredential, SearchToolCredential
+from gateway.models.entities import SearchToolCredential
 from gateway.models.guardrails import OrganizationGuardrail
+from gateway.models.providers import ProviderCredential
 from gateway.models.secret_fields import (
     REDACTED_VALUE,
     redact_secret_like_values,

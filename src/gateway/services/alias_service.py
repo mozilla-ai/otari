@@ -49,7 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
-from gateway.models.entities import ModelAlias
+from gateway.models.providers import ModelAlias
 from gateway.services.workspace_scope import lookup_default_workspace_id
 
 # How long a worker may serve a stale alias map before refreshing. A new alias

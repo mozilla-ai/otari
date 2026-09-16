@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from gateway.api.routes import providers as providers_route
 from gateway.core.config import API_ROOT
-from gateway.models.entities import ProviderCredential
+from gateway.models.providers import ProviderCredential
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.provider_store_service import reset_provider_cache
 from gateway.services.secret_box import decrypt_secret, generate_secret_key

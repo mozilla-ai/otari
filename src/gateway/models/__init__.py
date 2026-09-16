@@ -25,5 +25,6 @@ from gateway.models import (  # noqa: F401
     playground,
     pricing,
     provider_keys,
+    providers,
     tenancy,
 )

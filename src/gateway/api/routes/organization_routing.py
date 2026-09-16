@@ -77,7 +77,8 @@ from gateway.api.routes.routing import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.models.entities import ModelAlias, RoutingPolicy
+from gateway.models.entities import RoutingPolicy
+from gateway.models.providers import ModelAlias
 from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace

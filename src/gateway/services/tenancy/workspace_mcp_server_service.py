@@ -93,7 +93,7 @@ class WorkspaceMcpServerCreate(BaseModel):
 
     ``authorization_token`` is never stored as sent: it is encrypted with
     ``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention
-    `entities.ProviderCredential` and `OrgProviderKey` already use.
+    `providers.ProviderCredential` and `OrgProviderKey` already use.
     """
 
     name: str = Field(min_length=1, max_length=128, description="Label for the server, unique within the workspace")

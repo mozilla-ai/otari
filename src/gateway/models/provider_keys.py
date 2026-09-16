@@ -35,8 +35,8 @@ throughout so no column here is ever ambiguously named ``provider_key_id``.
   ``(workspace, key)`` pair means every model is allowed; one or more rows
   narrows it to exactly those.
 
-Style follows ``models/tenancy.py``: SQLModel (not `entities.py`'s declarative
-style) because these are tenancy-scoped tables sharing its mixins and
+Style follows ``models/tenancy.py``: SQLModel (not the declarative ``Base``
+style) because these are tenancy-scoped tables sharing the same mixins and
 ``UtcDateTime`` timestamp handling, and no ``relationship()`` is declared
 (lazy loading raises ``MissingGreenlet`` on an ``AsyncSession``); repositories
 join explicitly.
@@ -82,7 +82,7 @@ class OrgProviderKeyCreateRequest(SQLModel):
 
     The plaintext key is never stored as sent: the service encrypts it
     (`services/secret_box.py`) and keeps only the ciphertext and ``last4``,
-    the same convention `entities.ProviderCredential` already uses.
+    the same convention `providers.ProviderCredential` already uses.
     """
 
     provider: str = Field(max_length=255)

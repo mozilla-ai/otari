@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import ProviderCredential
+from gateway.models.providers import ProviderCredential
 from gateway.services import provider_store_service as store
 from gateway.services.provider_store_service import apply_to_config, reset_provider_cache
 from gateway.services.secret_box import (
