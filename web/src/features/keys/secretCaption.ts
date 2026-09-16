@@ -1,9 +1,16 @@
-import type { CreateKeyResponse } from "@/client"
+import type { ApiKey, CreateKeyResponse } from "@/client"
 import { accessLabel } from "@/features/models/ModelScopeControl"
 import { formatDate } from "@/shared/helpers/format"
 
 export const isVirtualUser = (userId: string | null): boolean =>
   (userId ?? "").startsWith("apikey-")
+
+/** Prefix and suffix around an ellipsis, or null when there is no prefix. */
+export function keyFingerprint(apiKey: ApiKey): string | null {
+  return apiKey.key_prefix
+    ? `${apiKey.key_prefix}\u2026${apiKey.key_suffix ?? ""}`
+    : null
+}
 
 /**
  * The line under the key, naming what was just made.

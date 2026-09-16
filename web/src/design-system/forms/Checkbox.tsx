@@ -98,6 +98,7 @@ export function Checkbox({
   onChange,
   isDisabled = false,
   ariaLabel,
+  hasTouchTarget = false,
   children,
 }: {
   isSelected: boolean
@@ -109,6 +110,13 @@ export function Checkbox({
    * Keep the visible text inside it, so speech input still reaches the control.
    */
   ariaLabel?: string
+  /**
+   * A 44px target for a box that is 16px. For a list whose only other control
+   * is at the far edge of the row, where `CopyButton`'s pseudo-element bleed
+   * cannot be used: a 14px bleed each way would overlap the row above and
+   * below, so this one claims the space instead of borrowing it.
+   */
+  hasTouchTarget?: boolean
   children: ReactNode
 }) {
   return (
@@ -117,7 +125,9 @@ export function Checkbox({
       isSelected={isSelected}
       onChange={onChange}
       isDisabled={isDisabled}
-      className="group flex w-fit items-center gap-2 text-body"
+      className={`group flex w-fit items-center gap-2 text-body${
+        hasTouchTarget ? " min-h-11 min-w-11 justify-center" : ""
+      }`}
     >
       {({ isSelected: selected, isDisabled: disabled }) => (
         <>

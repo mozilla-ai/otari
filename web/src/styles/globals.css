@@ -3158,42 +3158,102 @@ main {
 .otari-members-table[data-scrolled="true"] .table__cell[data-key="member"] {
   border-right: 1px solid var(--color-control-border);
 }
+/* Key lanes stay fixed while the name absorbs the available width. */
+.otari-keys-table .table__content {
+  table-layout: fixed;
+  width: 100%;
+}
 .otari-keys-table .table__row .table__cell {
-  height: 58px;
-  padding-block: 0;
+  height: 3.625rem;
+  padding-block: 0.5rem;
+  white-space: nowrap;
+}
+.otari-keys-table .table__column {
+  white-space: nowrap;
+}
+.otari-keys-table .table__column:first-child {
+  width: 3rem;
 }
 .otari-keys-table .table__column[data-key="status"] {
-  width: 120px;
+  width: 7.5rem;
 }
 .otari-keys-table .table__column[data-key="owner"] {
-  width: 170px;
+  width: 10.625rem;
 }
 .otari-keys-table .table__column[data-key="key"] {
-  width: 150px;
+  width: 11.25rem;
 }
 .otari-keys-table .table__column[data-key="created"],
 .otari-keys-table .table__column[data-key="expires"] {
-  width: 110px;
+  width: 6.875rem;
 }
 .otari-keys-table .table__column[data-key="last_used"] {
-  width: 120px;
+  width: 7.5rem;
 }
 .otari-keys-table .table__column[data-key="actions"] {
-  width: 192px;
+  width: 5rem;
 }
-.otari-keys-table .otari-table .otari-detail-row > td {
-  background-color: transparent;
+.otari-key-actions-trigger {
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+.otari-key-actions-trigger:hover {
+  color: var(--color-text);
+  background: var(--color-surface-muted);
+}
+/* The ring is `otari-focus-ring` on the trigger; only the offset is local. The
+   trigger is flush with the row's right edge, where the utility's outward 2px
+   would be clipped by the table's own overflow. */
+.otari-key-actions-trigger[data-focus-visible],
+.otari-key-actions-trigger[aria-expanded="true"] {
+  outline: 2px solid var(--focus-ring-ink, var(--color-focus));
+  outline-offset: -2px;
+}
+/* HeroUI has no prop for the menu's density or its two text lanes. */
+.otari-key-actions-menu {
+  width: 16.75rem;
+  max-width: calc(100vw - 2rem);
+}
+.otari-key-actions-menu .dropdown__menu {
+  padding: 0;
+}
+.otari-key-actions-menu .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--color-text-muted);
+}
+.otari-key-actions-menu .menu-item .label {
+  white-space: nowrap;
+}
+.otari-key-actions-menu .menu-item [slot="description"] {
+  margin-left: auto;
+  text-align: right;
+}
+.otari-key-actions-menu .menu-item:last-child {
   border-top: 1px solid var(--color-border-subtle);
-  border-bottom: 1px solid var(--color-border-subtle);
 }
-/* The row above an armed strip gives up its own rule, so the two are one unit
-   rather than two stacked bands. */
-.otari-keys-table .otari-table .table__row:has(+ .otari-detail-row),
-.otari-keys-table .table__row:has(+ .otari-detail-row) .table__cell {
-  border-bottom-color: transparent;
-} /* The header's background and edges are not repeated here: they live with the
-   `.table-root` border they have to counteract, in the divided-surface table
-   block above. */
+.otari-key-actions-menu .menu-item[data-focused],
+.otari-key-actions-menu .menu-item[data-hovered] {
+  background: var(--color-surface-muted);
+}
+@media (min-width: 48rem) and (pointer: fine) {
+  .otari-key-actions-trigger {
+    width: 2rem;
+    height: 2rem;
+  }
+  .otari-key-actions-menu .menu-item {
+    min-height: 2.25rem;
+  }
+}
 .otari-breakdown .table__column[data-key="requests"],
 .otari-breakdown .table__column[data-key="tokens"] {
   width: 110px;

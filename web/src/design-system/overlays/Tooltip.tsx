@@ -15,7 +15,7 @@ export type TooltipTriggerProps = JSX.IntrinsicElements["button"]
  * component rather than with the app's stylesheet; react-aria still opens the
  * next tooltip in a group instantly once one has been seen.
  */
-const OPEN_DELAY_MS = 300
+export const TOOLTIP_OPEN_DELAY_MS = 300
 
 /**
  * A short label revealed by hovering or focusing the thing it describes.
@@ -60,7 +60,7 @@ export function Tooltip({
   children: ReactNode | ((props: TooltipTriggerProps) => ReactElement)
 }) {
   return (
-    <HeroTooltip.Root delay={OPEN_DELAY_MS}>
+    <HeroTooltip.Root delay={TOOLTIP_OPEN_DELAY_MS}>
       {typeof children === "function" ? (
         // The generic is what types the render function for a `button` rather
         // than for the `div` HeroUI's trigger defaults to. A control wanting a
