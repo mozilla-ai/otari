@@ -213,22 +213,23 @@ describe("DocsPage code blocks", () => {
 // Pointing them at `/welcome` there names a page otari.ai does not serve; see
 // `welcomeGuideHref`.
 describe("DocsPage get-started pointer", () => {
-  // Exact, because the pointer is appended to the sentence before it and JSX
-  // decides the space between them: matched loosely, a double space or a
-  // missing one reads the same to the test and wrong on the page.
-  it("points at the walkthrough where the deployment serves it", () => {
+  // A link rather than a bare path in the prose, matching every other place
+  // the dashboard names this page.
+  it("links the walkthrough where the deployment serves it", () => {
     renderDocs()
 
+    const link = screen.getByRole("link", { name: "/welcome" })
+    expect(link).toHaveAttribute("href", "/welcome")
+    expect(link).toHaveAttribute("target", "_blank")
     expect(
-      screen.getByText(
-        "A reference for operating this dashboard, bundled with and version-matched to the running gateway. New here? The get-started walkthrough lives at /welcome.",
-      ),
+      screen.getByText(/New here\? The get-started walkthrough lives at/),
     ).toBeInTheDocument()
   })
 
   it("says nothing about it on a hosted deployment, which serves none", () => {
     renderDocs("hosted")
 
+    expect(screen.queryByRole("link", { name: "/welcome" })).toBeNull()
     expect(screen.queryByText(/walkthrough lives at/)).toBeNull()
     // The rest of the intro is unchanged: only the pointer goes.
     expect(

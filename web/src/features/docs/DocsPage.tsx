@@ -163,9 +163,23 @@ export function DocsPage() {
       <PageIntro title="User guide" descriptionClassName="max-w-[560px]">
         A reference for operating this dashboard, bundled with and
         version-matched to the running gateway.
-        {welcomeHref
-          ? ` New here? The get-started walkthrough lives at ${welcomeHref}.`
-          : ""}
+        {welcomeHref ? (
+          <>
+            {" "}
+            New here? The get-started walkthrough lives at{" "}
+            {/* A new tab, like the other links to this page: it leaves the SPA,
+                and the guide is what the reader came here to keep. */}
+            <a
+              href={welcomeHref}
+              target="_blank"
+              rel="noreferrer"
+              className="text-link hover:text-link-hover"
+            >
+              {welcomeHref}
+            </a>
+            .
+          </>
+        ) : null}
       </PageIntro>
       {/* The prose pattern: a 560px measure at 16px, bounded above by the
           section rule and on its right by a rule that runs the height of the
