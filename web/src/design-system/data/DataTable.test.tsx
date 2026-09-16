@@ -77,6 +77,32 @@ describe("DataTable", () => {
     expect(onRowAction).toHaveBeenCalledWith("b")
   })
 
+  it("marks a row clickable only where it has a row action", () => {
+    const inert = render(<DataTable {...base({})} />)
+    expect(screen.getByRole("row", { name: /Alpha/ })).not.toHaveClass(
+      "cursor-pointer",
+    )
+    inert.unmount()
+    render(<DataTable {...base({ onRowAction: vi.fn() })} />)
+    expect(screen.getByRole("row", { name: /Alpha/ })).toHaveClass(
+      "cursor-pointer",
+    )
+  })
+
+  it("keeps a caller's own row class beside the clickable one", () => {
+    render(
+      <DataTable
+        {...base({
+          onRowAction: vi.fn(),
+          rowClassName: () => "bg-danger-subtle",
+        })}
+      />,
+    )
+    const row = screen.getByRole("row", { name: /Alpha/ })
+    expect(row).toHaveClass("cursor-pointer")
+    expect(row).toHaveClass("bg-danger-subtle")
+  })
+
   // The press sequence is dispatched raw rather than through userEvent.click,
   // which collapses the document selection on pointer down (as a browser does
   // when a click *starts* a new selection) and so cannot model the click that

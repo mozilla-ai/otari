@@ -320,11 +320,22 @@ export function DataTable<Row extends object>({
   // so callers must keep `columns`, `getRowKey`, and `rowClassName` (if used)
   // referentially stable across unrelated re-renders for the cache to pay off;
   // an inline arrow for any of them rebuilds every row on each render.
+  // A boolean, not `onRowAction` itself: every caller passes an inline arrow, and
+  // depending on its identity would rebuild the row cache below on each render.
+  const hasRowAction = onRowAction != null
+
   const renderRow = useCallback(
     (row: Row) => {
       const key = getRowKey(row)
+      // A row with a drill-in action takes the pointer cursor. The base rule in
+      // globals.css cannot reach it: nothing in the markup tells a row that
+      // opens something from one that is inert.
+      const className =
+        [hasRowAction ? "cursor-pointer" : null, rowClassName?.(row)]
+          .filter(Boolean)
+          .join(" ") || undefined
       return (
-        <Table.Row key={key} id={key} className={rowClassName?.(row)}>
+        <Table.Row key={key} id={key} className={className}>
           {showSelection ? (
             <Table.Cell>
               <SelectionCheckbox ariaLabel="Select row" />
@@ -343,7 +354,7 @@ export function DataTable<Row extends object>({
         </Table.Row>
       )
     },
-    [getRowKey, rowClassName, showSelection, columns],
+    [getRowKey, rowClassName, showSelection, columns, hasRowAction],
   )
 
   return (

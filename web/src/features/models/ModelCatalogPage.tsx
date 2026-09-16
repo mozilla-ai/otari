@@ -371,7 +371,7 @@ function ModelCard({
     </>
   )
   const cardClass =
-    "group flex cursor-pointer flex-col gap-2 border border-border bg-surface p-4 hover:bg-surface-alt"
+    "group flex flex-col gap-2 border border-border bg-surface p-4 transition-colors duration-150 ease-out hover:bg-surface-alt motion-reduce:transition-none"
   return (
     <article>
       {publicView ? (
@@ -396,76 +396,93 @@ function ModelCard({
   )
 }
 
-function tableColumns(): DataTableColumn<CatalogModelSummary>[] {
-  return [
-    {
-      id: "name",
-      header: "Model",
-      isRowHeader: true,
-      allowsSorting: true,
-      cell: (row) => (
-        <div className="flex min-w-0 flex-col">
-          <span className="text-body break-words">{row.name}</span>
-          <span className="text-caption">
-            {row.vendor ?? "Unknown vendor"} ·{" "}
-            {row.provider_count === 1
-              ? "1 provider"
-              : `${row.provider_count} providers`}
-          </span>
-        </div>
-      ),
-    },
-    {
-      id: "context",
-      header: "Context",
-      align: "end",
-      allowsSorting: true,
-      cell: (row) => (
-        <span className="text-mono-caption">
-          {formatContext(row.context_window)}
+const TABLE_COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
+  {
+    id: "name",
+    header: "Model",
+    isRowHeader: true,
+    allowsSorting: true,
+    cell: (row) => (
+      <div className="flex min-w-0 flex-col">
+        <span className="text-body break-words">{row.name}</span>
+        <span className="text-caption">
+          {row.vendor ?? "Unknown vendor"} ·{" "}
+          {row.provider_count === 1
+            ? "1 provider"
+            : `${row.provider_count} providers`}
         </span>
-      ),
-    },
-    {
-      id: "released",
-      header: "Released",
-      align: "end",
-      allowsSorting: true,
-      cell: (row) => (
-        <span className="text-mono-caption">
-          {formatReleaseDate(row.release_date)}
-        </span>
-      ),
-    },
-    {
-      id: "input",
-      header: "Input / 1M",
-      align: "end",
-      allowsSorting: true,
-      cell: (row) => (
-        <span className="text-mono-caption">
-          {fromRate(row.min_input_price_per_million)}
-        </span>
-      ),
-    },
-    {
-      id: "output",
-      header: "Output / 1M",
-      align: "end",
-      allowsSorting: true,
-      cell: (row) => (
-        <span className="text-mono-caption">
-          {fromRate(row.min_output_price_per_million)}
-        </span>
-      ),
-    },
-  ]
-}
+      </div>
+    ),
+  },
+  {
+    id: "context",
+    header: "Context",
+    align: "end",
+    allowsSorting: true,
+    cell: (row) => (
+      <span className="text-mono-caption">
+        {formatContext(row.context_window)}
+      </span>
+    ),
+  },
+  {
+    id: "released",
+    header: "Released",
+    align: "end",
+    allowsSorting: true,
+    cell: (row) => (
+      <span className="text-mono-caption">
+        {formatReleaseDate(row.release_date)}
+      </span>
+    ),
+  },
+  {
+    id: "input",
+    header: "Input / 1M",
+    align: "end",
+    allowsSorting: true,
+    cell: (row) => (
+      <span className="text-mono-caption">
+        {fromRate(row.min_input_price_per_million)}
+      </span>
+    ),
+  },
+  {
+    id: "output",
+    header: "Output / 1M",
+    align: "end",
+    allowsSorting: true,
+    cell: (row) => (
+      <span className="text-mono-caption">
+        {fromRate(row.min_output_price_per_million)}
+      </span>
+    ),
+  },
+]
 
 const VIEW_OPTIONS = [
   { value: "list", label: "List" },
   { value: "table", label: "Table" },
 ]
+
+// Hoisted beside the columns: DataTable caches its rendered rows on these two,
+// and an inline arrow would rebuild every row on each render.
+const rowKey = (row: CatalogModelSummary) => row.id
+
+const VIEW_STORAGE_KEY = "otari.dashboard.modelsView"
+
+function readStoredView(): string {
+  if (typeof window === "undefined") return "list"
+  try {
+    return window.localStorage.getItem(VIEW_STORAGE_KEY) === "table"
+      ? "table"
+      : "list"
+  } catch {
+    // Private-mode Safari and a disabled-storage policy both throw. The list is
+    // the view a first visit gets, so it is what a blocked read falls back to.
+    return "list"
+  }
+}
 
 export function ModelCatalogView({
   onOpen,
@@ -489,19 +506,11 @@ export function ModelCatalogView({
     providers: initialProvider ? [initialProvider] : [],
   })
   const [sort, setSort] = useState("newest")
-  const [view, setView] = useState(() => {
-    try {
-      return localStorage.getItem("otari.models.view") === "table"
-        ? "table"
-        : "list"
-    } catch {
-      return "list"
-    }
-  })
+  const [view, setView] = useState(readStoredView)
   const changeView = (next: string) => {
     setView(next)
     try {
-      localStorage.setItem("otari.models.view", next)
+      window.localStorage.setItem(VIEW_STORAGE_KEY, next)
     } catch {
       // Keep the control usable when browser storage is unavailable.
     }
@@ -656,13 +665,12 @@ export function ModelCatalogView({
             <TableScrollFrame className="otari-models-table">
               <DataTable
                 ariaLabel="Models"
-                columns={tableColumns()}
+                columns={TABLE_COLUMNS}
                 rows={pageRows}
-                getRowKey={(row) => row.id}
+                getRowKey={rowKey}
                 sortDescriptor={sortDescriptor}
                 onSortChange={onSortChange}
                 onRowAction={onOpen}
-                rowClassName={() => "cursor-pointer"}
                 emptyContent={
                   <EmptyMessage>
                     {models.length === 0

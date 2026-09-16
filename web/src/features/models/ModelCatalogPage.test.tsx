@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
   CatalogModelDetail,
@@ -190,8 +190,6 @@ function renderPage(ui: ReactElement, url = "/models") {
 }
 
 describe("ModelCatalogPage", () => {
-  beforeEach(() => localStorage.clear())
-
   afterEach(() => {
     vi.restoreAllMocks()
     localStorage.clear()
@@ -262,7 +260,7 @@ describe("ModelCatalogPage", () => {
   })
 
   it("falls back to list for an invalid saved view", async () => {
-    localStorage.setItem("otari.models.view", "invalid")
+    localStorage.setItem("otari.dashboard.modelsView", "invalid")
     mockApi()
     renderPage(<ModelCatalogPage />)
     expect(
@@ -352,10 +350,7 @@ describe("ModelCatalogPage", () => {
     const grid = await screen.findByRole("grid", { name: "Models" })
     expect(within(grid).getByText("GLM-5.3")).toBeInTheDocument()
     expect(within(grid).getByText("from $0.50")).toBeInTheDocument()
-    const row = within(grid).getByRole("row", {
-      name: /GLM-5.3/,
-    })
-    expect(row).toHaveClass("cursor-pointer")
+    const row = within(grid).getByRole("row", { name: /GLM-5.3/ })
     await user.click(within(row).getByRole("gridcell", { name: "200K" }))
     expect(await screen.findByText("opened a model")).toBeInTheDocument()
   })
