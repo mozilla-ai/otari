@@ -9908,7 +9908,7 @@ export interface components {
              * Commands
              * @description Shell commands the caller observed run or is about to run.
              */
-            commands?: string[];
+            commands?: string[] | null;
             /** Policy Yaml */
             policy_yaml: string;
         };
