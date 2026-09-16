@@ -313,9 +313,25 @@ def test_a_route_may_not_import_the_feature_registry(tmp_path: Path) -> None:
     assert check.check_file(file_path, tmp_path) == [(1, "gateway.features", "Forbidden import in API routes")]
 
 
+DISCOVERY_MESSAGE = "Forbidden import in OSS base (no entry-point discovery; the feature registry is a literal tuple)"
+
+
 @pytest.mark.parametrize("relative_path", ["gateway/features.py", "gateway/main.py", "gateway/services/thing.py"])
 def test_entry_point_discovery_is_forbidden_anywhere_under_gateway(tmp_path: Path, relative_path: str) -> None:
     # The registry is a literal tuple on purpose; importlib.metadata is how the
-    # alternative gets written.
+    # alternative gets written, and the message says so.
     file_path = _write(tmp_path, relative_path, "from importlib.metadata import entry_points\n")
-    assert check.check_file(file_path, tmp_path) == [(1, "importlib.metadata", "Forbidden import in OSS base")]
+    assert check.check_file(file_path, tmp_path) == [(1, "importlib.metadata", DISCOVERY_MESSAGE)]
+
+
+@pytest.mark.parametrize(
+    ("source", "module"),
+    [
+        ("from importlib import metadata\n", "importlib.metadata"),
+        ("import importlib_metadata\n", "importlib_metadata"),
+        ("import pkg_resources\n", "pkg_resources"),
+    ],
+)
+def test_every_spelling_of_entry_point_discovery_is_forbidden(tmp_path: Path, source: str, module: str) -> None:
+    file_path = _write(tmp_path, "gateway/core/plugins.py", source)
+    assert check.check_file(file_path, tmp_path) == [(1, module, DISCOVERY_MESSAGE)]
