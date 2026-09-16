@@ -19,6 +19,7 @@ export function PlaygroundToolbar({
   return (
     <div className="flex flex-wrap items-center gap-3">
       <Segmented
+        size="md"
         label="Playground mode"
         value={isComparing ? "compare" : "single"}
         onChange={(next) => {

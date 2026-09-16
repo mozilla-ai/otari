@@ -18,7 +18,7 @@ Does it change route?
 ```ts
 Tab: { isActive, onPress, children }
 TabRow: { children }
-Segmented: { label, value, onChange: (next: string) => void,
+Segmented: { label, value, size?: "sm" | "md", onChange: (next: string) => void,
   options: { value, label }[] }
 FilterChips: { chips: FilterChip[], children, onClearAll?, start?, end? }
 FilterChip: { key, label, value, clearLabel?, onClear: () => void }
@@ -49,6 +49,9 @@ roving-focus contract a tablist implies; they are buttons in a row.
 The track is what says "these are the alternatives and there are no others". Native
 radios underneath, so the semantics come free. Four options or fewer; past that use
 a `FilterSelect`.
+
+Use `size="md"` beside 36px buttons; the default `sm` matches 32px controls.
+Both sizes keep 44px label targets on mobile.
 
 ```tsx
 // Correct

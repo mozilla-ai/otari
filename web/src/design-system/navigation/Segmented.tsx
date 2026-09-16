@@ -29,11 +29,14 @@ export function Segmented({
   options,
   value,
   onChange,
+  size = "sm",
 }: {
   label: string
   options: { value: string; label: string }[]
   value: string
   onChange: (next: string) => void
+  /** Match adjacent 32px or 36px controls; both retain 44px mobile targets. */
+  size?: "sm" | "md"
 }) {
   const name = useId()
   return (
@@ -53,7 +56,9 @@ export function Segmented({
             // The divider is a leading border on every segment but the first,
             // so the count of rules is always one less than the count of
             // segments, however many there are.
-            className={`flex min-h-11 items-center md:min-h-0 shrink-0 cursor-pointer border-l border-control-border px-3 py-[0.3125rem] text-sm whitespace-nowrap transition-colors first:border-l-0 has-[:focus-visible]:otari-focus-ring motion-reduce:transition-none ${
+            className={`flex min-h-11 items-center md:min-h-0 shrink-0 cursor-pointer border-l border-control-border text-sm whitespace-nowrap transition-colors first:border-l-0 has-[:focus-visible]:otari-focus-ring motion-reduce:transition-none ${
+              size === "md" ? "px-3.5 py-[0.4375rem]" : "px-3 py-[0.3125rem]"
+            } ${size === "md" && selected ? "font-medium" : ""} ${
               selected
                 ? "bg-surface-subtle text-foreground"
                 : "text-muted hover:text-foreground"

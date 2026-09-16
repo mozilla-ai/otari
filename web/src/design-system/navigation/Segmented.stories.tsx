@@ -64,6 +64,18 @@ export const TwoOptions: Story = {
   },
 }
 
+export const Medium: Story = {
+  args: {
+    size: "md",
+    label: "Playground mode",
+    value: "single",
+    options: [
+      { value: "single", label: "Single" },
+      { value: "compare", label: "Compare" },
+    ],
+  },
+}
+
 /** Four, which is the documented ceiling. A fifth belongs in a `FilterSelect`. */
 export const FourOptions: Story = {
   args: {

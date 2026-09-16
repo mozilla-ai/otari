@@ -239,13 +239,15 @@ export function PlaygroundHistory({
         isOpen={isOpen && !isAllOpen}
         onOpenChange={onOpenChange}
         trigger={
-          <Button
-            isIconOnly
-            aria-label="History"
-            className="min-h-11 min-w-11 md:min-h-9 md:min-w-9"
-          >
-            <FiClock aria-hidden className="size-4" />
-          </Button>
+          <span className="inline-flex size-11 shrink-0 border border-control-border md:size-9">
+            <Button
+              isIconOnly
+              aria-label="History"
+              className="size-full min-w-0"
+            >
+              <FiClock aria-hidden className="size-4" />
+            </Button>
+          </span>
         }
       >
         <div className="flex w-[23.75rem] max-w-[calc(100vw-2rem)] flex-col">
