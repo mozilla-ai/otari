@@ -91,8 +91,7 @@ def _hybrid(
 
 
 def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: Path) -> None:
-    config = _standalone(tmp_path)
-    app = create_app(config)
+    app = create_app(_standalone(tmp_path))
 
     with TestClient(app) as client:
         response = client.get(f"{API_ROOT}/bootstrap")
@@ -101,7 +100,7 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
     assert response.json() == {
         "deployment_type": "standalone",
         "session_type": "local_operator",
-        "surfaces": published_surfaces(config, app.state.enabled_features),
+        "surfaces": sorted(STANDALONE_SURFACES),
         "sign_in_methods": ["master_key"],
         "management_url": None,
         "data_plane_url": None,
