@@ -67,7 +67,7 @@ from gateway.models.entities import MAX_COUNT_LIMIT, APIKey, Budget, ScopedBudge
 from gateway.models.entities import User as GatewayUser
 from gateway.models.money import MAX_USD_LIMIT, as_float, to_usd_or_none
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
-from gateway.services.budget_periods import ResetAlignment, period_window
+from gateway.services.budget_periods import ProviderNarrowing, ResetAlignment, period_window
 from gateway.services.budget_retiming import cadence_of, retime_ceilings_for_budget
 from gateway.services.tenancy.errors import (
     OrganizationBudgetHeldElsewhereError,
@@ -245,21 +245,10 @@ class OrganizationScopedBudgetCreate(BaseModel):
             "a membership in either, or an API key in one"
         ),
     )
-    # Absent means every provider; a present value must name a real instance.
-    # Resolution matches `provider_key_id == provider_instance OR IS NULL`, and a
-    # blank string is neither, so it would store, list, and never bind. Refused
-    # rather than folded into null, because null is the *wider* cap and coercing
-    # would silently cap more than the caller asked for.
-    provider_key_id: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=255,
-        pattern=r"^\S+$",
-        description=(
-            "Narrow the cap to one provider instance; omit or null to cap spend across every provider. "
-            "Must name a real instance: a blank value would store a ceiling that never binds"
-        ),
-    )
+    # Absent means every provider; a blank value is refused rather than folded
+    # into null. Constraint and wording live on `ProviderNarrowing`; #918 notes a
+    # present value naming no configured instance is still not checked here.
+    provider_key_id: ProviderNarrowing = None
     budget_id: str = Field(
         min_length=1,
         max_length=255,
