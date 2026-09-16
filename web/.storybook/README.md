@@ -93,8 +93,8 @@ Three traps it was written around, all worth keeping:
   `__tableGeometry.mjs` is the reader for the one that exists.
 - `preview.tsx`: imports `globals.css` (the whole design system) and composes
   the decorators. Note the order: innermost first.
-- `theme.tsx`: the light/dark toolbar, writing the same three properties on
-  `<html>` that `useTheme.tsx` and `index.html` do.
+- `theme.tsx`: the light/dark toolbar and the dashboard's `ThemeProvider`,
+  keeping theme context and document styles together.
 - `appContext.tsx`: `DeploymentProvider` and `SelectedWorkspaceProvider`, for
   the feature components that read them. Override the bootstrap per story with
   `parameters.deployment`.

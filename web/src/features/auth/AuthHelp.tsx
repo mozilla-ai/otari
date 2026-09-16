@@ -1,4 +1,5 @@
 import { Link } from "@heroui/react"
+import { Button } from "@/design-system/actions/Button"
 import { Popover } from "@/design-system/overlays/Popover"
 import { PublicAuthLink } from "./PublicAuthLayout"
 
@@ -22,11 +23,8 @@ export function AuthHelp({
 }) {
   return (
     <Popover
-      trigger={
-        <span className="inline-flex min-h-11 items-center px-3 text-sm font-medium text-link">
-          Help
-        </span>
-      }
+      label="Help"
+      trigger={<Button variant="ghost">Help</Button>}
       placement="top"
     >
       <div className="flex max-w-xs flex-col gap-2">

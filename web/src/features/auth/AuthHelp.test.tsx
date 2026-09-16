@@ -7,6 +7,7 @@ import { AuthHelp } from "./AuthHelp"
 async function open(ui: ReactElement) {
   render(ui)
   await userEvent.setup().click(screen.getByRole("button", { name: "Help" }))
+  expect(await screen.findByRole("dialog", { name: "Help" })).toBeVisible()
 }
 
 it("offers password recovery beside the master-key box, where no password field carries it", async () => {
