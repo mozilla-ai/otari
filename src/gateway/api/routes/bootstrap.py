@@ -34,6 +34,7 @@ from gateway.api.routes import (
     keys,
     models,
     organizations,
+    playground,
     pricing,
     providers,
     routing,
@@ -83,8 +84,7 @@ _DECLARED_SURFACES: tuple[Surface, ...] = (
     # Hosted only: on standalone the organization is the deployment, so ``usage`` already shows it.
     Surface("organization_usage", standalone=False),
     organizations.SURFACE,
-    # A hosted deployment serves no inference, and the Playground sends completions.
-    Surface("playground", hosted=False),
+    playground.SURFACE,
     pricing.SURFACE,
     providers.SURFACE,
     routing.SURFACE,
