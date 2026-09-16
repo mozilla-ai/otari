@@ -154,7 +154,7 @@ def published_surfaces(config: GatewayConfig, enabled_features: tuple[CoreFeatur
         return []
     fixed = HOSTED_SURFACES if config.is_hosted_mode else STANDALONE_SURFACES
     featured = [feature.surface for feature in enabled_features if feature.surface is not None]
-    return sorted((*fixed, *featured))
+    return sorted({*fixed, *featured})
 
 
 class DeploymentBootstrap(BaseModel):

@@ -83,6 +83,15 @@ def test_the_registry_is_a_literal_tuple() -> None:
     assert all(isinstance(element, ast.Attribute | ast.Name) for element in value.elts)
 
 
+def test_registry_features_have_distinct_names_and_surfaces() -> None:
+    """A collision is a mistake to catch here, not one for the published set to merge away."""
+    names = [feature.name for feature in features.CORE_FEATURES]
+    surfaces = [feature.surface for feature in features.CORE_FEATURES if feature.surface is not None]
+    assert len(set(names)) == len(names), "two features share a name"
+    assert len(set(surfaces)) == len(surfaces), "two features share a surface"
+    assert not set(surfaces) & {*STANDALONE_SURFACES, *HOSTED_SURFACES}, "a feature surface repeats an edition's own"
+
+
 @pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
 def test_a_feature_mounts_its_routers_only_when_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool
