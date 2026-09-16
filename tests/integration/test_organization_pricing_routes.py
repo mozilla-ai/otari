@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from any_llm import LLMProvider
 from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
@@ -39,6 +40,8 @@ from gateway.services.organization_pricing_service import (
     PricingOverrideInput,
 )
 from gateway.services.pricing_service import find_model_pricing
+from gateway.services.provider_kwargs import credential_ladder_exhausted, get_provider_kwargs
+from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy.errors import (
     NotAuthorizedError,
     OrganizationPricingManagedModelError,
@@ -46,6 +49,7 @@ from gateway.services.tenancy.errors import (
     OrganizationPricingOverlapError,
     TenancyValidationError,
 )
+from gateway.services.tenancy.org_provider_key_service import refresh_org_provider_cache, reset_org_provider_cache
 from gateway.services.workspace_scope import (
     organization_for_key_id,
     organization_for_workspace_id,
@@ -739,6 +743,66 @@ async def test_a_key_row_with_no_credential_material_does_not_exempt_the_organiz
         api_base=None,
         client_args=None,
     )
+    service = OrganizationPricingService(
+        async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="openai")
+    )
+
+    with pytest.raises(OrganizationPricingManagedModelError):
+        await service.create_for_caller(identity, _MODEL_KEY, _rates())
+
+
+@pytest.mark.asyncio
+async def test_an_unusable_default_key_does_not_fall_back_to_a_usable_one(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dispatch uses the default key or none, so a usable second key does not exempt the organization."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-hosted-bad-default", created_by_user_id=None
+    )
+    identity = await _identity(async_db, organization, role="admin", name="admin person")
+    workspace = await WorkspaceRepository(async_db).create_workspace(
+        name="Platform", organization_id=organization.id, created_by_user_id=None
+    )
+    keys = OrgProviderKeyRepository(async_db)
+    usable = await keys.create_key(
+        organization_id=organization.id,
+        provider="openai",
+        name="usable",
+        encrypted_api_key=encrypt_secret("sk-usable"),
+        last4="able",
+        api_base=None,
+        client_args=None,
+    )
+    unusable = await keys.create_key(
+        organization_id=organization.id,
+        provider="openai",
+        name="unusable",
+        encrypted_api_key="not-a-ciphertext",
+        last4=None,
+        api_base=None,
+        client_args=None,
+    )
+
+    async def dispatch_falls_through_to_the_port() -> bool:
+        await refresh_org_provider_cache(async_db)
+        kwargs = get_provider_kwargs(GatewayConfig(), LLMProvider.OPENAI, workspace_id=workspace.id)
+        return credential_ladder_exhausted(LLMProvider.OPENAI, kwargs)
+
+    try:
+        usable.is_org_default = True
+        await async_db.flush()
+        assert not await dispatch_falls_through_to_the_port()
+
+        usable.is_org_default = False
+        await async_db.flush()
+        unusable.is_org_default = True
+        await async_db.flush()
+        assert await dispatch_falls_through_to_the_port()
+    finally:
+        reset_org_provider_cache()
+
     service = OrganizationPricingService(
         async_db, GatewayConfig(), model_provider=_FakeHostedModelProvider(served="openai")
     )
