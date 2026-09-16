@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_catalog_reader
 from gateway.core.config import PROVIDER_TYPE_ALIASES, RESERVED_PROVIDER_INSTANCE_NAMES, GatewayConfig
+from gateway.core.surface import Surface
 from gateway.log_config import logger
 from gateway.models.providers import ProviderCredential
 from gateway.services.model_discovery_service import (
@@ -71,6 +72,10 @@ catalog_router = APIRouter(
     tags=["providers"],
     dependencies=[Depends(verify_catalog_reader)],
 )
+
+# Not hosted: a stored provider is shared by every organization and overrides their own keys.
+# Hiding the page does not stop the API from writing one.
+SURFACE = Surface("providers", hosted=False)
 
 
 class ProviderCapabilitiesSchema(BaseModel):

@@ -35,6 +35,7 @@ from gateway.api.routes import (
     models,
     organizations,
     pricing,
+    providers,
     routing,
     settings,
     tools,
@@ -85,9 +86,7 @@ _DECLARED_SURFACES: tuple[Surface, ...] = (
     # A hosted deployment serves no inference, and the Playground sends completions.
     Surface("playground", hosted=False),
     pricing.SURFACE,
-    # Not hosted: a stored provider is shared by every organization and overrides their own keys.
-    # Hiding the page does not stop the API from writing one.
-    Surface("providers", hosted=False),
+    providers.SURFACE,
     routing.SURFACE,
     settings.SURFACE,
     tools.SURFACE,
