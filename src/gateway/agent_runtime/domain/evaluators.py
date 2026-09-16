@@ -242,17 +242,27 @@ def _strip_shell_comment(command: str) -> str:
 def _normalize_bare_newlines(command: str) -> str:
     """Replace every unquoted, unescaped newline with a whitespace-padded `;`.
 
-    A newline outside any quoting ends one command and starts the next, the
-    same as `;`, but `shlex.split` treats it as ordinary whitespace: without
-    this, `git push\\ngit status` tokenizes as one segment
-    `["git", "push", "git", "status"]`, so a gate forbidding `git push`
-    (with nothing after it) never matches a real two-line script that runs
-    it as its own complete command. `_command_segments` only recognizes a
-    separator as a *whole token* (module docstring above), and shlex only
-    isolates `;` as one when whitespace surrounds it (`"a;b"` stays one
-    token, `"a ; b"` becomes three), so this inserts `" ; "`, never a bare
-    `;`, to guarantee the substitution is always its own token regardless of
-    what is adjacent to the original newline.
+    `_contains_subsequence` matches a phrase anywhere in a segment, not only
+    at its start, so a two-word phrase like `git push` already matched
+    `git push\\ngit status` before this existed: `shlex.split` turns the
+    unquoted newline into ordinary whitespace, giving one segment
+    `["git", "push", "git", "status"]`, and `"git", "push"` still appear
+    there contiguously. What that merge actually breaks is the opposite
+    direction: `git\\npush`, two separate one-word commands, merges into the
+    same `["git", "push"]` and falsely matches the *two*-word phrase, which
+    names one command, not two in sequence. Splitting on the newline gives
+    each its own segment, and neither contains the phrase. This is also
+    load-bearing for `_contains_subsequence`'s command-position basename
+    equivalence below: `echo hi\\n/usr/bin/npm install`, unsplit, is one
+    segment with `/usr/bin/npm` at a non-zero position, where that
+    equivalence does not apply; split, it is its own segment's position 0.
+
+    `_command_segments` only recognizes a separator as a *whole token*
+    (module docstring above), and shlex only isolates `;` as one when
+    whitespace surrounds it (`"a;b"` stays one token, `"a ; b"` becomes
+    three), so this inserts `" ; "`, never a bare `;`, to guarantee the
+    substitution is always its own token regardless of what is adjacent to
+    the original newline.
 
     Meant to run on `_strip_shell_comment`'s own output, which has already
     rewritten Bash's `$'...'` quoting into plain `'...'`, so this only needs
@@ -262,6 +272,12 @@ def _normalize_bare_newlines(command: str) -> str:
     continuation; both are left untouched, matching how neither ends a
     command in a real shell.
     """
+    if "\n" not in command:
+        # The overwhelmingly common case, and cheap to rule out up front:
+        # `in` is a single C-level scan, versus the character-by-character
+        # Python loop below running to the end of every command regardless,
+        # on top of `_strip_shell_comment`'s own pass over the same string.
+        return command
     quote: str | None = None
     escaped = False
     result: list[str] = []
@@ -307,16 +323,12 @@ def _command_segments(command: str) -> list[list[str]]:
     looks at whole tokens, never substrings of one.
 
     Each segment's own first token, the command actually being invoked for
-    that segment, is normalized to its path basename (`/usr/bin/npm` and
-    `./node_modules/.bin/npm` both become `npm`): a policy author writes a
-    forbidden phrase against the name they would type, and a path-qualified
-    invocation of the same executable is not a different command. Only that
-    one position is normalized, never an argument token, since a path in
-    argument position (`npm install ./local-package`) is real content a
-    normalization there would corrupt. This does not follow indirection
-    through a prefix command (`sudo /usr/bin/npm install` still has `sudo`,
-    not `npm`, as segment[0]); that is a separate, harder problem this does
-    not attempt to solve.
+    that segment, is later compared by path basename rather than literally
+    (`_contains_subsequence`), so a path-qualified invocation of an
+    executable matches a phrase naming it unqualified and vice versa. That
+    equivalence is applied at comparison time, not by rewriting a token
+    here: this function's own output is always the literal tokens a
+    caller's command actually contained.
 
     A command shlex cannot tokenize even after comment-stripping (an
     unbalanced quote outside any comment) falls back to a plain whitespace
@@ -363,10 +375,7 @@ def _command_segments(command: str) -> list[list[str]]:
             segments.append([])
         else:
             segments[-1].append(token)
-    non_empty = [segment for segment in segments if segment]
-    for segment in non_empty:
-        segment[0] = _basename(segment[0])
-    return non_empty
+    return [segment for segment in segments if segment]
 
 
 def tokenize_phrase(phrase: str) -> list[str]:
@@ -413,10 +422,41 @@ def tokenize_commands(commands: tuple[str, ...]) -> dict[str, list[list[str]]]:
 
 
 def _contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
-    """Whether `phrase`'s tokens appear, in order and unbroken, inside `segment`."""
+    """Whether `phrase`'s tokens appear, in order and unbroken, inside `segment`.
+
+    Every position compares literally except one: when a candidate window
+    starts at `segment[0]`, that position is the executable actually
+    invoked for this segment, so it is compared to `phrase[0]` by path
+    basename rather than by literal equality. A policy author writes a
+    forbidden phrase against the name they would type (`npm install`), and
+    a path-qualified invocation of the same executable (`/usr/bin/npm
+    install`) is not a different command; the same equivalence also lets a
+    path-qualified *phrase* (`./scripts/release.sh`) keep matching a
+    command that invokes that exact path, which comparing only the segment
+    side against a literal phrase would silently stop doing the moment the
+    phrase's own spelling no longer equals the normalized token. Comparing
+    both sides by basename, rather than rewriting either one ahead of time,
+    is what keeps every direction working: bare phrase vs. qualified
+    command, qualified phrase vs. bare command, and qualified phrase vs. the
+    identical qualified command.
+
+    Everywhere else, including `segment[0]` itself when the window instead
+    starts later (an earlier phrase token already matched a prefix
+    command), a path is real content and compared literally: `sudo
+    /usr/bin/npm install` does not match `npm install`, since the actual
+    executable sits at `segment[1]`, not `segment[0]`, for that segment; and
+    `npm install ./local-package` does not match a phrase naming just
+    `local-package`, since an argument's path is not a command position.
+    """
     if not phrase or len(phrase) > len(segment):
         return False
-    return any(segment[start : start + len(phrase)] == phrase for start in range(len(segment) - len(phrase) + 1))
+    for start in range(len(segment) - len(phrase) + 1):
+        head_matches = (
+            _basename(segment[0]) == _basename(phrase[0]) if start == 0 else segment[start] == phrase[0]
+        )
+        if head_matches and segment[start + 1 : start + len(phrase)] == phrase[1:]:
+            return True
+    return False
 
 
 def evaluate_command_match(

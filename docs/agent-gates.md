@@ -97,6 +97,19 @@ command, so a one-word phrase also matches where that word is an argument:
 `forbidden: ["npm"]` refuses `grep -rn npm web/`. Prefer a phrase that names
 a real invocation (`npm install`, `npm ci`) over a bare tool name.
 
+A bare, unquoted newline is a segment boundary too, the same as `;`: a
+multi-line Bash script checks each of its own lines as its own command,
+not as one long run-on segment.
+
+The token actually invoked for a segment (its own first word) is compared
+by path basename, not literal text, in both directions: `forbidden: ["npm
+install"]` catches `/usr/bin/npm install` and `./node_modules/.bin/npm
+install` as well as the bare form, and a path-qualified phrase like
+`forbidden: ["./scripts/release.sh"]` still catches a command that invokes
+that exact path. This does not follow indirection through a prefix
+command: `sudo /usr/bin/npm install` still has `sudo`, not `npm`, in that
+position, so `forbidden: ["npm install"]` does not catch it.
+
 Three things this gate does not do, on purpose, for now:
 
 - It sees only the literal command text of one tool call. It does not, and
@@ -137,7 +150,7 @@ import json, urllib.request
 body = json.dumps({
     "policy_yaml": open(".otari-gates.yml").read(),
     "changed_paths": ["CHANGELOG.md"],
-    "commands": ["npm install"],
+    "commands": ["git push --force"],
 }).encode()
 request = urllib.request.Request(
     "http://localhost:8000/api/v1/hooks/check",
@@ -161,11 +174,11 @@ print(urllib.request.urlopen(request).read().decode())
       "detail": "CHANGELOG.md"
     },
     {
-      "gate_id": "use-pnpm-not-npm",
+      "gate_id": "no-force-push",
       "enforcement": "required",
       "outcome": "fail",
-      "message": "web/ is pnpm, not npm...",
-      "detail": "npm install"
+      "message": "Force-pushing is not allowed; use --force-with-lease if you must.",
+      "detail": "git push --force"
     }
   ],
   "blocked": true

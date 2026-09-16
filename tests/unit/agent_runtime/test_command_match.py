@@ -283,7 +283,7 @@ def test_ansi_c_quoted_escaped_apostrophe_does_not_evade_the_gate() -> None:
     assert result.outcome is Outcome.FAIL
 
 
-# --- Command-position basename normalization -------------------------------
+# --- Command-position basename equivalence ----------------------------------
 
 
 def test_path_qualified_command_matches_the_bare_phrase() -> None:
@@ -298,40 +298,74 @@ def test_relative_path_qualified_command_matches_the_bare_phrase() -> None:
     assert result.outcome is Outcome.FAIL
 
 
-def test_path_in_argument_position_is_not_normalized() -> None:
-    """Only the command-position token (segment[0]) is basename-normalized.
+def test_path_qualified_phrase_still_matches_the_identical_path_qualified_command() -> None:
+    """Regression check for rewriting only one side to its basename.
 
-    A path passed as an *argument*, like a local package reference, is real
-    content: normalizing it too would corrupt it and could create a false
-    match against an unrelated phrase.
+    Doing that (instead of comparing both sides by basename at match time)
+    would silently stop a path-qualified phrase like this one from ever
+    matching the exact command it names, since neither would equal the
+    other's literal spelling any more.
     """
-    assert _command_segments("npm install ./local-package") == [["npm", "install", "./local-package"]]
+    gate = _gate(id="no-release-script", forbidden=("./scripts/release.sh",), message="m")
+    result = evaluate_command_match(gate, CommandEvidence(commands=("./scripts/release.sh",)))
+    assert result.outcome is Outcome.FAIL
+
+
+def test_path_qualified_phrase_still_matches_in_argument_position() -> None:
+    gate = _gate(id="no-release-script", forbidden=("./scripts/release.sh",), message="m")
+    result = evaluate_command_match(gate, CommandEvidence(commands=("bash ./scripts/release.sh",)))
+    assert result.outcome is Outcome.FAIL
+
+
+def test_argument_position_path_does_not_get_basename_equivalence() -> None:
+    """Only a segment's own position 0, the command actually invoked, gets basename equivalence.
+
+    A path in argument position is real content: a bare-basename phrase
+    must not reach into it and match just its tail.
+    """
+    gate = _gate(id="g", forbidden=("local-package",), message="m")
+    result = evaluate_command_match(gate, CommandEvidence(commands=("npm install ./local-package",)))
+    assert result.outcome is Outcome.PASS
 
 
 def test_sudo_prefixed_path_qualified_command_is_a_documented_gap() -> None:
-    """Only segment[0] is normalized; a prefix command like `sudo` means the
+    """A prefix command like `sudo` puts the actual executable one position later.
 
-    actual executable is not in that position. This is the same class of
-    documented limitation as other indirection this evaluator does not
-    resolve, not a regression from normalizing segment[0].
+    Basename equivalence applies only to a segment's own position 0, so it
+    does not reach there. Same class of documented limitation as other
+    indirection this evaluator does not resolve.
     """
-    assert _command_segments("sudo /usr/bin/npm install") == [["sudo", "/usr/bin/npm", "install"]]
+    gate = _gate(id="use-pnpm", forbidden=("npm install",), message="m")
+    result = evaluate_command_match(gate, CommandEvidence(commands=("sudo /usr/bin/npm install",)))
+    assert result.outcome is Outcome.PASS
 
 
 # --- Unquoted newlines as command-segment boundaries ------------------------
 
 
-def test_bare_newline_is_a_segment_boundary() -> None:
-    """`shlex.split(..., posix=True)` treats an unquoted newline as ordinary
+def test_cross_line_merge_no_longer_creates_a_false_positive() -> None:
+    """Two separate one-word commands on their own lines used to merge into one segment.
 
-    whitespace, so without normalizing it first, a two-line Bash script like
-    `git push\\ngit status` combines into one segment
-    `["git", "push", "git", "status"]`, and a gate forbidding exactly
-    `git push` (as its own complete command) never matches it.
+    `shlex.split` treats an unquoted newline as ordinary whitespace, so
+    `["git", "push"]` falsely matched the two-word phrase `git push`, which
+    names one command, not two run in sequence. Splitting on the newline
+    gives each its own segment, and neither contains the phrase.
     """
-    assert _command_segments("git push\ngit status") == [["git", "push"], ["git", "status"]]
+    assert _command_segments("git\npush") == [["git"], ["push"]]
     gate = _gate(id="no-bare-push", forbidden=("git push",), message="m")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("echo hi\ngit push",)))
+    result = evaluate_command_match(gate, CommandEvidence(commands=("git\npush",)))
+    assert result.outcome is Outcome.PASS
+
+
+def test_newline_split_is_load_bearing_for_basename_equivalence() -> None:
+    """Unsplit, a path-qualified invocation on its own line sits at a non-zero segment position.
+
+    Basename equivalence only applies at a segment's own position 0, so
+    without the newline split this would never reach it. Splitting on the
+    newline gives that invocation its own segment, and its own position 0.
+    """
+    gate = _gate(id="use-pnpm", forbidden=("npm install",), message="m")
+    result = evaluate_command_match(gate, CommandEvidence(commands=("echo hi\n/usr/bin/npm install",)))
     assert result.outcome is Outcome.FAIL
 
 
@@ -341,7 +375,6 @@ def test_quoted_newline_is_preserved_as_content() -> None:
 
 def test_backslash_escaped_newline_is_not_a_boundary() -> None:
     """A line continuation (`\\` followed by a newline) joins two physical
-
     lines into one logical line in a real shell; splitting on it would be a
     missed-block bypass (a forbidden two-word command hidden behind an
     escaped newline would never match as a whole phrase), unlike a bare
@@ -353,7 +386,6 @@ def test_backslash_escaped_newline_is_not_a_boundary() -> None:
 
 def test_newline_boundary_also_applies_to_the_malformed_command_fallback() -> None:
     """The plain-`.split()` fallback (an unbalanced quote) also collapses a
-
     bare newline to whitespace unless normalized the same way; this fallback
     cannot distinguish a quoted newline from a bare one either way (already
     documented as degraded), so it replaces every newline unconditionally.
