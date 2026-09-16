@@ -13,6 +13,7 @@ from gateway.metrics import (
     MetricsMiddleware,
     _endpoint_label,
     metrics_endpoint,
+    refresh_db_pool_metrics,
 )
 
 
@@ -30,6 +31,10 @@ _EXPOSED_FAMILIES: set[tuple[str, str, tuple[str, ...]]] = {
     ("gateway_active_requests", "gauge", ()),
     ("gateway_auth_failures", "counter", ("reason",)),
     ("gateway_budget_exceeded", "counter", ()),
+    ("gateway_db_pool_capacity", "gauge", ("pool",)),
+    ("gateway_db_pool_connections_checked_out", "gauge", ("pool",)),
+    ("gateway_db_pool_connections_idle", "gauge", ("pool",)),
+    ("gateway_db_pool_overflow_connections", "gauge", ("pool",)),
     ("gateway_inline_cost_settlements", "counter", ("outcome",)),
     ("gateway_rate_limit_hits", "counter", ()),
     ("gateway_request_cost_dollars", "histogram", ("provider", "model")),
@@ -238,3 +243,51 @@ def test_metrics_expose_process_memory() -> None:
 
     assert "process_resident_memory_bytes" in body
     assert _sample("process_resident_memory_bytes") > 0
+
+
+class _FakeQueuePool:
+    """Stand-in for ``AsyncAdaptedQueuePool``, exposing only the counters read."""
+
+    _max_overflow = 20
+
+    def checkedout(self) -> int:
+        return 4
+
+    def checkedin(self) -> int:
+        return 6
+
+    def overflow(self) -> int:
+        return 1
+
+    def size(self) -> int:
+        return 10
+
+
+def test_db_pool_gauges_are_refreshed_at_scrape_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A leaked connection has to be visible before requests start failing."""
+    from types import SimpleNamespace
+
+    from gateway.core import database
+
+    monkeypatch.setattr(database, "_engine", SimpleNamespace(pool=_FakeQueuePool()))
+    monkeypatch.setattr(database, "_log_engine", None)
+
+    refresh_db_pool_metrics()
+
+    labels = {"pool": "request"}
+    assert _sample("gateway_db_pool_connections_checked_out", labels) == 4.0
+    assert _sample("gateway_db_pool_connections_idle", labels) == 6.0
+    assert _sample("gateway_db_pool_overflow_connections", labels) == 1.0
+    assert _sample("gateway_db_pool_capacity", labels) == 30.0
+
+
+def test_db_pool_gauges_are_left_alone_without_a_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SQLite runs on NullPool, and an uninitialized engine has no pool at all."""
+    from gateway.core import database
+
+    monkeypatch.setattr(database, "_engine", None)
+    monkeypatch.setattr(database, "_log_engine", None)
+
+    refresh_db_pool_metrics()
+
+    assert _sample("gateway_db_pool_capacity", {"pool": "unbuilt"}) == 0.0

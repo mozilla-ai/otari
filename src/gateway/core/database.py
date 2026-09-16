@@ -6,8 +6,9 @@ import asyncio
 import contextlib
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from alembic import command
 from alembic.config import Config
@@ -194,6 +195,97 @@ async def release_session(session: AsyncSession | None) -> bool:
             await session.rollback()
         return False
     return True
+
+
+
+# The name each pool reports under, in metrics and in anything that iterates
+# :func:`pool_stats`.
+REQUEST_POOL = "request"
+LOG_POOL = "log"
+
+
+@runtime_checkable
+class _CountingPool(Protocol):
+    """The counters a ``QueuePool`` keeps and a ``NullPool`` does not."""
+
+    def checkedout(self) -> int: ...
+    def checkedin(self) -> int: ...
+    def overflow(self) -> int: ...
+    def size(self) -> int: ...
+
+
+@dataclass(frozen=True, slots=True)
+class PoolStats:
+    """A point-in-time reading of one engine's connection pool."""
+
+    checked_out: int
+    checked_in: int
+    overflow: int
+    size: int
+    max_overflow: int
+
+    @property
+    def capacity(self) -> int:
+        """The most connections this pool will ever hand out at once."""
+        return self.size + self.max_overflow
+
+    @property
+    def is_saturated(self) -> bool:
+        """Whether every connection the pool can hand out is already out.
+
+        A caller checking out here would queue for ``db_pool_timeout`` and then
+        fail, so this is what lets the readiness probe answer immediately
+        instead of holding the orchestrator open for the full timeout.
+        """
+        return self.capacity > 0 and self.checked_out >= self.capacity
+
+
+def _engine_pool_stats(engine: AsyncEngine | None) -> PoolStats | None:
+    """Read *engine*'s pool, or ``None`` when there is nothing to read.
+
+    Returns ``None`` for an engine that was never built and for one on
+    ``NullPool``, which is SQLite's pool here and implements none of the
+    counters below: it opens a connection per checkout and keeps no pool to
+    saturate. Callers treat ``None`` as "no pool ceiling applies" rather than
+    as an error, so this never raises.
+
+    ``max_overflow`` has no public accessor on ``QueuePool``, so it is read
+    defensively and falls back to ``0``, which understates capacity rather than
+    inventing it.
+    """
+    if engine is None:
+        return None
+    pool = engine.pool
+    if not isinstance(pool, _CountingPool):
+        return None
+    # Negative until the pool has created its full complement of base
+    # connections, which would read as "overflow in use" the wrong way round.
+    overflow = max(pool.overflow(), 0)
+    return PoolStats(
+        checked_out=pool.checkedout(),
+        checked_in=pool.checkedin(),
+        overflow=overflow,
+        size=pool.size(),
+        max_overflow=max(getattr(pool, "_max_overflow", 0), 0),
+    )
+
+
+def request_pool_stats() -> PoolStats | None:
+    """Pool stats for the engine that serves request-scoped sessions."""
+    return _engine_pool_stats(_engine)
+
+
+def pool_stats() -> dict[str, PoolStats]:
+    """Pool stats for every active engine, keyed by pool name.
+
+    A pool with nothing to report is omitted, so the result is empty before
+    :func:`init_db` runs and on SQLite.
+    """
+    readings = {
+        REQUEST_POOL: _engine_pool_stats(_engine),
+        LOG_POOL: _engine_pool_stats(_log_engine),
+    }
+    return {name: stats for name, stats in readings.items() if stats is not None}
 
 
 def engine_kwargs(
@@ -387,13 +479,18 @@ def reset_db() -> None:
 
 __all__ = [
     "DATABASE_ERRORS",
+    "LOG_POOL",
+    "REQUEST_POOL",
+    "PoolStats",
     "create_log_session",
     "create_session",
     "dispose_db",
     "engine_kwargs",
     "get_db",
     "init_db",
+    "pool_stats",
     "release_session",
+    "request_pool_stats",
     "reset_db",
     "translate_timeout_error",
 ]
