@@ -16,6 +16,10 @@ or contribute a capability-gated router after core bindings are installed.
 A core feature is one domain-named module per layer plus an entry in
 `gateway/features.py`; see ARCHITECTURE.md.
 
+A route module that backs a dashboard page declares `SURFACE` beside its router
+and adds it to `_DECLARED_SURFACES` in `api/routes/bootstrap.py`. A core feature
+sets `surface` on its registry entry instead.
+
 Add a port only when a real second implementation exists. Core never imports an
 overlay. Dependencies request protocols from the container and never name an
 adapter.
