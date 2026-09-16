@@ -10201,13 +10201,20 @@
             "type": "array"
           },
           "commands": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 10000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Shell commands the caller observed run or is about to run.",
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 10000,
-            "title": "Commands",
-            "type": "array"
+            "title": "Commands"
           },
           "policy_yaml": {
             "maxLength": 262144,
