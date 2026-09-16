@@ -29,7 +29,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT
-from gateway.models.entities import WorkspaceWebSearchConfig
+from gateway.models.tools import WorkspaceWebSearchConfig
 
 _SEARCH_URL = "http://127.0.0.1:9998/search"
 _REQUEST = {

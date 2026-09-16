@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.entities import FileObject
+from gateway.models.tools import FileObject
 from gateway.services.file_store import FileStore
 
 

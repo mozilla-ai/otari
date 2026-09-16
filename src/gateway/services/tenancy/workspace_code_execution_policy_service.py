@@ -52,8 +52,8 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.entities import WorkspaceCodeExecutionPolicy
 from gateway.models.tenancy import User, Workspace
+from gateway.models.tools import WorkspaceCodeExecutionPolicy
 from gateway.services.mcp_loop import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.sandbox_backend import (
     CODE_EXECUTION_TOOL_NAME,

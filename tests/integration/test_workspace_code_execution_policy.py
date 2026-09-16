@@ -16,8 +16,8 @@ import pytest_asyncio
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from gateway.models.entities import WorkspaceCodeExecutionPolicy
 from gateway.models.tenancy import Organization, User, Workspace
+from gateway.models.tools import WorkspaceCodeExecutionPolicy
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,

@@ -13,7 +13,7 @@ import pytest
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import FileObject
+from gateway.models.tools import FileObject
 from gateway.services import content_normalizer as cn
 from gateway.services.content_normalizer import normalize_messages
 from gateway.services.file_extractors import ExtractionResult

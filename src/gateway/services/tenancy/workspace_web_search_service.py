@@ -57,8 +57,8 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.entities import WorkspaceWebSearchConfig
 from gateway.models.tenancy import User, Workspace
+from gateway.models.tools import WorkspaceWebSearchConfig
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.errors import WorkspaceWebSearchDomainsExcludedError
 from gateway.services.tenancy.organization_service import OrganizationService

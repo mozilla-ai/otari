@@ -28,4 +28,5 @@ from gateway.models import (  # noqa: F401
     providers,
     routing,
     tenancy,
+    tools,
 )

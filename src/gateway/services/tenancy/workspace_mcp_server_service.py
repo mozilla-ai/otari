@@ -49,9 +49,9 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.entities import WorkspaceMcpServer
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.tenancy import User
+from gateway.models.tools import WorkspaceMcpServer
 from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,

@@ -8957,7 +8957,7 @@ export interface components {
          *
          *     ``credential`` is never stored as sent: it is encrypted with
          *     ``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention
-         *     `entities.WorkspaceMcpServer` and `providers.ProviderCredential` use. It is
+         *     `tools.WorkspaceMcpServer` and `providers.ProviderCredential` use. It is
          *     sent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,
          *     so it authenticates this gateway to the guardrails service the entry names.
          *     A guardrail *vendor's* own key is not this: the guardrails service builds
