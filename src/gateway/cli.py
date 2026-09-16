@@ -571,7 +571,12 @@ def _merge_pretooluse_hook(settings_path: Path, matcher: str, command: str) -> b
     else:
         settings = {}
 
-    pretooluse = settings.setdefault("hooks", {}).setdefault("PreToolUse", [])
+    hooks_section = settings.setdefault("hooks", {})
+    if not isinstance(hooks_section, dict):
+        raise click.ClickException(f'{settings_path}\'s "hooks" must be a JSON object.')
+    pretooluse = hooks_section.setdefault("PreToolUse", [])
+    if not isinstance(pretooluse, list):
+        raise click.ClickException(f'{settings_path}\'s "hooks.PreToolUse" must be a JSON array.')
     otari_hook_prefix = command.split(" --", 1)[0]  # "<path> hook", before any flags
 
     updated = False

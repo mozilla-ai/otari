@@ -244,6 +244,25 @@ evidence it needs in its own way, not through this same Git-status step.
    `--api-key <key>` skips resolution and prompting outright, for a
    non-interactive run.
 
+   Three things about this are temporary, not deliberate design, and all
+   trace back to one cause: this package installs into a per-project venv
+   today, not a single, stable, per-user location. `setup` identifies its own
+   hook entry by the absolute path of that venv's `otari` binary, so a
+   reinstalled or relocated environment leaves the old entry unrecognized
+   rather than updated in place. It has no `--config`/`-c` of its own (unlike
+   `otari hook` itself, see "Registering it by hand" below), so a
+   `master_key` living only in `config.yml` is neither found automatically
+   nor passed to the generated hook. And a manually entered credential is
+   embedded directly in the generated command: a subprocess argument visible
+   to anything that lists processes on the machine, not just a value in a
+   gitignored file. Once otari ships as a standalone install (Homebrew, most
+   likely) instead of a venv console script, it gains a fixed binary path to
+   match on and a well-known per-user config directory (`~/.config/otari` on
+   both macOS and Linux, not the platform-native convention) to read a
+   `master_key` from and write a prompted one into, closing all three without
+   threading a flag through every entry point or ever putting a secret in
+   argv. Fixed then, not now.
+
 2. Try something a gate forbids: `Edit` `CHANGELOG.md`, or ask for
    `npm install` (this repo's own `.otari-gates.yml` enforces pnpm; see
    `web/AGENTS.md`). Either tool call itself is refused before it runs; for

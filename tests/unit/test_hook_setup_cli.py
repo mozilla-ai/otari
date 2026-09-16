@@ -213,3 +213,29 @@ def test_rejects_an_existing_settings_file_that_is_not_valid_json(repo: Path) ->
     assert "not valid JSON" in result.output
     # Untouched, not clobbered with a fresh empty structure.
     assert settings_path.read_text(encoding="utf-8") == "{not valid json"
+
+
+def test_rejects_a_non_object_hooks_section(repo: Path) -> None:
+    (repo / ".otari-gates.yml").write_text(_CHANGED_PATH_ONLY_GATES, encoding="utf-8")
+    settings_path = repo / ".claude" / "settings.local.json"
+    settings_path.parent.mkdir(parents=True)
+    original = json.dumps({"hooks": ["not", "an", "object"]})
+    settings_path.write_text(original, encoding="utf-8")
+
+    result = _invoke("--api-key", "k")
+    assert result.exit_code != 0
+    assert '"hooks" must be a JSON object' in result.output
+    assert settings_path.read_text(encoding="utf-8") == original
+
+
+def test_rejects_a_non_array_pretooluse_list(repo: Path) -> None:
+    (repo / ".otari-gates.yml").write_text(_CHANGED_PATH_ONLY_GATES, encoding="utf-8")
+    settings_path = repo / ".claude" / "settings.local.json"
+    settings_path.parent.mkdir(parents=True)
+    original = json.dumps({"hooks": {"PreToolUse": "not-a-list"}})
+    settings_path.write_text(original, encoding="utf-8")
+
+    result = _invoke("--api-key", "k")
+    assert result.exit_code != 0
+    assert '"hooks.PreToolUse" must be a JSON array' in result.output
+    assert settings_path.read_text(encoding="utf-8") == original
