@@ -39,6 +39,18 @@ def test_unknown_when_evidence_was_not_collected() -> None:
     assert result.outcome.is_blocking, "unknown must block a required gate, never pass silently"
 
 
+def test_not_applicable_when_evidence_is_an_explicit_empty_list() -> None:
+    """An empty commands list is what a PreToolUse edit call or a Stop event
+
+    submits: evidence was collected and there is no command to report, not
+    "checked, none forbidden". A required gate must not read this as a clean
+    pass, since nothing was actually checked.
+    """
+    result = evaluate_command_match(_gate(), CommandEvidence(commands=()))
+    assert result.outcome is Outcome.NOT_APPLICABLE
+    assert not result.outcome.is_blocking
+
+
 def test_advisory_gate_does_not_block_required() -> None:
     gate = _gate(enforcement="advisory")
     result = evaluate_command_match(gate, CommandEvidence(commands=("git push --force",)))
@@ -196,6 +208,10 @@ def test_strip_shell_comment_cases() -> None:
         # inside, so the '#' right after it is still inside quotes, not a
         # comment start; nothing after it is discarded.
         ('echo "a\\" # b" && npm install', 'echo "a\\" # b" && npm install'),
+        # Bash ANSI-C quoting ($'...'): backslash escapes are active inside
+        # it, so \' is a literal apostrophe, not the closing quote; the '#'
+        # right after it is still inside the string, not a comment start.
+        ("echo $'a\\' # b' && npm install", "echo 'a'\\'' # b' && npm install"),
     ]
     for command, expected in cases:
         assert _strip_shell_comment(command) == expected, command
@@ -227,6 +243,21 @@ def test_an_escaped_quote_does_not_end_double_quoting_early() -> None:
     """
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
     result = evaluate_command_match(gate, CommandEvidence(commands=('echo "a\\" # b" && npm install',)))
+    assert result.outcome is Outcome.FAIL
+
+
+def test_ansi_c_quoted_escaped_apostrophe_does_not_evade_the_gate() -> None:
+    r"""echo $'a\' # b' && npm install is one ANSI-C-quoted argument
+
+    (`a' # b`, via the escaped apostrophe) followed by a real, separate `&&
+    npm install`. Bash keeps this apostrophe as literal content because
+    backslash escapes are active inside $'...', unlike a plain '...' quote.
+    A prior version treated the escaped apostrophe as the real closing
+    quote, so the '#' right after it looked unquoted and word-start,
+    discarding "&& npm install" as a bogus comment.
+    """
+    gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
+    result = evaluate_command_match(gate, CommandEvidence(commands=("echo $'a\\' # b' && npm install",)))
     assert result.outcome is Outcome.FAIL
 
 

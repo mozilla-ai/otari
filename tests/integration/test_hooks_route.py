@@ -259,6 +259,18 @@ gates:
     message: Force-pushing is not allowed.
 """
 
+_COMMAND_MATCH_USE_PNPM_POLICY = """\
+schema_version: "1.0"
+policy:
+  id: test/use-pnpm
+gates:
+  - id: use-pnpm
+    type: command_match
+    enforcement: required
+    forbidden: ["npm"]
+    message: Use pnpm, not npm.
+"""
+
 
 def test_command_match_passes_when_no_forbidden_command_run(
     client: TestClient, master_key_header: dict[str, str]
@@ -371,7 +383,9 @@ def test_a_policy_with_no_command_match_gate_never_tokenizes_commands(
     being rejected by a budget meant for command_match gates that do not
     exist here.
     """
-    commands = [" " * 4000 for _ in range(600)]
+    # Distinct (a trailing index) so evidence deduplication does not collapse
+    # this back down to one command and hide the aggregate-length case.
+    commands = [" " * 4000 + str(i) for i in range(600)]
     start = time.time()
     response = client.post(
         f"{API_ROOT}/hooks/check",
@@ -508,3 +522,62 @@ def test_escaped_quote_does_not_hide_a_later_command_as_a_bogus_comment(
     )
     assert response.status_code == 200, response.text
     assert response.json()["blocked"] is True
+
+
+def test_ansi_c_quoted_escaped_apostrophe_does_not_evade_a_required_gate(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    r"""echo $'a\' # b' && npm install keeps '# b' inside its ANSI-C-quoted
+
+    argument (backslash escapes are active inside $'...', so \' is a
+    literal apostrophe there, not the closing quote); the real, separate
+    "&& npm install" after it must still be visible to this gate.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _COMMAND_MATCH_USE_PNPM_POLICY, "commands": ["echo $'a\\' # b' && npm install"]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["blocked"] is True
+
+
+def test_omitted_commands_blocks_a_required_command_match_gate(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Omitting `commands` from the request body entirely (as distinct from
+
+    sending an explicit `[]`) means this caller never collected command
+    evidence at all. A required command_match gate must read that as
+    `unknown` and block, not silently `pass`.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _COMMAND_MATCH_POLICY},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is True
+    assert body["results"][0]["outcome"] == "unknown"
+
+
+def test_explicit_empty_commands_is_not_applicable_not_a_pass(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """An explicit `commands: []`, what a PreToolUse edit call or a Stop
+
+    event submits, is evidence that was collected with nothing to report,
+    not "checked, none forbidden". A required gate must resolve
+    `not_applicable` (non-blocking, but honest that nothing was checked),
+    never a `pass` that reads as a clean check.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _COMMAND_MATCH_POLICY, "commands": []},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "not_applicable"

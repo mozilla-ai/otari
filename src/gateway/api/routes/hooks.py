@@ -171,8 +171,15 @@ class PolicyCheckRequest(BaseModel):
         max_length=_MAX_CHANGED_PATHS,
         description="Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).",
     )
-    commands: list[str] = Field(
-        default_factory=list,
+    # None (omitted, or an explicit `null`) is distinct from `[]`: None means
+    # this caller never collects command evidence at all (evaluate_command_match
+    # reports `unknown`, blocking a required gate rather than reading absent
+    # evidence as a pass); `[]` means it was collected and there is none right
+    # now (`not_applicable`). Unlike changed_paths, an omitted commands field
+    # is not defaulted to a list, because collapsing that distinction is
+    # exactly the bug this field's default used to have.
+    commands: list[str] | None = Field(
+        default=None,
         max_length=_MAX_COMMANDS,
         description="Shell commands the caller observed run or is about to run.",
     )
@@ -186,7 +193,9 @@ class PolicyCheckRequest(BaseModel):
         return ChangedPathEvidence(changed_paths=tuple(dict.fromkeys(self.changed_paths)))
 
     @property
-    def command_evidence(self) -> CommandEvidence:
+    def command_evidence(self) -> CommandEvidence | None:
+        if self.commands is None:
+            return None
         return CommandEvidence(commands=tuple(dict.fromkeys(self.commands)))
 
 
@@ -224,7 +233,7 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     for path in request.changed_paths:
         if len(path) > _MAX_PATH_LENGTH:
             raise HTTPException(status_code=422, detail=f"changed_paths entry exceeds {_MAX_PATH_LENGTH} characters.")
-    for command in request.commands:
+    for command in request.commands or []:
         if len(command) > _MAX_COMMAND_LENGTH:
             raise HTTPException(
                 status_code=422, detail=f"commands entry exceeds {_MAX_COMMAND_LENGTH} characters."
@@ -260,9 +269,11 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     # is exactly the cost _MAX_TOTAL_COMMAND_CHARS below exists to bound. A
     # policy with none (every policy shipped before this gate type existed)
     # must not pay that cost just to prove there is nothing to bound it
-    # against.
+    # against. Also gated on evidence actually being present: `commands`
+    # omitted from the request means command_evidence is None, and there is
+    # nothing to tokenize or bound in that case either.
     segment_cache: dict[str, list[list[str]]] | None = None
-    if command_match_gates:
+    if command_match_gates and command_evidence is not None:
         total_command_chars = sum(len(command) for command in command_evidence.commands)
         if total_command_chars > _MAX_TOTAL_COMMAND_CHARS:
             raise HTTPException(

@@ -144,6 +144,19 @@ def _strip_shell_comment(command: str) -> str:
     quotes (`$`, `` ` ``, `"`, `\\`, or a newline): it only matters here for
     whether a character is a real closing `"` or a real comment `#`, and
     treating any other escaped character as "not that" changes nothing.
+
+    Bash's ANSI-C quoting, `$'...'`, is not a plain single-quoted string:
+    backslash escapes are active inside it, so an escaped apostrophe (`\\'`)
+    is literal content, not the closing quote, unlike a real `'...'`. Left
+    to `shlex` (which knows only POSIX quoting), a closing `\\'` reads as
+    real, and `shlex.split` then either raises on the now-unbalanced
+    trailing quote or, before that, this function treated it the same as a
+    plain single quote closing, mistaking whatever followed for a fresh,
+    unquoted word, `#` included. Rewritten here into an equivalent plain
+    `'...'` shlex can already tokenize (an embedded, escaped apostrophe
+    becomes close-quote, escaped-quote, reopen-quote, `'\\''`), so a
+    forbidden token inside a `$'...'` argument is found the same as inside
+    any other quoting.
     """
     quote: str | None = None
     at_word_start = True
@@ -164,6 +177,24 @@ def _strip_shell_comment(command: str) -> str:
             if char == "'":
                 quote = None
             index += 1
+            continue
+        if quote is None and char == "$" and command[index + 1 : index + 2] == "'":
+            result.append("'")
+            index += 2
+            at_word_start = False
+            while index < length:
+                inner = command[index]
+                if inner == "\\" and index + 1 < length:
+                    escaped_char = command[index + 1]
+                    result.append("'\\''" if escaped_char == "'" else escaped_char)
+                    index += 2
+                    continue
+                if inner == "'":
+                    result.append("'")
+                    index += 1
+                    break
+                result.append(inner)
+                index += 1
             continue
         if char == "\\":
             escaped = True
@@ -292,6 +323,21 @@ def evaluate_command_match(
             enforcement=gate.enforcement,
             outcome=Outcome.UNKNOWN,
             message="Command evidence was not submitted.",
+        )
+
+    if not evidence.commands:
+        # An explicitly empty commands list is not "checked, none forbidden":
+        # a caller submits it for exactly the events that never carry command
+        # evidence at all (Claude Code's Stop event, or a PreToolUse call for
+        # an edit tool rather than Bash; see docs/agent-gates.md). Reporting
+        # PASS there would read as a check that ran and found nothing, when
+        # this gate never had anything to check. not_applicable is the
+        # non-blocking outcome that says so honestly.
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.NOT_APPLICABLE,
+            message="No commands were submitted to check.",
         )
 
     forbidden_phrases = [tokenize_phrase(phrase) for phrase in gate.forbidden]

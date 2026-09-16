@@ -156,8 +156,8 @@ resolves `pass` and `blocked` is `false`. Request/response fields:
 | Field | Meaning |
 | --- | --- |
 | `policy_yaml` | The full text of the caller's `.otari-gates.yml`, read and submitted by the caller. |
-| `changed_paths` | Repo-relative paths the caller observed changed. Omit or send `[]` if there's nothing to check yet. |
-| `commands` | Shell commands the caller observed run or is about to run. Omit or send `[]` if there's nothing to check yet. |
+| `changed_paths` | Repo-relative paths the caller observed changed. Send `[]` if there's nothing to check yet. |
+| `commands` | Shell commands the caller observed run or is about to run. Send `[]` if evidence was collected and there is none right now (a `command_match` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects command evidence at all (a required `command_match` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
 | `blocked` | `true` when a `required` gate's outcome is not `pass`/`not_applicable`. An unresolved gate never counts as a pass. |
 | `results[].outcome` | `pass`, `fail`, `unknown`, `error`, `not_applicable`, or `not_run`. |
 
@@ -188,12 +188,17 @@ execute rather than the Git working tree after: it covers
 about to touch. `command_match` needs the command itself, which is exactly
 what a `Bash` call's `tool_input` names; a single `PreToolUse` call is either
 an edit or a shell command, never both, so it submits whichever evidence that
-one call can produce, never both kinds. On a `Stop` event, `changed_path`
-instead submits `git status --porcelain`'s output, which does cover
-shell-written file changes (anything a `Bash` call touched), at the cost of
-only catching them after the fact rather than preventing them; `command_match`
-does not participate in the `Stop` event at all, since there is no evidence
-of which commands ran that a `Stop` payload carries or Git can reconstruct.
+one call can produce, never both kinds. `command_match` therefore also
+resolves `not_applicable`, not `pass`, on an edit call: it has no command to
+check either way, and the distinction is what keeps a required command_match
+gate from reading every unrelated `Edit`/`Write`/`NotebookEdit` call as a
+clean pass. On a `Stop` event, `changed_path` instead submits `git status
+--porcelain`'s output, which does cover shell-written file changes (anything
+a `Bash` call touched), at the cost of only catching them after the fact
+rather than preventing them; `command_match` does not participate in the
+`Stop` event at all, since there is no evidence of which commands ran that a
+`Stop` payload carries or Git can reconstruct, and resolves `not_applicable`
+there too rather than a silent, evidence-free `pass`.
 
 `otari hook` runs `git status` itself on a `Stop` event because Claude
 Code's own Stop payload names no files: unlike `PreToolUse`, where
