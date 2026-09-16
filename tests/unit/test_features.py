@@ -126,6 +126,12 @@ def test_an_enabled_feature_hosts_its_surface_beside_the_fixed_set(tmp_path: Pat
     assert published_surfaces(_hosted(tmp_path), enabled) == sorted((*HOSTED_SURFACES, "probe"))
 
 
+def test_a_surface_the_edition_already_hosts_is_published_once(tmp_path: Path) -> None:
+    """The published surfaces are a set, whatever the registry repeats."""
+    enabled = (_probe(enabled=True, surface=STANDALONE_SURFACES[0]),)
+    assert published_surfaces(_standalone(tmp_path), enabled) == sorted(STANDALONE_SURFACES)
+
+
 def test_a_disabled_feature_hosts_no_surface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=False),))
     app = create_app(_standalone(tmp_path))
