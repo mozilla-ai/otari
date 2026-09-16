@@ -90,6 +90,7 @@ test("the dashboard build id is served at the gateway's own root", async ({
   expect(typeof body.build).toBe("string")
   expect(body.build.length).toBeGreaterThan(0)
   expect(typeof body.version).toBe("string")
+  expect(body.version.length).toBeGreaterThan(0)
 
   // And not under the API root, which is where it was being asked for.
   expect(
