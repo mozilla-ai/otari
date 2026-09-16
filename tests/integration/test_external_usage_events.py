@@ -15,7 +15,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
-from gateway.models.entities import OrganizationModelPricing, RuntimeSetting, UsageLog, User
+from gateway.models.entities import OrganizationModelPricing, UsageLog, User
+from gateway.models.platform import RuntimeSetting
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace
 from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 

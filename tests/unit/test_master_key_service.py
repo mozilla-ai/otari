@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from gateway.api import deps
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
-from gateway.models.entities import RuntimeSetting
+from gateway.models.platform import RuntimeSetting
 from gateway.services import master_key_service
 from gateway.services.master_key_service import (
     MASTER_KEY_HASH_KEY,

@@ -41,7 +41,7 @@ one who does not recovers by setting ``OTARI_MASTER_KEY`` and restarting.
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.entities import RuntimeSetting
+from gateway.models.platform import RuntimeSetting
 
 # The ``runtime_settings`` row this flag lives in. Deliberately absent from
 # ``runtime_settings_service._SPECS``: see the module docstring.

@@ -21,6 +21,7 @@ from gateway.models import (  # noqa: F401
     entities,
     guardrails,
     inference,
+    platform,
     playground,
     provider_keys,
     tenancy,

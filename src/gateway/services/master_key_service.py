@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import log_secret, logger
-from gateway.models.entities import RuntimeSetting
+from gateway.models.platform import RuntimeSetting
 
 # Stored in runtime_settings; ignored by runtime_settings_service (not a SETTABLE_KEY).
 MASTER_KEY_HASH_KEY = "master_key_hash"

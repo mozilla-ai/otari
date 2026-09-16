@@ -45,7 +45,7 @@ from gateway.core.config import (
     GatewayConfig,
 )
 from gateway.log_config import logger
-from gateway.models.entities import RuntimeSetting
+from gateway.models.platform import RuntimeSetting
 from gateway.services.pricing_service import configure_default_pricing
 
 MODEL_DISCOVERY = "model_discovery"
