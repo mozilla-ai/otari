@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 from gateway import features
 from gateway.api.deps import reset_config
-from gateway.api.routes.bootstrap import HOSTED_SURFACES, STANDALONE_SURFACES, hosted_surfaces
+from gateway.api.routes.bootstrap import HOSTED_SURFACES, STANDALONE_SURFACES, published_surfaces
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.core.feature import CoreFeature, Worker
@@ -122,24 +122,29 @@ def test_an_enabled_feature_hosts_its_surface_beside_the_fixed_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True),))
-    assert hosted_surfaces(_standalone(tmp_path)) == sorted((*STANDALONE_SURFACES, "probe"))
-    assert hosted_surfaces(_hosted(tmp_path)) == sorted((*HOSTED_SURFACES, "probe"))
+    assert published_surfaces(_standalone(tmp_path)) == sorted((*STANDALONE_SURFACES, "probe"))
+    assert published_surfaces(_hosted(tmp_path)) == sorted((*HOSTED_SURFACES, "probe"))
 
 
 def test_a_disabled_feature_hosts_no_surface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=False),))
-    assert hosted_surfaces(_standalone(tmp_path)) == sorted(STANDALONE_SURFACES)
+    assert published_surfaces(_standalone(tmp_path)) == sorted(STANDALONE_SURFACES)
 
 
 def test_a_feature_with_no_page_hosts_no_surface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True, surface=None),))
-    assert hosted_surfaces(_standalone(tmp_path)) == sorted(STANDALONE_SURFACES)
+    assert published_surfaces(_standalone(tmp_path)) == sorted(STANDALONE_SURFACES)
 
 
-def test_a_hybrid_gateway_hosts_no_surface_whatever_the_registry_says(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_hybrid_gateway_publishes_no_surface_whatever_the_registry_says(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True),))
-    assert hosted_surfaces(_hybrid()) == []
+    app = create_app(_hybrid())
+
+    with TestClient(app) as client:
+        surfaces = client.get(f"{API_ROOT}/bootstrap").json()["surfaces"]
+
+    assert surfaces == []
 
 
 def test_the_bootstrap_publishes_an_enabled_feature_surface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

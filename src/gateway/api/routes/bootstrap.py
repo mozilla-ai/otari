@@ -144,8 +144,8 @@ HOSTED_SURFACES: tuple[str, ...] = (
 )
 
 
-def hosted_surfaces(config: GatewayConfig) -> list[str]:
-    """The surfaces this deployment hosts, sorted.
+def published_surfaces(config: GatewayConfig) -> list[str]:
+    """The surfaces this deployment publishes, sorted.
 
     The edition's fixed set plus the surface of each enabled registry feature.
     Empty for hybrid, which hosts none.
@@ -334,7 +334,7 @@ async def get_bootstrap(
         return DeploymentBootstrap(
             deployment_type="hybrid",
             session_type="none",
-            surfaces=[],
+            surfaces=published_surfaces(config),
             sign_in_methods=[],
             management_url=config.platform_management_url,
             # This gateway *is* the data plane, so the address that reached this
@@ -360,7 +360,7 @@ async def get_bootstrap(
     return DeploymentBootstrap(
         deployment_type="hosted" if hosted else "standalone",
         session_type="local_operator",
-        surfaces=hosted_surfaces(config),
+        surfaces=published_surfaces(config),
         sign_in_methods=await _sign_in_methods(db, config),
         management_url=None,
         # Standalone is its own data plane and answers null; a hosted control

@@ -20,7 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.api.deps import reset_config
 from gateway.api.routes import bootstrap as bootstrap_route
-from gateway.api.routes.bootstrap import HOSTED_SURFACES, STANDALONE_SURFACES, hosted_surfaces
+from gateway.api.routes.bootstrap import HOSTED_SURFACES, STANDALONE_SURFACES, published_surfaces
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
@@ -101,7 +101,7 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
     assert response.json() == {
         "deployment_type": "standalone",
         "session_type": "local_operator",
-        "surfaces": hosted_surfaces(config),
+        "surfaces": published_surfaces(config),
         "sign_in_methods": ["master_key"],
         "management_url": None,
         "data_plane_url": None,
@@ -279,7 +279,7 @@ def test_every_surface_names_a_route_the_gateway_mounts(
 
     # The fixed tuple and what the endpoint publishes, which adds each enabled
     # registry feature's surface: a package whose route is not mounted fails here.
-    for surface in {*surfaces, *hosted_surfaces(config)}:
+    for surface in {*surfaces, *published_surfaces(config)}:
         prefix = SURFACE_ROUTE_PREFIXES.get(surface, f"{API_ROOT}/{surface}")
         assert any(path.startswith(prefix) for path in mounted), f"surface {surface!r} names no mounted /api/v1/ route"
 
