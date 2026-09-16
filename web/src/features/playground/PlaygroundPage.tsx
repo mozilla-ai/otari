@@ -1,21 +1,20 @@
-import { FiArrowDown, FiPlus } from "react-icons/fi"
+import { FiArrowDown } from "react-icons/fi"
 
-import { Button } from "@/design-system/actions/Button"
 import { IconButton } from "@/design-system/actions/IconButton"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
 import { useDocumentTitle } from "@/shared/hooks/useDocumentTitle"
 
-import { ComparisonHistoryDialog } from "./ComparisonHistoryDialog"
 import { ComparisonRatingBar } from "./ComparisonRatingBar"
-import { ConversationHistoryDialog } from "./ConversationHistoryDialog"
 import { useFollowConversation } from "./hooks/useFollowConversation"
 import { usePlayground } from "./hooks/usePlayground"
 import { ModelSelect } from "./ModelSelect"
 import { PlaygroundComposer } from "./PlaygroundComposer"
 import { PlaygroundConversation } from "./PlaygroundConversation"
 import { PlaygroundGateNotice } from "./PlaygroundGateNotice"
+import { PlaygroundHistory } from "./PlaygroundHistory"
 import { PlaygroundToolbar } from "./PlaygroundToolbar"
 import { PlaygroundWelcome } from "./PlaygroundWelcome"
 import { CHAT_COLUMN } from "./playgroundLayout"
@@ -38,6 +37,11 @@ export function PlaygroundPage() {
   }
 
   const composerProps = {
+    hasTranscript: playground.panelA.turns.length > 0,
+    missingModel:
+      playground.isComparing && !playground.panelB.model
+        ? ("B" as const)
+        : undefined,
     modelPicker: playground.isComparing ? undefined : (
       <ModelSelect
         label="Model"
@@ -46,7 +50,8 @@ export function PlaygroundPage() {
         pinnedKeys={playground.pinnedKeys}
         onTogglePin={playground.togglePin}
         onChange={playground.selectPanelAModel}
-        className="min-h-11 min-w-0 max-w-full"
+        size="sm"
+        className="min-w-0 max-w-full"
       />
     ),
     draft: playground.draft,
@@ -70,32 +75,41 @@ export function PlaygroundPage() {
 
   return (
     <div className="flex min-h-[calc(100dvh-6rem)] flex-col md:min-h-[calc(100dvh-6.5rem)]">
-      <PageIntro
-        title="Playground"
-        action={
-          <Button
-            aria-label="Start a new chat"
-            onPress={() => playground.setIsNewChatConfirmOpen(true)}
-            isDisabled={!hasTranscript}
-          >
-            <FiPlus aria-hidden className="size-4" />
-            <span className="hidden md:inline">New chat</span>
-            <span className="md:hidden">New</span>
-          </Button>
-        }
-      />
-      <PlaygroundToolbar
-        isComparing={playground.isComparing}
-        hasTranscript={hasTranscript}
-        onOpenHistory={() => playground.setIsHistoryOpen(true)}
-        onSaveConversation={playground.requestSaveConversation}
-        isSaveDisabled={!hasTranscript || playground.isConversationSaved}
-        isSavePending={playground.isSavePending}
-        onOpenComparisonHistory={() =>
-          playground.setIsComparisonHistoryOpen(true)
-        }
-        onToggleCompare={playground.toggleCompare}
-      />
+      <Section className="border-b border-border">
+        <PageIntro
+          title="Playground"
+          action={
+            <PlaygroundToolbar
+              isComparing={playground.isComparing}
+              hasTranscript={hasTranscript}
+              onToggleCompare={playground.toggleCompare}
+              onNewChat={() => playground.setIsNewChatConfirmOpen(true)}
+              history={
+                <PlaygroundHistory
+                  conversations={playground.conversations}
+                  comparisons={playground.comparisons}
+                  isOpen={playground.isHistoryOpen}
+                  onOpenChange={playground.setIsHistoryOpen}
+                  onLoad={playground.loadConversation}
+                  onDeleteConversation={playground.removeConversation}
+                  onDeleteComparison={playground.removeComparison}
+                  onSave={
+                    !playground.isComparing && hasTranscript
+                      ? playground.requestSaveConversation
+                      : undefined
+                  }
+                  isSaveDisabled={
+                    playground.isConversationSaved || playground.isBusy
+                  }
+                  isSavePending={playground.isSavePending}
+                  isLoading={playground.isHistoryLoading}
+                  error={playground.historyError}
+                />
+              }
+            />
+          }
+        />
+      </Section>
       {playground.actionError ? (
         <div className="pt-4">
           <ErrorBanner error={playground.actionError} />
@@ -122,7 +136,7 @@ export function PlaygroundPage() {
           />
           <div ref={follow.setEndMarker} aria-hidden className="h-0" />
           <div
-            className={`${CHAT_COLUMN} -mb-5 sticky bottom-0 z-10 mt-auto bg-background pt-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:-mb-6 md:pb-6`}
+            className={`${playground.isComparing ? "w-full" : CHAT_COLUMN} -mb-5 sticky bottom-0 z-10 mt-auto bg-background pt-7 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:-mb-6 md:pb-6`}
           >
             {playground.haveBothAnswered &&
             playground.ratingState !== "dismissed" ? (
@@ -196,25 +210,6 @@ export function PlaygroundPage() {
         onConfirm={() => {
           void playground.confirmPendingConsent()
         }}
-      />
-
-      <ConversationHistoryDialog
-        isOpen={playground.isHistoryOpen}
-        onOpenChange={playground.setIsHistoryOpen}
-        conversations={playground.conversations}
-        onLoad={(id) => void playground.loadConversation(id)}
-        onDelete={playground.removeConversation}
-        isDeleting={playground.isDeletingConversation}
-        deleteError={playground.deleteConversationError}
-      />
-
-      <ComparisonHistoryDialog
-        isOpen={playground.isComparisonHistoryOpen}
-        onOpenChange={playground.setIsComparisonHistoryOpen}
-        comparisons={playground.comparisons}
-        onDelete={playground.removeComparison}
-        isDeleting={playground.isDeletingComparison}
-        deleteError={playground.deleteComparisonError}
       />
     </div>
   )

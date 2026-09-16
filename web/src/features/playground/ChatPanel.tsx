@@ -23,7 +23,7 @@ export function ChatPanel({
   onRegenerate: () => void
 }) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-6">
+    <div className="flex min-w-0 flex-1 flex-col gap-8">
       {panel.turns.length === 0 && !panel.isAwaitingFirstToken ? (
         <p className="text-caption">Send a message to start.</p>
       ) : null}

@@ -97,7 +97,6 @@ export function usePlayground() {
   const [panelA, setPanelA] = useState<PanelState>(EMPTY_PANEL)
   const [panelB, setPanelB] = useState<PanelState>(EMPTY_PANEL)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
-  const [isComparisonHistoryOpen, setIsComparisonHistoryOpen] = useState(false)
   const [isNewChatConfirmOpen, setIsNewChatConfirmOpen] = useState(false)
   const [isConversationSaved, setIsConversationSaved] = useState(false)
   // The id the last Save recorded, so deleting that row from history re-arms
@@ -163,9 +162,7 @@ export function usePlayground() {
     invalidateSavedState()
   }, [workspaceId, stop, invalidateSavedState])
 
-  // Seed each panel's model once the catalog answers: A from what this browser
-  // last used here, B from the first model that is not A's, so opening compare
-  // never starts with the same model twice.
+  // Restore A from this browser; B stays empty until explicitly chosen.
   const defaultModel = models[0]?.key ?? ""
   useEffect(() => {
     if (!defaultModel || !workspaceId) return
@@ -177,7 +174,6 @@ export function usePlayground() {
             model: pickInitialModel(readRememberedModel(workspaceId), models),
           },
     )
-    setPanelB((prev) => (prev.model ? prev : { ...prev, model: defaultModel }))
   }, [defaultModel, workspaceId, models])
 
   useEffect(() => {
@@ -193,16 +189,13 @@ export function usePlayground() {
       // The send *button* becomes Stop while a reply is in flight, so the only
       // way in here is the Enter key, and a second stream into the same panel
       // interleaves two replies into one turn.
-      if (isBusy) return
+      if (isBusy || (isComparing && !panelB.model)) return
       const turn: ChatTurn = { role: "user", content: trimmed }
 
       setDraft("")
       invalidateSavedState()
 
-      // Both panels are sent the same question and stream independently, which
-      // is what makes a side-by-side comparison a comparison. A panel with no
-      // model is skipped rather than given an error turn: compare can leave B
-      // without one when A is changed to B's model.
+      // Both comparison panels receive the same question and stream independently.
       await Promise.all([
         streamReply(setPanelA, panelA.model, [...panelA.turns, turn]),
         ...(isComparing && panelB.model
@@ -345,6 +338,7 @@ export function usePlayground() {
   }
 
   const loadConversation = async (conversationId: string) => {
+    setIsHistoryOpen(false)
     const saved = conversations.data?.data.find(
       (item) => item.id === conversationId,
     )
@@ -389,15 +383,12 @@ export function usePlayground() {
     setRatingState("none")
   }
 
-  const removeConversation = (conversationId: string) => {
-    deleteConversation.mutate(conversationId, {
-      onSuccess: () => {
-        if (conversationId === savedConversationId) {
-          setIsConversationSaved(false)
-          setSavedConversationId(undefined)
-        }
-      },
-    })
+  const removeConversation = async (conversationId: string) => {
+    await deleteConversation.mutateAsync(conversationId)
+    if (conversationId === savedConversationId) {
+      setIsConversationSaved(false)
+      setSavedConversationId(undefined)
+    }
   }
 
   const toggleCompare = () => {
@@ -407,17 +398,9 @@ export function usePlayground() {
     stop()
     setIsComparing(next)
     if (next) {
-      // Both columns start empty, and this is the one place the port departs
-      // from the hosted original, which kept the first panel's transcript. It
-      // has to: the two models are sent their own panel's history, so a column
-      // carrying an earlier conversation is answering a different prompt from
-      // the one beside it. The comparison would not be a comparison, and the
-      // rating it records is a judgment over an unequal contest, which is worse
-      // than losing an on-screen transcript nobody asked to keep. A saved one
-      // is still in the history.
-      const other = models.find((model) => model.key !== panelA.model)
+      // Both models need the same empty history for a fair comparison.
       setPanelA((prev) => ({ ...prev, turns: [] }))
-      setPanelB((prev) => ({ ...prev, model: other?.key ?? "", turns: [] }))
+      setPanelB((prev) => ({ ...prev, model: "", turns: [] }))
       invalidateSavedState()
     }
   }
@@ -507,6 +490,10 @@ export function usePlayground() {
 
     // Saved transcripts
     conversations: conversations.data?.data ?? [],
+    isHistoryLoading:
+      (conversations.isPending && !conversations.data) ||
+      (comparisons.isPending && !comparisons.data),
+    historyError: conversations.error ?? comparisons.error ?? undefined,
     isHistoryOpen,
     setIsHistoryOpen,
     loadConversation,
@@ -514,8 +501,6 @@ export function usePlayground() {
     isSavePending: saveConversation.isPending,
     isConversationSaved,
     removeConversation,
-    isDeletingConversation: deleteConversation.isPending,
-    deleteConversationError: deleteConversation.error ?? undefined,
 
     // New chat
     isNewChatConfirmOpen,
@@ -530,11 +515,7 @@ export function usePlayground() {
 
     // Saved comparisons
     comparisons: comparisons.data?.data ?? [],
-    isComparisonHistoryOpen,
-    setIsComparisonHistoryOpen,
-    removeComparison: deleteComparison.mutate,
-    isDeletingComparison: deleteComparison.isPending,
-    deleteComparisonError: deleteComparison.error ?? undefined,
+    removeComparison: (id: string) => deleteComparison.mutateAsync(id),
 
     // Just-in-time retention consent
     pendingConsent,

@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { FiChevronDown, FiStar } from "react-icons/fi"
 
-import { Button } from "@/design-system/actions/Button"
+import { Button, type ButtonSize } from "@/design-system/actions/Button"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { Popover } from "@/design-system/overlays/Popover"
 
@@ -34,6 +34,7 @@ export function ModelSelect({
   unavailableKeys,
   label,
   className = "",
+  size = "md",
 }: {
   /** The selected `instance:model` key, or "" for none. */
   value: string
@@ -46,6 +47,7 @@ export function ModelSelect({
   /** The accessible name, which is what tells the two compare pickers apart. */
   label: string
   className?: string
+  size?: ButtonSize
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -77,8 +79,12 @@ export function ModelSelect({
       }}
       placement="bottom"
       trigger={
-        <Button aria-label={label} className={`justify-between ${className}`}>
-          <span className="truncate">{selectedLabel || "Select a model"}</span>
+        <Button
+          size={size}
+          aria-label={label}
+          className={`min-h-11 md:min-h-0 justify-between ${className}`}
+        >
+          <span className="truncate">{selectedLabel || "Choose a model"}</span>
           <FiChevronDown aria-hidden className="size-4 shrink-0 text-muted" />
         </Button>
       }

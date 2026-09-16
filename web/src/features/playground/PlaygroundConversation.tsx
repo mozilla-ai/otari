@@ -1,28 +1,10 @@
 import type { Dispatch, SetStateAction } from "react"
-
 import { ChatPanel } from "./ChatPanel"
-import type { PlaygroundModel } from "./helpers/playgroundModels"
+import { type PlaygroundModel, splitModelKey } from "./helpers/playgroundModels"
 import type { PanelState } from "./helpers/playgroundTypes"
 import { ModelSelect } from "./ModelSelect"
 import { CHAT_COLUMN } from "./playgroundLayout"
 
-/**
- * The conversation area: one panel, or two side by side while comparing.
- *
- * Each column carries its own picker while comparing, and each picker excludes
- * the other column's model: comparing a model with itself produces two answers
- * nobody can tell apart, and a rating over them means nothing. Changing A to the
- * model B holds clears B's selection rather than silently swapping them, so the
- * reader chooses B's replacement instead of finding one chosen for them.
- *
- * Two columns become one stacked pair below `md`. A phone cannot show two
- * transcripts side by side, and the alternative (hiding compare on a small
- * screen) would take the feature away rather than fit it.
- *
- * Neither column scrolls on its own, and while comparing they are top-aligned
- * rather than stretched: the page is the scroll container, so the shorter
- * answer ends where it ends instead of being padded out to the taller one.
- */
 export function PlaygroundConversation({
   isComparing,
   panelA,
@@ -47,7 +29,7 @@ export function PlaygroundConversation({
     setPanel: Dispatch<SetStateAction<PanelState>>,
   ) => void
 }) {
-  if (!isComparing) {
+  if (!isComparing)
     return (
       <div className={`${CHAT_COLUMN} flex pt-8 pb-6`}>
         <ChatPanel
@@ -56,51 +38,68 @@ export function PlaygroundConversation({
         />
       </div>
     )
-  }
 
   return (
-    <div className="flex flex-col gap-8 pt-6 pb-6 md:flex-row md:items-start">
-      <div className="flex min-w-0 flex-1 flex-col gap-6">
-        <h2 className="text-overline">Model A</h2>
-        <ModelSelect
-          label="Model A"
-          value={panelA.model}
-          models={models}
-          pinnedKeys={pinnedKeys}
-          onTogglePin={onTogglePin}
-          unavailableKeys={panelB.model ? [panelB.model] : undefined}
-          onChange={(key) => {
-            setPanelA((prev) => ({ ...prev, model: key }))
-            if (key === panelB.model) {
-              setPanelB((prev) => ({ ...prev, model: "" }))
+    <div className="grid flex-1 grid-cols-1 gap-8 pt-8 pb-0 md:grid-cols-2 md:gap-0">
+      {(
+        [
+          { name: "A", panel: panelA, setPanel: setPanelA, other: panelB },
+          { name: "B", panel: panelB, setPanel: setPanelB, other: panelA },
+        ] as const
+      ).map(({ name, panel, setPanel, other }) => {
+        const identity = splitModelKey(panel.model)
+        return (
+          <section
+            key={name}
+            aria-label={`Model ${name} response`}
+            className={
+              name === "B"
+                ? "flex min-w-0 flex-col gap-2 border-t border-border pt-8 md:border-t-0 md:border-l md:pt-0 md:pl-4"
+                : "flex min-w-0 flex-col gap-2 md:pr-4"
             }
-          }}
-          className="w-full"
-        />
-        <ChatPanel
-          panel={panelA}
-          onRegenerate={() => onRegenerate(panelA, setPanelA)}
-        />
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-6">
-        <h2 className="text-overline">Model B</h2>
-        <ModelSelect
-          label="Model B"
-          value={panelB.model}
-          models={models}
-          pinnedKeys={pinnedKeys}
-          onTogglePin={onTogglePin}
-          unavailableKeys={panelA.model ? [panelA.model] : undefined}
-          onChange={(key) => {
-            setPanelB((prev) => ({ ...prev, model: key }))
-          }}
-          className="w-full"
-        />
-        <ChatPanel
-          panel={panelB}
-          onRegenerate={() => onRegenerate(panelB, setPanelB)}
-        />
-      </div>
+          >
+            <div className="flex items-center gap-2">
+              <span className="w-6 shrink-0 text-center text-mono-caption text-subtle">
+                {name}
+              </span>
+              <ModelSelect
+                label={`Model ${name}`}
+                value={panel.model}
+                models={models}
+                pinnedKeys={pinnedKeys}
+                onTogglePin={onTogglePin}
+                unavailableKeys={other.model ? [other.model] : undefined}
+                onChange={(key) => {
+                  setPanel((prev) => ({ ...prev, model: key }))
+                  if (name === "A" && key === panelB.model)
+                    setPanelB((prev) => ({ ...prev, model: "" }))
+                }}
+                className="min-w-0 flex-1"
+              />
+            </div>
+            <p className="pl-8 text-caption">
+              {identity.instance ||
+                (panel.model
+                  ? "Model alias"
+                  : `Any model other than ${name === "A" ? "B" : "A"}`)}
+            </p>
+            {panel.turns.length === 0 && !panel.isAwaitingFirstToken ? (
+              <div className="flex min-h-40 flex-1 items-center justify-center py-12 pl-8 text-center text-body text-subtle">
+                {panel.model
+                  ? `${identity.label}’s answer appears here.`
+                  : `Choose model ${name} to start comparing.`}
+              </div>
+            ) : (
+              <div className="pt-4">
+                <ChatPanel
+                  panel={panel}
+                  onRegenerate={() => onRegenerate(panel, setPanel)}
+                />
+              </div>
+            )}
+          </section>
+        )
+      })}
     </div>
   )
 }

@@ -12,10 +12,10 @@ import { CodeBlock } from "@/design-system/content/CodeBlock"
 import { Markdown } from "@/design-system/content/Markdown"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { parseThinkTags } from "./helpers/parseThinkTags"
-import { formatTurnStats } from "./helpers/playgroundCost"
 import { splitModelKey } from "./helpers/playgroundModels"
 import type { ChatTurn } from "./helpers/playgroundTypes"
 import { ThinkingBlock } from "./ThinkingBlock"
+import { TurnReadout } from "./TurnReadout"
 
 /**
  * A fenced block in a model's answer, routed through the shared `CodeBlock`.
@@ -78,12 +78,11 @@ export function MessageBubble({
 }) {
   if (turn.role === "user") {
     return (
-      <div className="flex flex-col gap-2 border-b border-border pb-6">
-        <p className="text-overline">You</p>
-        <p className="whitespace-pre-wrap break-words text-base leading-[1.625rem]">
+      <article aria-label="Your message" className="flex justify-end">
+        <p className="max-w-[35rem] whitespace-pre-wrap break-words bg-surface-alt px-4 py-3 text-base leading-[1.625rem]">
           {turn.content}
         </p>
-      </div>
+      </article>
     )
   }
 
@@ -94,11 +93,11 @@ export function MessageBubble({
   const identity = splitModelKey(model)
 
   return (
-    <div className="flex min-w-0 flex-col gap-4 break-words">
+    <div className="flex min-w-0 flex-col gap-3 break-words">
       <div className="flex flex-wrap items-baseline gap-2">
-        <p className="text-overline">{identity.label}</p>
+        <p className="text-emphasis">{identity.label}</p>
         {identity.instance ? (
-          <span className="text-caption">{identity.instance}</span>
+          <span className="text-caption text-subtle">{identity.instance}</span>
         ) : null}
       </div>
       {reasoning ? <ThinkingBlock content={reasoning} /> : null}
@@ -111,27 +110,29 @@ export function MessageBubble({
         // failure scrolled past is still findable.
         <ErrorBanner error={new Error(turn.errorMessage)} />
       ) : null}
-      {turn.usage ? (
-        <p className="text-mono-caption tabular-nums text-muted">
-          {formatTurnStats(turn.usage)}
-        </p>
-      ) : null}
-      {/* Shown for a failed turn too, not only a successful one. A stream that
-          died before its first token leaves `content` empty, so gating on the
-          response alone hid the whole row at the one moment somebody wants
-          Regenerate. Copy still needs something to copy. */}
-      {areActionsVisible && (response || turn.errorMessage) ? (
-        <div className="otari-actions flex flex-wrap items-center gap-2">
-          {response ? (
-            <CopyButton value={response} label="response" showLabel />
-          ) : null}
-          {onRegenerate ? (
-            <Button aria-label="Regenerate response" onPress={onRegenerate}>
-              <FiRotateCcw aria-hidden className="size-4" /> Regenerate
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pt-1">
+        {areActionsVisible && (response || turn.errorMessage) ? (
+          <div className="otari-actions flex shrink-0 items-center gap-3">
+            {response ? <CopyButton value={response} label="response" /> : null}
+            {onRegenerate ? (
+              <Button
+                isIconOnly
+                size="sm"
+                aria-label="Regenerate response"
+                className="min-h-11 min-w-11 md:min-h-8 md:min-w-8"
+                onPress={onRegenerate}
+              >
+                <FiRotateCcw aria-hidden className="size-4" />
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {turn.usage ? (
+          <div className="ml-auto">
+            <TurnReadout usage={turn.usage} />
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }

@@ -19,6 +19,7 @@ export function Popover({
   trigger,
   children,
   placement = "bottom",
+  padding = "default",
   isOpen,
   onOpenChange,
 }: {
@@ -28,7 +29,9 @@ export function Popover({
    */
   trigger: ReactNode
   children: ReactNode
-  placement?: "top" | "bottom" | "left" | "right"
+  placement?: "top" | "bottom" | "bottom end" | "left" | "right"
+  /** Use none when child sections own their padding and full-width dividers. */
+  padding?: "default" | "none"
   isOpen?: boolean
   onOpenChange?: (isOpen: boolean) => void
 }) {
@@ -40,7 +43,9 @@ export function Popover({
             name: it is what puts the panel in the accessibility tree as a
             dialog and traps focus inside it while it is open. Without it the
             panel is a div that a keyboard operator tabs straight past. */}
-        <HeroPopover.Dialog>{children}</HeroPopover.Dialog>
+        <HeroPopover.Dialog className={padding === "none" ? "p-0" : undefined}>
+          {children}
+        </HeroPopover.Dialog>
       </HeroPopover.Content>
     </HeroPopover.Root>
   )

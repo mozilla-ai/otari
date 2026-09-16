@@ -53,7 +53,7 @@ export function Segmented({
             // The divider is a leading border on every segment but the first,
             // so the count of rules is always one less than the count of
             // segments, however many there are.
-            className={`shrink-0 cursor-pointer border-l border-control-border px-3 py-[0.3125rem] text-sm whitespace-nowrap transition-colors first:border-l-0 has-[:focus-visible]:otari-focus-ring motion-reduce:transition-none ${
+            className={`flex min-h-11 items-center md:min-h-0 shrink-0 cursor-pointer border-l border-control-border px-3 py-[0.3125rem] text-sm whitespace-nowrap transition-colors first:border-l-0 has-[:focus-visible]:otari-focus-ring motion-reduce:transition-none ${
               selected
                 ? "bg-surface-subtle text-foreground"
                 : "text-muted hover:text-foreground"

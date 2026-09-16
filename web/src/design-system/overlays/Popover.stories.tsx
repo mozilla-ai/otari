@@ -87,3 +87,23 @@ export const Controlled: Story = {
     )
   },
 }
+
+export const Sectioned: Story = {
+  render: () => (
+    <Popover
+      padding="none"
+      placement="bottom end"
+      trigger={<Button>History</Button>}
+    >
+      <div className="w-72 max-w-[calc(100vw-2rem)]">
+        <h2 className="border-b border-border px-4 py-3 text-heading">
+          History
+        </h2>
+        <p className="px-4 py-3 text-body">Recent activity appears here.</p>
+        <div className="border-t border-border px-4 py-3">
+          <Button size="sm">View all</Button>
+        </div>
+      </div>
+    </Popover>
+  ),
+}

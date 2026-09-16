@@ -323,29 +323,27 @@ describe("the Playground before the first question", () => {
       } as ModelListResponse,
     })
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent(
       "openai:gpt-4o",
     )
   })
 
-  it("names comparison history as it appears on screen", async () => {
+  it("filters comparison history from the shared History control", async () => {
     mockApi()
     renderPage()
-    await screen.findByText("What can I help with?")
-    const history = screen.getByRole("button", { name: "Comparison history" })
-    expect(history).toHaveTextContent("Comparison history")
-    await userEvent.click(history)
-    expect(
-      await screen.findByText("No saved comparisons yet."),
-    ).toBeInTheDocument()
+    await screen.findByText("Try a prompt.")
+    await userEvent.click(screen.getByRole("button", { name: "History" }))
+    await userEvent.click(screen.getByRole("radio", { name: "Comparisons" }))
+    expect(screen.getByRole("radio", { name: "Comparisons" })).toBeChecked()
+    expect(await screen.findByText("No saved history yet.")).toBeInTheDocument()
   })
 
   it("greets, and offers the catalog's first chat model", async () => {
     mockApi()
     renderPage()
 
-    expect(await screen.findByText("What can I help with?")).toBeInTheDocument()
+    expect(await screen.findByText("Try a prompt.")).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent(
         "gpt-4o",
@@ -356,7 +354,7 @@ describe("the Playground before the first question", () => {
   it("offers no model the gateway could not chat with", async () => {
     mockApi()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await userEvent.click(await screen.findByRole("button", { name: "Model" }))
     expect(
@@ -383,7 +381,7 @@ describe("sending a question", () => {
     mockStream([delta("Hel"), delta("lo there"), "[DONE]"])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.type(await screen.findByLabelText("Message"), "hi")
     await user.click(screen.getByRole("button", { name: "Send message" }))
@@ -398,7 +396,7 @@ describe("sending a question", () => {
     const stream = mockStream([delta("ok"), "[DONE]"])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.type(await screen.findByLabelText("Message"), "hi")
     await user.click(screen.getByRole("button", { name: "Send message" }))
@@ -431,7 +429,7 @@ describe("sending a question", () => {
     ])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.type(await screen.findByLabelText("Message"), "hi")
     await user.click(screen.getByRole("button", { name: "Send message" }))
@@ -446,7 +444,7 @@ describe("sending a question", () => {
     mockStream([delta("partial "), delta("and more"), "[DONE]"])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.type(await screen.findByLabelText("Message"), "hi")
     await user.click(screen.getByRole("button", { name: "Send message" }))
@@ -471,7 +469,7 @@ describe("sending a question", () => {
     mockStream([JSON.stringify({ error: "Upstream refused" })])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.type(await screen.findByLabelText("Message"), "hi")
     await user.click(screen.getByRole("button", { name: "Send message" }))
@@ -496,7 +494,7 @@ describe("sending a question", () => {
     ])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.type(await screen.findByLabelText("Message"), "hi")
     await user.click(screen.getByRole("button", { name: "Send message" }))
@@ -514,12 +512,13 @@ describe("retention consent", () => {
     mockStream([delta("ok"), "[DONE]"])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.type(await screen.findByLabelText("Message"), "hi")
     await user.click(screen.getByRole("button", { name: "Send message" }))
     await screen.findByText("ok")
 
+    await user.click(screen.getByRole("button", { name: "History" }))
     await user.click(screen.getByRole("button", { name: "Save conversation" }))
     expect(
       await screen.findByText("Save this conversation?"),
@@ -556,12 +555,13 @@ describe("retention consent", () => {
     mockStream([delta("ok"), "[DONE]"])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.type(await screen.findByLabelText("Message"), "hi")
     await user.click(screen.getByRole("button", { name: "Send message" }))
     await screen.findByText("ok")
 
+    await user.click(screen.getByRole("button", { name: "History" }))
     await user.click(screen.getByRole("button", { name: "Save conversation" }))
 
     await waitFor(() => {
@@ -576,6 +576,28 @@ describe("retention consent", () => {
 })
 
 describe("comparing two models", () => {
+  it("waits for model B even when Enter is pressed", async () => {
+    mockApi()
+    const stream = mockStream([delta("answer"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+    await user.click(screen.getByRole("radio", { name: "Compare" }))
+    await user.type(
+      screen.getByLabelText("Message"),
+      "Compare these answers{Enter}",
+    )
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled()
+    expect(stream).not.toHaveBeenCalled()
+    expect(screen.getByLabelText("Message")).toHaveValue(
+      "Compare these answers",
+    )
+    await user.click(screen.getByRole("button", { name: "Model B" }))
+    expect(screen.getByRole("button", { name: "gpt-4o" })).toBeDisabled()
+    await user.click(await screen.findByText("claude-sonnet-4"))
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled()
+  })
+
   it("asks both models and offers a rating once both answer", async () => {
     mockApi()
     // Two frames, so an answer cut short is observable: a panel aborted after
@@ -583,20 +605,19 @@ describe("comparing two models", () => {
     mockStream([delta("an "), delta("answer"), "[DONE]"])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
-    await user.click(
-      await screen.findByRole("button", { name: "Compare models" }),
-    )
+    await user.click(await screen.findByRole("radio", { name: "Compare" }))
     expect(
       await screen.findByRole("button", { name: "Model A" }),
     ).toBeInTheDocument()
-    // The second column starts on a different model: comparing a model with
-    // itself produces two answers nobody can tell apart.
-    expect(
-      screen.getByRole("button", { name: "Model B" }),
-    ).not.toHaveTextContent("gpt-4o")
+    // Model B is an explicit choice before either request can start.
+    expect(screen.getByRole("button", { name: "Model B" })).toHaveTextContent(
+      "Choose a model",
+    )
 
+    await user.click(screen.getByRole("button", { name: "Model B" }))
+    await user.click(await screen.findByText("claude-sonnet-4"))
     await user.type(screen.getByLabelText("Message"), "which?")
     await user.click(screen.getByRole("button", { name: "Send message" }))
 
@@ -617,9 +638,11 @@ describe("comparing two models", () => {
     mockStream([delta("an answer"), "[DONE]"])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
-    await user.click(screen.getByRole("button", { name: "Compare models" }))
+    await user.click(screen.getByRole("radio", { name: "Compare" }))
+    await user.click(screen.getByRole("button", { name: "Model B" }))
+    await user.click(await screen.findByText("claude-sonnet-4"))
     await user.type(screen.getByLabelText("Message"), "which?")
     await user.click(screen.getByRole("button", { name: "Send message" }))
     await user.click(
@@ -642,11 +665,11 @@ describe("comparing two models", () => {
     mockStream([delta("an answer"), "[DONE]"])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
-    await user.click(
-      await screen.findByRole("button", { name: "Compare models" }),
-    )
+    await user.click(await screen.findByRole("radio", { name: "Compare" }))
+    await user.click(screen.getByRole("button", { name: "Model B" }))
+    await user.click(await screen.findByText("claude-sonnet-4"))
     await user.type(screen.getByLabelText("Message"), "which?")
     await user.click(screen.getByRole("button", { name: "Send message" }))
     await user.click(
@@ -678,30 +701,28 @@ describe("comparing two models", () => {
     mockStream([delta("an answer"), "[DONE]"])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.type(await screen.findByLabelText("Message"), "asked before")
     await user.click(screen.getByRole("button", { name: "Send message" }))
     expect(await screen.findByText("asked before")).toBeInTheDocument()
 
-    await user.click(screen.getByRole("button", { name: "Compare models" }))
+    await user.click(screen.getByRole("radio", { name: "Compare" }))
     await screen.findByRole("button", { name: "Model A" })
 
     expect(screen.queryByText("asked before")).not.toBeInTheDocument()
-    expect(await screen.findAllByText("Send a message to start.")).toHaveLength(
-      2,
-    )
+    expect(
+      await screen.findByText("Choose model B to start comparing."),
+    ).toBeInTheDocument()
   })
 
   it("offers no Save while comparing, because there is no one conversation", async () => {
     mockApi()
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
-    await user.click(
-      await screen.findByRole("button", { name: "Compare models" }),
-    )
+    await user.click(await screen.findByRole("radio", { name: "Compare" }))
     await screen.findByRole("button", { name: "Model A" })
     expect(
       screen.queryByRole("button", { name: "Save conversation" }),
@@ -718,7 +739,7 @@ describe("state that must not outlive what produced it", () => {
     const stream = openStream()
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.type(await screen.findByLabelText("Message"), "hi")
     await user.click(screen.getByRole("button", { name: "Send message" }))
@@ -747,14 +768,14 @@ describe("state that must not outlive what produced it", () => {
     const stream = openStream()
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.type(await screen.findByLabelText("Message"), "hi")
     await user.click(screen.getByRole("button", { name: "Send message" }))
     await stream.push(delta("mid-flight"))
     await screen.findByText("mid-flight")
 
-    await user.click(screen.getByRole("button", { name: "Compare models" }))
+    await user.click(screen.getByRole("radio", { name: "Compare" }))
     await screen.findByRole("button", { name: "Model A" })
 
     // The frame that matters: one delivered *after* the switch. An uncancelled
@@ -763,7 +784,9 @@ describe("state that must not outlive what produced it", () => {
     await stream.close()
 
     expect(screen.queryByText(/mid-flight/)).not.toBeInTheDocument()
-    expect(screen.getAllByText("Send a message to start.")).toHaveLength(2)
+    expect(
+      screen.getByText("Choose model B to start comparing."),
+    ).toBeInTheDocument()
   })
 
   it("starts over when the selected workspace changes", async () => {
@@ -774,7 +797,7 @@ describe("state that must not outlive what produced it", () => {
     mockStream([delta("first workspace answer"), "[DONE]"])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.type(await screen.findByLabelText("Message"), "hi")
     await user.click(screen.getByRole("button", { name: "Send message" }))
@@ -782,7 +805,7 @@ describe("state that must not outlive what produced it", () => {
 
     await user.click(screen.getByRole("button", { name: "Select Second" }))
 
-    expect(await screen.findByText("What can I help with?")).toBeInTheDocument()
+    expect(await screen.findByText("Try a prompt.")).toBeInTheDocument()
     expect(screen.queryByText("first workspace answer")).not.toBeInTheDocument()
   })
 
@@ -794,7 +817,7 @@ describe("state that must not outlive what produced it", () => {
     mockStream([delta("first answer"), "[DONE]"])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.type(await screen.findByLabelText("Message"), "hi")
     await user.click(screen.getByRole("button", { name: "Send message" }))
@@ -822,7 +845,7 @@ describe("state that must not outlive what produced it", () => {
     mockApi()
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.click(await screen.findByLabelText("Model", { exact: true }))
     await user.click(await screen.findByText("claude-sonnet-4"))
@@ -846,7 +869,7 @@ describe("when a write fails", () => {
     mockStream([delta("ok"), "[DONE]"])
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
     await user.type(await screen.findByLabelText("Message"), "hi")
     await user.click(screen.getByRole("button", { name: "Send message" }))
@@ -863,6 +886,7 @@ describe("when a write fails", () => {
       return previous?.(path, init) as never
     })
 
+    await user.click(screen.getByRole("button", { name: "History" }))
     await user.click(screen.getByRole("button", { name: "Save conversation" }))
 
     expect(
@@ -894,11 +918,9 @@ describe("when a write fails", () => {
     })
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
-    await user.click(
-      await screen.findByRole("button", { name: "Conversation history" }),
-    )
+    await user.click(await screen.findByRole("button", { name: "History" }))
     const dialog = await screen.findByRole("dialog")
     await user.click(
       within(dialog).getByRole("button", { name: /^How does OAuth work/ }),
@@ -914,14 +936,10 @@ describe("history", () => {
   it("opens an empty history before the first save", async () => {
     mockApi()
     renderPage()
-    await screen.findByText("What can I help with?")
+    await screen.findByText("Try a prompt.")
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Conversation history" }),
-    )
-    expect(
-      await screen.findByText("No saved conversations yet."),
-    ).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "History" }))
+    expect(await screen.findByText("No saved history yet.")).toBeInTheDocument()
   })
 
   it("loads a saved transcript with its model and exits comparison", async () => {
@@ -945,12 +963,10 @@ describe("history", () => {
     })
     const user = userEvent.setup()
     renderPage()
-    await screen.findByText("What can I help with?")
-    await user.click(screen.getByRole("button", { name: "Compare models" }))
+    await screen.findByText("Try a prompt.")
+    await user.click(screen.getByRole("radio", { name: "Compare" }))
 
-    await user.click(
-      await screen.findByRole("button", { name: "Conversation history" }),
-    )
+    await user.click(await screen.findByRole("button", { name: "History" }))
     const dialog = await screen.findByRole("dialog")
     // Anchored, so it picks the row and not the delete beside it, whose name
     // is `Delete conversation "How does OAuth work"`.
@@ -967,8 +983,6 @@ describe("history", () => {
     expect(
       screen.queryByRole("button", { name: "Model B" }),
     ).not.toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: "Compare models" }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "Compare" })).toBeInTheDocument()
   })
 })

@@ -62,7 +62,8 @@ export function ToolsMenu({
       trigger={
         <Button
           aria-label="Add tools"
-          className="min-h-11 min-w-11 shrink-0"
+          size="sm"
+          className="min-h-11 min-w-11 shrink-0 md:min-h-8"
           isDisabled={isDisabled}
         >
           <FiPlus aria-hidden className="size-4" />
