@@ -120,11 +120,11 @@ class SandboxNotReachableError(RuntimeError):
 
 
 class SandboxUnavailableError(SandboxNotReachableError):
-    """The sandbox is temporarily unable to accept a session."""
+    """Temporary sandbox capacity or dependency failure."""
 
     def __init__(self, retry_after: str | None = None) -> None:
         super().__init__("sandbox temporarily unavailable")
-        # Accept delay-seconds only; never reflect arbitrary upstream headers.
+        # Forward only validated delay-seconds.
         self.retry_after = (
             retry_after
             if retry_after and retry_after.isascii() and retry_after.isdigit() and len(retry_after) <= 6

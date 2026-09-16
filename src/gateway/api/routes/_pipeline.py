@@ -4051,7 +4051,6 @@ async def run_single_attempt_stream(
         await release_reservation(ctx)
         raise
     except SandboxNotReachableError as exc:
-        # Keep sandbox availability distinct from provider errors.
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
         await release_reservation(ctx)
         raise _sandbox_error(adapter, exc) from exc
@@ -4344,17 +4343,7 @@ def raise_all_streaming_attempts_failed(
     exc: Exception,
     route: ResolvedRoute,
 ) -> NoReturn:
-    """Map a terminal :func:`run_streaming_with_fallback` failure (no attempt
-    yielded a first chunk) onto the format's wire error.
-
-    Sandbox capacity failures preserve 503 and Retry-After. Other backend
-    failures get 502 with a backend-specific detail. A single attempt preserves
-    its classified provider error. Once a
-    multi-attempt route is exhausted, it surfaces the aggregate result: 504 when
-    the last failure was a timeout, 429 when it was a rate limit, and 502
-    otherwise. A 502 for an exhausted-by-rate-limit route would tell a client
-    that was just asked to back off that it may retry now.
-    """
+    """Map pre-stream failures, preserving sandbox retry hints and provider status."""
     if isinstance(exc, SandboxNotReachableError):
         logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
         raise _sandbox_error(adapter, exc) from exc
