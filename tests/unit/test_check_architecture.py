@@ -31,7 +31,7 @@ def _write(src_root: Path, relative_path: str, content: str) -> Path:
 
 
 def test_service_importing_models_is_clean(tmp_path: Path) -> None:
-    file_path = _write(tmp_path, "gateway/services/thing.py", "from gateway.models.entities import User\n")
+    file_path = _write(tmp_path, "gateway/services/thing.py", "from gateway.models.users import User\n")
     assert check.check_file(file_path, tmp_path) == []
 
 

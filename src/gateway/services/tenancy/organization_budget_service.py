@@ -65,9 +65,9 @@ from sqlmodel import col
 
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import MAX_COUNT_LIMIT, Budget, ScopedBudget, WorkspaceBudgetDefault
-from gateway.models.entities import User as GatewayUser
 from gateway.models.money import MAX_USD_LIMIT, as_float, to_usd_or_none
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
+from gateway.models.users import User as GatewayUser
 from gateway.services.budget_periods import ResetAlignment, period_window
 from gateway.services.budget_retiming import cadence_of, retime_ceilings_for_budget
 from gateway.services.tenancy.errors import (

@@ -1,13 +1,14 @@
+"""ORM table for the gateway's billing identity.
+
+API keys, budgets, and usage rows attach to this ``User``. Gotcha: another model
+class named ``User`` is the dashboard sign-in identity.
+"""
+
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import (
-    JSON,
-    BigInteger,
-    DateTime,
-    ForeignKey,
-)
+from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from gateway.models.base import Base

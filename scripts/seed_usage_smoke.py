@@ -20,10 +20,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlmodel import col
 
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import User
 from gateway.models.pricing import ModelPricing
 from gateway.models.tenancy import Organization, Workspace
 from gateway.models.usage import UsageLog
+from gateway.models.users import User
 from gateway.services.pricing_service import gateway_tool_pricing_key
 from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 

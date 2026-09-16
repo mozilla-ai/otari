@@ -18,7 +18,6 @@ to the metadata and stays out of it.
 from gateway.models import (  # noqa: F401
     api_keys,
     budgets,
-    entities,
     guardrails,
     inference,
     platform,
@@ -30,4 +29,5 @@ from gateway.models import (  # noqa: F401
     tenancy,
     tools,
     usage,
+    users,
 )

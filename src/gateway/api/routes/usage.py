@@ -30,9 +30,9 @@ from gateway.core.sql import (
 from gateway.core.usage_source import is_served_here, not_served_here
 from gateway.inflight import get_registry
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import User
 from gateway.models.money import as_float
 from gateway.models.usage import UsageLog
+from gateway.models.users import User
 from gateway.services.external_usage_service import (
     ExternalEventsRequest,
     ExternalIngestResult,

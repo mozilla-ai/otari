@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
 from gateway.models.budgets import BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
-from gateway.models.entities import User
 from gateway.models.tenancy import Organization, Workspace
+from gateway.models.users import User
 
 
 def _make_budget(client: TestClient, headers: dict[str, str], max_budget: float | None = 100.0) -> str:

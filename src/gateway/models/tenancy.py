@@ -150,7 +150,7 @@ class UserCreate(UserBase):
 class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
     """An identity in the reconciled control plane.
 
-    Not to be confused with `entities.User`, the gateway's own string-keyed
+    Not to be confused with `users.User`, the gateway's own string-keyed
     per-request spend identity, which is what keys, budgets, and usage attach to.
     Both exist, and how they converge is no longer settled: otari-ai#1719 made
     otari's schema the survivor, which retired the pre-flip plan of re-parenting

@@ -13,8 +13,8 @@ from gateway.api.deps import CallerOrganization, get_config, get_db, require_dep
 from gateway.auth.models import generate_api_key, hash_key, key_prefix, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import User
 from gateway.models.tenancy import Workspace
+from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
 from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
 from gateway.services.workspace_scope import organization_default_workspace_id

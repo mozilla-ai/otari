@@ -31,10 +31,10 @@ from gateway.core.config import API_ROOT
 from gateway.core.database import release_session
 from gateway.inflight import InFlightRegistry
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import User
 from gateway.models.mcp import ResolvedMcpServer
 from gateway.models.tenancy import Organization, Workspace
 from gateway.models.tools import WorkspaceMcpServer
+from gateway.models.users import User
 from gateway.services import mcp_stateless
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 

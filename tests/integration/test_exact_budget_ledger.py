@@ -25,8 +25,8 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.models.budgets import Budget, ScopedBudget
-from gateway.models.entities import User
 from gateway.models.usage import UsageLog
+from gateway.models.users import User
 from gateway.services.budget_service import ReservationHandle, reconcile_reservation, reserve_budget
 from gateway.services.scoped_budget_service import ApplicableBudget, reserve, settle
 

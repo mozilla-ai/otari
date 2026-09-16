@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 from conftest import seed_workspace_id
 from gateway.core.config import API_ROOT
 from gateway.models.api_keys import APIKey
-from gateway.models.entities import User
 from gateway.models.usage import UsageLog
+from gateway.models.users import User
 
 USAGE_PATH = f"{API_ROOT}/usage"
 

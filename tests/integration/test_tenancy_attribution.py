@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
-from gateway.models.entities import User as GatewayUser
+from gateway.models.users import User as GatewayUser
 
 
 def _add_member(client: TestClient, headers: dict[str, str], email: str) -> dict[str, Any]:

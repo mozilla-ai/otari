@@ -18,9 +18,9 @@ from gateway.core.metered_pricing import estimate_metered_cost
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.budgets import MAX_COUNT_LIMIT, Budget, BudgetResetLog
-from gateway.models.entities import User
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing
+from gateway.models.users import User
 from gateway.repositories.users_repository import get_active_user
 from gateway.services import budget_reservation_ledger as ledger
 from gateway.services.budget_periods import budget_window
