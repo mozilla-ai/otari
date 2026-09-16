@@ -262,9 +262,10 @@ evidence it needs in its own way, not through this same Git-status step.
    file or a command line is one you should be able to rotate on its own.
 
 2. Try something a gate forbids: `Edit` `CHANGELOG.md`, or ask for
-   `git push --force`. Either tool call itself is refused before it runs;
-   for the edit, `git status` afterward shows nothing changed, because the
-   edit never happened.
+   `npm install` (this repo's own `.otari-gates.yml` enforces pnpm; see
+   `web/AGENTS.md`). Either tool call itself is refused before it runs; for
+   the edit, `git status` afterward shows nothing changed, because the edit
+   never happened.
 
 `otari hook` is a thin, harness-specific transport, not a second copy of the
 evaluator: it collects evidence and calls the endpoint above; every actual
