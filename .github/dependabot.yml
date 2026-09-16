@@ -14,3 +14,30 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  # Python dependencies resolved through uv. The ecosystem must be "uv", not
+  # "pip": the pip ecosystem does not understand uv.lock, so it would leave the
+  # lockfile (the thing CI and the Docker image actually install from, both via
+  # --frozen) untouched while editing pyproject.toml.
+  #
+  # This block adds *version* updates. Security updates are a separate feature
+  # that needs no config and already runs here, which is why advisory-driven
+  # bumps arrived for years while a stale-but-unvulnerable package like
+  # genai-prices sat six releases behind.
+  #
+  # What version updates do for a lockfile entry whose declared floor already
+  # permits the newer version is not documented for uv, so
+  # otari-lock-refresh.yml is the path that does not depend on the answer.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # No entry for the dashboard: Dependabot documents pnpm support only through
+  # v10 and web/ requires pnpm 11, so one would target a lockfile format it
+  # cannot resolve. Tracked in #1001.
