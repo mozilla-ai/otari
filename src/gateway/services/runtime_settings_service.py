@@ -39,11 +39,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import (
-    PRICING_REFRESH_POLICIES,
     STREAM_MISSING_USAGE_POLICIES,
     VISION_STRATEGIES,
     GatewayConfig,
 )
+from gateway.core.settings.pricing import PRICING_REFRESH_POLICIES
 from gateway.log_config import logger
 from gateway.models.platform import RuntimeSetting
 from gateway.services.pricing_service import configure_default_pricing

@@ -25,7 +25,8 @@ from any_llm.types.completion import (
 )
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig, PricingConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.settings.pricing import PricingConfig
 from gateway.main import create_app
 from gateway.models.routing import RoutingConfig
 

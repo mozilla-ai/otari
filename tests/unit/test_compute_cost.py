@@ -30,7 +30,7 @@ from any_llm.types.completion import CompletionUsage
 from pydantic import ValidationError
 
 from gateway.api.routes._pipeline import _compute_cost
-from gateway.core.config import PricingConfig, PricingTierConfig
+from gateway.core.settings.pricing import PricingConfig, PricingTierConfig
 from gateway.core.usage import GatewayUsage
 from gateway.models.pricing import ModelPricing
 
