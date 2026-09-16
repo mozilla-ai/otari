@@ -61,8 +61,6 @@ from any_llm.types.messages import MessagesParams
 from any_llm.types.responses import ResponsesParams
 from fastapi import BackgroundTasks, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
-from prometheus_client import Counter as PrometheusCounter
-from prometheus_client import Histogram
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -120,7 +118,8 @@ from gateway.core.usage import (
 )
 from gateway.inflight import track_request
 from gateway.log_config import logger
-from gateway.metrics import REGISTRY
+from gateway.metrics import REGISTRY, Histogram
+from gateway.metrics import Counter as PrometheusCounter
 from gateway.model_labeling import relabel_model
 from gateway.models.entities import APIKey, ModelPricing, UsageLog
 from gateway.models.guardrails import GuardrailConfig

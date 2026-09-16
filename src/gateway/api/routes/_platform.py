@@ -25,7 +25,6 @@ from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException, Request, status
 from openai import APIConnectionError as _OpenAIAPIConnectionError
 from openai import APITimeoutError as _OpenAIAPITimeoutError
-from prometheus_client import Counter
 from pydantic import BaseModel, Field, ValidationError
 
 from gateway.core.config import GatewayConfig
@@ -35,7 +34,7 @@ from gateway.core.usage import (
     cache_write_tokens_of,
 )
 from gateway.log_config import logger
-from gateway.metrics import REGISTRY
+from gateway.metrics import REGISTRY, Counter
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
 from gateway.services.mcp_loop import MaxToolIterationsExceeded

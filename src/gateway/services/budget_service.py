@@ -10,14 +10,13 @@ from typing import Any, Literal
 from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError
 from fastapi import HTTPException, status
-from prometheus_client import Counter
 from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.metered_pricing import estimate_metered_cost
 from gateway.log_config import logger
-from gateway.metrics import REGISTRY
+from gateway.metrics import REGISTRY, Counter
 from gateway.models.entities import MAX_COUNT_LIMIT, Budget, BudgetResetLog, ModelPricing, User
 from gateway.models.money import to_usd
 from gateway.repositories.users_repository import get_active_user

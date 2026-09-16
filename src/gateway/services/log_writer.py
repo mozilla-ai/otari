@@ -6,11 +6,9 @@ import asyncio
 import time
 from typing import Protocol
 
-from prometheus_client import Counter, Gauge, Histogram
-
 from gateway.core.database import DATABASE_ERRORS, create_log_session
 from gateway.log_config import logger
-from gateway.metrics import REGISTRY
+from gateway.metrics import REGISTRY, Counter, Gauge, Histogram
 from gateway.models.entities import UsageLog
 
 QUEUE_DEPTH = Gauge(

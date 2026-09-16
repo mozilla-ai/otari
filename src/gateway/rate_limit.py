@@ -6,9 +6,8 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 
 from fastapi import HTTPException, Request, status
-from prometheus_client import Counter
 
-from gateway.metrics import REGISTRY
+from gateway.metrics import REGISTRY, Counter
 
 RATE_LIMIT_HITS = Counter(
     "gateway_rate_limit_hits",

@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
-from prometheus_client import Counter
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +15,7 @@ from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, create_session, get_db
 from gateway.core.feature import CoreFeature
 from gateway.log_config import logger
-from gateway.metrics import REGISTRY
+from gateway.metrics import REGISTRY, Counter
 from gateway.models.entities import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.billing_port import BillingPort

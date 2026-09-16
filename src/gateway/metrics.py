@@ -1,4 +1,7 @@
-"""Prometheus registry and HTTP request instrumentation for the gateway."""
+"""Prometheus registry, metric types, and HTTP request instrumentation for the gateway.
+
+The metric types are re-exported so that code declaring a metric need not depend on ``prometheus_client`` directly.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +23,8 @@ from gateway.core.config import API_ROOT, API_VERSION
 if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+__all__ = ["Counter", "Gauge", "Histogram", "MetricsMiddleware", "REGISTRY", "metrics_endpoint"]
 
 REGISTRY = CollectorRegistry()
 
