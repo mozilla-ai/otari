@@ -439,6 +439,15 @@ class CallerIdentityPublic(SQLModel):
             "cookie-authenticated caller exactly while this is true."
         ),
     )
+    # Required for the reason ``has_password`` is: a default of False tells the
+    # operator that claiming the deployment is an ordinary password change.
+    claims_deployment: bool = Field(
+        description=(
+            "Whether setting this identity's password claims the deployment, which stops the "
+            "master key signing in to the dashboard. True for the deployment's operator until it "
+            "holds a password, whether or not it already has an address; false for everybody else."
+        ),
+    )
 
 
 class OrganizationMembershipContextPublic(SQLModel):

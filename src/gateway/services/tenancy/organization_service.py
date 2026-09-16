@@ -107,7 +107,7 @@ from gateway.services.tenancy.invitation_email import render_invitation_email
 # into the tenancy graph is a function-local import), so this direction of the
 # dependency is the safe one; ``tests/unit/test_service_module_imports.py``
 # pins it.
-from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
+from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME, password_claims_deployment
 
 
 def _validated_organization_name(name: str | None) -> str:
@@ -285,6 +285,7 @@ class OrganizationService:
                 email=user.email,
                 full_name=user.full_name,
                 has_password=user.hashed_password is not None,
+                claims_deployment=await password_claims_deployment(self.db, user),
             ),
             # The platform answers "does this org have a self-hosted gateway
             # attached". A standalone deployment reading this *is* that gateway,

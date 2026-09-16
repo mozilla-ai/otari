@@ -5983,6 +5983,11 @@ export interface components {
          *     has to be ready to draw either one alone.
          */
         CallerIdentityPublic: {
+            /**
+             * Claims Deployment
+             * @description Whether setting this identity's password claims the deployment, which stops the master key signing in to the dashboard. True for the deployment's operator until it holds a password, whether or not it already has an address; false for everybody else.
+             */
+            claims_deployment: boolean;
             /** Email */
             email?: string | null;
             /** Full Name */

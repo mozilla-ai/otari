@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH, CallerIdentityPublic
+from gateway.services.tenancy.provisioning_service import password_claims_deployment
 from gateway.services.tenancy.user_service import update_full_name
 
 # Declared on the router rather than left to arrive through ``CurrentIdentity``,
@@ -81,6 +82,7 @@ async def update_own_profile(
         email=updated.email,
         full_name=updated.full_name,
         has_password=updated.hashed_password is not None,
+        claims_deployment=await password_claims_deployment(db, updated),
     )
 
 
