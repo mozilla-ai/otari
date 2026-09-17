@@ -71,10 +71,13 @@ test("welcome fits a phone while keeping long code scrollable", async ({
   expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
   const snippet = page.getByLabel("Chat completion example", { exact: true })
   await snippet.focus()
-  await page.keyboard.press("End")
-  expect(
-    await snippet.evaluate((node) => node.scrollWidth > node.clientWidth),
-  ).toBe(true)
+  const overflow = await snippet.evaluate((node) => ({
+    scrollWidth: node.scrollWidth,
+    clientWidth: node.clientWidth,
+    overflowX: getComputedStyle(node).overflowX,
+  }))
+  expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth)
+  expect(["auto", "scroll"]).toContain(overflow.overflowX)
   for (const button of await page
     .getByRole("button", { name: /^Copy / })
     .all()) {
