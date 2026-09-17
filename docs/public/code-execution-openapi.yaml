@@ -92,7 +92,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "503":
           description: |
-            At capacity, no session leased. Distinct from a malformed request:
+            Temporarily unavailable, including capacity or dependency failures.
             Otari preserves 503 and a valid Retry-After delay-seconds hint for
             its caller, without automatically retrying the request.
           headers:
@@ -100,6 +100,7 @@ paths:
               description: Optional delay in seconds before another attempt.
               schema:
                 type: string
+                maxLength: 6
                 pattern: "^[0-9]+$"
           content:
             application/json:
@@ -195,6 +196,7 @@ paths:
               description: Optional delay in seconds before another attempt.
               schema:
                 type: string
+                maxLength: 6
                 pattern: "^[0-9]+$"
           content:
             application/json:

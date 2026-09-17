@@ -327,8 +327,9 @@ Status codes:
 | Session creation or execution temporarily unavailable | `503` |
 
 A backend may include `Retry-After` delay-seconds with a `503`. Otari preserves
-that status and a valid delay-seconds hint for its caller. It does not retry
-session creation or code execution automatically. Connection failures remain
+that status and a delay-seconds hint of one to six ASCII digits for its caller.
+Other hint values are omitted. It does not retry session creation or code
+execution automatically. Connection failures remain
 `502`; clients should not blindly replay an execution whose outcome is unknown.
 
 A bearer credential, where the deployment uses one, is sent as
