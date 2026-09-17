@@ -165,10 +165,7 @@ async def _require_reachable_targets(
     Without this, writing a policy would be a way to reach a provider the
     organization holds no key for: the name is the tenant's to choose, and
     resolution follows the name. Answered as a 400 naming the target, because it
-    is a statement about the body rather than about the caller's role, and the
-    catalog the dashboard offers already excludes these. ``model_provider`` is
-    what makes the two agree about a hosted provider, so a write passes it where
-    a delete, which names no target, need not.
+    is a statement about the body rather than about the caller's role.
 
     A target that names another alias or policy is left alone, because the write
     helpers refuse chaining a step later and say so precisely. Checking it here

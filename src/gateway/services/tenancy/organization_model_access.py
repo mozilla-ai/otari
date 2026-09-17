@@ -16,15 +16,11 @@ Two disjoint addressing schemes decide it, and the split is
   contributes ``instance:*``.
 * A bare ``provider:model`` selector resolves through the organization's own BYO
   keys for the request's workspace, so it contributes only where the caller has
-  one. Where the workspace has none, dispatch asks the bound ``ModelProviderPort``
-  for a deployment-owned credential, so every provider the port would serve this
-  organization contributes ``provider:*`` too.
+  one. Where a workspace has no such key, a provider the hosted port serves
+  contributes ``provider:*``.
 
 An organization holding no BYO key still gets every configured instance, which on
-a standalone deployment is the whole catalog, and every hosted provider, which on
-the core build is none. Opening this filter therefore changes nothing for a
-single-tenant deployment and narrows only where a tenant's reach is actually
-narrower.
+a standalone deployment is the whole catalog.
 
 The scope also answers one thing the allow-list cannot. Aliases and stored
 policies are workspace-scoped rows, and the catalog reads them for a workspace
@@ -138,23 +134,15 @@ async def resolve_session_catalog_scope(
     organizations: OrganizationService | None = None,
     model_provider: ModelProviderPort | None,
 ) -> SessionCatalogScope:
-    """What this session identity may be shown. Unrestricted is the caller's own call.
+    """Returns what this session identity may be shown.
 
-    An owner or admin is answered from the organization's providers directly
-    rather than by walking its workspaces. That is both truer to what they may do
-    (a workspace's disable or model restriction is theirs to lift) and cheaper by
-    a query.
+    An owner or admin is answered from the whole organization,
+    because a workspace's disable or model restriction is theirs to lift.
+    A member is answered from their own workspaces.
+    A caller with no live organization membership gets the configured instances rather than a refusal.
+    Passing ``None`` as ``model_provider`` lists no hosted providers.
 
-    ``model_provider`` is the port this build bound; ``None`` reads as a build
-    that serves nothing hosted.
-
-    A caller with no live organization membership is answered with the configured
-    instances rather than refused. That is the same rule applied to an empty
-    tenant, not a fallback around one: they reach no BYO key because there is no
-    organization holding any, the configured instances are deployment-wide, and
-    the hosted rung is keyed on an organization they do not have. The routers
-    that exist to answer "which organization" still refuse such a caller; a
-    catalog read is not one of them.
+    NOTE: this never answers unrestricted, so a caller should decide that for a deployment operator first.
     """
     services = organizations if organizations is not None else OrganizationService(db)
     allowlist = {f"{instance}:*" for instance in config.providers}

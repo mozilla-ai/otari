@@ -1,23 +1,20 @@
 """``GET /api/v1/models`` shows a tenant only the providers their organization reaches.
 
 The roles matrix wants a member's model list narrowed to the providers they have
-access to (otari-ai#1969). The narrowing reuses the allow-list machinery an API
-key already goes through (``services/model_access``), so the assertions here are
-about *which* allow-list a caller is answered by rather than about a second
-matcher:
+access to. The narrowing reuses the allow-list machinery an API key already goes
+through (``services/model_access``), so the assertions here are about *which*
+allow-list a caller is answered by rather than about a second matcher:
 
 * a header master key is the deployment credential and is unrestricted;
 * a session that operates the deployment is unrestricted;
 * any other session is answered by its membership, which is every
   ``config.providers`` instance (deployment-wide, so every tenant reaches them)
-  plus the organization's own BYO providers, plus every provider the bound
-  ``ModelProviderPort`` would serve the organization on the deployment's own
-  credential.
+  plus the organization's own BYO providers, plus the hosted providers the
+  port serves where a workspace has no key.
 
 The test deployment configures no ``providers:`` block, so every entry a caller
-is shown here comes from a BYO key. That is the sharp case: a deployment with
-config-file providers gives every tenant those on top, which is why opening this
-filter changes nothing for a single-tenant install.
+is shown here comes from a BYO key. A deployment with config-file providers gives
+every tenant those on top.
 """
 
 import uuid
@@ -386,11 +383,7 @@ def test_a_provider_whose_only_key_will_not_decrypt_is_withheld(
 def test_a_hosted_provider_is_listed_for_a_member_of_an_organization_holding_no_key_for_it(
     client: TestClient, world: _World
 ) -> None:
-    """The deployment serves mistral on its own credential, so every tenant may call it (otari-ai#1969 follow-up).
-
-    Alpha holds a BYO key for openai only. Without the hosted rung the member is
-    shown openai alone, though a request for the mistral model would be served.
-    """
+    """Alpha holds a BYO key for openai only, and the deployment serves mistral."""
     port = HostedModelProvider("mistral")
     bind_model_provider(client, port)
 
@@ -404,12 +397,7 @@ def test_a_hosted_provider_is_listed_for_a_member_of_an_organization_holding_no_
 def test_a_hosted_provider_the_organization_also_holds_a_key_for_is_the_organizations_to_price(
     client: TestClient, world: _World
 ) -> None:
-    """BYO wins at dispatch, so the catalog does not flag the model as deployment-supplied.
-
-    Same provider, two tenants: Alpha's openai runs on Alpha's key and Beta's on
-    the deployment's, so the same model id carries a different flag for each,
-    which is the flag the dashboard reads to offer or withhold the rate override.
-    """
+    """Alpha holds an openai key and may price the model, while Beta holds none and may not."""
     bind_model_provider(client, HostedModelProvider("openai"))
 
     alpha = _listing_as(client, world, "alpha_member")
@@ -437,7 +425,7 @@ def test_the_deployment_managed_flag_agrees_with_the_rate_override_gate(
     disabled_in_alpha_two: bool,
     deployment_managed: bool,
 ) -> None:
-    """The dashboard offers a rate override only where the flag is false, so the gate must accept exactly those."""
+    """The flag must predict whether the organization may set its own rate."""
     bind_model_provider(client, HostedModelProvider("openai", "mistral"))
     if disabled_in_alpha_two:
         session = db_session_factory()
@@ -549,7 +537,6 @@ def test_the_single_model_read_agrees_with_the_listing_about_a_hosted_model(clie
 
 
 def test_the_grouped_catalog_lists_a_hosted_model_for_a_member(client: TestClient, world: _World) -> None:
-    """The dashboard's Models page reads the grouped catalog, which builds the same merged view."""
     bind_model_provider(client, HostedModelProvider("mistral"))
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
     try:
@@ -563,7 +550,7 @@ def test_the_grouped_catalog_lists_a_hosted_model_for_a_member(client: TestClien
 
 
 def test_the_grouped_catalog_labels_a_hosted_offering_hosted(client: TestClient, world: _World) -> None:
-    """The Models page offers a rate override only on an offering labeled ``organization``."""
+    """An offering labeled ``organization`` is one the organization may price."""
     bind_model_provider(client, HostedModelProvider("mistral"))
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
     credentials: dict[str, str] = {}
@@ -582,8 +569,8 @@ def test_the_grouped_catalog_labels_a_hosted_offering_hosted(client: TestClient,
     assert credentials[_OPENAI_MODEL] == "organization"
 
 
-def test_an_operator_session_is_not_flagged_by_the_hosted_rung(client: TestClient, world: _World) -> None:
-    """The operator is exempt from the pricing rule, and their catalog was never narrowed."""
+def test_an_operator_session_flags_no_hosted_model(client: TestClient, world: _World) -> None:
+    """An operator sees every model and may price any of them."""
     bind_model_provider(client, HostedModelProvider("mistral"))
     listed = _listing_as(client, world, "superuser")
     assert set(listed) == set(_ALL_MODELS)
@@ -598,7 +585,7 @@ def test_a_hosted_port_failure_fails_the_read(client: TestClient, world: _World)
 
 
 def test_an_identity_with_no_live_membership_is_not_shown_hosted_models(client: TestClient, world: _World) -> None:
-    """The hosted rung is keyed on an organization, which this caller does not have."""
+    """The port is asked about an organization, and this caller has none."""
     port = HostedModelProvider("mistral")
     bind_model_provider(client, port)
     assert _catalog_as(client, world, "orphan") == set()

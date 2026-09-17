@@ -561,5 +561,4 @@ async def test_fresh_resolution_also_reaches_the_port() -> None:
 
 @pytest.mark.asyncio
 async def test_the_plain_build_serves_no_hosted_provider() -> None:
-    """The catalog's hosted rung is empty on a build with no overlay, so nothing it lists changes."""
     assert await _plain_build_port().get_hosted_providers(organization_id=ORGANIZATION_ID) == frozenset()

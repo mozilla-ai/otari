@@ -119,28 +119,15 @@ class ModelObject(BaseModel):
     # knows the model. Metadata only (independent of the default_pricing toggle);
     # ``None`` when the dataset has no value for the model.
     context_window: int | None = None
-    # True when the deployment holds the upstream credential this model runs on,
-    # so its rate is the deployment price list's: a model addressed through one
-    # of the deployment's own provider instances, or a bare ``provider:model``
-    # key the bound ``ModelProviderPort`` serves the viewer's organization for
-    # because no BYO key of theirs covers it. False for a bare key the
-    # organization's own BYO credential serves, and for an alias or policy, which
-    # is a name rather than a model. It is what lets the dashboard withhold a
-    # rate-override control the gateway would refuse anyway
-    # (``OrganizationPricingService.raise_if_deployment_supplied``).
+    # True when the deployment pays the upstream bill for this model, so the organization may not set its own rate.
+    # An alias or policy is a name, not a model, so it is always False.
     deployment_managed: bool = False
 
 
 def mark_deployment_managed(
     config: GatewayConfig, model: ModelObject, *, deployment_supplied_providers: frozenset[str]
 ) -> ModelObject:
-    """Stamp ``deployment_managed`` from the entry's own id, and hand it back.
-
-    Applied in one pass rather than at each construction site: the answer depends
-    only on the id, the provider map and the viewer's hosted providers
-    (``CatalogScope.deployment_supplied_providers``), so deriving it once is what
-    keeps the phases from disagreeing about a model they both build.
-    """
+    """Sets ``deployment_managed`` on ``model`` and returns it."""
     split = split_selector(model.id)
     model.deployment_managed = is_deployment_instance_key(config, model.id) or (
         split is not None and split[0] in deployment_supplied_providers
@@ -393,12 +380,9 @@ class CatalogScope:
     """
 
     deployment_supplied_providers: frozenset[str] = frozenset()
-    """Bare providers whose models run on the deployment's own credential for this caller.
+    """Hosted providers the deployment pays for in at least one of the organization's workspaces.
 
-    See ``SessionCatalogScope.deployment_supplied_providers``. Empty for every
-    caller but a member session: an operator and a master key are exempt from
-    the pricing rule this flags for, and an API key's catalog has always been
-    stamped from the provider map alone.
+    It is empty for an operator, a master key, an API key and a visitor.
     """
 
 
@@ -411,16 +395,13 @@ async def catalog_scope(
     anonymous: bool = False,
     model_provider: ModelProviderPort | None,
 ) -> CatalogScope:
-    """What this caller may be shown, by the rule that fits how they authenticated.
+    """Returns what this caller may be shown, by how they authenticated.
 
-    Three callers reach the catalog. An API key gets its stored allow-list, as it
-    has always done. A header master key is the deployment credential itself, so
-    it is unrestricted. A dashboard session is unrestricted only while it
-    operates the deployment; otherwise it is answered by its membership, so a
-    member sees the providers their own organization holds, plus the ones the
-    bound ``model_provider`` would serve it on the deployment's credential,
-    rather than every tenant's, and the workspace-scoped rows only where that
-    workspace is theirs (otari-ai#1969).
+    An API key gets its stored allow-list.
+    A master key, and a session that operates the deployment, are unrestricted.
+    Any other session gets what its organization can reach,
+    and the workspace-scoped rows only for workspaces it may see.
+    A visitor to the public catalog gets the configured instances alone.
     """
     # A visitor, while the catalog is public: the deployment's configured
     # instances and nothing that belongs to a tenant. Not a member of anything,
@@ -478,9 +459,7 @@ async def build_merged_catalog(
     ``cached_only`` builds the view without dialing any provider, for a caller
     that runs off the request path; see :func:`discover_all_models`.
 
-    ``model_provider`` is the port this build bound, consulted for a member
-    session's hosted providers; see :func:`catalog_scope`. A caller that passes
-    none is answered as on a build that serves nothing hosted.
+    Passing ``None`` as ``model_provider`` lists no hosted providers.
     """
     # Aliases are scoped, so the catalog is too: a caller sees their workspace's
     # aliases and the configured ones, plus their own user-scoped layer, never
