@@ -10,6 +10,7 @@ from collections.abc import Generator
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway.agent_runtime.domain.evaluators import _contains_subsequence
 from gateway.core.config import API_ROOT, PLATFORM_TOKEN_ENV_VAR, GatewayConfig
 
 from .conftest import build_test_client
@@ -521,15 +522,21 @@ def test_apostrophe_in_a_trailing_comment_does_not_evade_a_required_gate(
     assert body["results"][0]["outcome"] == "fail"
 
 
-def test_many_separator_only_commands_resolve_quickly(client: TestClient, master_key_header: dict[str, str]) -> None:
-    """Review's repro: one gate with 500 forbidden phrases against 100 commands
+def test_separator_only_commands_are_never_compared_against_a_phrase(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A command made only of separators leaves no segment to compare against a phrase.
 
-    built from 500 semicolons each (no real content) passed every request
-    budget (the token count correctly counts 0 real tokens) yet measured
-    ~1.1s, because evaluation still compared every one of ~50,000 resulting
-    empty segments against every phrase. Dropping empty segments at the
-    source, since a non-empty phrase can never match one, collapses this.
+    This counts comparisons because a timed request on a loaded CI runner measures the runner.
     """
+    comparisons = 0
+
+    def counting_contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
+        nonlocal comparisons
+        comparisons += 1
+        return _contains_subsequence(segment, phrase)
+
+    monkeypatch.setattr("gateway.agent_runtime.domain.evaluators._contains_subsequence", counting_contains_subsequence)
     forbidden = [f'"p{i}"' for i in range(500)]
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
@@ -537,15 +544,14 @@ def test_many_separator_only_commands_resolve_quickly(client: TestClient, master
         f"    forbidden: [{', '.join(forbidden)}]\n    message: m\n"
     )
     commands = ["; " * 500 + " " * i for i in range(100)]
-    start = time.time()
     response = client.post(
         f"{API_ROOT}/hooks/check",
         json={"policy_yaml": policy, "commands": commands},
         headers=master_key_header,
     )
-    assert time.time() - start < 0.5
     assert response.status_code == 200, response.text
     assert response.json()["blocked"] is False
+    assert comparisons == 0
 
 
 def test_multiline_command_with_a_leading_comment_still_blocks(
