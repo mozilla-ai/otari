@@ -201,8 +201,10 @@ def _include_object(
     and autogenerate must not propose dropping them.
     A table that otari's own models stop declaring was created by this chain, so it still gets its drop.
     """
+    # Read on every call, so an unreadable revision fails autogenerate even when no foreign table is present.
+    owned = _tables_this_chain_creates()
     if type_ == "table" and reflected and compare_to is None:
-        return name in _tables_this_chain_creates()
+        return name in owned
     return True
 
 

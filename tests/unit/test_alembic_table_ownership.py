@@ -36,7 +36,8 @@ def downgrade() -> None:
 '''
 
 
-def test_autogenerate_refuses_a_revision_whose_table_name_it_cannot_read(tmp_path: Path) -> None:
+@pytest.mark.parametrize("foreign_table", [False, True])
+def test_autogenerate_refuses_a_revision_whose_table_name_it_cannot_read(tmp_path: Path, foreign_table: bool) -> None:
     # Guessing would either drop a table another chain owns or keep one otari retired.
     script_location = tmp_path / "alembic"
     shutil.copytree(_REPO_ROOT / "alembic", script_location, ignore=shutil.ignore_patterns("__pycache__"))
@@ -49,12 +50,13 @@ def test_autogenerate_refuses_a_revision_whose_table_name_it_cannot_read(tmp_pat
         _UNREADABLE_REVISION.format(head=head)
     )
     command.upgrade(config, "head")
-    connection = sqlite3.connect(database)
-    try:
-        connection.execute("CREATE TABLE edition_widgets (id INTEGER PRIMARY KEY)")
-        connection.commit()
-    finally:
-        connection.close()
+    if foreign_table:
+        connection = sqlite3.connect(database)
+        try:
+            connection.execute("CREATE TABLE edition_widgets (id INTEGER PRIMARY KEY)")
+            connection.commit()
+        finally:
+            connection.close()
 
     with pytest.raises(CommandError, match=r"Revision f0f0f0f0f0f0 names a table with _table_name\(\)"):
         command.check(config)
