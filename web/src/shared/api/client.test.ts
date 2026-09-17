@@ -75,6 +75,23 @@ describe("apiFetch", () => {
     })
   })
 
+  it("wraps a non-JSON body as an ApiError carrying the parse failure", async () => {
+    const parseFailure = new SyntaxError("Unexpected token '<'")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: () => Promise.reject(parseFailure),
+    } as unknown as Response)
+
+    await expect(apiFetch("/v1/models")).rejects.toBeInstanceOf(ApiError)
+    await expect(apiFetch("/v1/models")).rejects.toMatchObject({
+      status: 200,
+      message: expect.stringContaining("something other than JSON"),
+      // Nothing else records what the intermediary actually returned.
+      cause: parseFailure,
+    })
+  })
+
   it("passes a caller's signal through instead of imposing its own", async () => {
     const controller = new AbortController()
     const seen: (AbortSignal | null | undefined)[] = []
@@ -167,6 +184,28 @@ describe("siteFetch", () => {
     await expect(siteFetch(DASHBOARD_BUILD_PATH)).rejects.toBeInstanceOf(
       ApiError,
     )
+  })
+
+  it("reports a 200 whose body is not JSON as an ApiError", async () => {
+    // The build poll runs once a minute against the gateway's own root, so an
+    // edge proxy's HTML interstitial lands here first. A raw SyntaxError
+    // ("Unexpected token '<'") reached the UI as an unrecognized failure.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html>checking your browser</html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      }),
+    )
+
+    await expect(siteFetch(DASHBOARD_BUILD_PATH)).rejects.toBeInstanceOf(
+      ApiError,
+    )
+    await expect(siteFetch(DASHBOARD_BUILD_PATH)).rejects.toMatchObject({
+      // 200, not 0: the gateway answered, so this is not "cannot reach it",
+      // which is the distinction ConnectionStatus keys on.
+      status: 200,
+      message: expect.stringContaining("something other than JSON"),
+    })
   })
 
   it("reports an unreachable gateway rather than throwing a raw fetch failure", async () => {

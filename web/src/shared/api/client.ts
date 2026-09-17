@@ -11,10 +11,26 @@ import { getPasskeyAssertion } from "@/shared/helpers/webauthn"
 export class ApiError extends Error {
   status: number
 
-  constructor(status: number, message: string) {
-    super(message)
+  constructor(status: number, message: string, options?: { cause?: unknown }) {
+    super(message, options)
     this.name = "ApiError"
     this.status = status
+  }
+}
+
+const NON_JSON_BODY_MESSAGE =
+  "The gateway answered with something other than JSON."
+
+// The JSON read every success path shares. An edge proxy can answer 200 with an
+// HTML interstitial, and a raw SyntaxError reaches the UI as an unrecognized
+// failure (#993), so it becomes an ApiError like every other fault here. The
+// response's own status is kept rather than 0: ConnectionStatus treats status 0
+// as "cannot reach the gateway", and the gateway did answer.
+async function parseJsonBody<T>(response: Response): Promise<T> {
+  try {
+    return (await response.json()) as T
+  } catch (error) {
+    throw new ApiError(response.status, NON_JSON_BODY_MESSAGE, { cause: error })
   }
 }
 
@@ -302,7 +318,7 @@ async function publicGet(path: string): Promise<{
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response))
   }
-  return { ok: true, body: await response.json() }
+  return { ok: true, body: await parseJsonBody(response) }
 }
 
 // One unauthenticated POST, with the sign-in screen's error handling: a 401 or
@@ -347,7 +363,7 @@ async function publicPost(
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response))
   }
-  return { ok: true, body: await response.json() }
+  return { ok: true, body: await parseJsonBody(response) }
 }
 
 // Best-effort server-side sign-out: revokes the cookie's session and expires
@@ -439,7 +455,7 @@ export async function siteFetch<T>(path: string): Promise<T> {
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response))
   }
-  return (await response.json()) as T
+  return parseJsonBody<T>(response)
 }
 
 export async function apiFetch<T>(
@@ -497,12 +513,15 @@ export async function apiFetch<T>(
   try {
     return (await response.json()) as T
   } catch (error) {
-    // Every caller expects an ApiError; a raw DOMException here would reach the
-    // UI as an unrecognized failure. A malformed body is still its own error.
+    // Every caller expects an ApiError; a raw DOMException or SyntaxError here
+    // would reach the UI as an unrecognized failure. A stalled body is the
+    // deadline expiring, which is status 0 and names its own timeout; a body
+    // that arrived but is not JSON keeps the response's status, because the
+    // gateway did answer.
     if (isTimeout(error)) {
       throw new ApiError(0, timeoutMessage)
     }
-    throw error
+    throw new ApiError(response.status, NON_JSON_BODY_MESSAGE, { cause: error })
   }
 }
 
