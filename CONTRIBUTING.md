@@ -61,6 +61,37 @@ remove it once the SDK pin moves. `service_tier` in
 `src/gateway/api/routes/chat.py` is the worked example. File the upstream issue
 first; a shim with no upstream issue is permanent by accident.
 
+## Does this change belong in Otari?
+
+Decide where a change goes before writing it. There are four answers, and each
+one is a supported way to get what you need.
+
+| The change | Where it goes |
+| --- | --- |
+| A feature most deployments want, that the project will maintain | A pull request to Otari |
+| A different engine behind something Otari already has, such as a search backend, a model provider or a telemetry store | Configuration or an existing port, with no change to Otari's code |
+| Something only one deployment wants, or that the project will not maintain | That deployment's own bootstrap module, which binds Otari's ports to its own adapters without editing Otari |
+| Code installed into a running gateway without review | Not supported |
+
+**For a change proposed to core**, maintainers weigh three things:
+
+- whether most deployments want it
+- whether the project can maintain it
+- whether it is secure, and respects the terms of any third-party service it calls
+
+A change that most deployments do not want, or that the project cannot
+maintain, still has a home in its deployment's bootstrap module, maintained by
+the people who run that deployment.
+
+Code installed into a running gateway runs with the gateway's access to
+credentials, the database and every request, whether or not anyone reviewed
+it. That is why the last row is not supported.
+
+[Where new code goes](ARCHITECTURE.md#where-new-code-goes) maps each kind of
+change to its mechanism, and
+[How a port is resolved](ARCHITECTURE.md#how-a-port-is-resolved) explains ports
+and the bootstrap module. If no row fits, open an issue and ask.
+
 ## Dev setup
 
 **Prerequisites:** Python 3.13+, `uv`, Docker (for integration tests).
