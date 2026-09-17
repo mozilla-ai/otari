@@ -19,6 +19,7 @@ and SQLite runs on ``NullPool``, so this is PostgreSQL-only and lives here
 rather than in ``tests/unit``.
 """
 
+import time
 from typing import Any
 from unittest.mock import patch
 
@@ -36,6 +37,25 @@ from gateway.core.database import dispose_db, init_db
 from .conftest import MODEL_NAME
 
 _REQUESTS = 8
+_IDLE_TIMEOUT_SECONDS = 10.0
+_IDLE_POLL_SECONDS = 0.05
+
+
+def _wait_for_an_idle_pool(pool: AsyncAdaptedQueuePool) -> None:
+    """Wait out the work the lifespan does on this pool before measuring it.
+
+    ``run_selector_index_refresher`` rebuilds once and sleeps afterwards, on a
+    ``create_session()`` from this engine, so a lifespan that has only just
+    started still has a checkout of its own in flight. Measuring across it
+    reads a baseline of one and a tail of zero, or the reverse, depending on
+    where the pass lands. Every other refresher sleeps first and so cannot tick
+    inside a single test; once this one has finished its pass it is a minute
+    from the next.
+    """
+    deadline = time.monotonic() + _IDLE_TIMEOUT_SECONDS
+    while pool.checkedout() and time.monotonic() < deadline:
+        time.sleep(_IDLE_POLL_SECONDS)
+    assert pool.checkedout() == 0, "the pool never went idle, so a leaked connection cannot be told from a startup one"
 
 
 def _completion() -> ChatCompletion:
@@ -107,7 +127,7 @@ def test_chat_completions_returns_every_connection_it_checks_out(
     assert engine is not None
     pool = engine.pool
     assert isinstance(pool, AsyncAdaptedQueuePool), "checkedout() needs a queue pool, so PostgreSQL"
-    baseline = pool.checkedout()
+    _wait_for_an_idle_pool(pool)
     checkouts = 0
 
     def _count_checkout(*_args: Any) -> None:
@@ -132,4 +152,4 @@ def test_chat_completions_returns_every_connection_it_checks_out(
         event.remove(engine.sync_engine, "checkout", _count_checkout)
 
     assert checkouts >= _REQUESTS, "the inference route did not use the engine this deployment runs on"
-    assert pool.checkedout() == baseline
+    assert pool.checkedout() == 0
