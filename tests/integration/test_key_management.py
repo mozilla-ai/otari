@@ -40,7 +40,7 @@ def test_create_api_key(client: TestClient, master_key_header: dict[str, str]) -
 
     assert "id" in data
     assert "key" in data
-    assert data["key"].startswith("gw-")
+    assert data["key"].startswith("tk-")
     # The prefix and suffix are the leading and trailing slices of the plaintext,
     # echoed for the show-once reveal so the list can later fingerprint the key
     # without the full secret.
@@ -295,7 +295,7 @@ def test_rotate_api_key_returns_new_working_key_same_id(
     rotated = rotate_response.json()
 
     assert rotated["id"] == original["id"]
-    assert rotated["key"].startswith("gw-")
+    assert rotated["key"].startswith("tk-")
     assert rotated["key"] != original["key"]
     # Regenerate re-fingerprints both halves: they track the new secret, not the old
     # one. A stale suffix here would be worse than an absent one, because the row
