@@ -30,6 +30,7 @@
 - [ ] I ran the Definition of Done checks locally (`make lint`, `make typecheck`, `make test`).
 - [ ] Documentation was updated where necessary.
 - [ ] If the API contract changed, I regenerated the OpenAPI spec (`uv run python scripts/generate_openapi.py`).
+- [ ] If this changes a rule in `ARCHITECTURE.md` or `scripts/check_architecture.py`, the description names the rule and says why.
 
 ## AI Usage
 <!-- Check one -->
