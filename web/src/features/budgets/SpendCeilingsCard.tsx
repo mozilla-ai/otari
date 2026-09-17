@@ -52,13 +52,24 @@ export function SpendCeilingsCard({
   // on the way in rather than on the way out.
   const [openCount, setOpenCount] = useState(0)
   // The organization joins that key because the dialog seeds its target from
-  // the id on mount, and switching organization invalidates every query rather
-  // than remounting this page: an open dialog would otherwise hold the previous
-  // organization's id, which submits as a workspace and is not among the
-  // options it is offering.
+  // the id on mount: a remount is what re-seeds it.
   const dialogKey = `${organizationId}:${openCount}`
   const [editing, setEditing] = useState<OrganizationSpendCeiling>()
   const [pendingDelete, setPendingDelete] = useState<OrganizationSpendCeiling>()
+
+  // Switching organization invalidates every query rather than remounting this
+  // page, so both frames can outlive the rows they were opened on: the server
+  // scopes each write to the caller's organization and refuses, but the frame
+  // still names a ceiling the reader has just left. Dropped here rather than in
+  // an effect, so nothing renders against the new organization holding the old
+  // one's row.
+  const [shownFor, setShownFor] = useState(organizationId)
+  if (shownFor !== organizationId) {
+    setShownFor(organizationId)
+    setDialogOpen(false)
+    setEditing(undefined)
+    setPendingDelete(undefined)
+  }
 
   const rows = ceilings.data ?? []
   const workspaceRows = workspaces.data ?? []

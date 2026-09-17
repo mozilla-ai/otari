@@ -509,12 +509,11 @@ describe("OrganizationBudgetsPage", () => {
     })
   })
 
-  it("re-seeds an open dialog when the organization changes under it", async () => {
-    // The dialog stays mounted between opens and seeds its target on mount, and
-    // a switch invalidates every query rather than remounting this page. So an
-    // open dialog can outlive the organization it was seeded from, and the
-    // stale id is not among the options it is offering: it would submit as a
-    // workspace.
+  it("seeds the new organization after a switch, not the one it opened on", async () => {
+    // The dialog seeds its target on mount and this page is not remounted by a
+    // switch, so without the organization in its key the next open would post
+    // the previous organization's id, which is not among the options it offers
+    // and submits as a workspace.
     const requests = mockApi()
     const user = userEvent.setup()
     const { switchTo } = renderPage()
@@ -527,6 +526,16 @@ describe("OrganizationBudgetsPage", () => {
       name: "Second Organization",
     })
     switchTo(admin({ organization: moved }))
+
+    // The frame opened on the previous organization is gone, so this is a fresh
+    // open against the new one.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "New spend ceiling" }),
+      ).toBeNull(),
+    )
+    await user.click(screen.getByRole("button", { name: "Add ceiling" }))
+    await screen.findByRole("dialog", { name: "New spend ceiling" })
     await user.click(
       screen
         .getAllByRole("button", { name: "Add ceiling" })
@@ -544,6 +553,37 @@ describe("OrganizationBudgetsPage", () => {
         scope_id: moved.id,
       })
     })
+  })
+
+  it("drops an open edit when the organization changes under it", async () => {
+    // `editing` and `pendingDelete` hold rows, not ids, and a switch leaves this
+    // page mounted. Without the reset the frame stays open naming a ceiling from
+    // the organization the reader has just left, and saving PATCHes an id the
+    // new organization does not own.
+    const requests = mockApi({ ceilings: [spendCeiling()] })
+    const user = userEvent.setup()
+    const { switchTo } = renderPage()
+    const table = await screen.findByRole("grid", {
+      name: "Organization spend ceilings",
+    })
+    await user.click(await within(table).findByRole("button", { name: "Edit" }))
+    await screen.findByRole("dialog", { name: "Edit spend ceiling" })
+
+    switchTo(
+      admin({
+        organization: organization({
+          id: "77777777-7777-7777-7777-777777777777",
+          name: "Second Organization",
+        }),
+      }),
+    )
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Edit spend ceiling" }),
+      ).toBeNull(),
+    )
+    expect(requests.some((request) => request.method === "PATCH")).toBe(false)
   })
 
   it("offers an unnamed budget by what it caps, without saying the figure twice", async () => {
