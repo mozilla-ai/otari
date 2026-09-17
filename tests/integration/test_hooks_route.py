@@ -553,6 +553,15 @@ def test_separator_only_commands_are_never_compared_against_a_phrase(
     assert response.json()["blocked"] is False
     assert comparisons == 0
 
+    # The zero above means something only if the counter fires on a real command.
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": policy, "commands": ["p0"]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert comparisons > 0
+
 
 def test_multiline_command_with_a_leading_comment_still_blocks(
     client: TestClient, master_key_header: dict[str, str]
