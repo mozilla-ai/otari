@@ -97,15 +97,23 @@ async def resolve_dispatch_key(db: AsyncSession, *, principal: SessionPrincipal)
     key that kept the value it was minted with would let somebody keep reaching a
     model an operator has since taken away from them.
     """
+    # The oldest match rather than the only one. Two first messages sent at once,
+    # from two tabs, race here and can both insert: nothing in the schema forbids
+    # a second row, and a lookup that insisted on exactly one would turn that into
+    # a 500 on every later request. Whichever row wins is a complete credential,
+    # so the loser is simply never read.
     row = (
         await db.execute(
-            select(APIKey).where(
+            select(APIKey)
+            .where(
                 col(APIKey.user_id) == principal.user_id,
                 col(APIKey.workspace_id) == principal.workspace_id,
                 col(APIKey.internal_secret).is_not(None),
             )
+            .order_by(col(APIKey.created_at), col(APIKey.id))
+            .limit(1)
         )
-    ).scalar_one_or_none()
+    ).scalars().first()
 
     if row is None:
         plaintext = generate_api_key()

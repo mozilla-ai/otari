@@ -234,6 +234,45 @@ def test_the_key_is_minted_once_and_reused(
     assert seen["authorization"] == first
 
 
+def test_a_duplicate_key_from_a_race_is_read_rather_than_refused(
+    hosted_client: TestClient,
+    caller: tuple[uuid.UUID, uuid.UUID, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two first messages at once can both insert, and neither breaks the page.
+
+    Nothing in the schema forbids a second row, so the lookup takes the oldest
+    match rather than insisting on exactly one: insisting would turn a momentary
+    race into a 500 on every later request, forever.
+    """
+    _, workspace_id, token = caller
+    seen: dict[str, object] = {}
+    _answer_from_the_data_plane(monkeypatch, seen)
+    _send(hosted_client, token, workspace_id)
+    first = _internal_keys(db_session_factory)[0]
+
+    session = db_session_factory()
+    try:
+        session.add(
+            APIKey(
+                id=str(uuid.uuid4()),
+                workspace_id=first.workspace_id,
+                key_hash="a-second-row-from-a-race",
+                user_id=first.user_id,
+                internal_secret=first.internal_secret,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    response = _send(hosted_client, token, workspace_id)
+
+    assert response.status_code == status.HTTP_200_OK
+    assert seen["authorization"] == f"Bearer {decrypt_secret(first.internal_secret or '')}"
+
+
 def test_the_internal_key_is_absent_from_the_key_surfaces(
     hosted_client: TestClient,
     caller: tuple[uuid.UUID, uuid.UUID, str],
