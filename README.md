@@ -59,14 +59,14 @@ On the first empty database, Otari creates an API key and prints it once:
 
 ```text
 No API keys found. Created bootstrap key for first run. Save this key now:
-gw-...
+tk_...
 ```
 
 Send a request with that key:
 
 ```bash
 curl http://localhost:8000/api/v1/chat/completions \
-  -H "Authorization: Bearer gw-..." \
+  -H "Authorization: Bearer tk_..." \
   -H "Content-Type: application/json" \
   -d '{
     "model": "openai:gpt-4o-mini",

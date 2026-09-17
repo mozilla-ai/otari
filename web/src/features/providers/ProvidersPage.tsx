@@ -1062,7 +1062,7 @@ function OnboardingPanel({
           Once a provider exists, the <strong>Overview</strong> page usually
           offers a setup guide that hands you an API key and the call to make.
           Either way, point your app at <code>/v1</code> on this gateway with an
-          API key (the one printed in the server logs starts <code>gw-…</code>).
+          API key (the one printed in the server logs starts <code>tk_…</code>).
           See the{" "}
           {/* /welcome is served by the gateway itself, not by a client route, so this
                 stays a plain path anchor: a router Link would resolve to /#/welcome, which

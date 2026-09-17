@@ -17,8 +17,8 @@ from gateway.auth.models import (
 @pytest.mark.parametrize(
     "api_key",
     [
-        "gw-" + "a" * 48,
-        "gw_" + "a" * 48,
+        "tk_" + "a" * 48,
+        "tk-" + "a" * 48,
     ],
 )
 def test_validate_api_key_format_accepts_supported_prefixes(api_key: str) -> None:
@@ -28,9 +28,10 @@ def test_validate_api_key_format_accepts_supported_prefixes(api_key: str) -> Non
 @pytest.mark.parametrize(
     "api_key",
     [
-        "gw" + "a" * 49,
-        "gx-" + "a" * 48,
-        "gw." + "a" * 48,
+        "tk" + "a" * 49,
+        "tx_" + "a" * 48,
+        "tk." + "a" * 48,
+        "gw-" + "a" * 48,
     ],
 )
 def test_validate_api_key_format_rejects_invalid_prefixes(api_key: str) -> None:
@@ -54,6 +55,11 @@ def test_hash_key_hashes_a_key_that_is_not_gw_shaped() -> None:
     api_key = "tk_" + "b" * 48
 
     assert hash_key(api_key) == hashlib.sha256(api_key.encode()).hexdigest()
+
+
+def test_generate_api_key_mints_a_user_key_not_a_gateway_token() -> None:
+    """User keys are ``tk_``; ``gw_`` is the gateway's own credential to the platform."""
+    assert generate_api_key().startswith("tk_")
 
 
 def test_generate_api_key_still_validates_at_mint_time() -> None:
