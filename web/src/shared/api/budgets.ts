@@ -7,6 +7,7 @@ import type {
   CreateOrganizationSpendCeiling,
   CreateScopedBudgetRequest,
   OrganizationBudget,
+  OrganizationContext,
   OrganizationSpendCeiling,
   ScopedBudget,
   UpdateBudgetRequest,
@@ -15,10 +16,12 @@ import type {
   UpdateScopedBudgetRequest,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
   BUDGETS,
   ORGANIZATION_BUDGETS,
+  ORGANIZATION_CONTEXT,
   ORGANIZATION_SPEND_CEILINGS,
   SCOPED_BUDGETS,
 } from "@/shared/api/queryKeys"
@@ -219,6 +222,9 @@ export function useOrganizationBudgets(enabled = true) {
 }
 
 export function useOrganizationSpendCeilings(enabled = true) {
+  const queryClient = useQueryClient()
+  // The context the caller's `enabled` was read from, whatever it read off it.
+  const context = useOrganizationContext().data
   return useQuery({
     queryKey: [ORGANIZATION_SPEND_CEILINGS],
     queryFn: () =>
@@ -226,7 +232,20 @@ export function useOrganizationSpendCeilings(enabled = true) {
         "/organizations/me/spend-ceilings",
       ),
     staleTime: 60_000,
-    enabled,
+    // A callback, because this is the one read here that a *role* opens, and a
+    // role moves under a mounted query. Switching organization invalidates
+    // everything cached, and React Query resolves a plain `enabled` from the
+    // render before, so an owner or admin here who is a member there refetched
+    // this owners-and-admins-only read under the role just left and the page
+    // reported the refusal (otari#1300). A callback is resolved when the
+    // refetch is decided, by which point the switch has written the new
+    // context, so the read is withheld rather than made and apologized for.
+    // The gate reopens on the caller's next render, which is where `enabled`
+    // is worked out again from the context now in its hands.
+    enabled: () =>
+      enabled &&
+      queryClient.getQueryData<OrganizationContext>(ORGANIZATION_CONTEXT) ===
+        context,
   })
 }
 

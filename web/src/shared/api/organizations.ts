@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  hashKey,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   AcceptInvitationResult,
   CallerOrganizationMembership,
@@ -25,6 +30,7 @@ import type {
 import { ApiError, apiFetch } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
+  ORGANIZATION_CONTEXT,
   ORGANIZATION_DOMAINS,
   ORGANIZATION_MEMBERS,
   ORGANIZATION_PROVIDER_KEYS,
@@ -32,12 +38,15 @@ import {
   WORKSPACES,
 } from "@/shared/api/queryKeys"
 
+/** The context key as React Query addresses it, for a filter that excludes it. */
+const ORGANIZATION_CONTEXT_HASH = hashKey(ORGANIZATION_CONTEXT)
+
 // `enabled` is for the one page that renders ahead of a session: the public
 // catalog has no organization to ask about, and asking would 401 into the
 // sign-out handler.
 export function useOrganizationContext(enabled = true) {
   return useQuery({
-    queryKey: [ORGANIZATIONS, "context"],
+    queryKey: ORGANIZATION_CONTEXT,
     queryFn: () => apiFetch<OrganizationContext>("/organizations/me"),
     staleTime: 60_000,
     enabled,
@@ -108,10 +117,13 @@ export function useCreateOrganization() {
 
 // Switching moves `users.active_organization_id`, which is what every scoped
 // read on the server resolves through, so *everything* cached here is about
-// the organization just left. Hence `invalidateQueries()` with no key rather
-// than a list of them: enumerating the affected keys would mean keeping that
-// list in step with every future query, and the one it missed would render
-// another organization's rows under this one's name.
+// the organization just left. Hence an invalidation with no key rather than a
+// list of them: enumerating the affected keys would mean keeping that list in
+// step with every future query, and the one it missed would render another
+// organization's rows under this one's name.
+//
+// The context is the exception, and the only one: it is what the switch itself
+// answers with, and what a role gate reads.
 export function useSwitchOrganization() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -127,8 +139,17 @@ export function useSwitchOrganization() {
         body: JSON.stringify(body),
       })
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries()
+    onSuccess: (context) => {
+      // Written, not invalidated, and written first: the invalidation below is
+      // where every query decides whether to refetch, and one gated on the role
+      // in here would decide it against the organization just left, asking for
+      // a read the new one refuses (otari#1300). Refetching the context instead
+      // would hold the caller's new role a round trip behind the reads already
+      // being made in it.
+      queryClient.setQueryData(ORGANIZATION_CONTEXT, context)
+      void queryClient.invalidateQueries({
+        predicate: (query) => query.queryHash !== ORGANIZATION_CONTEXT_HASH,
+      })
     },
   })
 }

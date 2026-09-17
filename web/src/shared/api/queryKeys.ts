@@ -61,6 +61,12 @@ export const SCOPED_BUDGETS = "scoped-budgets"
 export const USERS = "users"
 export const USAGE = "usage"
 export const ORGANIZATIONS = "organizations"
+// The caller's standing in the organization they are acting in. Composed here
+// rather than spelled at the hook, because two things outside that hook address
+// this one read: switching organization writes the context it was answered with
+// straight into it, and the spend-ceilings read binds its role gate to whatever
+// object is cached under it.
+export const ORGANIZATION_CONTEXT = [ORGANIZATIONS, "context"] as const
 // Deliberately its own key rather than a child of ORGANIZATIONS: switching
 // organizations invalidates both, but a role change invalidates only the roster,
 // and nesting would re-read the context (and every page gated on it) as well.
