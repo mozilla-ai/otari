@@ -41,7 +41,7 @@ class UnitOfWork:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._depth = 0
-        self._failed = False
+        self._first_failure: BaseException | None = None
 
     @property
     def session(self) -> AsyncSession:
@@ -66,17 +66,17 @@ class UnitOfWork:
         traceback: TracebackType | None,
     ) -> None:
         self._depth -= 1
-        if exc is not None:
-            self._failed = True
+        if exc is not None and self._first_failure is None:
+            self._first_failure = exc
         if self._depth > 0:
             return
 
-        failed, self._failed = self._failed, False
-        if failed:
+        failure, self._first_failure = self._first_failure, None
+        if failure is not None:
             await self._roll_back()
             if exc is None:
                 msg = "The step was rolled back because a step inside it failed"
-                raise UnitOfWorkRolledBackError(msg)
+                raise UnitOfWorkRolledBackError(msg) from failure
             return
 
         try:

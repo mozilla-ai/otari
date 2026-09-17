@@ -189,6 +189,19 @@ async def test_a_step_whose_inner_block_failed_is_rolled_back_even_when_the_erro
 
 
 @pytest.mark.asyncio
+async def test_a_rolled_back_step_names_the_inner_failure_as_its_cause(notes_database: None) -> None:
+    inner_failure = ValueError("inner step failed")
+    async with create_unit_of_work() as uow:
+        with pytest.raises(UnitOfWorkRolledBackError) as rolled_back:
+            async with uow:
+                with pytest.raises(ValueError, match="inner step failed"):
+                    async with uow:
+                        raise inner_failure
+
+    assert rolled_back.value.__cause__ is inner_failure
+
+
+@pytest.mark.asyncio
 async def test_the_session_is_unavailable_outside_a_block(notes_database: None) -> None:
     async with create_unit_of_work() as uow:
         with pytest.raises(OutsideUnitOfWorkError):
