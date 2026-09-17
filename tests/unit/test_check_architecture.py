@@ -519,3 +519,52 @@ def test_main_fails_on_a_service_function_that_takes_a_session(tmp_path: Path, m
     monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
     monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
     assert check.main() == 1
+
+
+@pytest.mark.parametrize(
+    "signature",
+    [
+        "def build(factory: Callable[[], AsyncSession]) -> None: ...",
+        "def build(factory: async_sessionmaker[AsyncSession]) -> None: ...",
+        'def build(factory: "Callable[[], AsyncSession]") -> None: ...',
+    ],
+)
+def test_a_parameter_that_only_mentions_the_session_type_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, signature: str
+) -> None:
+    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
+    _write(tmp_path, "gateway/services/thing_service.py", f"{signature}\n")
+    assert check.check_session_parameters(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    ["Optional[AsyncSession]", "Annotated[AsyncSession, Depends(get_db)]", "None | AsyncSession"],
+)
+def test_a_wrapped_session_annotation_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, annotation: str
+) -> None:
+    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
+    _write(tmp_path, "gateway/services/thing_service.py", f"async def find(db: {annotation}) -> None: ...\n")
+    assert check.check_session_parameters(tmp_path) == [
+        "gateway/services/thing_service.py:1 find takes a session; a service receives its session when it is built"
+    ]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "if enabled:\n    async def find(db: AsyncSession) -> None: ...\n",
+        "try:\n    pass\nexcept ImportError:\n    async def find(db: AsyncSession) -> None: ...\n",
+        "with suppress(Exception):\n    async def find(db: AsyncSession) -> None: ...\n",
+    ],
+)
+def test_a_function_defined_in_module_level_control_flow_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
+    _write(tmp_path, "gateway/services/thing_service.py", source)
+    violations = check.check_session_parameters(tmp_path)
+    assert [violation.split(" ", 1)[1] for violation in violations] == [
+        "find takes a session; a service receives its session when it is built"
+    ]

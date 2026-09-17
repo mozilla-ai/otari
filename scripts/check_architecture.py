@@ -34,6 +34,7 @@ Exit codes:
 
 import ast
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TypedDict
 
@@ -420,23 +421,55 @@ SESSION_PARAMETER_BASELINE = (
 )
 
 
+SESSION_WRAPPERS = ("Optional", "Union", "Annotated")
+
+
+def _type_name(node: ast.expr) -> str | None:
+    """Return the unqualified name a type expression refers to, such as ``Optional`` for ``typing.Optional``."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
 def _annotation_names_session(annotation: ast.expr | None) -> bool:
-    """Return whether a parameter annotation names the async session type, including in a string annotation."""
-    if annotation is None:
-        return False
-    for node in ast.walk(annotation):
-        if isinstance(node, ast.Name) and node.id == SESSION_TYPE:
-            return True
-        if isinstance(node, ast.Attribute) and node.attr == SESSION_TYPE:
-            return True
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            try:
-                forward_reference = ast.parse(node.value, mode="eval").body
-            except SyntaxError:
-                continue
-            if _annotation_names_session(forward_reference):
-                return True
+    """Return whether a parameter annotation is the async session type, optionally wrapped.
+
+    A session inside another type, such as a factory that returns one, is not a session.
+    """
+    if isinstance(annotation, ast.Name | ast.Attribute):
+        return _type_name(annotation) == SESSION_TYPE
+    if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
+        return _annotation_names_session(annotation.left) or _annotation_names_session(annotation.right)
+    if isinstance(annotation, ast.Subscript):
+        wrapper = _type_name(annotation.value)
+        if wrapper not in SESSION_WRAPPERS:
+            return False
+        members = annotation.slice.elts if isinstance(annotation.slice, ast.Tuple) else [annotation.slice]
+        # Only the first member of Annotated is the type; the rest is metadata.
+        if wrapper == "Annotated":
+            members = members[:1]
+        return any(_annotation_names_session(member) for member in members)
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        try:
+            return _annotation_names_session(ast.parse(annotation.value, mode="eval").body)
+        except SyntaxError:
+            return False
     return False
+
+
+def _module_scope_functions(statements: list[ast.stmt]) -> Iterator[ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Yield the functions a module defines at module scope, including inside module-level control flow."""
+    for statement in statements:
+        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
+            yield statement
+        elif not isinstance(statement, ast.ClassDef):
+            for child in ast.iter_child_nodes(statement):
+                if isinstance(child, ast.stmt):
+                    yield from _module_scope_functions([child])
+                elif isinstance(child, ast.ExceptHandler | ast.match_case):
+                    yield from _module_scope_functions(child.body)
 
 
 def _takes_session(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
@@ -456,8 +489,8 @@ def check_session_parameters(src_root: Path) -> list[str]:
             tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
         except SyntaxError:
             continue  # check_file already reports an unparseable file.
-        for node in tree.body:
-            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) or not _takes_session(node):
+        for node in _module_scope_functions(tree.body):
+            if not _takes_session(node):
                 continue
             entry = f"{relative_path}::{node.name}"
             taking.add(entry)
