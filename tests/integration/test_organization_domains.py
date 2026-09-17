@@ -46,8 +46,6 @@ from gateway.services.tenancy.errors import (
 )
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 
-pytestmark = pytest.mark.asyncio
-
 _SERVICE_MODULE = "gateway.services.tenancy.organization_domain_service"
 
 
@@ -119,6 +117,7 @@ async def _claim(
 # =============================================================================
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("role", ["member", "viewer"])
 async def test_a_plain_member_may_not_read_the_claims(async_db: AsyncSession, role: str) -> None:
     """Reading is gated as tightly as writing: a row carries the record to publish."""
@@ -129,6 +128,7 @@ async def test_a_plain_member_may_not_read_the_claims(async_db: AsyncSession, ro
         await OrganizationDomainService(async_db).list_domains_for_user(user=caller)
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("role", ["member", "viewer"])
 async def test_a_plain_member_may_not_claim_a_domain(async_db: AsyncSession, role: str) -> None:
     organization = await _organization(async_db, slug="acme")
@@ -141,6 +141,7 @@ async def test_a_plain_member_may_not_claim_a_domain(async_db: AsyncSession, rol
         )
 
 
+@pytest.mark.asyncio
 async def test_another_organizations_claim_is_not_found_rather_than_forbidden(async_db: AsyncSession) -> None:
     """A neighbour's claim must not be distinguishable from one that never existed."""
     theirs = await _organization(async_db, slug="theirs")
@@ -160,6 +161,7 @@ async def test_another_organizations_claim_is_not_found_rather_than_forbidden(as
 # =============================================================================
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("domain", ["gmail.com", "mail.gmail.com", "Yahoo.CO.UK"])
 async def test_a_public_provider_cannot_be_claimed(async_db: AsyncSession, domain: str) -> None:
     organization = await _organization(async_db, slug="acme")
@@ -172,6 +174,7 @@ async def test_a_public_provider_cannot_be_claimed(async_db: AsyncSession, domai
         )
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("domain", ["not-a-domain", "https://acme.example", "acme.example/path"])
 async def test_a_value_that_is_not_a_domain_is_refused(async_db: AsyncSession, domain: str) -> None:
     organization = await _organization(async_db, slug="acme")
@@ -184,6 +187,7 @@ async def test_a_value_that_is_not_a_domain_is_refused(async_db: AsyncSession, d
         )
 
 
+@pytest.mark.asyncio
 async def test_a_domain_another_organization_holds_is_a_conflict(async_db: AsyncSession) -> None:
     theirs = await _organization(async_db, slug="theirs")
     mine = await _organization(async_db, slug="mine")
@@ -200,6 +204,7 @@ async def test_a_domain_another_organization_holds_is_a_conflict(async_db: Async
     assert "theirs" not in str(raised.value).lower()
 
 
+@pytest.mark.asyncio
 async def test_a_claim_lands_unverified_and_carries_the_record_to_publish(async_db: AsyncSession) -> None:
     organization = await _organization(async_db, slug="acme")
     admin = await _identity(async_db, organization, role="admin", email="admin@acme.example")
@@ -221,6 +226,7 @@ async def test_a_claim_lands_unverified_and_carries_the_record_to_publish(async_
 # =============================================================================
 
 
+@pytest.mark.asyncio
 async def test_verifying_finds_the_published_record(
     async_db: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -241,6 +247,7 @@ async def test_verifying_finds_the_published_record(
     assert verified.verified_at is not None
 
 
+@pytest.mark.asyncio
 async def test_verifying_refuses_when_the_record_is_absent_or_belongs_to_another_claim(
     async_db: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -264,6 +271,7 @@ async def test_verifying_refuses_when_the_record_is_absent_or_belongs_to_another
     assert claim.verified_at is None
 
 
+@pytest.mark.asyncio
 async def test_verifying_an_already_verified_claim_does_not_look_up_again(
     async_db: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -286,6 +294,7 @@ async def test_verifying_an_already_verified_claim_does_not_look_up_again(
     assert again.verified_at == first_verified_at
 
 
+@pytest.mark.asyncio
 async def test_a_resolver_that_cannot_answer_reads_as_proof_not_found(
     async_db: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -303,6 +312,7 @@ async def test_a_resolver_that_cannot_answer_reads_as_proof_not_found(
         )
 
 
+@pytest.mark.asyncio
 async def test_the_verification_state_cannot_be_set_through_an_update(async_db: AsyncSession) -> None:
     """The only way to ``verified_at`` is the DNS proof."""
     organization = await _organization(async_db, slug="acme")
@@ -326,6 +336,7 @@ async def test_the_verification_state_cannot_be_set_through_an_update(async_db: 
 # =============================================================================
 
 
+@pytest.mark.asyncio
 async def test_a_verified_address_joins_the_organization_that_proved_its_domain(
     async_db: AsyncSession,
 ) -> None:
@@ -341,6 +352,7 @@ async def test_a_verified_address_joins_the_organization_that_proved_its_domain(
     assert membership.status == "active"
 
 
+@pytest.mark.asyncio
 async def test_an_unverified_address_does_not_join(async_db: AsyncSession) -> None:
     """Otherwise signing up as anyone@theircompany.com would be enough to get in."""
     organization = await _organization(async_db, slug="acme")
@@ -350,6 +362,7 @@ async def test_an_unverified_address_does_not_join(async_db: AsyncSession) -> No
     assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
 
 
+@pytest.mark.asyncio
 async def test_an_unproven_claim_sweeps_in_nobody(async_db: AsyncSession) -> None:
     """The whole point of the DNS proof: a claim on someone else's domain is inert."""
     organization = await _organization(async_db, slug="squatter")
@@ -359,6 +372,7 @@ async def test_an_unproven_claim_sweeps_in_nobody(async_db: AsyncSession) -> Non
     assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
 
 
+@pytest.mark.asyncio
 async def test_a_disabled_claim_sweeps_in_nobody(async_db: AsyncSession) -> None:
     organization = await _organization(async_db, slug="acme")
     await _claim(async_db, organization, domain="acme.example", enabled=False)
@@ -367,6 +381,7 @@ async def test_a_disabled_claim_sweeps_in_nobody(async_db: AsyncSession) -> None
     assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
 
 
+@pytest.mark.asyncio
 async def test_an_unclaimed_domain_is_the_ordinary_no_match(async_db: AsyncSession) -> None:
     organization = await _organization(async_db, slug="acme")
     newcomer = await _identity(async_db, organization, role=None, email="new@elsewhere.example")
@@ -374,6 +389,7 @@ async def test_an_unclaimed_domain_is_the_ordinary_no_match(async_db: AsyncSessi
     assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
 
 
+@pytest.mark.asyncio
 async def test_an_identity_with_no_address_is_skipped(async_db: AsyncSession) -> None:
     """The deployment's master-key operator signs in through the same route."""
     organization = await _organization(async_db, slug="acme")
@@ -383,6 +399,7 @@ async def test_an_identity_with_no_address_is_skipped(async_db: AsyncSession) ->
     assert await OrganizationDomainService(async_db).auto_join_for_user(operator) is None
 
 
+@pytest.mark.asyncio
 async def test_a_suspended_member_is_not_re_added_by_signing_in(async_db: AsyncSession) -> None:
     """Somebody was removed on purpose; the next sign-in must not undo that."""
     organization = await _organization(async_db, slug="acme")
@@ -402,6 +419,7 @@ async def test_a_suspended_member_is_not_re_added_by_signing_in(async_db: AsyncS
     assert membership.status == "suspended"
 
 
+@pytest.mark.asyncio
 async def test_an_established_role_is_never_overwritten_by_the_claims_default(
     async_db: AsyncSession,
 ) -> None:
@@ -415,6 +433,7 @@ async def test_an_established_role_is_never_overwritten_by_the_claims_default(
     assert membership.role == "owner"
 
 
+@pytest.mark.asyncio
 async def test_auto_join_never_moves_where_the_caller_is_pointed(async_db: AsyncSession) -> None:
     """Adding a membership is one thing; hijacking the active organization is another."""
     home = await _organization(async_db, slug="home")
@@ -431,6 +450,7 @@ async def test_auto_join_never_moves_where_the_caller_is_pointed(async_db: Async
     assert person.active_organization_id == pointed_at
 
 
+@pytest.mark.asyncio
 async def test_verifying_a_domain_later_sweeps_in_the_accounts_that_already_existed(
     async_db: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -453,6 +473,7 @@ async def test_verifying_a_domain_later_sweeps_in_the_accounts_that_already_exis
     assert await service.auto_join_for_user(existing) is not None
 
 
+@pytest.mark.asyncio
 async def test_dropping_a_claim_leaves_the_members_it_already_admitted(async_db: AsyncSession) -> None:
     organization = await _organization(async_db, slug="acme")
     claim = await _claim(async_db, organization, domain="acme.example")
@@ -580,6 +601,7 @@ def test_an_unknown_claim_is_a_404(client: TestClient, master_key_header: dict[s
 # =============================================================================
 
 
+@pytest.mark.asyncio
 async def test_an_unproven_claim_does_not_lock_out_the_domains_real_owner(
     async_db: AsyncSession,
 ) -> None:
@@ -603,6 +625,7 @@ async def test_an_unproven_claim_does_not_lock_out_the_domains_real_owner(
     assert mine.verified_at is None
 
 
+@pytest.mark.asyncio
 async def test_proving_a_domain_takes_it_from_a_rival_without_deleting_their_row(
     async_db: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -643,6 +666,7 @@ async def test_proving_a_domain_takes_it_from_a_rival_without_deleting_their_row
         await service.verify_domain_for_user(user=loser, organization_domain_id=beaten.id)
 
 
+@pytest.mark.asyncio
 async def test_a_domain_whose_proof_aged_out_can_be_taken_over(
     async_db: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -682,6 +706,7 @@ async def test_a_domain_whose_proof_aged_out_can_be_taken_over(
     assert stale.verified_at is None
 
 
+@pytest.mark.asyncio
 async def test_a_proven_domain_cannot_then_be_claimed_by_anyone_else(
     async_db: AsyncSession,
 ) -> None:
@@ -698,6 +723,7 @@ async def test_a_proven_domain_cannot_then_be_claimed_by_anyone_else(
     assert "real" not in str(raised.value).lower()
 
 
+@pytest.mark.asyncio
 async def test_verifying_is_refused_once_another_organization_has_proven_the_domain(
     async_db: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -720,6 +746,7 @@ async def test_verifying_is_refused_once_another_organization_has_proven_the_dom
         )
 
 
+@pytest.mark.asyncio
 async def test_the_same_organization_cannot_claim_one_domain_twice(async_db: AsyncSession) -> None:
     """Named plainly, unlike the cross-tenant refusal: this row is the caller's own."""
     organization = await _organization(async_db, slug="acme")
@@ -737,6 +764,7 @@ async def test_the_same_organization_cannot_claim_one_domain_twice(async_db: Asy
         )
 
 
+@pytest.mark.asyncio
 async def test_an_organization_is_capped_on_how_many_domains_it_may_claim(
     async_db: AsyncSession,
 ) -> None:
@@ -758,6 +786,7 @@ async def test_an_organization_is_capped_on_how_many_domains_it_may_claim(
 # =============================================================================
 
 
+@pytest.mark.asyncio
 async def test_a_proof_that_has_aged_out_admits_nobody(async_db: AsyncSession) -> None:
     """Domains change hands; a stamp kept forever would admit whoever owns it next."""
     organization = await _organization(async_db, slug="acme")
@@ -770,6 +799,7 @@ async def test_a_proof_that_has_aged_out_admits_nobody(async_db: AsyncSession) -
     assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is None
 
 
+@pytest.mark.asyncio
 async def test_a_proof_inside_its_window_still_admits(async_db: AsyncSession) -> None:
     """The other side of the boundary, so the TTL is not passing by refusing everything."""
     organization = await _organization(async_db, slug="acme")
@@ -782,6 +812,7 @@ async def test_a_proof_inside_its_window_still_admits(async_db: AsyncSession) ->
     assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is not None
 
 
+@pytest.mark.asyncio
 async def test_re_verifying_an_aged_out_proof_runs_the_lookup_again(
     async_db: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -810,6 +841,7 @@ async def test_re_verifying_an_aged_out_proof_runs_the_lookup_again(
     assert await OrganizationDomainService(async_db).auto_join_for_user(newcomer) is not None
 
 
+@pytest.mark.asyncio
 async def test_a_record_pulled_after_verification_stops_mattering_only_at_the_ttl(
     async_db: AsyncSession,
 ) -> None:
