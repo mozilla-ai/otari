@@ -3,7 +3,7 @@
 The composition half of otari#654. `merge_guardrail_layers` is the one place
 three layers meet, so the rules that matter are asserted directly on it rather
 than through a request: an organization may add a check or tighten one and can
-never weaken what is already there, the operator's policy is the outermost layer
+never weaken what is already there, the operator's policy is the outer of the two
 and owns the endpoint where both name a profile, and a credential never travels
 to an endpoint other than the one it was stored for.
 
@@ -79,17 +79,17 @@ def test_no_layer_asked_for_anything_leaves_the_request_exactly_as_it_was() -> N
     """The zero-rows requirement: no organization entries, no policy, no change."""
     caller = [_guardrail("pii", mode="monitor")]
 
-    unrouted = merge_guardrail_layers(_ctx(), caller, [])
+    unrouted = merge_guardrail_layers(_ctx(), caller, [], [])
     assert unrouted.configs is caller
     assert unrouted.credentials == {} and unrouted.mandated == frozenset()
 
-    empty = merge_guardrail_layers(_ctx(), None, [])
+    empty = merge_guardrail_layers(_ctx(), None, [], [])
     assert empty.configs is None
     assert empty.credentials == {} and empty.mandated == frozenset()
 
 
 def test_an_organization_guardrail_runs_when_the_caller_asked_for_nothing() -> None:
-    merged = merge_guardrail_layers(_ctx(), None, [_organization(_guardrail("prompt-injection"))])
+    merged = merge_guardrail_layers(_ctx(), None, [_organization(_guardrail("prompt-injection"))], [])
 
     assert merged.configs is not None
     assert [g.profile for g in merged.configs] == ["prompt-injection"]
@@ -102,6 +102,7 @@ def test_a_caller_cannot_weaken_what_the_organization_mandated() -> None:
         _ctx(),
         [_guardrail("prompt-injection", mode="monitor", on_unavailable="monitor")],
         [_organization(_guardrail("prompt-injection", mode="block", on_unavailable="block"))],
+        [],
     )
 
     assert merged.configs is not None and len(merged.configs) == 1
@@ -114,6 +115,7 @@ def test_a_caller_may_tighten_what_the_organization_mandated() -> None:
         _ctx(),
         [_guardrail("prompt-injection", mode="block", on_unavailable="block")],
         [_organization(_guardrail("prompt-injection", mode="monitor", on_unavailable="monitor"))],
+        [],
     )
 
     assert merged.configs is not None
@@ -126,6 +128,7 @@ def test_a_caller_may_add_their_own_guardrails_alongside_an_organization_mandate
         _ctx(),
         [_guardrail("pii", mode="monitor")],
         [_organization(_guardrail("prompt-injection"))],
+        [],
     )
 
     assert merged.configs is not None
@@ -138,6 +141,7 @@ def test_the_organization_owns_the_endpoint_for_a_profile_the_caller_also_named(
         _ctx(),
         [_guardrail("prompt-injection", url="https://caller.example/guardrails")],
         [_organization(_guardrail("prompt-injection", url="https://org.example/guardrails"), credential="s3cret")],
+        [],
     )
 
     assert merged.configs is not None
@@ -156,6 +160,7 @@ def test_the_policy_layer_is_outermost_and_takes_the_endpoint_from_the_organizat
         _ctx(_guardrail("prompt-injection", url="https://operator.example/guardrails")),
         None,
         [_organization(_guardrail("prompt-injection", url="https://org.example/guardrails"), credential="s3cret")],
+        [],
     )
 
     assert merged.configs is not None and len(merged.configs) == 1
@@ -168,6 +173,7 @@ def test_a_credential_survives_a_policy_that_mandates_a_different_profile() -> N
         _ctx(_guardrail("pii")),
         None,
         [_organization(_guardrail("prompt-injection"), credential="s3cret")],
+        [],
     )
 
     assert merged.configs is not None
@@ -180,6 +186,7 @@ def test_the_strictest_of_all_three_layers_wins() -> None:
         _ctx(_guardrail("prompt-injection", mode="monitor", on_unavailable="monitor")),
         [_guardrail("prompt-injection", mode="monitor", on_unavailable="block")],
         [_organization(_guardrail("prompt-injection", mode="block", on_unavailable="monitor"))],
+        [],
     )
 
     assert merged.configs is not None and len(merged.configs) == 1

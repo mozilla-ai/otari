@@ -362,6 +362,26 @@ async def _check_enforced_limit(db: AsyncSession, *, enabling: bool, excluding: 
         raise EnforcedGuardrailLimitReachedError(MAX_ENFORCED_GUARDRAILS)
 
 
+async def resolve_workspace_guardrails(db: AsyncSession, *, workspace_id: uuid.UUID) -> list[GuardrailConfig]:
+    """The stored definitions that check this workspace's requests.
+
+    Returned as request-path guardrails rather than rows, for the reason
+    :class:`ResolvedOrganizationGuardrail` is a value type: the admission check
+    must not lazily touch the session after the request has moved on, and
+    nothing ORM-identified should ride into a streaming response that outlives
+    the handler.
+
+    No credential travels with them, unlike the organization layer's entries. A
+    stored definition is built in this process from the arguments the row
+    carries, so there is no endpoint to authenticate to.
+
+    No authorization check, and none is missing: ``workspace_id`` comes off the
+    key that authenticated the request, never off a header.
+    """
+    rows = await repository.list_enforced_guardrail_credentials(db, workspace_id=workspace_id)
+    return [stored_guardrail_config(row) for row in rows]
+
+
 async def create_guardrail_credential(
     db: AsyncSession,
     *,

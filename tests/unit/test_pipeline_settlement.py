@@ -1196,8 +1196,11 @@ async def _call_prepare_gateway_tools(ctx: RequestContext, **overrides: Any) -> 
     }
     kwargs.update(overrides)
     # Stubbed rather than fed a session: every case here is about a *different*
-    # admission refusal, and the organization plane resolves before all of them.
-    with patch("gateway.api.routes._pipeline.resolve_organization_guardrails", new=AsyncMock(return_value=[])):
+    # admission refusal, and both guardrail planes resolve before all of them.
+    with (
+        patch("gateway.api.routes._pipeline.resolve_organization_guardrails", new=AsyncMock(return_value=[])),
+        patch("gateway.api.routes._pipeline.resolve_workspace_guardrails", new=AsyncMock(return_value=[])),
+    ):
         return await prepare_gateway_tools(**kwargs)
 
 

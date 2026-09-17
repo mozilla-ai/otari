@@ -8,8 +8,7 @@ the mask back keeps the key it was never shown.
 """
 
 import logging
-import time
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -22,6 +21,8 @@ from gateway.log_config import logger as gateway_logger
 from gateway.services.guardrail_credential_service import MAX_ENFORCED_GUARDRAILS
 from gateway.services.guardrail_runner import get_guardrail_runner, reset_guardrail_runner
 from gateway.services.secret_box import SecretDecryptionError, generate_secret_key
+
+from .guardrail_helpers import built
 
 _LAKERA_KEY = "lak-live-notreal-9876"
 _ENDPOINT = "https://api.lakera.ai/v2/guard"
@@ -64,16 +65,6 @@ def builds(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
     reset_guardrail_runner()
 
 
-def _built(runner_knows: Callable[[], bool]) -> bool:
-    """Wait for a rebuild, which the route deliberately does not wait for itself."""
-    deadline = time.monotonic() + 10.0
-    while time.monotonic() < deadline:
-        if runner_knows():
-            return True
-        time.sleep(0.05)
-    return runner_knows()
-
-
 def _create(client: TestClient, headers: dict[str, str], **body: Any) -> Any:
     payload: dict[str, Any] = {
         "name": "prompt-injection",
@@ -93,9 +84,7 @@ def test_requires_master_key(client: TestClient) -> None:
     assert client.post(f"{API_ROOT}/guardrail-credentials/reencrypt").status_code == 401
 
 
-def test_create_lists_and_never_returns_the_credential(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_create_lists_and_never_returns_the_credential(client: TestClient, master_key_header: dict[str, str]) -> None:
     """The secret goes in, its name comes back, and the value never does."""
     resp = _create(client, master_key_header)
     assert resp.status_code == 201, resp.text
@@ -229,9 +218,7 @@ def test_a_definition_the_catalog_refuses_is_a_400(
     assert client.get(f"{API_ROOT}/guardrail-credentials", headers=master_key_header).json() == []
 
 
-def test_a_name_that_is_not_one_path_segment_is_refused(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_a_name_that_is_not_one_path_segment_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
     """A stored '/' would be a row no route could address again.
 
     Neither ``/guardrail-credentials/team/prompt`` nor the ``%2F`` spelling
@@ -252,9 +239,7 @@ def test_a_duplicate_name_is_a_409(client: TestClient, master_key_header: dict[s
 
 def test_an_unknown_name_is_a_404(client: TestClient, master_key_header: dict[str, str]) -> None:
     assert client.get(f"{API_ROOT}/guardrail-credentials/nope", headers=master_key_header).status_code == 404
-    assert (
-        client.patch(f"{API_ROOT}/guardrail-credentials/nope", json={}, headers=master_key_header).status_code == 404
-    )
+    assert client.patch(f"{API_ROOT}/guardrail-credentials/nope", json={}, headers=master_key_header).status_code == 404
     assert client.delete(f"{API_ROOT}/guardrail-credentials/nope", headers=master_key_header).status_code == 404
 
 
@@ -391,9 +376,9 @@ def test_a_rotation_reencrypts_under_the_new_primary_key(
     }
 
     monkeypatch.setenv("OTARI_SECRET_KEY", new)
-    listed = {row["name"]: row for row in client.get(
-        f"{API_ROOT}/guardrail-credentials", headers=master_key_header
-    ).json()}
+    listed = {
+        row["name"]: row for row in client.get(f"{API_ROOT}/guardrail-credentials", headers=master_key_header).json()
+    }
     assert listed["second"]["decryptable"] is True
     assert listed["prompt-injection"]["decryptable"] is False
 
@@ -444,9 +429,7 @@ def test_a_refused_flush_is_a_500_too(
     assert created.json()["detail"] == "Database error"
 
 
-def test_a_guardrail_with_no_credential_stores_fine(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_a_guardrail_with_no_credential_stores_fine(client: TestClient, master_key_header: dict[str, str]) -> None:
     """``any_llm`` takes no constructor arguments at all, so the map is empty."""
     resp = _create(
         client,
@@ -468,7 +451,7 @@ def test_a_created_guardrail_is_built_without_waiting_for_a_request(
     """Startup builds every definition; a write is the same thing for one made since."""
     assert _create(client, master_key_header).status_code == 201
 
-    assert _built(lambda: get_guardrail_runner().knows("prompt-injection"))
+    assert built(lambda: get_guardrail_runner().knows("prompt-injection"))
     assert builds == ["lakera_guard"]
 
 
@@ -477,7 +460,7 @@ def test_a_patch_builds_the_definition_it_wrote(
 ) -> None:
     """Otherwise an edited profile would keep answering from its old arguments."""
     assert _create(client, master_key_header).status_code == 201
-    assert _built(lambda: get_guardrail_runner().knows("prompt-injection"))
+    assert built(lambda: get_guardrail_runner().knows("prompt-injection"))
 
     resp = client.patch(
         f"{API_ROOT}/guardrail-credentials/prompt-injection",
@@ -486,7 +469,7 @@ def test_a_patch_builds_the_definition_it_wrote(
     )
 
     assert resp.status_code == 200, resp.text
-    assert _built(lambda: len(builds) == 2)
+    assert built(lambda: len(builds) == 2)
 
 
 def test_disabling_a_guardrail_takes_it_out_of_the_runner(
@@ -498,7 +481,7 @@ def test_disabling_a_guardrail_takes_it_out_of_the_runner(
     next restart, which is the one thing turning it off was meant to stop.
     """
     assert _create(client, master_key_header).status_code == 201
-    assert _built(lambda: get_guardrail_runner().knows("prompt-injection"))
+    assert built(lambda: get_guardrail_runner().knows("prompt-injection"))
 
     resp = client.patch(
         f"{API_ROOT}/guardrail-credentials/prompt-injection",
@@ -507,7 +490,7 @@ def test_disabling_a_guardrail_takes_it_out_of_the_runner(
     )
 
     assert resp.status_code == 200, resp.text
-    assert _built(lambda: not get_guardrail_runner().knows("prompt-injection"))
+    assert built(lambda: not get_guardrail_runner().knows("prompt-injection"))
 
 
 def test_creating_a_disabled_guardrail_never_builds_it(
@@ -515,17 +498,19 @@ def test_creating_a_disabled_guardrail_never_builds_it(
 ) -> None:
     assert _create(client, master_key_header, enabled=False).status_code == 201
 
-    assert not _built(lambda: get_guardrail_runner().knows("prompt-injection"))
+    assert not built(lambda: get_guardrail_runner().knows("prompt-injection"))
     assert builds == []
 
 
 def test_a_write_whose_credentials_will_not_read_back_logs_and_does_not_raise(
-    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Reading back a credential written a moment ago should not fail, so it is worth a line."""
     assert _create(client, master_key_header).status_code == 201
-    assert _built(lambda: get_guardrail_runner().knows("prompt-injection"))
+    assert built(lambda: get_guardrail_runner().knows("prompt-injection"))
 
     def _refuse(row: Any) -> None:
         raise SecretDecryptionError("rotated under us")
@@ -542,7 +527,7 @@ def test_a_write_whose_credentials_will_not_read_back_logs_and_does_not_raise(
             headers=master_key_header,
         )
         assert resp.status_code == 200, resp.text
-        assert _built(lambda: not get_guardrail_runner().knows("prompt-injection"))
+        assert built(lambda: not get_guardrail_runner().knows("prompt-injection"))
     finally:
         gateway_logger.removeHandler(caplog.handler)
 
@@ -565,11 +550,9 @@ def test_a_definition_that_will_not_build_still_stores(
     assert not get_guardrail_runner().knows("prompt-injection")
 
 
-def test_deleting_a_guardrail_forgets_what_was_built(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_deleting_a_guardrail_forgets_what_wasbuilt(client: TestClient, master_key_header: dict[str, str]) -> None:
     assert _create(client, master_key_header).status_code == 201
-    assert _built(lambda: get_guardrail_runner().knows("prompt-injection"))
+    assert built(lambda: get_guardrail_runner().knows("prompt-injection"))
 
     resp = client.delete(f"{API_ROOT}/guardrail-credentials/prompt-injection", headers=master_key_header)
 
@@ -577,12 +560,10 @@ def test_deleting_a_guardrail_forgets_what_was_built(
     assert not get_guardrail_runner().knows("prompt-injection")
 
 
-def test_re_encryption_builds_nothing(
-    client: TestClient, master_key_header: dict[str, str], builds: list[str]
-) -> None:
+def test_re_encryption_builds_nothing(client: TestClient, master_key_header: dict[str, str], builds: list[str]) -> None:
     """It rotates ciphertext and changes no argument, so what is built is still right."""
     assert _create(client, master_key_header).status_code == 201
-    assert _built(lambda: get_guardrail_runner().knows("prompt-injection"))
+    assert built(lambda: get_guardrail_runner().knows("prompt-injection"))
 
     resp = client.post(f"{API_ROOT}/guardrail-credentials/reencrypt", headers=master_key_header)
 
@@ -798,9 +779,7 @@ def test_a_scope_naming_a_workspace_that_does_not_exist_is_refused(
     assert client.get(f"{API_ROOT}/guardrail-credentials", headers=master_key_header).json() == []
 
 
-def test_an_update_that_leaves_out_the_mode_keeps_it(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_an_update_that_leaves_out_the_mode_keeps_it(client: TestClient, master_key_header: dict[str, str]) -> None:
     assert _create(client, master_key_header, mode="monitor", on_unavailable="allow").status_code == 201
 
     resp = client.patch(
@@ -814,9 +793,7 @@ def test_an_update_that_leaves_out_the_mode_keeps_it(
     assert resp.json()["on_unavailable"] == "allow"
 
 
-def test_an_empty_workspace_list_clears_the_scope(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_an_empty_workspace_list_clears_the_scope(client: TestClient, master_key_header: dict[str, str]) -> None:
     """``[]`` is a value rather than an omission, which is how a scope is taken away."""
     workspace_id = _workspace_id(client, master_key_header)
     assert _create(client, master_key_header, workspace_ids=[workspace_id]).status_code == 201
@@ -873,12 +850,10 @@ def test_an_eleventh_enabled_definition_is_refused_and_disabling_one_makes_room(
     assert resumed.status_code == 200, resumed.text
 
 
-def test_a_definition_that_built_reports_itself_ready(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_a_definition_that_built_reports_itself_ready(client: TestClient, master_key_header: dict[str, str]) -> None:
     """``loaded`` is how a definition that failed to build stops being silent."""
     assert _create(client, master_key_header).status_code == 201
-    assert _built(lambda: get_guardrail_runner().knows("prompt-injection"))
+    assert built(lambda: get_guardrail_runner().knows("prompt-injection"))
 
     listed = client.get(f"{API_ROOT}/guardrail-credentials", headers=master_key_header).json()
 

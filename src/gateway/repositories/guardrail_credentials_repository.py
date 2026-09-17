@@ -15,7 +15,7 @@ when a unit of work is complete.
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -115,3 +115,38 @@ async def replace_guardrail_credential_workspaces(
     for workspace_id in workspace_ids:
         db.add(GuardrailCredentialWorkspace(credential_name=name, workspace_id=workspace_id))
     await db.flush()
+
+
+async def list_enforced_guardrail_credentials(
+    db: AsyncSession, *, workspace_id: uuid.UUID
+) -> list[GuardrailCredential]:
+    """The enabled definitions that check one workspace's requests, ordered by name.
+
+    One indexed read, on every request that reaches a completion endpoint in
+    standalone mode. Deliberately not cached, for the reason
+    ``resolve_organization_guardrails`` gives about the layer above: an operator
+    who turns a guardrail on expects the next request to run it, not the next
+    process.
+
+    Ordered by name so a request's guardrails run in a stable order and a test
+    can assert one.
+    """
+    stmt = (
+        select(GuardrailCredential)
+        .outerjoin(
+            GuardrailCredentialWorkspace,
+            and_(
+                GuardrailCredentialWorkspace.credential_name == GuardrailCredential.name,
+                GuardrailCredentialWorkspace.workspace_id == workspace_id,
+            ),
+        )
+        .where(
+            GuardrailCredential.enabled.is_(True),
+            or_(
+                GuardrailCredential.applies_to_all_workspaces.is_(True),
+                GuardrailCredentialWorkspace.workspace_id.is_not(None),
+            ),
+        )
+        .order_by(GuardrailCredential.name)
+    )
+    return list((await db.execute(stmt)).scalars().all())
