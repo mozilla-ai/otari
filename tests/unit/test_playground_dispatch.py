@@ -76,7 +76,7 @@ async def test_the_request_carries_the_key_and_the_body_and_nothing_else(monkeyp
         seen["body"] = request.content
         return _answer(200, b'{"id": "chat-1"}', **{"content-type": "application/json"})
 
-    monkeypatch.setattr(playground_dispatch.httpx, "AsyncClient", _client_factory(handler))
+    monkeypatch.setattr(httpx, "AsyncClient", _client_factory(handler))
 
     status_code, _headers, body = await playground_dispatch.forward_completion(
         url="https://gateway.example.com/api/v1/chat/completions",
@@ -104,7 +104,7 @@ async def test_the_answer_is_returned_as_the_data_plane_wrote_it(monkeypatch: py
     def handler(_request: httpx.Request) -> httpx.Response:
         return _answer(200, chunks, **{"content-type": "text/event-stream"})
 
-    monkeypatch.setattr(playground_dispatch.httpx, "AsyncClient", _client_factory(handler))
+    monkeypatch.setattr(httpx, "AsyncClient", _client_factory(handler))
 
     status_code, headers, body = await playground_dispatch.forward_completion(
         url="https://gateway.example.com/api/v1/chat/completions",
@@ -130,7 +130,7 @@ async def test_a_refusal_from_the_data_plane_is_forwarded_rather_than_swallowed(
     def handler(_request: httpx.Request) -> httpx.Response:
         return _answer(402, b'{"detail": "Budget exceeded"}', **{"content-type": "application/json"})
 
-    monkeypatch.setattr(playground_dispatch.httpx, "AsyncClient", _client_factory(handler))
+    monkeypatch.setattr(httpx, "AsyncClient", _client_factory(handler))
 
     status_code, _headers, body = await playground_dispatch.forward_completion(
         url="https://gateway.example.com/api/v1/chat/completions",
@@ -157,7 +157,7 @@ async def test_framing_headers_are_not_copied_onto_the_new_response(monkeypatch:
             **{"content-type": "application/json", "x-request-id": "abc", "content-length": "16"},
         )
 
-    monkeypatch.setattr(playground_dispatch.httpx, "AsyncClient", _client_factory(handler))
+    monkeypatch.setattr(httpx, "AsyncClient", _client_factory(handler))
 
     _status, headers, body = await playground_dispatch.forward_completion(
         url="https://gateway.example.com/api/v1/chat/completions",
@@ -179,7 +179,7 @@ async def test_an_unreachable_data_plane_raises_rather_than_returning_a_body(
     def handler(_request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("nope")
 
-    monkeypatch.setattr(playground_dispatch.httpx, "AsyncClient", _client_factory(handler))
+    monkeypatch.setattr(httpx, "AsyncClient", _client_factory(handler))
 
     with pytest.raises(httpx.HTTPError):
         await playground_dispatch.forward_completion(

@@ -18,6 +18,7 @@ from collections.abc import Callable, Generator
 from datetime import UTC, datetime, timedelta
 
 import httpx
+import httpx2
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
@@ -26,7 +27,6 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
-from gateway.services import playground_dispatch
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import decrypt_secret, generate_secret_key
 
@@ -144,10 +144,10 @@ def _answer_from_the_data_plane(
     def build(**kwargs: object) -> httpx.AsyncClient:
         return _REAL_ASYNC_CLIENT(transport=httpx.MockTransport(handler), **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(playground_dispatch.httpx, "AsyncClient", build)
+    monkeypatch.setattr(httpx, "AsyncClient", build)
 
 
-def _send(client: TestClient, token: str, workspace_id: uuid.UUID) -> httpx.Response:
+def _send(client: TestClient, token: str, workspace_id: uuid.UUID) -> httpx2.Response:
     client.cookies.set(SESSION_COOKIE_NAME, token)
     try:
         return client.post(
@@ -343,7 +343,7 @@ def test_an_unreachable_data_plane_answers_502_without_naming_it(
     def build(**kwargs: object) -> httpx.AsyncClient:
         return _REAL_ASYNC_CLIENT(transport=httpx.MockTransport(handler), **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(playground_dispatch.httpx, "AsyncClient", build)
+    monkeypatch.setattr(httpx, "AsyncClient", build)
 
     response = _send(hosted_client, token, workspace_id)
 
