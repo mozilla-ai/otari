@@ -10,7 +10,7 @@ from collections.abc import Generator
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.agent_runtime.domain.evaluators import _contains_subsequence
+from gateway.agent_runtime.domain.evaluators import _command_segments, _contains_subsequence
 from gateway.core.config import API_ROOT, PLATFORM_TOKEN_ENV_VAR, GatewayConfig
 
 from .conftest import build_test_client
@@ -26,6 +26,25 @@ gates:
     forbidden: ["scratch/**"]
     message: Do not commit scratch files.
 """
+
+_NO_NPM_POLICY = (
+    'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+    "  - id: g\n    type: command_match\n    enforcement: required\n"
+    '    forbidden: ["npm"]\n    message: m\n'
+)
+
+
+@pytest.fixture
+def tokenized_commands(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Returns the commands the hooks check splits into segments, one entry per split."""
+    calls: list[str] = []
+
+    def recording_command_segments(command: str) -> list[list[str]]:
+        calls.append(command)
+        return _command_segments(command)
+
+    monkeypatch.setattr("gateway.agent_runtime.domain.evaluators._command_segments", recording_command_segments)
+    return calls
 
 
 def test_requires_authentication(client: TestClient) -> None:
@@ -412,73 +431,65 @@ def test_command_match_work_estimate_charges_a_shared_phrase_per_gate(
 
 
 def test_many_whitespace_only_commands_do_not_stall_tokenizing(
-    client: TestClient, master_key_header: dict[str, str]
+    client: TestClient, master_key_header: dict[str, str], tokenized_commands: list[str]
 ) -> None:
-    """shlex.split costs meaningfully more per character than a plain len()
+    """Commands over the total character budget are refused before any of them is tokenized.
 
-    check, regardless of content, so a request built from many long,
-    all-whitespace commands (which tokenize to zero tokens each, keeping
-    _MAX_COMMAND_MATCH_WORK's estimate at zero no matter how many there are)
-    can still cost real seconds just computing that estimate. This must be
-    caught by a raw character-total budget before any command is tokenized,
-    not discovered only after tokenizing all of them.
+    Whitespace-only commands have no tokens, so only a character count bounds their tokenizing cost.
     """
-    # Distinct (a trailing index) so evidence deduplication does not collapse
-    # this back down to one command and hide the aggregate-length case.
+    # A trailing index keeps the commands distinct, so evidence deduplication cannot merge them.
     commands = [" " * 4000 + str(i) for i in range(600)]
-    policy = (
-        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: command_match\n    enforcement: required\n"
-        '    forbidden: ["npm"]\n    message: m\n'
-    )
-    start = time.time()
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "commands": commands},
+        json={"policy_yaml": _NO_NPM_POLICY, "commands": commands},
         headers=master_key_header,
     )
-    assert time.time() - start < 1.0
     assert response.status_code == 422
     assert "characters" in response.json()["detail"]
+    assert tokenized_commands == []
+
+    # The empty list above means something only if the recorder fires on a real command.
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _NO_NPM_POLICY, "commands": commands[:1]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert tokenized_commands == commands[:1]
 
 
 def test_a_policy_with_no_command_match_gate_never_tokenizes_commands(
-    client: TestClient, master_key_header: dict[str, str]
+    client: TestClient, master_key_header: dict[str, str], tokenized_commands: list[str]
 ) -> None:
-    """Submitting `commands` evidence against a policy with no command_match
+    """A policy with no command_match gate never tokenizes the submitted commands.
 
-    gate must not pay any tokenizing cost at all: the result is moot
-    regardless, so this must resolve quickly and successfully rather than
-    being rejected by a budget meant for command_match gates that do not
-    exist here.
+    The commands are over the character budget, so the 200 also shows that budget is not applied.
     """
-    # Distinct (a trailing index) so evidence deduplication does not collapse
-    # this back down to one command and hide the aggregate-length case.
+    # A trailing index keeps the commands distinct, so evidence deduplication cannot merge them.
     commands = [" " * 4000 + str(i) for i in range(600)]
-    start = time.time()
     response = client.post(
         f"{API_ROOT}/hooks/check",
         json={"policy_yaml": _VALID_POLICY, "changed_paths": [], "commands": commands},
         headers=master_key_header,
     )
-    assert time.time() - start < 1.0
     assert response.status_code == 200, response.text
     assert response.json()["blocked"] is False
+    assert tokenized_commands == []
+
+    # The empty list above means something only if the recorder fires on a real command.
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _NO_NPM_POLICY, "commands": commands[:1]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert tokenized_commands == commands[:1]
 
 
 def test_many_command_match_gates_do_not_retokenize_per_gate(
-    client: TestClient, master_key_header: dict[str, str]
+    client: TestClient, master_key_header: dict[str, str], tokenized_commands: list[str]
 ) -> None:
-    """Review's repro: 100 command_match gates, each forbidding "npm", against
-
-    250 distinct ~4,000-character mostly-whitespace commands passed every
-    request-level budget (low token content, few phrases per gate) yet
-    measured ~7s of synchronous blocking in check_policy, because
-    evaluate_command_match was called once per gate and each call
-    independently re-tokenized every command from scratch. Tokenizing once
-    per request and sharing the result across every command_match gate's
-    evaluation collapses this to well under a second.
-    """
+    """Each command is tokenized once per request, however many command_match gates check it."""
     gates_yaml = "".join(
         f'  - id: g{i}\n    type: command_match\n    enforcement: required\n'
         f'    forbidden: ["npm"]\n    message: m\n'
@@ -486,14 +497,13 @@ def test_many_command_match_gates_do_not_retokenize_per_gate(
     )
     policy = 'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n' + gates_yaml
     commands = [" " * 4000 + str(i) for i in range(250)]
-    start = time.time()
     response = client.post(
         f"{API_ROOT}/hooks/check",
         json={"policy_yaml": policy, "commands": commands},
         headers=master_key_header,
     )
-    assert time.time() - start < 1.0
     assert response.status_code == 200, response.text
+    assert sorted(tokenized_commands) == sorted(commands)
 
 
 def test_apostrophe_in_a_trailing_comment_does_not_evade_a_required_gate(
