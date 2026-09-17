@@ -27,6 +27,8 @@ The release runs in two halves so the changelog is reviewable before the tag:
    (`otari-release.yml`) workflow from the Actions UI with the target version
    (for example `0.4.0`). It regenerates `CHANGELOG.md` for `v0.4.0` and opens a
    `release/v0.4.0` PR labeled `release` with the rendered notes in the body.
+   A release that contains a breaking change needs a larger version; see
+   [Breaking changes](#breaking-changes).
 2. **Merge it.** Review the changelog diff and squash-merge the PR.
    **Otari Release (tag + publish)** (`otari-tag-release.yml`) then tags the
    squash commit `v0.4.0` and publishes the GitHub Release with the git-cliff
@@ -93,6 +95,12 @@ reaches the squash commit only from a branch commit message, so do not rely on i
 The release notes put the marker **BREAKING:** at the start of each breaking
 entry. The entry stays in the group of its type. A breaking commit of a hidden
 type, such as `refactor(ports)!:`, appears under "Maintenance".
+
+A release that contains a breaking change raises the minor version while Otari is
+below 1.0 (`0.6.3` becomes `0.7.0`), and the major version from 1.0 on. The
+**Otari Release (open PR)** workflow compares the requested version with the last
+release tag. When the version is too small, it puts a warning at the top of the
+release PR body. It does not stop the release.
 
 ### Prerequisites (repository secrets)
 

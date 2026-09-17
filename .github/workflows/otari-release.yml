@@ -103,13 +103,51 @@ jobs:
           uvx git-cliff@2.13.1 --config cliff.toml --tag "v$VERSION" --unreleased --strip header > /tmp/notes.md
           cat /tmp/notes.md
 
+      # This step warns and does not fail, because the maintainer makes the call.
+      # The warning goes into the PR body, which is what reviewers read.
+      # cliff.toml defines the marker that the grep looks for.
+      - name: Check the version against breaking changes
+        id: bump
+        env:
+          NOTES: /tmp/notes.md
+        run: |
+          if ! grep -qF '**BREAKING:**' "$NOTES"; then
+            exit 0
+          fi
+          PREVIOUS="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude 'v*-*')"
+          IFS=. read -r PREV_MAJOR PREV_MINOR _ <<< "${PREVIOUS#v}"
+          IFS=. read -r MAJOR MINOR _ <<< "${VERSION%%-*}"
+          # Gotcha: $(( )) and [[ -gt ]] evaluate a value as an expression, which can
+          # run a command. [ -gt ] accepts only integers.
+          if [ "$MAJOR" -gt "$PREV_MAJOR" ]; then
+            exit 0
+          fi
+          if [ "$PREV_MAJOR" -eq 0 ]; then
+            PART=minor
+            if [ "$MINOR" -gt "$PREV_MINOR" ]; then
+              exit 0
+            fi
+          else
+            PART=major
+          fi
+          WARNING="The release notes contain a breaking change, which raises the $PART version, but v$VERSION does not raise it over $PREVIOUS. See Breaking changes in RELEASE.md."
+          echo "::warning::$WARNING"
+          echo "warning=$WARNING" >> "$GITHUB_OUTPUT"
+
       - name: Build PR body
+        env:
+          BUMP_WARNING: ${{ steps.bump.outputs.warning }}
         run: |
           {
             echo "<!-- release-version: $VERSION -->"
             echo
             echo "## Description"
             echo
+            if [ -n "$BUMP_WARNING" ]; then
+              echo "> [!WARNING]"
+              echo "> $BUMP_WARNING"
+              echo
+            fi
             echo "Automated release PR for \`v$VERSION\`. Regenerates \`CHANGELOG.md\` from Conventional Commits via git-cliff. Merging this PR tags the squash commit \`v$VERSION\` and publishes the GitHub Release, which triggers the Docker image build."
             echo
             echo "### Release notes preview"
