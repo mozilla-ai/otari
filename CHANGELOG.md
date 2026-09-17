@@ -4,6 +4,36 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.6.3](https://github.com/mozilla-ai/otari/releases/tag/v0.6.3) - 2026-09-17
+
+
+
+### Bug Fixes
+
+- **dashboard:** Cap the whole organization with its own id, not the word in [#1263](https://github.com/mozilla-ai/otari/pull/1263) by [@khaledosman](https://github.com/khaledosman) ([`89cd358`](https://github.com/mozilla-ai/otari/commit/89cd35808882d03ecec58c7310db02c455ca0ccd))
+- **policy-checks:** Cleanup fixes for 1229  - hooks in [#1257](https://github.com/mozilla-ai/otari/pull/1257) by [@agpituk](https://github.com/agpituk) ([`54ff172`](https://github.com/mozilla-ai/otari/commit/54ff1723201959530998e01c8e0542af1cee2b22))
+- **catalog:** List hosted providers for members and flag their models as deployment-supplied in [#1261](https://github.com/mozilla-ai/otari/pull/1261) by [@tbille](https://github.com/tbille) ([`907cd93`](https://github.com/mozilla-ai/otari/commit/907cd93e784248d761952c43c990116ce7081971))
+- **playground:** Index the dispatch lookup and mend an unreadable key in [#1297](https://github.com/mozilla-ai/otari/pull/1297) by [@khaledosman](https://github.com/khaledosman) ([`3193937`](https://github.com/mozilla-ai/otari/commit/31939379ee9f9b166c49de6640d38961b0d0632e))
+- **dashboard:** Stop a switch of organization asking for the role it left in [#1302](https://github.com/mozilla-ai/otari/pull/1302) by [@khaledosman](https://github.com/khaledosman) ([`df70175`](https://github.com/mozilla-ai/otari/commit/df701759fa86446dcdead704b581a922e9f851ef))
+- **dashboard:** Let the user guide use the whole page in [#1301](https://github.com/mozilla-ai/otari/pull/1301) by [@khaledosman](https://github.com/khaledosman) ([`af7cd7a`](https://github.com/mozilla-ai/otari/commit/af7cd7ac5bca653dea071be5b3e733c533c2d577))
+- **migrations:** Keep autogenerate from dropping tables another chain owns in [#1293](https://github.com/mozilla-ai/otari/pull/1293) by [@peteski22](https://github.com/peteski22) ([`3818ce7`](https://github.com/mozilla-ai/otari/commit/3818ce7119929a4692d4d75283d1403cc362bc70))
+- **policy-checks:** Submit no command evidence when aggregate bounds are exceeded by [@agpituk](https://github.com/agpituk) ([`d358f9f`](https://github.com/mozilla-ai/otari/commit/d358f9fd9536cc165dc96369d015e3832422715c))
+- **policy-checks:** Scope command evidence, so a Stop gate cannot dead-end a session by [@daavoo](https://github.com/daavoo) ([`3d52624`](https://github.com/mozilla-ai/otari/commit/3d526240db4c288dcb31b522782af833b61d0d7c))
+- **policy-checks:** Regenerate the dashboard client for the command_scope field in [#1278](https://github.com/mozilla-ai/otari/pull/1278) by [@daavoo](https://github.com/daavoo) ([`2fd3eb7`](https://github.com/mozilla-ai/otari/commit/2fd3eb7584ed9ef417cb2587add834f1e7d33ce4))
+
+
+### Features
+
+- **policy-checks:** Add otari hook setup, so registering the hook is not a manual JSON edit in [#1239](https://github.com/mozilla-ai/otari/pull/1239) by [@agpituk](https://github.com/agpituk) ([`f15d488`](https://github.com/mozilla-ai/otari/commit/f15d488f0a744fa9f284c87edfe114d820d11e83))
+- **playground:** Serve the Playground on a hosted control plane in [#1284](https://github.com/mozilla-ai/otari/pull/1284) by [@khaledosman](https://github.com/khaledosman) ([`73ac9d9`](https://github.com/mozilla-ai/otari/commit/73ac9d95a8b8693567355d15776b9dcc903628be))
+- **policy-checks:** Add command_if_changed, a gate correlating a changed path with a required command by [@agpituk](https://github.com/agpituk) ([`04582bc`](https://github.com/mozilla-ai/otari/commit/04582bca47c50b23af555901b40529ee3ac9d3a7))
+
+
+
+### New Contributors
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.6.2...v0.6.3
 ## [0.6.2](https://github.com/mozilla-ai/otari/releases/tag/v0.6.2) - 2026-09-16
 
 
