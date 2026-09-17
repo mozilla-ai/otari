@@ -9,11 +9,3 @@ from gateway.services import code_execution_tool, web_search_tool
 from gateway.services.builtin_tool import BuiltinTool
 
 BUILTIN_TOOLS: tuple[BuiltinTool, ...] = (web_search_tool.TOOL, code_execution_tool.TOOL)
-
-
-def find_builtin_tool(name: str) -> BuiltinTool | None:
-    """The listed tool a model calls by ``name``, or ``None`` when no listed tool has that name.
-
-    Gotcha: an MCP server may expose a tool with the same name, so a match does not prove the gateway ran the call.
-    """
-    return next((tool for tool in BUILTIN_TOOLS if tool.name == name), None)

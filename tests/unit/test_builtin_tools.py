@@ -13,7 +13,7 @@ from gateway.core.config import GatewayConfig
 from gateway.services import code_execution_tool, web_search_tool
 from gateway.services._tool_loop import ToolBackend
 from gateway.services.builtin_tool import BuiltinTool
-from gateway.services.builtin_tools import BUILTIN_TOOLS, find_builtin_tool
+from gateway.services.builtin_tools import BUILTIN_TOOLS
 from gateway.services.sandbox_backend import SandboxBackend
 from gateway.services.web_retrieval_backend import WebRetrievalBackend
 
@@ -120,10 +120,3 @@ def test_configured_agrees_with_what_the_tools_endpoint_reports(
     reported = {tool.id: tool.available for tool in _managed_tools(config)}
 
     assert reported == {f"otari_{tool.name}": tool.configured(config) for tool in BUILTIN_TOOLS}
-
-
-def test_find_builtin_tool_matches_the_function_name_only() -> None:
-    assert find_builtin_tool(web_search_tool.TOOL.name) is web_search_tool.TOOL
-    assert find_builtin_tool(code_execution_tool.TOOL.name) is code_execution_tool.TOOL
-    assert find_builtin_tool(str(Tool.WEB_SEARCH)) is None, "the declaration type is not the name a model calls"
-    assert find_builtin_tool("lookup_ticket") is None
