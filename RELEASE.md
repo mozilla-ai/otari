@@ -84,12 +84,18 @@ direct pushes to `main`.
   the image.
 - `SDK_CODEGEN_TOKEN`, used by `otari-sdk-codegen.yml` to open regeneration PRs
   on the SDK repos.
-- `RELEASE_TOKEN`, used by `otari-release.yml` and `otari-tag-release.yml`. A PAT
-  or GitHub App token with `contents: write` + `pull-requests: write` on this
-  repo. Required because the default `GITHUB_TOKEN` cannot start downstream
-  workflows: a PR it opens would not run CI, and a Release it publishes would not
-  trigger `otari-docker.yml`. Until this secret exists, only the release
-  workflows are blocked; normal development is unaffected.
+- `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY`, used by `otari-release.yml`
+  and `otari-tag-release.yml`. The App ID and a private key for the Otari
+  Release GitHub App, an org-owned App installed on this repo alone and holding
+  exactly `contents: write` + `pull requests: write`. A token is minted per run
+  by `actions/create-github-app-token` and expires with the job, so nothing
+  long-lived sits in the repo and the release PR is authored by
+  `otari-release[bot]` rather than by whichever maintainer owned a personal
+  access token. The default `GITHUB_TOKEN` cannot be used instead, because it
+  cannot start downstream workflows: a PR it opens would not run CI, and a
+  Release it publishes would not trigger `otari-docker.yml`. An App installation
+  token is a distinct identity and does start them. Until these secrets exist,
+  only the release workflows are blocked; normal development is unaffected.
 
 ## SDK releases
 

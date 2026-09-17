@@ -6,9 +6,10 @@ name: Otari Release (tag + publish)
 # the Release fires otari-docker.yml (`release: published`), which builds and
 # pushes the image with OTARI_VERSION baked to the tag.
 #
-# Uses RELEASE_TOKEN so that `gh release create` triggers otari-docker.yml; a
-# Release created with the default GITHUB_TOKEN would not start downstream
-# workflows. See RELEASE.md.
+# Runs as the Otari Release GitHub App (RELEASE_APP_ID +
+# RELEASE_APP_PRIVATE_KEY) so that `gh release create` triggers
+# otari-docker.yml; a Release created with the default GITHUB_TOKEN would not
+# start downstream workflows. See RELEASE.md.
 
 on:
   pull_request:
@@ -26,11 +27,18 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'release')
     runs-on: ubuntu-latest
     steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -72,7 +80,7 @@ jobs:
 
       - name: Create tag and publish GitHub Release
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           VERSION: ${{ steps.ver.outputs.version }}
           SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |

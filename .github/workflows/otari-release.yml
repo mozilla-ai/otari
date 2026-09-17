@@ -10,10 +10,12 @@ name: Otari Release (open PR)
 # (baked in as OTARI_VERSION; see src/gateway/version.py), so this workflow only
 # regenerates the changelog.
 #
-# Requires a RELEASE_TOKEN secret (PAT or GitHub App token with contents:write
-# + pull-requests:write). The default GITHUB_TOKEN cannot be used: a branch it
-# pushes and a PR it opens do not trigger the PR's CI, so the release PR could
-# not satisfy required status checks. See RELEASE.md.
+# Runs as the Otari Release GitHub App (RELEASE_APP_ID +
+# RELEASE_APP_PRIVATE_KEY), so the PR is authored by a bot rather than by
+# whichever maintainer owned a personal access token. The default GITHUB_TOKEN
+# cannot be used instead: a branch it pushes and a PR it opens do not trigger
+# the PR's CI, so the release PR could not satisfy required status checks. An
+# App installation token is a distinct identity and does. See RELEASE.md.
 
 on:
   workflow_dispatch:
@@ -34,13 +36,20 @@ jobs:
     env:
       VERSION: ${{ github.event.inputs.version }}
     steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           # git-cliff walks tag history to render the changelog, so it needs
           # the full history, not the default shallow clone.
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -121,11 +130,16 @@ jobs:
 
       - name: Commit, push, open PR
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: |
           BRANCH="release/v$VERSION"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Commit as the App's own bot user, so the commit and the PR it lands
+          # in carry one identity. The numeric id is what links the noreply
+          # address to that user; only the API knows it.
+          BOT_ID="$(gh api "/users/$APP_SLUG%5Bbot%5D" --jq .id)"
+          git config user.name "$APP_SLUG[bot]"
+          git config user.email "$BOT_ID+$APP_SLUG[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
           git add CHANGELOG.md
           git commit -m "chore: release v$VERSION"
