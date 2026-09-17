@@ -49,6 +49,15 @@ const VALIDATION = "aria" as const
 // gateway will refuse.
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 
+/**
+ * A password sign-in refused because the address is not verified yet. Its own
+ * class rather than a match on the wording: the password path's only 403 is
+ * `EmailNotVerifiedError` (`api/routes/auth_session.py`), and the message is
+ * the gateway's to phrase. Carried on the same `error` state as every other
+ * refusal, so typing clears the resend link together with the message.
+ */
+class EmailUnverifiedRefusal extends Error {}
+
 const ERROR_IDS: Record<CredentialField, string> = {
   email: "login-email-error",
   password: "login-password-error",
@@ -253,6 +262,14 @@ export function Login() {
   // success; it clears on the refusal path, where the person stays here.
   const [pendingProvider, setPendingProvider] = useState<string | null>(null)
 
+  // The unverified refusal tells the reader to request a new verification
+  // email, so the request is offered beside it rather than left as a sentence
+  // with nothing to press. Gated on mail alone, not `offersRecovery`: the
+  // resend page only sends a message, and the refusal itself has already
+  // proven a password exists.
+  const offersResendVerification =
+    mail_ready && error instanceof EmailUnverifiedRefusal
+
   const clearError = () => {
     if (error) {
       setError(null)
@@ -386,12 +403,21 @@ export function Login() {
         // retired it as a sign-in, and only it knows which happened. It is
         // about the credential rather than one box, so it lands on the last row
         // above the button, where the operator's eye already is.
-        fail(
-          usesPassword ? "password" : "masterKey",
+        //
+        // A password 403 is the one refusal with a remedy other than retyping:
+        // on that path the gateway sends it only for an unverified address, so
+        // it is marked here and the form answers it with the resend link the
+        // wording asks for.
+        const message =
           result.message ??
-            (usesPassword
-              ? "Incorrect email or password."
-              : "Invalid master key."),
+          (usesPassword
+            ? "Incorrect email or password."
+            : "Invalid master key.")
+        setErrorField(usesPassword ? "password" : "masterKey")
+        setError(
+          usesPassword && result.status === 403
+            ? new EmailUnverifiedRefusal(message)
+            : new Error(message),
         )
       }
     } catch (caught) {
@@ -660,6 +686,11 @@ export function Login() {
                   className="h-10 text-base"
                 />
               </TextField>
+              {offersResendVerification ? (
+                <PublicAuthLink to="#/resend-verification">
+                  Send a new verification link
+                </PublicAuthLink>
+              ) : null}
             </>
           ) : (
             <>

@@ -537,6 +537,66 @@ describe("Login", () => {
     expect(screen.queryByText("SIGNED IN")).not.toBeInTheDocument()
   })
 
+  it("offers a fresh verification link when sign-in is refused for an unverified address", async () => {
+    // The password path's only 403 is the unverified-address refusal, whose
+    // wording tells the reader to request a new verification email. Without
+    // the link the sentence is a dead end.
+    const refusal =
+      "Verify your email before signing in; request a new verification email if yours expired"
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: refusal }, 403),
+    )
+    const user = userEvent.setup()
+
+    render(
+      <Mounted signInMethods={["password"]} mailReady>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.type(screen.getByLabelText("Email"), "member@example.com")
+    await user.type(screen.getByLabelText("Password"), "right-but-unverified")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(await screen.findByText(refusal)).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Send a new verification link" }),
+    ).toHaveAttribute("href", "#/resend-verification")
+
+    // The link describes the refusal, not the page, so typing takes both away.
+    await user.type(screen.getByLabelText("Password"), "x")
+    expect(screen.queryByText(refusal)).toBeNull()
+    expect(
+      screen.queryByRole("link", { name: "Send a new verification link" }),
+    ).toBeNull()
+  })
+
+  it("renders the unverified refusal without a link on a gateway that cannot mail one", async () => {
+    // The resend page starts by sending a message, so on a mailless gateway
+    // the link would lead to a flow that can only 503. The refusal still
+    // renders; hiding the action is the same call `mail_ready` already makes
+    // for signup and recovery.
+    const refusal =
+      "Verify your email before signing in; request a new verification email if yours expired"
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: refusal }, 403),
+    )
+    const user = userEvent.setup()
+
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.type(screen.getByLabelText("Email"), "member@example.com")
+    await user.type(screen.getByLabelText("Password"), "right-but-unverified")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(await screen.findByText(refusal)).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: /verification link/ })).toBeNull()
+  })
+
   it("surfaces the retirement message when a stale client posts a master key to a claimed deployment", async () => {
     // A 403 is not a wrong credential, and rendering "Invalid master key." over
     // it (what this screen did before it could post a password) tells the
@@ -559,6 +619,8 @@ describe("Login", () => {
 
     expect(await screen.findByText(retired)).toBeInTheDocument()
     expect(screen.queryByText("Invalid master key.")).not.toBeInTheDocument()
+    // A master-key 403 is retirement, not an unverified address.
+    expect(screen.queryByRole("link", { name: /verification link/ })).toBeNull()
   })
 
   it("offers no credential box when the gateway reports it cannot mint a session", async () => {
