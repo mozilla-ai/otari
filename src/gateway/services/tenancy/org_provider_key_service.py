@@ -383,7 +383,7 @@ class OrgProviderKeyService:
         self.overrides = WorkspaceProviderKeyOverrideRepository(db)
         self.restrictions = WorkspaceProviderModelRestrictionRepository(db)
         self.workspaces = WorkspaceRepository(db)
-        self.organizations = OrganizationService(db)
+        self.organizations = OrganizationService(db, membership_listener=None)
 
     # ------------------------------------------------------------------
     # Organization-scoped keys

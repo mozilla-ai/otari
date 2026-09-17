@@ -149,7 +149,7 @@ async def _caller_context(db: AsyncSession, identity: TenancyUser) -> tuple[uuid
     identity's UUID rendered as a string, the attribution convention
     ``get_or_create_attribution_user`` documents.
     """
-    organization = await OrganizationService(db).get_active_organization_for_user(identity)
+    organization = await OrganizationService(db, membership_listener=None).get_active_organization_for_user(identity)
     return organization.id, str(identity.id)
 
 
@@ -169,7 +169,7 @@ async def create_own_key(
     workspace must be visible to the caller (a member of it, or an organization
     owner/admin, who see every workspace). The secret is returned once.
     """
-    organizations = OrganizationService(db)
+    organizations = OrganizationService(db, membership_listener=None)
     organization = await organizations.get_active_organization_for_user(identity)
 
     if request.workspace_id is not None:

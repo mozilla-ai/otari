@@ -109,7 +109,7 @@ class OrganizationPricingService:
         """
         self.db = db
         self.config = config
-        self.organizations = OrganizationService(db)
+        self.organizations = OrganizationService(db, membership_listener=None)
         self.provider_keys = OrgProviderKeyService(db)
         self.model_provider = model_provider
 

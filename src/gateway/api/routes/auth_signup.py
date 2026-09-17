@@ -33,6 +33,7 @@ from gateway.services.tenancy.user_service import (
     resend_verification_email,
     verify_email,
 )
+from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -122,6 +123,7 @@ async def signup(
             config,
             email=body.email,
             password=body.password,
+            membership_listener=WorkspaceBudgetDefaultService(db),
             full_name=body.full_name,
             terms_accepted=body.terms_accepted,
         )

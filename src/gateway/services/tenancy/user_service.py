@@ -79,6 +79,7 @@ from gateway.services.tenancy.errors import (
     UnmodifiedPasswordError,
     VerificationTokenInvalidError,
 )
+from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.password_reset_email import render_password_reset_email
 from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
@@ -260,6 +261,7 @@ async def create_user_for_signup(
     *,
     email: str,
     password: str,
+    membership_listener: MembershipListener,
     full_name: str | None = None,
     terms_accepted: bool = False,
 ) -> User | None:
@@ -336,7 +338,9 @@ async def create_user_for_signup(
         # committed here and nowhere else would be live, password-less and
         # unverifiable.
         try:
-            identity = await OrganizationService(db).provision_signup_tenancy(
+            identity = await OrganizationService(
+                db, membership_listener=membership_listener
+            ).provision_signup_tenancy(
                 email=address,
                 full_name=full_name,
             )

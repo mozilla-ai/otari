@@ -138,7 +138,7 @@ async def test_member_added_afterwards_is_materialized_on_join(async_db: AsyncSe
         request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=25.0)),
     )
 
-    workspace_service = WorkspaceService(async_db)
+    workspace_service = WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
     added = await workspace_service.add_member(user=owner, workspace_id=workspace.id, user_id=joiner.id)
 
     budget = await _member_budget(async_db, added.id)
@@ -158,7 +158,7 @@ async def test_member_added_via_organization_workspace_assignment_is_materialize
         request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=15.0)),
     )
 
-    organization_service = OrganizationService(async_db)
+    organization_service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
     result = await organization_service.create_active_organization_member_for_user(
         user=owner,
         request=ActiveOrganizationMemberCreateRequest(
@@ -212,7 +212,7 @@ async def test_reviving_a_suspended_workspace_membership_is_materialized(async_d
     # nothing from it yet.
     assert await _member_budget(async_db, suspended_member.id) is None
 
-    organization_service = OrganizationService(async_db)
+    organization_service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
     await organization_service.create_active_organization_member_for_user(
         user=owner,
         request=ActiveOrganizationMemberCreateRequest(
@@ -265,7 +265,7 @@ async def test_reapplying_an_active_assignment_does_not_rematerialize_a_deleted_
     await async_db.commit()
     assert await _member_budget(async_db, workspace_member.id) is None
 
-    organization_service = OrganizationService(async_db)
+    organization_service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
     await organization_service._apply_workspace_assignments(  # noqa: SLF001 - exercising the internal gate directly
         user_id=member_user.id,
         assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="member")],
@@ -306,7 +306,7 @@ async def test_update_is_not_retroactive(async_db: AsyncSession) -> None:
     assert owner_budget_after is not None
     assert await _limit(async_db, owner_budget_after) == 10.0, "an already-materialized ceiling must not be rewritten"
 
-    workspace_service = WorkspaceService(async_db)
+    workspace_service = WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
     joined = await workspace_service.add_member(user=owner, workspace_id=workspace.id, user_id=later_joiner.id)
     joiner_budget = await _member_budget(async_db, joined.id)
     assert joiner_budget is not None
@@ -333,7 +333,7 @@ async def test_delete_preserves_materialized_rows_and_stops_future_ones(async_db
     owner_budget = await _member_budget(async_db, owner_member.id)
     assert owner_budget is not None, "spend history on an already-materialized ceiling survives the delete"
 
-    workspace_service = WorkspaceService(async_db)
+    workspace_service = WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
     joined = await workspace_service.add_member(user=owner, workspace_id=workspace.id, user_id=later_joiner.id)
     assert await _member_budget(async_db, joined.id) is None, "a member joining after the delete gets nothing from it"
 
@@ -538,7 +538,9 @@ async def test_concurrent_default_create_and_member_add_both_land(
             user = await UserRepository(session).get(owner.id)
             assert user is not None
             try:
-                return await WorkspaceService(session).add_member(
+                return await WorkspaceService(
+                    session, membership_listener=WorkspaceBudgetDefaultService(session)
+                ).add_member(
                     user=user,
                     workspace_id=workspace.id,
                     user_id=joiner.id,
@@ -651,7 +653,7 @@ async def test_removing_a_member_takes_their_workspace_ceiling_with_them(async_d
         request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=25.0)),
     )
 
-    workspace_service = WorkspaceService(async_db)
+    workspace_service = WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
     added = await workspace_service.add_member(user=owner, workspace_id=workspace.id, user_id=leaver.id)
     assert await _member_budget(async_db, added.id) is not None
 
@@ -733,7 +735,7 @@ async def test_bootstrap_provisioning_materializes_the_default_workspaces_defaul
     async_db.add(WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=budget_id))
     await async_db.commit()
 
-    operator = await ensure_bootstrap_identity(async_db)
+    operator = await ensure_bootstrap_identity(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
 
     member = await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(workspace.id, operator.id)
     assert member is not None
@@ -773,14 +775,15 @@ async def test_bootstrap_survives_a_default_naming_a_budget_that_is_gone(
 
     monkeypatch.setattr(WorkspaceBudgetDefaultService, "_budget_for", _gone)
 
-    operator = await ensure_bootstrap_identity(async_db)
+    operator = await ensure_bootstrap_identity(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
     member = await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(workspace.id, operator.id)
     assert member is not None
     assert await _member_budget(async_db, member.id) is None, "the ceiling could not be materialized"
 
     # The marker landed, so the deployment is still bootstrappable rather than
     # re-provisioning (and re-failing) on every later request.
-    assert (await ensure_bootstrap_identity(async_db)).id == operator.id
+    resolved = await ensure_bootstrap_identity(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    assert resolved.id == operator.id
 
 
 async def test_a_default_may_not_name_another_organizations_budget(async_db: AsyncSession) -> None:

@@ -476,7 +476,7 @@ class OrganizationGuardrailService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.organizations = OrganizationService(db)
+        self.organizations = OrganizationService(db, membership_listener=None)
 
     async def _manageable_organization_id(self, user: User) -> uuid.UUID:
         """The caller's organization, having checked they may manage its guardrails.

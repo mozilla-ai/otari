@@ -82,13 +82,8 @@ from gateway.services.tenancy.errors import (
 from gateway.services.tenancy.organization_service import OrganizationService
 
 # The scopes this surface understands, spelled out rather than imported from
-# `scoped_budget_service`: that module reaches `workspace_scope`, which reaches
-# `tenancy.provisioning_service`, which runs `tenancy/__init__`, which imports
-# this package. `WorkspaceService._delete_scoped_budgets_for` avoids the same
-# cycle the same way, and `tests/unit/test_service_module_imports.py` pins it.
-# The values are identical to `ScopeType`, and
-# `tests/unit/test_organization_budget_scopes.py` asserts that rather than
-# trusting it.
+# `scoped_budget_service`, which reaches this package through `workspace_scope`.
+# The values are identical to `ScopeType`.
 SCOPE_ORGANIZATION = "organization"
 SCOPE_WORKSPACE = "workspace"
 SCOPE_WORKSPACE_MEMBER = "workspace_member"
@@ -362,7 +357,7 @@ class OrganizationBudgetService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.organizations = OrganizationService(db)
+        self.organizations = OrganizationService(db, membership_listener=None)
 
     # ------------------------------------------------------------------
     # Identity and scope resolution

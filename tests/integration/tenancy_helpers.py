@@ -1,4 +1,4 @@
-"""Builders for the tenancy rows a service-layer test stands its case up on.
+"""Builders for the tenancy rows a service-layer test needs.
 
 Each one writes through the repositories rather than a service, so a test can
 start from whatever organization, workspace and membership shape it needs
@@ -61,7 +61,7 @@ async def create_budget(
 ) -> str:
     """A budget for a default to hand out, returning its id.
 
-    A default no longer carries a limit of its own: it names a ``budgets`` row,
+    A default names a ``budgets`` row rather than carrying a limit of its own,
     which is what lets the Budgets page say a limit is a workspace's default.
     """
     budget = Budget(

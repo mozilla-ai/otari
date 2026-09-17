@@ -91,7 +91,7 @@ async def resolve_playground_workspace(
     Every Playground route resolves through here, reads included, so a read and a
     completion can never disagree about which workspace a caller reached.
     """
-    organizations = OrganizationService(db)
+    organizations = OrganizationService(db, membership_listener=None)
     organization = await organizations.get_active_organization_for_user(identity)
 
     resolved = workspace_id

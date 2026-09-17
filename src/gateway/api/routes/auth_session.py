@@ -68,6 +68,7 @@ from gateway.services.tenancy.errors import EmailNotVerifiedError, InvalidCreden
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import authenticate, operator_has_password
+from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 router = APIRouter(prefix="/auth/session", tags=["auth"])
 
@@ -229,7 +230,7 @@ async def _sign_in_with_master_key(
     # Provisions the tenancy root on a first-ever sign-in, and resolves the same
     # operator every time after that. It commits its own work, which is why it
     # runs before the session row is staged rather than beside it.
-    return await ensure_bootstrap_identity(db)
+    return await ensure_bootstrap_identity(db, membership_listener=WorkspaceBudgetDefaultService(db))
 
 
 async def _sign_in_with_password(email: str, password: str, request: Request, db: AsyncSession) -> TenancyUser:

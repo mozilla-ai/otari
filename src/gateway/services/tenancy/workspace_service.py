@@ -17,12 +17,9 @@ two-row insert here.
 
 import uuid
 
-from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
-from gateway.models.budgets import ScopedBudget
 from gateway.models.tenancy import (
     MANAGEMENT_ROLES,
     WORKSPACE_MEMBER_ROLES,
@@ -30,7 +27,6 @@ from gateway.models.tenancy import (
     User,
     Workspace,
     WorkspaceCreate,
-    WorkspaceMember,
     WorkspaceMemberPublic,
     WorkspaceMembersPublic,
     WorkspaceMemberUpdate,
@@ -50,19 +46,19 @@ from gateway.services.tenancy.errors import (
     WorkspaceMemberNotFoundError,
     WorkspaceNameRequiredError,
 )
+from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 
 class WorkspaceService:
     """Business logic for the workspace surface."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, *, membership_listener: MembershipListener):
         self.db = db
         self.workspaces = WorkspaceRepository(db)
         self.members = WorkspaceMemberRepository(db)
-        self.organizations = OrganizationService(db)
-        self.budget_defaults = WorkspaceBudgetDefaultService(db)
+        self.organizations = OrganizationService(db, membership_listener=None)
+        self._membership_listener = membership_listener
 
     # ------------------------------------------------------------------
     # Scoping and authorization
@@ -180,7 +176,7 @@ class WorkspaceService:
             # Called anyway so every WorkspaceMember-creating path materializes
             # the same way, rather than three of four doing it and this one
             # relying on being first.
-            await self.budget_defaults.materialize_for_member(member)
+            await self._membership_listener.member_joined(member)
             await self.db.commit()
         except IntegrityError:
             await self.db.rollback()
@@ -270,12 +266,9 @@ class WorkspaceService:
         ON DELETE RESTRICT, so the database refuses; without the guard below the
         refusal reached the client as a 500 rather than as the conflict it is.
 
-        The scoped budgets naming this workspace and its memberships go with it,
-        in the same transaction. ``scoped_budgets.scope_id`` is deliberately not
-        a foreign key (a scope names a row in one of four tables), so nothing in
-        the database removes them, and a ceiling left behind is the exact state
-        ``routes/scoped_budgets._require_scope_exists`` refuses to create: it
-        lists, it never binds, and nothing surfaces that it stopped mattering.
+        The workspace and its memberships are announced to the membership
+        listener first, in the same transaction, so whatever else is keyed on
+        them goes at the same time.
         """
         organization = await self._active_organization(user)
         await self.organizations.require_active_organization_management_access(
@@ -298,7 +291,8 @@ class WorkspaceService:
             raise LastWorkspaceError
 
         try:
-            await self._delete_scoped_budgets_for(workspace_id)
+            member_ids = await self.members.ids_for_workspace(workspace_id)
+            await self._membership_listener.workspace_deleted(workspace_id, member_ids)
             await self.workspaces.delete_workspace(workspace)
             await self.db.commit()
         except IntegrityError:
@@ -308,41 +302,6 @@ class WorkspaceService:
             # delete leaves the workspace exactly as it was.
             await self.db.rollback()
             raise WorkspaceInUseError from None
-
-    async def _delete_scoped_budgets_for(self, workspace_id: uuid.UUID) -> None:
-        """Remove the ceilings that would outlive this workspace.
-
-        Its own, and its memberships', read before the cascade takes those rows
-        away. Not committed here: the caller owns the transaction, so a refused
-        workspace delete takes these back with it.
-        """
-        member_ids = (
-            (
-                await self.db.execute(
-                    select(col(WorkspaceMember.id)).where(col(WorkspaceMember.workspace_id) == workspace_id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        # The scope names are spelled out rather than imported from
-        # `scoped_budget_service`: that module imports `workspace_scope`, which
-        # imports `tenancy.provisioning_service`, which runs `tenancy/__init__`,
-        # which imports this one. `tests/unit/test_service_module_imports.py`
-        # pins that cycle staying closed.
-        await self.db.execute(
-            delete(ScopedBudget)
-            .where(
-                or_(
-                    and_(ScopedBudget.scope_type == "workspace", ScopedBudget.scope_id == str(workspace_id)),
-                    and_(
-                        ScopedBudget.scope_type == "workspace_member",
-                        ScopedBudget.scope_id.in_([str(member_id) for member_id in member_ids]),
-                    ),
-                )
-            )
-            .execution_options(synchronize_session=False)
-        )
 
     # ------------------------------------------------------------------
     # Membership
@@ -401,7 +360,7 @@ class WorkspaceService:
         # constraint is what actually decides.
         try:
             member = await self.members.create(workspace_id=workspace.id, user_id=user_id, role=role)
-            await self.budget_defaults.materialize_for_member(member)
+            await self._membership_listener.member_joined(member)
             await self.db.commit()
         except IntegrityError:
             await self.db.rollback()
@@ -438,19 +397,7 @@ class WorkspaceService:
         if member is None:
             return
 
-        # The ceilings keyed on this membership go with it, for the same reason
-        # `delete_workspace` sweeps them: `scoped_budgets.scope_id` is not a
-        # foreign key, so nothing cascades, and a ceiling naming a membership that
-        # no longer exists can never bind again. It is not inert, either: it holds
-        # a RESTRICT reference to its budget, so an orphan would refuse that
-        # budget's deletion forever, and there is no page listing ceilings to go
-        # and find it on. Same transaction, so a failed removal takes them back.
-        await self.db.execute(
-            delete(ScopedBudget).where(
-                ScopedBudget.scope_type == "workspace_member",
-                ScopedBudget.scope_id == str(member.id),
-            )
-        )
+        await self._membership_listener.member_removed(member)
         await self.members.delete(member)
         await self.db.commit()
 

@@ -92,7 +92,7 @@ class OrganizationDomainService:
         self.db = db
         self.domains = OrganizationDomainRepository(db)
         self.members = OrganizationMemberRepository(db)
-        self.organizations = OrganizationService(db)
+        self.organizations = OrganizationService(db, membership_listener=None)
 
     # ------------------------------------------------------------------
     # The claim surface

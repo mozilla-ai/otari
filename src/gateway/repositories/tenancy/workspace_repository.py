@@ -293,6 +293,13 @@ class WorkspaceMemberRepository:
         )
         return list(result.scalars().all())
 
+    async def ids_for_workspace(self, workspace_id: uuid.UUID) -> list[uuid.UUID]:
+        """Every membership ID in a workspace."""
+        result = await self.db.execute(
+            select(col(WorkspaceMember.id)).where(col(WorkspaceMember.workspace_id) == workspace_id)
+        )
+        return list(result.scalars().all())
+
     async def create(
         self,
         *,

@@ -12,6 +12,7 @@ from typing import NamedTuple
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.models.budgets import ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import (
@@ -242,5 +243,9 @@ async def test_bootstrap_provisioning_announces_the_operator_membership(async_db
 
     operator = await ensure_bootstrap_identity(async_db, membership_listener=listener)
 
-    members = await WorkspaceMemberRepository(async_db).get_workspace_ids_for_user(operator.id)
-    assert len(listener.joined) == 1, members
+    memberships = (
+        (await async_db.execute(select(WorkspaceMember).where(col(WorkspaceMember.user_id) == operator.id)))
+        .scalars()
+        .all()
+    )
+    assert listener.joined == [membership.id for membership in memberships]

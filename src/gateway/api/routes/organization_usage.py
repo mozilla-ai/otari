@@ -120,7 +120,7 @@ async def _scope_condition(
     suspended or a role changed between two requests, and the cheaper answer is
     the one that goes stale in the unsafe direction.
     """
-    organizations = OrganizationService(db)
+    organizations = OrganizationService(db, membership_listener=None)
 
     if workspace_id is not None:
         # Only the organization is resolved on this branch. The full scope would

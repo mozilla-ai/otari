@@ -46,18 +46,6 @@ from gateway.services.tenancy.errors import (
 )
 from gateway.services.tenancy.organization_service import OrganizationService
 
-# The scope name is spelled out rather than imported from
-# `scoped_budget_service`: that module imports `workspace_scope`, which imports
-# `tenancy.provisioning_service`, which imports `tenancy/__init__`, which
-# imports `workspace_service`, which imports this module. See
-# `WorkspaceService`'s own docstring on `_delete_scoped_budgets_for` for the
-# same avoidance. `tests/unit/test_service_module_imports.py` pins the graph
-# staying acyclic.
-#
-# The *period derivation* used to be duplicated for the same reason, and that
-# copy only understood durations, so a calendar-aligned budget materialized a
-# ceiling with no window and never reset. It lives in
-# `gateway.services.budget_periods` now, a leaf both sides import.
 _SCOPE_WORKSPACE = "workspace"
 _SCOPE_WORKSPACE_MEMBER = "workspace_member"
 
@@ -162,7 +150,7 @@ class WorkspaceBudgetDefaultService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.organizations = OrganizationService(db)
+        self.organizations = OrganizationService(db, membership_listener=None)
         self.workspaces = WorkspaceRepository(db)
         self.workspace_members = WorkspaceMemberRepository(db)
 

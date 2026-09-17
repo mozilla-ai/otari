@@ -210,7 +210,7 @@ class WorkspaceActivationService:
     def __init__(self, db: AsyncSession, config: GatewayConfig):
         self.db = db
         self.config = config
-        self.organizations = OrganizationService(db)
+        self.organizations = OrganizationService(db, membership_listener=None)
 
     # ------------------------------------------------------------------
     # Reads

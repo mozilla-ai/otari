@@ -33,6 +33,7 @@ from gateway.services.routing import clear_router_backend_cache
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
+from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -597,7 +598,7 @@ async def get_current_identity(
     """
     if session_identity is not None:
         return session_identity
-    return await ensure_bootstrap_identity(db)
+    return await ensure_bootstrap_identity(db, membership_listener=WorkspaceBudgetDefaultService(db))
 
 
 CurrentIdentity = Annotated[TenancyUser, Depends(get_current_identity)]
@@ -755,7 +756,7 @@ async def _caller_organization_id(
     so an operator running several organizations behind one gateway works in the
     one they are currently in rather than across all of them (otari#817).
     """
-    return (await OrganizationService(db).get_active_organization_for_user(identity)).id
+    return (await OrganizationService(db, membership_listener=None).get_active_organization_for_user(identity)).id
 
 
 CallerOrganization = Annotated[uuid.UUID, Depends(_caller_organization_id)]

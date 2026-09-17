@@ -466,7 +466,7 @@ class WorkspaceWebSearchService:
 
     def __init__(self, db: AsyncSession, *, web_search_configured: bool):
         self.db = db
-        self.organizations = OrganizationService(db)
+        self.organizations = OrganizationService(db, membership_listener=None)
         # Passed in rather than read here: whether a backend is configured is a
         # question about the running deployment's config, which the route layer
         # already holds and a service has no business reaching for.

@@ -299,7 +299,7 @@ class WorkspaceCodeExecutionPolicyService:
 
     def __init__(self, db: AsyncSession, *, sandbox_configured: bool, allowed_images: tuple[str, ...] = ()):
         self.db = db
-        self.organizations = OrganizationService(db)
+        self.organizations = OrganizationService(db, membership_listener=None)
         # Passed in rather than read here: whether a sandbox is configured, and
         # which images an operator curated, are questions about the running
         # deployment's config, which the route layer already holds and a service

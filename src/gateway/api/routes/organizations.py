@@ -57,6 +57,7 @@ from gateway.models.tenancy import (
     SwitchActiveOrganizationRequest,
 )
 from gateway.services.tenancy import OrganizationDomainService, OrganizationService
+from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
 # every handler here happens to take one today, and a future handler that did
@@ -78,7 +79,7 @@ class Message(BaseModel):
 
 def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationService:
     """Build the organization service on the request's session."""
-    return OrganizationService(db)
+    return OrganizationService(db, membership_listener=WorkspaceBudgetDefaultService(db))
 
 
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]

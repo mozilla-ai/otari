@@ -1,6 +1,6 @@
 """The interface a domain implements to react to workspace membership changes.
 
-The organizations domain calls it and never imports the domain that implements it.
+The domain that changes membership calls it and never imports the domain that implements it.
 """
 
 import uuid

@@ -24,6 +24,7 @@ from gateway.models.tenancy import (
     WorkspaceUpdate,
 )
 from gateway.services.tenancy import WorkspaceService
+from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
 # every handler here happens to take one today, and a future handler that did
@@ -41,7 +42,7 @@ WORKSPACE_ROLE_DESCRIPTION = "Role to assign in this workspace."
 
 def get_workspace_service(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceService:
     """Build the workspace service on the request's session."""
-    return WorkspaceService(db)
+    return WorkspaceService(db, membership_listener=WorkspaceBudgetDefaultService(db))
 
 
 WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]

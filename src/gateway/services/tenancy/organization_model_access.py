@@ -144,7 +144,7 @@ async def resolve_session_catalog_scope(
 
     NOTE: this never answers unrestricted, so a caller should decide that for a deployment operator first.
     """
-    services = organizations if organizations is not None else OrganizationService(db)
+    services = organizations if organizations is not None else OrganizationService(db, membership_listener=None)
     allowlist = {f"{instance}:*" for instance in config.providers}
     try:
         scope = await resolve_visible_workspace_scope(db, user=user, organizations=services)

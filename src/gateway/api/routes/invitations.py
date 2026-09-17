@@ -26,6 +26,7 @@ from gateway.models.tenancy import (
     ValidateInvitationRequest,
 )
 from gateway.services.tenancy import OrganizationService
+from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 router = APIRouter(prefix="/invitations", tags=["invitations"])
 
@@ -38,7 +39,7 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
     public, one is master-key gated), and importing the dependency alone
     across that boundary is not worth it for one function.
     """
-    return OrganizationService(db)
+    return OrganizationService(db, membership_listener=WorkspaceBudgetDefaultService(db))
 
 
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
