@@ -135,9 +135,14 @@ function storedGuardrail(
     create_secrets: { api_key: "***" },
     validate_kwargs: {},
     enabled: true,
+    mode: "block",
+    on_unavailable: "block",
+    applies_to_all_workspaces: true,
+    workspace_ids: [],
     created_at: "2026-09-16T00:00:00Z",
     updated_at: "2026-09-16T00:00:00Z",
     decryptable: true,
+    loaded: true,
     ...overrides,
   }
 }

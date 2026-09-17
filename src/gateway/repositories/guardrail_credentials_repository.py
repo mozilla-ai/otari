@@ -12,10 +12,15 @@ while the commit boundary stays with the service, which is the layer that knows
 when a unit of work is complete.
 """
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+import uuid
+from collections.abc import Sequence
 
-from gateway.models.guardrails import GuardrailCredential
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
+
+from gateway.models.guardrails import GuardrailCredential, GuardrailCredentialWorkspace
+from gateway.models.tenancy import Workspace
 
 MAX_GUARDRAIL_CREDENTIALS = 500
 """Ceiling on one listing. The table is operator-authored and nothing like this
@@ -62,4 +67,51 @@ async def add_guardrail_credential(db: AsyncSession, row: GuardrailCredential) -
 async def delete_guardrail_credential(db: AsyncSession, row: GuardrailCredential) -> None:
     """Stage the row's removal and flush it."""
     await db.delete(row)
+    await db.flush()
+
+
+async def count_enabled_guardrail_credentials(db: AsyncSession, *, excluding: str | None = None) -> int:
+    """How many definitions are enabled, optionally ignoring one by name.
+
+    ``excluding`` is the row a write is about to change, so an update that leaves
+    it enabled is not counted against itself.
+    """
+    stmt = select(func.count()).select_from(GuardrailCredential).where(GuardrailCredential.enabled.is_(True))
+    if excluding is not None:
+        stmt = stmt.where(GuardrailCredential.name != excluding)
+    return int((await db.execute(stmt)).scalar_one())
+
+
+async def missing_workspace_ids(db: AsyncSession, workspace_ids: Sequence[uuid.UUID]) -> set[uuid.UUID]:
+    """The ids of ``workspace_ids`` that no workspace row carries."""
+    if not workspace_ids:
+        return set()
+    wanted = set(workspace_ids)
+    stmt = select(col(Workspace.id)).where(col(Workspace.id).in_(wanted))
+    return wanted - set((await db.execute(stmt)).scalars().all())
+
+
+async def workspace_ids_by_credential(db: AsyncSession, *, name: str | None = None) -> dict[str, list[uuid.UUID]]:
+    """Definition scopes keyed by name, for a listing that must not fan out.
+
+    ``name`` narrows it to one row, which is what the single-row reads use.
+    """
+    stmt = select(GuardrailCredentialWorkspace.credential_name, GuardrailCredentialWorkspace.workspace_id).order_by(
+        GuardrailCredentialWorkspace.credential_name, GuardrailCredentialWorkspace.workspace_id
+    )
+    if name is not None:
+        stmt = stmt.where(GuardrailCredentialWorkspace.credential_name == name)
+    scoped: dict[str, list[uuid.UUID]] = {}
+    for credential_name, workspace_id in (await db.execute(stmt)).all():
+        scoped.setdefault(credential_name, []).append(workspace_id)
+    return scoped
+
+
+async def replace_guardrail_credential_workspaces(
+    db: AsyncSession, *, name: str, workspace_ids: Sequence[uuid.UUID]
+) -> None:
+    """Set one definition's scope to exactly ``workspace_ids``."""
+    await db.execute(delete(GuardrailCredentialWorkspace).where(GuardrailCredentialWorkspace.credential_name == name))
+    for workspace_id in workspace_ids:
+        db.add(GuardrailCredentialWorkspace(credential_name=name, workspace_id=workspace_id))
     await db.flush()

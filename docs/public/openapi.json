@@ -3762,6 +3762,12 @@
           "name": "prompt-injection"
         },
         "properties": {
+          "applies_to_all_workspaces": {
+            "default": false,
+            "description": "True checks every workspace, including one created later; false checks only the workspaces named by workspace_ids.",
+            "title": "Applies To All Workspaces",
+            "type": "boolean"
+          },
           "create_kwargs": {
             "additionalProperties": true,
             "description": "Constructor arguments, secret and plain together. They are split by the catalog's own secret flag; the secret half is encrypted before it is stored.",
@@ -3770,13 +3776,23 @@
           },
           "enabled": {
             "default": true,
-            "description": "A disabled definition is kept but does not run.",
+            "description": "A disabled definition is kept but checks nothing. At most 10 may be enabled at once.",
             "title": "Enabled",
             "type": "boolean"
           },
           "guardrail_name": {
             "description": "The guardrail to build, as listed by GET /tool-settings/guardrails/catalog.",
             "title": "Guardrail Name",
+            "type": "string"
+          },
+          "mode": {
+            "default": "block",
+            "description": "What happens when this guardrail flags a request. 'block' refuses it with a 403 and never calls the provider; 'monitor' serves it and reports the verdict on the response.",
+            "enum": [
+              "block",
+              "monitor"
+            ],
+            "title": "Mode",
             "type": "string"
           },
           "name": {
@@ -3787,11 +3803,30 @@
             "title": "Name",
             "type": "string"
           },
+          "on_unavailable": {
+            "default": "block",
+            "description": "What Otari does when the guardrail returns no verdict at all, because the vendor failed, timed out or answered malformed. 'block' refuses the request, 'allow' serves it. Consulted only when mode is 'block': a monitoring definition serves the request either way and reports the missing verdict. Not the same as an inconclusive verdict, which never blocks.",
+            "enum": [
+              "block",
+              "allow"
+            ],
+            "title": "On Unavailable",
+            "type": "string"
+          },
           "validate_kwargs": {
             "additionalProperties": true,
             "description": "Per-call arguments sent with the text on every check.",
             "title": "Validate Kwargs",
             "type": "object"
+          },
+          "workspace_ids": {
+            "description": "Workspaces this guardrail checks. Must be empty when applies_to_all_workspaces is true.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Workspace Ids",
+            "type": "array"
           }
         },
         "required": [
@@ -12882,6 +12917,10 @@
       "StoredGuardrailSchema": {
         "description": "A stored guardrail definition. Credentials are never returned, only their names.",
         "properties": {
+          "applies_to_all_workspaces": {
+            "title": "Applies To All Workspaces",
+            "type": "boolean"
+          },
           "create_kwargs": {
             "additionalProperties": true,
             "description": "The non-secret constructor arguments, as stored.",
@@ -12921,8 +12960,32 @@
             "title": "Guardrail Name",
             "type": "string"
           },
+          "loaded": {
+            "default": false,
+            "description": "Whether this worker has the guardrail built and ready. False on a definition that failed to build, whose checks therefore do not run. Answered by the worker that served the read.",
+            "title": "Loaded",
+            "type": "boolean"
+          },
+          "mode": {
+            "description": "What happens when this guardrail flags a request: block refuses it, monitor serves it.",
+            "enum": [
+              "block",
+              "monitor"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
           "name": {
             "title": "Name",
+            "type": "string"
+          },
+          "on_unavailable": {
+            "description": "What Otari does when the guardrail returns no verdict at all.",
+            "enum": [
+              "block",
+              "allow"
+            ],
+            "title": "On Unavailable",
             "type": "string"
           },
           "updated_at": {
@@ -12941,12 +13004,24 @@
             "description": "The per-call arguments, with credential-shaped entries masked.",
             "title": "Validate Kwargs",
             "type": "object"
+          },
+          "workspace_ids": {
+            "description": "The workspaces this definition checks. Empty when it applies to all of them.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Workspace Ids",
+            "type": "array"
           }
         },
         "required": [
           "name",
           "guardrail_name",
-          "enabled"
+          "enabled",
+          "mode",
+          "on_unavailable",
+          "applies_to_all_workspaces"
         ],
         "title": "StoredGuardrailSchema",
         "type": "object"
@@ -13771,6 +13846,17 @@
           "enabled": false
         },
         "properties": {
+          "applies_to_all_workspaces": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applies To All Workspaces"
+          },
           "create_kwargs": {
             "anyOf": [
               {
@@ -13818,6 +13904,36 @@
             ],
             "title": "Guardrail Name"
           },
+          "mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "block",
+                  "monitor"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "on_unavailable": {
+            "anyOf": [
+              {
+                "enum": [
+                  "block",
+                  "allow"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Unavailable"
+          },
           "validate_kwargs": {
             "anyOf": [
               {
@@ -13829,6 +13945,22 @@
               }
             ],
             "title": "Validate Kwargs"
+          },
+          "workspace_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replaces the scope whole when sent; [] clears it.",
+            "title": "Workspace Ids"
           }
         },
         "title": "UpdateGuardrailCredentialRequest",

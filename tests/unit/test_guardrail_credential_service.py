@@ -26,6 +26,7 @@ from gateway.services.guardrail_credential_service import (
     decrypt_create_secrets,
     definition_from_row,
     split_create_kwargs,
+    stored_guardrail_config,
     stored_secret_names,
     validate_guardrail_kwargs,
 )
@@ -278,3 +279,55 @@ def test_storing_a_guardrail_never_loads_a_model_backend() -> None:
     """The catalog reads an import-free registry, and this module must not widen that."""
     assert "torch" not in sys.modules
     assert "transformers" not in sys.modules
+
+
+def _row(**kwargs: object) -> GuardrailCredential:
+    """A stored row with only the columns the config is built from set."""
+    defaults: dict[str, object] = {
+        "name": "prompt-injection",
+        "guardrail_name": "lakera_guard",
+        "create_kwargs": {},
+        "validate_kwargs": {},
+        "enabled": True,
+        "mode": "block",
+        "on_unavailable": "block",
+        "applies_to_all_workspaces": False,
+    }
+    return GuardrailCredential(**(defaults | kwargs))
+
+
+def test_the_row_is_the_profile_a_request_is_checked_against() -> None:
+    """``name`` is the profile, and the row's per-call arguments travel with it."""
+    config = stored_guardrail_config(_row(validate_kwargs={"threshold": 0.8}))
+
+    assert config.profile == "prompt-injection"
+    assert config.validate_kwargs == {"threshold": 0.8}
+    # Never an endpoint: a stored definition runs in this process, and a URL here
+    # would send it to a sidecar instead.
+    assert config.url is None
+
+
+def test_allow_becomes_the_legacy_monitor() -> None:
+    """The one place the two vocabularies meet."""
+    assert stored_guardrail_config(_row(on_unavailable="allow")).on_unavailable == "monitor"
+
+
+def test_block_survives_the_translation() -> None:
+    assert stored_guardrail_config(_row(on_unavailable="block")).on_unavailable == "block"
+
+
+@pytest.mark.parametrize("column", ["mode", "on_unavailable"])
+def test_a_value_written_around_the_schema_resolves_to_block(column: str) -> None:
+    """Fail closed, as ``services/tenancy/organization_guardrail_service._stored_mode`` does.
+
+    Both columns are plain strings whose only writers are ``Literal`` fields, so
+    this is unreachable through the API. It resolves to the enforcing side
+    because the alternative is a security control that silently stops enforcing.
+    """
+    config = stored_guardrail_config(_row(**{column: "nonsense"}))
+
+    assert getattr(config, column) == "block"
+
+
+def test_a_monitor_definition_reports_rather_than_refuses() -> None:
+    assert stored_guardrail_config(_row(mode="monitor")).mode == "monitor"

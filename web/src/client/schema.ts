@@ -6825,6 +6825,12 @@ export interface components {
          */
         CreateGuardrailCredentialRequest: {
             /**
+             * Applies To All Workspaces
+             * @description True checks every workspace, including one created later; false checks only the workspaces named by workspace_ids.
+             * @default false
+             */
+            applies_to_all_workspaces: boolean;
+            /**
              * Create Kwargs
              * @description Constructor arguments, secret and plain together. They are split by the catalog's own secret flag; the secret half is encrypted before it is stored.
              */
@@ -6833,7 +6839,7 @@ export interface components {
             };
             /**
              * Enabled
-             * @description A disabled definition is kept but does not run.
+             * @description A disabled definition is kept but checks nothing. At most 10 may be enabled at once.
              * @default true
              */
             enabled: boolean;
@@ -6843,10 +6849,24 @@ export interface components {
              */
             guardrail_name: string;
             /**
+             * Mode
+             * @description What happens when this guardrail flags a request. 'block' refuses it with a 403 and never calls the provider; 'monitor' serves it and reports the verdict on the response.
+             * @default block
+             * @enum {string}
+             */
+            mode: "block" | "monitor";
+            /**
              * Name
              * @description The profile name a caller sends. One path segment, so it cannot contain '/'.
              */
             name: string;
+            /**
+             * On Unavailable
+             * @description What Otari does when the guardrail returns no verdict at all, because the vendor failed, timed out or answered malformed. 'block' refuses the request, 'allow' serves it. Consulted only when mode is 'block': a monitoring definition serves the request either way and reports the missing verdict. Not the same as an inconclusive verdict, which never blocks.
+             * @default block
+             * @enum {string}
+             */
+            on_unavailable: "block" | "allow";
             /**
              * Validate Kwargs
              * @description Per-call arguments sent with the text on every check.
@@ -6854,6 +6874,11 @@ export interface components {
             validate_kwargs?: {
                 [key: string]: unknown;
             };
+            /**
+             * Workspace Ids
+             * @description Workspaces this guardrail checks. Must be empty when applies_to_all_workspaces is true.
+             */
+            workspace_ids?: string[];
         };
         /**
          * CreateKeyRequest
@@ -11253,6 +11278,8 @@ export interface components {
          * @description A stored guardrail definition. Credentials are never returned, only their names.
          */
         StoredGuardrailSchema: {
+            /** Applies To All Workspaces */
+            applies_to_all_workspaces: boolean;
             /**
              * Create Kwargs
              * @description The non-secret constructor arguments, as stored.
@@ -11279,8 +11306,26 @@ export interface components {
             enabled: boolean;
             /** Guardrail Name */
             guardrail_name: string;
+            /**
+             * Loaded
+             * @description Whether this worker has the guardrail built and ready. False on a definition that failed to build, whose checks therefore do not run. Answered by the worker that served the read.
+             * @default false
+             */
+            loaded: boolean;
+            /**
+             * Mode
+             * @description What happens when this guardrail flags a request: block refuses it, monitor serves it.
+             * @enum {string}
+             */
+            mode: "block" | "monitor";
             /** Name */
             name: string;
+            /**
+             * On Unavailable
+             * @description What Otari does when the guardrail returns no verdict at all.
+             * @enum {string}
+             */
+            on_unavailable: "block" | "allow";
             /** Updated At */
             updated_at?: string | null;
             /**
@@ -11290,6 +11335,11 @@ export interface components {
             validate_kwargs?: {
                 [key: string]: unknown;
             };
+            /**
+             * Workspace Ids
+             * @description The workspaces this definition checks. Empty when it applies to all of them.
+             */
+            workspace_ids?: string[];
         };
         /**
          * StoredProviderResponse
@@ -11674,6 +11724,8 @@ export interface components {
          *     }
          */
         UpdateGuardrailCredentialRequest: {
+            /** Applies To All Workspaces */
+            applies_to_all_workspaces?: boolean | null;
             /**
              * Create Kwargs
              * @description Replaces the whole map when sent. A value of '***' keeps the stored credential of that name, a new value rotates it, and a credential left out is cleared.
@@ -11690,10 +11742,19 @@ export interface components {
             expected_updated_at?: string | null;
             /** Guardrail Name */
             guardrail_name?: string | null;
+            /** Mode */
+            mode?: ("block" | "monitor") | null;
+            /** On Unavailable */
+            on_unavailable?: ("block" | "allow") | null;
             /** Validate Kwargs */
             validate_kwargs?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Workspace Ids
+             * @description Replaces the scope whole when sent; [] clears it.
+             */
+            workspace_ids?: string[] | null;
         };
         /**
          * UpdateKeyRequest
