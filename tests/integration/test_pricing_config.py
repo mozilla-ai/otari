@@ -229,6 +229,7 @@ def test_pricing_loaded_from_config_normalizes_legacy_slash_format(postgres_url:
         dispose_override()
 
 
+@pytest.mark.filterwarnings("ignore:Model format 'provider/model' is deprecated:DeprecationWarning")
 def test_set_pricing_api_normalizes_legacy_slash_format(
     client: TestClient,
     master_key_header: dict[str, str],

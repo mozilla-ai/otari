@@ -121,6 +121,7 @@ async def test_two_instances_of_same_impl_do_not_collide(client: TestClient) -> 
 
 
 @pytest.mark.asyncio
+@pytest.mark.filterwarnings("ignore:Model format 'provider/model' is deprecated:DeprecationWarning")
 async def test_pricing_round_trip_for_instance_key(client: TestClient) -> None:
     """Pricing for an instance-scoped key can be set and then read back (no 500).
 

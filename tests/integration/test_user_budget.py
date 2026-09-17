@@ -415,7 +415,7 @@ def test_user_exceeded_budget_blocked_on_unknown_pricing(
     response = client.post(
         f"{API_ROOT}/chat/completions",
         json={
-            "model": "unknown/model",
+            "model": "unknown:model",
             "messages": test_messages,
             "user": "test-user-budget",
         },
