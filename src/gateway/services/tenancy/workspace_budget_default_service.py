@@ -24,10 +24,11 @@ provisioning). CRUD methods commit on success.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -57,6 +58,7 @@ from gateway.services.tenancy.organization_service import OrganizationService
 # copy only understood durations, so a calendar-aligned budget materialized a
 # ceiling with no window and never reset. It lives in
 # `gateway.services.budget_periods` now, a leaf both sides import.
+_SCOPE_WORKSPACE = "workspace"
 _SCOPE_WORKSPACE_MEMBER = "workspace_member"
 
 # Page size for fanning a new default out across a workspace's active members,
@@ -163,6 +165,37 @@ class WorkspaceBudgetDefaultService:
         self.organizations = OrganizationService(db)
         self.workspaces = WorkspaceRepository(db)
         self.workspace_members = WorkspaceMemberRepository(db)
+
+    async def member_joined(self, member: WorkspaceMember) -> None:
+        """Materialize the member's workspace defaults into the caller's transaction."""
+        await self.materialize_for_member(member)
+
+    async def member_removed(self, member: WorkspaceMember) -> None:
+        """Delete the ceilings keyed on this membership, in the caller's transaction."""
+        # scope_id is not a foreign key, so nothing cascades, and an orphan
+        # ceiling would refuse its budget's deletion.
+        await self.db.execute(
+            delete(ScopedBudget).where(
+                ScopedBudget.scope_type == _SCOPE_WORKSPACE_MEMBER,
+                ScopedBudget.scope_id == str(member.id),
+            )
+        )
+
+    async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
+        """Delete the ceilings that would outlive the workspace, in the caller's transaction."""
+        await self.db.execute(
+            delete(ScopedBudget)
+            .where(
+                or_(
+                    and_(ScopedBudget.scope_type == _SCOPE_WORKSPACE, ScopedBudget.scope_id == str(workspace_id)),
+                    and_(
+                        ScopedBudget.scope_type == _SCOPE_WORKSPACE_MEMBER,
+                        ScopedBudget.scope_id.in_([str(member_id) for member_id in member_ids]),
+                    ),
+                )
+            )
+            .execution_options(synchronize_session=False)
+        )
 
     # ------------------------------------------------------------------
     # Materialization (flush-only, no auth: called from within an
