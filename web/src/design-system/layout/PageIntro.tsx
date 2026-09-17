@@ -35,7 +35,7 @@ export function PageIntro({
   docsHref?: string
   /**
    * Overrides the description's measure. One caller uses it: the guide, whose
-   * own prose is 560px, so the paragraph introducing it should not be the
+   * own prose is 35rem, so the paragraph introducing it should not be the
    * widest line on a page about measure.
    */
   descriptionClassName?: string

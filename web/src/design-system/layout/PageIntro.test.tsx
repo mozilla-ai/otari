@@ -88,12 +88,12 @@ describe("PageIntro", () => {
     // header. It has to append: replacing the base would take the muted color
     // and the type with it, and the caller would then re-spell both.
     render(
-      <PageIntro title="Guide" descriptionClassName="max-w-[560px]">
+      <PageIntro title="Guide" descriptionClassName="max-w-[35rem]">
         How to use the gateway.
       </PageIntro>,
     )
     const description = screen.getByText("How to use the gateway.")
-    expect([...description.classList]).toContain("max-w-[560px]")
+    expect([...description.classList]).toContain("max-w-[35rem]")
     expect([...description.classList]).toContain("text-sm")
     expect([...description.classList]).toContain("text-muted")
   })
