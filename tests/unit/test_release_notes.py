@@ -28,9 +28,6 @@ _UNRELEASED_COMMITS = [
     "Update a readme without a type",
 ]
 
-# Reruns cover a transient PyPI failure while uvx fetches git-cliff.
-pytestmark = pytest.mark.flaky(reruns=2, reruns_delay=5)
-
 
 def _pinned_git_cliff_version() -> str:
     versions = {match.group(1) for match in re.finditer(r"git-cliff@(\S+)", _RELEASE_WORKFLOW.read_text())}
