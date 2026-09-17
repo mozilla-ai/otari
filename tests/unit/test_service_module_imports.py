@@ -72,3 +72,35 @@ def test_module_imports_first(module: str) -> None:
     )
 
     assert result.returncode == 0, f"{module} cannot be imported first:\n{result.stderr}"
+
+
+# Budgets depends on organizations, never the reverse. Importing an organizations
+# module must not drag a budget module in behind it.
+_BUDGET_MODULE_PREFIXES = (
+    "gateway.services.budget",
+    "gateway.services.scoped_budget_service",
+    "gateway.services.tenancy.organization_budget_service",
+    "gateway.services.tenancy.workspace_budget_default_service",
+    "gateway.services.budgets",
+)
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        "gateway.services.tenancy.workspace_service",
+        "gateway.services.tenancy.organization_service",
+        "gateway.services.tenancy.provisioning_service",
+    ],
+)
+def test_organizations_modules_load_no_budget_module(module: str) -> None:
+    code = (
+        "import sys, importlib\n"
+        f"importlib.import_module({module!r})\n"
+        f"loaded = sorted(m for m in sys.modules if m.startswith({_BUDGET_MODULE_PREFIXES!r}))\n"
+        "print(','.join(loaded))\n"
+    )
+
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+
+    assert result.stdout.strip() == "", f"{module} loaded budget modules: {result.stdout.strip()}"
