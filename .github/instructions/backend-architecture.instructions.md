@@ -53,10 +53,15 @@ same" as a reason.
 
 ## Commits
 
-- A service commits. A route or a repository never does.
-- Once `core/unit_of_work.py` exists, a commit happens only when a Unit of Work
-  block ends, and only a service opens a block. Flag a direct `commit()` or
-  `rollback()` in code the PR adds after that.
+- A commit happens only when a Unit of Work block ends, and only a service
+  opens a block. Flag a direct `commit()` or `rollback()` in code the PR adds,
+  and a route or a repository that opens a block.
+- A repository reaches the session only through `session_for(uow)`. Flag any
+  other code that calls `session_for`.
+- A request gets its Unit of Work from `get_unit_of_work`, and a worker job
+  from `create_unit_of_work()` or `create_log_unit_of_work()`.
+- Code still in the old shape commits in its services. Do not flag a commit
+  the PR does not add.
 
 ## Imports between domains
 

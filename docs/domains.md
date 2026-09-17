@@ -30,10 +30,10 @@ How a domain fits together:
   repositories, the Unit of Work, config, ports, and the services of other
   domains it needs. It never receives the session or another domain's
   repository, so it cannot run a query.
-- **One Unit of Work per request or worker job.** A business step is one
-  `async with` block that commits when it ends and rolls back on an error. Only
-  a service opens a block. **Planned:** the type lives in
-  `core/unit_of_work.py`.
+- **One Unit of Work per request or worker job.** Only a service opens a
+  block.
+  [Who commits](../.github/skills/backend-standards/SKILL.md#who-commits) gives
+  the rules.
 - **Builders** live in `api/deps.py`. A worker job calls the same builder with a
   Unit of Work over its own session. Nothing under `services/` may import
   `api/`, so the code that starts a worker passes the builder in.

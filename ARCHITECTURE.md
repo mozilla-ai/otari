@@ -229,7 +229,7 @@ Services and repositories are one package per domain inside their layer, and a s
 
 1. Nothing under `services/` imports `sqlalchemy` or `sqlmodel`.
 2. Nothing under `api/routes/` imports `sqlalchemy` or `sqlmodel`.
-3. Only the Unit of Work calls `commit()` or `rollback()`. The Unit of Work is planned; the [backend standards](.github/skills/backend-standards/SKILL.md#who-commits) describe it.
+3. Only the Unit of Work calls `commit()` or `rollback()`. The [backend standards](.github/skills/backend-standards/SKILL.md#who-commits) say how it is used.
 4. Only a domain's own service package and the builders in `api/deps.py` import `repositories.<domain>`.
 5. Code outside a domain imports only the package root of `services.<domain>`. A module whose name starts with `_` is private to its package.
 6. Domain service packages never import each other in a cycle.

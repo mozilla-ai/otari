@@ -234,12 +234,12 @@ identity.
 Request code gets a session through `get_db`; non-request code uses
 `create_session()`; the usage-log writer uses `create_log_session()`, which
 draws from a pool of its own so metering is not starved by request traffic.
-Services own commits and rollbacks. The one exception is
-`release_session(db)`, which the request path calls before dispatching upstream
-so a pooled connection is not held across the provider call. Both describe the
-code as it is today;
+Code still in the old shape commits in its services, and the request path
+calls `release_session(db)` before dispatching upstream so a pooled connection
+is not held across the provider call. New code commits through a Unit of Work
+block, as
 [Who commits](../../.github/skills/backend-standards/SKILL.md#who-commits)
-gives the target shape, where a Unit of Work block commits and no route does.
+describes.
 Migrations live under `alembic/versions/`.
 
 Once a client-side `db_command_timeout` is configured, a database call can

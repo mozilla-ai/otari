@@ -104,27 +104,33 @@ from a builder in `api/deps.py`. Two rules add to it:
 
 ### Who commits
 
-A Unit of Work marks where a business transaction starts, commits and rolls back.
+A Unit of Work (`core/unit_of_work.py`) marks where a business transaction starts, commits and
+rolls back.
 
-- Each request, and each worker job, has one Unit of Work over its one session. Every service
-  built in that scope shares it.
+- Each request, and each worker job, has one Unit of Work over its one session, and every service
+  built in that scope shares it. A request gets it from `get_unit_of_work` in `api/deps.py`. A
+  worker job gets it from `create_unit_of_work()`, or from `create_log_unit_of_work()` for work
+  on the metering pool.
 - A business step is one `async with uow:` block, an async context manager. The block commits
   when it ends, and rolls back and re-raises on an error. Either way the connection goes back to
   the pool.
 - Blocks nest. An inner block joins the outer one, and only the outermost block commits, so a step
   that writes to two domains is atomic.
 - A step in which an inner block failed is rolled back as a whole, even when the code around that
-  block caught the error: the outermost block rolls back and raises instead of committing.
-- Every database call runs inside a block, and a repository call outside a block raises. No
-  transaction stays open by accident, so a request whose database work all runs in blocks needs
-  no `release_session` before it dispatches upstream.
+  block caught the error: the outermost block rolls back and raises `UnitOfWorkRolledBackError`.
+- If the rollback itself fails with a database error, that error is logged, and the error that
+  ended the step is still the one the caller sees.
+- A repository reaches the session only through `session_for(uow)`, which raises
+  `OutsideUnitOfWorkError` when no block is open. A Unit of Work exposes no session of its own.
+  A `BaseRepository` built on a Unit of Work calls `session_for` for every operation.
 - Only a service opens a block. A repository never commits, and a route never opens a block.
+- A request whose database work all runs in blocks needs no `release_session` before it
+  dispatches upstream.
 - Hybrid mode has no local database and no Unit of Work.
 
-**Planned:** the Unit of Work type in `core/unit_of_work.py`, with a request dependency over
-`get_db` and a worker helper over `create_session()` and `create_log_session()`. #1306 adds it and
-is not merged yet. Until it lands, a domain that has not moved keeps its commits in its services,
-and a route or a repository never commits.
+Code still in the old shape commits in its services, and some routes still commit. A domain's
+commits move into blocks when the domain moves
+([step 4](../../../docs/domains.md#what-one-domain-change-does)).
 
 ### Sources
 
