@@ -62,7 +62,7 @@ _DEPLOYMENT_WIDE_PROBES: list[tuple[str, str]] = [
 ]
 
 # The subset whose reach is worse than reading somebody else's rows: two that
-# take the deployment away from its operator, and the three that make the
+# take the deployment away from its operator, and the four that make the
 # gateway issue an outbound request to an address the caller supplies.
 _ESCALATION_PROBES: list[tuple[str, str]] = [
     ("POST", f"{API_ROOT}/settings/master-key/rotate"),
@@ -70,6 +70,7 @@ _ESCALATION_PROBES: list[tuple[str, str]] = [
     ("POST", f"{API_ROOT}/provider-credentials/test"),
     ("POST", f"{API_ROOT}/tool-settings/web_search/test"),
     ("POST", f"{API_ROOT}/settings/mail/test"),
+    ("POST", f"{API_ROOT}/guardrail-credentials/any/test"),
 ]
 
 # The data plane: a provider is called with somebody's credentials and a usage

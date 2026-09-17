@@ -2077,6 +2077,48 @@
               ]
             }
           }
+        },
+        {
+          "name": "Test Stored Guardrail",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"input_text\": \"string\"\n}"
+            },
+            "description": "Run a stored guardrail against some text, so an operator sees it work.\n\nBuilds the definition as it stands right now and checks the text against that,\nchanging nothing about what the gateway is enforcing. A disabled definition is\nas testable as any other, since checking one before turning it on is the point,\nand finding out must not be what puts it in front of traffic.\n\nA guardrail that cannot run answers ``ok: false`` with the reason rather than\nan error status: the question asked was whether this definition works, and one\nshape of answer is easier to act on than two.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "guardrail-credentials",
+                ":name",
+                "test"
+              ],
+              "raw": "{{baseUrl}}/api/v1/guardrail-credentials/:name/test",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
         }
       ],
       "name": "guardrail-credentials"

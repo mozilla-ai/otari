@@ -24,11 +24,12 @@ from gateway.exceptions.guardrail_credentials import (
 from gateway.models.guardrails import GuardrailCredential
 from gateway.services.guardrail_credential_service import (
     decrypt_create_secrets,
+    definition_from_row,
     split_create_kwargs,
     stored_secret_names,
     validate_guardrail_kwargs,
 )
-from gateway.services.secret_box import encrypt_secret, generate_secret_key
+from gateway.services.secret_box import SecretDecryptionError, encrypt_secret, generate_secret_key
 
 _LAKERA = {"api_key": "lak-secret", "endpoint": "https://api.lakera.ai/v2/guard"}
 
@@ -74,6 +75,16 @@ def test_a_guardrail_that_would_load_model_weights_is_refused() -> None:
     """
     with pytest.raises(UnknownGuardrailError):
         validate_guardrail_kwargs("llama_guard", create_kwargs={}, validate_kwargs={})
+
+
+def test_a_guardrail_whose_hosted_path_needs_a_live_object_is_refused() -> None:
+    """``susfactor`` names a hosted alternate that a stored definition cannot select.
+
+    Reaching it means passing a ``provider=`` object, which is not an argument
+    upstream publishes, so what this would build is the local encoder.
+    """
+    with pytest.raises(UnknownGuardrailError):
+        validate_guardrail_kwargs("susfactor", create_kwargs={}, validate_kwargs={})
 
 
 def test_an_argument_the_guardrail_does_not_take_is_refused() -> None:
@@ -197,6 +208,70 @@ def test_an_unreadable_map_costs_the_names_and_not_the_listing(monkeypatch: pyte
     )
 
     assert stored_secret_names(row) == (frozenset(), False)
+
+
+def test_a_definition_puts_the_two_halves_of_a_row_back_together(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guardrail being built knows nothing about where its API key was kept."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    row = GuardrailCredential(
+        name="prompt-injection",
+        guardrail_name="lakera_guard",
+        create_kwargs={"endpoint": "https://api.lakera.ai/v2/guard"},
+        validate_kwargs={"breakdown": True},
+        encrypted_create_secrets=encrypt_secret('{"api_key": "lak-secret"}'),
+    )
+
+    definition = definition_from_row(row)
+
+    assert definition.guardrail_name == "lakera_guard"
+    assert definition.create_kwargs == {
+        "endpoint": "https://api.lakera.ai/v2/guard",
+        "api_key": "lak-secret",
+    }
+    assert definition.validate_kwargs == {"breakdown": True}
+
+
+def test_a_stored_secret_wins_over_a_plain_key_of_the_same_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The plain half cannot shadow a credential, however it came to hold that name.
+
+    A row rewritten under a guardrail that classifies the argument differently
+    could leave both halves carrying it, and the encrypted one is the real value.
+    """
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    row = GuardrailCredential(
+        name="n",
+        guardrail_name="lakera_guard",
+        create_kwargs={"api_key": "stale-plain-copy"},
+        validate_kwargs={},
+        encrypted_create_secrets=encrypt_secret('{"api_key": "lak-secret"}'),
+    )
+
+    assert definition_from_row(row).create_kwargs == {"api_key": "lak-secret"}
+
+
+def test_a_definition_from_a_row_with_no_secrets_is_its_plain_half() -> None:
+    row = GuardrailCredential(
+        name="judge", guardrail_name="any_llm", create_kwargs={"model_id": "gpt-4o"}, validate_kwargs={}
+    )
+
+    assert definition_from_row(row).create_kwargs == {"model_id": "gpt-4o"}
+
+
+def test_a_definition_refuses_a_row_whose_secrets_cannot_be_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Building the plain half alone would be a client with no API key."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    ciphertext = encrypt_secret('{"api_key": "lak-secret"}')
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    row = GuardrailCredential(
+        name="n",
+        guardrail_name="lakera_guard",
+        create_kwargs={},
+        validate_kwargs={},
+        encrypted_create_secrets=ciphertext,
+    )
+
+    with pytest.raises(SecretDecryptionError):
+        definition_from_row(row)
 
 
 def test_storing_a_guardrail_never_loads_a_model_backend() -> None:

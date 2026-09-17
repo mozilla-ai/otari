@@ -13158,6 +13158,89 @@
         "title": "TaskPool",
         "type": "object"
       },
+      "TestGuardrailRequest": {
+        "description": "Text to run one stored guardrail against.",
+        "properties": {
+          "input_text": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Input Text",
+            "type": "string"
+          },
+          "validate_kwargs": {
+            "additionalProperties": true,
+            "description": "Merged over the stored per-call arguments, for this call only.",
+            "title": "Validate Kwargs",
+            "type": "object"
+          }
+        },
+        "required": [
+          "input_text"
+        ],
+        "title": "TestGuardrailRequest",
+        "type": "object"
+      },
+      "TestGuardrailResponse": {
+        "description": "What one guardrail said about the text.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the guardrail could not run, when ok is false.",
+            "title": "Error"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation"
+          },
+          "ok": {
+            "description": "Whether the guardrail ran at all. False means it could not be evaluated.",
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "valid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "True when the input passed, false when it was flagged, null when the verdict was inconclusive.",
+            "title": "Valid"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "TestGuardrailResponse",
+        "type": "object"
+      },
       "TestProviderRequest": {
         "description": "Credentials to test before saving (from the add-provider form).",
         "properties": {
@@ -20972,6 +21055,67 @@
           }
         ],
         "summary": "Update Stored Guardrail",
+        "tags": [
+          "guardrail-credentials"
+        ]
+      }
+    },
+    "/api/v1/guardrail-credentials/{name}/test": {
+      "post": {
+        "description": "Run a stored guardrail against some text, so an operator sees it work.\n\nBuilds the definition as it stands right now and checks the text against that,\nchanging nothing about what the gateway is enforcing. A disabled definition is\nas testable as any other, since checking one before turning it on is the point,\nand finding out must not be what puts it in front of traffic.\n\nA guardrail that cannot run answers ``ok: false`` with the reason rather than\nan error status: the question asked was whether this definition works, and one\nshape of answer is easier to act on than two.",
+        "operationId": "guardrail-credentials-test_stored_guardrail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestGuardrailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestGuardrailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Stored Guardrail",
         "tags": [
           "guardrail-credentials"
         ]

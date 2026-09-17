@@ -16,6 +16,7 @@ from collections.abc import Callable
 import httpx
 import pytest
 from any_guardrail.base import GuardrailName
+from any_guardrail.parameter_registry import get_parameter_schema
 from any_guardrail.parameters import ParameterType as UpstreamParameterType
 from any_guardrail.registry import GUARDRAIL_METADATA
 from any_guardrail.taxonomy import BackendType, OutputShape
@@ -285,9 +286,7 @@ def test_lists_only_the_guardrails_a_hosted_api_reaches() -> None:
     listed = {spec.guardrail_name for spec in build_builtin_guardrail_catalog().guardrails}
 
     assert listed == {
-        name.value
-        for name, metadata in GUARDRAIL_METADATA.items()
-        if BackendType.HOSTED_API in ({metadata.backend} | metadata.alternate_backends)
+        name.value for name, metadata in GUARDRAIL_METADATA.items() if metadata.backend is BackendType.HOSTED_API
     }
 
 
@@ -298,11 +297,18 @@ def test_omits_a_guardrail_that_would_load_model_weights() -> None:
     assert not listed & {"llama_guard", "prompt_guard", "injec_guard", "lettuce_detect"}
 
 
-def test_lists_a_local_guardrail_that_also_has_a_hosted_path() -> None:
-    """SusFactor is why the rule reads `alternate_backends` and not `backend` alone."""
+def test_omits_a_guardrail_whose_hosted_path_cannot_be_selected() -> None:
+    """SusFactor is why the rule reads `backend` alone and not `alternate_backends`.
+
+    Its hosted alternate is reached by passing a live `provider=` object, and that
+    argument is not one upstream publishes, so no stored definition can ask for it
+    and the constructor would download an encoder instead. The assertion is on the
+    parameters rather than the count, because the parameters are the reason.
+    """
     listed = {spec.guardrail_name for spec in build_builtin_guardrail_catalog().guardrails}
 
-    assert "susfactor" in listed
+    assert "susfactor" not in listed
+    assert "provider" not in {spec.name for spec in get_parameter_schema(GuardrailName.SUSFACTOR)}
 
 
 def test_orders_the_catalog_for_a_picker() -> None:
@@ -424,13 +430,6 @@ def test_publishes_a_one_of_requirement_no_single_parameter_can_express() -> Non
 def test_leaves_requirement_groups_empty_for_a_guardrail_without_one() -> None:
     """The majority. An empty list must not read as "constraints unknown"."""
     assert _spec(build_builtin_guardrail_catalog(), "lakera_guard").requirement_groups == []
-
-
-def test_reports_a_second_way_to_run_the_same_guardrail() -> None:
-    """Susfactor also has a hosted path, which is the reason it is listed at all."""
-    spec = _spec(build_builtin_guardrail_catalog(), "susfactor")
-
-    assert spec.model_dump(mode="json")["alternate_backends"] == ["hosted_api"]
 
 
 def test_listing_the_catalog_never_loads_a_model_backend() -> None:

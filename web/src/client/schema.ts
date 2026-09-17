@@ -1253,6 +1253,35 @@ export interface paths {
         patch: operations["guardrail-credentials-update_stored_guardrail"];
         trace?: never;
     };
+    "/api/v1/guardrail-credentials/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Stored Guardrail
+         * @description Run a stored guardrail against some text, so an operator sees it work.
+         *
+         *     Builds the definition as it stands right now and checks the text against that,
+         *     changing nothing about what the gateway is enforcing. A disabled definition is
+         *     as testable as any other, since checking one before turning it on is the point,
+         *     and finding out must not be what puts it in front of traffic.
+         *
+         *     A guardrail that cannot run answers ``ok: false`` with the reason rather than
+         *     an error status: the question asked was whether this definition works, and one
+         *     shape of answer is easier to act on than two.
+         */
+        post: operations["guardrail-credentials-test_stored_guardrail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -11350,6 +11379,46 @@ export interface components {
             warm: boolean;
         };
         /**
+         * TestGuardrailRequest
+         * @description Text to run one stored guardrail against.
+         */
+        TestGuardrailRequest: {
+            /** Input Text */
+            input_text: string;
+            /**
+             * Validate Kwargs
+             * @description Merged over the stored per-call arguments, for this call only.
+             */
+            validate_kwargs?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * TestGuardrailResponse
+         * @description What one guardrail said about the text.
+         */
+        TestGuardrailResponse: {
+            /**
+             * Error
+             * @description Why the guardrail could not run, when ok is false.
+             */
+            error?: string | null;
+            /** Explanation */
+            explanation?: string | null;
+            /**
+             * Ok
+             * @description Whether the guardrail ran at all. False means it could not be evaluated.
+             */
+            ok: boolean;
+            /** Score */
+            score?: number | null;
+            /**
+             * Valid
+             * @description True when the input passed, false when it was flagged, null when the verdict was inconclusive.
+             */
+            valid?: boolean | null;
+        };
+        /**
          * TestProviderRequest
          * @description Credentials to test before saving (from the add-provider form).
          */
@@ -14898,6 +14967,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StoredGuardrailSchema"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "guardrail-credentials-test_stored_guardrail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestGuardrailRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestGuardrailResponse"];
                 };
             };
             /** @description Validation Error */

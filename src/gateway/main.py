@@ -32,6 +32,8 @@ from gateway.services.budget_reservation_ledger import run_reservation_sweeper
 from gateway.services.catalog_selectors import reset_selector_index
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.file_store import build_file_store
+from gateway.services.guardrail_loader import load_stored_guardrails
+from gateway.services.guardrail_runner import reset_guardrail_runner
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
 from gateway.services.model_catalog_service import (
@@ -429,6 +431,9 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         configure_provider_types(config.provider_pricing_implementation)
         log_writer: LogWriter
         workers: list[tuple[asyncio.Task[None], _LifespanWorker]] = []
+        # Not in ``_LIFESPAN_WORKERS``: every entry there is periodic, and this
+        # one runs once.
+        guardrail_loader: asyncio.Task[None] | None = None
         feature_workers: list[tuple[asyncio.Task[None], str]] = []
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
@@ -498,6 +503,13 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 for feature in app.state.enabled_features
                 if feature.worker is not None
             ]
+            # Inside the standalone branch, because the definitions are rows and a
+            # hybrid gateway keeps none. Not awaited, for the reason the refreshers
+            # are not: the work is a vendor SDK import and a client construction per
+            # profile, and a slow one must not hold the port closed. One shot rather
+            # than a refresher, because a definition changes through a write and the
+            # write rebuilds what it changed.
+            guardrail_loader = asyncio.create_task(load_stored_guardrails(config))
 
         # Start the writer inside the try so a failure here still runs the cleanup
         # below; the refresher tasks are already created and would otherwise leak.
@@ -508,8 +520,12 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             app.state.log_writer = log_writer
             yield
         finally:
+            # The guardrail pass is listed apart from the workers, whose names are
+            # rendered with the word "refresher": it runs once and is not one.
             await _stop_refreshers(
-                [(task, f"{worker.name} refresher") for task, worker in workers] + feature_workers
+                [(task, f"{worker.name} refresher") for task, worker in workers]
+                + feature_workers
+                + ([(guardrail_loader, "guardrail build")] if guardrail_loader is not None else [])
             )
             for _task, worker in workers:
                 if worker.reset is not None:
@@ -521,6 +537,10 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # POST /api/v1/search dispatches on one pooled client for the process, so
             # shutdown owns closing it. A no-op when no search was ever served.
             await close_search_client()
+            # The runner holds a vendor client per defined guardrail. Unconditional,
+            # unlike the resets above: it is not gated on a refresher, and a store
+            # write builds one in a deployment that defined nothing at boot.
+            reset_guardrail_runner()
             # After the log writer, whose final flush is the last thing to need
             # a session. Hybrid mode never opened an engine, so this is a no-op there.
             await dispose_db()

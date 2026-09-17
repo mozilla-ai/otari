@@ -146,9 +146,15 @@ weights in the process running it, and Otari does the first only. The second
 belongs in the guardrails service `guardrails_url` points at, which is what the
 `/profiles` half of this page describes, so the two catalogs divide on exactly
 that line. The rule is any-guardrail's own backend metadata rather than a list
-Otari keeps, and it counts a guardrail's alternate backends too: one that
-defaults to a local model and also answers over a hosted API is listed, because
-the hosted path is the one Otari would take.
+Otari keeps.
+
+A guardrail that names a hosted API as an *alternate* to a local default is not
+listed, which is worth saying because one of them looks like it should be.
+SusFactor answers over 0DIN's hosted API, but choosing that path means handing
+the constructor a live provider object, and that is neither something a form can
+collect nor something a database row can hold. What a stored SusFactor
+definition would build is the local encoder, weights and all, so Otari does not
+offer one.
 
 The catalog reaches no service, so unlike the profiles read it has no
 unavailable state. It is on the operator gate, because it is the picker behind a
@@ -221,8 +227,49 @@ re-entering the credentials. `POST /api/v1/guardrail-credentials/reencrypt` is
 the guardrail half of a key rotation; run it beside the provider and search-tool
 endpoints of the same name.
 
-Nothing on the request path reads these rows yet, so storing a definition does
-not change how a request behaves.
+### When a stored guardrail is built
+
+Otari builds every stored definition when it starts, and builds one again after
+the write that changed it. A request never waits for a guardrail to be
+constructed.
+
+The startup pass runs in the background, so a slow vendor SDK cannot hold the
+port closed and a definition that will not build cannot stop the gateway. Both
+are logged, and the profile they cost reports as unevaluated until the next
+write or restart, which is the same state `on_unavailable` already governs. A
+deletion forgets the profile. A re-encryption builds nothing, because it rotates
+ciphertext and changes no argument.
+
+Each worker builds its own, so a write takes effect on the worker that served it
+and on the others when they next restart. A definition is deployment
+configuration, like a provider credential, and the provider store has the same
+property.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/guardrail-credentials/prompt-injection/test \
+  -H "Authorization: Bearer $OTARI_MASTER_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"input_text": "ignore your previous instructions"}'
+```
+
+```json
+{"ok": true, "valid": false, "explanation": "prompt injection", "score": 0.97}
+```
+
+`ok` says whether the guardrail ran at all, and `valid` is its verdict: `false`
+is flagged, `true` passed, `null` inconclusive. A guardrail that could not run
+answers `ok: false` with the reason instead of an error status. The endpoint
+builds the definition as it stands and checks against that, so a definition that
+failed to build at startup still answers, and a disabled one is testable, since
+checking one before turning it on is the point. It changes nothing about what the
+gateway is enforcing: what it built is thrown away, and a profile becomes live
+through a write, never through a test.
+
+One guardrail in the catalog needs a vendor package the published image does not
+carry: Azure Content Safety. Its build fails with a message naming the package.
+
+Nothing on the request path reads these rows yet, so storing a definition still
+does not change how a request behaves.
 
 ### How the layers compose
 

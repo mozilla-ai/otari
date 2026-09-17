@@ -44,9 +44,8 @@ It is not every guardrail the library ships. A guardrail that works by holding
 model weights in the process running it is not one this gateway builds, so it is
 not one this catalog may offer; those belong in the guardrails service above, and
 the two catalogs divide on exactly that line. The rule is upstream's own backend
-taxonomy rather than a list kept here, and it reads ``alternate_backends`` beside
-``backend`` so a guardrail with a hosted path alongside a local default is
-reachable by the path that is a call rather than a download.
+taxonomy rather than a list kept here, and :func:`runs_in_process` is where it is
+written down.
 """
 
 from __future__ import annotations
@@ -358,15 +357,29 @@ class BuiltInGuardrailCatalog(BaseModel):
     guardrails: list[BuiltInGuardrailSpec] = Field(default_factory=list)
 
 
-def _reachable_over_a_hosted_api(name: GuardrailName) -> bool:
-    """Whether ``name`` runs as a call to a service rather than as a local model.
+def runs_in_process(guardrail_name: str) -> bool:
+    """Whether this gateway may build ``guardrail_name`` and call it here.
 
-    ``alternate_backends`` counts beside ``backend``: SusFactor defaults to a local
-    encoder and also answers over 0DIN's hosted API, and it is the hosted path this
-    gateway would take.
+    Only one whose backend *is* a hosted API, which makes it a client object and a
+    request. The rest hold model weights in whatever process runs them, and that
+    process is the guardrails service, not this one.
+
+    ``alternate_backends`` is deliberately not read, though a hosted alternate is
+    what SusFactor declares. Selecting that path means passing a live ``provider=``
+    object, and ``provider`` is absent from upstream's parameter registry, so no
+    stored definition can ask for it and the constructor would take the local
+    encoder instead. The alternate may count again the day upstream publishes
+    ``provider`` as a create-stage parameter.
+
+    Takes a plain string, so a caller holding a stored row's value needs no enum
+    and a name this build does not ship is simply false.
     """
-    metadata = GUARDRAIL_METADATA[name]
-    return BackendType.HOSTED_API in ({metadata.backend} | metadata.alternate_backends)
+    try:
+        name = GuardrailName(guardrail_name)
+    except ValueError:
+        return False
+    metadata = GUARDRAIL_METADATA.get(name)
+    return metadata is not None and metadata.backend is BackendType.HOSTED_API
 
 
 def _builtin_spec(name: GuardrailName) -> BuiltInGuardrailSpec:
@@ -394,7 +407,7 @@ def build_builtin_guardrail_catalog() -> BuiltInGuardrailCatalog:
     """
     return BuiltInGuardrailCatalog(
         guardrails=sorted(
-            (_builtin_spec(name) for name in GuardrailName if _reachable_over_a_hosted_api(name)),
+            (_builtin_spec(name) for name in GuardrailName if runs_in_process(name.value)),
             key=lambda spec: spec.display_name.casefold(),
         )
     )

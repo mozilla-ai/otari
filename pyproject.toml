@@ -13,14 +13,16 @@ description = "otari, an OpenAI-compatible LLM gateway"
 requires-python = ">=3.13"
 dependencies = [
     "any-llm-sdk[all]>=1.27.1",
-    # The guardrail catalog only (`services/guardrail_catalog.py`). Its
-    # `parameter_registry` is a stdlib+pydantic leaf built so a consumer can
-    # render a configuration form without importing a model backend, so no
-    # extra is taken and nothing here ever constructs a guardrail: this
-    # gateway runs them against the operator's any-guardrail sidecar. What is
-    # imported is `GuardrailName` and `get_parameter_schema`, and the shape of
-    # the `ParameterSpec` they return; bounded below 0.8 rather than trusting a
-    # 0.x minor to keep those three.
+    # Read by the catalog (`services/guardrail_catalog.py`) and called by the
+    # runner (`services/guardrail_runner.py`). Its `parameter_registry` is a
+    # stdlib+pydantic leaf built so a consumer can render a configuration form
+    # without importing a model backend. No extra is taken, and none is needed:
+    # only a guardrail whose backend is a hosted API is built here, and each of
+    # those is a client and a request rather than a model download. What is
+    # imported is `GuardrailName`, `GUARDRAIL_METADATA`, `get_parameter_schema`
+    # and the shape of the `ParameterSpec` it returns, plus `AnyGuardrail`,
+    # `Guardrail`, `EvaluateArgumentError` and `BackendType`; bounded below 0.8
+    # rather than trusting a 0.x minor to keep them.
     "any-guardrail>=0.7.7,<0.8.0",
     "alembic>=1.13.0",
     "aiosqlite>=0.19.0",

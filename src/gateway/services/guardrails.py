@@ -37,10 +37,10 @@ from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TIMEOUT_S = 30.0
+GUARDRAIL_TIMEOUT_S = 30.0
 
 
-def _unevaluated_detail(profile: str) -> str:
+def unevaluated_detail(profile: str) -> str:
     """What a caller is told when a guardrail could not run.
 
     Names the profile, which the caller either asked for or is subject to, and
@@ -130,7 +130,7 @@ async def _validate_one(
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         raise GuardrailsNotReachableError(
             f"guardrail profile {cfg.profile!r} failed against {base_url}: {exc}",
-            public_detail=_unevaluated_detail(cfg.profile),
+            public_detail=unevaluated_detail(cfg.profile),
         ) from exc
 
     # `result` may be a list when the service runs the guardrail over a list of
@@ -140,7 +140,7 @@ async def _validate_one(
     if not isinstance(result, dict):
         raise GuardrailsNotReachableError(
             f"guardrail profile {cfg.profile!r} returned an unexpected result shape: {result!r}",
-            public_detail=_unevaluated_detail(cfg.profile),
+            public_detail=unevaluated_detail(cfg.profile),
         )
 
     # Treat a missing or non-boolean `valid` as malformed and raise, so the
@@ -150,13 +150,13 @@ async def _validate_one(
     if "valid" not in result:
         raise GuardrailsNotReachableError(
             f"guardrail profile {cfg.profile!r} returned no 'valid' field: {result!r}",
-            public_detail=_unevaluated_detail(cfg.profile),
+            public_detail=unevaluated_detail(cfg.profile),
         )
     valid = result["valid"]
     if valid is not None and not isinstance(valid, bool):
         raise GuardrailsNotReachableError(
             f"guardrail profile {cfg.profile!r} returned a non-boolean 'valid': {valid!r}",
-            public_detail=_unevaluated_detail(cfg.profile),
+            public_detail=unevaluated_detail(cfg.profile),
         )
 
     return GuardrailResult(
@@ -287,7 +287,7 @@ async def run_input_guardrails(
         return GuardrailVerdict()
 
     results: list[GuardrailResult] = []
-    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT_S) as client:
+    async with httpx.AsyncClient(timeout=GUARDRAIL_TIMEOUT_S) as client:
         for cfg in input_guardrails:
             base_url = (cfg.url or default_url or "").rstrip("/")
             try:
@@ -295,7 +295,7 @@ async def run_input_guardrails(
                     raise GuardrailsNotReachableError(
                         f"guardrail profile {cfg.profile!r} names an endpoint that failed the "
                         f"safety check: {unsafe_url}",
-                        public_detail=_unevaluated_detail(cfg.profile),
+                        public_detail=unevaluated_detail(cfg.profile),
                     )
                 if not base_url:
                     raise GuardrailsNotReachableError(

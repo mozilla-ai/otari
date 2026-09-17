@@ -6,7 +6,18 @@ one, the constructor and per-call arguments it takes; these endpoints store one
 of those choices together with the values filled in beside it, so a guardrail is
 defined in Otari rather than in a sidecar's YAML.
 
-Nothing on the request path reads these rows yet.
+Startup builds every definition it finds. A write here hands the row it touched
+to the same loader, in the background, because the answer to a save is the row
+and not a vendor round trip: a client that will not construct must not turn a
+committed write into a failed response. Delete forgets the profile and builds
+nothing. Re-encryption builds nothing either, and that is not an omission: it
+rotates ciphertext and changes no argument, so what is already built is still
+correct.
+
+Each worker holds its own, so a write takes effect on the worker that served it
+and on the others when they next restart. That is the cross-worker gap the
+provider overlay has, and a definition is deployment configuration rather than
+per-request policy.
 
 Deliberately the same shape as ``/api/v1/search-tools`` and
 ``/api/v1/provider-credentials``: rows keyed by name, the credentials encrypted
@@ -20,6 +31,7 @@ several credentials, so which ones are set is the useful answer and the last
 four characters of a map are not one.
 """
 
+import asyncio
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -33,10 +45,12 @@ from gateway.exceptions.guardrail_credentials import (
     GuardrailCredentialExistsError,
     GuardrailCredentialNotFoundError,
 )
-from gateway.models.guardrails import GuardrailCredential
+from gateway.log_config import logger
+from gateway.models.guardrails import GuardrailConfig, GuardrailCredential
 from gateway.services.guardrail_credential_service import (
     UNSET,
     create_guardrail_credential,
+    definition_from_row,
     delete_guardrail_credential,
     get_guardrail_credential,
     get_guardrail_credential_for_update,
@@ -45,6 +59,9 @@ from gateway.services.guardrail_credential_service import (
     stored_secret_names,
     update_guardrail_credential,
 )
+from gateway.services.guardrail_loader import apply_stored_guardrail
+from gateway.services.guardrail_runner import get_guardrail_runner
+from gateway.services.guardrails import GuardrailsNotReachableError
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
 
 router = APIRouter(
@@ -52,6 +69,10 @@ router = APIRouter(
     tags=["guardrail-credentials"],
     dependencies=[Depends(require_deployment_operator)],
 )
+
+# A sample, not a load test. The request path's own limits are the ones that bound
+# real traffic; this only keeps a check from being handed a novel.
+_MAX_TEST_INPUT = 8000
 
 
 class StoredGuardrailSchema(BaseModel):
@@ -155,6 +176,28 @@ class UpdateGuardrailCredentialRequest(BaseModel):
     )
 
 
+class TestGuardrailRequest(BaseModel):
+    """Text to run one stored guardrail against."""
+
+    input_text: str = Field(min_length=1, max_length=_MAX_TEST_INPUT)
+    validate_kwargs: dict[str, Any] = Field(
+        default_factory=dict, description="Merged over the stored per-call arguments, for this call only."
+    )
+
+
+class TestGuardrailResponse(BaseModel):
+    """What one guardrail said about the text."""
+
+    ok: bool = Field(description="Whether the guardrail ran at all. False means it could not be evaluated.")
+    valid: bool | None = Field(
+        default=None,
+        description="True when the input passed, false when it was flagged, null when the verdict was inconclusive.",
+    )
+    explanation: str | None = None
+    score: float | None = None
+    error: str | None = Field(default=None, description="Why the guardrail could not run, when ok is false.")
+
+
 class ReencryptGuardrailCredentialsResponse(BaseModel):
     """Result of re-encrypting stored guardrail credentials with the primary secret key."""
 
@@ -187,6 +230,36 @@ def _database_error() -> HTTPException:
     here touches the session.
     """
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
+
+
+# Strong references to the rebuilds in flight, so one is not collected while it is
+# still constructing. The pattern, and the reason for it, is ``_pipeline.py``'s
+# ``_USAGE_REPORT_TASKS``.
+_REBUILD_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _rebuild(row: GuardrailCredential) -> None:
+    """Make the runner agree with the row just written, so the next request finds it ready.
+
+    Without this a write would leave exactly the profile an operator just touched
+    as the one nobody has built, while every other one was built at startup.
+
+    In the background, because the answer to a save is the row: a vendor client
+    that will not construct must not turn a committed write into a failed response.
+    What a row means is the loader's to decide, so that a write and a restart
+    cannot disagree about it.
+    """
+    task = asyncio.create_task(apply_stored_guardrail(row))
+    _REBUILD_TASKS.add(task)
+
+    def _finished(done: asyncio.Task[None]) -> None:
+        _REBUILD_TASKS.discard(done)
+        if done.cancelled():
+            return
+        if (error := done.exception()) is not None:
+            logger.warning("Guardrail '%s' was written but did not build: %s", row.name, error)
+
+    task.add_done_callback(_finished)
 
 
 @router.get("")
@@ -260,7 +333,53 @@ async def create_stored_guardrail(
     except SQLAlchemyError:
         raise _database_error() from None
 
+    _rebuild(row)
     return StoredGuardrailSchema.from_model(row)
+
+
+@router.post("/{name}/test")
+async def test_stored_guardrail(
+    name: str,
+    request: TestGuardrailRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TestGuardrailResponse:
+    """Run a stored guardrail against some text, so an operator sees it work.
+
+    Builds the definition as it stands right now and checks the text against that,
+    changing nothing about what the gateway is enforcing. A disabled definition is
+    as testable as any other, since checking one before turning it on is the point,
+    and finding out must not be what puts it in front of traffic.
+
+    A guardrail that cannot run answers ``ok: false`` with the reason rather than
+    an error status: the question asked was whether this definition works, and one
+    shape of answer is easier to act on than two.
+    """
+    row = await get_guardrail_credential(db, name)
+    if row is None:
+        raise _not_found(name)
+
+    try:
+        definition = definition_from_row(row)
+    except (SecretBoxUnavailableError, SecretDecryptionError):
+        return TestGuardrailResponse(ok=False, error=f"The stored credentials of '{name}' cannot be decrypted.")
+
+    cfg = GuardrailConfig(profile=name, mode="monitor", validate_kwargs=request.validate_kwargs)
+    try:
+        result = await get_guardrail_runner().probe(
+            definition=definition, cfg=cfg, input_text=request.input_text
+        )
+    except GuardrailsNotReachableError as exc:
+        # The runner's own message, which names types and argument names and never
+        # an argument's value. This route is operator-gated.
+        logger.info("Test of stored guardrail '%s' could not be evaluated", name)
+        return TestGuardrailResponse(ok=False, error=str(exc))
+
+    return TestGuardrailResponse(
+        ok=True,
+        valid=result.valid,
+        explanation=str(result.explanation) if result.explanation is not None else None,
+        score=float(result.score) if isinstance(result.score, int | float) else None,
+    )
 
 
 @router.get("/{name}")
@@ -326,6 +445,7 @@ async def update_stored_guardrail(
     except SQLAlchemyError:
         raise _database_error() from None
 
+    _rebuild(updated)
     return StoredGuardrailSchema.from_model(updated)
 
 
@@ -341,3 +461,4 @@ async def delete_stored_guardrail(
         raise _database_error() from None
     if not deleted:
         raise _not_found(name)
+    get_guardrail_runner().drop(name)

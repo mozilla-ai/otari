@@ -11,8 +11,9 @@ the picker it exists to accept, and the drift would show up as a form offering a
 field the store refuses. So the store is wrong exactly when the catalog is.
 
 There is no in-memory overlay and no refresher, unlike the sibling credential
-stores whose shape this otherwise follows: nothing on the request path reads
-these rows, so there is nothing to keep warm. This module commits its own writes,
+stores whose shape this otherwise follows. What reads these rows is the runner,
+at startup and again after each write, and a definition is what it reads them
+as. This module commits its own writes,
 the layering the rest of the codebase uses and the one #1127 records those two as
 missing.
 
@@ -52,6 +53,7 @@ from gateway.services.secret_box import (
     decrypt_secret,
     encrypt_secret,
 )
+from gateway.types.guardrail_definition import GuardrailDefinition
 
 
 class _Unset:
@@ -185,6 +187,24 @@ def decrypt_create_secrets(row: GuardrailCredential) -> dict[str, Any]:
         return {}
     loaded = json.loads(decrypt_secret(row.encrypted_create_secrets))
     return loaded if isinstance(loaded, dict) else {}
+
+
+def definition_from_row(row: GuardrailCredential) -> GuardrailDefinition:
+    """The row as the runner takes it, with its secrets put back where they came from.
+
+    The two halves are one constructor argument map again. They were split on the
+    way in only so the credentials could be encrypted, and the guardrail being
+    built knows nothing about that split.
+
+    Raises what :func:`decrypt_create_secrets` raises. Refusing is the point: a
+    definition built from the plain half alone would be a client with no API key,
+    which fails later and less clearly.
+    """
+    return GuardrailDefinition(
+        guardrail_name=row.guardrail_name,
+        create_kwargs={**row.create_kwargs, **decrypt_create_secrets(row)},
+        validate_kwargs=dict(row.validate_kwargs),
+    )
 
 
 def stored_secret_names(row: GuardrailCredential) -> tuple[frozenset[str], bool]:

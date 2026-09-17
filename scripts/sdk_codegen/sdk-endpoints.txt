@@ -240,6 +240,7 @@ GET /api/v1/guardrail-credentials/{name}            # not yet wrapped
 PATCH /api/v1/guardrail-credentials/{name}          # not yet wrapped
 DELETE /api/v1/guardrail-credentials/{name}         # not yet wrapped
 POST /api/v1/guardrail-credentials/reencrypt        # not yet wrapped
+POST /api/v1/guardrail-credentials/{name}/test      # not yet wrapped
 # Settings
 POST /api/v1/settings/master-key/rotate             # not yet wrapped
 # Tenancy-scoped budgets: an operator surface with no dashboard page yet either,
