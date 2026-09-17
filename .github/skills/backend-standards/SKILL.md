@@ -6,16 +6,15 @@ description: Backend conventions for the otari gateway (`src/gateway/`), async S
 # Backend Standards: otari gateway (`src/gateway/`)
 
 The gateway is an async FastAPI service: request handlers in `api/routes/`, business logic in
-`services/`, ORM in `models/` (one module per domain), migrations in
-`alembic/versions/`. This guide is the backend counterpart to the frontend skill and to the
-path-scoped review instructions in
-`.github/instructions/` (performance and security). `AGENTS.md` is the source of truth for
-build/test/lint commands and runtime modes; read it first. This file captures the
-conventions that keep new backend code correct and consistent.
+`services/`, queries in `repositories/`, ORM in `models/`, migrations in `alembic/versions/`.
+This guide is the backend counterpart to the frontend skill and to the path-scoped review
+instructions in `.github/instructions/` (architecture, performance and security). `AGENTS.md`
+is the source of truth for build/test/lint commands and runtime modes; read it first. This file
+captures the conventions that keep new backend code correct and consistent.
 
 ## Async SQLAlchemy 2.0: the house style
 
-Everything is async. Match the shapes already in `services/`:
+Everything is async. A query belongs in a repository (see [Layering](#layering)). Match these shapes:
 
 ```python
 from sqlalchemy import select, func
@@ -34,7 +33,7 @@ count = (await db.execute(select(func.count()).select_from(ModelPricing))).scala
   `.scalar_one()`. Don't fetch rows to count them (`len(all())`), use `func.count()`.
 - ORM columns are typed with `Mapped[...]` + `mapped_column(...)`. Follow the existing style:
   modern generics (`str | None`, `list[str]`), timezone-aware `DateTime(timezone=True)`.
-- Sessions come from the `get_db` dependency in routes; non-request code uses
+- A request's session comes from the `get_db` dependency, and non-request code uses
   `create_session()` (`core/database.py`). Don't open ad-hoc engines.
 
 ## The SQLModel half: the reconciled control plane's tables
@@ -49,9 +48,9 @@ extra rules:
   `Organization.slug == slug` reads as `bool` and mypy rejects it. Applies to `where`,
   `order_by`, `join` conditions, and `.in_(...)`.
 - **Inherit `BaseRepository`** (`repositories/base_repository.py`) for `get`/`get_all`/`create`/
-  `update`/`delete`/`count`, and put tenancy repositories in `repositories/tenancy/`. Every
-  repository write **flushes and never commits**: the service owns the commit boundary, because
-  it is the layer that knows when a unit of work is complete.
+  `update`/`delete`/`count`, and put a domain's repositories in `repositories/<domain>/`. Every
+  repository write **flushes and never commits**. The commit belongs to the service (see
+  [Who commits](#who-commits)).
 - **Declare no `relationship()`.** Lazy loading raises `MissingGreenlet` on an `AsyncSession` at
   attribute access rather than at the query; join explicitly and return
   `(model, related)` tuples instead.
@@ -63,20 +62,83 @@ cannot attach to more than one table, so a shared mixin passes `sa_type` plus
 
 ## Layering
 
-- **Routes** (`api/routes/`) stay thin: parse the request, resolve identity, call a service,
-  shape the response. Keep request/response Pydantic models near the handler; return typed
-  models, not raw dicts; use `fastapi.status` constants.
-- **Services** (`services/`, one concern per `*_service.py`) hold the business logic and own
-  the DB work.
-- Service-specific exceptions live beside their service (e.g. `UnsafeURLError`,
-  `GuardrailsNotReachableError`). Raise `HTTPException` with a clear `detail` in the API layer;
-  prefer specific exceptions (`ValueError`, `SQLAlchemyError`) over broad `except Exception`.
-- **The tenancy slice is the one exception, deliberately.** `services/tenancy/errors.py`
-  declares a `TenancyError` family that each carry their own `status_code`, and one handler
-  registered in `gateway.main` renders them as FastAPI's `{"detail": ...}` shape. A tenancy
-  route therefore raises nothing and needs no `try`/`except`; a 5xx member has its message
-  logged and a generic detail returned. Follow that convention inside `services/tenancy/` and
-  `api/routes/organizations.py` / `workspaces.py`, and the rule above everywhere else.
+The backend is a modular monolith. [ARCHITECTURE.md](../../../ARCHITECTURE.md#the-modular-monolith)
+names the shape and says which layer may import which, and
+[docs/domains.md](../../../docs/domains.md) assigns every module to its domain. These are the rules
+for writing code in each layer.
+
+**New and moved code follows these rules. Most existing code does not, so never copy the module
+beside yours.** `QUERY_BASELINE` and `SESSION_PARAMETER_BASELINE` in
+`scripts/check_architecture.py` name the code still in the old shape. A baseline only shrinks:
+remove a name when you move its code, and never add one.
+
+- **Routes** (`api/routes/<domain>.py`) parse the request, call one service method, and return a
+  schema. A route holds no business rule, builds no query, and defines no Pydantic model. Use
+  `fastapi.status` constants.
+- **Schemas** (`schemas/<domain>.py`) hold the domain's Pydantic request and response models,
+  and nothing else.
+- **Services** (`services/<domain>/`) hold the use cases: business rules and orchestration. A
+  service builds no query, holds no session, and touches no HTTP.
+- **Repositories** (`repositories/<domain>/`, modules ending in `_repository.py`) run every
+  query, over `BaseRepository`. A repository write flushes and never commits, and a repository
+  holds no business rule.
+- **Exceptions** (`exceptions/<domain>_exceptions.py`) hold the domain's error classes. Each
+  class carries its own `status_code`, and one registered handler renders the family as
+  FastAPI's `{"detail": ...}` shape, so a route needs no `try`/`except`. A 5xx member has its
+  message logged and a generic detail returned. The family's base is `TenancyError`
+  (`services/tenancy/errors.py`), rendered by `_tenancy_error_handler` in `gateway.main`.
+- **Models** (`models/<domain>.py`) hold ORM tables, and no logic.
+
+Divider comments that cut a module into sections mean the module is more than one module. Split
+it along them.
+
+Catch specific exceptions (`ValueError`, `SQLAlchemyError`), not a broad `except Exception`.
+
+### How a service is built
+
+A domain's service is its Service Layer: the one place its use cases run.
+
+- **One service per domain, with a small public API.** Each public method is one use case. The
+  implementation sits in the package's private modules, whose names start with `_`, so the
+  service is a deep module. The package's `__init__.py` exports the service and the types its
+  public methods use, and nothing else.
+- **Constructor injection.** The service receives its own domain's repositories, the Unit of
+  Work, config, ports, and the services of other domains it needs. It never receives the
+  session or another domain's repository, so it cannot run a query.
+- **One builder.** A builder in `api/deps.py` builds the service for a request. A worker calls
+  the same builder with a Unit of Work it creates from its own session.
+- **Moving old code.** A module-level function that takes a session becomes a method of its
+  domain's service, or a repository method when all it does is run a query. A helper that
+  needs no database stays a plain function.
+
+### Who commits
+
+A Unit of Work marks where a business transaction starts, commits and rolls back.
+
+- Each request, and each worker job, has one Unit of Work over its one session. Every service
+  built in that scope shares it.
+- A business step is one `async with uow:` block. The block commits when it ends, and rolls back
+  and re-raises on an error. Either way the connection goes back to the pool.
+- Blocks nest. Only the outermost block commits, so a step that writes to two domains is atomic.
+- Only a service opens a block. A repository never commits, and a route never opens a block.
+- Hybrid mode has no local database and no Unit of Work.
+
+**Planned:** the Unit of Work type in `core/unit_of_work.py`, with a request dependency over
+`get_db` and a worker helper over `create_session()` and `create_log_session()`. Until it exists,
+a domain that has not moved keeps its commits in its services, and a route or a repository never
+commits.
+
+### Sources
+
+- Service Layer (Randy Stafford), Repository (Edward Hieatt and Rob Mee) and Unit of Work, in
+  Martin Fowler, *Patterns of Enterprise Application Architecture* (2002):
+  <https://martinfowler.com/eaaCatalog/>
+- Harry Percival and Bob Gregory, *Architecture Patterns with Python* (2020), chapter 2
+  (Repository) and chapter 6 (Unit of Work): <https://www.cosmicpython.com/book/>
+- Constructor injection: Martin Fowler, "Inversion of Control Containers and the Dependency
+  Injection pattern" (2004): <https://martinfowler.com/articles/injection.html>
+- Deep modules: John Ousterhout, *A Philosophy of Software Design* (2018), chapter 4, "Modules
+  Should Be Deep"
 
 ## The budget / reservation lifecycle is load-bearing
 
@@ -140,4 +202,5 @@ through the config / `otari_env()`.
 ## Related instructions
 
 - [performance-review.instructions.md](../../instructions/performance-review.instructions.md): N+1, indexes, pagination limits, transaction atomicity, async efficiency.
+- [backend-architecture.instructions.md](../../instructions/backend-architecture.instructions.md): the layer and import rules above, restated for review.
 - [security-review.instructions.md](../../instructions/security-review.instructions.md): budget/tenant isolation, auth, SSRF, prompt injection, migration safety.

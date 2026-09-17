@@ -7,6 +7,11 @@ Before changing the backend, read
 [backend-standards](../../.github/skills/backend-standards/SKILL.md). The root
 [AGENTS.md](../../AGENTS.md) owns runtime modes, validation, and generated
 artifacts. [ARCHITECTURE.md](../../ARCHITECTURE.md) owns the extension boundary.
+[The modular monolith](../../ARCHITECTURE.md#the-modular-monolith) names the
+target shape and its import rules,
+[Layering](../../.github/skills/backend-standards/SKILL.md#layering) gives the
+rules for each layer, and [docs/domains.md](../../docs/domains.md) maps every
+module to its domain.
 
 ## Ports and composition
 
