@@ -172,6 +172,20 @@ def _new_sqlite_file(database_url: str) -> Path | None:
     return path if path.parent.is_dir() and not path.exists() else None
 
 
+@pytest.fixture(autouse=True)
+def _cheap_password_hashing(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hash passwords at bcrypt's lowest cost, unless the test is marked ``production_password_cost``.
+
+    Each hash or check at the production cost takes about a fifth of a second.
+    A hash verifies the same way at any cost, so no other test needs the production cost.
+    """
+    if request.node.get_closest_marker("production_password_cost") is not None:
+        return
+    monkeypatch.setattr("gateway.services.password_service._BCRYPT_ROUNDS", 4)
+    # The stand-in hash is cached per process, so a test must not reuse one minted at another cost.
+    monkeypatch.setattr("gateway.services.password_service._absent_password_hash", None)
+
+
 def seed_workspace_id(db: Any) -> Any:
     """The workspace a directly-built request-plane row belongs to.
 

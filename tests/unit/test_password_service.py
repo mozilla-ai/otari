@@ -38,6 +38,7 @@ def test_two_hashes_of_one_password_differ() -> None:
     assert hash_password(PASSWORD) != hash_password(PASSWORD)
 
 
+@pytest.mark.production_password_cost
 def test_the_stored_format_is_the_platform_s() -> None:
     """``$2b$`` at cost 12, which is what passlib writes and what #1644 will import."""
     assert hash_password(PASSWORD).startswith("$2b$12$")
