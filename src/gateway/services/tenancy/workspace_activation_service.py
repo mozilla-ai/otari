@@ -483,7 +483,7 @@ class WorkspaceActivationService:
             .where(
                 UsageLog.workspace_id == workspace_id,
                 served_here(UsageLog.source),
-                integration_traffic(UsageLog.endpoint),
+                integration_traffic(UsageLog.endpoint, UsageLog.api_key_id),
                 UsageLog.status == "success",
             )
             # Tie-broken on the id so two rows sharing a timestamp still name one
@@ -507,7 +507,7 @@ class WorkspaceActivationService:
             .where(
                 UsageLog.workspace_id == workspace_id,
                 served_here(UsageLog.source),
-                integration_traffic(UsageLog.endpoint),
+                integration_traffic(UsageLog.endpoint, UsageLog.api_key_id),
                 UsageLog.status.in_(_ATTEMPT_STATUSES),
             )
             .order_by(UsageLog.timestamp.desc(), UsageLog.id.desc())

@@ -25,8 +25,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.usage_source import SERVED_HERE_SLUG
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
+from gateway.models.usage import UsageLog
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import decrypt_secret, generate_secret_key
 
@@ -393,3 +395,129 @@ def test_a_workspace_the_caller_is_not_in_is_refused_before_any_forward(
     assert response.status_code == status.HTTP_404_NOT_FOUND
     assert seen == {}
     assert _internal_keys(db_session_factory) == []
+
+
+# What the control plane's own usage rows are labelled with. Every report a
+# gateway sends lands under one fixed label (the overlay's ``USAGE_LOG_ENDPOINT``
+# in ``mozilla-ai/otari-ai``), because the surface that made the call is not on
+# the wire. That is the point of the two tests below: the label cannot tell a
+# Playground message from an SDK call, and the credential can.
+_REPORTED_BY_A_GATEWAY = "attached-gateway"
+
+
+def _record_gateway_usage(
+    db_session_factory: Callable[[], Session],
+    *,
+    workspace_id: uuid.UUID,
+    user_id: str | None,
+    api_key_id: str | None,
+) -> None:
+    """Write the usage row a hosted deployment's gateway report produces."""
+    session = db_session_factory()
+    try:
+        session.add(
+            UsageLog(
+                workspace_id=workspace_id,
+                api_key_id=api_key_id,
+                user_id=user_id,
+                timestamp=datetime.now(UTC),
+                model="openai:gpt-4o",
+                provider="openai",
+                endpoint=_REPORTED_BY_A_GATEWAY,
+                source=SERVED_HERE_SLUG,
+                status="success",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+
+def _activation(client: TestClient, token: str, workspace_id: uuid.UUID) -> dict[str, object]:
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        response = client.get(f"{API_ROOT}/workspaces/{workspace_id}/activation")
+    finally:
+        client.cookies.clear()
+    assert response.status_code == status.HTTP_200_OK, response.text
+    body: dict[str, object] = response.json()
+    return body
+
+
+def test_a_forwarded_playground_message_does_not_close_the_activation_guide(
+    hosted_client: TestClient,
+    caller: tuple[uuid.UUID, uuid.UUID, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The guide marks somebody integrating Otari, which our own page is not.
+
+    Standalone catches this on the endpoint label, because it wrote the row
+    itself. Hosted cannot: the row comes from the gateway's usage report, under
+    the one label every report from that gateway carries. The dispatch key is
+    what carries the distinction instead, and it is minted by this deployment for
+    this purpose alone, so it is not a claim the caller could make.
+    """
+    _, workspace_id, token = caller
+    _answer_from_the_data_plane(monkeypatch, {})
+    _send(hosted_client, token, workspace_id)
+    dispatch_key = _internal_keys(db_session_factory)[0]
+
+    assert _activation(hosted_client, token, workspace_id)["status"] == "waiting"
+
+    _record_gateway_usage(
+        db_session_factory,
+        workspace_id=workspace_id,
+        user_id=dispatch_key.user_id,
+        api_key_id=dispatch_key.id,
+    )
+
+    after = _activation(hosted_client, token, workspace_id)
+    assert after["status"] == "waiting"
+    assert after["activation_attempt"] is None
+    # Nor the "your last attempt" line, which would otherwise report the product
+    # talking to itself as the caller's most recent try.
+    assert after["latest_attempt"] is None
+
+
+def test_a_real_gateway_request_still_closes_it(
+    hosted_client: TestClient,
+    caller: tuple[uuid.UUID, uuid.UUID, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other side of the same predicate, so the exclusion cannot swallow the feature.
+
+    An identical row under a key somebody made is the milestone the guide exists
+    for, and it still closes it.
+    """
+    _, workspace_id, token = caller
+    _answer_from_the_data_plane(monkeypatch, {})
+    _send(hosted_client, token, workspace_id)
+    dispatch_key = _internal_keys(db_session_factory)[0]
+
+    session = db_session_factory()
+    try:
+        own_key = APIKey(
+            id=str(uuid.uuid4()),
+            workspace_id=workspace_id,
+            key_hash="a-key-somebody-made",
+            key_name="My SDK key",
+            user_id=dispatch_key.user_id,
+        )
+        session.add(own_key)
+        session.commit()
+        own_key_id = own_key.id
+    finally:
+        session.close()
+
+    _record_gateway_usage(
+        db_session_factory,
+        workspace_id=workspace_id,
+        user_id=dispatch_key.user_id,
+        api_key_id=own_key_id,
+    )
+
+    after = _activation(hosted_client, token, workspace_id)
+    assert after["status"] != "waiting"
+    assert after["activation_attempt"] is not None
