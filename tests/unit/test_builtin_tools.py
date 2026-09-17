@@ -10,15 +10,13 @@ from gateway.api.routes._tools import Tool
 from gateway.api.routes.tools import _managed_tools
 from gateway.api.routes.usage import GATEWAY_TOOL_NAMES
 from gateway.core.config import GatewayConfig
-from gateway.services import code_execution_tool, web_search_tool
 from gateway.services._tool_loop import ToolBackend
-from gateway.services.builtin_tool import BuiltinTool
-from gateway.services.builtin_tool_registry import BUILTIN_TOOLS
-from gateway.services.sandbox_backend import SandboxBackend
-from gateway.services.web_retrieval_backend import WebRetrievalBackend
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, SandboxBackend
+from gateway.services.tools import BUILTIN_TOOLS, BuiltinTool
+from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME, WebRetrievalBackend
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-REGISTRY_PATH = REPO_ROOT / "src" / "gateway" / "services" / "builtin_tool_registry.py"
+REGISTRY_PATH = REPO_ROOT / "src" / "gateway" / "services" / "tools" / "_registry.py"
 TOOL_ENV = (
     "OTARI_SANDBOX_URL",
     "OTARI_WEB_SEARCH_URL",
@@ -73,9 +71,9 @@ def test_a_definition_names_its_tool_and_is_new_on_every_call(tool: BuiltinTool)
 
 def _backend_for(tool: BuiltinTool) -> ToolBackend:
     """The backend that runs ``tool``, built without opening a connection."""
-    if tool is web_search_tool.TOOL:
+    if tool.name == WEB_SEARCH_TOOL_NAME:
         return WebRetrievalBackend(base_url="http://search.invalid")
-    if tool is code_execution_tool.TOOL:
+    if tool.name == CODE_EXECUTION_TOOL_NAME:
         return SandboxBackend(sandbox_url="http://sandbox.invalid")
     raise AssertionError(f"no backend case for listed tool {tool.name!r}")
 

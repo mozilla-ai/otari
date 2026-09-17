@@ -5,7 +5,7 @@ It is a literal tuple edited by hand: nothing is discovered and nothing register
 Each entry names the ``BuiltinTool`` its own module declares, so nothing is built here.
 """
 
-from gateway.services import code_execution_tool, web_search_tool
-from gateway.services.builtin_tool import BuiltinTool
+from gateway.services.tools import _code_execution_tool, _web_search_tool
+from gateway.services.tools._builtin_tool import BuiltinTool
 
-BUILTIN_TOOLS: tuple[BuiltinTool, ...] = (web_search_tool.TOOL, code_execution_tool.TOOL)
+BUILTIN_TOOLS: tuple[BuiltinTool, ...] = (_web_search_tool.TOOL, _code_execution_tool.TOOL)
