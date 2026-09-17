@@ -498,6 +498,72 @@ def test_the_deployment_managed_flag_agrees_with_the_rate_override_gate(
     assert written.status_code == expected, written.text
 
 
+@pytest.mark.parametrize(
+    ("who", "restricted_in_alpha_one", "disabled_in_alpha_one", "hosted", "expected"),
+    [
+        pytest.param(
+            "alpha_member", True, False, ("openai",), {_OPENAI_MODEL}, id="the-port-does-not-widen-a-restricted-key"
+        ),
+        pytest.param(
+            "alpha_member",
+            True,
+            True,
+            ("openai",),
+            {_OPENAI_MODEL, _OPENAI_OTHER},
+            id="a-disabled-key-leaves-the-provider-to-the-port",
+        ),
+        pytest.param("alpha_member", False, True, (), set(), id="a-disabled-key-and-no-port-list-nothing"),
+        pytest.param("alpha_newcomer", False, False, ("mistral",), set(), id="a-member-of-no-workspace-gets-nothing"),
+        pytest.param(
+            "alpha_owner",
+            True,
+            False,
+            ("mistral",),
+            {_OPENAI_MODEL, _OPENAI_OTHER, _MISTRAL_MODEL},
+            id="an-owner-sees-the-whole-organization",
+        ),
+    ],
+)
+def test_a_hosted_provider_is_listed_only_where_dispatch_would_ask_the_port(
+    client: TestClient,
+    world: _World,
+    db_session_factory: Callable[[], Session],
+    who: str,
+    restricted_in_alpha_one: bool,
+    disabled_in_alpha_one: bool,
+    hosted: tuple[str, ...],
+    expected: set[str],
+) -> None:
+    """Dispatch asks the port only when a workspace has no active key with a credential for the provider."""
+    _bind_hosted(client, _HostedPort(*hosted))
+    session = db_session_factory()
+    try:
+        if restricted_in_alpha_one:
+            session.add(
+                WorkspaceProviderModelRestriction(
+                    workspace_id=world.workspaces["alpha_one"],
+                    organization_id=world.alpha,
+                    org_provider_key_id=world.keys["alpha_openai"],
+                    model="gpt-4o-mini",
+                )
+            )
+        if disabled_in_alpha_one:
+            session.add(
+                WorkspaceProviderKeyOverride(
+                    workspace_id=world.workspaces["alpha_one"],
+                    organization_id=world.alpha,
+                    org_provider_key_id=world.keys["alpha_openai"],
+                    is_default=False,
+                    disabled=True,
+                )
+            )
+        session.commit()
+    finally:
+        session.close()
+
+    assert _catalog_as(client, world, who) == expected
+
+
 def test_the_single_model_read_agrees_with_the_listing_about_a_hosted_model(client: TestClient, world: _World) -> None:
     _bind_hosted(client, _HostedPort("mistral"))
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])

@@ -34,7 +34,6 @@ see would be listed even though every entry it resolves to is permitted. See
 """
 
 import uuid
-from collections import defaultdict
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -42,19 +41,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
+from gateway.models.provider_keys import OrgProviderKey
 from gateway.models.tenancy import User, Workspace
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.repositories.tenancy.org_provider_key_repository import (
-    Candidate,
     OrgProviderKeyRepository,
-    WorkspaceProviderKeyOverrideRepository,
     WorkspaceProviderModelRestrictionRepository,
-    resolve_active_key,
 )
 from gateway.services.provider_kwargs import provider_key
 from gateway.services.tenancy.authorization import VisibleWorkspaceScope, resolve_visible_workspace_scope
 from gateway.services.tenancy.errors import TenancyForbiddenError, TenancyNotFoundError
-from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, key_is_usable
+from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, has_credential, key_is_usable
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.workspace_scope import lookup_default_workspace_id
 
@@ -91,49 +88,27 @@ async def _get_hosted_providers(model_provider: ModelProviderPort | None, organi
     return frozenset(provider_key(provider) for provider in hosted)
 
 
-async def _byo_entries_for_workspaces(
-    db: AsyncSession,
-    *,
-    organization_id: uuid.UUID,
-    workspace_ids: list[uuid.UUID],
-) -> set[str]:
-    """BYO entries as the caller's own workspaces resolve them.
+async def _get_byo_allowlist(db: AsyncSession, active_keys: dict[uuid.UUID, dict[str, OrgProviderKey]]) -> set[str]:
+    """Returns the BYO allow-list the caller's workspaces resolve to.
 
-    Two queries whatever the number of workspaces: one for the candidates, one
-    for the restrictions of the keys that survived. One key per (workspace,
-    provider) is what a request would actually use, so ``resolve_active_key``
-    picks it here too: a provider whose every key this workspace disabled
-    contributes nothing, and a model restriction narrows the wildcard to the
-    models it names. The union across the workspaces, not the intersection: a
-    model one of them can call is a model this caller can call.
+    A model restriction narrows a provider to the models it names.
+    The result is the union across the workspaces: a model one of them can call is a model this caller can call.
     """
-    if not workspace_ids:
-        return set()
-    candidates = await WorkspaceProviderKeyOverrideRepository(db).candidates_for_workspaces(
-        organization_id=organization_id, workspace_ids=workspace_ids
-    )
-    active: dict[tuple[uuid.UUID, uuid.UUID], str] = {}
-    for workspace_id, rows in candidates.items():
-        by_provider: dict[str, list[Candidate]] = defaultdict(list)
-        for key, override in rows:
-            by_provider[key.provider].append((key, override))
-        for provider, group in by_provider.items():
-            resolved = resolve_active_key(group)
-            # A key whose secret will not decrypt supplies no credential at
-            # dispatch, so advertising its models would break the rule this
-            # allow-list exists to keep.
-            if resolved is not None and key_is_usable(resolved):
-                active[(workspace_id, resolved.id)] = provider
-
-    restrictions = await WorkspaceProviderModelRestrictionRepository(db).list_for_workspace_keys(active)
-    entries: set[str] = set()
-    for (workspace_id, key_id), provider in active.items():
+    usable = {
+        (workspace_id, key.id): provider
+        for workspace_id, keys in active_keys.items()
+        for provider, key in keys.items()
+        if key_is_usable(key)
+    }
+    restrictions = await WorkspaceProviderModelRestrictionRepository(db).list_for_workspace_keys(usable)
+    allowlist: set[str] = set()
+    for (workspace_id, key_id), provider in usable.items():
         prefix = provider_key(provider)
         allowed = restrictions.get((workspace_id, key_id))
         # An absent narrowing is not an empty allow-list: no restriction row means
         # every model of that provider (see ``WorkspaceProviderModelRestriction``).
-        entries.update({f"{prefix}:{model}" for model in allowed} if allowed else {f"{prefix}:*"})
-    return entries
+        allowlist.update({f"{prefix}:{model}" for model in allowed} if allowed else {f"{prefix}:*"})
+    return allowlist
 
 
 async def _sees_default_workspace(db: AsyncSession, scope: VisibleWorkspaceScope) -> bool:
@@ -182,36 +157,41 @@ async def resolve_session_catalog_scope(
     catalog read is not one of them.
     """
     services = organizations if organizations is not None else OrganizationService(db)
-    entries = {f"{instance}:*" for instance in config.providers}
+    allowlist = {f"{instance}:*" for instance in config.providers}
     try:
         scope = await resolve_visible_workspace_scope(db, user=user, organizations=services)
     except (TenancyForbiddenError, TenancyNotFoundError):
         return SessionCatalogScope(
-            allowlist=sorted(entries), reads_default_workspace=False, deployment_supplied_providers=frozenset()
+            allowlist=sorted(allowlist), reads_default_workspace=False, deployment_supplied_providers=frozenset()
         )
 
+    provider_keys = OrgProviderKeyService(db)
+    hosted = await _get_hosted_providers(model_provider, scope.organization.id)
     if scope.sees_every_workspace:
-        byo_entries = {
+        byo_allowlist = {
             f"{provider_key(key.provider)}:*"
             for key in await OrgProviderKeyRepository(db).list_live_keys(scope.organization.id)
             if key_is_usable(key)
         }
+        reachable_hosted = hosted
     else:
-        byo_entries = await _byo_entries_for_workspaces(
-            db,
-            organization_id=scope.organization.id,
-            workspace_ids=scope.workspace_ids or [],
+        active_keys = await provider_keys.get_active_keys(
+            organization_id=scope.organization.id, workspace_ids=scope.workspace_ids or []
         )
-    hosted = await _get_hosted_providers(model_provider, scope.organization.id)
+        byo_allowlist = await _get_byo_allowlist(db, active_keys)
+        # Dispatch asks the port only in a workspace with no active key that has a credential.
+        reachable_hosted = frozenset(
+            provider
+            for provider in hosted
+            if any((key := keys.get(provider)) is None or not has_credential(key) for keys in active_keys.values())
+        )
     byo_providers = (
-        await OrgProviderKeyService(db).get_byo_providers(organization_id=scope.organization.id)
-        if hosted
-        else frozenset()
+        await provider_keys.get_byo_providers(organization_id=scope.organization.id) if hosted else frozenset()
     )
-    entries |= byo_entries
-    entries.update(f"{provider}:*" for provider in hosted)
+    allowlist |= byo_allowlist
+    allowlist.update(f"{provider}:*" for provider in reachable_hosted)
     return SessionCatalogScope(
-        allowlist=sorted(entries),
+        allowlist=sorted(allowlist),
         reads_default_workspace=await _sees_default_workspace(db, scope),
         deployment_supplied_providers=hosted - byo_providers,
     )
