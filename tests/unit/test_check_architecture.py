@@ -644,11 +644,15 @@ def test_a_flat_module_baseline_entry_that_no_longer_exists_must_leave_the_basel
 
 
 def test_main_fails_on_a_new_top_level_service_module(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _write(tmp_path, "src/gateway/services/things.py", "")
+    _write(tmp_path, "src/gateway/services/__init__.py", "")
     _write(tmp_path, "tests/__init__.py", "")
     _use_empty_flat_module_baseline(monkeypatch)
+    monkeypatch.setattr(check, "QUERY_BASELINE", ())
+    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
     monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
     monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
     monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
+    assert check.main() == 0
+    _write(tmp_path, "src/gateway/services/things.py", "")
     assert check.main() == 1
