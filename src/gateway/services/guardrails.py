@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Collection, Mapping
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 
 import httpx
@@ -286,10 +287,19 @@ async def run_input_guardrails(
     if not input_guardrails:
         return GuardrailVerdict()
 
+    # Imported here rather than at module scope because the runner imports this
+    # module: it raises this module's error type, which is what lets one failure
+    # matrix govern both ways a check can be run.
+    from gateway.services.guardrail_runner import get_guardrail_runner
+
+    runner = get_guardrail_runner()
     results: list[GuardrailResult] = []
-    async with httpx.AsyncClient(timeout=GUARDRAIL_TIMEOUT_S) as client:
+    # The sidecar client is opened on first use rather than around the loop, so a
+    # deployment whose guardrails are all stored definitions makes no HTTP setup
+    # at all and needs no `guardrails_url`.
+    async with AsyncExitStack() as stack:
+        client: httpx.AsyncClient | None = None
         for cfg in input_guardrails:
-            base_url = (cfg.url or default_url or "").rstrip("/")
             try:
                 if (unsafe_url := unsafe.get(cfg.profile)) is not None:
                     raise GuardrailsNotReachableError(
@@ -297,19 +307,29 @@ async def run_input_guardrails(
                         f"safety check: {unsafe_url}",
                         public_detail=unevaluated_detail(cfg.profile),
                     )
-                if not base_url:
-                    raise GuardrailsNotReachableError(
-                        f"guardrail profile {cfg.profile!r} requested but no guardrails service is "
-                        "configured. Set OTARI_GUARDRAILS_URL on the gateway or pass `url` on the "
-                        "guardrail entry."
+                # A stored definition this gateway already built wins over a
+                # sidecar profile of the same name: it is the operator's explicit
+                # one. An entry that names its own endpoint is a decision about
+                # where the check goes, so it is sent there either way.
+                if cfg.url is None and runner.knows(cfg.profile):
+                    result = await runner.check(cfg=cfg, input_text=input_text)
+                else:
+                    base_url = (cfg.url or default_url or "").rstrip("/")
+                    if not base_url:
+                        raise GuardrailsNotReachableError(
+                            f"guardrail profile {cfg.profile!r} requested but no guardrails service is "
+                            "configured. Set OTARI_GUARDRAILS_URL on the gateway or pass `url` on the "
+                            "guardrail entry."
+                        )
+                    if client is None:
+                        client = await stack.enter_async_context(httpx.AsyncClient(timeout=GUARDRAIL_TIMEOUT_S))
+                    result = await _validate_one(
+                        client,
+                        base_url=base_url,
+                        cfg=cfg,
+                        input_text=input_text,
+                        credential=credentials.get(cfg.profile),
                     )
-                result = await _validate_one(
-                    client,
-                    base_url=base_url,
-                    cfg=cfg,
-                    input_text=input_text,
-                    credential=credentials.get(cfg.profile),
-                )
             except GuardrailsNotReachableError as exc:
                 if cfg.mode == "block" and cfg.on_unavailable == "block":
                     raise  # fail closed: an enforcing guardrail must not be skipped
