@@ -6334,7 +6334,7 @@ export interface components {
         CatalogOffering: {
             /** Context Window */
             context_window?: number | null;
-            /** @description Whose key serves it: `deployment` for a `providers:` instance the operator configured, `organization` for a key the viewer's organization holds. */
+            /** @description Whose key serves it: `deployment` for a `providers:` instance the operator configured, `hosted` for a model the deployment serves on its own credential, `organization` for a key the viewer's organization holds. */
             credential: components["schemas"]["CatalogCredential"];
             /**
              * Discovered

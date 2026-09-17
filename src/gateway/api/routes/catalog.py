@@ -170,6 +170,7 @@ class CatalogOffering(BaseModel):
     credential: CatalogCredential = Field(
         description=(
             "Whose key serves it: `deployment` for a `providers:` instance the operator configured, "
+            "`hosted` for a model the deployment serves on its own credential, "
             "`organization` for a key the viewer's organization holds."
         ),
     )
@@ -442,7 +443,7 @@ async def _group(
                 short_selector=short_selector_for(obj.id),
                 provider=instance,
                 provider_type=provider_type,
-                credential=_credential(config, instance),
+                credential=_get_credential(config, instance, deployment_managed=obj.deployment_managed),
                 discovered=obj.id in merged.discovered_keys,
                 context_window=(metadata.context_window if metadata else None) or obj.context_window,
                 max_output_tokens=metadata.max_output_tokens if metadata else None,
@@ -483,16 +484,17 @@ async def _with_usage(db: AsyncSession, grouped: _Grouped, members: list[_Offeri
     return [member.wire.model_copy(update={"usage_30d": usage.get(member.wire.selector)}) for member in members]
 
 
-def _credential(config: GatewayConfig, instance: str) -> CatalogCredential:
-    """Whose key an instance runs on, from its name alone.
+def _get_credential(config: GatewayConfig, instance: str, *, deployment_managed: bool) -> CatalogCredential:
+    """Returns whose key an offering runs on.
 
-    The reserved name is the seam: ``config`` refuses it in ``providers:``
-    precisely so that an offering carrying it came from an overlay, which is
-    what makes the name readable here without the route knowing the overlay.
+    ``config`` refuses the reserved hosted instance name in ``providers:``,
+    so an offering carrying it came from an overlay.
     """
     if instance == HOSTED_OFFERING_INSTANCE:
         return CatalogCredential.HOSTED
-    return CatalogCredential.DEPLOYMENT if instance in config.providers else CatalogCredential.ORGANIZATION
+    if instance in config.providers:
+        return CatalogCredential.DEPLOYMENT
+    return CatalogCredential.HOSTED if deployment_managed else CatalogCredential.ORGANIZATION
 
 
 def _first(values: Iterable[str | None]) -> str | None:

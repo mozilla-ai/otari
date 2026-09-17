@@ -590,6 +590,26 @@ def test_the_grouped_catalog_lists_a_hosted_model_for_a_member(client: TestClien
         client.cookies.clear()
 
 
+def test_the_grouped_catalog_labels_a_hosted_offering_hosted(client: TestClient, world: _World) -> None:
+    """The Models page offers a rate override only on an offering labeled ``organization``."""
+    _bind_hosted(client, _HostedPort("mistral"))
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
+    credentials: dict[str, str] = {}
+    try:
+        listing = client.get(f"{API_ROOT}/catalog/models")
+        assert listing.status_code == status.HTTP_200_OK, listing.text
+        for model in listing.json()["models"]:
+            detail = client.get(f"{API_ROOT}/catalog/models/{model['id']}")
+            assert detail.status_code == status.HTTP_200_OK, detail.text
+            for offering in detail.json()["offerings"]:
+                credentials[offering["selector"]] = offering["credential"]
+    finally:
+        client.cookies.clear()
+
+    assert credentials[_MISTRAL_MODEL] == "hosted"
+    assert credentials[_OPENAI_MODEL] == "organization"
+
+
 def test_an_operator_session_is_not_flagged_by_the_hosted_rung(client: TestClient, world: _World) -> None:
     """The operator is exempt from the pricing rule, and their catalog was never narrowed."""
     _bind_hosted(client, _HostedPort("mistral"))

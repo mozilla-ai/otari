@@ -2744,7 +2744,7 @@
           },
           "credential": {
             "$ref": "#/components/schemas/CatalogCredential",
-            "description": "Whose key serves it: `deployment` for a `providers:` instance the operator configured, `organization` for a key the viewer's organization holds."
+            "description": "Whose key serves it: `deployment` for a `providers:` instance the operator configured, `hosted` for a model the deployment serves on its own credential, `organization` for a key the viewer's organization holds."
           },
           "discovered": {
             "description": "Whether the provider itself reported this model.",
