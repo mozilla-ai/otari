@@ -194,8 +194,8 @@ jobs:
           # in carry one identity. The numeric id is what links the noreply
           # address to that user; only the API knows it.
           BOT_ID="$(gh api "/users/$APP_SLUG%5Bbot%5D" --jq .id)"
-          git config user.name "$APP_SLUG[bot]"
-          git config user.email "$BOT_ID+$APP_SLUG[bot]@users.noreply.github.com"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "$BOT_ID+${APP_SLUG}[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
           git add CHANGELOG.md
           git commit -m "chore: release v$VERSION"
