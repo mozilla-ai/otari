@@ -9,10 +9,6 @@ import pytest
 
 _SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "check_architecture.py"
 _DISCOVERY_MESSAGE = "Forbidden import in OSS base (no entry-point discovery; the feature registry is a literal tuple)"
-_SESSION_MESSAGE = (
-    "takes a session; move it onto its domain's service, "
-    "which receives repositories and a Unit of Work, never a session"
-)
 
 
 def _load() -> ModuleType:
@@ -372,222 +368,119 @@ def test_every_spelling_of_entry_point_discovery_is_forbidden(tmp_path: Path, so
     assert check.check_file(file_path, tmp_path) == [(1, module, _DISCOVERY_MESSAGE)]
 
 
+_SERVICE_REMEDY = "a service reaches the database through its repositories and the Unit of Work"
+_ROUTE_REMEDY = "a route reaches the database through a service"
+
+
+def _use_empty_database_baselines(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "SERVICE_DATABASE_IMPORT_BASELINE", ())
+    monkeypatch.setattr(check, "ROUTE_DATABASE_IMPORT_BASELINE", ())
+
+
 @pytest.mark.parametrize(
-    "relative_path", ["gateway/api/routes/things.py", "gateway/services/thing_service.py", "gateway/services/sub/x.py"]
-)
-@pytest.mark.parametrize(
-    ("source", "line", "name"),
+    ("relative_path", "remedy"),
     [
-        ("from sqlalchemy import select\n", 1, "select"),
-        ("from sqlmodel import select\n", 1, "select"),
-        ("from sqlalchemy.dialects.postgresql import insert\n", 1, "insert"),
-        ("import sqlalchemy as sa\n\nsa.update\n", 3, "update"),
-        ("import sqlalchemy.sql\n\nsqlalchemy.sql.delete\n", 3, "delete"),
-        ("from sqlalchemy import text\n", 1, "text"),
-        ("from sqlalchemy import sql\n\nsql.select\n", 3, "select"),
-        ("from sqlalchemy.sql import expression as e\n\ne.update\n", 3, "update"),
+        ("gateway/services/thing_service.py", _SERVICE_REMEDY),
+        ("gateway/services/things/_store.py", _SERVICE_REMEDY),
+        ("gateway/api/routes/things.py", _ROUTE_REMEDY),
     ],
 )
-def test_a_route_or_service_that_builds_a_query_is_flagged(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str, source: str, line: int, name: str
+@pytest.mark.parametrize(
+    ("source", "module"),
+    [
+        ("from sqlalchemy import select\n", "sqlalchemy"),
+        ("from sqlmodel import col\n", "sqlmodel"),
+        ("import sqlalchemy as sa\n", "sqlalchemy"),
+        ("from sqlalchemy.ext.asyncio import AsyncSession\n", "sqlalchemy.ext.asyncio"),
+        (
+            "from typing import TYPE_CHECKING\n\nif TYPE_CHECKING:\n    import sqlmodel.sql.expression\n",
+            "sqlmodel.sql.expression",
+        ),
+    ],
+)
+def test_a_route_or_service_that_imports_a_database_library_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str, remedy: str, source: str, module: str
 ) -> None:
-    monkeypatch.setattr(check, "QUERY_BASELINE", ())
+    _use_empty_database_baselines(monkeypatch)
     _write(tmp_path, relative_path, source)
-    assert check.check_query_layering(tmp_path) == [
-        f"{relative_path}:{line} builds a query with {name}; a query belongs in a repository"
-    ]
+    line = source.count("\n")
+    assert check.check_database_imports(tmp_path) == [f"{relative_path}:{line} imports {module}; {remedy}"]
 
 
-def test_a_repository_may_build_a_query(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "QUERY_BASELINE", ())
-    _write(tmp_path, "gateway/repositories/thing_repository.py", "from sqlalchemy import select\n")
-    assert check.check_query_layering(tmp_path) == []
-
-
-def test_a_service_may_use_query_types_and_column_helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "QUERY_BASELINE", ())
+def test_a_service_class_that_takes_a_session_in_its_constructor_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_empty_database_baselines(monkeypatch)
     _write(
         tmp_path,
         "gateway/services/thing_service.py",
-        "from sqlalchemy import Select, func\n"
-        "from sqlalchemy.ext.asyncio import AsyncSession\n"
-        "from sqlmodel import col\n",
+        "from sqlalchemy.ext.asyncio import AsyncSession\n\n\n"
+        "class ThingService:\n"
+        "    def __init__(self, db: AsyncSession) -> None:\n"
+        "        self._db = db\n",
     )
-    assert check.check_query_layering(tmp_path) == []
+    assert check.check_database_imports(tmp_path) == [
+        f"gateway/services/thing_service.py:1 imports sqlalchemy.ext.asyncio; {_SERVICE_REMEDY}"
+    ]
 
 
-def test_a_module_on_the_query_baseline_may_build_a_query(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "QUERY_BASELINE", ("gateway/services/thing_service.py",))
+@pytest.mark.parametrize(
+    ("relative_path", "source"),
+    [
+        ("gateway/repositories/thing_repository.py", "from sqlalchemy import select\n"),
+        ("gateway/services/thing_service.py", "import sqlalchemylike\nfrom gateway.repositories import things\n"),
+    ],
+)
+def test_a_repository_or_an_unrelated_import_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str, source: str
+) -> None:
+    _use_empty_database_baselines(monkeypatch)
+    _write(tmp_path, relative_path, source)
+    assert check.check_database_imports(tmp_path) == []
+
+
+def test_a_module_on_its_layers_baseline_may_import_a_database_library(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "SERVICE_DATABASE_IMPORT_BASELINE", ("gateway/services/thing_service.py",))
+    monkeypatch.setattr(check, "ROUTE_DATABASE_IMPORT_BASELINE", ())
     _write(tmp_path, "gateway/services/thing_service.py", "from sqlalchemy import select\n")
-    assert check.check_query_layering(tmp_path) == []
-
-
-@pytest.mark.parametrize("source", ["from gateway.repositories.thing_repository import find\n", None])
-def test_a_baseline_entry_that_builds_no_query_must_leave_the_baseline(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str | None
-) -> None:
-    # The baseline only shrinks: a module that stops querying, or no longer exists, fails until removed.
-    monkeypatch.setattr(check, "QUERY_BASELINE", ("gateway/services/thing_service.py",))
-    _write(tmp_path, "gateway/services/other_service.py", "")
-    if source is not None:
-        _write(tmp_path, "gateway/services/thing_service.py", source)
-    assert check.check_query_layering(tmp_path) == [
-        "gateway/services/thing_service.py is on the query baseline but builds no query; remove it from the baseline"
+    _write(tmp_path, "gateway/api/routes/things.py", "from sqlalchemy import select\n")
+    assert check.check_database_imports(tmp_path) == [
+        f"gateway/api/routes/things.py:1 imports sqlalchemy; {_ROUTE_REMEDY}"
     ]
 
 
-def test_main_fails_on_a_service_that_builds_a_query(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _write(tmp_path, "src/gateway/services/thing_service.py", "from sqlalchemy import select\n")
-    _write(tmp_path, "tests/__init__.py", "")
-    monkeypatch.setattr(check, "QUERY_BASELINE", ())
-    monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
-    monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
-    monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
-    assert check.main() == 1
-
-
-@pytest.mark.parametrize(
-    "signature",
-    [
-        "async def find(db: AsyncSession) -> None: ...",
-        "async def find(owner: str, *, db: AsyncSession | None = None) -> None: ...",
-        'async def find(db: "AsyncSession") -> None: ...',
-        "def find(db: asyncio.AsyncSession) -> None: ...",
-    ],
-)
-def test_a_module_level_service_function_that_takes_a_session_is_flagged(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, signature: str
-) -> None:
-    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
-    _write(tmp_path, "gateway/services/thing_service.py", f"{signature}\n")
-    assert check.check_session_parameters(tmp_path) == [f"gateway/services/thing_service.py:1 find {_SESSION_MESSAGE}"]
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "class ThingService:\n    def __init__(self, db: AsyncSession) -> None: ...\n",
-        "def outer() -> None:\n    async def inner(db: AsyncSession) -> None: ...\n",
-        "def find(owner: str) -> None: ...\n",
-    ],
-)
-def test_a_method_a_nested_function_or_a_sessionless_function_is_clean(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
-) -> None:
-    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
-    _write(tmp_path, "gateway/services/thing_service.py", source)
-    assert check.check_session_parameters(tmp_path) == []
-
-
-def test_a_function_outside_services_may_take_a_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
-    _write(tmp_path, "gateway/repositories/thing_repository.py", "async def find(db: AsyncSession) -> None: ...\n")
-    assert check.check_session_parameters(tmp_path) == []
-
-
-def test_a_function_on_the_session_baseline_may_take_a_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ("gateway/services/thing_service.py::find",))
-    _write(
-        tmp_path,
-        "gateway/services/thing_service.py",
-        "async def find(db: AsyncSession) -> None: ...\nasync def count(db: AsyncSession) -> None: ...\n",
-    )
-    assert check.check_session_parameters(tmp_path) == [f"gateway/services/thing_service.py:2 count {_SESSION_MESSAGE}"]
-
-
-@pytest.mark.parametrize("source", ["def find(owner: str) -> None: ...\n", None])
-def test_a_session_baseline_entry_that_takes_no_session_must_leave_the_baseline(
+@pytest.mark.parametrize("source", ["from gateway.repositories import things\n", None])
+def test_a_database_baseline_entry_that_imports_no_database_library_must_leave_the_baseline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str | None
 ) -> None:
-    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ("gateway/services/thing_service.py::find",))
-    _write(tmp_path, "gateway/services/other_service.py", "")
+    monkeypatch.setattr(check, "SERVICE_DATABASE_IMPORT_BASELINE", ())
+    monkeypatch.setattr(check, "ROUTE_DATABASE_IMPORT_BASELINE", ("gateway/api/routes/things.py",))
+    _write(tmp_path, "gateway/api/routes/other.py", "")
     if source is not None:
-        _write(tmp_path, "gateway/services/thing_service.py", source)
-    assert check.check_session_parameters(tmp_path) == [
-        "gateway/services/thing_service.py::find is on the session parameter baseline but takes no session; "
+        _write(tmp_path, "gateway/api/routes/things.py", source)
+    assert check.check_database_imports(tmp_path) == [
+        "gateway/api/routes/things.py is on the database import baseline but imports no database library; "
         "remove it from the baseline"
     ]
 
 
-def test_main_fails_on_a_service_function_that_takes_a_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _write(tmp_path, "src/gateway/services/thing_service.py", "async def find(db: AsyncSession) -> None: ...\n")
+def test_main_fails_on_a_service_that_imports_a_database_library(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, "src/gateway/services/__init__.py", "")
+    _write(tmp_path, "src/gateway/services/thing_service.py", "")
     _write(tmp_path, "tests/__init__.py", "")
-    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
+    _use_empty_database_baselines(monkeypatch)
+    monkeypatch.setattr(check, "FLAT_MODULE_BASELINE", ("gateway/services/thing_service.py",))
     monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
     monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
     monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
+    assert check.main() == 0
+    _write(tmp_path, "src/gateway/services/thing_service.py", "from sqlalchemy import select\n")
     assert check.main() == 1
-
-
-@pytest.mark.parametrize(
-    "signature",
-    [
-        "def build(factory: Callable[[], AsyncSession]) -> None: ...",
-        "def build(factory: async_sessionmaker[AsyncSession]) -> None: ...",
-        'def build(factory: "Callable[[], AsyncSession]") -> None: ...',
-    ],
-)
-def test_a_parameter_that_only_mentions_the_session_type_is_clean(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, signature: str
-) -> None:
-    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
-    _write(tmp_path, "gateway/services/thing_service.py", f"{signature}\n")
-    assert check.check_session_parameters(tmp_path) == []
-
-
-@pytest.mark.parametrize(
-    "annotation",
-    ["Optional[AsyncSession]", "Annotated[AsyncSession, Depends(get_db)]", "None | AsyncSession"],
-)
-def test_a_wrapped_session_annotation_is_flagged(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, annotation: str
-) -> None:
-    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
-    _write(tmp_path, "gateway/services/thing_service.py", f"async def find(db: {annotation}) -> None: ...\n")
-    assert check.check_session_parameters(tmp_path) == [f"gateway/services/thing_service.py:1 find {_SESSION_MESSAGE}"]
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "if enabled:\n    async def find(db: AsyncSession) -> None: ...\n",
-        "try:\n    pass\nexcept ImportError:\n    async def find(db: AsyncSession) -> None: ...\n",
-        "with suppress(Exception):\n    async def find(db: AsyncSession) -> None: ...\n",
-    ],
-)
-def test_a_function_defined_in_module_level_control_flow_is_flagged(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
-) -> None:
-    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
-    _write(tmp_path, "gateway/services/thing_service.py", source)
-    violations = check.check_session_parameters(tmp_path)
-    assert [violation.split(" ", 1)[1] for violation in violations] == [f"find {_SESSION_MESSAGE}"]
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "from sqlalchemy.ext.asyncio import AsyncSession as DBSession\n\nasync def find(db: DBSession) -> None: ...\n",
-        "from sqlalchemy.ext.asyncio import AsyncSession as DBSession\n\n"
-        "async def find(db: DBSession | None) -> None: ...\n",
-    ],
-)
-def test_an_aliased_session_annotation_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str) -> None:
-    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
-    _write(tmp_path, "gateway/services/thing_service.py", source)
-    assert check.check_session_parameters(tmp_path) == [f"gateway/services/thing_service.py:3 find {_SESSION_MESSAGE}"]
-
-
-def test_a_type_that_shares_an_alias_name_is_not_a_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
-    _write(
-        tmp_path,
-        "gateway/services/thing_service.py",
-        "from gateway.types import Session as DBSession\n\nasync def find(db: DBSession) -> None: ...\n",
-    )
-    assert check.check_session_parameters(tmp_path) == []
 
 
 def _use_empty_flat_module_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -661,8 +554,7 @@ def test_main_fails_on_a_new_top_level_service_module(tmp_path: Path, monkeypatc
     _write(tmp_path, "src/gateway/services/__init__.py", "")
     _write(tmp_path, "tests/__init__.py", "")
     _use_empty_flat_module_baseline(monkeypatch)
-    monkeypatch.setattr(check, "QUERY_BASELINE", ())
-    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
+    _use_empty_database_baselines(monkeypatch)
     monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
     monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")

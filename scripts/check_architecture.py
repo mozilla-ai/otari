@@ -16,13 +16,12 @@ Enforces:
    discovered.
 10. Top-level packages: src/ holds only the packages on an explicit list, so a
     feature cannot sit beside gateway/, outside every rule above.
-11. Query layering: a route or a service builds no query, because a query
-    belongs in a repository. Modules that still do are named on a baseline,
-    and the baseline only shrinks.
-12. Session parameters: a module-level function under services/ takes no
-    AsyncSession, because it belongs on its domain's service, which receives
-    repositories and a Unit of Work, never a session. Functions that still
-    take one are named on a baseline, and the baseline only shrinks.
+11. Service database access: nothing under services/ imports sqlalchemy or
+    sqlmodel, so a service can neither build a query nor name the session type.
+12. Route database access: nothing under api/routes/ imports sqlalchemy or
+    sqlmodel, so a route reaches the database through a service. Rules 11 and
+    12 each name the modules that still import one on a baseline, and each
+    baseline only shrinks.
 13. Domain packages: services/ and repositories/ gain no top-level module, so
     new code goes in its domain's package, and every directory of modules in
     either layer has an __init__.py. The flat modules that exist are named on
@@ -38,7 +37,6 @@ Exit codes:
 
 import ast
 import sys
-from collections.abc import Iterator
 from pathlib import Path
 from typing import TypedDict
 
@@ -230,309 +228,6 @@ def _imported_modules(node: ast.Import | ast.ImportFrom, file_path: Path, src_ro
     return [base] + [f"{base}.{alias.name}" for alias in node.names]
 
 
-SESSION_SCOPE = "gateway/services"
-SESSION_TYPE = "AsyncSession"
-SESSION_MODULE = "sqlalchemy.ext.asyncio"
-# Module-level service functions that took a session when the rule landed, as
-# "<module>::<function>". An entry that stops taking one fails the check until
-# it is removed, so the list only shrinks.
-SESSION_PARAMETER_BASELINE = (
-    "gateway/services/agent_telemetry_service.py::ingest",
-    "gateway/services/alias_service.py::load_aliases_at_startup",
-    "gateway/services/alias_service.py::refresh_alias_cache",
-    "gateway/services/batch_service.py::claim_batch_accounting",
-    "gateway/services/batch_service.py::get_batch_record",
-    "gateway/services/batch_service.py::get_batch_records",
-    "gateway/services/batch_service.py::record_batch",
-    "gateway/services/bootstrap_service.py::bootstrap_first_api_key",
-    "gateway/services/budget_reservation_ledger.py::_reclaim",
-    "gateway/services/budget_reservation_ledger.py::_release_holds",
-    "gateway/services/budget_reservation_ledger.py::grow",
-    "gateway/services/budget_reservation_ledger.py::prune_terminal",
-    "gateway/services/budget_reservation_ledger.py::reclaim_expired_for_user",
-    "gateway/services/budget_reservation_ledger.py::record",
-    "gateway/services/budget_reservation_ledger.py::sweep_expired",
-    "gateway/services/budget_reservation_ledger.py::try_settle_reclaimed",
-    "gateway/services/budget_reservation_ledger.py::try_terminate",
-    "gateway/services/budget_retiming.py::retime_ceilings_for_budget",
-    "gateway/services/budget_service.py::_cas_reset_user_budget",
-    "gateway/services/budget_service.py::_get_budget",
-    "gateway/services/budget_service.py::_held_handle",
-    "gateway/services/budget_service.py::_is_model_free",
-    "gateway/services/budget_service.py::get_budget_state",
-    "gateway/services/budget_service.py::increase_reservation",
-    "gateway/services/budget_service.py::reconcile_reservation",
-    "gateway/services/budget_service.py::record_external_spend",
-    "gateway/services/budget_service.py::refund_reservation",
-    "gateway/services/budget_service.py::reserve_budget",
-    "gateway/services/content_normalizer.py::_classify",
-    "gateway/services/content_normalizer.py::_normalize_block",
-    "gateway/services/content_normalizer.py::_resolve_from_ref",
-    "gateway/services/content_normalizer.py::normalize_messages",
-    "gateway/services/dashboard_session_service.py::create_dashboard_session",
-    "gateway/services/dashboard_session_service.py::record_session_key_marker",
-    "gateway/services/dashboard_session_service.py::resolve_dashboard_session",
-    "gateway/services/dashboard_session_service.py::revoke_all_dashboard_sessions",
-    "gateway/services/dashboard_session_service.py::revoke_dashboard_session",
-    "gateway/services/dashboard_session_service.py::revoke_sessions_on_master_key_change",
-    "gateway/services/dashboard_session_service.py::revoke_user_dashboard_sessions",
-    "gateway/services/external_usage_service.py::_existing_event_ids",
-    "gateway/services/external_usage_service.py::_insert_rows",
-    "gateway/services/external_usage_service.py::_load_pricing_index",
-    "gateway/services/external_usage_service.py::ingest_external_events",
-    "gateway/services/file_service.py::fetch_file",
-    "gateway/services/maintenance_mode_service.py::is_maintenance_mode",
-    "gateway/services/maintenance_mode_service.py::stage_maintenance_mode",
-    "gateway/services/master_key_service.py::ensure_master_key",
-    "gateway/services/master_key_service.py::load_master_key_hash",
-    "gateway/services/master_key_service.py::stage_generated_master_key_rotation",
-    "gateway/services/merged_catalog_service.py::build_merged_catalog",
-    "gateway/services/merged_catalog_service.py::catalog_scope",
-    "gateway/services/merged_catalog_service.py::get_pricing_map",
-    "gateway/services/model_access.py::resolve_request_allowlist",
-    "gateway/services/oauth_service.py::_client",
-    "gateway/services/oauth_service.py::authorization_url",
-    "gateway/services/oauth_service.py::exchange_code",
-    "gateway/services/playground_dispatch.py::resolve_dispatch_key",
-    "gateway/services/playground_service.py::_prune_oldest",
-    "gateway/services/playground_service.py::_require_consent",
-    "gateway/services/playground_service.py::delete_comparison",
-    "gateway/services/playground_service.py::delete_conversation",
-    "gateway/services/playground_service.py::list_comparisons",
-    "gateway/services/playground_service.py::list_conversations",
-    "gateway/services/playground_service.py::list_favorite_models",
-    "gateway/services/playground_service.py::read_consent",
-    "gateway/services/playground_service.py::read_conversation_messages",
-    "gateway/services/playground_service.py::replace_favorite_models",
-    "gateway/services/playground_service.py::resolve_playground_principal",
-    "gateway/services/playground_service.py::resolve_playground_workspace",
-    "gateway/services/playground_service.py::resolve_tool_availability",
-    "gateway/services/playground_service.py::save_comparison",
-    "gateway/services/playground_service.py::save_conversation",
-    "gateway/services/playground_service.py::update_consent",
-    "gateway/services/policy_store.py::load_policies_at_startup",
-    "gateway/services/policy_store.py::refresh_policy_cache",
-    "gateway/services/pricing_init_service.py::initialize_pricing_from_config",
-    "gateway/services/pricing_init_service.py::warn_if_gateway_tools_lack_pricing",
-    "gateway/services/pricing_init_service.py::warn_if_require_pricing_without_pricing",
-    "gateway/services/pricing_init_service.py::warn_if_router_candidates_lack_pricing",
-    "gateway/services/pricing_init_service.py::warn_if_search_tools_lack_flat_pricing",
-    "gateway/services/pricing_refresh_service.py::_get_active_snapshot_row",
-    "gateway/services/pricing_refresh_service.py::_prune_history",
-    "gateway/services/pricing_refresh_service.py::claim_poll_tick",
-    "gateway/services/pricing_refresh_service.py::confirm_price_refresh",
-    "gateway/services/pricing_refresh_service.py::list_accepted_snapshots",
-    "gateway/services/pricing_refresh_service.py::load_persisted_price_snapshot",
-    "gateway/services/pricing_refresh_service.py::poll_price_updates",
-    "gateway/services/pricing_refresh_service.py::prepare_price_refresh",
-    "gateway/services/pricing_refresh_service.py::preview_pending_refresh",
-    "gateway/services/pricing_refresh_service.py::refresh_price_snapshot",
-    "gateway/services/pricing_refresh_service.py::reject_price_refresh",
-    "gateway/services/pricing_service.py::_find_by_model_key",
-    "gateway/services/pricing_service.py::_find_organization_override",
-    "gateway/services/pricing_service.py::_tool_rates",
-    "gateway/services/pricing_service.py::find_model_pricing",
-    "gateway/services/pricing_service.py::load_organization_override_index",
-    "gateway/services/pricing_service.py::price_tool_calls",
-    "gateway/services/pricing_service.py::rates_in_force",
-    "gateway/services/provider_store_service.py::delete_credential",
-    "gateway/services/provider_store_service.py::get_credential",
-    "gateway/services/provider_store_service.py::get_credential_for_update",
-    "gateway/services/provider_store_service.py::list_credentials",
-    "gateway/services/provider_store_service.py::load_providers_at_startup",
-    "gateway/services/provider_store_service.py::reencrypt_credentials",
-    "gateway/services/provider_store_service.py::refresh_provider_cache",
-    "gateway/services/provider_store_service.py::save_credential",
-    "gateway/services/routing/knn.py::unpriced_router_candidates",
-    "gateway/services/runtime_settings_service.py::apply_overrides_from_db",
-    "gateway/services/runtime_settings_service.py::load_overrides",
-    "gateway/services/runtime_settings_service.py::stage_override",
-    "gateway/services/scoped_budget_service.py::_resolve_identities",
-    "gateway/services/scoped_budget_service.py::_roll_expired_periods",
-    "gateway/services/scoped_budget_service.py::applicable_budgets",
-    "gateway/services/scoped_budget_service.py::blocked_axis",
-    "gateway/services/scoped_budget_service.py::release",
-    "gateway/services/scoped_budget_service.py::reserve",
-    "gateway/services/scoped_budget_service.py::settle",
-    "gateway/services/search_tool_store_service.py::delete_search_tool",
-    "gateway/services/search_tool_store_service.py::get_search_tool",
-    "gateway/services/search_tool_store_service.py::get_search_tool_for_update",
-    "gateway/services/search_tool_store_service.py::list_search_tools",
-    "gateway/services/search_tool_store_service.py::load_search_tools_at_startup",
-    "gateway/services/search_tool_store_service.py::reencrypt_search_tools",
-    "gateway/services/search_tool_store_service.py::refresh_search_tool_cache",
-    "gateway/services/search_tool_store_service.py::save_search_tool",
-    "gateway/services/selector_index_service.py::rebuild_selector_index",
-    "gateway/services/tenancy/authorization.py::has_workspace_management_access",
-    "gateway/services/tenancy/authorization.py::require_workspace_management_access",
-    "gateway/services/tenancy/authorization.py::resolve_visible_workspace",
-    "gateway/services/tenancy/authorization.py::resolve_visible_workspace_scope",
-    "gateway/services/tenancy/authorization.py::resolve_workspace_in_organization",
-    "gateway/services/tenancy/org_provider_key_service.py::load_org_provider_keys_at_startup",
-    "gateway/services/tenancy/org_provider_key_service.py::refresh_org_provider_cache",
-    "gateway/services/tenancy/organization_guardrail_service.py::resolve_organization_guardrails",
-    "gateway/services/tenancy/organization_model_access.py::_get_byo_allowlist",
-    "gateway/services/tenancy/organization_model_access.py::_sees_default_workspace",
-    "gateway/services/tenancy/organization_model_access.py::resolve_session_catalog_scope",
-    "gateway/services/tenancy/organization_model_access.py::resolve_session_model_allowlist",
-    "gateway/services/tenancy/provisioning_service.py::_provision",
-    "gateway/services/tenancy/provisioning_service.py::_refuse_to_shadow_existing_tenancy",
-    "gateway/services/tenancy/provisioning_service.py::ensure_bootstrap_identity",
-    "gateway/services/tenancy/provisioning_service.py::load_bootstrap_identity",
-    "gateway/services/tenancy/provisioning_service.py::password_claims_deployment",
-    "gateway/services/tenancy/user_service.py::_claimable_email",
-    "gateway/services/tenancy/user_service.py::authenticate",
-    "gateway/services/tenancy/user_service.py::create_user_for_signup",
-    "gateway/services/tenancy/user_service.py::operator_has_password",
-    "gateway/services/tenancy/user_service.py::password_sign_in_possible",
-    "gateway/services/tenancy/user_service.py::request_password_reset",
-    "gateway/services/tenancy/user_service.py::resend_verification_email",
-    "gateway/services/tenancy/user_service.py::reset_password",
-    "gateway/services/tenancy/user_service.py::set_password",
-    "gateway/services/tenancy/user_service.py::update_full_name",
-    "gateway/services/tenancy/user_service.py::update_password",
-    "gateway/services/tenancy/user_service.py::verify_email",
-    "gateway/services/tenancy/webauthn_service.py::_all_credentials_for",
-    "gateway/services/tenancy/webauthn_service.py::_credentials_for",
-    "gateway/services/tenancy/webauthn_service.py::_issue_challenge",
-    "gateway/services/tenancy/webauthn_service.py::_owned_credential",
-    "gateway/services/tenancy/webauthn_service.py::_refuse_at_the_ceiling",
-    "gateway/services/tenancy/webauthn_service.py::_spend_challenge",
-    "gateway/services/tenancy/webauthn_service.py::begin_authentication",
-    "gateway/services/tenancy/webauthn_service.py::begin_registration",
-    "gateway/services/tenancy/webauthn_service.py::delete_credential",
-    "gateway/services/tenancy/webauthn_service.py::finish_authentication",
-    "gateway/services/tenancy/webauthn_service.py::finish_registration",
-    "gateway/services/tenancy/webauthn_service.py::has_any_credential",
-    "gateway/services/tenancy/webauthn_service.py::list_credentials",
-    "gateway/services/tenancy/webauthn_service.py::rename_credential",
-    "gateway/services/tenancy/workspace_code_execution_policy_service.py::resolve_workspace_code_execution_policy",
-    "gateway/services/tenancy/workspace_mcp_server_service.py::resolve_workspace_mcp_server",
-    "gateway/services/tenancy/workspace_mcp_server_service.py::resolve_workspace_mcp_servers",
-    "gateway/services/tenancy/workspace_web_search_service.py::resolve_workspace_web_search_config",
-    "gateway/services/tool_settings_service.py::apply_overrides_from_db",
-    "gateway/services/tool_settings_service.py::load_overrides",
-    "gateway/services/tool_settings_service.py::stage_override",
-    "gateway/services/usage_admin_service.py::delete_usage",
-    "gateway/services/usage_admin_service.py::set_usage_price",
-    "gateway/services/workspace_scope.py::_create_default_workspace",
-    "gateway/services/workspace_scope.py::default_workspace_id",
-    "gateway/services/workspace_scope.py::lookup_default_workspace_id",
-    "gateway/services/workspace_scope.py::organization_default_workspace_id",
-    "gateway/services/workspace_scope.py::organization_for_key_id",
-    "gateway/services/workspace_scope.py::organization_for_workspace_id",
-    "gateway/services/workspace_scope.py::resolve_workspace_id",
-    "gateway/services/workspace_scope.py::workspace_for_key_id",
-)
-
-
-SESSION_WRAPPERS = ("Optional", "Union", "Annotated")
-
-
-def _type_name(node: ast.expr) -> str | None:
-    """Return the unqualified name a type expression refers to, such as ``Optional`` for ``typing.Optional``."""
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return None
-
-
-def _session_names(tree: ast.Module) -> frozenset[str]:
-    """Return the names a module binds to the async session type, its own name included."""
-    return frozenset(
-        {SESSION_TYPE}
-        | {
-            alias.asname or alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module is not None and _matches(node.module, SESSION_MODULE)
-            for alias in node.names
-            if alias.name == SESSION_TYPE
-        }
-    )
-
-
-def _annotation_names_session(annotation: ast.expr | None, session_names: frozenset[str]) -> bool:
-    """Return whether a parameter annotation is the async session type, optionally wrapped.
-
-    A session inside another type, such as a factory that returns one, is not a session.
-    """
-    if isinstance(annotation, ast.Name):
-        return annotation.id in session_names
-    if isinstance(annotation, ast.Attribute):
-        return annotation.attr == SESSION_TYPE
-    if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
-        return _annotation_names_session(annotation.left, session_names) or _annotation_names_session(
-            annotation.right, session_names
-        )
-    if isinstance(annotation, ast.Subscript):
-        wrapper = _type_name(annotation.value)
-        if wrapper not in SESSION_WRAPPERS:
-            return False
-        members = annotation.slice.elts if isinstance(annotation.slice, ast.Tuple) else [annotation.slice]
-        # Only the first member of Annotated is the type; the rest is metadata.
-        if wrapper == "Annotated":
-            members = members[:1]
-        return any(_annotation_names_session(member, session_names) for member in members)
-    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
-        try:
-            return _annotation_names_session(ast.parse(annotation.value, mode="eval").body, session_names)
-        except SyntaxError:
-            return False
-    return False
-
-
-def _module_scope_functions(statements: list[ast.stmt]) -> Iterator[ast.FunctionDef | ast.AsyncFunctionDef]:
-    """Yield the functions a module defines at module scope, including inside module-level control flow."""
-    for statement in statements:
-        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
-            yield statement
-        elif not isinstance(statement, ast.ClassDef):
-            for child in ast.iter_child_nodes(statement):
-                if isinstance(child, ast.stmt):
-                    yield from _module_scope_functions([child])
-                elif isinstance(child, ast.ExceptHandler | ast.match_case):
-                    yield from _module_scope_functions(child.body)
-
-
-def _takes_session(function: ast.FunctionDef | ast.AsyncFunctionDef, session_names: frozenset[str]) -> bool:
-    """Return whether any parameter of a function is annotated with the async session type."""
-    arguments = function.args
-    parameters = [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs, arguments.vararg, arguments.kwarg]
-    return any(
-        parameter is not None and _annotation_names_session(parameter.annotation, session_names)
-        for parameter in parameters
-    )
-
-
-def check_session_parameters(src_root: Path) -> list[str]:
-    """Check that no module-level service function off the baseline takes a session, and that every entry still does."""
-    violations: list[str] = []
-    taking: set[str] = set()
-    for py_file in sorted((src_root / SESSION_SCOPE).rglob("*.py")):
-        relative_path = py_file.relative_to(src_root).as_posix()
-        try:
-            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
-        except SyntaxError:
-            continue  # check_file already reports an unparseable file.
-        session_names = _session_names(tree)
-        for node in _module_scope_functions(tree.body):
-            if not _takes_session(node, session_names):
-                continue
-            entry = f"{relative_path}::{node.name}"
-            taking.add(entry)
-            if entry not in SESSION_PARAMETER_BASELINE:
-                violations.append(
-                    f"{relative_path}:{node.lineno} {node.name} takes a session; "
-                    "move it onto its domain's service, which receives repositories and a Unit of Work, never a session"
-                )
-    violations.extend(
-        f"{entry} is on the session parameter baseline but takes no session; remove it from the baseline"
-        for entry in sorted(set(SESSION_PARAMETER_BASELINE) - taking)
-    )
-    return violations
-
-
 def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
     """Check one Python file below src_root against the layer rules for its location.
 
@@ -581,36 +276,21 @@ def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
     return violations
 
 
-QUERY_SCOPES = ("gateway/api/routes", "gateway/services")
-QUERY_LIBRARIES = ("sqlalchemy", "sqlmodel")
-QUERY_PRIMITIVES = ("select", "insert", "update", "delete", "text")
-# Modules that built a query when the rule landed. An entry that stops building
-# one fails the check until it is removed, so the list only shrinks.
-QUERY_BASELINE = (
-    "gateway/api/routes/_helpers.py",
-    "gateway/api/routes/agent_telemetry.py",
-    "gateway/api/routes/aliases.py",
-    "gateway/api/routes/budgets.py",
-    "gateway/api/routes/catalog.py",
-    "gateway/api/routes/files.py",
-    "gateway/api/routes/health.py",
-    "gateway/api/routes/keys.py",
-    "gateway/api/routes/models.py",
-    "gateway/api/routes/organization_keys.py",
-    "gateway/api/routes/organization_routing.py",
-    "gateway/api/routes/organization_usage.py",
-    "gateway/api/routes/pricing.py",
-    "gateway/api/routes/routing.py",
-    "gateway/api/routes/routing_memory.py",
-    "gateway/api/routes/scoped_budgets.py",
-    "gateway/api/routes/usage.py",
-    "gateway/api/routes/users.py",
+DATABASE_LIBRARIES = ("sqlalchemy", "sqlmodel")
+SERVICE_SCOPE = "gateway/services"
+ROUTE_SCOPE = "gateway/api/routes"
+# Modules that imported a database library when rules 11 and 12 landed. An
+# entry that stops importing one fails the check until it is removed, so each
+# list only shrinks.
+SERVICE_DATABASE_IMPORT_BASELINE = (
+    "gateway/services/agent_telemetry_service.py",
     "gateway/services/alias_service.py",
     "gateway/services/batch_service.py",
     "gateway/services/bootstrap_service.py",
     "gateway/services/budget_reservation_ledger.py",
     "gateway/services/budget_retiming.py",
     "gateway/services/budget_service.py",
+    "gateway/services/content_normalizer.py",
     "gateway/services/dashboard_session_service.py",
     "gateway/services/external_usage_service.py",
     "gateway/services/file_service.py",
@@ -631,80 +311,148 @@ QUERY_BASELINE = (
     "gateway/services/runtime_settings_service.py",
     "gateway/services/scoped_budget_service.py",
     "gateway/services/search_tool_store_service.py",
+    "gateway/services/selector_index_service.py",
+    "gateway/services/tenancy/authorization.py",
+    "gateway/services/tenancy/deployment_user_service.py",
     "gateway/services/tenancy/org_provider_key_service.py",
     "gateway/services/tenancy/organization_budget_service.py",
+    "gateway/services/tenancy/organization_domain_service.py",
     "gateway/services/tenancy/organization_guardrail_service.py",
     "gateway/services/tenancy/organization_model_access.py",
+    "gateway/services/tenancy/organization_service.py",
     "gateway/services/tenancy/provisioning_service.py",
+    "gateway/services/tenancy/user_service.py",
     "gateway/services/tenancy/webauthn_service.py",
     "gateway/services/tenancy/workspace_activation_service.py",
     "gateway/services/tenancy/workspace_budget_default_service.py",
+    "gateway/services/tenancy/workspace_code_execution_policy_service.py",
     "gateway/services/tenancy/workspace_mcp_server_service.py",
     "gateway/services/tenancy/workspace_service.py",
+    "gateway/services/tenancy/workspace_web_search_service.py",
     "gateway/services/tool_settings_service.py",
     "gateway/services/usage_admin_service.py",
     "gateway/services/workspace_scope.py",
 )
+ROUTE_DATABASE_IMPORT_BASELINE = (
+    "gateway/api/routes/_helpers.py",
+    "gateway/api/routes/_normalize.py",
+    "gateway/api/routes/_passthrough.py",
+    "gateway/api/routes/_pipeline.py",
+    "gateway/api/routes/admin.py",
+    "gateway/api/routes/agent_telemetry.py",
+    "gateway/api/routes/aliases.py",
+    "gateway/api/routes/audio.py",
+    "gateway/api/routes/auth_oauth.py",
+    "gateway/api/routes/auth_password.py",
+    "gateway/api/routes/auth_password_reset.py",
+    "gateway/api/routes/auth_profile.py",
+    "gateway/api/routes/auth_session.py",
+    "gateway/api/routes/auth_signup.py",
+    "gateway/api/routes/auth_webauthn.py",
+    "gateway/api/routes/batches.py",
+    "gateway/api/routes/bootstrap.py",
+    "gateway/api/routes/budgets.py",
+    "gateway/api/routes/catalog.py",
+    "gateway/api/routes/chat.py",
+    "gateway/api/routes/embeddings.py",
+    "gateway/api/routes/files.py",
+    "gateway/api/routes/health.py",
+    "gateway/api/routes/hooks.py",
+    "gateway/api/routes/images.py",
+    "gateway/api/routes/invitations.py",
+    "gateway/api/routes/keys.py",
+    "gateway/api/routes/maintenance_mode.py",
+    "gateway/api/routes/mcp.py",
+    "gateway/api/routes/messages.py",
+    "gateway/api/routes/models.py",
+    "gateway/api/routes/moderations.py",
+    "gateway/api/routes/org_provider_keys.py",
+    "gateway/api/routes/organization_budgets.py",
+    "gateway/api/routes/organization_guardrails.py",
+    "gateway/api/routes/organization_keys.py",
+    "gateway/api/routes/organization_pricing.py",
+    "gateway/api/routes/organization_routing.py",
+    "gateway/api/routes/organization_usage.py",
+    "gateway/api/routes/organizations.py",
+    "gateway/api/routes/otlp.py",
+    "gateway/api/routes/playground.py",
+    "gateway/api/routes/pricing.py",
+    "gateway/api/routes/providers.py",
+    "gateway/api/routes/rerank.py",
+    "gateway/api/routes/responses.py",
+    "gateway/api/routes/routing.py",
+    "gateway/api/routes/routing_memory.py",
+    "gateway/api/routes/scoped_budgets.py",
+    "gateway/api/routes/search.py",
+    "gateway/api/routes/search_tools.py",
+    "gateway/api/routes/settings.py",
+    "gateway/api/routes/tool_settings.py",
+    "gateway/api/routes/usage.py",
+    "gateway/api/routes/users.py",
+    "gateway/api/routes/workspace_activation.py",
+    "gateway/api/routes/workspace_code_execution_policy.py",
+    "gateway/api/routes/workspace_mcp_servers.py",
+    "gateway/api/routes/workspace_member_budget_policies.py",
+    "gateway/api/routes/workspace_web_search.py",
+    "gateway/api/routes/workspaces.py",
+)
 
 
-def _root_name(node: ast.expr) -> str | None:
-    """Return the name an attribute chain starts from, or None when it starts from an expression."""
-    while isinstance(node, ast.Attribute):
-        node = node.value
-    return node.id if isinstance(node, ast.Name) else None
-
-
-def _query_primitives(tree: ast.Module) -> list[tuple[int, str]]:
-    """Return the line and name of each query-building primitive a module imports or references."""
-    # An unaliased `import sqlalchemy.sql` binds the name `sqlalchemy`.
-    library_names = {
-        alias.asname or alias.name.split(".")[0]
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-        if alias.name.split(".")[0] in QUERY_LIBRARIES
-    } | {
-        alias.asname or alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module is not None
-        if node.module.split(".")[0] in QUERY_LIBRARIES
-        for alias in node.names
-    }
+def _database_imports(tree: ast.Module) -> list[tuple[int, str]]:
+    """Return the line and module of each import of a database library in a module."""
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module is not None:
-            if node.module.split(".")[0] in QUERY_LIBRARIES:
-                found.extend((node.lineno, alias.name) for alias in node.names if alias.name in QUERY_PRIMITIVES)
-        elif isinstance(node, ast.Attribute) and node.attr in QUERY_PRIMITIVES and _root_name(node) in library_names:
-            found.append((node.lineno, node.attr))
+        if isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module is not None:
+            modules = [node.module]
+        else:
+            continue
+        found.extend(
+            (node.lineno, module)
+            for module in modules
+            if any(_matches(module, library) for library in DATABASE_LIBRARIES)
+        )
     return sorted(found)
 
 
-def check_query_layering(src_root: Path) -> list[str]:
-    """Check that no route or service off the baseline builds a query, and that every baseline entry still does."""
+def _check_layer_database_imports(src_root: Path, scope: str, baseline: tuple[str, ...], remedy: str) -> list[str]:
+    """Check one layer against its database import baseline, reporting new importers and stale entries."""
     violations: list[str] = []
-    querying: set[str] = set()
-    for scope in QUERY_SCOPES:
-        for py_file in sorted((src_root / scope).rglob("*.py")):
-            relative_path = py_file.relative_to(src_root).as_posix()
-            try:
-                tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
-            except SyntaxError:
-                continue  # check_file already reports an unparseable file.
-            primitives = _query_primitives(tree)
-            if not primitives:
-                continue
-            querying.add(relative_path)
-            if relative_path not in QUERY_BASELINE:
-                violations.extend(
-                    f"{relative_path}:{line} builds a query with {name}; a query belongs in a repository"
-                    for line, name in primitives
-                )
+    importing: set[str] = set()
+    for py_file in sorted((src_root / scope).rglob("*.py")):
+        relative_path = py_file.relative_to(src_root).as_posix()
+        try:
+            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        except SyntaxError:
+            continue  # check_file already reports an unparseable file.
+        imports = _database_imports(tree)
+        if not imports:
+            continue
+        importing.add(relative_path)
+        if relative_path not in baseline:
+            violations.extend(f"{relative_path}:{line} imports {module}; {remedy}" for line, module in imports)
     violations.extend(
-        f"{relative_path} is on the query baseline but builds no query; remove it from the baseline"
-        for relative_path in sorted(set(QUERY_BASELINE) - querying)
+        f"{relative_path} is on the database import baseline but imports no database library; "
+        "remove it from the baseline"
+        for relative_path in sorted(set(baseline) - importing)
     )
     return violations
+
+
+def check_database_imports(src_root: Path) -> list[str]:
+    """Check that no service or route off its layer's baseline imports a database library."""
+    return [
+        *_check_layer_database_imports(
+            src_root,
+            SERVICE_SCOPE,
+            SERVICE_DATABASE_IMPORT_BASELINE,
+            "a service reaches the database through its repositories and the Unit of Work",
+        ),
+        *_check_layer_database_imports(
+            src_root, ROUTE_SCOPE, ROUTE_DATABASE_IMPORT_BASELINE, "a route reaches the database through a service"
+        ),
+    ]
 
 
 # Service modules are purpose-named (guardrails.py, url_safety.py, ...), so
@@ -876,8 +624,7 @@ def main() -> int:
     naming_violations = check_naming_conventions(SRC_ROOT)
     package_violations = check_top_level_packages(SRC_ROOT)
     flat_module_violations = check_flat_modules(SRC_ROOT)
-    query_violations = check_query_layering(SRC_ROOT)
-    session_violations = check_session_parameters(SRC_ROOT)
+    database_violations = check_database_imports(SRC_ROOT)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -898,17 +645,11 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal top-level package violations: {len(package_violations)}")
 
-    if query_violations:
-        print("\n❌ Query layering violations:\n")
-        for violation in query_violations:
+    if database_violations:
+        print("\n❌ Database import violations:\n")
+        for violation in database_violations:
             print(f"  {violation}")
-        print(f"\nTotal query layering violations: {len(query_violations)}")
-
-    if session_violations:
-        print("\n❌ Session parameter violations:\n")
-        for violation in session_violations:
-            print(f"  {violation}")
-        print(f"\nTotal session parameter violations: {len(session_violations)}")
+        print(f"\nTotal database import violations: {len(database_violations)}")
 
     if flat_module_violations:
         print("\n❌ Flat module violations:\n")
@@ -916,14 +657,7 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal flat module violations: {len(flat_module_violations)}")
 
-    if (
-        import_violations
-        or naming_violations
-        or package_violations
-        or query_violations
-        or session_violations
-        or flat_module_violations
-    ):
+    if import_violations or naming_violations or package_violations or database_violations or flat_module_violations:
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1
 

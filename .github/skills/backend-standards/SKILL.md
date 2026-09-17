@@ -69,12 +69,12 @@ domain fits together and the domain test, assigns every module to its domain, an
 for moving one domain into the shape. This section adds the house style for code in those layers.
 
 **New and moved code follows the target shape. Most existing code does not, so never copy the
-module beside yours.** `QUERY_BASELINE`, `SESSION_PARAMETER_BASELINE` and `FLAT_MODULE_BASELINE` in
+module beside yours.** `SERVICE_DATABASE_IMPORT_BASELINE`, `ROUTE_DATABASE_IMPORT_BASELINE` and `FLAT_MODULE_BASELINE` in
 `scripts/check_architecture.py` name the code still in the old shape. A baseline only shrinks:
 remove a name when you move its code, and never add one.
 
 - **Routes** return typed schemas, not raw dicts, and use `fastapi.status` constants.
-- **Services** never import `sqlalchemy`. A service that handles a database failure catches
+- **Services** never import `sqlalchemy` or `sqlmodel`. A service that handles a database failure catches
   `DATABASE_ERRORS` from `core/database.py`, which also covers the bare `TimeoutError` a
   connect timeout raises.
 - **Repositories** inherit `BaseRepository`, flush and never commit. A repository that turns a

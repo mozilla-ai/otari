@@ -16,7 +16,7 @@ from `gateway.core.database` rather than importing `sqlalchemy`. Review new and 
 against the rules below, and do not accept "the module next to it does the
 same" as a reason.
 
-`QUERY_BASELINE`, `SESSION_PARAMETER_BASELINE` and `FLAT_MODULE_BASELINE` in
+`SERVICE_DATABASE_IMPORT_BASELINE`, `ROUTE_DATABASE_IMPORT_BASELINE` and `FLAT_MODULE_BASELINE` in
 `scripts/check_architecture.py` name the code still in the old shape.
 
 - Do not flag an existing baseline entry the PR does not touch.
@@ -28,9 +28,9 @@ same" as a reason.
 
 | Layer | Path | Does | Flag when it |
 | --- | --- | --- | --- |
-| Routes | `api/routes/<domain>.py` | Parses the request, calls one service method, returns a schema | Imports `sqlalchemy`, builds a query, holds a business rule, defines a Pydantic model, imports a repository, or commits |
+| Routes | `api/routes/<domain>.py` | Parses the request, calls one service method, returns a schema | Imports `sqlalchemy` or `sqlmodel`, builds a query, holds a business rule, defines a Pydantic model, imports a repository, or commits |
 | Schemas | `schemas/<domain>.py` | Holds Pydantic request and response models | Holds anything else |
-| Services | `services/<domain>/` | Runs use cases: business rules and orchestration | Imports `sqlalchemy`, builds a query, takes or holds a session, touches HTTP, or imports another domain's repository |
+| Services | `services/<domain>/` | Runs use cases: business rules and orchestration | Imports `sqlalchemy` or `sqlmodel`, builds a query, takes or holds a session, touches HTTP, or imports another domain's repository |
 | Repositories | `repositories/<domain>/`, modules ending in `_repository.py` | Runs every query, over `BaseRepository`, and flushes | Commits, or holds a business rule |
 | Exceptions | `exceptions/<domain>_exceptions.py` | Declares error classes, each with its own `status_code` | Handles an error |
 | Models | `models/<domain>.py` | Declares ORM tables | Holds logic |
@@ -47,8 +47,6 @@ same" as a reason.
   that receives the session or another domain's repository.
 - A builder in `api/deps.py` builds the service. Flag a new service builder
   defined anywhere else.
-- Flag a new module-level function under `services/` that takes an
-  `AsyncSession`.
 
 ## Commits
 
