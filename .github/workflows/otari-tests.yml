@@ -13,6 +13,8 @@ on:
       - 'scripts/**'
       # A unit test renders the release notes from this config.
       - 'cliff.toml'
+      # A unit test runs this workflow's shell steps.
+      - '.github/workflows/otari-release.yml'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-tests.yml'
@@ -28,6 +30,8 @@ on:
       - 'scripts/**'
       # A unit test renders the release notes from this config.
       - 'cliff.toml'
+      # A unit test runs this workflow's shell steps.
+      - '.github/workflows/otari-release.yml'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-tests.yml'
