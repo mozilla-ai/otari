@@ -10,6 +10,7 @@ from collections.abc import Generator
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway.agent_runtime.domain.evaluators import _command_segments, _contains_subsequence
 from gateway.core.config import API_ROOT, PLATFORM_TOKEN_ENV_VAR, GatewayConfig
 
 from .conftest import build_test_client
@@ -25,6 +26,25 @@ gates:
     forbidden: ["scratch/**"]
     message: Do not commit scratch files.
 """
+
+_NO_NPM_POLICY = (
+    'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+    "  - id: g\n    type: command_match\n    enforcement: required\n"
+    '    forbidden: ["npm"]\n    message: m\n'
+)
+
+
+@pytest.fixture
+def tokenized_commands(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Returns the commands the hooks check splits into segments, one entry per split."""
+    calls: list[str] = []
+
+    def recording_command_segments(command: str) -> list[list[str]]:
+        calls.append(command)
+        return _command_segments(command)
+
+    monkeypatch.setattr("gateway.agent_runtime.domain.evaluators._command_segments", recording_command_segments)
+    return calls
 
 
 def test_requires_authentication(client: TestClient) -> None:
@@ -160,6 +180,16 @@ def test_duplicated_globs_and_paths_resolve_quickly_instead_of_blocking(
     ~5s of synchronous blocking. Deduplicating at parse time and at the
     evidence boundary (domain.policy, PolicyCheckRequest.changed_path_evidence)
     collapses this to one pattern against one path.
+
+    The budget below is deliberately far above what the deduplicated work
+    costs. What the timer actually spans is a whole HTTP round trip, and most
+    of what is left in it once the quadratic blowup is gone is the unavoidable
+    cost of the payload itself: parsing and validating 10,000 paths and a
+    2,500-entry policy. That floor scales with the request rather than with
+    the bug, so a budget pressed close to it measures how loaded the runner
+    is, not whether the blowup is back (it failed at 1.07s against a 1.0s
+    budget on a four-worker CI runner). Three seconds still catches a return
+    to ~5s, which is the regression this exists to hold.
     """
     quoted_b = '"b"'
     policy = (
@@ -174,7 +204,7 @@ def test_duplicated_globs_and_paths_resolve_quickly_instead_of_blocking(
         json={"policy_yaml": policy, "changed_paths": changed_paths},
         headers=master_key_header,
     )
-    assert time.time() - start < 1.0
+    assert time.time() - start < 3.0
     assert response.status_code == 200, response.text
     assert response.json()["blocked"] is False
 
@@ -399,87 +429,78 @@ def test_command_match_work_estimate_charges_a_shared_phrase_per_gate(
 
 
 def test_many_whitespace_only_commands_do_not_stall_tokenizing(
-    client: TestClient, master_key_header: dict[str, str]
+    client: TestClient, master_key_header: dict[str, str], tokenized_commands: list[str]
 ) -> None:
-    """shlex.split costs meaningfully more per character than a plain len()
+    """Commands over the total character budget are refused before any of them is tokenized.
 
-    check, regardless of content, so a request built from many long,
-    all-whitespace commands (which tokenize to zero tokens each, keeping
-    _MAX_COMMAND_MATCH_WORK's estimate at zero no matter how many there are)
-    can still cost real seconds just computing that estimate. This must be
-    caught by a raw character-total budget before any command is tokenized,
-    not discovered only after tokenizing all of them.
+    Whitespace-only commands have no tokens, so only a character count bounds their tokenizing cost.
     """
-    # Distinct (a trailing index) so evidence deduplication does not collapse
-    # this back down to one command and hide the aggregate-length case.
+    # A trailing index keeps the commands distinct, so evidence deduplication cannot merge them.
     commands = [" " * 4000 + str(i) for i in range(600)]
-    policy = (
-        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: command_match\n    enforcement: required\n"
-        '    forbidden: ["npm"]\n    message: m\n'
-    )
-    start = time.time()
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "commands": commands},
+        json={"policy_yaml": _NO_NPM_POLICY, "commands": commands},
         headers=master_key_header,
     )
-    assert time.time() - start < 1.0
     assert response.status_code == 422
     assert "characters" in response.json()["detail"]
+    assert tokenized_commands == []
+
+    # The empty list above means something only if the recorder fires on a real command.
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _NO_NPM_POLICY, "commands": commands[:1]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert tokenized_commands == commands[:1]
 
 
 def test_a_policy_with_no_command_match_gate_never_tokenizes_commands(
-    client: TestClient, master_key_header: dict[str, str]
+    client: TestClient, master_key_header: dict[str, str], tokenized_commands: list[str]
 ) -> None:
-    """Submitting `commands` evidence against a policy with no command_match
+    """A policy with no command_match gate never tokenizes the submitted commands.
 
-    gate must not pay any tokenizing cost at all: the result is moot
-    regardless, so this must resolve quickly and successfully rather than
-    being rejected by a budget meant for command_match gates that do not
-    exist here.
+    The commands are over the character budget, so the 200 also shows that budget is not applied.
     """
-    # Distinct (a trailing index) so evidence deduplication does not collapse
-    # this back down to one command and hide the aggregate-length case.
+    # A trailing index keeps the commands distinct, so evidence deduplication cannot merge them.
     commands = [" " * 4000 + str(i) for i in range(600)]
-    start = time.time()
     response = client.post(
         f"{API_ROOT}/hooks/check",
         json={"policy_yaml": _VALID_POLICY, "changed_paths": [], "commands": commands},
         headers=master_key_header,
     )
-    assert time.time() - start < 1.0
     assert response.status_code == 200, response.text
     assert response.json()["blocked"] is False
+    assert tokenized_commands == []
+
+    # The empty list above means something only if the recorder fires on a real command.
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _NO_NPM_POLICY, "commands": commands[:1]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert tokenized_commands == commands[:1]
 
 
 def test_many_command_match_gates_do_not_retokenize_per_gate(
-    client: TestClient, master_key_header: dict[str, str]
+    client: TestClient, master_key_header: dict[str, str], tokenized_commands: list[str]
 ) -> None:
-    """Review's repro: 100 command_match gates, each forbidding "npm", against
-
-    250 distinct ~4,000-character mostly-whitespace commands passed every
-    request-level budget (low token content, few phrases per gate) yet
-    measured ~7s of synchronous blocking in check_policy, because
-    evaluate_command_match was called once per gate and each call
-    independently re-tokenized every command from scratch. Tokenizing once
-    per request and sharing the result across every command_match gate's
-    evaluation collapses this to well under a second.
-    """
+    """Each command is tokenized once per request, however many command_match gates check it."""
     gates_yaml = "".join(
         f'  - id: g{i}\n    type: command_match\n    enforcement: required\n    forbidden: ["npm"]\n    message: m\n'
         for i in range(100)
     )
     policy = 'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n' + gates_yaml
     commands = [" " * 4000 + str(i) for i in range(250)]
-    start = time.time()
     response = client.post(
         f"{API_ROOT}/hooks/check",
         json={"policy_yaml": policy, "commands": commands},
         headers=master_key_header,
     )
-    assert time.time() - start < 1.0
     assert response.status_code == 200, response.text
+    assert sorted(tokenized_commands) == sorted(commands)
 
 
 def test_apostrophe_in_a_trailing_comment_does_not_evade_a_required_gate(
@@ -508,15 +529,21 @@ def test_apostrophe_in_a_trailing_comment_does_not_evade_a_required_gate(
     assert body["results"][0]["outcome"] == "fail"
 
 
-def test_many_separator_only_commands_resolve_quickly(client: TestClient, master_key_header: dict[str, str]) -> None:
-    """Review's repro: one gate with 500 forbidden phrases against 100 commands
+def test_separator_only_commands_are_never_compared_against_a_phrase(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A command made only of separators leaves no segment to compare against a phrase.
 
-    built from 500 semicolons each (no real content) passed every request
-    budget (the token count correctly counts 0 real tokens) yet measured
-    ~1.1s, because evaluation still compared every one of ~50,000 resulting
-    empty segments against every phrase. Dropping empty segments at the
-    source, since a non-empty phrase can never match one, collapses this.
+    This counts comparisons because a timed request on a loaded CI runner measures the runner.
     """
+    comparisons = 0
+
+    def counting_contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
+        nonlocal comparisons
+        comparisons += 1
+        return _contains_subsequence(segment, phrase)
+
+    monkeypatch.setattr("gateway.agent_runtime.domain.evaluators._contains_subsequence", counting_contains_subsequence)
     forbidden = [f'"p{i}"' for i in range(500)]
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
@@ -524,15 +551,23 @@ def test_many_separator_only_commands_resolve_quickly(client: TestClient, master
         f"    forbidden: [{', '.join(forbidden)}]\n    message: m\n"
     )
     commands = ["; " * 500 + " " * i for i in range(100)]
-    start = time.time()
     response = client.post(
         f"{API_ROOT}/hooks/check",
         json={"policy_yaml": policy, "commands": commands},
         headers=master_key_header,
     )
-    assert time.time() - start < 0.5
     assert response.status_code == 200, response.text
     assert response.json()["blocked"] is False
+    assert comparisons == 0
+
+    # The zero above means something only if the counter fires on a real command.
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": policy, "commands": ["p0"]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert comparisons > 0
 
 
 def test_multiline_command_with_a_leading_comment_still_blocks(

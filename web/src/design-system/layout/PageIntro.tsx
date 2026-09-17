@@ -22,7 +22,6 @@ export function PageIntro({
   title,
   action,
   docsHref,
-  descriptionClassName = "",
   children,
 }: {
   title: string
@@ -33,12 +32,6 @@ export function PageIntro({
    * action slot is how a page ends up with two things competing to be that.
    */
   docsHref?: string
-  /**
-   * Overrides the description's measure. One caller uses it: the guide, whose
-   * own prose is 560px, so the paragraph introducing it should not be the
-   * widest line on a page about measure.
-   */
-  descriptionClassName?: string
   children?: ReactNode
 }) {
   return (
@@ -46,7 +39,7 @@ export function PageIntro({
       <div className="max-w-[38.75rem]">
         <h1 className="text-display">{title}</h1>
         {children || docsHref ? (
-          <p className={`mt-1 text-sm text-muted ${descriptionClassName}`}>
+          <p className="mt-1 text-sm text-muted">
             {children}
             {docsHref ? (
               <>

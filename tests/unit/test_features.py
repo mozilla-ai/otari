@@ -46,8 +46,15 @@ def _standalone(tmp_path: Path) -> GatewayConfig:
 
 
 def _hosted(tmp_path: Path) -> GatewayConfig:
+    # Told where its data plane is, so the roster it publishes is the whole
+    # hosted one. The Playground is withheld without that address, which is a
+    # fact about that surface rather than about features, and is asserted where
+    # it belongs (``test_deployment_bootstrap``).
     return GatewayConfig(
-        mode="hosted", database_url=f"sqlite:///{tmp_path / 'features.db'}", master_key="sk-test-master"
+        mode="hosted",
+        database_url=f"sqlite:///{tmp_path / 'features.db'}",
+        master_key="sk-test-master",
+        data_plane_url="https://gateway.example.com",
     )
 
 

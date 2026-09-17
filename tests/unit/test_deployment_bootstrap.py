@@ -295,10 +295,11 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     the row that exists only where tenants do: standalone's organization is the
     deployment, so ``/usage`` already answers it whole (otari-ai#1963).
 
-    ``playground`` is the one row dropped for a reason that is not about
-    credentials or scope at all: the page dispatches a completion, and a control
-    plane serves no inference (otari#822), so the whole feature is missing rather
-    than mis-scoped.
+    ``playground`` is the one row withheld for a reason that is not about
+    credentials or scope at all, and not about the topology either: the page
+    dispatches a completion, a control plane serves no inference (otari#822), and
+    this one was given no ``data_plane_url`` to forward to. Configure one and it
+    appears; the test below is that pair.
     """
     app = create_app(_hosted(tmp_path))
 
@@ -323,6 +324,29 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     }
 
 
+
+def test_hosted_publishes_the_playground_once_it_knows_its_data_plane(tmp_path: Path) -> None:
+    """The other half of the row above, and the only surface configuration decides.
+
+    A control plane runs no completion itself, so the Playground page is served
+    by forwarding that one request to the data-plane gateway
+    (``services/playground_dispatch``). Told where that gateway is, the
+    deployment can serve the page and says so; told nothing, it withholds the
+    surface rather than publishing a page whose composer could only fail.
+    """
+    app = create_app(_hosted(tmp_path, data_plane_url="https://gateway.example.com"))
+
+    with TestClient(app) as client:
+        answered = client.get(f"{API_ROOT}/bootstrap").json()
+
+    assert "playground" in answered["surfaces"]
+    # The rest of the hosted set is unchanged by the address: this is one row's
+    # availability, not a different edition.
+    assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
+        "organization_providers",
+        "organization_usage",
+        "providers",
+    }
 
 def test_hosted_answers_everything_below_the_edition_the_way_standalone_does(tmp_path: Path) -> None:
     """Hosted mode is standalone's multi-tenant sibling, not a third data plane.

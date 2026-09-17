@@ -13,8 +13,10 @@ artifacts. [ARCHITECTURE.md](../../ARCHITECTURE.md) owns the extension boundary.
 Domain protocols live in `ports/`, core implementations in `adapters/`, and
 bindings in `container.py`. `OTARI_BOOTSTRAP=module:callable` may rebind a port
 or contribute a capability-gated router after core bindings are installed.
-A core feature is one domain-named module per layer plus an entry in
-`gateway/features.py`; see ARCHITECTURE.md.
+Which mechanism new code uses is in
+[Where new code goes](../../ARCHITECTURE.md#where-new-code-goes), and the steps
+for an optional feature are in
+[How to add a core feature](../../ARCHITECTURE.md#how-to-add-a-core-feature).
 
 A route module that backs a dashboard page declares `SURFACE` beside its router
 and adds it to `_DECLARED_SURFACES` in `api/routes/bootstrap.py`. A core feature

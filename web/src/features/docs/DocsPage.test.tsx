@@ -79,6 +79,27 @@ describe("DocsPage", () => {
     expect(region).toContainElement(tables[0])
   })
 
+  it("renders the guide as one band of the page, not beside an empty column", () => {
+    const { container } = renderDocs()
+
+    // The guide is a band of the page like any other: its rule runs the width
+    // of the scroll area (`otari-bleed`) and the prose sits in the page column.
+    // The missing `border-r` is half the point. A vertical rule here has
+    // nothing on its far side, so a wide window reads it as a second column
+    // that failed to load, with the guide pinched into the first.
+    const band = container.querySelector("section.otari-bleed")
+    expect(band).not.toBeNull()
+    expect(band).toContainElement(
+      screen.getByText(/Otari serves its dashboard at the gateway root/),
+    )
+    expect(container.querySelector(".border-r")).toBeNull()
+    // And the prose runs the width of that column rather than stopping at a
+    // measure of its own, which is what leaves the rest of a wide window empty.
+    const prose = band?.querySelector("div.text-base") as HTMLElement
+    expect(prose).not.toBeNull()
+    expect([...prose.classList].some((c) => c.startsWith("max-w-"))).toBe(false)
+  })
+
   it("does not leak react-markdown's node prop onto rendered DOM elements", () => {
     const { container } = renderDocs()
 

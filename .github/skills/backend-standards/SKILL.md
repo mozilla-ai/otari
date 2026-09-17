@@ -103,6 +103,9 @@ A reservation that never settles leaks and permanently shrinks the user's budget
 - Every foreign key needs an explicit `ondelete` policy; index it (`index=True`), see the
   performance instructions. Account deletion must leave no orphaned billable rows.
 - Provide a real, reversible `downgrade()`.
+- Name each table in `op.create_table` or `op.rename_table` with a string literal or a module-level
+  constant. Autogenerate reads those names to tell otari's tables from another chain's tables in the
+  same database, and it refuses a revision whose table name it cannot read.
 - The chain runs on SQLite *and* PostgreSQL, so keep it dialect-neutral: `sa.func.now()` rather
   than a literal `now()`/`CURRENT_TIMESTAMP`, and no `ALTER TABLE ... ADD CONSTRAINT`, which
   SQLite does not have. Adding a constraint to an existing table goes through

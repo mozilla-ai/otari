@@ -2755,6 +2755,11 @@ export interface paths {
          *
          *     ``user`` in the body is the one field the pipeline will not read here: spend
          *     binds to the session's own attribution user, derived and never accepted.
+         *
+         *     On a hosted control plane there is no local pipeline to call, so the same
+         *     principal is forwarded to the data-plane gateway instead
+         *     (:func:`_dispatch_to_data_plane`). The request and the response are the same
+         *     either way.
          */
         post: operations["playground-playground_chat_completions"];
         delete?: never;

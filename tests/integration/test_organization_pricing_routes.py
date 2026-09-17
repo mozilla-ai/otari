@@ -254,6 +254,7 @@ def test_a_replacement_without_a_start_is_refused(
     assert listed[0]["effective_from"] == created.json()["effective_from"]
 
 
+@pytest.mark.filterwarnings("ignore:Model format 'provider/model' is deprecated:DeprecationWarning")
 def test_the_two_spellings_of_one_model_collapse_to_one_key(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -281,6 +282,7 @@ def test_the_two_spellings_of_one_model_collapse_to_one_key(
     assert listed["data"][0]["input_price_per_million"] != 99.0
 
 
+@pytest.mark.filterwarnings("ignore:Model format 'provider/model' is deprecated:DeprecationWarning")
 def test_a_slash_form_key_is_stored_canonically(
     client: TestClient,
     master_key_header: dict[str, str],
