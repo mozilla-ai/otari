@@ -132,7 +132,7 @@ class ModelObject(BaseModel):
 
 
 def mark_deployment_managed(
-    config: GatewayConfig, model: ModelObject, *, hosted_providers: frozenset[str] = frozenset()
+    config: GatewayConfig, model: ModelObject, *, deployment_supplied_providers: frozenset[str]
 ) -> ModelObject:
     """Stamp ``deployment_managed`` from the entry's own id, and hand it back.
 
@@ -143,7 +143,7 @@ def mark_deployment_managed(
     """
     split = split_selector(model.id)
     model.deployment_managed = is_deployment_instance_key(config, model.id) or (
-        split is not None and split[0] in hosted_providers
+        split is not None and split[0] in deployment_supplied_providers
     )
     return model
 
@@ -639,7 +639,7 @@ async def build_merged_catalog(
         merged = {mid: obj for mid, obj in merged.items() if _permitted(mid)}
 
     for obj in merged.values():
-        mark_deployment_managed(config, obj, hosted_providers=scope.deployment_supplied_providers)
+        mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)
 
     return MergedCatalog(
         models=merged,

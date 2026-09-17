@@ -286,7 +286,6 @@ async def get_model(
     # aliases, plus their workspace's and the configured ones. A master-key caller
     # has neither, so it reads the configured layer and the default workspace's.
     scope = await catalog_scope(db, config, auth=auth, session_identity=session_identity, model_provider=model_provider)
-    hosted = scope.deployment_supplied_providers
     aliases = catalog_aliases(
         config,
         caller_user_id=api_key.user_id if api_key is not None else None,
@@ -364,7 +363,9 @@ async def get_model(
         )
         apply_default_pricing(fallback)
         if fallback.pricing is not None:
-            return mark_deployment_managed(config, fallback, hosted_providers=hosted)
+            return mark_deployment_managed(
+                config, fallback, deployment_supplied_providers=scope.deployment_supplied_providers
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Model '{model_id}' not found",
@@ -385,8 +386,10 @@ async def get_model(
             context_window=context_window_for_key(model_key),
         )
         apply_default_pricing(obj)
-        return mark_deployment_managed(config, obj, hosted_providers=hosted)
+        return mark_deployment_managed(config, obj, deployment_supplied_providers=scope.deployment_supplied_providers)
 
     # Pricing-only model (no discovery data).
     assert pricing is not None
-    return mark_deployment_managed(config, model_from_pricing(pricing), hosted_providers=hosted)
+    return mark_deployment_managed(
+        config, model_from_pricing(pricing), deployment_supplied_providers=scope.deployment_supplied_providers
+    )
