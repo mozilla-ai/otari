@@ -29,10 +29,17 @@ on:
       - '.github/workflows/otari-tests.yml'
   workflow_dispatch:
 
+# A new push to a pull request supersedes its older run.
+# A run on main always finishes, so every commit keeps its coverage upload.
+concurrency:
+  group: otari-tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test-unit:
     name: test-unit (${{ matrix.shard }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -68,6 +75,7 @@ jobs:
     name: test-integration (${{ matrix.shard }})
     runs-on: ubuntu-latest
     environment: integration-tests
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
