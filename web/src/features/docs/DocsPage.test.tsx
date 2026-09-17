@@ -93,6 +93,11 @@ describe("DocsPage", () => {
       screen.getByText(/Otari serves its dashboard at the gateway root/),
     )
     expect(container.querySelector(".border-r")).toBeNull()
+    // And the prose runs the width of that column rather than stopping at a
+    // measure of its own, which is what leaves the rest of a wide window empty.
+    const prose = band?.querySelector("div.text-base") as HTMLElement
+    expect(prose).not.toBeNull()
+    expect([...prose.classList].some((c) => c.startsWith("max-w-"))).toBe(false)
   })
 
   it("does not leak react-markdown's node prop onto rendered DOM elements", () => {

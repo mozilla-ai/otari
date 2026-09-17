@@ -158,10 +158,7 @@ export function DocsPage() {
 
   return (
     <div className="flex flex-col">
-      {/* Narrower than the app's default: on a page whose subject is the
-          measure, the widest line should not be the scanning-size paragraph at
-          the top of it. */}
-      <PageIntro title="User guide" descriptionClassName="max-w-[35rem]">
+      <PageIntro title="User guide">
         A reference for operating this dashboard, bundled with and
         version-matched to the running gateway.
         {welcomeHref ? (
@@ -183,13 +180,13 @@ export function DocsPage() {
         ) : null}
       </PageIntro>
       {/* One band of the page, like every other surface: the rule runs the
-          width of the scroll area and the guide sits in the page column at a
-          35rem measure, 16/26 rather than the 14px the rest of the product
-          uses, because this is read rather than scanned. */}
+          width of the scroll area and the guide fills the page column rather
+          than a measure of its own, so the guide's tables and headings line up
+          with the rest of the product on the window it is read on. The type is
+          16/26 rather than the 14px everything else uses, because this is read
+          rather than scanned. */}
       <Section className="border-t border-border py-8">
-        <Markdown className="max-w-[35rem]" components={markdownComponents}>
-          {guideBody}
-        </Markdown>
+        <Markdown components={markdownComponents}>{guideBody}</Markdown>
       </Section>
     </div>
   )
