@@ -112,12 +112,14 @@ operator_router = APIRouter(
 # it as "nobody" rather than as a key that failed to verify.
 CatalogCaller = tuple[APIKey | None, bool] | None
 
+
 class CatalogCredential(StrEnum):
-    """Whose key serves a catalog offering."""
+    """Who may price a catalog offering."""
 
     DEPLOYMENT = "deployment"
     ORGANIZATION = "organization"
     HOSTED = "hosted"
+
 
 # The window the viewer's own usage is rolled up over on a detail read.
 _USAGE_WINDOW = timedelta(days=30)
@@ -169,9 +171,10 @@ class CatalogOffering(BaseModel):
     provider_type: str = Field(description="The any-llm implementation behind the instance.")
     credential: CatalogCredential = Field(
         description=(
-            "Whose key serves it: `deployment` for a `providers:` instance the operator configured, "
-            "`hosted` for a model the deployment serves on its own credential, "
-            "`organization` for a key the viewer's organization holds."
+            "Who may price it: `deployment` for a `providers:` instance the operator configured, "
+            "`hosted` for a provider the deployment pays for in any workspace of the viewer's organization, "
+            "`organization` for one the viewer's organization may set its own rate for. "
+            "A workspace can still call a `hosted` provider with the organization's own key."
         ),
     )
     discovered: bool = Field(description="Whether the provider itself reported this model.")
@@ -485,7 +488,7 @@ async def _with_usage(db: AsyncSession, grouped: _Grouped, members: list[_Offeri
 
 
 def _get_credential(config: GatewayConfig, instance: str, *, deployment_managed: bool) -> CatalogCredential:
-    """Returns whose key an offering runs on.
+    """Returns who may price an offering.
 
     ``config`` refuses the reserved hosted instance name in ``providers:``,
     so an offering carrying it came from an overlay.

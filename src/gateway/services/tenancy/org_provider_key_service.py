@@ -838,7 +838,6 @@ class OrgProviderKeyService:
             await self.db.commit()
             await refresh_org_provider_cache(self.db)
 
-
     async def get_active_keys(
         self,
         *,
