@@ -40,7 +40,9 @@ artifacts.
 7. **Open the PR** against `mozilla-ai/otari` with `Fixes #<n>`. The **title must be a
    Conventional Commit** (`otari-pr-title.yml` gates it; accepted types are `feat`, `fix`,
    `perf`, `security`, `revert`, `chore`, `build`, `ci`, `docs`, `style`, `refactor`, `test`),
-   because the repo squash-merges and git-cliff parses that title into the changelog. Keep the
+   because the repo squash-merges and git-cliff parses that title into the changelog. A breaking
+   change carries `!` after the type or scope; see
+   [Breaking changes](../../../RELEASE.md#breaking-changes). Keep the
    template's `## PR Type`, `## Checklist` and `## AI Usage` sections: `pr-template-check.yml`
    fails and labels the PR `missing-template` if any of the three is absent. Fill in AI Usage
    honestly, including the AI-agent checkbox. Two further sections are expected on every PR

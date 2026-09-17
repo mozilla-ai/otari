@@ -150,6 +150,7 @@ make postman-check
 
 - PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/); CI enforces this.
 - PRs are squash-merged, so the title is what ends up in the changelog.
+- Mark a breaking change with `!` in the title, for example `feat(api)!: ...`. See [Breaking changes](RELEASE.md#breaking-changes).
 - Keep diffs focused; avoid unrelated refactors in the same PR.
 - Do not hand-edit `CHANGELOG.md`; it is regenerated from commit history at release time.
 - The PR description must keep the **PR Type**, **Checklist**, and **AI Usage** sections from the [PR template](https://github.com/mozilla-ai/otari/blob/main/.github/pull_request_template.md). CI checks for these sections and will auto-close PRs that are missing them after 24 hours.

@@ -68,7 +68,8 @@ Check these on every review; each has broken a PR here before.
   doc comments, commit messages, or PR descriptions. CLI flags and numeric ranges are fine.
 - **PR title.** Squash-merge means the PR title is what git-cliff parses, so it must be a
   conventional commit. `CHANGELOG.md` is generated at release time and must not be
-  hand-edited.
+  hand-edited. A breaking change without `!` in the title reads like any other entry in the
+  release notes, so flag it; see [Breaking changes](../../../RELEASE.md#breaking-changes).
 
 ## Review expression
 
