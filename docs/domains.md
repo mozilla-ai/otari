@@ -49,28 +49,30 @@ not the module beside it.
 
 ## The shape today
 
-Measured on `main` at `eeb5e42f`, 2026-09-17. A module "runs queries" when it
+Measured on `main` at `ecd07b13`, 2026-09-17. A module "runs queries" when it
 imports a query builder (`select`, `update`, `delete` or `insert` from
 SQLAlchemy or SQLModel) and calls `execute`, `exec`, `scalar`, `scalars` or
 `get` on a session.
 
 | Measure | Count |
 | --- | --- |
-| Service modules | 103, of which 70 sit flat at the top of `services/` |
-| Service modules that run queries | 38, plus 2 that only call `session.get` |
+| Service modules | 108, of which 71 sit flat at the top of `services/` |
+| Service modules that run queries | 39, plus 2 that only call `session.get` |
 | Route modules | 72 |
 | Route modules that run queries | 17, plus 1 that only calls `session.get` |
 | Route modules that define Pydantic models inline | 42 |
 | Model modules | 19 |
 | Repository modules | 9: a base, `users_repository.py`, and 7 under `tenancy/` |
-| Service and repository packages per domain | None |
+| Service packages per domain | 1: `services/tools/`, which holds the built-in tool registry and no service yet. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
+| Repository packages per domain | None. `repositories/tenancy/` is an older subpackage |
 | Modules in `schemas/` | None; the package does not exist |
 | Modules in `exceptions/` | None; `services/tenancy/errors.py` holds every tenancy error in 1,297 lines |
 
 ## The domains
 
 Fifteen domains plus a shared set. A module appears once. Paths are relative to
-their layer's directory. A route module whose name starts with an underscore is
+their layer's directory. A domain package is listed by its directory, which
+covers every module inside it. A route module whose name starts with an underscore is
 a shared helper, which the target shape moves out of the routes layer.
 
 Two groups of modules fail the domain test and are split here. Tenancy holds
@@ -244,7 +246,7 @@ and the Playground.
   `playground.py`; helpers `_pipeline.py`, `_attempts.py`, `_platform.py`,
   `_passthrough.py`, `_normalize.py`, `_schema_derive.py`, `_helpers.py`
 - Services: `batch_service.py`, `content_normalizer.py`, `vision.py`,
-  `upstream_redaction.py`, `playground_service.py`
+  `upstream_redaction.py`, `playground_service.py`, `playground_dispatch.py`
 - Models: `inference.py`, `playground.py`
 
 ### platform
