@@ -14,6 +14,7 @@ from gateway.container import Container
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, create_session, get_db
 from gateway.core.feature import CoreFeature
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
@@ -558,6 +559,14 @@ async def get_db_if_needed(
     async with aclosing(get_db()) as sessions:
         async for db in sessions:
             yield db
+
+
+def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork:
+    """Return the request's Unit of Work over its session.
+
+    Standalone and hosted only: a hybrid gateway has no local database, so it has no Unit of Work.
+    """
+    return UnitOfWork(db)
 
 
 async def get_current_identity(
