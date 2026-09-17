@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from gateway.models.entities import Budget, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.budgets import Budget, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.money import as_float
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,

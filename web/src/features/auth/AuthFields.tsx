@@ -1,4 +1,4 @@
-import { Description, Input, Label, TextField } from "@heroui/react"
+import { Description, FieldError, Input, Label, TextField } from "@heroui/react"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 
 /**
@@ -77,12 +77,21 @@ export function AuthPasswordField({
   onChange,
   autoComplete,
   description,
+  errorMessage,
 }: {
   label: string
   value: string
   onChange: (next: string) => void
   autoComplete: "current-password" | "new-password"
   description?: string
+  /**
+   * Why the password cannot be used yet, taking the description's line rather
+   * than one of its own. The card these forms sit in is what the animated
+   * background measures its bar grid from, so a message that changes the
+   * card's height moves the whole field behind it (otari-ai#2146). Give this
+   * to a field that carries a description, or it takes a line after all.
+   */
+  errorMessage?: string
 }) {
   return (
     <TextField
@@ -90,13 +99,21 @@ export function AuthPasswordField({
       onChange={onChange}
       type="password"
       isRequired
+      isInvalid={Boolean(errorMessage)}
       className="flex flex-col gap-1"
     >
       <Label className="text-body">{label}</Label>
       <Input autoComplete={autoComplete} />
-      {description ? (
+      {description || errorMessage ? (
         <FieldMessages>
-          <Description className="text-muted">{description}</Description>
+          {/* `FieldError` renders through the field's error slot, so the
+              message is announced on the input rather than sitting in the form
+              as a loose paragraph; `isInvalid` above is what lets it render. */}
+          {errorMessage ? (
+            <FieldError className="text-danger">{errorMessage}</FieldError>
+          ) : (
+            <Description className="text-muted">{description}</Description>
+          )}
         </FieldMessages>
       ) : null}
     </TextField>

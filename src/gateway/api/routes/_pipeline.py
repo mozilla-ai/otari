@@ -85,6 +85,7 @@ from gateway.api.routes._platform import (
     _resolve_platform_mcp_servers,
     _resolve_platform_web_search,
     is_provider_billing_error,
+    record_abandoned_attempt,
     run_platform_attempts,
     upstream_error_message,
     upstream_exception_chain,
@@ -117,12 +118,15 @@ from gateway.core.usage import (
 )
 from gateway.inflight import track_request
 from gateway.log_config import logger
-from gateway.metrics import record_abandoned_attempt, record_cost, record_inline_cost_settlement, record_tokens
+from gateway.metrics import REGISTRY, Histogram
+from gateway.metrics import Counter as PrometheusCounter
 from gateway.model_labeling import relabel_model
-from gateway.models.entities import APIKey, ModelPricing, UsageLog
+from gateway.models.api_keys import APIKey
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
+from gateway.models.pricing import ModelPricing
+from gateway.models.usage import UsageLog
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budget_service import (
@@ -220,6 +224,46 @@ from gateway.types.session_principal import SessionPrincipal
 
 ResultT = TypeVar("ResultT")
 ChunkT = TypeVar("ChunkT")
+
+TOKENS = PrometheusCounter(
+    "gateway_tokens",
+    "Total number of tokens processed",
+    ["provider", "model", "type"],
+    registry=REGISTRY,
+)
+
+REQUEST_COST_DOLLARS = Histogram(
+    "gateway_request_cost_dollars",
+    "Request cost in USD",
+    ["provider", "model"],
+    registry=REGISTRY,
+)
+
+INLINE_COST_SETTLEMENTS = PrometheusCounter(
+    "gateway_inline_cost_settlements",
+    "Inline platform cost settlement outcomes on the hybrid response path",
+    ["outcome"],
+    registry=REGISTRY,
+)
+
+
+def record_tokens(provider: str, model: str, prompt_tokens: int, completion_tokens: int) -> None:
+    """Record token usage metrics."""
+    if prompt_tokens:
+        TOKENS.labels(provider=provider, model=model, type="input").inc(prompt_tokens)
+    if completion_tokens:
+        TOKENS.labels(provider=provider, model=model, type="output").inc(completion_tokens)
+
+
+def record_cost(provider: str, model: str, cost: float) -> None:
+    """Record request cost."""
+    REQUEST_COST_DOLLARS.labels(provider=provider, model=model).observe(cost)
+
+
+def record_inline_cost_settlement(outcome: str) -> None:
+    """Record an attached, unattached, or timed-out inline settlement."""
+    INLINE_COST_SETTLEMENTS.labels(outcome=outcome).inc()
+
 
 # ---------------------------------------------------------------------------
 # Shared wire-level detail strings. These are client-visible API contract

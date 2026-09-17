@@ -29,7 +29,8 @@ from sqlalchemy.orm import Session
 
 import gateway.models  # noqa: F401  (registers every table on the shared metadata)
 from gateway.core.metered_pricing import COST_QUANTUM, calculate_token_cost
-from gateway.models.entities import ModelPricing, UsageLog
+from gateway.models.pricing import ModelPricing
+from gateway.models.usage import UsageLog
 from gateway.services.pricing_service import default_model_pricing
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"

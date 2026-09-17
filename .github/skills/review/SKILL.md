@@ -20,10 +20,11 @@ description: Review a pull request or diff for this repository against otari's p
      [frontend-standards](../frontend-standards/SKILL.md).
    - Glob-match every `applyTo` pattern in [.github/instructions/](../../instructions/)
      against the changed files and apply each file that matches:
+     [backend-architecture](../../instructions/backend-architecture.instructions.md),
      [security-review](../../instructions/security-review.instructions.md),
      [performance-review](../../instructions/performance-review.instructions.md),
      [frontend-standards](../../instructions/frontend-standards.instructions.md).
-     CodeRabbit loads all three as review guidance, through the directory glob in
+     CodeRabbit loads all four as review guidance, through the directory glob in
      `.coderabbit.yaml` rather than through their `applyTo` frontmatter (its
      `path_instructions` is empty). No bot reviewing here reads that frontmatter now
      that Copilot is gone, so it is a note to a human reader and to you: glob it

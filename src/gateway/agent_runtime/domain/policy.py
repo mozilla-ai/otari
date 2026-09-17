@@ -13,7 +13,15 @@ from typing import Any, cast
 
 import yaml
 
-from gateway.agent_runtime.domain.types import ChangedPathGate, Enforcement, GateSpec, PolicySpec
+from gateway.agent_runtime.domain.evaluators import tokenize_phrase
+from gateway.agent_runtime.domain.types import (
+    ChangedPathGate,
+    CommandIfChangedGate,
+    CommandMatchGate,
+    Enforcement,
+    GateSpec,
+    PolicySpec,
+)
 
 # A policy body is a developer-edited text file, not a data export; this bounds
 # a pathological input (and an accidental binary) before it ever reaches the
@@ -24,7 +32,7 @@ from gateway.agent_runtime.domain.types import ChangedPathGate, Enforcement, Gat
 MAX_POLICY_BYTES = 256 * 1024
 
 _SUPPORTED_SCHEMA_VERSIONS = {"1.0"}
-_SUPPORTED_GATE_TYPES = {"changed_path"}
+_SUPPORTED_GATE_TYPES = {"changed_path", "command_match", "command_if_changed"}
 _SUPPORTED_ENFORCEMENTS = {"required", "advisory"}
 
 # A `**` in a forbidden glob crosses path segments by recursing over every
@@ -38,7 +46,16 @@ _MAX_DOUBLE_STAR_PER_GLOB = 1
 
 _TOP_LEVEL_FIELDS = {"schema_version", "policy", "gates"}
 _POLICY_FIELDS = {"id", "description"}
-_GATE_FIELDS = {"id", "type", "enforcement", "forbidden", "message"}
+_COMMON_GATE_FIELDS = {"id", "type", "enforcement", "message"}
+# Each gate type accepts only the common fields plus its own: a
+# changed_path gate submitting when_changed, or a command_if_changed gate
+# submitting forbidden, is an unknown-field error like any other, not a
+# silently-ignored one.
+_GATE_FIELDS_BY_TYPE = {
+    "changed_path": _COMMON_GATE_FIELDS | {"forbidden"},
+    "command_match": _COMMON_GATE_FIELDS | {"forbidden"},
+    "command_if_changed": _COMMON_GATE_FIELDS | {"when_changed", "require"},
+}
 
 
 class PolicyError(Exception):
@@ -97,10 +114,59 @@ def _require_fields(document: dict[str, Any], known: set[str], where: str) -> No
         raise PolicyError(f"Unknown field(s) in {where}: {', '.join(formatted)}.")
 
 
+def _require_string_list(raw: dict[str, Any], field: str, gate_id: str, gate_type: str) -> list[str]:
+    """A non-empty list of non-empty strings under ``field``, deduplicated in first-seen order.
+
+    A duplicate entry matches nothing a single copy wouldn't; collapsing it
+    here (once, at parse time) is what keeps a caller who repeats one entry
+    many times from multiplying the Hook Server's per-request match work for
+    zero effect on the result.
+    """
+    value = raw.get(field)
+    if not isinstance(value, list) or not value or not all(isinstance(item, str) and item for item in value):
+        raise PolicyError(f"Gate {gate_id!r} (type {gate_type!r}) needs a non-empty list of {field!r} entries.")
+    return list(dict.fromkeys(value))
+
+
+def _parse_glob_list(gate_id: str, field: str, globs: list[str]) -> list[str]:
+    """Validate every entry as a bounded repo-relative POSIX glob (see ``_MAX_DOUBLE_STAR_PER_GLOB``)."""
+    for glob in globs:
+        # Only a segment that is exactly "**" crosses directories and
+        # recurses in _segments_match; "a****b" is a literal-with-stars
+        # pattern the linear intra-segment matcher handles safely, however
+        # many '*' it has, and must not be counted here.
+        double_star_segments = sum(1 for segment in glob.split("/") if segment == "**")
+        if double_star_segments > _MAX_DOUBLE_STAR_PER_GLOB:
+            raise PolicyError(
+                f"Gate {gate_id!r}: {field} glob {glob!r} uses '**' as its own path "
+                f"segment more than {_MAX_DOUBLE_STAR_PER_GLOB} time(s)."
+            )
+    return globs
+
+
+def _parse_phrase_list(gate_id: str, field: str, phrases: list[str]) -> list[str]:
+    """Validate every entry as a shell phrase the evaluator can tokenize (domain/evaluators.py).
+
+    Validating that it tokenizes, and to at least one token, here rather than
+    at evaluation time means a malformed phrase is a 422 at policy-load time,
+    not an unhandled error the first time a command happens to be evaluated
+    against it.
+    """
+    for phrase in phrases:
+        try:
+            phrase_tokens = tokenize_phrase(phrase)
+        except ValueError as exc:
+            raise PolicyError(
+                f"Gate {gate_id!r}: {field} phrase {phrase!r} is not a valid shell phrase: {exc}"
+            ) from exc
+        if not phrase_tokens:
+            raise PolicyError(f"Gate {gate_id!r}: {field} phrase {phrase!r} has no tokens to match.")
+    return phrases
+
+
 def _parse_gate(raw: Any) -> GateSpec:
     if not isinstance(raw, dict):
         raise PolicyError(f"Each entry under 'gates' must be a mapping, got {type(raw).__name__}.")
-    _require_fields(raw, _GATE_FIELDS, f"gate {raw.get('id', '<missing id>')!r}")
 
     gate_id = raw.get("id")
     if not isinstance(gate_id, str) or not gate_id:
@@ -115,6 +181,10 @@ def _parse_gate(raw: Any) -> GateSpec:
             f"Gate {gate_id!r} has unsupported type {gate_type!r}. "
             f"Supported in this build: {', '.join(sorted(_SUPPORTED_GATE_TYPES))}."
         )
+    # Field set is picked only once `type` itself is known valid, so a gate
+    # is judged against the fields its own type actually uses, not some
+    # union of every type's fields.
+    _require_fields(raw, _GATE_FIELDS_BY_TYPE[gate_type], f"gate {gate_id!r}")
 
     enforcement = raw.get("enforcement")
     if not isinstance(enforcement, str) or enforcement not in _SUPPORTED_ENFORCEMENTS:
@@ -130,35 +200,37 @@ def _parse_gate(raw: Any) -> GateSpec:
     if not isinstance(message, str) or not message:
         raise PolicyError(f"Gate {gate_id!r} is missing a non-empty 'message'.")
 
-    forbidden = raw.get("forbidden")
-    if (
-        not isinstance(forbidden, list)
-        or not forbidden
-        or not all(isinstance(item, str) and item for item in forbidden)
-    ):
-        raise PolicyError(f"Gate {gate_id!r} (type 'changed_path') needs a non-empty list of 'forbidden' globs.")
-    # A duplicate glob matches nothing a single copy wouldn't; collapsing it
-    # here (once, at parse time) is what keeps a caller who repeats one glob
-    # many times from multiplying the Hook Server's per-request match work
-    # for zero effect on the result. Order doesn't matter to matching, so
-    # first-seen order (what dict.fromkeys preserves) is as good as any.
-    forbidden = list(dict.fromkeys(forbidden))
-    for glob in forbidden:
-        # Only a segment that is exactly "**" crosses directories and recurses
-        # in _segments_match; "a****b" is a literal-with-stars pattern the
-        # linear intra-segment matcher handles safely, however many '*' it
-        # has, and must not be counted here.
-        double_star_segments = sum(1 for segment in glob.split("/") if segment == "**")
-        if double_star_segments > _MAX_DOUBLE_STAR_PER_GLOB:
-            raise PolicyError(
-                f"Gate {gate_id!r}: forbidden glob {glob!r} uses '**' as its own path "
-                f"segment more than {_MAX_DOUBLE_STAR_PER_GLOB} time(s)."
-            )
+    if gate_type == "changed_path":
+        forbidden = _parse_glob_list(gate_id, "forbidden", _require_string_list(raw, "forbidden", gate_id, gate_type))
+        return ChangedPathGate(
+            id=gate_id,
+            enforcement=enforcement_value,
+            forbidden=tuple(forbidden),
+            message=message,
+        )
 
-    return ChangedPathGate(
+    if gate_type == "command_match":
+        forbidden = _parse_phrase_list(gate_id, "forbidden", _require_string_list(raw, "forbidden", gate_id, gate_type))
+        return CommandMatchGate(
+            id=gate_id,
+            enforcement=enforcement_value,
+            forbidden=tuple(forbidden),
+            message=message,
+        )
+
+    # command_if_changed: when_changed is the same glob grammar changed_path's
+    # forbidden uses; require is the same shell-phrase grammar command_match's
+    # forbidden uses, just under different field names because both evidence
+    # kinds apply to the same gate at once.
+    when_changed = _parse_glob_list(
+        gate_id, "when_changed", _require_string_list(raw, "when_changed", gate_id, gate_type)
+    )
+    require = _parse_phrase_list(gate_id, "require", _require_string_list(raw, "require", gate_id, gate_type))
+    return CommandIfChangedGate(
         id=gate_id,
         enforcement=enforcement_value,
-        forbidden=tuple(forbidden),
+        when_changed=tuple(when_changed),
+        require=tuple(require),
         message=message,
     )
 

@@ -7,7 +7,8 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import Base, RuntimeSetting
+from gateway.models.base import Base
+from gateway.models.platform import RuntimeSetting
 from gateway.services.pricing_service import configure_default_pricing, default_pricing_enabled
 from gateway.services.runtime_settings_service import (
     DEFAULT_PRICING,

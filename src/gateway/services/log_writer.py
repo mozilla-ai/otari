@@ -8,13 +8,35 @@ from typing import Protocol
 
 from gateway.core.database import DATABASE_ERRORS, create_log_session
 from gateway.log_config import logger
-from gateway.metrics import (
-    log_writer_batch_size,
-    log_writer_flush_duration,
-    log_writer_queue_depth,
-    log_writer_rows,
+from gateway.metrics import REGISTRY, Counter, Gauge, Histogram
+from gateway.models.usage import UsageLog
+
+QUEUE_DEPTH = Gauge(
+    "gateway_usage_log_queue_depth",
+    "Number of usage log entries waiting to be written",
+    registry=REGISTRY,
 )
-from gateway.models.entities import UsageLog
+
+BATCH_SIZE = Histogram(
+    "gateway_usage_log_batch_size",
+    "Number of rows per flush batch",
+    ["writer"],
+    registry=REGISTRY,
+)
+
+FLUSH_DURATION = Histogram(
+    "gateway_usage_log_flush_duration_seconds",
+    "Time spent flushing usage log batches",
+    ["writer", "result"],
+    registry=REGISTRY,
+)
+
+ROWS = Counter(
+    "gateway_usage_log_rows",
+    "Total usage log rows by outcome",
+    ["writer", "result"],
+    registry=REGISTRY,
+)
 
 
 class LogWriter(Protocol):
@@ -37,11 +59,11 @@ class SingleLogWriter:
                 # and, under the batch writer, lag the budget gate.
                 db.add(log)
                 await db.commit()
-                log_writer_rows.labels(writer="single", result="written").inc()
+                ROWS.labels(writer="single", result="written").inc()
             except DATABASE_ERRORS as e:  # pragma: no cover - defensive logging
                 await db.rollback()
                 logger.error("SingleLogWriter failed: %s", e)
-                log_writer_rows.labels(writer="single", result="dropped").inc()
+                ROWS.labels(writer="single", result="dropped").inc()
 
     async def start(self) -> None:
         pass
@@ -61,7 +83,7 @@ class BatchLogWriter:
 
     async def put(self, log: UsageLog) -> None:
         await self._queue.put(log)
-        log_writer_queue_depth.set(self._queue.qsize())
+        QUEUE_DEPTH.set(self._queue.qsize())
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._run())
@@ -106,7 +128,7 @@ class BatchLogWriter:
 
     async def _flush(self, batch: list[UsageLog]) -> None:
         start = time.monotonic()
-        log_writer_batch_size.labels(writer="batch").observe(len(batch))
+        BATCH_SIZE.labels(writer="batch").observe(len(batch))
         try:
             async with create_log_session() as db:
                 # Spend is reconciled inline via the budget reservation path, not
@@ -114,12 +136,12 @@ class BatchLogWriter:
                 for log in batch:
                     db.add(log)
                 await db.commit()
-                log_writer_rows.labels(writer="batch", result="written").inc(len(batch))
-            log_writer_flush_duration.labels(writer="batch", result="ok").observe(time.monotonic() - start)
+                ROWS.labels(writer="batch", result="written").inc(len(batch))
+            FLUSH_DURATION.labels(writer="batch", result="ok").observe(time.monotonic() - start)
         except DATABASE_ERRORS as e:  # pragma: no cover - defensive logging
             logger.error("BatchLogWriter flush failed, dropping %d rows: %s", len(batch), e)
-            log_writer_rows.labels(writer="batch", result="dropped").inc(len(batch))
-            log_writer_flush_duration.labels(writer="batch", result="error").observe(time.monotonic() - start)
+            ROWS.labels(writer="batch", result="dropped").inc(len(batch))
+            FLUSH_DURATION.labels(writer="batch", result="error").observe(time.monotonic() - start)
 
     async def _flush_all(self) -> None:
         batch: list[UsageLog] = []

@@ -289,13 +289,8 @@ export function OrganizationProviderKeysPage() {
   // fired and refused, the way `OrganizationGuardrailsCard` gates its own read
   // and WorkspacesPage withholds the operator-only budget ones.
   //
-  // Deliberately not widened to `isDeploymentOperator`: the server also admits
-  // a superuser whatever their organization role, and `roles.ts` records that
-  // divergence, why it narrows in the safe direction, and that closing it means
-  // growing the membership context a superuser field. `deployment_operator` is
-  // not that field, since it also admits a non-superuser bootstrap identity the
-  // server would refuse, and the rail row is `canManage`-gated too, so no such
-  // caller had a route here to lose.
+  // Not widened to `isDeploymentOperator`: the server gates these rows on the
+  // organization role alone, and operating the deployment grants no role.
   const canEdit = canManage(context.data)
   const keys = useOrgProviderKeys(canEdit)
   // Same gate the `/providers` page applies, for the same reason: without

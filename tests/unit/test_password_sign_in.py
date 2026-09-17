@@ -26,7 +26,7 @@ from sqlalchemy.orm import sessionmaker
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
-from gateway.models.entities import DashboardSession
+from gateway.models.tenancy import DashboardSession
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 from gateway.services.password_service import MAX_PASSWORD_BYTES, MIN_PASSWORD_LENGTH, hash_password
 from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
@@ -549,6 +549,25 @@ def test_the_membership_context_reports_whether_the_caller_holds_a_password(tmp_
         )
 
         assert client.get(f"{API_ROOT}/organizations/me").json()["caller"]["has_password"] is True
+
+
+def test_the_membership_context_reports_whether_a_password_claims_the_deployment(tmp_path: Path) -> None:
+    """An adopted operator already has an address, so a missing address cannot signal the claim."""
+    with _client(tmp_path) as client:
+        _sign_in_with_master_key(client)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
+    with engine.begin() as connection:
+        connection.execute(text('UPDATE "user" SET email = :email'), {"email": EMAIL})
+
+    with _client(tmp_path) as client:
+        _sign_in_with_master_key(client)
+        assert client.get(f"{API_ROOT}/organizations/me").json()["caller"]["claims_deployment"] is True
+
+        response = client.put(f"{API_ROOT}/auth/password", json={"new_password": PASSWORD})
+        assert response.json() == {"email": EMAIL, "master_key_sign_in_retired": True}
+
+        assert client.get(f"{API_ROOT}/organizations/me").json()["caller"]["claims_deployment"] is False
 
 
 def test_a_signed_in_operator_changes_their_password_with_the_current_one(tmp_path: Path) -> None:

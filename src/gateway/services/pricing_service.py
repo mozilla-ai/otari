@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import API_ROOT
 from gateway.core.metered_pricing import meter_cost, quantize_cost, to_decimal
 from gateway.log_config import logger
-from gateway.models.entities import ModelPricing, OrganizationModelPricing
+from gateway.models.pricing import ModelPricing, OrganizationModelPricing
 
 # A zero-token usage is enough to resolve a model's per-million rates from
 # genai-prices without depending on real token counts.

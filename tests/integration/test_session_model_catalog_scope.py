@@ -1,27 +1,27 @@
 """``GET /api/v1/models`` shows a tenant only the providers their organization reaches.
 
 The roles matrix wants a member's model list narrowed to the providers they have
-access to (otari-ai#1969). The narrowing reuses the allow-list machinery an API
-key already goes through (``services/model_access``), so the assertions here are
-about *which* allow-list a caller is answered by rather than about a second
-matcher:
+access to. The narrowing reuses the allow-list machinery an API key already goes
+through (``services/model_access``), so the assertions here are about *which*
+allow-list a caller is answered by rather than about a second matcher:
 
 * a header master key is the deployment credential and is unrestricted;
 * a session that operates the deployment is unrestricted;
 * any other session is answered by its membership, which is every
   ``config.providers`` instance (deployment-wide, so every tenant reaches them)
-  plus the organization's own BYO providers.
+  plus the organization's own BYO providers, plus the hosted providers the
+  port serves where a workspace has no key.
 
 The test deployment configures no ``providers:`` block, so every entry a caller
-is shown here comes from a BYO key. That is the sharp case: a deployment with
-config-file providers gives every tenant those on top, which is why opening this
-filter changes nothing for a single-tenant install.
+is shown here comes from a BYO key. A deployment with config-file providers gives
+every tenant those on top.
 """
 
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from fastapi import status
@@ -29,11 +29,16 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
-from gateway.models.entities import DashboardSession
-from gateway.models.provider_keys import OrgProviderKey, WorkspaceProviderModelRestriction
-from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
+from gateway.models.provider_keys import (
+    OrgProviderKey,
+    WorkspaceProviderKeyOverride,
+    WorkspaceProviderModelRestriction,
+)
+from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
+
+from .hosted_port_helpers import HostedModelProvider, bind_model_provider
 
 # Priced but undiscovered models: phase 2 of the listing publishes them, so the
 # catalog is deterministic without dialing a provider.
@@ -213,14 +218,18 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
         session.close()
 
 
-def _catalog_as(client: TestClient, world: _World, who: str) -> set[str]:
+def _listing_as(client: TestClient, world: _World, who: str) -> dict[str, dict[str, Any]]:
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
     try:
         response = client.get(f"{API_ROOT}/models")
         assert response.status_code == status.HTTP_200_OK, response.text
-        return {model["id"] for model in response.json()["data"]}
+        return {model["id"]: model for model in response.json()["data"]}
     finally:
         client.cookies.clear()
+
+
+def _catalog_as(client: TestClient, world: _World, who: str) -> set[str]:
+    return set(_listing_as(client, world, who))
 
 
 def test_the_master_key_still_sees_every_priced_model(
@@ -369,3 +378,215 @@ def test_a_provider_whose_only_key_will_not_decrypt_is_withheld(
     listed = _catalog_as(client, world, "beta_member")
     assert _ANTHROPIC_MODEL in listed, "beta's decryptable key still counts"
     assert _MISTRAL_MODEL not in listed, "the undecryptable key's provider is withheld"
+
+
+def test_a_hosted_provider_is_listed_for_a_member_of_an_organization_holding_no_key_for_it(
+    client: TestClient, world: _World
+) -> None:
+    """Alpha holds a BYO key for openai only, and the deployment serves mistral."""
+    port = HostedModelProvider("mistral")
+    bind_model_provider(client, port)
+
+    listed = _listing_as(client, world, "alpha_member")
+    assert set(listed) == {_OPENAI_MODEL, _OPENAI_OTHER, _MISTRAL_MODEL}
+    assert listed[_MISTRAL_MODEL]["deployment_managed"] is True, "the deployment pays the mistral bill"
+    assert listed[_OPENAI_MODEL]["deployment_managed"] is False, "alpha's own key pays the openai bill"
+    assert port.asked_for == [world.alpha], "the port is asked for the caller's organization, once"
+
+
+def test_a_hosted_provider_the_organization_also_holds_a_key_for_is_the_organizations_to_price(
+    client: TestClient, world: _World
+) -> None:
+    """Alpha holds an openai key and may price the model, while Beta holds none and may not."""
+    bind_model_provider(client, HostedModelProvider("openai"))
+
+    alpha = _listing_as(client, world, "alpha_member")
+    assert alpha[_OPENAI_MODEL]["deployment_managed"] is False
+
+    beta = _listing_as(client, world, "beta_member")
+    assert set(beta) == {_OPENAI_MODEL, _OPENAI_OTHER, _ANTHROPIC_MODEL}
+    assert beta[_OPENAI_MODEL]["deployment_managed"] is True
+    assert beta[_ANTHROPIC_MODEL]["deployment_managed"] is False
+
+
+@pytest.mark.parametrize(
+    ("model", "disabled_in_alpha_two", "deployment_managed"),
+    [
+        pytest.param(_MISTRAL_MODEL, False, True, id="no-byo-key"),
+        pytest.param(_OPENAI_MODEL, False, False, id="byo-key-in-every-workspace"),
+        pytest.param(_OPENAI_MODEL, True, True, id="one-workspace-disables-the-byo-key"),
+    ],
+)
+def test_the_deployment_managed_flag_agrees_with_the_rate_override_gate(
+    client: TestClient,
+    world: _World,
+    db_session_factory: Callable[[], Session],
+    model: str,
+    disabled_in_alpha_two: bool,
+    deployment_managed: bool,
+) -> None:
+    """The flag must predict whether the organization may set its own rate."""
+    bind_model_provider(client, HostedModelProvider("openai", "mistral"))
+    if disabled_in_alpha_two:
+        session = db_session_factory()
+        try:
+            session.add(
+                WorkspaceProviderKeyOverride(
+                    workspace_id=world.workspaces["alpha_two"],
+                    organization_id=world.alpha,
+                    org_provider_key_id=world.keys["alpha_openai"],
+                    is_default=False,
+                    disabled=True,
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+    listed = _listing_as(client, world, "alpha_owner")
+    assert listed[model]["deployment_managed"] is deployment_managed
+
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_owner"])
+    try:
+        written = client.post(
+            f"{API_ROOT}/organizations/me/pricing",
+            json={"model_key": model, "input_price_per_million": 2.5, "output_price_per_million": 5.0},
+        )
+    finally:
+        client.cookies.clear()
+    expected = status.HTTP_403_FORBIDDEN if deployment_managed else status.HTTP_201_CREATED
+    assert written.status_code == expected, written.text
+
+
+@pytest.mark.parametrize(
+    ("who", "restricted_in_alpha_one", "disabled_in_alpha_one", "hosted", "expected"),
+    [
+        pytest.param(
+            "alpha_member", True, False, ("openai",), {_OPENAI_MODEL}, id="the-port-does-not-widen-a-restricted-key"
+        ),
+        pytest.param(
+            "alpha_member",
+            True,
+            True,
+            ("openai",),
+            {_OPENAI_MODEL, _OPENAI_OTHER},
+            id="a-disabled-key-leaves-the-provider-to-the-port",
+        ),
+        pytest.param("alpha_member", False, True, (), set(), id="a-disabled-key-and-no-port-list-nothing"),
+        pytest.param("alpha_newcomer", False, False, ("mistral",), set(), id="a-member-of-no-workspace-gets-nothing"),
+        pytest.param(
+            "alpha_owner",
+            True,
+            False,
+            ("mistral",),
+            {_OPENAI_MODEL, _OPENAI_OTHER, _MISTRAL_MODEL},
+            id="an-owner-sees-the-whole-organization",
+        ),
+    ],
+)
+def test_a_hosted_provider_is_listed_only_where_dispatch_would_ask_the_port(
+    client: TestClient,
+    world: _World,
+    db_session_factory: Callable[[], Session],
+    who: str,
+    restricted_in_alpha_one: bool,
+    disabled_in_alpha_one: bool,
+    hosted: tuple[str, ...],
+    expected: set[str],
+) -> None:
+    """Dispatch asks the port only when a workspace has no active key with a credential for the provider."""
+    bind_model_provider(client, HostedModelProvider(*hosted))
+    session = db_session_factory()
+    try:
+        if restricted_in_alpha_one:
+            session.add(
+                WorkspaceProviderModelRestriction(
+                    workspace_id=world.workspaces["alpha_one"],
+                    organization_id=world.alpha,
+                    org_provider_key_id=world.keys["alpha_openai"],
+                    model="gpt-4o-mini",
+                )
+            )
+        if disabled_in_alpha_one:
+            session.add(
+                WorkspaceProviderKeyOverride(
+                    workspace_id=world.workspaces["alpha_one"],
+                    organization_id=world.alpha,
+                    org_provider_key_id=world.keys["alpha_openai"],
+                    is_default=False,
+                    disabled=True,
+                )
+            )
+        session.commit()
+    finally:
+        session.close()
+
+    assert _catalog_as(client, world, who) == expected
+
+
+def test_the_single_model_read_agrees_with_the_listing_about_a_hosted_model(client: TestClient, world: _World) -> None:
+    bind_model_provider(client, HostedModelProvider("mistral"))
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
+    try:
+        response = client.get(f"{API_ROOT}/models/{_MISTRAL_MODEL}")
+        assert response.status_code == status.HTTP_200_OK, response.text
+        assert response.json()["deployment_managed"] is True
+        assert client.get(f"{API_ROOT}/models/{_ANTHROPIC_MODEL}").status_code == status.HTTP_404_NOT_FOUND
+    finally:
+        client.cookies.clear()
+
+
+def test_the_grouped_catalog_lists_a_hosted_model_for_a_member(client: TestClient, world: _World) -> None:
+    bind_model_provider(client, HostedModelProvider("mistral"))
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
+    try:
+        response = client.get(f"{API_ROOT}/catalog/models")
+        assert response.status_code == status.HTTP_200_OK, response.text
+        selectors = {selector for model in response.json()["models"] for selector in model["selectors"]}
+        assert _MISTRAL_MODEL in selectors
+        assert _ANTHROPIC_MODEL not in selectors
+    finally:
+        client.cookies.clear()
+
+
+def test_the_grouped_catalog_labels_a_hosted_offering_hosted(client: TestClient, world: _World) -> None:
+    """An offering labeled ``organization`` is one the organization may price."""
+    bind_model_provider(client, HostedModelProvider("mistral"))
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
+    credentials: dict[str, str] = {}
+    try:
+        listing = client.get(f"{API_ROOT}/catalog/models")
+        assert listing.status_code == status.HTTP_200_OK, listing.text
+        for model in listing.json()["models"]:
+            detail = client.get(f"{API_ROOT}/catalog/models/{model['id']}")
+            assert detail.status_code == status.HTTP_200_OK, detail.text
+            for offering in detail.json()["offerings"]:
+                credentials[offering["selector"]] = offering["credential"]
+    finally:
+        client.cookies.clear()
+
+    assert credentials[_MISTRAL_MODEL] == "hosted"
+    assert credentials[_OPENAI_MODEL] == "organization"
+
+
+def test_an_operator_session_flags_no_hosted_model(client: TestClient, world: _World) -> None:
+    """An operator sees every model and may price any of them."""
+    bind_model_provider(client, HostedModelProvider("mistral"))
+    listed = _listing_as(client, world, "superuser")
+    assert set(listed) == set(_ALL_MODELS)
+    assert listed[_MISTRAL_MODEL]["deployment_managed"] is False
+
+
+def test_a_hosted_port_failure_fails_the_read(client: TestClient, world: _World) -> None:
+    """A catalog that hid the failure would list fewer models and flag them wrongly."""
+    bind_model_provider(client, HostedModelProvider("mistral", error=RuntimeError("fleet store unreachable")))
+    with pytest.raises(RuntimeError, match="fleet store unreachable"):
+        _catalog_as(client, world, "alpha_member")
+
+
+def test_an_identity_with_no_live_membership_is_not_shown_hosted_models(client: TestClient, world: _World) -> None:
+    """The port is asked about an organization, and this caller has none."""
+    port = HostedModelProvider("mistral")
+    bind_model_provider(client, port)
+    assert _catalog_as(client, world, "orphan") == set()
+    assert port.asked_for == []

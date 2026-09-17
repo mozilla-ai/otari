@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT
-from gateway.models.entities import RuntimeSetting
+from gateway.models.platform import RuntimeSetting
 from gateway.models.tenancy import (
     MAX_WORKSPACE_ASSIGNMENTS,
     Organization,

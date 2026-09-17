@@ -21,7 +21,7 @@ reading of the same rows:
   ``POST /api/v1/organizations/me/switch``, which 404s on one the caller does not
   belong to.
 * **How much of the organization** follows the rule the workspace list already
-  uses: an owner, an admin or a superuser reads every workspace in it, and a
+  uses: an owner or an admin reads every workspace in it, and a
   member or viewer reads the ones they actively belong to. A member who belongs
   to no workspace gets an empty page, not a refusal: the surface is theirs and
   simply has nothing in it yet.
@@ -82,9 +82,12 @@ from gateway.api.routes.usage import (
     _usage_filters,
 )
 from gateway.core.sql import MAX_FILTER_VALUES
-from gateway.models.entities import APIKey, UsageLog, User
+from gateway.core.surface import Surface
+from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
+from gateway.models.usage import UsageLog
+from gateway.models.users import User
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import (
     resolve_visible_workspace_scope,
@@ -100,6 +103,9 @@ router = APIRouter(
     # deployment operator gate does not belong here.
     dependencies=[Depends(verify_master_key)],
 )
+
+# Hosted only: on standalone the organization is the deployment, so ``usage`` already shows it.
+SURFACE = Surface("organization_usage", standalone=False)
 
 
 async def _scope_condition(

@@ -236,6 +236,20 @@ export function ProviderComboBox({
     )
     .slice(0, 50)
 
+  // Both gated on `includeCatalog`: a picker offering only the API dialects must
+  // not report a catalog it excludes.
+  const catalogPending = includeCatalog && catalog.isLoading
+  // A refused or failed read leaves `data` undefined, which is the same empty
+  // array a deployment with no providers gives. Reported as that, a catalog the
+  // caller was refused reads as a deployment with nothing to offer, and the
+  // refusal is invisible from the form.
+  const catalogFailed = includeCatalog && catalog.isError
+  const emptyMessage = catalogPending
+    ? "Loading the provider catalog…"
+    : catalogFailed
+      ? "The provider catalog could not be loaded. Reload the page to try again."
+      : "No provider to offer here."
+
   return (
     <ComboBox.Root
       allowsEmptyCollection
@@ -282,19 +296,13 @@ export function ProviderComboBox({
           className="max-h-72 overflow-auto"
           renderEmptyState={() => (
             <ComboBoxEmpty
-              // A loading catalog counts as an empty source, so a query that
-              // matches none of `extra` says the catalog is still coming rather
-              // than that nothing matches. Both halves are gated on
-              // `includeCatalog`: a picker offering only the API dialects must
-              // not report a catalog it excludes.
+              // A catalog that is still coming or did not arrive counts as an
+              // empty source, so a query matching none of `extra` says why the
+              // list is short rather than that nothing matches it.
               isSourceEmpty={
-                options.length === 0 || (includeCatalog && catalog.isLoading)
+                options.length === 0 || catalogPending || catalogFailed
               }
-              emptyMessage={
-                includeCatalog && catalog.isLoading
-                  ? "Loading the provider catalog…"
-                  : "No provider to offer here."
-              }
+              emptyMessage={emptyMessage}
               noMatchesMessage="No provider matches what you typed."
             />
           )}

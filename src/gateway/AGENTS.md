@@ -7,14 +7,25 @@ Before changing the backend, read
 [backend-standards](../../.github/skills/backend-standards/SKILL.md). The root
 [AGENTS.md](../../AGENTS.md) owns runtime modes, validation, and generated
 artifacts. [ARCHITECTURE.md](../../ARCHITECTURE.md) owns the extension boundary.
+[The modular monolith](../../ARCHITECTURE.md#the-modular-monolith) names the
+target shape and its import rules,
+[Layering](../../.github/skills/backend-standards/SKILL.md#layering) gives the
+rules for each layer, and [docs/domains.md](../../docs/domains.md) maps every
+module to its domain.
 
 ## Ports and composition
 
 Domain protocols live in `ports/`, core implementations in `adapters/`, and
 bindings in `container.py`. `OTARI_BOOTSTRAP=module:callable` may rebind a port
 or contribute a capability-gated router after core bindings are installed.
-A core feature is one domain-named module per layer plus an entry in
-`gateway/features.py`; see ARCHITECTURE.md.
+Which mechanism new code uses is in
+[Where new code goes](../../ARCHITECTURE.md#where-new-code-goes), and the steps
+for an optional feature are in
+[How to add a core feature](../../ARCHITECTURE.md#how-to-add-a-core-feature).
+
+A route module that backs a dashboard page declares `SURFACE` beside its router
+and adds it to `_DECLARED_SURFACES` in `api/routes/bootstrap.py`. A core feature
+sets `surface` on its registry entry instead.
 
 Add a port only when a real second implementation exists. Core never imports an
 overlay. Dependencies request protocols from the container and never name an
@@ -209,20 +220,27 @@ endpoints.
 
 ## Data and migrations
 
-Gateway ORM entities live in `models/entities.py`. Reconciled control-plane
-SQLModel tables live in `models/tenancy.py`, and the newer tenancy-scoped
-gateway tables whose `Public` schemas are endpoint contracts follow its style in
-their own modules (`models/provider_keys.py`, `models/playground.py`). All of
-them share `SQLModel.metadata`; `models/__init__.py` imports every table module
-before Alembic uses it.
+Put a table in its domain's model module (`models/budgets.py`,
+`models/tenancy.py`, and so on). `models/base.py` holds `Base` and the shared
+column types and mixins. Tables use the declarative `Base`, except those whose
+`Public` schemas are endpoint contracts, which use SQLModel (`models/tenancy.py`,
+`models/provider_keys.py`, `models/playground.py`). A new table module must join
+the import list in `models/__init__.py`, or Alembic proposes dropping its tables.
+
+Two classes are named `User`: `models/users.py` is the billing identity that
+keys, budgets, and usage attach to; `models/tenancy.py` is the dashboard sign-in
+identity.
 
 Request code gets a session through `get_db`; non-request code uses
 `create_session()`; the usage-log writer uses `create_log_session()`, which
 draws from a pool of its own so metering is not starved by request traffic.
 Services own commits and rollbacks. The one exception is
 `release_session(db)`, which the request path calls before dispatching upstream
-so a pooled connection is not held across the provider call. Migrations live
-under `alembic/versions/`.
+so a pooled connection is not held across the provider call. Both describe the
+code as it is today;
+[Who commits](../../.github/skills/backend-standards/SKILL.md#who-commits)
+gives the target shape, where a Unit of Work block commits and no route does.
+Migrations live under `alembic/versions/`.
 
 Once a client-side `db_command_timeout` is configured, a database call can
 raise a bare `TimeoutError` as well as a `SQLAlchemyError`. Statement timeouts
@@ -241,6 +259,11 @@ Validate a new security or routing setting at config load. Annotate every new
 field with its settings view (`core/settings_view.py`): shown in a group,
 omitted, or secret. The settings endpoint derives its view from that, and a
 field without one fails at import.
+
+A domain's settings live in `core/settings/<domain>.py`. `GatewayConfig`
+inherits them rather than nesting them, because a nested model does not read
+a flat `OTARI_<FIELD>` variable. A new setting goes in its domain's module
+where one exists.
 
 ## Usage filters
 

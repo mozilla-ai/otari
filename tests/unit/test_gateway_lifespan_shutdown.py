@@ -19,13 +19,23 @@ land and is not reproducible on demand.
 """
 
 import asyncio
+from collections.abc import Callable, Coroutine
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
 
+from gateway import main as gateway_main
 from gateway.core.config import GatewayConfig
-from gateway.main import _REFRESHER_STOP_TIMEOUT_SECONDS, _create_lifespan, _stop_refresher, _stop_refreshers
+from gateway.main import (
+    _LIFESPAN_WORKERS,
+    _REFRESHER_STOP_TIMEOUT_SECONDS,
+    _create_lifespan,
+    _start_lifespan_workers,
+    _stop_refresher,
+    _stop_refreshers,
+)
 
 
 async def _absorbs_cancellation() -> None:
@@ -156,3 +166,64 @@ async def test_lifespan_shutdown_completes_despite_a_stuck_refresher(
     # indistinguishable from the fix under test.
     async with lifespan(app):
         pass
+
+
+def _recording_refresher(name: str, started: list[str]) -> Callable[..., Coroutine[Any, Any, None]]:
+    """A stand-in refresher that records when it is called, not when it is awaited.
+
+    Recording at call time lets a caller cancel the task before the loop runs it,
+    so a real refresher that slipped through fails an assertion rather than
+    hanging on its own sleep.
+    """
+
+    async def _noop() -> None:
+        return None
+
+    def _start(*_args: Any, **_kwargs: Any) -> Coroutine[Any, Any, None]:
+        started.append(name)
+        return _noop()
+
+    return _start
+
+
+async def _started_worker_names(config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], list[str]]:
+    """Start the registry against stand-in refreshers, then stop it.
+
+    Returns the worker names that started, and the refreshers they called.
+    """
+    called: list[str] = []
+    for attribute in dir(gateway_main):
+        if attribute.startswith("run_"):
+            monkeypatch.setattr(gateway_main, attribute, _recording_refresher(attribute, called))
+
+    workers = _start_lifespan_workers(config)
+    for task, _worker in workers:
+        task.cancel()
+    await asyncio.gather(*(task for task, _worker in workers), return_exceptions=True)
+    return [worker.name for _task, worker in workers], called
+
+
+@pytest.mark.asyncio
+async def test_every_worker_looks_its_refresher_up_when_it_starts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A registry entry must resolve its refresher in ``gateway.main``, not hold it.
+
+    The root conftest substitutes refreshers by that name to keep the unit suite
+    off the network. An entry holding the function object would keep calling the
+    original, and the substitution would silently do nothing.
+    """
+    names, called = await _started_worker_names(GatewayConfig(master_key="sk-test-master"), monkeypatch)
+
+    assert names == [worker.name for worker in _LIFESPAN_WORKERS]
+    assert len(called) == len(_LIFESPAN_WORKERS)
+
+
+@pytest.mark.asyncio
+async def test_the_reservation_sweeper_is_the_one_worker_a_setting_turns_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sweeping is opt-out, and opting out must not drop any other worker."""
+    config = GatewayConfig(master_key="sk-test-master", budget_reservation_sweep_interval_sec=0)
+    names, _called = await _started_worker_names(config, monkeypatch)
+
+    assert "budget reservation sweep" not in names
+    assert names == [worker.name for worker in _LIFESPAN_WORKERS if worker.name != "budget reservation sweep"]

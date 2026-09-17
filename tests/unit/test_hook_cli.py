@@ -88,7 +88,7 @@ def test_pretooluse_allows_when_not_blocked(monkeypatch: pytest.MonkeyPatch, rep
     assert result.exit_code == 0, result.output
 
 
-def test_pretooluse_ignores_non_edit_tools(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+def test_pretooluse_ignores_unhandled_tools(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     called = False
 
     def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
@@ -100,12 +100,117 @@ def test_pretooluse_ignores_non_edit_tools(monkeypatch: pytest.MonkeyPatch, repo
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
-        "tool_name": "Bash",
-        "tool_input": {"command": "echo hi"},
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(repo / "README.md")},
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert not called, "a non-edit tool call must never reach the Hook Server"
+    assert not called, "a tool call this integration does not name must never reach the Hook Server"
+
+
+def test_pretooluse_submits_a_bash_command_for_command_match(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse(
+            {
+                "blocked": True,
+                "results": [
+                    {"gate_id": "no-force-push", "enforcement": "required", "outcome": "fail", "message": "no"}
+                ],
+            }
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": "git push --force"},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 2, result.output
+    assert captured["json"]["commands"] == ["git push --force"]
+    assert captured["json"]["changed_paths"] == []
+
+
+def test_an_oversize_bash_command_is_truncated_rather_than_rejected(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """The Hook Server 422s a command over its limit, and a 422 fails the whole
+    check open, taking every changed_path gate in the same policy with it. A
+    Bash call carrying a heredoc clears that limit routinely, so the head is
+    sent (where a tool name lives) instead of the request being lost.
+    """
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    command = "npm install " + "x" * 8000
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    sent = captured["json"]["commands"]
+    assert len(sent[0]) == gateway_cli._HOOK_MAX_COMMAND_LENGTH
+    assert sent[0].startswith("npm install ")
+    assert "checking only the first" in result.output
+
+
+def test_a_rejected_check_does_not_block_and_does_not_blame_the_network(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """A 4xx means the request arrived and was answered. Reporting it as
+    "could not reach" sends whoever debugs it to the network rather than to
+    the status and body that say what was actually wrong.
+    """
+
+    class _RejectingResponse:
+        status_code = 422
+        text = "commands entry exceeds 4096 characters."
+
+        def raise_for_status(self) -> None:
+            request = httpx.Request("POST", "http://gw.test/api/v1/hooks/check")
+            response = httpx.Response(422, text=self.text, request=request)
+            raise httpx.HTTPStatusError("422", request=request, response=response)
+
+        def json(self) -> dict[str, Any]:  # pragma: no cover - never reached
+            raise AssertionError("json() must not be called on a rejected check")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _RejectingResponse())
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": "npm install"},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert "rejected the check (422" in result.output
+    assert "could not reach" not in result.output
+
+
+def test_pretooluse_ignores_a_bash_call_with_no_command(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    called = False
+
+    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
+        nonlocal called
+        called = True
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "PreToolUse", "cwd": str(repo), "tool_name": "Bash", "tool_input": {}}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert not called
 
 
 def test_stop_event_blocks_on_git_status(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -130,6 +235,362 @@ def test_stop_event_blocks_on_git_status(monkeypatch: pytest.MonkeyPatch, repo: 
     result = _invoke(payload)
     assert result.exit_code == 2, result.output
     assert captured["json"]["changed_paths"] == ["CHANGELOG.md"]
+
+
+def _transcript_line(
+    *, command: str | None = None, text: str | None = None, side_chain: bool = False, tool_use_id: str = "toolu_1"
+) -> str:
+    """One JSONL line shaped like a real Claude Code transcript record."""
+    content: list[dict[str, Any]]
+    if command is not None:
+        content = [{"type": "tool_use", "id": tool_use_id, "name": "Bash", "input": {"command": command}}]
+    else:
+        content = [{"type": "text", "text": text or "hello"}]
+    record = {
+        "type": "assistant",
+        "isSidechain": side_chain,
+        "message": {"role": "assistant", "content": content},
+    }
+    return json.dumps(record)
+
+
+def _tool_result_line(*, tool_use_id: str, is_error: bool, content: str) -> str:
+    """One JSONL line shaped like a real Claude Code tool_result record.
+
+    Confirmed against a real transcript: a PreToolUse denial's `content` is a
+    bare string like "PreToolUse:Bash hook error: [...]: {...}", not a list
+    of content blocks.
+    """
+    record = {
+        "type": "user",
+        "isSidechain": False,
+        "message": {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": tool_use_id, "is_error": is_error, "content": content}],
+        },
+    }
+    return json.dumps(record)
+
+
+def test_stop_event_submits_commands_collected_from_the_transcript(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                _transcript_line(text="thinking..."),
+                _transcript_line(command="make postman"),
+                _transcript_line(command="git status"),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["commands"] == ["make postman", "git status"]
+
+
+def test_stop_event_excludes_sidechain_commands(monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path) -> None:
+    """A subagent's own Bash calls (isSidechain: true) are not this policy's own agent's."""
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                _transcript_line(command="make postman"),
+                _transcript_line(command="rm -rf /", side_chain=True),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["commands"] == ["make postman"]
+
+
+def test_stop_event_excludes_a_command_a_pretooluse_hook_denied(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    """A denied `npm install` followed by an allowed `pnpm install` must not
+
+    keep failing every later Stop for an attempt that never executed: the
+    transcript records the denied call as a tool_use like any other, and the
+    only trace of the denial is the paired tool_result naming the same
+    tool_use_id, is_error, with content matching a PreToolUse hook block.
+    """
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                _transcript_line(command="npm install", tool_use_id="toolu_denied"),
+                _tool_result_line(
+                    tool_use_id="toolu_denied",
+                    is_error=True,
+                    content="PreToolUse:Bash hook error: [otari hook]: otari hook: blocked (claude-code, PreToolUse)",
+                ),
+                _transcript_line(command="pnpm install", tool_use_id="toolu_allowed"),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["commands"] == ["pnpm install"]
+
+
+def test_stop_event_includes_a_command_that_ran_but_exited_nonzero(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    """A command that actually ran, and merely failed, is not a PreToolUse
+
+    denial: excluding every is_error tool_result regardless of content would
+    let a forbidden command that happened to also fail evade command_match,
+    the opposite of what excluding a denial is for.
+    """
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                _transcript_line(command="npm install", tool_use_id="toolu_ran"),
+                _tool_result_line(tool_use_id="toolu_ran", is_error=True, content="npm error code ENOENT"),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["commands"] == ["npm install"]
+
+
+def test_stop_event_submits_no_commands_when_aggregate_evidence_is_oversize(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    """Per-command truncation alone doesn't bound the total: 501 commands,
+
+    each safely under the per-command cap, already clear the Hook Server's
+    own aggregate _MAX_TOTAL_COMMAND_CHARS. Submitting an arbitrary subset
+    (dropping the oldest) risks a false pass or false fail on whichever
+    command that subset happened to lose, so this submits no command
+    evidence at all (None) rather than a partial one: a required
+    command_match/command_if_changed gate then resolves unknown and blocks,
+    instead of risking either outcome on data known to be incomplete.
+    """
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    # Index at the front, comfortably under _HOOK_MAX_COMMAND_LENGTH per
+    # command (4008 chars), so only the aggregate bound is exercised here.
+    lines = [_transcript_line(command=f"cmd{i:04d} " + "x" * 4000, tool_use_id=f"toolu_{i}") for i in range(501)]
+    transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["commands"] is None
+    assert "submitting no command evidence" in result.output
+
+
+def test_stop_event_submits_no_commands_when_there_are_too_many(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    """Same reasoning as the aggregate-characters bound, for the count bound:
+
+    an arbitrary subset of way too many commands is not evidence a required
+    gate should trust either.
+    """
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    lines = [
+        _transcript_line(command=f"cmd{i}", tool_use_id=f"toolu_{i}") for i in range(gateway_cli._HOOK_MAX_COMMANDS + 1)
+    ]
+    transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["commands"] is None
+    assert "submitting no command evidence" in result.output
+
+
+def test_stop_event_submits_no_commands_when_transcript_path_is_missing(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """No transcript_path at all submits None (unresolved), not `[]` (collected, none)."""
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["commands"] is None
+
+
+def test_stop_event_submits_no_commands_when_transcript_is_unreadable(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    missing_transcript = tmp_path / "does-not-exist.jsonl"
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(missing_transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["commands"] is None
+
+
+def test_stop_event_skips_a_malformed_transcript_line(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        "\n".join(["not json at all", _transcript_line(command="make postman")]) + "\n", encoding="utf-8"
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["commands"] == ["make postman"]
+
+
+def test_stop_event_skips_a_bash_call_whose_input_is_not_a_mapping(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    """A tool_use block's `input` is a mapping in every real transcript, but this
+
+    reads a caller-controlled file it does not otherwise validate; a line
+    that deviates (input as a bare string, say) must be skipped like any
+    other malformed line, not crash the whole Stop event with an
+    AttributeError from treating a non-dict as one.
+    """
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    malformed = json.dumps(
+        {
+            "type": "assistant",
+            "isSidechain": False,
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": "not-a-mapping"}],
+            },
+        }
+    )
+    transcript.write_text("\n".join([malformed, _transcript_line(command="make postman")]) + "\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["commands"] == ["make postman"]
 
 
 def test_pretooluse_submits_a_posix_relative_path(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -338,6 +799,33 @@ def test_unreadable_response_does_not_block(
     assert "unreadable response" in result.output, case
 
 
+def test_a_gate_result_missing_display_fields_does_not_crash(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """The try/except around reading the response only covers what builds
+
+    `failing` (result["results"], gate["outcome"]); it does not, on its own,
+    cover the later step that formats each failing gate for display, which
+    reads gate['enforcement']/['gate_id']/['message']. A gate result that is
+    well-formed enough to build `failing` (has 'outcome') but is missing one
+    of those other fields, as an older or otherwise mismatched otari serve
+    behind --url might send, must not raise KeyError there and surface as a
+    traceback instead of this command's own fail-open contract.
+    """
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *a, **k: _FakeResponse({"blocked": True, "results": [{"outcome": "fail"}]}),
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 2, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
 def test_unreachable_gateway_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
         raise httpx.ConnectError("connection refused")
@@ -414,3 +902,103 @@ def test_advisory_only_failure_warns_without_blocking(monkeypatch: pytest.Monkey
     stdout_payload = json.loads(result.stdout)
     assert "please reconsider" in stdout_payload["systemMessage"]
     assert "advisory" in stdout_payload["systemMessage"].lower()
+
+
+def test_pretooluse_submits_call_scoped_evidence(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """One tool call's own command is call-scoped, which is what lets the
+
+    server judge it with command_match and skip command_if_changed, rather
+    than inferring either from an empty list.
+    """
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": "npm install"},
+    }
+    assert _invoke(payload).exit_code == 0
+    assert captured["json"]["command_scope"] == "call"
+
+
+def test_stop_event_submits_session_scoped_evidence(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    """A Stop event really has seen every command the session ran, and saying
+
+    so is what lets command_if_changed resolve at all and takes command_match
+    out of the picture (where a cumulative match could never be cleared).
+    """
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(_transcript_line(command="make postman") + "\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    assert _invoke(payload).exit_code == 0
+    assert captured["json"]["command_scope"] == "session"
+
+
+def test_a_repeat_stop_block_says_the_block_is_finite(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """Claude Code overrides a Stop hook after 8 consecutive blocks and lets the
+
+    turn end. Blocking silently through that budget leaves a required gate
+    looking clean at exactly the moment it is firing hardest, so a repeat
+    block says what the budget is and that it is running out.
+    """
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *a, **k: _FakeResponse(
+            {
+                "blocked": True,
+                "results": [{"gate_id": "g", "enforcement": "required", "outcome": "fail", "message": "no"}],
+            }
+        ),
+    )
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "stop_hook_active": True}
+    result = _invoke(payload)
+    assert result.exit_code == 2
+    assert "already blocked once this turn" in result.output
+    assert "8 consecutive blocks" in result.output
+
+
+def test_a_first_stop_block_does_not_mention_the_budget(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *a, **k: _FakeResponse(
+            {
+                "blocked": True,
+                "results": [{"gate_id": "g", "enforcement": "required", "outcome": "fail", "message": "no"}],
+            }
+        ),
+    )
+    payload = {"hook_event_name": "Stop", "cwd": str(repo)}
+    result = _invoke(payload)
+    assert result.exit_code == 2
+    assert "already blocked once" not in result.output

@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.entities import APIKey
+from gateway.models.api_keys import APIKey
 from gateway.ports.telemetry_storage_port import IngestResult, TelemetryRecord, TelemetryStoragePort
 from gateway.services.agent_telemetry_service import ingest
 

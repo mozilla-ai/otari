@@ -54,7 +54,7 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import release_session
 from gateway.inflight import track_request
 from gateway.log_config import logger
-from gateway.models.entities import APIKey
+from gateway.models.api_keys import APIKey
 from gateway.rate_limit import check_rate_limit
 from gateway.repositories.users_repository import get_active_user
 

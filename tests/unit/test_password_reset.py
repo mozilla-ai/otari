@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
-from gateway.models.entities import DashboardSession
+from gateway.models.tenancy import DashboardSession
 
 MASTER_KEY = "sk-test-master"
 PASSWORD = "a-real-password"  # pragma: allowlist secret

@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import gateway.services.pricing_refresh_service as pricing_refresh_service
-from gateway.models.entities import PricingSnapshot, PricingSnapshotHistory
+from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
 
 _PERSISTED_SNAPSHOT = (
     '[{"id":"test","name":"Test","api_pattern":"","models":['

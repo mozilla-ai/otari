@@ -29,17 +29,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT
-from gateway.models.entities import (
-    APIKey,
-    Budget,
-    BudgetResetLog,
-    ScopedBudget,
-    WorkspaceBudgetDefault,
-)
-from gateway.models.entities import (
-    User as ApiUser,
-)
+from gateway.models.api_keys import APIKey
+from gateway.models.budgets import Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
+from gateway.models.users import User as ApiUser
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,

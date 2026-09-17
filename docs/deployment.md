@@ -19,6 +19,29 @@ A durable standalone deployment should:
 
 The default SQLite database is intended for evaluation and single-node local use.
 
+### Watch the connection pool
+
+On PostgreSQL the gateway serves requests from a fixed pool of database
+connections, and running out of them makes every request fail at once. `/metrics`
+reports the pool directly, labeled by `pool` (`request` for request traffic,
+`log` for the usage-log writer):
+
+| Metric | Meaning |
+| --- | --- |
+| `gateway_db_pool_connections_checked_out` | Connections in use right now |
+| `gateway_db_pool_connections_idle` | Connections available to hand out |
+| `gateway_db_pool_overflow_connections` | Connections open beyond the pool's base size |
+| `gateway_db_pool_capacity` | Ceiling on connections the pool hands out at once |
+
+The `request` pool is sized by `db_pool_size` and may open `db_max_overflow`
+connections beyond it, so its capacity is the two added together. The `log`
+pool is sized by `db_log_pool_size` and has no overflow, so its capacity is
+that value.
+
+Alert on checked-out connections approaching capacity for a sustained period.
+These metrics do not appear on SQLite, which opens a connection per use and
+keeps no pool.
+
 ## Docker Compose
 
 The repository Compose stack runs Otari and PostgreSQL:

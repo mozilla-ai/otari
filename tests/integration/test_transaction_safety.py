@@ -9,7 +9,8 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT
-from gateway.models.entities import Budget, User
+from gateway.models.budgets import Budget
+from gateway.models.users import User
 from gateway.services.budget_service import _cas_reset_user_budget, _is_model_free
 
 

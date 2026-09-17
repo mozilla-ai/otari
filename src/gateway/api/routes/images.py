@@ -13,7 +13,8 @@ from gateway.api.routes._passthrough import BillingMeters, run_passthrough
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import APIKey, ModelPricing
+from gateway.models.api_keys import APIKey
+from gateway.models.pricing import ModelPricing
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import per_image_cost
 from gateway.services.provider_kwargs import ResolvedProvider

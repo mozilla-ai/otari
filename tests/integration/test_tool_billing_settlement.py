@@ -27,7 +27,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT
-from gateway.models.entities import UsageLog, User
+from gateway.models.usage import UsageLog
+from gateway.models.users import User
 from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 
 from .conftest import MODEL_NAME

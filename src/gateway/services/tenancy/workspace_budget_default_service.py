@@ -32,7 +32,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.models.entities import Budget, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.budgets import Budget, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.money import as_float
 from gateway.models.tenancy import User, Workspace, WorkspaceMember
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository

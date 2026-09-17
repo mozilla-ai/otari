@@ -14,6 +14,7 @@ const CALLER: CallerIdentity = {
   email: "ada@example.com",
   full_name: "Operator",
   has_password: true,
+  claims_deployment: false,
 }
 
 /**

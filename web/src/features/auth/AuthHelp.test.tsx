@@ -2,10 +2,23 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { expect, it } from "vitest"
+import type { DeploymentType } from "@/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap } from "@/tests/fixtures"
 import { AuthHelp } from "./AuthHelp"
 
-async function open(ui: ReactElement) {
-  render(ui)
+// The popover reads the bootstrap to decide whether this deployment serves the
+// welcome guide, so every render here goes through a provider. Standalone by
+// default, matching the fixture and the deployment most of these cases describe.
+async function open(
+  ui: ReactElement,
+  deployment_type: DeploymentType = "standalone",
+) {
+  render(
+    <DeploymentProvider value={bootstrap({ deployment_type })}>
+      {ui}
+    </DeploymentProvider>,
+  )
   await userEvent.setup().click(screen.getByRole("button", { name: "Help" }))
   expect(await screen.findByRole("dialog", { name: "Help" })).toBeVisible()
 }
@@ -70,6 +83,29 @@ it("leaves the credential note off a page that takes no credential", async () =>
   expect(
     screen.queryByRole("link", { name: /Forgot your password/ }),
   ).toBeNull()
+  expect(
+    screen.getByRole("link", { name: /verification link/ }),
+  ).toBeInTheDocument()
+})
+
+// otari.ai serves the bundle from its own edge and `/welcome` from nowhere, so
+// the row would be a link out of the app to a 404. See `welcomeGuideHref`.
+it("offers no welcome guide on a hosted deployment, which serves none", async () => {
+  await open(<AuthHelp offersRecovery credential="master-key" />, "hosted")
+
+  expect(screen.queryByRole("link", { name: /welcome guide/ })).toBeNull()
+  // The note still has to name the credential the form took; only its link goes.
+  expect(screen.getByText(/master key/)).toBeInTheDocument()
+  expect(screen.queryByText(/master key/, { selector: "a" })).toBeNull()
+})
+
+// Recovery is a different axis, and hosted deployments run those flows.
+it("keeps the recovery links a hosted deployment does serve", async () => {
+  await open(<AuthHelp offersRecovery credential="master-key" />, "hosted")
+
+  expect(
+    screen.getByRole("link", { name: /Forgot your password/ }),
+  ).toBeInTheDocument()
   expect(
     screen.getByRole("link", { name: /verification link/ }),
   ).toBeInTheDocument()

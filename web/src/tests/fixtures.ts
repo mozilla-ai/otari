@@ -200,6 +200,7 @@ export function organizationContext(
       email: null,
       full_name: "Operator",
       has_password: false,
+      claims_deployment: true,
     },
     role: "owner",
     status: "active",

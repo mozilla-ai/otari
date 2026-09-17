@@ -282,6 +282,8 @@ def test_a_provider_sign_in_reports_that_it_holds_no_password_and_can_set_one(
     before = client.get(f"{API_ROOT}/organizations/me")
     assert before.status_code == 200, before.text
     assert before.json()["caller"]["has_password"] is False
+    # A member's first password leaves an unclaimed deployment on the master key.
+    assert before.json()["caller"]["claims_deployment"] is False
 
     set_password = client.put(f"{API_ROOT}/auth/password", json={"new_password": PASSWORD})
 

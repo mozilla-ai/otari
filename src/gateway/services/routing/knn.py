@@ -16,7 +16,7 @@ plain failover policy it was written from.
 
 The store is a linear cosine scan over the records the requesting user has in the
 requesting workspace, held in the gateway DB
-(:class:`gateway.models.entities.RoutingMemory`). That holds into the low
+(:class:`gateway.models.routing.RoutingMemory`). That holds into the low
 thousands of records per partition (the ``router_max_records_per_user`` cap,
 which bounds one user's records in one workspace, since that is what a decision
 loads); larger pools need an indexed vector store. Records carry an
@@ -47,7 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.database import create_session
 from gateway.log_config import logger
-from gateway.models.entities import RoutingMemory
+from gateway.models.routing import RoutingMemory
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.routing.backends import RoutingContext, RoutingDecision

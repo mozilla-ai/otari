@@ -28,8 +28,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.models.entities import DashboardSession
-from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
+from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.ports.growth_signal_port import GrowthActivationEvent, GrowthSignalPort
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 

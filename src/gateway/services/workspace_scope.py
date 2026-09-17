@@ -39,7 +39,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.models.entities import APIKey
+from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import Organization, Workspace
 from gateway.services.tenancy.provisioning_service import (
     DEFAULT_ORGANIZATION_NAME,

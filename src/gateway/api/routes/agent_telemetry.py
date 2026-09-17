@@ -38,7 +38,7 @@ from gateway.api.routes.usage import (
     _resolve_window,
 )
 from gateway.core.sql import MAX_FILTER_VALUES, bucket_expr, canonical_bucket, dialect_name, match_any
-from gateway.models.entities import UsageLog
+from gateway.models.usage import UsageLog
 from gateway.ports.telemetry_storage_port import (
     BehaviorCounts,
     TelemetryFilter,

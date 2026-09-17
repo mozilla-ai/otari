@@ -90,7 +90,7 @@ export function PasswordDialog({
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
 
-  const { needsEmail, needsCurrentPassword } = shape
+  const { needsEmail, needsCurrentPassword, claimsDeployment } = shape
   const problem = newPasswordProblem(newPassword, confirmPassword)
   const unchanged =
     needsCurrentPassword &&
@@ -126,7 +126,7 @@ export function PasswordDialog({
       },
       {
         onSuccess: (result) => {
-          onSaved({ email: result.email, claimed: needsEmail })
+          onSaved({ email: result.email, claimed: claimsDeployment })
           // The server's own assertion, not an inference from which form was
           // submitted: it answers this on a change as well, and it is the fact
           // the rest of the tab has to act on.

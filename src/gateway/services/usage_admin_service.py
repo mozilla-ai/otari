@@ -32,7 +32,8 @@ from gateway.core.metered_pricing import BillableUsage, billable_usage, price_bi
 from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
 from gateway.core.usage_source import not_served_here
 from gateway.log_config import logger
-from gateway.models.entities import ModelPricing, UsageLog
+from gateway.models.pricing import ModelPricing
+from gateway.models.usage import UsageLog
 from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 
 # Cap on an explicit id list. Page selections drive the id path and the largest

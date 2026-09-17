@@ -19,7 +19,9 @@ from sqlalchemy.orm import Session
 from conftest import seed_workspace_id
 from gateway.core.config import API_ROOT
 from gateway.core.sql import MAX_FILTER_VALUES
-from gateway.models.entities import APIKey, UsageLog, User
+from gateway.models.api_keys import APIKey
+from gateway.models.usage import UsageLog
+from gateway.models.users import User
 
 SUMMARY_PATH = f"{API_ROOT}/usage/summary"
 SERIES_PATH = f"{API_ROOT}/usage/series"

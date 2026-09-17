@@ -16,7 +16,7 @@ from sqlalchemy import text
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import init_db, reset_db
-from gateway.models.entities import UsageLog
+from gateway.models.usage import UsageLog
 from gateway.services import log_writer as log_writer_module
 from gateway.services.log_writer import BatchLogWriter, SingleLogWriter
 

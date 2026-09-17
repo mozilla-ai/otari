@@ -45,7 +45,7 @@ unreadable to the operator who backs them up. Secrets that *are* encrypted here
 are credentials, and none of these tables holds one.
 
 Style follows ``models/tenancy.py`` and ``models/provider_keys.py``: SQLModel
-rather than `entities.py`'s declarative style, because the ``Public`` schemas
+rather than the declarative ``Base`` style, because the ``Public`` schemas
 below are the endpoint contracts the generated dashboard client is built from,
 and no ``relationship()`` is declared (lazy loading raises ``MissingGreenlet``
 on an ``AsyncSession``), so the routes join explicitly.
@@ -58,7 +58,7 @@ from typing import Annotated, Literal
 from sqlalchemy import Column, Index, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
-from gateway.models.tenancy import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin
+from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin
 
 # What one save may carry. Each ceiling is enforced at the request schema, so an
 # oversized save is a 422 naming the field rather than a database error, and the

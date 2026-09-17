@@ -11,7 +11,7 @@ from decimal import Decimal
 
 import pytest
 
-from gateway.models.entities import ModelPricing
+from gateway.models.pricing import ModelPricing
 from gateway.services.pricing_service import flat_request_cost, input_token_cost, per_image_cost
 
 

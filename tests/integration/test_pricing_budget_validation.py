@@ -3,7 +3,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_ROOT, PricingConfig
+from gateway.core.config import API_ROOT
+from gateway.core.settings.pricing import PricingConfig
 from gateway.services.pricing_service import pricing_required_but_missing
 
 

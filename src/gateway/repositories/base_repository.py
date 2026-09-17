@@ -21,6 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import class_mapper
 from sqlmodel import SQLModel
 
+from gateway.core.unit_of_work import UnitOfWork, session_for
+
 ModelType = TypeVar("ModelType", bound=SQLModel)
 CreateSchemaType = TypeVar("CreateSchemaType", bound=SQLModel)
 UpdateSchemaType = TypeVar("UpdateSchemaType", bound=SQLModel)
@@ -38,15 +40,26 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         UpdateSchemaType: The schema describing an update payload.
     """
 
-    def __init__(self, db: AsyncSession, model_class: type[ModelType]):
-        """Bind the repository to a session and the table it serves.
+    def __init__(self, db: AsyncSession | UnitOfWork, model_class: type[ModelType]):
+        """Bind the repository to a session or a unit of work, and the table it serves.
 
         Args:
-            db: The active async session.
+            db: The active async session, or the unit of work whose blocks it runs in.
             model_class: The SQLModel class for this repository.
         """
-        self.db = db
+        self._db = db
         self.model_class = model_class
+
+    @property
+    def db(self) -> AsyncSession:
+        """The session this repository's operations run on.
+
+        Raises:
+            OutsideUnitOfWorkError: the repository was built on a unit of work and no block is open.
+        """
+        if isinstance(self._db, UnitOfWork):
+            return session_for(self._db)
+        return self._db
 
     async def get(self, entity_id: Any) -> ModelType | None:
         """Return one entity by primary key, or None."""

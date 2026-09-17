@@ -13,7 +13,7 @@ from typing import Any, Iterable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.entities import APIKey
+from gateway.models.api_keys import APIKey
 from gateway.ports.telemetry_storage_port import IngestResult, TelemetryRecord, TelemetryStoragePort
 from gateway.repositories.users_repository import get_active_user
 

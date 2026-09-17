@@ -2015,7 +2015,7 @@ export interface paths {
          *     The member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the
          *     caller's own attribution user, the key is always budget-enforced, and the
          *     workspace must be visible to the caller (a member of it, or an organization
-         *     owner/admin/superuser, who see every workspace). The secret is returned once.
+         *     owner/admin, who see every workspace). The secret is returned once.
          */
         post: operations["organization-keys-create_own_key"];
         delete?: never;
@@ -2322,9 +2322,12 @@ export interface paths {
          *
          *     Refused with a 409 when the period overlaps one already stored for that model,
          *     naming the period it collides with, rather than shadowing it. Refused with a
-         *     403 when the model is addressed through one of the deployment's own provider
-         *     instances: the deployment holds that credential and settles its upstream bill,
-         *     so its rate is the deployment price list's rather than a tenant's.
+         *     403 when the deployment, not the caller's organization, holds the credential
+         *     that serves the model, whether through one of its own provider instances or a
+         *     hosted credential the bound port supplies because no usable BYO credential of
+         *     the organization's own covers every one of its workspaces: either way the
+         *     deployment settles the upstream bill, so its rate is the deployment price
+         *     list's rather than a tenant's.
          *
          *     The key is normalized to its canonical ``instance:model`` form first, the same
          *     call ``POST /api/v1/pricing`` makes, and that is what makes one model one row
@@ -2752,6 +2755,11 @@ export interface paths {
          *
          *     ``user`` in the body is the one field the pipeline will not read here: spend
          *     binds to the session's own attribution user, derived and never accepted.
+         *
+         *     On a hosted control plane there is no local pipeline to call, so the same
+         *     principal is forwarded to the data-plane gateway instead
+         *     (:func:`_dispatch_to_data_plane`). The request and the response are the same
+         *     either way.
          */
         post: operations["playground-playground_chat_completions"];
         delete?: never;
@@ -5980,6 +5988,11 @@ export interface components {
          *     has to be ready to draw either one alone.
          */
         CallerIdentityPublic: {
+            /**
+             * Claims Deployment
+             * @description Whether setting this identity's password claims the deployment, which stops the master key signing in to the dashboard. True for the deployment's operator until it holds a password, whether or not it already has an address; false for everybody else.
+             */
+            claims_deployment: boolean;
             /** Email */
             email?: string | null;
             /** Full Name */
@@ -6098,6 +6111,12 @@ export interface components {
              */
             tool_call: boolean;
         };
+        /**
+         * CatalogCredential
+         * @description Who may price a catalog offering.
+         * @enum {string}
+         */
+        CatalogCredential: "deployment" | "organization" | "hosted";
         /**
          * CatalogElsewhere
          * @description A provider models.dev lists for this model that this deployment has not configured.
@@ -6320,12 +6339,8 @@ export interface components {
         CatalogOffering: {
             /** Context Window */
             context_window?: number | null;
-            /**
-             * Credential
-             * @description Whose key serves it: `deployment` for a `providers:` instance the operator configured, `organization` for a key the viewer's organization holds.
-             * @enum {string}
-             */
-            credential: "deployment" | "organization" | "hosted";
+            /** @description Who may price it: `deployment` for a `providers:` instance the operator configured, `hosted` for a provider the deployment pays for in any workspace of the viewer's organization, `organization` for one the viewer's organization may set its own rate for. A workspace can still call a `hosted` provider with the organization's own key. */
+            credential: components["schemas"]["CatalogCredential"];
             /**
              * Discovered
              * @description Whether the provider itself reported this model.
@@ -8651,7 +8666,7 @@ export interface components {
          *
          *     The plaintext key is never stored as sent: the service encrypts it
          *     (`services/secret_box.py`) and keeps only the ciphertext and ``last4``,
-         *     the same convention `entities.ProviderCredential` already uses.
+         *     the same convention `providers.ProviderCredential` already uses.
          */
         OrgProviderKeyCreateRequest: {
             /** Api Base */
@@ -8954,7 +8969,7 @@ export interface components {
          *
          *     ``credential`` is never stored as sent: it is encrypted with
          *     ``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention
-         *     `entities.WorkspaceMcpServer` and `entities.ProviderCredential` use. It is
+         *     `tools.WorkspaceMcpServer` and `providers.ProviderCredential` use. It is
          *     sent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,
          *     so it authenticates this gateway to the guardrails service the entry names.
          *     A guardrail *vendor's* own key is not this: the guardrails service builds
@@ -9903,7 +9918,19 @@ export interface components {
              * Changed Paths
              * @description Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).
              */
-            changed_paths?: string[];
+            changed_paths?: string[] | null;
+            /**
+             * Command Scope
+             * @description What `commands` covers: `call` for the single tool call about to run, `session` for every command the session has run so far.
+             * @default call
+             * @enum {string}
+             */
+            command_scope: "call" | "session";
+            /**
+             * Commands
+             * @description Shell commands the caller observed run or is about to run.
+             */
+            commands?: string[] | null;
             /** Policy Yaml */
             policy_yaml: string;
         };
@@ -12426,7 +12453,7 @@ export interface components {
          *
          *     ``authorization_token`` is never stored as sent: it is encrypted with
          *     ``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention
-         *     `entities.ProviderCredential` and `OrgProviderKey` already use.
+         *     `providers.ProviderCredential` and `OrgProviderKey` already use.
          */
         WorkspaceMcpServerCreate: {
             /**

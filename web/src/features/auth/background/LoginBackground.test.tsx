@@ -95,6 +95,29 @@ describe("login background lifecycle", () => {
     expect(drawBars).toHaveBeenCalledTimes(2)
   })
 
+  it("repaints in the frame that resizes the canvas", () => {
+    // Assigning width or height wipes the bitmap, so a resize that waited for
+    // the next budgeted paint left the background blank for up to a frame
+    // interval: the flash the sign-up card produced on every keystroke that
+    // changed its height (otari-ai#2146).
+    const env = animationEnvironment()
+    const bounds = vi.mocked(HTMLElement.prototype.getBoundingClientRect)
+    render(<Harness />)
+    env.tick(1000)
+    const painted = vi.mocked(drawBars).mock.calls.length
+
+    const rect = bounds.mock.results[0]?.value as DOMRect
+    bounds.mockReturnValue({ ...rect, height: 640, bottom: 640 })
+    act(() => {
+      window.dispatchEvent(new Event("resize"))
+    })
+    // Well inside the 24fps budget, which on its own would have skipped this.
+    env.tick(1004)
+
+    expect(drawBars).toHaveBeenCalledTimes(painted + 1)
+    expect(vi.mocked(drawBars).mock.lastCall?.[1].height).toBe(640)
+  })
+
   it("reduces painting frequency on large grids without enlarging bars", () => {
     const env = animationEnvironment()
     const bounds = vi.mocked(HTMLElement.prototype.getBoundingClientRect)

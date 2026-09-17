@@ -174,6 +174,9 @@ function StatusMark({ status }: { status: string }) {
 // drop them into in the same request. A local identity is created for an address
 // nothing else knows yet, which is the handle a future sign-in flow claims it
 // by; until then the row is a place to hang a role, which is the point.
+//
+// The form a deployment with no mail transport gets, and the only one it gets:
+// an invitation nobody can be sent is an acceptance step with no way through.
 function AddMemberForm({
   isOpen,
   onClose,
@@ -273,7 +276,7 @@ function AddMemberForm({
           placeholder="alice@example.com"
           isRequired
           autoFocus
-          description="The handle this identity is claimed by. Nothing is emailed here; the membership is active straight away. Use Invite member instead to email an accept link."
+          description="The handle this identity is claimed by. This deployment cannot send mail, so nothing is emailed and the membership is active straight away."
         />
         <Select
           label="Role"
@@ -315,10 +318,11 @@ function AddMemberForm({
 }
 
 // Invites rather than adds: the membership lands `invited`, not `active`, and
-// an email with an accept link goes out if mail is configured. Kept separate
-// from AddMemberForm rather than a toggle on it: the two produce different
-// results (`mail_sent`, `accept_link`) and this one has something to show
-// after it succeeds, which AddMemberForm's immediate close does not.
+// an email with an accept link goes out. The form a deployment that can send
+// mail gets, and the only one it gets. Kept separate from AddMemberForm rather
+// than a toggle on it: the two produce different results (`mail_sent`,
+// `accept_link`) and this one has something to show after it succeeds, which
+// AddMemberForm's immediate close does not.
 function InviteMemberForm({
   isOpen,
   onClose,
@@ -328,7 +332,6 @@ function InviteMemberForm({
 }) {
   const invite = useInviteOrganizationMember()
   const workspaces = useWorkspaces()
-  const { mail_ready } = useDeployment()
   const { selected } = useSelectedWorkspace()
   const [email, setEmail] = useState("")
   const [role, setRole] = useState<MembershipRole>("member")
@@ -450,11 +453,7 @@ function InviteMemberForm({
           placeholder="alice@example.com"
           isRequired
           autoFocus
-          description={
-            mail_ready
-              ? "An email with an accept link is sent here; the membership becomes active once they follow it."
-              : "Invitation email is unavailable, so you will get a link to share with them yourself."
-          }
+          description="An email with an accept link is sent here; the membership becomes active once they follow it."
         />
         <Select
           label="Role"
@@ -858,14 +857,14 @@ export function OrganizationMembersPage() {
   const workspaceDefaults = useAllWorkspaceBudgetDefaults(workspaceIds)
   const budgets = useBudgets(operates)
   const scopedBudgets = useScopedBudgets(operates)
+  // Which of the two ways in this deployment offers: see the header action.
+  const { mail_ready } = useDeployment()
 
   const [editingMember, setEditingMember] = useState<string | null>(null)
   const [removing, setRemoving] = useState<OrganizationMember | null>(null)
   const [revoking, setRevoking] = useState<OrganizationMember | null>(null)
-  const [adding, setAdding] = useState(false)
-  const [inviting, setInviting] = useState(false)
-  const [addCount, setAddCount] = useState(0)
-  const [inviteCount, setInviteCount] = useState(0)
+  const [joining, setJoining] = useState(false)
+  const [joinCount, setJoinCount] = useState(0)
 
   const rows = useMemo(() => members.data ?? [], [members.data])
   const userByAttribution = useMemo(
@@ -1221,28 +1220,20 @@ export function OrganizationMembersPage() {
         title="Members"
         action={
           manages ? (
-            // Both stay on screen while their dialog is open: the dialog is
-            // over the page rather than in place of the action.
-            <div className="flex gap-2">
-              <Button
-                variant="ghost"
-                onPress={() => {
-                  setAddCount((count) => count + 1)
-                  setAdding(true)
-                }}
-              >
-                Add member
-              </Button>
-              <Button
-                variant="primary"
-                onPress={() => {
-                  setInviteCount((count) => count + 1)
-                  setInviting(true)
-                }}
-              >
-                Invite member
-              </Button>
-            </div>
+            // One way in: an invitation is an email plus an acceptance step,
+            // and neither exists without a mail transport, so offering both
+            // asked the operator to choose on a fact the page already knows.
+            // It stays on screen while its dialog is open, which sits over the
+            // page rather than in place of it.
+            <Button
+              variant="primary"
+              onPress={() => {
+                setJoinCount((count) => count + 1)
+                setJoining(true)
+              }}
+            >
+              {mail_ready ? "Invite member" : "Add member"}
+            </Button>
           ) : null
         }
       >
@@ -1285,16 +1276,19 @@ export function OrganizationMembersPage() {
       {/* Keyed on the open count, so each open remounts a blank form. Clearing
           the draft on close instead would blank the fields while the dialog is
           still animating away. */}
-      <AddMemberForm
-        key={`add-${addCount}`}
-        isOpen={adding}
-        onClose={() => setAdding(false)}
-      />
-      <InviteMemberForm
-        key={`invite-${inviteCount}`}
-        isOpen={inviting}
-        onClose={() => setInviting(false)}
-      />
+      {mail_ready ? (
+        <InviteMemberForm
+          key={`invite-${joinCount}`}
+          isOpen={joining}
+          onClose={() => setJoining(false)}
+        />
+      ) : (
+        <AddMemberForm
+          key={`add-${joinCount}`}
+          isOpen={joining}
+          onClose={() => setJoining(false)}
+        />
+      )}
 
       {/* Keyed on the row: its fields seed from the member on mount only, so
           the next Edit has to arrive at a fresh form. */}

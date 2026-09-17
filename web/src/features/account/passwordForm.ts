@@ -20,50 +20,63 @@ export interface PasswordFormShape {
   needsEmail: boolean
   /** The identity holds a password, so replacing it means proving the old one. */
   needsCurrentPassword: boolean
+  /** Setting this identity's password stops the master key signing in. */
+  claimsDeployment: boolean
+  /** The address the identity already signs in with, if it has one. */
+  email: string | undefined
 }
 
 export function passwordFormShape(caller: CallerIdentity): PasswordFormShape {
   return {
     needsEmail: !caller.email,
     needsCurrentPassword: caller.has_password,
+    claimsDeployment: caller.claims_deployment,
+    email: caller.email ?? undefined,
   }
 }
 
 /** The card's line about what this account signs in with today. */
 export function passwordSummary({
-  needsEmail,
   needsCurrentPassword,
+  claimsDeployment,
+  email,
 }: PasswordFormShape): string {
   if (needsCurrentPassword) {
     return "The password you sign in to this dashboard with. Changing it ends every other session this identity holds; this one stays signed in."
   }
-  if (needsEmail) {
-    return "This gateway still signs in with its master key. Set an address and a password to sign in as yourself from now on. The master key stays the credential for the management API, and it can still reset this password if you forget it."
+  if (claimsDeployment) {
+    const action = email
+      ? `Set a password to sign in as ${email} from now on.`
+      : "Set an address and a password to sign in as yourself from now on."
+    return `This gateway still signs in with its master key. ${action} The master key stays the credential for the management API, and it can still reset this password if you forget it.`
   }
   return "You have no dashboard password. You signed in another way, through a connected account or a passkey, and that keeps working: a password is a second way in, and it is what lets you sign in where those are not available."
 }
 
 /** The dialog's one line under its title: the consequence, not the title again. */
 export function passwordDialogDescription({
-  needsEmail,
   needsCurrentPassword,
+  claimsDeployment,
+  email,
 }: PasswordFormShape): string {
   if (needsCurrentPassword) {
     return "You stay signed in here; every other session this identity holds ends."
   }
-  if (needsEmail) {
-    return "The address and password this deployment signs in with from now on. The master key stops being a dashboard login."
+  if (claimsDeployment) {
+    return email
+      ? `The password ${email} signs in with from now on. The master key stops being a dashboard login.`
+      : "The address and password this deployment signs in with from now on. The master key stops being a dashboard login."
   }
   return "A second way in, beside however you sign in now. Every other session this identity holds ends."
 }
 
 /** The label the card's trigger and the dialog's submit both carry. */
 export function passwordAction({
-  needsEmail,
   needsCurrentPassword,
+  claimsDeployment,
 }: PasswordFormShape): string {
   if (needsCurrentPassword) {
     return "Change password"
   }
-  return needsEmail ? "Claim this deployment" : "Set a password"
+  return claimsDeployment ? "Claim this deployment" : "Set a password"
 }

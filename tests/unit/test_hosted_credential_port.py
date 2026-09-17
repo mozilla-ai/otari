@@ -91,6 +91,9 @@ class RecordingPort:
             raise self.error
         return self.credential
 
+    async def get_hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
+        raise AssertionError("dispatch must not ask for the hosted provider list")
+
 
 def _plain_build_port() -> ModelProviderPort:
     """The adapter a build with no overlay actually runs, via the composition root."""
@@ -554,3 +557,8 @@ async def test_fresh_resolution_also_reaches_the_port() -> None:
     result = await _dispatch(_ctx(resolved_provider=None), port)
     assert result.kwargs == {"api_key": "hosted-key"}
     assert len(port.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_plain_build_serves_no_hosted_provider() -> None:
+    assert await _plain_build_port().get_hosted_providers(organization_id=ORGANIZATION_ID) == frozenset()

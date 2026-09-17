@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.routes.chat import log_usage
 from gateway.core.usage import GatewayUsage
-from gateway.models.entities import ModelPricing, UsageLog
+from gateway.models.pricing import ModelPricing
+from gateway.models.usage import UsageLog
 
 
 @dataclass

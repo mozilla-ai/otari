@@ -42,7 +42,8 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
 from gateway.log_config import logger
-from gateway.models.entities import APIKey, Budget, ScopedBudget
+from gateway.models.api_keys import APIKey
+from gateway.models.budgets import Budget, ScopedBudget
 from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
 from gateway.services.budget_periods import (
     ALIGN_DAY,

@@ -14,9 +14,10 @@ from gateway.container import Container
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, create_session, get_db
 from gateway.core.feature import CoreFeature
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
-from gateway.metrics import record_auth_failure
-from gateway.models.entities import APIKey
+from gateway.metrics import REGISTRY, Counter
+from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.entitlement_port import EntitlementPort
@@ -38,6 +39,18 @@ from gateway.services.tenancy.provisioning_service import ensure_bootstrap_ident
 # falls back to this shim for callers that set it directly (see ``set_config``).
 _config: GatewayConfig | None = None
 _LAST_USED_UPDATE_INTERVAL_SECONDS = 300
+
+AUTH_FAILURES = Counter(
+    "gateway_auth_failures",
+    "Total number of authentication failures",
+    ["reason"],
+    registry=REGISTRY,
+)
+
+
+def record_auth_failure(reason: str) -> None:
+    """Record an authentication failure."""
+    AUTH_FAILURES.labels(reason=reason).inc()
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -404,11 +417,10 @@ async def require_deployment_operator(
     later inherits the gate instead of being reachable with no credential at
     all until someone notices the missing decorator. ``Depends`` caching means
     the master-key verification underneath still runs once per request however
-    many of these a route pulls in. The three modules that hold an exception
-    (``models.py`` and ``pricing.py`` for the catalog reads, ``usage.py`` for
-    external-event ingestion) put it on a router of its own, so admitting a
-    non-operator is spelled at a router instead of hidden in one route's
-    decorator.
+    many of these a route pulls in. A module that holds an exception (a catalog
+    read, the tool-settings reader, external-event ingestion) puts it on a router
+    of its own, so admitting a non-operator is spelled at a router instead of
+    hidden in one route's decorator.
     """
     if session_identity is not None and not await DeploymentUserService(db).has_administration_access(
         session_identity
@@ -471,14 +483,20 @@ async def verify_catalog_reader(
     """As :func:`verify_api_key_or_master_key`, and a dashboard session also reads.
 
     The narrow exception to the rule above, for the catalog reads that describe
-    the deployment rather than act on it: ``GET /api/v1/models``, ``GET /api/v1/pricing``
-    and ``GET /api/v1/tools`` (with their by-id variants). The dashboard's Models and
-    Pricing pages are built on these, so a session has to reach them; they call
-    no provider, write nothing, and bill nothing, so reaching them
-    deployment-wide costs a signed-in caller's own organization nothing.
+    the deployment rather than act on it: ``GET /api/v1/models``, ``GET /api/v1/pricing``,
+    ``GET /api/v1/tools`` and ``GET /api/v1/providers/catalog`` (with their by-id
+    variants). The dashboard's Models and Pricing pages are built on these, so a
+    session has to reach them; they call no provider, write nothing, and bill
+    nothing, so reaching them deployment-wide costs a signed-in caller's own
+    organization nothing.
+
+    The provider catalog is the one of these a *tenant* rather than an operator
+    needs: it names the providers any-llm knows, which the organization
+    provider-key form offers as the BYO choices, so an owner or admin who reaches
+    no operator route still has to read it.
 
     Split out rather than left as a branch inside the other dependency so that
-    adding a route to this plane defaults to refusing the cookie. The three
+    adding a route to this plane defaults to refusing the cookie. The four
     routers that serve these reads declare it on the router for the same reason,
     so admitting a session is spelled where the route is mounted rather than in
     one route's decorator.
@@ -541,6 +559,16 @@ async def get_db_if_needed(
     async with aclosing(get_db()) as sessions:
         async for db in sessions:
             yield db
+
+
+def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork:
+    """Return the request's Unit of Work over its session.
+
+    Gotcha: the rest of the request writes to this same session.
+    A block's commit also stores what that code staged outside a block, and its rollback discards it.
+    Standalone and hosted only: a hybrid gateway has no local database, so it has no Unit of Work.
+    """
+    return UnitOfWork(db)
 
 
 async def get_current_identity(

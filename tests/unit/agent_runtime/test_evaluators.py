@@ -35,6 +35,20 @@ def test_unknown_when_evidence_was_not_collected() -> None:
     assert result.outcome.is_blocking, "unknown must block a required gate, never pass silently"
 
 
+def test_not_applicable_when_evidence_is_an_explicit_empty_list() -> None:
+    """Mirrors evaluate_command_match rather than reporting a pass.
+
+    A caller submits an empty list for exactly the events that carry no path
+    evidence at all (a PreToolUse call for Bash rather than an edit tool).
+    PASS there reads as a check that ran and found nothing, when this gate
+    never had anything to check. Both are non-blocking, so this is about what
+    gets reported, not what gets enforced.
+    """
+    result = evaluate_changed_path(_gate(), ChangedPathEvidence(changed_paths=()))
+    assert result.outcome is Outcome.NOT_APPLICABLE
+    assert not result.outcome.is_blocking
+
+
 def test_star_does_not_cross_a_path_segment() -> None:
     gate = _gate(forbidden=("src/*.py",))
     # A single '*' must not match the nested file: only a direct child of src/ counts.

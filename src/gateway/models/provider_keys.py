@@ -14,7 +14,7 @@ bare ``provider:model`` selector never consults ``config.providers`` for a
 workspace that has an org-scoped key. See mozilla-ai/otari#643.
 
 Three tables, named to avoid a collision that already exists in this
-codebase: ``ScopedBudget.provider_key_id`` (`models/entities.py`) already
+codebase: ``ScopedBudget.provider_key_id`` (`models/budgets.py`) already
 means "an instance-name string, no FK". These tables use ``org_provider_key``
 throughout so no column here is ever ambiguously named ``provider_key_id``.
 
@@ -35,8 +35,8 @@ throughout so no column here is ever ambiguously named ``provider_key_id``.
   ``(workspace, key)`` pair means every model is allowed; one or more rows
   narrows it to exactly those.
 
-Style follows ``models/tenancy.py``: SQLModel (not `entities.py`'s declarative
-style) because these are tenancy-scoped tables sharing its mixins and
+Style follows ``models/tenancy.py``: SQLModel (not the declarative ``Base``
+style) because these are tenancy-scoped tables sharing the same mixins and
 ``UtcDateTime`` timestamp handling, and no ``relationship()`` is declared
 (lazy loading raises ``MissingGreenlet`` on an ``AsyncSession``); repositories
 join explicitly.
@@ -57,8 +57,8 @@ from typing import Any
 from sqlalchemy import JSON, Column, ForeignKeyConstraint, Index, UniqueConstraint, text
 from sqlmodel import Field, SQLModel
 
+from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
 from gateway.models.secret_fields import redact_secret_like_values
-from gateway.models.tenancy import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
 
 # ``client_args`` is arbitrary JSON, and this gateway's own Bedrock support is
 # the reason a credential-shaped entry in it cannot simply be rejected outright:
@@ -82,7 +82,7 @@ class OrgProviderKeyCreateRequest(SQLModel):
 
     The plaintext key is never stored as sent: the service encrypts it
     (`services/secret_box.py`) and keeps only the ciphertext and ``last4``,
-    the same convention `entities.ProviderCredential` already uses.
+    the same convention `providers.ProviderCredential` already uses.
     """
 
     provider: str = Field(max_length=255)

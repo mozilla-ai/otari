@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Iterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from alembic import command
 from alembic.config import Config
@@ -19,6 +20,7 @@ from sqlalchemy.pool import NullPool
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.metrics import REGISTRY, Collector, GaugeMetricFamily
 
 _engine: AsyncEngine | None = None
 _SessionLocal: async_sessionmaker[AsyncSession] | None = None
@@ -86,7 +88,12 @@ def _run_migrations(database_url: str) -> None:
     alembic_cfg = Config()
     alembic_dir = Path(__file__).resolve().parents[3] / "alembic"
     alembic_cfg.set_main_option("script_location", str(alembic_dir))
-    alembic_cfg.set_main_option("sqlalchemy.url", database_url)
+    # set_main_option stores the value in a configparser.ConfigParser, whose
+    # interpolation treats a lone "%" as the start of a variable reference. A
+    # URL-decoded password containing "%" (e.g. from an encoded "+") then
+    # fails with "invalid interpolation syntax" before any migration runs.
+    # Doubling it is configparser's own documented escape for a literal "%".
+    alembic_cfg.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
     alembic_cfg.attributes["configure_logger"] = False
     command.upgrade(alembic_cfg, "head")
 
@@ -196,6 +203,122 @@ async def release_session(session: AsyncSession | None) -> bool:
     return True
 
 
+REQUEST_POOL = "request"
+LOG_POOL = "log"
+
+# The configured ``max_overflow`` of each live pool, by pool name. ``QueuePool``
+# has no public accessor for it, and the gateway is the side that chose the
+# value, so it is recorded here at :func:`init_db` time rather than read back
+# off the pool.
+_pool_max_overflow: dict[str, int] = {}
+
+
+@runtime_checkable
+class _CountingPool(Protocol):
+    """The counters a ``QueuePool`` keeps and a ``NullPool`` does not."""
+
+    def checkedout(self) -> int: ...
+    def checkedin(self) -> int: ...
+    def overflow(self) -> int: ...
+    def size(self) -> int: ...
+
+
+@dataclass(frozen=True, slots=True)
+class PoolStats:
+    """A point-in-time reading of one engine's connection pool."""
+
+    checked_out: int
+    checked_in: int
+    overflow: int
+    size: int
+    max_overflow: int
+
+    @property
+    def capacity(self) -> int:
+        """The most connections this pool will ever hand out at once."""
+        return self.size + self.max_overflow
+
+
+def _engine_pool_stats(engine: AsyncEngine | None, max_overflow: int) -> PoolStats | None:
+    """Read *engine*'s pool.
+
+    Returns ``None`` when there is no pool to read: no engine yet, or a pool
+    with no counters (``NullPool``, which SQLite uses).
+    """
+    if engine is None:
+        return None
+    pool = engine.pool
+    if not isinstance(pool, _CountingPool):
+        return None
+    # ``QueuePool`` reports a negative overflow until it has opened its base
+    # connections.
+    overflow = max(pool.overflow(), 0)
+    return PoolStats(
+        checked_out=pool.checkedout(),
+        checked_in=pool.checkedin(),
+        overflow=overflow,
+        size=pool.size(),
+        max_overflow=max_overflow,
+    )
+
+
+def pool_stats() -> dict[str, PoolStats]:
+    """Pool stats for every active engine, keyed by pool name.
+
+    A pool with nothing to report is omitted, so the result is empty before
+    :func:`init_db` runs and on SQLite.
+    """
+    readings = {
+        REQUEST_POOL: _engine_pool_stats(_engine, _pool_max_overflow.get(REQUEST_POOL, 0)),
+        LOG_POOL: _engine_pool_stats(_log_engine, _pool_max_overflow.get(LOG_POOL, 0)),
+    }
+    return {name: stats for name, stats in readings.items() if stats is not None}
+
+
+class _PoolCollector(Collector):
+    """Publish the connection-pool counters at scrape time.
+
+    A collector rather than gauges refreshed on a timer: the counters are
+    already maintained by SQLAlchemy, so every scrape reads the live pool with
+    no way to lag it, and a pool that reports nothing emits no series at all
+    rather than leaving a stale value behind.
+    """
+
+    def collect(self) -> Iterator[GaugeMetricFamily]:
+        checked_out = GaugeMetricFamily(
+            "gateway_db_pool_connections_checked_out",
+            "Pooled database connections currently checked out",
+            labels=["pool"],
+        )
+        idle = GaugeMetricFamily(
+            "gateway_db_pool_connections_idle",
+            "Pooled database connections checked in and available",
+            labels=["pool"],
+        )
+        overflow = GaugeMetricFamily(
+            "gateway_db_pool_overflow_connections",
+            "Database connections open beyond the base pool size",
+            labels=["pool"],
+        )
+        capacity = GaugeMetricFamily(
+            "gateway_db_pool_capacity",
+            "Most database connections the pool will hand out at once (size plus max overflow)",
+            labels=["pool"],
+        )
+        for name, stats in pool_stats().items():
+            checked_out.add_metric([name], stats.checked_out)
+            idle.add_metric([name], stats.checked_in)
+            overflow.add_metric([name], stats.overflow)
+            capacity.add_metric([name], stats.capacity)
+        yield checked_out
+        yield idle
+        yield overflow
+        yield capacity
+
+
+REGISTRY.register(_PoolCollector())
+
+
 def engine_kwargs(
     config: GatewayConfig,
     *,
@@ -266,6 +389,7 @@ def init_db(config: GatewayConfig) -> None:
     )
     _install_timeout_translation(_engine)
     _SessionLocal = async_sessionmaker(_engine, expire_on_commit=False)
+    _pool_max_overflow[REQUEST_POOL] = config.db_max_overflow
 
     if is_sqlite:
         _configure_sqlite_pragmas(_engine)
@@ -298,6 +422,7 @@ def init_db(config: GatewayConfig) -> None:
         )
         _install_timeout_translation(_log_engine)
         _LogSessionLocal = async_sessionmaker(_log_engine, expire_on_commit=False)
+        _pool_max_overflow[LOG_POOL] = 0
 
     if config.auto_migrate:
         _run_migrations(database_url)
@@ -352,6 +477,7 @@ def _take_engines() -> list[AsyncEngine]:
     _SessionLocal = None
     _log_engine = None
     _LogSessionLocal = None
+    _pool_max_overflow.clear()
     return engines
 
 
@@ -387,12 +513,16 @@ def reset_db() -> None:
 
 __all__ = [
     "DATABASE_ERRORS",
+    "LOG_POOL",
+    "REQUEST_POOL",
+    "PoolStats",
     "create_log_session",
     "create_session",
     "dispose_db",
     "engine_kwargs",
     "get_db",
     "init_db",
+    "pool_stats",
     "release_session",
     "reset_db",
     "translate_timeout_error",

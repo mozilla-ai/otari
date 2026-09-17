@@ -378,8 +378,6 @@ function OrganizationOverview() {
   // route: `require_active_organization_management_access`, the same gate that
   // opens the organization rail in `AppShell`. A member is refused there, so a
   // member is not asked here (the matrix has Spend & budgets Hidden for them).
-  // `canManage` is narrower than the server on one point, a superuser with no
-  // management role, and `roles.ts` says why that is the safe direction.
   const managesSpend = canManage(context.data)
   const ceilings = useOrganizationSpendCeilings(managesSpend)
   // What this caller could route a request to, which is the setup guide's gate

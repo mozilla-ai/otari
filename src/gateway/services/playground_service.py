@@ -26,12 +26,6 @@ from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
-from gateway.models.entities import (
-    User,
-    WorkspaceCodeExecutionPolicy,
-    WorkspaceMcpServer,
-    WorkspaceWebSearchConfig,
-)
 from gateway.models.playground import (
     MAX_FAVORITE_MODELS,
     MAX_SAVED_COMPARISONS,
@@ -50,6 +44,8 @@ from gateway.models.playground import (
     PlaygroundMessagePublic,
 )
 from gateway.models.tenancy import User as TenancyUser
+from gateway.models.tools import WorkspaceCodeExecutionPolicy, WorkspaceMcpServer, WorkspaceWebSearchConfig
+from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization

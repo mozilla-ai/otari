@@ -66,7 +66,8 @@ from gateway.core.config import GatewayConfig
 from gateway.core.metered_pricing import quantize_cost
 from gateway.inflight import track_request
 from gateway.log_config import logger
-from gateway.models.entities import APIKey, UsageLog
+from gateway.models.api_keys import APIKey
+from gateway.models.usage import UsageLog
 from gateway.rate_limit import check_rate_limit
 from gateway.services.budget_service import reconcile_reservation, refund_reservation, reserve_budget
 from gateway.services.log_writer import LogWriter

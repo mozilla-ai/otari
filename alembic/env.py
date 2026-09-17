@@ -1,20 +1,23 @@
 import logging
 import os
+from functools import cache
 from logging.config import fileConfig
 
 from alembic import context
+from alembic.runtime.environment import NameFilterType
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from alembic.util import CommandError
 from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import Engine
+from sqlalchemy.sql.schema import SchemaItem
 
 from gateway.core.database import to_sync_url
+from gateway.core.migration_chain import tables_the_chain_creates
 
-# Importing anything from gateway.models registers every model module on this
-# metadata (see gateway/models/__init__.py), which is what makes the comparison
-# below cover the whole schema rather than the half this file names.
-from gateway.models.entities import Base
+# Importing any gateway.models module registers every table, so autogenerate
+# compares against the whole schema.
+from gateway.models.base import Base
 
 logger = logging.getLogger("alembic")
 
@@ -57,7 +60,14 @@ if not database_url:
 # `otari migrate`, auto_migrate on startup, and a bare `alembic upgrade head`
 # reading OTARI_DATABASE_URL. Migrations run on a sync engine, so an async URL
 # (the form README documents for SQLite) would otherwise fail with MissingGreenlet.
-config.set_main_option("sqlalchemy.url", to_sync_url(database_url))
+#
+# set_main_option stores the value in a configparser.ConfigParser, whose
+# interpolation treats a lone "%" as the start of a variable reference. A
+# URL-decoded credential containing "%" (e.g. from an encoded "+") would
+# otherwise fail here with "invalid interpolation syntax" -- the get above
+# already reversed this same doubling, so re-doubling before this second set
+# is what keeps the round trip consistent.
+config.set_main_option("sqlalchemy.url", to_sync_url(database_url).replace("%", "%%"))
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -133,6 +143,28 @@ def _reject_foreign_history(engine: Engine) -> None:
     raise CommandError(msg)
 
 
+@cache
+def _tables_this_chain_creates() -> frozenset[str]:
+    """Return every table a revision in this chain creates, or renames a table to."""
+    return tables_the_chain_creates(ScriptDirectory.from_config(config))
+
+
+def _include_object(
+    obj: SchemaItem, name: str | None, type_: NameFilterType, reflected: bool, compare_to: SchemaItem | None
+) -> bool:
+    """Leave out of autogenerate a table that exists only in the database and that this chain never created.
+
+    A database can hold another migration chain's tables beside otari's,
+    and autogenerate must not propose dropping them.
+    A table that otari's own models stop declaring was created by this chain, so it still gets its drop.
+    """
+    # Read on every call, so an unreadable revision fails autogenerate even when no foreign table is present.
+    owned = _tables_this_chain_creates()
+    if type_ == "table" and reflected and compare_to is None:
+        return name in owned
+    return True
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -149,6 +181,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=url,
         target_metadata=target_metadata,
+        include_object=_include_object,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -173,7 +206,7 @@ def run_migrations_online() -> None:
     _reject_foreign_history(connectable)
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(connection=connection, target_metadata=target_metadata, include_object=_include_object)
 
         with context.begin_transaction():
             context.run_migrations()

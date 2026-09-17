@@ -19,13 +19,14 @@ import {
  * One endpoint (`PUT /v1/auth/password`) behind three readings of one form, and
  * which one applies is read off the *caller*, not off the deployment. That is
  * the correction: `sign_in_methods` describes the gateway, and the question
- * here is what the person signed in right now holds, which `caller.has_password`
- * and `caller.email` on the membership context answer.
+ * here is what the person signed in right now holds, which `caller.has_password`,
+ * `caller.claims_deployment` and `caller.email` on the membership context answer.
  *
  * - **Claiming.** First boot leaves the operator identity with no address and
- *   no password, and the master key as the dashboard login. Supplying an
- *   address and a password is the single act that retires master-key sign-in on
- *   this deployment (mozilla-ai/otari-ai#1716).
+ *   no password, and the master key as the dashboard login. Setting the
+ *   operator's password is the single act that retires master-key sign-in on
+ *   this deployment (mozilla-ai/otari-ai#1716). An operator adopted from an
+ *   existing tenancy already has an address, so only a password is asked for.
  * - **Setting a first password.** Somebody who signs in through Google, GitHub
  *   or a passkey holds no password, and neither does a roster entry nobody has
  *   claimed. They have an address already, so only a new password is asked for.

@@ -1,0 +1,88 @@
+---
+applyTo: "src/gateway/**/*.py"
+---
+
+# Backend architecture review instructions
+
+The backend is a modular monolith. The layers are the top-level folders under
+`src/gateway/`, and each layer holds one package or module per domain.
+`docs/domains.md` assigns every module to its domain.
+
+## Old shape and new shape
+
+Most existing modules are still in the old shape.
+A service or route that handles a database failure catches `DATABASE_ERRORS`
+from `gateway.core.database` rather than importing `sqlalchemy`. Review new and moved code
+against the rules below, and do not accept "the module next to it does the
+same" as a reason.
+
+`QUERY_BASELINE` and `SESSION_PARAMETER_BASELINE` in
+`scripts/check_architecture.py` name the code still in the old shape.
+
+- Do not flag an existing baseline entry the PR does not touch.
+- Flag a PR that adds a name to either baseline.
+- A PR that moves code out of the old shape removes its names from the
+  baseline. The check fails until it does.
+
+## Layer rules
+
+| Layer | Path | Does | Flag when it |
+| --- | --- | --- | --- |
+| Routes | `api/routes/<domain>.py` | Parses the request, calls one service method, returns a schema | Imports `sqlalchemy`, builds a query, holds a business rule, defines a Pydantic model, imports a repository, or commits |
+| Schemas | `schemas/<domain>.py` | Holds Pydantic request and response models | Holds anything else |
+| Services | `services/<domain>/` | Runs use cases: business rules and orchestration | Imports `sqlalchemy`, builds a query, takes or holds a session, touches HTTP, or imports another domain's repository |
+| Repositories | `repositories/<domain>/`, modules ending in `_repository.py` | Runs every query, over `BaseRepository`, and flushes | Commits, or holds a business rule |
+| Exceptions | `exceptions/<domain>_exceptions.py` | Declares error classes, each with its own `status_code` | Handles an error |
+| Models | `models/<domain>.py` | Declares ORM tables | Holds logic |
+
+## How a service is built
+
+- One service per domain. The package's `__init__.py` exports the service and
+  the types its public methods use, and nothing else. Each public method is one
+  use case, and helpers sit in private modules whose names start with `_`.
+- A domain whose service cannot offer a small public API is more than one
+  domain. Flag a service that grows a wide interface.
+- The service receives its own domain's repositories, the Unit of Work, config,
+  ports and other domains' services through its constructor. Flag a service
+  that receives the session or another domain's repository.
+- A builder in `api/deps.py` builds the service. Flag a new service builder
+  defined anywhere else.
+- Flag a new module-level function under `services/` that takes an
+  `AsyncSession`.
+
+## Commits
+
+- A service commits. A route or a repository never does.
+- Once `core/unit_of_work.py` exists, a commit happens only when a Unit of Work
+  block ends, and only a service opens a block. Flag a direct `commit()` or
+  `rollback()` in code the PR adds after that.
+
+## Imports between domains
+
+- Code outside a domain imports its service only through the package root,
+  `gateway.services.<domain>`. Flag an import of a module whose name starts
+  with `_` from outside its package.
+- Only the domain's own service package and `api/deps.py` import
+  `gateway.repositories.<domain>`.
+- Flag an import that makes two domain services depend on each other in a
+  cycle.
+
+The boundary check does not enforce these import rules yet, so review is the
+only gate for them.
+
+## Errors
+
+A domain error carries its own `status_code`, and one registered handler
+renders its family. Today only tenancy errors have such a family:
+`TenancyError`, rendered by `_tenancy_error_handler` in `gateway.main`.
+
+- Flag a route that catches a tenancy error to turn it into an
+  `HTTPException`.
+- Flag an error class outside tenancy that subclasses `TenancyError`. Its
+  family base is not decided, and the tenancy handler would change its
+  response contract.
+
+## Module size
+
+Divider comments that cut a module into sections mean the module is more than
+one module. Suggest splitting a module that a PR grows along such a divider.

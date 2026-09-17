@@ -28,7 +28,11 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-function contextFor(email: string | null, hasPassword: boolean) {
+function contextFor(
+  email: string | null,
+  hasPassword: boolean,
+  claimsDeployment = false,
+) {
   return {
     api: {
       [`${API_ROOT}/organizations/me`]: organizationContext({
@@ -37,6 +41,7 @@ function contextFor(email: string | null, hasPassword: boolean) {
           email,
           full_name: "Ada Lovelace",
           has_password: hasPassword,
+          claims_deployment: claimsDeployment,
         },
       }),
     },
@@ -49,7 +54,18 @@ function contextFor(email: string | null, hasPassword: boolean) {
  */
 export const Unclaimed: Story = {
   parameters: {
-    ...contextFor(null, false),
+    ...contextFor(null, false, true),
+    deployment: { sign_in_methods: ["master_key"] },
+  },
+}
+
+/**
+ * Unclaimed, with an operator adopted from an existing tenancy: the address is
+ * already on file, so claiming asks for a password alone and names the address.
+ */
+export const UnclaimedWithAddress: Story = {
+  parameters: {
+    ...contextFor("operator@example.com", false, true),
     deployment: { sign_in_methods: ["master_key"] },
   },
 }

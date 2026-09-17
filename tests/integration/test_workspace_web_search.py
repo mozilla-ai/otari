@@ -15,8 +15,8 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from gateway.models.entities import WorkspaceWebSearchConfig
 from gateway.models.tenancy import Organization, User, Workspace
+from gateway.models.tools import WorkspaceWebSearchConfig
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,

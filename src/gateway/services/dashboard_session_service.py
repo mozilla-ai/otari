@@ -41,8 +41,8 @@ from sqlmodel import col
 from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
-from gateway.models.entities import DashboardSession, RuntimeSetting
-from gateway.models.tenancy import User
+from gateway.models.platform import RuntimeSetting
+from gateway.models.tenancy import DashboardSession, User
 from gateway.services.master_key_service import hash_master_key
 
 SESSION_COOKIE_NAME = "otari_dashboard_session"

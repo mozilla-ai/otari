@@ -84,7 +84,8 @@ the corresponding startup value after the database is available.
 | `mode` | `standalone`, `hosted`, or `hybrid`. See [Modes](modes.md). |
 
 For every field, its current default, validation, and description live on
-`GatewayConfig` in `src/gateway/core/config.py`. Operators can read the
+`GatewayConfig` in `src/gateway/core/config.py`, or in the per-domain module
+under `src/gateway/core/settings/` that it inherits. Operators can read the
 non-secret effective set through `GET /api/v1/settings`.
 
 ### Database connections

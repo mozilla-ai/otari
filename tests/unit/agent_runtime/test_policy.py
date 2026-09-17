@@ -1,7 +1,7 @@
 import pytest
 
 from gateway.agent_runtime.domain.policy import PolicyError, parse_policy
-from gateway.agent_runtime.domain.types import ChangedPathGate
+from gateway.agent_runtime.domain.types import ChangedPathGate, CommandIfChangedGate, CommandMatchGate
 
 VALID_POLICY = """\
 schema_version: "1.0"
@@ -50,7 +50,24 @@ def test_parses_a_valid_policy() -> None:
         # Unsupported gate type: never silently skipped.
         (
             'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            "  - id: g\n    type: judge\n    enforcement: required\n    message: m\n"
+        ),
+        # Missing forbidden list on a command_match gate.
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
             "  - id: g\n    type: command_match\n    enforcement: required\n    message: m\n"
+        ),
+        # A forbidden phrase that is not a valid shell phrase (unbalanced quote).
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            "  - id: g\n    type: command_match\n    enforcement: required\n"
+            '    forbidden: ["git push \\"--force"]\n    message: m\n'
+        ),
+        # A forbidden phrase that tokenizes to nothing (all whitespace).
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            "  - id: g\n    type: command_match\n    enforcement: required\n"
+            '    forbidden: ["   "]\n    message: m\n'
         ),
         # Missing forbidden list on a changed_path gate.
         (
@@ -69,7 +86,7 @@ def test_parses_a_valid_policy() -> None:
         # strings: an unhashable value (YAML's `[]`) raises TypeError there
         # unless isinstance is checked first. Each of these must come back as
         # a PolicyError (422), not an unhandled TypeError (500).
-        'schema_version: []\npolicy:\n  id: x\ngates: []\n',
+        "schema_version: []\npolicy:\n  id: x\ngates: []\n",
         (
             'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
             "  - id: g\n    type: []\n    enforcement: required\n"
@@ -89,8 +106,39 @@ def test_parses_a_valid_policy() -> None:
         # segment-crossing matcher never needs to try more than one split.
         (
             'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-            '  - id: g\n    type: changed_path\n    enforcement: required\n'
+            "  - id: g\n    type: changed_path\n    enforcement: required\n"
             '    forbidden: ["a/**/b/**/c"]\n    message: m\n'
+        ),
+        # Missing when_changed on a command_if_changed gate.
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            "  - id: g\n    type: command_if_changed\n    enforcement: required\n"
+            '    require: ["make postman"]\n    message: m\n'
+        ),
+        # Missing require on a command_if_changed gate.
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            "  - id: g\n    type: command_if_changed\n    enforcement: required\n"
+            '    when_changed: ["a"]\n    message: m\n'
+        ),
+        # A require phrase that is not a valid shell phrase.
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            "  - id: g\n    type: command_if_changed\n    enforcement: required\n"
+            '    when_changed: ["a"]\n    require: ["make \\"postman"]\n    message: m\n'
+        ),
+        # A changed_path gate cannot use command_if_changed's field names, now
+        # that the accepted field set is per-type rather than shared.
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            "  - id: g\n    type: changed_path\n    enforcement: required\n"
+            '    when_changed: ["a"]\n    message: m\n'
+        ),
+        # A command_if_changed gate cannot use forbidden, for the same reason.
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            "  - id: g\n    type: command_if_changed\n    enforcement: required\n"
+            '    forbidden: ["a"]\n    require: ["b"]\n    message: m\n'
         ),
     ],
 )
@@ -114,11 +162,65 @@ def test_duplicate_forbidden_globs_collapse_to_one() -> None:
     """
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        '  - id: g\n    type: changed_path\n    enforcement: required\n'
+        "  - id: g\n    type: changed_path\n    enforcement: required\n"
         '    forbidden: ["a", "a", "b", "a"]\n    message: m\n'
     )
     spec = parse_policy(policy, source="test.yml")
-    assert spec.gates[0].forbidden == ("a", "b")
+    gate = spec.gates[0]
+    assert isinstance(gate, ChangedPathGate)
+    assert gate.forbidden == ("a", "b")
+
+
+def test_parses_a_valid_command_match_policy() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: no-force-push\n    type: command_match\n    enforcement: required\n"
+        '    forbidden: ["git push --force", "git push -f"]\n    message: m\n'
+    )
+    spec = parse_policy(policy, source="test.yml")
+    assert len(spec.gates) == 1
+    gate = spec.gates[0]
+    assert isinstance(gate, CommandMatchGate)
+    assert gate.forbidden == ("git push --force", "git push -f")
+
+
+def test_duplicate_forbidden_phrases_collapse_to_one() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: command_match\n    enforcement: required\n"
+        '    forbidden: ["npm", "npm", "yarn"]\n    message: m\n'
+    )
+    spec = parse_policy(policy, source="test.yml")
+    gate = spec.gates[0]
+    assert isinstance(gate, CommandMatchGate)
+    assert gate.forbidden == ("npm", "yarn")
+
+
+def test_parses_a_valid_command_if_changed_policy() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: openapi-needs-postman\n    type: command_if_changed\n    enforcement: required\n"
+        '    when_changed: ["docs/public/openapi.json"]\n    require: ["make postman"]\n    message: m\n'
+    )
+    spec = parse_policy(policy, source="test.yml")
+    assert len(spec.gates) == 1
+    gate = spec.gates[0]
+    assert isinstance(gate, CommandIfChangedGate)
+    assert gate.when_changed == ("docs/public/openapi.json",)
+    assert gate.require == ("make postman",)
+
+
+def test_duplicate_when_changed_globs_and_require_phrases_collapse_to_one() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: command_if_changed\n    enforcement: required\n"
+        '    when_changed: ["a", "a", "b"]\n    require: ["c", "c"]\n    message: m\n'
+    )
+    spec = parse_policy(policy, source="test.yml")
+    gate = spec.gates[0]
+    assert isinstance(gate, CommandIfChangedGate)
+    assert gate.when_changed == ("a", "b")
+    assert gate.require == ("c",)
 
 
 def test_unhashable_yaml_mapping_key_is_rejected_not_a_500() -> None:

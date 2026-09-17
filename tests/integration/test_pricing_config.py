@@ -11,10 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from gateway.api.routes.chat import log_usage
-from gateway.core.config import API_ROOT, GatewayConfig, PricingConfig
+from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.settings.pricing import PricingConfig
 from gateway.db import ModelPricing, get_db
 from gateway.main import create_app
-from gateway.models.entities import UsageLog
+from gateway.models.usage import UsageLog
 
 from .conftest import build_async_session_override
 
@@ -228,6 +229,7 @@ def test_pricing_loaded_from_config_normalizes_legacy_slash_format(postgres_url:
         dispose_override()
 
 
+@pytest.mark.filterwarnings("ignore:Model format 'provider/model' is deprecated:DeprecationWarning")
 def test_set_pricing_api_normalizes_legacy_slash_format(
     client: TestClient,
     master_key_header: dict[str, str],

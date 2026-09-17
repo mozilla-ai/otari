@@ -75,6 +75,34 @@ describe("apiFetch", () => {
     })
   })
 
+  it("explains a reply that is not JSON instead of quoting the markup at the operator", async () => {
+    // The edge in front of a hosted deployment serves the dashboard's own page
+    // at 200 for the statuses it remaps, so a refused write arrives here looking
+    // like a successful one. `response.json()` then throws a SyntaxError whose
+    // message is the markup it choked on, and the banner rendered exactly that
+    // (otari-ai#2147).
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<!DOCTYPE html><html><body>otari</body></html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      }),
+    )
+
+    const failure = apiFetch(`${API_ROOT}/organizations/me/spend-ceilings`, {
+      method: "POST",
+      body: "{}",
+    })
+
+    await expect(failure).rejects.toBeInstanceOf(ApiError)
+    await expect(failure).rejects.toMatchObject({
+      status: 200,
+      message: expect.stringContaining("not JSON"),
+    })
+    await expect(failure).rejects.not.toMatchObject({
+      message: expect.stringContaining("DOCTYPE"),
+    })
+  })
+
   it("passes a caller's signal through instead of imposing its own", async () => {
     const controller = new AbortController()
     const seen: (AbortSignal | null | undefined)[] = []

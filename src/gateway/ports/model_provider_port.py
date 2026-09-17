@@ -89,3 +89,11 @@ class ModelProviderPort(Protocol):
 
         """
         ...
+
+    async def get_hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
+        """Returns the hosted providers the organization may use.
+
+        These must be the providers :meth:`resolve_hosted_credential` returns a credential for.
+        Each name is the ``provider`` that method receives, never its ``response_provider``.
+        """
+        ...

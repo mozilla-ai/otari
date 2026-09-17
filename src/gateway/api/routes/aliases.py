@@ -31,7 +31,7 @@ from gateway.api.deps import get_config, get_db, require_deployment_operator
 from gateway.api.routes._helpers import resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.models.entities import ModelAlias
+from gateway.models.providers import ModelAlias
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.alias_service import all_alias_names, refresh_alias_cache
 from gateway.services.policy_store import all_policy_names

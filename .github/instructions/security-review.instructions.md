@@ -1,5 +1,5 @@
 ---
-applyTo: "src/gateway/api/**/*.py,src/gateway/auth/**/*.py,src/gateway/services/**/*.py,src/gateway/core/config.py,src/gateway/models/**/*.py,src/gateway/streaming.py,alembic/versions/**/*.py"
+applyTo: "src/gateway/api/**/*.py,src/gateway/auth/**/*.py,src/gateway/services/**/*.py,src/gateway/core/config.py,src/gateway/core/settings/**/*.py,src/gateway/models/**/*.py,src/gateway/streaming.py,alembic/versions/**/*.py"
 ---
 
 # Security review instructions

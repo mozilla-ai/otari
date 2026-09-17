@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
 from gateway.log_config import logger
-from gateway.models.entities import RuntimeSetting
+from gateway.models.platform import RuntimeSetting
 from gateway.services.runtime_settings_service import SettingValue
 
 WEB_SEARCH_URL = "web_search_url"

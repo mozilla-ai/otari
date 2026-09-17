@@ -13,13 +13,6 @@ from gateway.metrics import (
     MetricsMiddleware,
     _endpoint_label,
     metrics_endpoint,
-    record_abandoned_attempt,
-    record_auth_failure,
-    record_budget_exceeded,
-    record_cost,
-    record_inline_cost_settlement,
-    record_rate_limit_hit,
-    record_tokens,
 )
 
 
@@ -28,97 +21,50 @@ def _sample(name: str, labels: dict[str, str] | None = None) -> float:
     return REGISTRY.get_sample_value(name, labels or {}) or 0.0
 
 
-def test_record_tokens_increments_counters() -> None:
-    input_labels = {"provider": "test-prov", "model": "test-model", "type": "input"}
-    output_labels = {"provider": "test-prov", "model": "test-model", "type": "output"}
-    before_in = _sample("gateway_tokens_total", input_labels)
-    before_out = _sample("gateway_tokens_total", output_labels)
-
-    record_tokens("test-prov", "test-model", 100, 50)
-
-    assert _sample("gateway_tokens_total", input_labels) - before_in == 100.0
-    assert _sample("gateway_tokens_total", output_labels) - before_out == 50.0
-
-
-def test_record_tokens_skips_zero_values() -> None:
-    labels_in = {"provider": "zero-prov", "model": "zero-model", "type": "input"}
-    labels_out = {"provider": "zero-prov", "model": "zero-model", "type": "output"}
-    before_in = _sample("gateway_tokens_total", labels_in)
-    before_out = _sample("gateway_tokens_total", labels_out)
-
-    record_tokens("zero-prov", "zero-model", 0, 0)
-
-    assert _sample("gateway_tokens_total", labels_in) == before_in
-    assert _sample("gateway_tokens_total", labels_out) == before_out
-
-
-def test_record_cost_observes_histogram() -> None:
-    labels = {"provider": "cost-prov", "model": "cost-model"}
-    before_count = _sample("gateway_request_cost_dollars_count", labels)
-
-    record_cost("cost-prov", "cost-model", 1.23)
-
-    assert _sample("gateway_request_cost_dollars_count", labels) - before_count == 1.0
-    assert _sample("gateway_request_cost_dollars_sum", labels) >= 1.23
+# Every family the gateway registers, as (name, type, label names). A metric
+# may move to the module that increments it, but the scrape is an external
+# contract: dashboards, recording rules and alerts outside this repository
+# key on these names and labels.
+_EXPOSED_FAMILIES: set[tuple[str, str, tuple[str, ...]]] = {
+    ("gateway_abandoned_attempts", "counter", ("provider", "model", "reason", "position")),
+    ("gateway_active_requests", "gauge", ()),
+    ("gateway_auth_failures", "counter", ("reason",)),
+    ("gateway_budget_exceeded", "counter", ()),
+    ("gateway_db_pool_capacity", "gauge", ("pool",)),
+    ("gateway_db_pool_connections_checked_out", "gauge", ("pool",)),
+    ("gateway_db_pool_connections_idle", "gauge", ("pool",)),
+    ("gateway_db_pool_overflow_connections", "gauge", ("pool",)),
+    ("gateway_inline_cost_settlements", "counter", ("outcome",)),
+    ("gateway_rate_limit_hits", "counter", ()),
+    ("gateway_request_cost_dollars", "histogram", ("provider", "model")),
+    ("gateway_request_duration_seconds", "histogram", ("method", "endpoint", "api_version")),
+    ("gateway_requests", "counter", ("method", "endpoint", "api_version", "status")),
+    ("gateway_tokens", "counter", ("provider", "model", "type")),
+    ("gateway_usage_log_batch_size", "histogram", ("writer",)),
+    ("gateway_usage_log_flush_duration_seconds", "histogram", ("writer", "result")),
+    ("gateway_usage_log_queue_depth", "gauge", ()),
+    ("gateway_usage_log_rows", "counter", ("writer", "result")),
+}
 
 
-@pytest.mark.parametrize("outcome", ["attached", "unattached", "timeout"])
-def test_record_inline_cost_settlement_increments_counter(outcome: str) -> None:
-    labels = {"outcome": outcome}
-    before = _sample("gateway_inline_cost_settlements_total", labels)
+def test_scrape_exposes_the_pinned_families() -> None:
+    """The set of gateway metric families, with their types and label names, is fixed.
 
-    record_inline_cost_settlement(outcome)
+    A labeled family with no series yet shows only its HELP and TYPE lines in a
+    scrape, so the label names are read off the collector, or off the family it
+    yields where the collector is a custom one that keeps no label names.
+    """
+    import gateway.main  # noqa: F401  # imports every module that registers a metric
 
-    assert _sample("gateway_inline_cost_settlements_total", labels) - before == 1.0
+    families: set[tuple[str, str, tuple[str, ...]]] = set()
+    for collector in REGISTRY._collector_to_names:
+        describe = getattr(collector, "describe", collector.collect)
+        for metric in describe():
+            if metric.name.startswith("gateway_"):
+                labelnames = getattr(collector, "_labelnames", ()) or getattr(metric, "_labelnames", ())
+                families.add((metric.name, metric.type, tuple(labelnames)))
 
-
-def test_record_rate_limit_hit_increments_counter() -> None:
-    before = _sample("gateway_rate_limit_hits_total")
-
-    record_rate_limit_hit()
-
-    assert _sample("gateway_rate_limit_hits_total") - before == 1.0
-
-
-def test_record_budget_exceeded_increments_counter() -> None:
-    before = _sample("gateway_budget_exceeded_total")
-
-    record_budget_exceeded()
-
-    assert _sample("gateway_budget_exceeded_total") - before == 1.0
-
-
-def test_record_auth_failure_increments_counter() -> None:
-    labels = {"reason": "unit-test-reason"}
-    before = _sample("gateway_auth_failures_total", labels)
-
-    record_auth_failure("unit-test-reason")
-
-    assert _sample("gateway_auth_failures_total", labels) - before == 1.0
-
-
-def test_record_abandoned_attempt_increments_counter() -> None:
-    labels = {"provider": "ab-prov", "model": "ab-model", "reason": "timeout", "position": "0"}
-    before = _sample("gateway_abandoned_attempts_total", labels)
-
-    record_abandoned_attempt("ab-prov", "ab-model", "timeout", 0)
-
-    assert _sample("gateway_abandoned_attempts_total", labels) - before == 1.0
-
-
-def test_record_abandoned_attempt_labels_by_reason_and_position() -> None:
-    """Each (reason, position) pair is its own series so operators can spot which
-    plan entry and failure phase dominates the fallback waste."""
-    build_labels = {"provider": "ab-prov2", "model": "ab-model2", "reason": "build_error", "position": "1"}
-    upstream_labels = {"provider": "ab-prov2", "model": "ab-model2", "reason": "upstream_error", "position": "2"}
-    before_build = _sample("gateway_abandoned_attempts_total", build_labels)
-    before_upstream = _sample("gateway_abandoned_attempts_total", upstream_labels)
-
-    record_abandoned_attempt("ab-prov2", "ab-model2", "build_error", 1)
-    record_abandoned_attempt("ab-prov2", "ab-model2", "upstream_error", 2)
-
-    assert _sample("gateway_abandoned_attempts_total", build_labels) - before_build == 1.0
-    assert _sample("gateway_abandoned_attempts_total", upstream_labels) - before_upstream == 1.0
+    assert families == _EXPOSED_FAMILIES
 
 
 def test_config_enable_metrics_defaults_to_false() -> None:
@@ -289,22 +235,6 @@ def test_active_requests_returns_to_zero() -> None:
     client.get("/ok")
 
     assert _sample("gateway_active_requests") == before
-
-
-def test_rate_limiter_records_metric_on_429() -> None:
-    """RateLimiter.check() records a metric before raising 429."""
-    from gateway.rate_limit import RateLimiter
-
-    limiter = RateLimiter(rpm=1)
-    limiter.check("metric-rl-user")
-
-    before = _sample("gateway_rate_limit_hits_total")
-
-    with pytest.raises(HTTPException) as exc_info:
-        limiter.check("metric-rl-user")
-
-    assert exc_info.value.status_code == 429
-    assert _sample("gateway_rate_limit_hits_total") - before == 1.0
 
 
 @pytest.mark.skipif(not os.path.exists("/proc/stat"), reason="ProcessCollector needs /proc")

@@ -7,8 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
-from gateway.models.entities import APIKey, UsageLog, User
+from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import OrganizationMember, Workspace
+from gateway.models.usage import UsageLog
+from gateway.models.users import User
 
 # The owner a key falls back to when it is created without a user_id (the API's
 # convenience path, and the first-run bootstrap key). One shared, visible,

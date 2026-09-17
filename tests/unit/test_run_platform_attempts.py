@@ -18,7 +18,13 @@ from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException
 
 from gateway.api.routes import _platform
-from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, default_attempt_kwargs, run_platform_attempts
+from gateway.api.routes._platform import (
+    ResolvedAttempt,
+    ResolvedRoute,
+    default_attempt_kwargs,
+    record_abandoned_attempt,
+    run_platform_attempts,
+)
 from gateway.core.config import GatewayConfig
 from gateway.metrics import REGISTRY
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
@@ -34,6 +40,27 @@ def _abandoned_sample(provider: str, model: str, reason: str, position: int) -> 
         )
         or 0.0
     )
+
+
+def test_record_abandoned_attempt_increments_counter() -> None:
+    before = _abandoned_sample("ab-prov", "ab-model", "timeout", 0)
+
+    record_abandoned_attempt("ab-prov", "ab-model", "timeout", 0)
+
+    assert _abandoned_sample("ab-prov", "ab-model", "timeout", 0) - before == 1.0
+
+
+def test_record_abandoned_attempt_labels_by_reason_and_position() -> None:
+    """Each (reason, position) pair is its own series so operators can spot which
+    plan entry and failure phase dominates the fallback waste."""
+    before_build = _abandoned_sample("ab-prov2", "ab-model2", "build_error", 1)
+    before_upstream = _abandoned_sample("ab-prov2", "ab-model2", "upstream_error", 2)
+
+    record_abandoned_attempt("ab-prov2", "ab-model2", "build_error", 1)
+    record_abandoned_attempt("ab-prov2", "ab-model2", "upstream_error", 2)
+
+    assert _abandoned_sample("ab-prov2", "ab-model2", "build_error", 1) - before_build == 1.0
+    assert _abandoned_sample("ab-prov2", "ab-model2", "upstream_error", 2) - before_upstream == 1.0
 
 
 def _single_attempt(provider: str, model: str) -> ResolvedAttempt:

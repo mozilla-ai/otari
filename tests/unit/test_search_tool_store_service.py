@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import SearchToolCredential
+from gateway.models.tools import SearchToolCredential
 from gateway.services import search_tool_store_service as store
 from gateway.services.search_backend import resolve_search_tool
 from gateway.services.search_tool_store_service import (

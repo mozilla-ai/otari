@@ -22,8 +22,9 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.models.entities import DashboardSession, RuntimeSetting
+from gateway.models.platform import RuntimeSetting
 from gateway.models.tenancy import (
+    DashboardSession,
     DeploymentUserUpdateRequest,
     Organization,
     OrganizationMember,

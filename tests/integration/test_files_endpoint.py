@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
-from gateway.models.entities import FileObject
+from gateway.models.tools import FileObject
 from gateway.services.file_extractors import ExtractionResult
 from gateway.services.file_store import LocalDirFileStore
 

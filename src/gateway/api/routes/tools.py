@@ -28,6 +28,7 @@ from gateway.api.deps import get_config, verify_catalog_reader
 from gateway.api.routes._tools import Tool, web_search_declaration_forms
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
+from gateway.core.surface import Surface
 from gateway.services.sandbox_backend import code_execution_tool_definition
 from gateway.services.web_retrieval_backend import web_search_tool_definition
 
@@ -35,6 +36,8 @@ router = APIRouter(
     tags=["tools"],
     dependencies=[Depends(verify_catalog_reader)],
 )
+
+SURFACE = Surface("tools")
 
 
 class ManagedTool(BaseModel):

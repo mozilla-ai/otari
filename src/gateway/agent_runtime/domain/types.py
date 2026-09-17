@@ -13,10 +13,13 @@ from typing import Literal
 
 Enforcement = Literal["required", "advisory"]
 
+# What a submitted command list covers. See CommandEvidence.scope.
+EvidenceScope = Literal["call", "session"]
+
 # Gate results that mean "no objection". Every other outcome blocks a required
 # gate: unknown and error are deliberately on the blocking side, not the
 # passing one, so a check that could not run is never mistaken for one that
-# passed. See docs/agent-gates-production-plan.md#5-evidence-and-decision-semantics.
+# passed. See docs/agent-gates.md.
 _NON_BLOCKING = frozenset({"pass", "not_applicable"})
 
 
@@ -59,11 +62,69 @@ class ChangedPathGate:
     type: Literal["changed_path"] = "changed_path"
 
 
-# The only gate type this first slice ships. Extend this alias (a Union, once
-# there is a second member) as command_match, check_passed, and judge land;
-# do not let a new gate type skip it, or the policy loader's dispatch on
-# ``type`` silently stops covering it.
-GateSpec = ChangedPathGate
+@dataclass(frozen=True, slots=True)
+class CommandMatchGate:
+    """A gate that fails when a caller-submitted command matches a forbidden phrase.
+
+    A ``forbidden`` entry is a shell phrase (``"git push --force"``,
+    ``"npm"``); matching is token-based, not substring: the phrase's own
+    tokens must appear as a contiguous run within one ``&&``/``;``/``|``/``||``
+    -separated segment of the submitted command. Token-based matching is what
+    keeps ``"npm"`` from matching inside ``"pnpm"``, and ``"--force"`` from
+    matching inside the deliberately-safer ``"--force-with-lease"``; a plain
+    substring check would get both wrong. A phrase matches a token run in any
+    position, not only at the head, so a one-word phrase also matches where
+    that word is an argument; prefer a phrase naming a real invocation
+    (``"npm install"``) over a bare tool name. A separator needs no whitespace
+    around it (``"npm install;"`` and ``"(npm install)"`` split the same as the
+    spaced forms). See domain/evaluators.py for the tokenizer and its
+    whitespace-split fallback for a command shlex cannot parse.
+
+    This gate sees only the literal command text of one tool call; it does
+    not, and cannot, see what a script or program that command invokes does
+    internally. It is a footgun-catcher for a cooperative agent, not a
+    sandbox against one deliberately working around it.
+    """
+
+    id: str
+    enforcement: Enforcement
+    forbidden: tuple[str, ...]
+    message: str
+    type: Literal["command_match"] = "command_match"
+
+
+@dataclass(frozen=True, slots=True)
+class CommandIfChangedGate:
+    """A gate that fails when a changed path matches but no required command ran.
+
+    ``when_changed`` is a tuple of repo-relative POSIX globs, the same
+    grammar ``ChangedPathGate.forbidden`` uses. ``require`` is a tuple of
+    shell phrases, the same grammar ``CommandMatchGate.forbidden`` uses,
+    matched the same token-based way; any one of them satisfies the gate
+    (an OR, same as a ``forbidden`` list matching any one entry). This is
+    what expresses "if this changed, that must have run" (e.g. regenerating
+    a committed artifact), which neither of the other two gate types can:
+    each of those checks one independent condition, not a correlation
+    between two.
+
+    Meaningful mainly when both evidence lists reflect a whole session, not
+    one tool call: on a ``Stop`` event, where ``otari hook`` now collects
+    real command evidence from the session's own transcript, not on a
+    single ``PreToolUse`` call.
+    """
+
+    id: str
+    enforcement: Enforcement
+    when_changed: tuple[str, ...]
+    require: tuple[str, ...]
+    message: str
+    type: Literal["command_if_changed"] = "command_if_changed"
+
+
+# Extend this alias as check_passed and judge land; do not let a new gate
+# type skip it, or the policy loader's dispatch on ``type`` silently stops
+# covering it.
+GateSpec = ChangedPathGate | CommandMatchGate | CommandIfChangedGate
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +144,26 @@ class ChangedPathEvidence:
     """
 
     changed_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CommandEvidence:
+    """Shell commands the caller reports as run or about to run.
+
+    Otari does not collect or verify this itself; see the module docstring.
+
+    ``scope`` says what the list covers, which decides which gate types can
+    resolve against it at all. ``"call"`` is one tool call about to run (a
+    ``PreToolUse`` hook): complete for "is this command forbidden", useless
+    for "did that command ever run". ``"session"`` is every command the
+    session has run so far (a ``Stop`` hook reading its own transcript): the
+    reverse. Without this, an evaluator has to guess from an empty list
+    alone, which cannot tell "nothing to collect here" from "collected, and
+    there was none".
+    """
+
+    commands: tuple[str, ...]
+    scope: EvidenceScope = "call"
 
 
 @dataclass(frozen=True, slots=True)

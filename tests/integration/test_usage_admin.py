@@ -16,7 +16,8 @@ from conftest import seed_workspace_id
 from gateway.core.config import API_ROOT
 from gateway.core.sql import MAX_FILTER_VALUES
 from gateway.core.usage_source import SERVED_HERE_SLUG, SERVED_HERE_SOURCES
-from gateway.models.entities import UsageLog, User
+from gateway.models.usage import UsageLog
+from gateway.models.users import User
 
 DELETE_PATH = f"{API_ROOT}/usage"
 SET_PRICE_PATH = f"{API_ROOT}/usage/set-price"

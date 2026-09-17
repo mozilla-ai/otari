@@ -38,10 +38,10 @@ from fastapi import HTTPException, status
 from gateway.api.routes._platform import (
     _provider_failure_http_exc,
     is_provider_billing_error,
+    record_abandoned_attempt,
     upstream_exception_shape,
 )
 from gateway.log_config import logger
-from gateway.metrics import record_abandoned_attempt
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError

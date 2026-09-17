@@ -664,6 +664,7 @@ async def test_capped_body_bounds_compressed_expansion_memory() -> None:
         ("gzip", gzip.compress(b"decoded body")),
         ("deflate", zlib.compress(b"decoded body")),
     ],
+    ids=["gzip", "deflate"],
 )
 @pytest.mark.asyncio
 async def test_capped_body_completes_supported_compressed_streams(encoding: str, compressed: bytes) -> None:

@@ -35,7 +35,7 @@ from gateway.core.config import (
     validate_search_tool_transport,
 )
 from gateway.log_config import logger
-from gateway.models.entities import SearchToolCredential
+from gateway.models.tools import SearchToolCredential
 from gateway.services.search_backend import default_api_base
 from gateway.services.search_tool_store_service import (
     UNSET,

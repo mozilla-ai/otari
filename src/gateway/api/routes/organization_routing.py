@@ -14,7 +14,7 @@ member, Edit for an admin (otari-ai#1942, otari-ai#1969).
   which refuses a pointer with no live membership behind it. No request here
   names an organization.
 * **How much of it a read covers** follows the rule the workspace list uses: an
-  owner, an admin or a superuser reads every workspace in the organization, and
+  owner or an admin reads every workspace in the organization, and
   a member or viewer reads the ones they actively belong to. A member who
   belongs to no workspace still gets the config-file entries, which are
   deployment-wide and in force in every workspace they could ever join.
@@ -61,7 +61,7 @@ from sqlalchemy import Select, false, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, ModelProviderPortDep, get_config, get_db, verify_master_key
 from gateway.api.routes.aliases import (
     AliasRequest,
     AliasResponse,
@@ -77,10 +77,11 @@ from gateway.api.routes.routing import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.models.entities import ModelAlias, RoutingPolicy
-from gateway.models.routing import PolicySpec
+from gateway.models.providers import ModelAlias
+from gateway.models.routing import PolicySpec, RoutingPolicy
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
+from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.alias_service import all_alias_names
 from gateway.services.model_access import is_model_allowed
 from gateway.services.policy_store import all_policy_names
@@ -122,6 +123,7 @@ async def _writable_workspace_id(
     user: TenancyUser,
     workspace_id: uuid.UUID | None,
     targets: list[str],
+    model_provider: ModelProviderPort | None,
 ) -> uuid.UUID:
     """Resolve the workspace a tenant write lands in, refusing what it may not do.
 
@@ -146,7 +148,7 @@ async def _writable_workspace_id(
         organization=organization,
         organizations=organizations,
     )
-    await _require_reachable_targets(db, config, user=user, targets=targets)
+    await _require_reachable_targets(db, config, user=user, targets=targets, model_provider=model_provider)
     return workspace.id
 
 
@@ -156,14 +158,14 @@ async def _require_reachable_targets(
     *,
     user: TenancyUser,
     targets: list[str],
+    model_provider: ModelProviderPort | None,
 ) -> None:
     """Refuse a target the caller's organization cannot already reach.
 
     Without this, writing a policy would be a way to reach a provider the
     organization holds no key for: the name is the tenant's to choose, and
     resolution follows the name. Answered as a 400 naming the target, because it
-    is a statement about the body rather than about the caller's role, and the
-    catalog the dashboard offers already excludes these.
+    is a statement about the body rather than about the caller's role.
 
     A target that names another alias or policy is left alone, because the write
     helpers refuse chaining a step later and say so precisely. Checking it here
@@ -173,7 +175,7 @@ async def _require_reachable_targets(
     if not targets:
         return
     indirections = all_alias_names(config) | all_policy_names(config)
-    allowlist = await resolve_session_model_allowlist(db, config, user=user)
+    allowlist = await resolve_session_model_allowlist(db, config, user=user, model_provider=model_provider)
     unreachable = [
         target
         for target in targets
@@ -294,6 +296,7 @@ async def set_organization_routing_policy(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     current_identity: CurrentIdentity,
+    model_provider: ModelProviderPortDep,
 ) -> PolicyResponse:
     """Create or update a stored policy in one of the organization's workspaces.
 
@@ -308,6 +311,7 @@ async def set_organization_routing_policy(
         user=current_identity,
         workspace_id=request.workspace_id,
         targets=validated_spec(request.name, request.spec).static_selectors(),
+        model_provider=model_provider,
     )
     return await upsert_policy_in_workspace(request, db, config, workspace_id=workspace_id)
 
@@ -330,6 +334,7 @@ async def delete_organization_routing_policy(
         user=current_identity,
         workspace_id=workspace_id,
         targets=[],
+        model_provider=None,
     )
     await delete_policy_in_workspace(name, db, config, workspace_id=resolved, user_id=None)
 
@@ -371,6 +376,7 @@ async def set_organization_alias(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     current_identity: CurrentIdentity,
+    model_provider: ModelProviderPortDep,
 ) -> AliasResponse:
     """Create or update a stored alias in one of the organization's workspaces.
 
@@ -385,6 +391,7 @@ async def set_organization_alias(
         user=current_identity,
         workspace_id=request.workspace_id,
         targets=[request.target],
+        model_provider=model_provider,
     )
     return await upsert_alias_in_workspace(request, db, config, workspace_id=workspace_id)
 
@@ -407,5 +414,6 @@ async def delete_organization_alias(
         user=current_identity,
         workspace_id=workspace_id,
         targets=[],
+        model_provider=None,
     )
     await delete_alias_in_workspace(name, db, config, workspace_id=resolved, user_id=None)

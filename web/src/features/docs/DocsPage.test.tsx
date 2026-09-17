@@ -3,12 +3,24 @@ import userEvent from "@testing-library/user-event"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { describe, expect, it, vi } from "vitest"
-
+import type { DeploymentType } from "@/client"
 import { DocsPage, markdownComponents } from "@/features/docs/DocsPage"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap } from "@/tests/fixtures"
+
+// The intro points at `/welcome` only where the deployment serves it, so the
+// page reads the bootstrap and every render here goes through a provider.
+function renderDocs(deployment_type: DeploymentType = "standalone") {
+  return render(
+    <DeploymentProvider value={bootstrap({ deployment_type })}>
+      <DocsPage />
+    </DeploymentProvider>,
+  )
+}
 
 describe("DocsPage", () => {
   it("renders the bundled dashboard guide, not a link to a separate docs site", () => {
-    render(<DocsPage />)
+    renderDocs()
 
     // The page chrome names it as the guide, and the guide content is rendered
     // inline from the bundled Markdown (docs/dashboard.md), so it is
@@ -25,7 +37,7 @@ describe("DocsPage", () => {
   })
 
   it("omits the circular first-run walkthrough but keeps the operating sections", () => {
-    render(<DocsPage />)
+    renderDocs()
 
     // The reader is already past first run (running, signed-in dashboard), so
     // the getting-started walkthrough is trimmed from the in-app view.
@@ -43,7 +55,7 @@ describe("DocsPage", () => {
   })
 
   it("shows a single top-level heading, dropping the guide's duplicate title", () => {
-    render(<DocsPage />)
+    renderDocs()
 
     // The guide's own "# Admin dashboard" title is stripped so it does not
     // stack a second big heading under the page's "User guide" header.
@@ -53,7 +65,7 @@ describe("DocsPage", () => {
   })
 
   it("renders GFM tables from the guide, keeping table semantics inside a focusable scroll region", () => {
-    render(<DocsPage />)
+    renderDocs()
 
     // The two-key model is a Markdown table; rendering it as a real <table>
     // proves remark-gfm is wired up (plain Markdown would leave it as text).
@@ -67,8 +79,29 @@ describe("DocsPage", () => {
     expect(region).toContainElement(tables[0])
   })
 
+  it("renders the guide as one band of the page, not beside an empty column", () => {
+    const { container } = renderDocs()
+
+    // The guide is a band of the page like any other: its rule runs the width
+    // of the scroll area (`otari-bleed`) and the prose sits in the page column.
+    // The missing `border-r` is half the point. A vertical rule here has
+    // nothing on its far side, so a wide window reads it as a second column
+    // that failed to load, with the guide pinched into the first.
+    const band = container.querySelector("section.otari-bleed")
+    expect(band).not.toBeNull()
+    expect(band).toContainElement(
+      screen.getByText(/Otari serves its dashboard at the gateway root/),
+    )
+    expect(container.querySelector(".border-r")).toBeNull()
+    // And the prose runs the width of that column rather than stopping at a
+    // measure of its own, which is what leaves the rest of a wide window empty.
+    const prose = band?.querySelector("div.text-base") as HTMLElement
+    expect(prose).not.toBeNull()
+    expect([...prose.classList].some((c) => c.startsWith("max-w-"))).toBe(false)
+  })
+
   it("does not leak react-markdown's node prop onto rendered DOM elements", () => {
-    const { container } = render(<DocsPage />)
+    const { container } = renderDocs()
 
     // react-markdown passes each hast node to custom components; if it is not
     // destructured out of the DOM spread it renders as node="[object Object]".
@@ -80,7 +113,7 @@ describe("DocsPage", () => {
   })
 
   it("rewrites sibling doc links to the GitHub source and opens them in a new tab", () => {
-    render(<DocsPage />)
+    renderDocs()
 
     // The guide links to sibling docs (e.g. configuration.md) that are not
     // bundled here, so a relative link cannot resolve inside the SPA. It is
@@ -188,11 +221,40 @@ describe("DocsPage code blocks", () => {
     // `bash` block for `otari gen-secret-key`), which is what puts the label
     // row and copy control on this page. Pinned at one rather than at zero, so
     // a second fence appearing still says so.
-    const { container } = render(<DocsPage />)
+    const { container } = renderDocs()
     const blocks = container.querySelectorAll("pre")
     expect(blocks).toHaveLength(1)
     // The label row, named by the control it carries rather than by a class.
     expect(screen.getAllByRole("button", { name: /^Copy / })).toHaveLength(1)
     expect(container.querySelectorAll("code").length).toBeGreaterThan(0)
+  })
+})
+
+// The bundled guide is ungated chrome, so a hosted tenant reads this page too.
+// Pointing them at `/welcome` there names a page otari.ai does not serve; see
+// `welcomeGuideHref`.
+describe("DocsPage get-started pointer", () => {
+  // A link rather than a bare path in the prose, matching every other place
+  // the dashboard names this page.
+  it("links the walkthrough where the deployment serves it", () => {
+    renderDocs()
+
+    const link = screen.getByRole("link", { name: "/welcome" })
+    expect(link).toHaveAttribute("href", "/welcome")
+    expect(link).toHaveAttribute("target", "_blank")
+    expect(
+      screen.getByText(/New here\? The get-started walkthrough lives at/),
+    ).toBeInTheDocument()
+  })
+
+  it("says nothing about it on a hosted deployment, which serves none", () => {
+    renderDocs("hosted")
+
+    expect(screen.queryByRole("link", { name: "/welcome" })).toBeNull()
+    expect(screen.queryByText(/walkthrough lives at/)).toBeNull()
+    // The rest of the intro is unchanged: only the pointer goes.
+    expect(
+      screen.getByText(/A reference for operating this dashboard/),
+    ).toBeInTheDocument()
   })
 })

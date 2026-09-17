@@ -77,6 +77,9 @@ class _NoHostedCredential:
     async def resolve_hosted_credential(self, **kwargs: object) -> None:
         return None
 
+    async def get_hosted_providers(self, **kwargs: object) -> frozenset[str]:
+        return frozenset()
+
 
 @pytest.mark.asyncio
 async def test_resolve_dispatch_provider_returns_cached() -> None:

@@ -17,8 +17,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.models.entities import DashboardSession, OrganizationModelPricing
-from gateway.models.tenancy import Organization, OrganizationMember, User
+from gateway.models.pricing import OrganizationModelPricing
+from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
 from gateway.services import model_catalog_service as mcs
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 
@@ -475,8 +475,8 @@ def test_a_signed_in_caller_sees_their_own_usage_of_an_offering(
     """The listed rate is what a token costs; this is what the tokens cost."""
     from sqlmodel import select
 
-    from gateway.models.entities import UsageLog
     from gateway.models.tenancy import Workspace
+    from gateway.models.usage import UsageLog
 
     # The master key acts in the default workspace, which boot provisioned.
     assert priced.get(f"{API_ROOT}/organizations/me", headers=master_header).status_code == status.HTTP_200_OK

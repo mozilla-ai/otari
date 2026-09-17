@@ -49,9 +49,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.auth.models import generate_api_key, hash_key, key_prefix, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.usage_source import integration_traffic, served_here
-from gateway.models.entities import APIKey, UsageLog, WorkspaceActivationState
+from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
-from gateway.models.tenancy import User, Workspace
+from gateway.models.tenancy import User, Workspace, WorkspaceActivationState
+from gateway.models.usage import UsageLog
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.errors import (
@@ -482,7 +483,7 @@ class WorkspaceActivationService:
             .where(
                 UsageLog.workspace_id == workspace_id,
                 served_here(UsageLog.source),
-                integration_traffic(UsageLog.endpoint),
+                integration_traffic(UsageLog.endpoint, UsageLog.api_key_id),
                 UsageLog.status == "success",
             )
             # Tie-broken on the id so two rows sharing a timestamp still name one
@@ -506,7 +507,7 @@ class WorkspaceActivationService:
             .where(
                 UsageLog.workspace_id == workspace_id,
                 served_here(UsageLog.source),
-                integration_traffic(UsageLog.endpoint),
+                integration_traffic(UsageLog.endpoint, UsageLog.api_key_id),
                 UsageLog.status.in_(_ATTEMPT_STATUSES),
             )
             .order_by(UsageLog.timestamp.desc(), UsageLog.id.desc())

@@ -107,7 +107,7 @@ from gateway.services.tenancy.invitation_email import render_invitation_email
 # into the tenancy graph is a function-local import), so this direction of the
 # dependency is the safe one; ``tests/unit/test_service_module_imports.py``
 # pins it.
-from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
+from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME, password_claims_deployment
 
 
 def _validated_organization_name(name: str | None) -> str:
@@ -240,8 +240,8 @@ class OrganizationService:
         return membership
 
     @staticmethod
-    def _enforce_management_role(membership: OrganizationMember, user: User) -> None:
-        if membership.role not in MANAGEMENT_ROLES and not user.is_superuser:
+    def _enforce_management_role(membership: OrganizationMember) -> None:
+        if membership.role not in MANAGEMENT_ROLES:
             raise NotAuthorizedError
 
     async def require_active_organization_management_access(
@@ -252,7 +252,7 @@ class OrganizationService:
     ) -> OrganizationMember:
         """Return the caller's membership, refusing unless it may manage the organization."""
         membership = await self._require_active_membership(user, organization)
-        self._enforce_management_role(membership, user)
+        self._enforce_management_role(membership)
         return membership
 
     async def user_has_active_membership(self, *, organization_id: uuid.UUID, user_id: uuid.UUID) -> bool:
@@ -285,6 +285,7 @@ class OrganizationService:
                 email=user.email,
                 full_name=user.full_name,
                 has_password=user.hashed_password is not None,
+                claims_deployment=await password_claims_deployment(self.db, user),
             ),
             # The platform answers "does this org have a self-hosted gateway
             # attached". A standalone deployment reading this *is* that gateway,

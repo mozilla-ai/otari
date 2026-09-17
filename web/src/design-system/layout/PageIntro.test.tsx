@@ -82,22 +82,6 @@ describe("PageIntro", () => {
     expect([...column.classList]).toContain("max-w-[38.75rem]")
   })
 
-  it("narrows the description without dropping what the role already gives it", () => {
-    // `descriptionClassName` is how the one page that needs a narrower measure
-    // gets it, and it is the reason that page does not need a hand-rolled
-    // header. It has to append: replacing the base would take the muted color
-    // and the type with it, and the caller would then re-spell both.
-    render(
-      <PageIntro title="Guide" descriptionClassName="max-w-[560px]">
-        How to use the gateway.
-      </PageIntro>,
-    )
-    const description = screen.getByText("How to use the gateway.")
-    expect([...description.classList]).toContain("max-w-[560px]")
-    expect([...description.classList]).toContain("text-sm")
-    expect([...description.classList]).toContain("text-muted")
-  })
-
   it("puts the action beside the opening and refuses to let it shrink", () => {
     const { container } = render(
       <PageIntro

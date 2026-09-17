@@ -5,10 +5,13 @@ import { CodeBlock } from "@/design-system/content/CodeBlock"
 import { Markdown } from "@/design-system/content/Markdown"
 
 import { PageIntro } from "@/design-system/layout/PageIntro"
+import { Section } from "@/design-system/layout/Section"
 // The operator user guide is bundled straight from the repo's docs so the
 // running dashboard ships the guide that matches it, instead of pointing at a
 // docs site that may describe a different version. Rebuilding the dashboard
 // after editing the guide is what keeps them aligned (see AGENTS.md).
+import { welcomeGuideHref } from "@/shared/helpers/welcomeGuide"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 import dashboardGuide from "../../../../docs/dashboard.md?raw"
 
 // The bundled guide lives among sibling docs (configuration.md, quickstart.md,
@@ -149,29 +152,42 @@ function MarkdownCodeBlock({ node: _node, children }: MdProps<"pre">) {
 }
 
 export function DocsPage() {
+  // The pointer at the get-started walkthrough is only true where the gateway
+  // serving this dashboard serves that page too; see `welcomeGuideHref`.
+  const welcomeHref = welcomeGuideHref(useDeployment())
+
   return (
     <div className="flex flex-col">
-      {/* The prose measure, not the app's 620px default: on the one page whose
-          subject is the measure, the widest line should not be the scanning-size
-          paragraph at the top of it. */}
-      <PageIntro title="User guide" descriptionClassName="max-w-[560px]">
+      <PageIntro title="User guide">
         A reference for operating this dashboard, bundled with and
-        version-matched to the running gateway. New here? The get-started
-        walkthrough lives at /welcome.
+        version-matched to the running gateway.
+        {welcomeHref ? (
+          <>
+            {" "}
+            New here? The get-started walkthrough lives at{" "}
+            {/* A new tab, like the other links to this page: it leaves the SPA,
+                and the guide is what the reader came here to keep. */}
+            <a
+              href={welcomeHref}
+              target="_blank"
+              rel="noreferrer"
+              className="text-link hover:text-link-hover"
+            >
+              {welcomeHref}
+            </a>
+            .
+          </>
+        ) : null}
       </PageIntro>
-      {/* The prose pattern: a 560px measure at 16px, bounded above by the
-          section rule and on its right by a rule that runs the height of the
-          page, with the ground beyond it left free. The interim 620px cap this
-          replaces was a number chosen on this page; 560 at 16/26 is the measure
-          the pattern sets, and the type steps *up* from the 14px the rest of
-          the product uses, because this is read rather than scanned. */}
-      <div className="flex flex-1 border-t border-border">
-        <div className="min-w-0 border-r border-border px-4 py-8 md:px-6">
-          <Markdown className="max-w-[560px]" components={markdownComponents}>
-            {guideBody}
-          </Markdown>
-        </div>
-      </div>
+      {/* One band of the page, like every other surface: the rule runs the
+          width of the scroll area and the guide fills the page column rather
+          than a measure of its own, so the guide's tables and headings line up
+          with the rest of the product on the window it is read on. The type is
+          16/26 rather than the 14px everything else uses, because this is read
+          rather than scanned. */}
+      <Section className="border-t border-border py-8">
+        <Markdown components={markdownComponents}>{guideBody}</Markdown>
+      </Section>
     </div>
   )
 }

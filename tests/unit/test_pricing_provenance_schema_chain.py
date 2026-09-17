@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the shared metadata)
-from gateway.models.entities import UsageLog
+from gateway.models.usage import UsageLog
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _PROVENANCE_REVISION = "a9c4e2b6d8f1"

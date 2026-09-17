@@ -39,9 +39,10 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
 from gateway.core.usage_source import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG
-from gateway.models.entities import DashboardSession, UsageLog, WorkspaceWebSearchConfig
-from gateway.models.entities import User as BillingUser
-from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
+from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
+from gateway.models.tools import WorkspaceWebSearchConfig
+from gateway.models.usage import UsageLog
+from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 
 from .conftest import MODEL_NAME

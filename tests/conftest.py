@@ -1,5 +1,10 @@
+import argparse
+import re
+import shutil
 import sys
+import zlib
 from collections.abc import Generator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +16,48 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 if "gateway" in sys.modules:
     del sys.modules["gateway"]
+
+
+@dataclass(frozen=True)
+class Shard:
+    """One of ``count`` disjoint slices of a test run, numbered from 1.
+
+    Every test belongs to exactly one shard, so running all ``count`` shards runs the whole suite once.
+    """
+
+    index: int
+    count: int
+
+    def includes(self, nodeid: str) -> bool:
+        # Not hash(): it is salted per process, and every xdist worker must select the same tests.
+        return zlib.crc32(nodeid.encode()) % self.count == self.index - 1
+
+
+def parse_shard(value: str) -> Shard:
+    """Parse ``INDEX/COUNT``, such as ``2/4``, into a shard."""
+    match = re.fullmatch(r"([0-9]+)/([0-9]+)", value)
+    if match is None or not 1 <= int(match[1]) <= int(match[2]):
+        raise argparse.ArgumentTypeError(f"expected INDEX/COUNT with 1 <= INDEX <= COUNT, got {value!r}")
+    return Shard(index=int(match[1]), count=int(match[2]))
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--shard",
+        type=parse_shard,
+        default=None,
+        metavar="INDEX/COUNT",
+        help="Run only the tests in shard INDEX of COUNT.",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    shard: Shard | None = config.getoption("shard")
+    if shard is None:
+        return
+    selected = [item for item in items if shard.includes(item.nodeid)]
+    config.hook.pytest_deselected(items=[item for item in items if not shard.includes(item.nodeid)])
+    items[:] = selected
 
 
 @pytest.fixture(autouse=True)
@@ -82,6 +129,61 @@ def _reset_default_pricing() -> Generator[None, None, None]:
     configure_default_pricing(False)
     configure_provider_types(None)
     reset_price_refresh_state()
+
+
+@pytest.fixture(scope="session")
+def _migrated_sqlite_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A SQLite database migrated to head once per worker, for new databases to start from."""
+    from gateway.core.database import _run_migrations
+
+    template = tmp_path_factory.mktemp("migrated-template") / "gateway.db"
+    _run_migrations(f"sqlite:///{template}")
+    return template
+
+
+@pytest.fixture(autouse=True)
+def _start_new_sqlite_databases_migrated(monkeypatch: pytest.MonkeyPatch, _migrated_sqlite_template: Path) -> None:
+    """Start an app's new SQLite database from a migrated copy instead of an empty file.
+
+    Migrating an empty SQLite file takes about a third of a second, and most apps a test builds get a new one.
+    Startup still runs the real migration step on the copy, and that step finds nothing left to apply.
+    A file that already exists, and any database other than a SQLite file, migrates as it would without this fixture.
+    """
+    from gateway.core import database
+
+    run_migrations = database._run_migrations
+
+    def run_migrations_from_template(database_url: str) -> None:
+        new_file = _new_sqlite_file(database_url)
+        if new_file is not None:
+            shutil.copyfile(_migrated_sqlite_template, new_file)
+        run_migrations(database_url)
+
+    monkeypatch.setattr(database, "_run_migrations", run_migrations_from_template)
+
+
+def _new_sqlite_file(database_url: str) -> Path | None:
+    from sqlalchemy.engine import make_url
+
+    url = make_url(database_url)
+    if url.get_backend_name() != "sqlite" or not url.database or url.database == ":memory:" or "uri" in url.query:
+        return None
+    path = Path(url.database)
+    return path if path.parent.is_dir() and not path.exists() else None
+
+
+@pytest.fixture(autouse=True)
+def _cheap_password_hashing(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hash passwords at bcrypt's lowest cost, unless the test is marked ``production_password_cost``.
+
+    Each hash or check at the production cost takes about a fifth of a second.
+    A hash verifies the same way at any cost, so no other test needs the production cost.
+    """
+    if request.node.get_closest_marker("production_password_cost") is not None:
+        return
+    monkeypatch.setattr("gateway.services.password_service._BCRYPT_ROUNDS", 4)
+    # The stand-in hash is cached per process, so a test must not reuse one minted at another cost.
+    monkeypatch.setattr("gateway.services.password_service._absent_password_hash", None)
 
 
 def seed_workspace_id(db: Any) -> Any:

@@ -5,9 +5,8 @@ import re
 import types
 import typing
 from collections.abc import Container
-from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Literal, NamedTuple
+from typing import Annotated, Any, NamedTuple
 from urllib.parse import urlsplit
 
 import yaml
@@ -19,6 +18,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gateway.core.addresses import normalized_address
 from gateway.core.env import otari_env
+from gateway.core.settings.budgets import BudgetSettings
+from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
@@ -101,7 +102,6 @@ OTARI_ENV_PREFIX = "OTARI_"
 # instance of that name would be indistinguishable from one in the catalog.
 HOSTED_OFFERING_INSTANCE = "hosted"
 RESERVED_PROVIDER_INSTANCE_NAMES: frozenset[str] = frozenset({"otari", HOSTED_OFFERING_INSTANCE})
-PRICING_REFRESH_POLICIES: tuple[str, ...] = ("manual", "review", "auto")
 
 OTARI_CONFIG_YAML_ENV = "OTARI_CONFIG_YAML"
 OTARI_CONFIG_B64_ENV = "OTARI_CONFIG_B64"
@@ -130,10 +130,6 @@ ENV_BRIDGED_FIELDS = (
 )
 
 
-# Allowed values for the enum config fields. Defined once so the field
-# validators and the runtime-settings layer (which lets the dashboard hot-change
-# these) agree on the accepted set.
-STREAM_MISSING_USAGE_POLICIES = ("estimate", "fail", "allow_free")
 VISION_STRATEGIES = ("describe", "ocr", "off")
 ROUTER_GRANULARITIES = ("trace_sticky", "step")
 # Selectable mail transports, plus the two states that are not a transport:
@@ -265,74 +261,6 @@ def provider_credential_env_names(provider_type: str) -> tuple[str, ...] | None:
     return tuple(candidate for candidate in candidates if candidate)
 
 
-class PricingTierConfig(BaseModel):
-    """One whole-request context threshold price rule from configuration."""
-
-    min_input_tokens: int = Field(gt=0)
-    input_price_per_million: float | None = Field(default=None, ge=0)
-    output_price_per_million: float | None = Field(default=None, ge=0)
-    cache_read_price_per_million: float | None = Field(default=None, ge=0)
-    cache_write_price_per_million: float | None = Field(default=None, ge=0)
-    cache_write_1h_price_per_million: float | None = Field(default=None, ge=0)
-
-    @model_validator(mode="after")
-    def validate_has_rate_override(self) -> "PricingTierConfig":
-        rates = (
-            self.input_price_per_million,
-            self.output_price_per_million,
-            self.cache_read_price_per_million,
-            self.cache_write_price_per_million,
-            self.cache_write_1h_price_per_million,
-        )
-        if all(rate is None for rate in rates):
-            raise ValueError("pricing tier must override at least one price field")
-        return self
-
-
-class PricingConfig(BaseModel):
-    """Model pricing configuration."""
-
-    input_price_per_million: float = Field(ge=0)
-    output_price_per_million: float = Field(ge=0)
-    cache_read_price_per_million: float | None = Field(
-        default=None,
-        ge=0,
-        description="Price per 1M cached-input tokens (OpenAI/Gemini discount rate or Anthropic cache-read rate).",
-    )
-    cache_write_price_per_million: float | None = Field(
-        default=None,
-        ge=0,
-        description="Price per 1M cache-write (creation) tokens. Anthropic only.",
-    )
-    cache_write_1h_price_per_million: float | None = Field(
-        default=None,
-        ge=0,
-        description="Price per 1M Anthropic 1-hour cache-write tokens.",
-    )
-    pricing_tiers: list[PricingTierConfig] = Field(
-        default_factory=list,
-        description="Whole-request context threshold pricing rules.",
-    )
-    effective_at: datetime | None = Field(
-        default=None,
-        description="ISO 8601 datetime from which this price applies. Defaults to now if omitted.",
-    )
-    unit: Literal["tokens", "requests", "images"] = Field(
-        default="tokens",
-        description=(
-            "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool or a "
-            "moderation call (USD per million requests), 'images' for image generation."
-        ),
-    )
-
-    @model_validator(mode="after")
-    def validate_unique_tier_thresholds(self) -> "PricingConfig":
-        thresholds = [tier.min_input_tokens for tier in self.pricing_tiers]
-        if len(thresholds) != len(set(thresholds)):
-            raise ValueError("pricing_tiers must not repeat min_input_tokens")
-        return self
-
-
 class ModelCapabilityConfig(BaseModel):
     """Per-model multimodal capability override.
 
@@ -393,7 +321,9 @@ class RelyingParty(NamedTuple):
         return host == self.rp_id or host.endswith(f".{self.rp_id}")
 
 
-class GatewayConfig(BaseSettings):
+# Gotcha: fields are ordered last base first, then this class's own.
+# The settings view keeps that order, so moving a base reorders it.
+class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
     """Gateway configuration with support for YAML files and environment variables."""
 
     model_config = SettingsConfigDict(
@@ -832,12 +762,6 @@ class GatewayConfig(BaseSettings):
             "bound, so the store grows without limit while each decision stays bounded."
         ),
     )
-    pricing: Annotated[dict[str, PricingConfig], OMITTED] = Field(
-        default_factory=dict,
-        description=(
-            "Pre-configured model USD pricing (model_key -> {input_price_per_million, output_price_per_million})"
-        ),
-    )
     search_tools: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
         default_factory=dict,
         description=(
@@ -866,50 +790,6 @@ class GatewayConfig(BaseSettings):
         default="single",
         description="How usage log rows are written: 'single' (inline) or 'batch' (background).",
     )
-    require_pricing: Annotated[bool, Shown(SettingsGroup.METERING)] = Field(
-        default=True,
-        description=(
-            "Reject requests for models that have no configured pricing (fail-closed, default). "
-            "When False, unpriced models are served and logged without cost (legacy behavior). "
-            "Audio and moderation endpoints are always exempt — they have no token-based pricing."
-        ),
-    )
-    default_pricing: Annotated[bool, Shown(SettingsGroup.METERING)] = Field(
-        default=False,
-        description=(
-            "When a model has no pricing in the database, fall back to community-maintained "
-            "default pricing from the bundled genai-prices dataset. Off by default: a billing "
-            "gateway should price from rates you control, and these community estimates can lag "
-            "or differ from real provider rates. Database pricing always takes precedence. Enable "
-            "to auto-price common models without configuring each one; while off, require_pricing "
-            "stays fail-closed for any model you have not priced explicitly."
-        ),
-    )
-    pricing_refresh: Annotated[Literal["manual", "review", "auto"], Shown(SettingsGroup.METERING)] = Field(
-        default="manual",
-        description=(
-            "How the genai-prices defaults are kept current. 'manual': only when an operator checks for "
-            "updates on Model pricing. 'review': fetch upstream every pricing_refresh_interval_seconds and "
-            "hold the update for an operator to accept or reject. 'auto': fetch and apply on that schedule."
-        ),
-    )
-    pricing_refresh_interval_seconds: Annotated[int, Shown(SettingsGroup.METERING)] = Field(
-        default=86400,
-        ge=300,
-        description="How often the scheduled genai-prices check runs when pricing_refresh is review or auto.",
-    )
-    reject_user_mismatch: Annotated[bool, Shown(SettingsGroup.METERING)] = Field(
-        default=True,
-        description=(
-            "When True (default), a non-master key whose request names a 'user' other than its own "
-            "is rejected with 403. When False, the client-supplied 'user' is still forwarded to the "
-            "provider (OpenAI-style end-user tag) but spend is always bound to the key's own user; "
-            "use this if clients send arbitrary 'user' values for abuse tracking. This setting "
-            "is the deployment-wide default: an individual key can override it in either "
-            "direction with its own reject_user_mismatch (null inherits this setting). The "
-            "master key may always bill an arbitrary user regardless of this setting."
-        ),
-    )
     capture_agent_telemetry: Annotated[bool, OMITTED] = Field(
         default=True,
         description=(
@@ -920,60 +800,6 @@ class GatewayConfig(BaseSettings):
             "discarded before storage; usage capture and billing are unaffected either way. This "
             "is the deployment-wide default: an individual key can override it in either direction "
             "with its own capture_agent_telemetry (null inherits this setting)."
-        ),
-    )
-    budget_reservation_ttl_sec: Annotated[int, OMITTED] = Field(
-        default=900,
-        gt=0,
-        description=(
-            "How long a budget reservation may stay in flight before the sweep treats it as "
-            "leaked and returns the hold. It must comfortably exceed the slowest request this "
-            "deployment serves, because reclaiming a hold that is still live would let a "
-            "concurrent request past a cap the in-flight one is already spending against."
-        ),
-    )
-    budget_reservation_sweep_interval_sec: Annotated[int, OMITTED] = Field(
-        default=300,
-        ge=0,
-        description=(
-            "How often to sweep for leaked budget reservations across all users. 0 disables the "
-            "sweep, leaving the opportunistic per-user reclaim that runs when a user next "
-            "reserves. Standalone mode only."
-        ),
-    )
-    budget_reservation_sweep_batch: Annotated[int, OMITTED] = Field(
-        default=500,
-        gt=0,
-        description="Maximum leaked budget reservations one sweep pass reclaims before yielding.",
-    )
-    budget_reservation_retention_sec: Annotated[int, OMITTED] = Field(
-        default=604800,
-        ge=0,
-        description=(
-            "How long a settled, released or reclaimed budget reservation is kept before the "
-            "sweep deletes it. The row exists to make an in-flight hold reclaimable; what a "
-            "request cost is recorded durably in usage_logs, so this is an audit window rather "
-            "than an accounting record. 0 keeps every row forever. Standalone mode only."
-        ),
-    )
-    stream_missing_usage_policy: Annotated[str, Shown(SettingsGroup.METERING)] = Field(
-        default="estimate",
-        description=(
-            "How to bill a streamed response that completes without provider usage data: "
-            "'estimate' (charge the pre-debit estimate, default), 'fail' (charge estimate and mark "
-            "the request errored), or 'allow_free' (release the reservation, legacy behavior)."
-        ),
-    )
-    budget_strategy: Annotated[str, Shown(SettingsGroup.METERING)] = Field(
-        default="for_update",
-        description="Budget validation strategy: 'for_update' (default), 'cas' (lock-free), or 'disabled'.",
-    )
-    budget_estimate_default_output_tokens: Annotated[int, Shown(SettingsGroup.METERING)] = Field(
-        default=1024,
-        ge=0,
-        description=(
-            "Output-token count assumed when reserving budget for a request whose max output is "
-            "unbounded. Used by the pre-debit estimate; reconciled to actual usage on completion."
         ),
     )
     streaming_keepalive_interval_ms: Annotated[int, Shown(SettingsGroup.GENERAL)] = Field(
@@ -1928,6 +1754,13 @@ class GatewayConfig(BaseSettings):
             and not entry.get("api_base")
         ]
 
+    def sandbox_configured(self) -> bool:
+        """Whether this deployment can run ``otari_code_execution`` at all.
+
+        Gotcha: a cleared dashboard override leaves ``sandbox_url`` as ``None``, so the environment value still counts.
+        """
+        return bool(self.sandbox_url or otari_env("SANDBOX_URL"))
+
     def effective_sandbox_image(self) -> str | None:
         """The image this deployment asks a sandbox session for, or ``None``.
 
@@ -2048,15 +1881,6 @@ class GatewayConfig(BaseSettings):
             return None
         if normalized not in WEB_SEARCH_PROVIDERS:
             msg = f"web_search_provider must be one of {sorted(WEB_SEARCH_PROVIDERS)}, got '{value}'"
-            raise ValueError(msg)
-        return normalized
-
-    @field_validator("stream_missing_usage_policy")
-    @classmethod
-    def _validate_stream_missing_usage_policy(cls, value: str) -> str:
-        normalized = value.strip().lower()
-        if normalized not in STREAM_MISSING_USAGE_POLICIES:
-            msg = f"stream_missing_usage_policy must be one of {sorted(STREAM_MISSING_USAGE_POLICIES)}, got '{value}'"
             raise ValueError(msg)
         return normalized
 

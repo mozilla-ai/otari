@@ -306,23 +306,40 @@ describe("OrganizationMembersPage", () => {
     })
   })
 
-  it("keeps both header triggers on screen while a dialog is open", async () => {
-    // The dialog sits over the page rather than replacing the pair, so neither
-    // control vanishes from under the pointer while one of them is open.
+  it("offers adding straight away, and only that, where mail cannot be sent", async () => {
+    // Two triggers asked the operator to choose on a fact about the server:
+    // with no transport there is no email to send and no link to accept, so
+    // the invitation is not a second option, it is one that cannot work.
+    mockApi({ members: [OWNER] })
+    renderPage(<OrganizationMembersPage />, { mail_ready: false })
+
+    await screen.findByRole("button", { name: "Add member" })
+    expect(screen.queryByRole("button", { name: "Invite member" })).toBeNull()
+  })
+
+  it("offers the invitation, and only that, where mail can be sent", async () => {
+    mockApi({ members: [OWNER] })
+    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+
+    await screen.findByRole("button", { name: "Invite member" })
+    expect(screen.queryByRole("button", { name: "Add member" })).toBeNull()
+  })
+
+  it("keeps the header trigger on screen while its dialog is open", async () => {
+    // The dialog sits over the page rather than replacing the action, so the
+    // control does not vanish from under the pointer while it is open.
     mockApi({ members: [OWNER] })
     const user = userEvent.setup()
     renderPage(<OrganizationMembersPage />)
 
     const add = await screen.findByRole("button", { name: "Add member" })
-    const invite = screen.getByRole("button", { name: "Invite member" })
     await user.click(add)
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
     expect(add).toBeVisible()
-    expect(invite).toBeVisible()
   })
 
-  it("opens each dialog on a blank draft, not on the last one typed", async () => {
+  it("opens the dialog on a blank draft, not on the last one typed", async () => {
     // Reset on the way in: clearing on the way out would blank the fields
     // while the dialog is still animating away.
     mockApi({ members: [OWNER] })
@@ -340,10 +357,10 @@ describe("OrganizationMembersPage", () => {
     expect(await screen.findByLabelText("Email address")).toHaveValue("")
   })
 
-  it("reads nothing on its own account for the two closed dialogs", async () => {
-    // Both forms are mounted from the first paint now, so anything they read
-    // would be read on page load. Today they read only the workspace list the
-    // page itself needs, which is why one GET serves all three.
+  it("reads nothing on its own account for the closed dialog", async () => {
+    // The form is mounted from the first paint, so anything it reads would be
+    // read on page load. Today it reads only the workspace list the page itself
+    // needs, which is why one GET serves both.
     const requests = mockApi({
       members: [OWNER],
       workspaces: [workspace({ id: "ws-1", name: "Production" })],
@@ -487,7 +504,7 @@ describe("OrganizationMembersPage", () => {
       workspaces: [workspace({ id: "ws-1", name: "Production" })],
     })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />)
+    renderPage(<OrganizationMembersPage />, { mail_ready: true })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -509,17 +526,14 @@ describe("OrganizationMembersPage", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
-  it("invites a member by email and shows the accept link when mail is not configured", async () => {
+  it("invites a member by email and shows the accept link when the send did not go out", async () => {
     const requests = mockApi({ members: [OWNER] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { mail_ready: false })
+    renderPage(<OrganizationMembersPage />, { mail_ready: true })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
     )
-    expect(
-      screen.getByText(/Invitation email is unavailable/),
-    ).toBeInTheDocument()
     await user.type(screen.getByLabelText("Email address"), "ada@example.com")
     // Scoped: the trigger and the submit say the same thing, which is the label
     // rule, so an unscoped press is ambiguous.
@@ -538,15 +552,59 @@ describe("OrganizationMembersPage", () => {
       role: "member",
     })
 
-    // mail_sent is false in the mocked response, so the link is offered to
-    // share by hand rather than the form just closing, and the dialog says the
-    // email did not go out rather than claiming it did.
+    // mail_sent is false in the mocked response, which with a transport
+    // configured means the send itself failed. The link is offered to share by
+    // hand rather than the form just closing, and the dialog says the email did
+    // not go out rather than claiming it did.
     expect(
       await screen.findByText(/Otari did not send the email/),
     ).toBeInTheDocument()
     expect(
       screen.getByText("/#/accept-invitation?token=abc123"),
     ).toBeInTheDocument()
+  })
+
+  it("confirms the send, and names who it went to, when the email went out", async () => {
+    // The ordinary outcome now that the invitation is only offered where mail
+    // is configured: no link to copy, because the one that matters is in the
+    // message. The acknowledgement is one way out of two here, since a
+    // delivered invitation leaves nothing behind that only this dialog holds.
+    mockApi({
+      members: [OWNER],
+      inviteResult: {
+        invitation_id: "invitation-1",
+        organization_member_id: "invited-membership",
+        email: "ada@example.com",
+        role: "member",
+        status: "invited",
+        mail_sent: true,
+        accept_link: "/#/accept-invitation?token=abc123",
+        expires_at: "2026-01-08T00:00:00+00:00",
+        created_at: "2026-01-01T00:00:00+00:00",
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Invite member" }),
+    )
+    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Invite member",
+      }),
+    )
+
+    const sent = await screen.findByText(
+      /An email with an accept link was sent/,
+    )
+    expect(within(sent).getByText("ada@example.com")).toBeInTheDocument()
+    expect(screen.queryByText(/Otari did not send the email/)).toBeNull()
+    expect(screen.queryByLabelText("Accept link")).toBeNull()
+
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
   it("says the email will be sent when mail is configured", async () => {

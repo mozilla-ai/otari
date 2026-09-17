@@ -15,7 +15,7 @@ every writer and none of them can be expressed in the schema at all:
   which the OSS edition ships by default, has neither exclusion constraints nor
   range types. So the rule is checked here and the schema holds the part both
   engines can (a unique index on the period start); see
-  `models.entities.OrganizationModelPricing` for the race that leaves.
+  `models.pricing.OrganizationModelPricing` for the race that leaves.
 - **Only a management role may write.** Rates decide what every member of the
   organization is billed, so this is the same owner-or-admin gate the rest of the
   organization surface uses, delegated to ``OrganizationService`` rather than
@@ -23,8 +23,9 @@ every writer and none of them can be expressed in the schema at all:
 - **A deployment-supplied model is not the organization's to re-price.** A key
   addressed through one of ``config.providers``' instances dispatches on the
   deployment's own credential, so the deployment settles its upstream bill and
-  owns its rate; only a bare ``provider:model`` key resolves against the
-  organization's BYO credential. See
+  owns its rate. A bare ``provider:model`` key gets the same refusal when a
+  workspace lacks a usable BYO key and the bound ``ModelProviderPort`` would
+  serve it on a deployment-owned hosted credential. See
   :meth:`OrganizationPricingService.raise_if_deployment_supplied`.
 
 Periods are half-open, ``[effective_from, effective_to)``. Two adjacent periods
@@ -43,11 +44,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import OrganizationModelPricing
 from gateway.models.money import to_usd, to_usd_or_none
+from gateway.models.pricing import OrganizationModelPricing
 from gateway.models.tenancy import User as TenancyUser
+from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.services.pricing_service import normalize_effective_at
-from gateway.services.provider_kwargs import is_deployment_instance_key
+from gateway.services.provider_kwargs import is_deployment_instance_key, split_selector
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.errors import (
     OrganizationPricingManagedModelError,
@@ -55,6 +57,7 @@ from gateway.services.tenancy.errors import (
     OrganizationPricingOverlapError,
     TenancyValidationError,
 )
+from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
 
 
@@ -93,10 +96,22 @@ def _describe_period(effective_from: datetime, effective_to: datetime | None) ->
 class OrganizationPricingService:
     """Read and write the caller's organization's pricing overrides."""
 
-    def __init__(self, db: AsyncSession, config: GatewayConfig):
+    def __init__(
+        self,
+        db: AsyncSession,
+        config: GatewayConfig,
+        *,
+        model_provider: ModelProviderPort | None,
+    ):
+        """Bind the request's session, provider map, and hosted-credential port.
+
+        ``model_provider`` has no default, so a caller cannot drop the hosted-credential check by accident.
+        """
         self.db = db
         self.config = config
         self.organizations = OrganizationService(db)
+        self.provider_keys = OrgProviderKeyService(db)
+        self.model_provider = model_provider
 
     async def _writable_organization_id(self, user: TenancyUser) -> uuid.UUID:
         """The caller's organization, having checked they may change its rates."""
@@ -118,7 +133,12 @@ class OrganizationPricingService:
         organization = await self.organizations.get_active_organization_for_user(user)
         return organization.id
 
-    async def raise_if_deployment_supplied(self, user: TenancyUser, model_key: str) -> None:
+    async def raise_if_deployment_supplied(
+        self,
+        user: TenancyUser,
+        model_key: str,
+        organization_id: uuid.UUID,
+    ) -> None:
         """Refuse a rate for a model this deployment, not this organization, pays for.
 
         Public for the reason :meth:`raise_if_overlapping` is: it is one of the
@@ -131,12 +151,43 @@ class OrganizationPricingService:
         serving tenants who did not pay for the upstream capacity, an override on a
         deployment-supplied instance would let a tenant name its own cost basis,
         and a zero would make the model free and spend no budget.
+
+        Gotcha: this runs at write time only.
+        A stored override still applies if the organization later loses BYO coverage.
         """
-        if not is_deployment_instance_key(self.config, model_key):
-            return
         if await DeploymentUserService(self.db).has_administration_access(user):
             return
-        raise OrganizationPricingManagedModelError(model_key)
+        if await self._is_deployment_supplied(organization_id, model_key):
+            raise OrganizationPricingManagedModelError(model_key)
+
+    async def _is_deployment_supplied(self, organization_id: uuid.UUID, model_key: str) -> bool:
+        """Whether the deployment, not the organization, pays the upstream bill for ``model_key``.
+
+        A ``config.providers`` instance always does.
+        A bare key does when a workspace lacks a usable BYO key and the port would serve it on a hosted credential.
+        A port refusal also counts, because the model still runs on a deployment-owned upstream.
+        """
+        if is_deployment_instance_key(self.config, model_key):
+            return True
+        if self.model_provider is None:
+            return False
+        split = split_selector(model_key)
+        if split is None:
+            return False
+        provider, model = split
+        # Gotcha: keep this before the port call. The port's contract only covers a candidate no BYO key serves.
+        if provider in await self.provider_keys.get_byo_providers(organization_id=organization_id):
+            return False
+        try:
+            credential = await self.model_provider.resolve_hosted_credential(
+                organization_id=organization_id,
+                workspace_id=None,
+                provider=provider,
+                model=model,
+            )
+        except HostedAccessDeniedError:
+            return True
+        return credential is not None
 
     async def raise_if_overlapping(
         self,
@@ -234,7 +285,7 @@ class OrganizationPricingService:
         period that overlaps one already stored for this key.
         """
         organization_id = await self._writable_organization_id(user)
-        await self.raise_if_deployment_supplied(user, model_key)
+        await self.raise_if_deployment_supplied(user, model_key, organization_id)
         effective_from = normalize_effective_at(override.effective_from)
         effective_to = None if override.effective_to is None else normalize_effective_at(override.effective_to)
         validate_period(effective_from, effective_to)
@@ -355,7 +406,7 @@ class OrganizationPricingService:
         """
         organization_id = await self._writable_organization_id(user)
         row = await self._owned_row(organization_id, pricing_id)
-        await self.raise_if_deployment_supplied(user, row.model_key)
+        await self.raise_if_deployment_supplied(user, row.model_key, organization_id)
 
         effective_from = normalize_effective_at(override.effective_from)
         effective_to = None if override.effective_to is None else normalize_effective_at(override.effective_to)

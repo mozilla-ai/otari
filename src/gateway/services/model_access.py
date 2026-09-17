@@ -20,7 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import APIKey, User
+from gateway.models.api_keys import APIKey
+from gateway.models.users import User
 from gateway.services.alias_service import all_alias_names
 from gateway.services.provider_kwargs import split_selector
 

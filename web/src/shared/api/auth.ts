@@ -80,6 +80,7 @@ export function useSetPassword() {
                   ...previous.caller,
                   email: result.email,
                   has_password: true,
+                  claims_deployment: false,
                 },
               }
             : previous,

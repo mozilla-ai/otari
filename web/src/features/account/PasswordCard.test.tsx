@@ -18,6 +18,7 @@ const OPERATOR_UNCLAIMED: CallerIdentity = {
   email: null,
   full_name: "Operator",
   has_password: false,
+  claims_deployment: true,
 }
 // Signed in through GitHub or Google, or added to the roster and never given a
 // password: an address, and nothing to prove (mozilla-ai/otari-ai#2099).
@@ -26,6 +27,7 @@ const PASSWORDLESS: CallerIdentity = {
   email: "ada@example.com",
   full_name: "Ada Lovelace",
   has_password: false,
+  claims_deployment: false,
 }
 const WITH_PASSWORD: CallerIdentity = { ...PASSWORDLESS, has_password: true }
 
@@ -67,6 +69,7 @@ function mockApi(caller: CallerIdentity, put: unknown = CHANGED, status = 200) {
             ...current,
             email: body.email ?? current.email,
             has_password: true,
+            claims_deployment: false,
           }
         }
         return jsonResponse(put, status)
@@ -231,6 +234,52 @@ describe("PasswordCard on an unclaimed deployment", () => {
     // The bootstrap is read once per load and still says `master_key`, so this
     // proves the tab believes the response over the stale context.
     expect(screen.getByText("offers password")).toBeInTheDocument()
+  })
+
+  it("claims for an operator who already holds an address without asking for one", async () => {
+    // A migrated deployment's operator arrives with an address, and the gateway
+    // refuses any address that differs from it.
+    const fetchMock = mockApi(
+      { ...OPERATOR_UNCLAIMED, email: "operator@example.com" },
+      CLAIMED,
+    )
+    const user = userEvent.setup()
+    renderCard(["master_key"])
+
+    expect(
+      await screen.findByText(/sign in as operator@example\.com from now on/i),
+    ).toBeInTheDocument()
+    const dialog = await openDialog(user, "Claim this deployment")
+    expect(within(dialog).queryByLabelText("Email")).toBeNull()
+    await fillNewPassword(user, dialog, "a-real-password")
+    await user.click(
+      within(dialog).getByRole("button", { name: "Claim this deployment" }),
+    )
+
+    expect(
+      await screen.findByText(/master key no longer signs in/i),
+    ).toBeInTheDocument()
+    const put = fetchMock.mock.calls.find(([candidate]) =>
+      String(candidate).endsWith("/auth/password"),
+    ) as [string, RequestInit]
+    expect(put[1].body).toBe(
+      JSON.stringify({ new_password: "a-real-password" }),
+    )
+  })
+
+  it("does not call a member's first password a claim", async () => {
+    mockApi(PASSWORDLESS)
+    const user = userEvent.setup()
+    renderCard(["master_key"])
+
+    const dialog = await openDialog(user, "Set a password")
+    await fillNewPassword(user, dialog, "a-real-password")
+    await user.click(
+      within(dialog).getByRole("button", { name: "Set a password" }),
+    )
+
+    const status = await screen.findByRole("status")
+    expect(status).not.toHaveTextContent(/master key/i)
   })
 })
 
@@ -427,7 +476,12 @@ describe("PasswordCard and the member roster", () => {
       if (url.endsWith("/organizations/me")) {
         return jsonResponse(organizationContext({ caller }))
       }
-      caller = { ...caller, email: CLAIMED.email, has_password: true }
+      caller = {
+        ...caller,
+        email: CLAIMED.email,
+        has_password: true,
+        claims_deployment: false,
+      }
       return jsonResponse(CLAIMED)
     })
     const user = userEvent.setup()

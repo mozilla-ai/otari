@@ -203,6 +203,7 @@ export function SignupPage({ hash }: { hash: string }) {
           }}
           autoComplete="new-password"
           description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
+          errorMessage={problem ?? undefined}
         />
         <AuthPasswordField
           label="Confirm password"
@@ -218,11 +219,24 @@ export function SignupPage({ hash }: { hash: string }) {
             deployment's `terms_url` says. Required rather than optional: an
             acceptance the form would have submitted either way records nothing.
             A plain anchor and not a router `Link`, because the target is an
-            address an operator configured and is usually off this origin. */}
+            address an operator configured and is usually off this origin, and
+            beside the control rather than inside its label, which is the only
+            arrangement that lets the terms be read: HTML exempts an
+            interactive descendant from a label's own activation, but
+            react-aria presses the label from a document-level handler that
+            knows no such exemption and that nothing on the anchor can stop, so
+            nested the link only ticked the box (otari-ai#2146). `ariaLabel`
+            carries the sentence the visible label no longer holds in full. */}
         {terms_url !== null ? (
-          <Checkbox isSelected={isTermsAccepted} onChange={setIsTermsAccepted}>
-            <span className="text-caption">
-              I accept the{" "}
+          <div className="flex flex-wrap items-center gap-x-1 text-caption">
+            <Checkbox
+              isSelected={isTermsAccepted}
+              onChange={setIsTermsAccepted}
+              ariaLabel="I accept the terms of service"
+            >
+              <span className="text-caption">I accept the</span>
+            </Checkbox>
+            <span>
               <a
                 href={terms_url}
                 target="_blank"
@@ -233,14 +247,9 @@ export function SignupPage({ hash }: { hash: string }) {
               </a>
               .
             </span>
-          </Checkbox>
+          </div>
         ) : null}
 
-        {problem ? (
-          <p role="alert" className="text-caption text-danger">
-            {problem}
-          </p>
-        ) : null}
         <ErrorBanner error={signup.error} />
 
         <Button

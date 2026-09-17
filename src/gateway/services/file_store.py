@@ -1,7 +1,7 @@
 """Pluggable blob storage for uploaded file bytes.
 
 The ``/v1/files`` API stores file *metadata* in the database (see
-``gateway.models.entities.FileObject``) and the raw *bytes* here, keyed by an
+``gateway.models.tools.FileObject``) and the raw *bytes* here, keyed by an
 opaque ``storage_ref``. Keeping bytes out of the relational store lets large
 uploads live on a filesystem / object store while the DB stays lean.
 

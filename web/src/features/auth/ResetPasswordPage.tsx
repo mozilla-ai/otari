@@ -120,6 +120,7 @@ export function ResetPasswordPage({ hash }: { hash: string }) {
           }}
           autoComplete="new-password"
           description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
+          errorMessage={problem ?? undefined}
         />
         <AuthPasswordField
           label="Confirm new password"
@@ -130,11 +131,6 @@ export function ResetPasswordPage({ hash }: { hash: string }) {
           }}
           autoComplete="new-password"
         />
-        {problem ? (
-          <p role="alert" className="text-caption text-danger">
-            {problem}
-          </p>
-        ) : null}
         <ErrorBanner error={reset.error} />
         <Button
           type="submit"

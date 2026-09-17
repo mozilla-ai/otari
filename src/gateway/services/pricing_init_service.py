@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.env import otari_env
 from gateway.log_config import logger
-from gateway.models.entities import ModelPricing
+from gateway.models.pricing import ModelPricing
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
     find_model_pricing,

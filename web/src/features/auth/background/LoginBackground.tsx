@@ -68,9 +68,17 @@ export function LoginBackground({
       const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5)
       const width = Math.round(bounds.width * pixelRatio)
       const height = Math.round(bounds.height * pixelRatio)
-      if (canvas.width !== width) canvas.width = width
-      if (canvas.height !== height) canvas.height = height
+      // Either assignment wipes the bitmap, so report it: the caller has to
+      // repaint in this same frame. Deferring to the interval below leaves the
+      // background blank for up to a paint, which is the flash that showed on
+      // every keystroke that changed the card's height (otari-ai#2146).
+      const resized = canvas.width !== width || canvas.height !== height
+      if (resized) {
+        canvas.width = width
+        canvas.height = height
+      }
       ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
+      return resized
     }
     const readPalette = () => {
       const style = getComputedStyle(canvas)
@@ -86,7 +94,7 @@ export function LoginBackground({
         return
       }
       const invalidated = geometryDirty || paletteDirty
-      if (geometryDirty) measure()
+      const cleared = geometryDirty ? measure() : false
       if (paletteDirty) readPalette()
       geometryDirty = false
       paletteDirty = false
@@ -94,7 +102,11 @@ export function LoginBackground({
       if (moving && lastFrame)
         time += Math.min((now - lastFrame) / 1000, 0.1) * speed
       lastFrame = moving ? now : 0
-      if ((invalidated && !moving) || now - lastPaint >= paintInterval) {
+      if (
+        cleared ||
+        (invalidated && !moving) ||
+        now - lastPaint >= paintInterval
+      ) {
         paint()
         lastPaint = now
       }

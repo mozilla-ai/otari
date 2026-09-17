@@ -30,8 +30,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
-from gateway.models.entities import SearchToolCredential
 from gateway.models.secret_fields import restore_redacted_values
+from gateway.models.tools import SearchToolCredential
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,

@@ -57,7 +57,8 @@ from sqlalchemy.orm import Mapped
 
 from gateway.core.database import create_session
 from gateway.log_config import logger
-from gateway.models.entities import BudgetReservation, BudgetReservationScope, User
+from gateway.models.budgets import BudgetReservation, BudgetReservationScope
+from gateway.models.users import User
 from gateway.services.scoped_budget_service import release as release_scoped
 
 if TYPE_CHECKING:

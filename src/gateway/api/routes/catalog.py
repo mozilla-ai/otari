@@ -27,7 +27,8 @@ import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, Literal
+from enum import StrEnum
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -36,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.api.deps import (
+    ModelProviderPortDep,
     get_config,
     get_db,
     get_session_identity,
@@ -44,9 +46,12 @@ from gateway.api.deps import (
 )
 from gateway.core.config import HOSTED_OFFERING_INSTANCE, GatewayConfig
 from gateway.core.metered_pricing import effective_rates
-from gateway.models.entities import APIKey, PricingSnapshot, UsageLog
+from gateway.models.api_keys import APIKey
+from gateway.models.pricing import PricingSnapshot
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
+from gateway.models.usage import UsageLog
+from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.catalog_selectors import (
     current_selector_index,
     model_selector_for_slug,
@@ -107,10 +112,14 @@ operator_router = APIRouter(
 # it as "nobody" rather than as a key that failed to verify.
 CatalogCaller = tuple[APIKey | None, bool] | None
 
-# The reserved instance a hosted edition serves deployment-owned offerings under;
-# the base gateway never configures one, so the label only ever appears where an
-# overlay contributes such an offering.
-Credential = Literal["deployment", "organization", "hosted"]
+
+class CatalogCredential(StrEnum):
+    """Who may price a catalog offering."""
+
+    DEPLOYMENT = "deployment"
+    ORGANIZATION = "organization"
+    HOSTED = "hosted"
+
 
 # The window the viewer's own usage is rolled up over on a detail read.
 _USAGE_WINDOW = timedelta(days=30)
@@ -160,10 +169,12 @@ class CatalogOffering(BaseModel):
     )
     provider: str = Field(description="The provider instance the selector names.")
     provider_type: str = Field(description="The any-llm implementation behind the instance.")
-    credential: Credential = Field(
+    credential: CatalogCredential = Field(
         description=(
-            "Whose key serves it: `deployment` for a `providers:` instance the operator configured, "
-            "`organization` for a key the viewer's organization holds."
+            "Who may price it: `deployment` for a `providers:` instance the operator configured, "
+            "`hosted` for a provider the deployment pays for in any workspace of the viewer's organization, "
+            "`organization` for one the viewer's organization may set its own rate for. "
+            "A workspace can still call a `hosted` provider with the organization's own key."
         ),
     )
     discovered: bool = Field(description="Whether the provider itself reported this model.")
@@ -435,7 +446,7 @@ async def _group(
                 short_selector=short_selector_for(obj.id),
                 provider=instance,
                 provider_type=provider_type,
-                credential=_credential(config, instance),
+                credential=_get_credential(config, instance, deployment_managed=obj.deployment_managed),
                 discovered=obj.id in merged.discovered_keys,
                 context_window=(metadata.context_window if metadata else None) or obj.context_window,
                 max_output_tokens=metadata.max_output_tokens if metadata else None,
@@ -476,16 +487,17 @@ async def _with_usage(db: AsyncSession, grouped: _Grouped, members: list[_Offeri
     return [member.wire.model_copy(update={"usage_30d": usage.get(member.wire.selector)}) for member in members]
 
 
-def _credential(config: GatewayConfig, instance: str) -> Credential:
-    """Whose key an instance runs on, from its name alone.
+def _get_credential(config: GatewayConfig, instance: str, *, deployment_managed: bool) -> CatalogCredential:
+    """Returns who may price an offering.
 
-    The reserved name is the seam: ``config`` refuses it in ``providers:``
-    precisely so that an offering carrying it came from an overlay, which is
-    what makes the name readable here without the route knowing the overlay.
+    ``config`` refuses the reserved hosted instance name in ``providers:``,
+    so an offering carrying it came from an overlay.
     """
     if instance == HOSTED_OFFERING_INSTANCE:
-        return "hosted"
-    return "deployment" if instance in config.providers else "organization"
+        return CatalogCredential.HOSTED
+    if instance in config.providers:
+        return CatalogCredential.DEPLOYMENT
+    return CatalogCredential.HOSTED if deployment_managed else CatalogCredential.ORGANIZATION
 
 
 def _first(values: Iterable[str | None]) -> str | None:
@@ -593,11 +605,19 @@ def _elsewhere(grouped: _Grouped, key: str, offered_types: set[str]) -> list[Cat
 
 
 async def _merged_for(
-    db: AsyncSession, config: GatewayConfig, caller: CatalogCaller, session_identity: TenancyUser | None
+    db: AsyncSession,
+    config: GatewayConfig,
+    caller: CatalogCaller,
+    session_identity: TenancyUser | None,
+    model_provider: ModelProviderPort,
 ) -> MergedCatalog:
     if caller is None:
-        return await build_merged_catalog(db, config, auth=(None, False), session_identity=None, anonymous=True)
-    return await build_merged_catalog(db, config, auth=caller, session_identity=session_identity)
+        return await build_merged_catalog(
+            db, config, auth=(None, False), session_identity=None, anonymous=True, model_provider=model_provider
+        )
+    return await build_merged_catalog(
+        db, config, auth=caller, session_identity=session_identity, model_provider=model_provider
+    )
 
 
 @router.get("/models")
@@ -606,6 +626,7 @@ async def list_catalog(
     config: Annotated[GatewayConfig, Depends(get_config)],
     caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    model_provider: ModelProviderPortDep,
     at_context: Annotated[
         int | None,
         Query(
@@ -625,7 +646,7 @@ async def list_catalog(
     the catalog is public, sees the configured instances at the deployment's
     rates and nothing that belongs to a tenant.
     """
-    merged = await _merged_for(db, config, caller, session_identity)
+    merged = await _merged_for(db, config, caller, session_identity, model_provider)
     grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity)
     models = [
         _summary(identity, [grouped.offerings[selector] for selector in identity.selectors], at_context)
@@ -646,6 +667,7 @@ async def get_catalog_model(
     config: Annotated[GatewayConfig, Depends(get_config)],
     caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    model_provider: ModelProviderPortDep,
 ) -> CatalogModelDetail:
     """One model and every offering of it this caller may use.
 
@@ -660,7 +682,7 @@ async def get_catalog_model(
     A signed-in caller's offerings also carry their organization's own usage of
     each over the last 30 days.
     """
-    merged = await _merged_for(db, config, caller, session_identity)
+    merged = await _merged_for(db, config, caller, session_identity, model_provider)
     grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity)
     identity = next((identity for identity in grouped.identities.values() if identity.id == model_id), None)
     if identity is None:

@@ -28,9 +28,9 @@ from gateway.api.routes import chat
 from gateway.api.routes._pipeline import RequestContext, prepare_gateway_tools
 from gateway.api.routes.chat import ChatCompletionRequest
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import WorkspaceMcpServer
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.models.tenancy import Organization, User, Workspace
+from gateway.models.tools import WorkspaceMcpServer
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,

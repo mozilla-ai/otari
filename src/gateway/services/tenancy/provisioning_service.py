@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.log_config import logger
-from gateway.models.entities import RuntimeSetting
+from gateway.models.platform import RuntimeSetting
 from gateway.models.tenancy import Organization, User
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -193,6 +193,17 @@ async def load_bootstrap_identity(db: AsyncSession) -> User | None:
     return await db.get(User, user_id)
 
 
+async def password_claims_deployment(db: AsyncSession, identity: User) -> bool:
+    """Whether setting this identity's password is the act that claims the deployment.
+
+    True for the identity the marker names until it holds a password.
+    """
+    if identity.hashed_password is not None:
+        return False
+    operator = await load_bootstrap_identity(db)
+    return operator is not None and operator.id == identity.id
+
+
 async def _provision(db: AsyncSession) -> User:
     """Create the default organization, workspace, operator identity, and memberships.
 
@@ -311,4 +322,5 @@ __all__ = [
     "BootstrapIdentityUnavailableError",
     "ensure_bootstrap_identity",
     "load_bootstrap_identity",
+    "password_claims_deployment",
 ]

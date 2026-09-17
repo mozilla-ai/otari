@@ -48,10 +48,9 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, is_valid_master_key
+from gateway.api.deps import get_config, get_db, is_valid_master_key, record_auth_failure
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.metrics import record_auth_failure
 from gateway.models.tenancy import User as TenancyUser
 from gateway.rate_limit import RateLimiter
 from gateway.services.dashboard_session_service import (

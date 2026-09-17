@@ -16,7 +16,7 @@ from gateway.api.routes.chat import _ChatAdapter
 from gateway.api.routes.messages import _messages_stream_usage, _MessagesAdapter, _requested_cache_write_ttl
 from gateway.api.routes.responses import _usage_to_completion_usage
 from gateway.core.usage import GatewayUsage, cache_read_tokens_of, cache_write_1h_tokens_of, cache_write_tokens_of
-from gateway.models.entities import UsageLog
+from gateway.models.usage import UsageLog
 from gateway.services.usage_admin_service import _row_cache_tokens_included
 
 

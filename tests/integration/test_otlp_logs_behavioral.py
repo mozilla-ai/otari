@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from gateway.api.routes.otlp import _MAX_EVENTS_PER_EXPORT
 from gateway.core.config import API_ROOT
-from gateway.models.entities import AgentTelemetry, UsageLog, User
+from gateway.models.usage import AgentTelemetry, UsageLog
+from gateway.models.users import User
 
 from .otlp_helpers import log_record, logs_export
 

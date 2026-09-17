@@ -32,7 +32,9 @@ service may not import the API layer (`scripts/check_architecture.py`).
 
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement
+from sqlalchemy import ColumnElement, and_, select
+
+from gateway.models.api_keys import APIKey
 
 # The slug on a row this gateway served itself.
 SERVED_HERE_SLUG = "gateway"
@@ -70,8 +72,8 @@ def is_served_here(source: str) -> bool:
     return source in SERVED_HERE_SOURCES
 
 
-def integration_traffic(column: Any) -> ColumnElement[bool]:
-    """Match rows made from outside the product, over ``usage_logs.endpoint``.
+def integration_traffic(endpoint: Any, api_key_id: Any) -> ColumnElement[bool]:
+    """Match rows made from outside the product, over ``usage_logs``.
 
     The activation guide's question, and the reason it cannot simply ask
     :func:`served_here`. The guide closes when a workspace first calls this
@@ -79,5 +81,27 @@ def integration_traffic(column: Any) -> ColumnElement[bool]:
     celebrate; a message typed into our own Playground is the product being
     demonstrated, not integrated, so closing on one would congratulate somebody
     for something they have not done yet and then never offer the guide again.
+
+    Two columns, because the Playground answers to two shapes and the endpoint
+    label only catches one of them. Where this deployment runs the completion
+    itself, the row carries :data:`PLAYGROUND_USAGE_ENDPOINT` and nothing else is
+    needed. Where it does not, which is a hosted control plane forwarding to its
+    data-plane gateway (``services/playground_dispatch``), the row is written from
+    the gateway's usage report and is labelled like every other report that
+    gateway sends: the surface that made the call is not on the wire, so the
+    label cannot carry it. What does carry it is the credential, because the one
+    the control plane forwards under is minted by this deployment for exactly
+    this purpose and is marked as such.
+
+    Taking both rather than leaving the second to each caller, for the reason the
+    module exists: a rule spelled at a call site is a rule the next call site
+    spells differently, and half of this one silently counts the Playground as
+    an integration.
     """
-    return cast("ColumnElement[bool]", column != PLAYGROUND_USAGE_ENDPOINT)
+    return and_(
+        endpoint != PLAYGROUND_USAGE_ENDPOINT,
+        # A row with no key at all (the standalone Playground writes one, and so
+        # does any session-authorized request) matches nothing here and is left to
+        # the endpoint half above, which is the half that knows about it.
+        ~select(APIKey.id).where(APIKey.id == api_key_id, APIKey.internal_secret.is_not(None)).exists(),
+    )

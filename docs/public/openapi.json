@@ -2019,6 +2019,11 @@
       "CallerIdentityPublic": {
         "description": "Who the caller is, as against what they may do.\n\nThe account control at the foot of the dashboard's sidebar draws a person,\nand no authenticated route reported the caller's own name or address, so it\ndrew a role for everybody who could reach it: \"Operator\", which is not a\nname and on a multi-tenant deployment was not even true\n(mozilla-ai/otari#832).\n\nCarried on the membership context for the reason ``deployment_operator`` is:\nthe shell reads that context before it paints, so an identity taken from it\nneeds no request of its own and cannot arrive a beat after the chrome it\nnames. Publishing it costs nothing either, since it is the caller's own\nidentity and they are holding the credential that resolved to it.\n\n``email`` and ``full_name`` are nullable for opposite reasons. A local\noperator identity has no address, because first boot provisions it with a\nname and nothing to sign in with but the master key; a member added by\naddress has no name until they claim the identity and supply one. So a shell\nhas to be ready to draw either one alone.",
         "properties": {
+          "claims_deployment": {
+            "description": "Whether setting this identity's password claims the deployment, which stops the master key signing in to the dashboard. True for the deployment's operator until it holds a password, whether or not it already has an address; false for everybody else.",
+            "title": "Claims Deployment",
+            "type": "boolean"
+          },
           "email": {
             "anyOf": [
               {
@@ -2054,7 +2059,8 @@
         },
         "required": [
           "user_id",
-          "has_password"
+          "has_password",
+          "claims_deployment"
         ],
         "title": "CallerIdentityPublic",
         "type": "object"
@@ -2204,6 +2210,16 @@
         },
         "title": "CatalogCapabilities",
         "type": "object"
+      },
+      "CatalogCredential": {
+        "description": "Who may price a catalog offering.",
+        "enum": [
+          "deployment",
+          "organization",
+          "hosted"
+        ],
+        "title": "CatalogCredential",
+        "type": "string"
       },
       "CatalogElsewhere": {
         "description": "A provider models.dev lists for this model that this deployment has not configured.",
@@ -2727,14 +2743,8 @@
             "title": "Context Window"
           },
           "credential": {
-            "description": "Whose key serves it: `deployment` for a `providers:` instance the operator configured, `organization` for a key the viewer's organization holds.",
-            "enum": [
-              "deployment",
-              "organization",
-              "hosted"
-            ],
-            "title": "Credential",
-            "type": "string"
+            "$ref": "#/components/schemas/CatalogCredential",
+            "description": "Who may price it: `deployment` for a `providers:` instance the operator configured, `hosted` for a provider the deployment pays for in any workspace of the viewer's organization, `organization` for one the viewer's organization may set its own rate for. A workspace can still call a `hosted` provider with the organization's own key."
           },
           "discovered": {
             "description": "Whether the provider itself reported this model.",
@@ -7740,7 +7750,7 @@
         "type": "object"
       },
       "OrgProviderKeyCreateRequest": {
-        "description": "What a caller sends to create a key.\n\nThe plaintext key is never stored as sent: the service encrypts it\n(`services/secret_box.py`) and keeps only the ciphertext and ``last4``,\nthe same convention `entities.ProviderCredential` already uses.",
+        "description": "What a caller sends to create a key.\n\nThe plaintext key is never stored as sent: the service encrypts it\n(`services/secret_box.py`) and keeps only the ciphertext and ``last4``,\nthe same convention `providers.ProviderCredential` already uses.",
         "properties": {
           "api_base": {
             "anyOf": [
@@ -8472,7 +8482,7 @@
         "type": "object"
       },
       "OrganizationGuardrailCreate": {
-        "description": "Request body for mandating a guardrail across an organization.\n\n``credential`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`entities.WorkspaceMcpServer` and `entities.ProviderCredential` use. It is\nsent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,\nso it authenticates this gateway to the guardrails service the entry names.\nA guardrail *vendor's* own key is not this: the guardrails service builds\nits guardrails from the operator's YAML and holds those itself.\n\nA credential therefore requires ``url``. The deployment's ``guardrails_url``\nis not necessarily encrypted (the shipped compose file makes it a same-host\n``http://`` sidecar) and this row cannot see what it is set to, so an entry\nthat fell back to it could not promise the bearer was sent over https. See\n`_require_url_for_credential`.\n\n``on`` is not offered. This plane mandates input-direction checks, which is\nthe only direction the request path enforces\n(`services.guardrails.run_input_guardrails`); an organization that could\nstore an output-direction mandate would be storing one nothing runs.",
+        "description": "Request body for mandating a guardrail across an organization.\n\n``credential`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`tools.WorkspaceMcpServer` and `providers.ProviderCredential` use. It is\nsent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,\nso it authenticates this gateway to the guardrails service the entry names.\nA guardrail *vendor's* own key is not this: the guardrails service builds\nits guardrails from the operator's YAML and holds those itself.\n\nA credential therefore requires ``url``. The deployment's ``guardrails_url``\nis not necessarily encrypted (the shipped compose file makes it a same-host\n``http://`` sidecar) and this row cannot see what it is set to, so an entry\nthat fell back to it could not promise the bearer was sent over https. See\n`_require_url_for_credential`.\n\n``on`` is not offered. This plane mandates input-direction checks, which is\nthe only direction the request path enforces\n(`services.guardrails.run_input_guardrails`); an organization that could\nstore an output-direction mandate would be storing one nothing runs.",
         "example": {
           "applies_to_all_workspaces": true,
           "credential": "sk-guardrails-...",
@@ -10192,13 +10202,46 @@
         "description": "A policy body plus the evidence to check it against, both caller-supplied.",
         "properties": {
           "changed_paths": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 10000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).",
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 10000,
-            "title": "Changed Paths",
-            "type": "array"
+            "title": "Changed Paths"
+          },
+          "command_scope": {
+            "default": "call",
+            "description": "What `commands` covers: `call` for the single tool call about to run, `session` for every command the session has run so far.",
+            "enum": [
+              "call",
+              "session"
+            ],
+            "title": "Command Scope",
+            "type": "string"
+          },
+          "commands": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 10000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shell commands the caller observed run or is about to run.",
+            "title": "Commands"
           },
           "policy_yaml": {
             "maxLength": 262144,
@@ -16461,7 +16504,7 @@
         "type": "object"
       },
       "WorkspaceMcpServerCreate": {
-        "description": "Request body for registering a server.\n\n``authorization_token`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`entities.ProviderCredential` and `OrgProviderKey` already use.",
+        "description": "Request body for registering a server.\n\n``authorization_token`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`providers.ProviderCredential` and `OrgProviderKey` already use.",
         "properties": {
           "allowed_tools": {
             "anyOf": [
@@ -22823,7 +22866,7 @@
         ]
       },
       "post": {
-        "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin/superuser, who see every workspace). The secret is returned once.",
+        "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /api/v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin, who see every workspace). The secret is returned once.",
         "operationId": "organization-keys-create_own_key",
         "requestBody": {
           "content": {
@@ -23667,7 +23710,7 @@
         ]
       },
       "post": {
-        "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it. Refused with a\n403 when the model is addressed through one of the deployment's own provider\ninstances: the deployment holds that credential and settles its upstream bill,\nso its rate is the deployment price list's rather than a tenant's.\n\nThe key is normalized to its canonical ``instance:model`` form first, the same\ncall ``POST /api/v1/pricing`` makes, and that is what makes one model one row\nrather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and\n``openai/gpt-4o`` are two keys: the overlap rule would not see them as\ncolliding, and both would resolve, with the canonical one preferred, leaving\nthe other dormant until the first is deleted. Normalizing on the way in is\nwhat stops that pair existing at all.",
+        "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it. Refused with a\n403 when the deployment, not the caller's organization, holds the credential\nthat serves the model, whether through one of its own provider instances or a\nhosted credential the bound port supplies because no usable BYO credential of\nthe organization's own covers every one of its workspaces: either way the\ndeployment settles the upstream bill, so its rate is the deployment price\nlist's rather than a tenant's.\n\nThe key is normalized to its canonical ``instance:model`` form first, the same\ncall ``POST /api/v1/pricing`` makes, and that is what makes one model one row\nrather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and\n``openai/gpt-4o`` are two keys: the overlap rule would not see them as\ncolliding, and both would resolve, with the canonical one preferred, leaving\nthe other dormant until the first is deleted. Normalizing on the way in is\nwhat stops that pair existing at all.",
         "operationId": "organization-pricing-create_organization_pricing",
         "requestBody": {
           "content": {
@@ -26167,7 +26210,7 @@
     },
     "/api/v1/playground/chat/completions": {
       "post": {
-        "description": "Run one chat completion for the signed-in caller.\n\nStreaming and non-streaming both, identically to ``POST\n/api/v1/chat/completions``: this resolves the principal and then calls the\nvery same handler. The request is billed to the caller's own attribution\nuser in the workspace they named (or their organization's default), against\nthat user's budget, and writes the ordinary usage row with no ``api_key_id``,\nbecause there was no key.\n\nThe body is ``ChatCompletionRequest`` unchanged, so the page sends the same\nrequest an SDK would and a model, tool or parameter the gateway gains is\navailable here the day it lands. The workspace rides in the query string\nrather than in the body for that reason: a field added to the body would\nalso have to be added to the pipeline's strip list, and a gateway-internal\nfield that is not stripped is forwarded to the provider as a call kwarg.\n\n``user`` in the body is the one field the pipeline will not read here: spend\nbinds to the session's own attribution user, derived and never accepted.",
+        "description": "Run one chat completion for the signed-in caller.\n\nStreaming and non-streaming both, identically to ``POST\n/api/v1/chat/completions``: this resolves the principal and then calls the\nvery same handler. The request is billed to the caller's own attribution\nuser in the workspace they named (or their organization's default), against\nthat user's budget, and writes the ordinary usage row with no ``api_key_id``,\nbecause there was no key.\n\nThe body is ``ChatCompletionRequest`` unchanged, so the page sends the same\nrequest an SDK would and a model, tool or parameter the gateway gains is\navailable here the day it lands. The workspace rides in the query string\nrather than in the body for that reason: a field added to the body would\nalso have to be added to the pipeline's strip list, and a gateway-internal\nfield that is not stripped is forwarded to the provider as a call kwarg.\n\n``user`` in the body is the one field the pipeline will not read here: spend\nbinds to the session's own attribution user, derived and never accepted.\n\nOn a hosted control plane there is no local pipeline to call, so the same\nprincipal is forwarded to the data-plane gateway instead\n(:func:`_dispatch_to_data_plane`). The request and the response are the same\neither way.",
         "operationId": "playground-playground_chat_completions",
         "parameters": [
           {

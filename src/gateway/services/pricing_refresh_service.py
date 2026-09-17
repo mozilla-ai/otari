@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
-from gateway.models.entities import PricingSnapshot, PricingSnapshotHistory
+from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
 from gateway.services.pricing_service import normalize_effective_at, reset_price_cache
 
 _PREVIEW_CHANGE_LIMIT = 100

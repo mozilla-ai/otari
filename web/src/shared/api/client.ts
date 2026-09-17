@@ -302,7 +302,7 @@ async function publicGet(path: string): Promise<{
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response))
   }
-  return { ok: true, body: await response.json() }
+  return { ok: true, body: await readJson<unknown>(response, TIMEOUT_MESSAGE) }
 }
 
 // One unauthenticated POST, with the sign-in screen's error handling: a 401 or
@@ -347,7 +347,7 @@ async function publicPost(
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response))
   }
-  return { ok: true, body: await response.json() }
+  return { ok: true, body: await readJson<unknown>(response, TIMEOUT_MESSAGE) }
 }
 
 // Best-effort server-side sign-out: revokes the cookie's session and expires
@@ -402,6 +402,40 @@ function isTimeout(error: unknown): boolean {
 }
 
 /**
+ * Read the body of a response that already looked like an answer.
+ *
+ * A body that is not JSON is never the gateway's: it is an intermediary
+ * answering in its place, which the edge in front of a hosted deployment does
+ * by serving the dashboard's own page at 200 for the statuses it remaps. The
+ * gateway's real answer is gone either way, so what a banner can usefully say
+ * is which side of the gateway replied. `response.json()`'s own `SyntaxError`
+ * says the opposite: `errorMessage` renders it verbatim, and the markup it
+ * quotes reads as a defect in the page that made the call (otari-ai#2147).
+ *
+ * Only `SyntaxError`. A body that fails to arrive at all is a different fault
+ * and keeps its own reporting.
+ */
+async function readJson<T>(
+  response: Response,
+  timeoutMessage: string,
+): Promise<T> {
+  try {
+    return (await response.json()) as T
+  } catch (error) {
+    if (isTimeout(error)) {
+      throw new ApiError(0, timeoutMessage)
+    }
+    if (error instanceof SyntaxError) {
+      throw new ApiError(
+        response.status,
+        `The gateway's reply was not JSON (HTTP ${response.status}). Something between this page and the gateway answered in its place, so whether the request was carried out is unknown.`,
+      )
+    }
+    throw error
+  }
+}
+
+/**
  * Read something the gateway serves at its own root rather than under the API.
  *
  * A handful of things are not API resources and are mounted beside the
@@ -439,7 +473,7 @@ export async function siteFetch<T>(path: string): Promise<T> {
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response))
   }
-  return (await response.json()) as T
+  return readJson<T>(response, TIMEOUT_MESSAGE)
 }
 
 export async function apiFetch<T>(
@@ -494,16 +528,7 @@ export async function apiFetch<T>(
     return undefined as T
   }
 
-  try {
-    return (await response.json()) as T
-  } catch (error) {
-    // Every caller expects an ApiError; a raw DOMException here would reach the
-    // UI as an unrecognized failure. A malformed body is still its own error.
-    if (isTimeout(error)) {
-      throw new ApiError(0, timeoutMessage)
-    }
-    throw error
-  }
+  return readJson<T>(response, timeoutMessage)
 }
 
 /**

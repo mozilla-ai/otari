@@ -9,7 +9,8 @@ estimate that had gone back to binary floating point.
 from decimal import Decimal
 from typing import Any
 
-from gateway.models.entities import MAX_COUNT_LIMIT, Budget, ModelPricing
+from gateway.models.budgets import MAX_COUNT_LIMIT, Budget
+from gateway.models.pricing import ModelPricing
 from gateway.services.budget_service import _blocked_axis, estimate_cost, estimate_tokens
 
 

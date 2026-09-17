@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter
 
 from gateway.core.config import GatewayConfig
+from gateway.core.surface import Surface
 
 Worker = Callable[[GatewayConfig], Coroutine[Any, Any, None]]
 
@@ -29,7 +30,7 @@ class CoreFeature:
     """
 
     name: str
-    surface: str | None
+    surface: Surface | None
     enabled: Callable[[GatewayConfig], bool]
     routers: Callable[[GatewayConfig], tuple[APIRouter, ...]]
     worker: Worker | None = None

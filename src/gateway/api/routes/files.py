@@ -31,7 +31,8 @@ from gateway.api.deps import get_config, get_db, get_file_store, verify_api_key_
 from gateway.api.routes._helpers import resolve_user_id
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.models.entities import APIKey, FileObject
+from gateway.models.api_keys import APIKey
+from gateway.models.tools import FileObject
 from gateway.services.file_service import fetch_file
 from gateway.services.file_store import FileStore
 from gateway.services.workspace_scope import default_workspace_id

@@ -1,4 +1,7 @@
-"""Prometheus metrics for the gateway."""
+"""Prometheus registry, metric types, and HTTP request instrumentation for the gateway.
+
+The metric types are re-exported so that code declaring a metric need not depend on ``prometheus_client`` directly.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +16,8 @@ from prometheus_client import (
     ProcessCollector,
     generate_latest,
 )
+from prometheus_client.core import GaugeMetricFamily
+from prometheus_client.registry import Collector
 from starlette.responses import Response
 
 from gateway.core.config import API_ROOT, API_VERSION
@@ -20,6 +25,17 @@ from gateway.core.config import API_ROOT, API_VERSION
 if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+__all__ = [
+    "REGISTRY",
+    "Collector",
+    "Counter",
+    "Gauge",
+    "GaugeMetricFamily",
+    "Histogram",
+    "MetricsMiddleware",
+    "metrics_endpoint",
+]
 
 REGISTRY = CollectorRegistry()
 
@@ -48,81 +64,6 @@ ACTIVE_REQUESTS = Gauge(
     "Number of currently in-flight requests",
     registry=REGISTRY,
 )
-
-TOKENS = Counter(
-    "gateway_tokens",
-    "Total number of tokens processed",
-    ["provider", "model", "type"],
-    registry=REGISTRY,
-)
-
-REQUEST_COST_DOLLARS = Histogram(
-    "gateway_request_cost_dollars",
-    "Request cost in USD",
-    ["provider", "model"],
-    registry=REGISTRY,
-)
-
-ABANDONED_ATTEMPTS = Counter(
-    "gateway_abandoned_attempts",
-    "Total upstream attempts abandoned before their first chunk (provider fallback / timeout waste)",
-    ["provider", "model", "reason", "position"],
-    registry=REGISTRY,
-)
-
-INLINE_COST_SETTLEMENTS = Counter(
-    "gateway_inline_cost_settlements",
-    "Inline platform cost settlement outcomes on the hybrid response path",
-    ["outcome"],
-    registry=REGISTRY,
-)
-
-RATE_LIMIT_HITS = Counter(
-    "gateway_rate_limit_hits",
-    "Total number of rate limit hits",
-    registry=REGISTRY,
-)
-
-BUDGET_EXCEEDED = Counter(
-    "gateway_budget_exceeded",
-    "Total number of budget exceeded events",
-    registry=REGISTRY,
-)
-
-AUTH_FAILURES = Counter(
-    "gateway_auth_failures",
-    "Total number of authentication failures",
-    ["reason"],
-    registry=REGISTRY,
-)
-
-LOG_WRITER_QUEUE_DEPTH = Gauge(
-    "gateway_usage_log_queue_depth",
-    "Number of usage log entries waiting to be written",
-    registry=REGISTRY,
-)
-
-LOG_WRITER_BATCH_SIZE = Histogram(
-    "gateway_usage_log_batch_size",
-    "Number of rows per flush batch",
-    ["writer"],
-    registry=REGISTRY,
-)
-
-LOG_WRITER_FLUSH_DURATION = Histogram(
-    "gateway_usage_log_flush_duration_seconds",
-    "Time spent flushing usage log batches",
-    ["writer", "result"],
-    registry=REGISTRY,
-)
-
-LOG_WRITER_ROWS = Counter(
-    "gateway_usage_log_rows",
-    "Total usage log rows by outcome",
-    ["writer", "result"],
-    registry=REGISTRY,
-)
-
 
 _PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
@@ -202,54 +143,3 @@ class MetricsMiddleware:
             REQUEST_DURATION_SECONDS.labels(method=method, endpoint=endpoint, api_version=api_version).observe(
                 duration
             )
-
-
-def record_tokens(provider: str, model: str, prompt_tokens: int, completion_tokens: int) -> None:
-    """Record token usage metrics."""
-    if prompt_tokens:
-        TOKENS.labels(provider=provider, model=model, type="input").inc(prompt_tokens)
-    if completion_tokens:
-        TOKENS.labels(provider=provider, model=model, type="output").inc(completion_tokens)
-
-
-def record_cost(provider: str, model: str, cost: float) -> None:
-    """Record request cost."""
-    REQUEST_COST_DOLLARS.labels(provider=provider, model=model).observe(cost)
-
-
-def record_abandoned_attempt(provider: str, model: str, reason: str, position: int) -> None:
-    """Record an upstream attempt abandoned before it produced its first chunk.
-
-    ``reason`` is one of ``timeout`` (the first-chunk wait elapsed),
-    ``build_error`` (opening the upstream stream failed), or ``upstream_error``
-    (the upstream raised before yielding a chunk). ``position`` is the attempt's
-    index in the resolved routing plan; label cardinality stays bounded by the
-    plan length.
-    """
-    ABANDONED_ATTEMPTS.labels(provider=provider, model=model, reason=reason, position=str(position)).inc()
-
-
-def record_inline_cost_settlement(outcome: str) -> None:
-    """Record an attached, unattached, or timed-out inline settlement."""
-    INLINE_COST_SETTLEMENTS.labels(outcome=outcome).inc()
-
-
-def record_rate_limit_hit() -> None:
-    """Record a rate limit hit."""
-    RATE_LIMIT_HITS.inc()
-
-
-def record_budget_exceeded() -> None:
-    """Record a budget exceeded event."""
-    BUDGET_EXCEEDED.inc()
-
-
-def record_auth_failure(reason: str) -> None:
-    """Record an authentication failure."""
-    AUTH_FAILURES.labels(reason=reason).inc()
-
-
-log_writer_queue_depth = LOG_WRITER_QUEUE_DEPTH
-log_writer_batch_size = LOG_WRITER_BATCH_SIZE
-log_writer_flush_duration = LOG_WRITER_FLUSH_DURATION
-log_writer_rows = LOG_WRITER_ROWS
