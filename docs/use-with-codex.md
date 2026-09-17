@@ -19,7 +19,7 @@ env_key = "OTARI_API_KEY"
 ```
 
 ```bash
-export OTARI_API_KEY="tk_your-otari-key"
+export OTARI_API_KEY="tk-your-otari-key"
 codex
 ```
 
@@ -41,7 +41,7 @@ env_key = "OTARI_API_KEY"
 ```
 
 ```bash
-export OTARI_API_KEY="tk_your_otari_token"
+export OTARI_API_KEY="tk-your_otari_token"
 codex
 ```
 
@@ -93,7 +93,7 @@ HTTP logs exporter with the full Otari logs path:
 [otel]
 environment = "otari"
 log_user_prompt = false
-exporter = { otlp-http = { endpoint = "https://otari.example.com/otlp/v1/logs", protocol = "binary", headers = { "Authorization" = "Bearer tk_your-import-key" } } }
+exporter = { otlp-http = { endpoint = "https://otari.example.com/otlp/v1/logs", protocol = "binary", headers = { "Authorization" = "Bearer tk-your-import-key" } } }
 ```
 
 `binary` sends protobuf; `json` also works. Otari does not accept OTLP over

@@ -48,14 +48,14 @@ curl http://localhost:8000/api/v1/health
 ```
 
 The first startup on an empty database creates an API key and prints it once.
-Find the `tk_` value in the Otari container logs. You can also create a key
+Find the `tk-` value in the Otari container logs. You can also create a key
 from the dashboard at `http://localhost:8000/`.
 
 ## Send a request
 
 ```bash
 curl http://localhost:8000/api/v1/chat/completions \
-  -H "Authorization: Bearer tk_..." \
+  -H "Authorization: Bearer tk-..." \
   -H "Content-Type: application/json" \
   -d '{
     "model": "openai:gpt-4o-mini",

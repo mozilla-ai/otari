@@ -3,7 +3,7 @@ import re
 import secrets
 
 # Number of leading plaintext characters kept as a display-only fingerprint
-# (``tk_`` plus 7 random chars). The key is ``tk_`` + token_urlsafe(48) = 67 chars,
+# (``tk-`` plus 7 random chars). The key is ``tk-`` + token_urlsafe(48) = 67 chars,
 # so exposing 10 leaves ~57 secret chars; the prefix never gates auth and cannot be
 # recovered from the stored SHA-256 hash.
 KEY_PREFIX_LENGTH = 10
@@ -19,13 +19,13 @@ def generate_api_key() -> str:
     """Generate a new API key with prefix.
 
     Returns:
-        A new API key with format 'tk_' followed by 48 random characters
+        A new API key with format 'tk-' followed by 48 random characters
 
     Raises:
         RuntimeError: If generated key doesn't match expected format (should never happen)
 
     """
-    api_key = f"tk_{secrets.token_urlsafe(48)}"
+    api_key = f"tk-{secrets.token_urlsafe(48)}"
 
     try:
         validate_api_key_format(api_key)
@@ -70,8 +70,8 @@ def validate_api_key_format(api_key: str) -> None:
         msg = f"API key must be a string, got {type(api_key).__name__}"
         raise ValueError(msg)
 
-    if not (api_key.startswith("tk_") or api_key.startswith("tk-")):
-        msg = "API key must start with 'tk_' or 'tk-' prefix"
+    if not (api_key.startswith("tk-") or api_key.startswith("tk_")):
+        msg = "API key must start with 'tk-' or 'tk_' prefix"
         raise ValueError(msg)
 
     if len(api_key) < 50:

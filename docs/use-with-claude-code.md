@@ -13,7 +13,7 @@ Claude Code appends `/v1/messages` itself, so `ANTHROPIC_BASE_URL` ends in
 
 ```bash
 export ANTHROPIC_BASE_URL="https://api.otari.ai/api"
-export ANTHROPIC_AUTH_TOKEN="tk_your_otari_token"
+export ANTHROPIC_AUTH_TOKEN="tk-your_otari_token"
 export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
@@ -39,7 +39,7 @@ Then point Claude Code at the standalone gateway:
 
 ```bash
 export ANTHROPIC_BASE_URL="http://localhost:8000/api"
-export ANTHROPIC_AUTH_TOKEN="tk_your-otari-key"
+export ANTHROPIC_AUTH_TOKEN="tk-your-otari-key"
 export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
@@ -75,7 +75,7 @@ export OTEL_LOGS_EXPORTER=otlp
 export OTEL_METRICS_EXPORTER=otlp
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com/otlp"
-export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer tk_your-import-key"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer tk-your-import-key"
 claude
 ```
 
@@ -103,7 +103,7 @@ otari import claude-code --dry-run
 
 # Then import it, with a budget-exempt API key. Usage binds to that key's own
 # user, so do not pass --user-id here.
-export OTARI_API_KEY="tk_your-import-key"
+export OTARI_API_KEY="tk-your-import-key"
 otari import claude-code
 ```
 

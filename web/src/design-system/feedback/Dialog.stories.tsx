@@ -93,7 +93,7 @@ export const Large: Story = {
           <CodeBlock
             label="curl"
             arrangement="bare"
-            value={`curl 'https://gateway.example.com/api/v1/chat/completions' \\\n  -H "Otari-Key: tk_..."`}
+            value={`curl 'https://gateway.example.com/api/v1/chat/completions' \\\n  -H "Otari-Key: tk-..."`}
           />
         </DialogSection>
       </>

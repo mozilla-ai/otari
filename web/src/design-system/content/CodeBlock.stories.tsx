@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import { CodeBlock } from "./CodeBlock"
 
 const CURL = `curl 'https://gateway.example.com/api/v1/chat/completions' \\
-  -H "Otari-Key: tk_3f9a2c5e8b1d4a7f" \\
+  -H "Otari-Key: tk-3f9a2c5e8b1d4a7f" \\
   -H "Content-Type: application/json" \\
   -d '{"model": "openai:gpt-4o-mini", "messages": [{"role": "user", "content": "Hello"}]}'`
 

@@ -77,7 +77,7 @@ per-request fee.
 ```python
 from otari import OtariClient
 
-client = OtariClient(api_base="http://localhost:8000", api_key="tk_...")
+client = OtariClient(api_base="http://localhost:8000", api_key="tk-...")
 response = client.completion(
     model="chatgpt:gpt-5",
     messages=[{"role": "user", "content": "Say hello in five words."}],
