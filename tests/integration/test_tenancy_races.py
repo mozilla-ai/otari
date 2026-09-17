@@ -9,7 +9,7 @@ with separate sessions rather than asserting the branch in isolation.
 
 import asyncio
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -23,6 +23,7 @@ from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
+from gateway.models.budgets import ScopedBudget
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberUpdateRequest,  # noqa: E402
@@ -32,6 +33,7 @@ from gateway.models.tenancy import (
     WorkspaceActivationState,
     WorkspaceAssignmentRequest,
     WorkspaceCreate,
+    WorkspaceMember,
 )
 from gateway.repositories.tenancy import (
     InvitationRepository,
@@ -67,7 +69,12 @@ from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
     WorkspaceActivationService,
 )
-from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
+from gateway.services.tenancy.workspace_budget_default_service import (
+    WorkspaceBudgetDefaultService,
+    WorkspaceMemberBudgetPolicyCreate,
+)
+
+from .tenancy_helpers import create_budget, create_member
 
 pytestmark = pytest.mark.asyncio
 
@@ -75,6 +82,11 @@ pytestmark = pytest.mark.asyncio
 KEY_FORMAT = DefaultApiKeyFormatAdapter(None)
 
 _RACERS = 4
+
+# How long the delete waits for the join before giving up on it. Generous,
+# because the join blocks on the workspace lock once the delete holds it, and
+# that wait is paid in full on every passing run.
+_JOIN_WINDOW = 1.0
 
 
 async def _seed_owner(db: AsyncSession) -> tuple[Organization, User]:
@@ -413,6 +425,90 @@ async def test_concurrent_deletes_cannot_remove_the_last_workspace(
     assert len(refused) == 1
     _, remaining = await WorkspaceRepository(async_db).get_by_organization(organization.id, limit=1)
     assert remaining == 1
+
+
+class _PausingListener:
+    """Delegates to the real listener, then holds the delete open until the join settles.
+
+    The orphan only appears when the join commits between the delete's membership
+    snapshot and the row delete, so that interleaving is pinned rather than raced for.
+    """
+
+    def __init__(
+        self,
+        inner: WorkspaceBudgetDefaultService,
+        joining: asyncio.Task[object],
+        swept: asyncio.Event,
+    ) -> None:
+        self._inner = inner
+        self._joining = joining
+        self._swept = swept
+
+    async def member_joined(self, member: WorkspaceMember) -> None:
+        await self._inner.member_joined(member)
+
+    async def member_removed(self, member: WorkspaceMember) -> None:
+        await self._inner.member_removed(member)
+
+    async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
+        await self._inner.workspace_deleted(workspace_id, member_ids)
+        self._swept.set()
+        await asyncio.wait({self._joining}, timeout=_JOIN_WINDOW)
+
+
+async def test_a_join_during_a_workspace_delete_leaves_no_orphaned_ceiling(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """A ceiling must not outlive the membership it caps.
+
+    ``scoped_budgets.scope_id`` is not a foreign key, so nothing cascades an
+    orphan away, it holds a RESTRICT reference that refuses its budget's
+    deletion, and no page lists it.
+    """
+    organization, owner = await _seed_owner(async_db)
+    service = WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    target = await service.create_workspace(user=owner, workspace_create=WorkspaceCreate(name="Target"))
+    await service.create_workspace(user=owner, workspace_create=WorkspaceCreate(name="Survivor"))
+    joiner = await create_member(async_db, organization, role="member", full_name="Joiner")
+    await WorkspaceBudgetDefaultService(async_db).create_default(
+        user=owner,
+        workspace_id=target.id,
+        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=10.0)),
+    )
+    await async_db.commit()
+
+    swept = asyncio.Event()
+
+    async def join() -> object:
+        await swept.wait()
+        async with sessions() as session:
+            actor = await UserRepository(session).get(owner.id)
+            assert actor is not None
+            adder = WorkspaceService(session, membership_listener=WorkspaceBudgetDefaultService(session))
+            try:
+                return await adder.add_member(user=actor, workspace_id=target.id, user_id=joiner.id)
+            except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+                return exc
+
+    joining = asyncio.create_task(join())
+    async with sessions() as session:
+        actor = await UserRepository(session).get(owner.id)
+        assert actor is not None
+        deleter = WorkspaceService(
+            session,
+            membership_listener=_PausingListener(WorkspaceBudgetDefaultService(session), joining, swept),
+        )
+        await deleter.delete_workspace(user=actor, workspace_id=target.id)
+    await joining
+
+    ceilings = (
+        await async_db.execute(select(ScopedBudget).where(ScopedBudget.scope_type == "workspace_member"))
+    ).scalars().all()
+    memberships = {
+        str(member_id) for member_id in (await async_db.execute(select(col(WorkspaceMember.id)))).scalars().all()
+    }
+    assert [ceiling.scope_id for ceiling in ceilings if ceiling.scope_id not in memberships] == []
 
 
 async def test_concurrent_invites_to_a_suspended_membership_produce_one_pending_invitation(
