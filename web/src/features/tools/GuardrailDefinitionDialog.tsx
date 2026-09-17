@@ -2,12 +2,15 @@ import { useState } from "react"
 
 import type {
   BuiltInGuardrailSpec,
+  GuardrailFallback,
+  GuardrailMode,
   StoredGuardrail,
   UpdateGuardrailRequest,
 } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
+import { MultiSelect } from "@/design-system/forms/MultiSelect"
 import { Select } from "@/design-system/forms/Select"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Disclosure } from "@/design-system/navigation/Disclosure"
@@ -34,9 +37,11 @@ import {
   useCreateGuardrailDefinition,
   useUpdateGuardrailDefinition,
 } from "@/shared/api/tools"
+import { useWorkspaces } from "@/shared/api/workspaces"
 
-// Defining one guardrail, in three stages: what should be checked, which
-// guardrail does it, then whatever that guardrail asks for.
+// Defining one guardrail, in the order the decision is made: what should be
+// checked, which guardrail does it, how the deployment wants it enforced, then
+// whatever that guardrail asks for.
 //
 // The second control is disabled rather than absent before the first is
 // answered: it exists and is about to be usable, which is a different thing from
@@ -86,6 +91,20 @@ export function GuardrailDefinitionDialog({
   const [nameDraft, setNameDraft] = useState<string | null>(
     editing ? editing.name : null,
   )
+  const [mode, setMode] = useState<GuardrailMode>(editing?.mode ?? "block")
+  const [onUnavailable, setOnUnavailable] = useState<GuardrailFallback>(
+    editing?.on_unavailable ?? "block",
+  )
+  // Two controls rather than one list of workspaces where "none" means "all":
+  // an empty list is an ordinary mistake, and it must not read as the widest
+  // possible scope.
+  const [everywhere, setEverywhere] = useState(
+    () => editing?.applies_to_all_workspaces ?? true,
+  )
+  const [workspaceIds, setWorkspaceIds] = useState<string[]>(
+    () => editing?.workspace_ids ?? [],
+  )
+  const workspaces = useWorkspaces()
 
   const spec = findGuardrail(guardrails, guardrailName)
   const createSpecs = spec?.create_parameters ?? []
@@ -148,6 +167,10 @@ export function GuardrailDefinitionDialog({
     operation,
     guardrailName,
     nameDraft,
+    mode,
+    onUnavailable,
+    everywhere,
+    workspaceIds,
     values: setup.values,
     perCallValues: perCall.values,
     extraJson: perCall.extraJson,
@@ -162,7 +185,11 @@ export function GuardrailDefinitionDialog({
     perCall.rawError !== undefined
 
   const pending = create.isPending || update.isPending
-  const ready = name.trim() !== "" && guardrailName !== "" && !secretBlocked
+  // A chosen scope with nothing in it would store a definition that checks
+  // nothing, which is what the "Every workspace" option is for.
+  const scoped = everywhere || workspaceIds.length > 0
+  const ready =
+    name.trim() !== "" && guardrailName !== "" && !secretBlocked && scoped
 
   const submit = () => {
     if (pending || !ready) return
@@ -185,6 +212,10 @@ export function GuardrailDefinitionDialog({
       const body: UpdateGuardrailRequest = {
         create_kwargs,
         validate_kwargs,
+        mode,
+        on_unavailable: onUnavailable,
+        applies_to_all_workspaces: everywhere,
+        workspace_ids: everywhere ? [] : workspaceIds,
         expected_updated_at: editing.updated_at,
       }
       update.mutate({ name: editing.name, body }, { onSuccess: onClose })
@@ -196,6 +227,10 @@ export function GuardrailDefinitionDialog({
         guardrail_name: guardrailName,
         create_kwargs,
         validate_kwargs,
+        mode,
+        on_unavailable: onUnavailable,
+        applies_to_all_workspaces: everywhere,
+        workspace_ids: everywhere ? [] : workspaceIds,
       },
       { onSuccess: onCreated ?? onClose },
     )
@@ -311,9 +346,78 @@ export function GuardrailDefinitionDialog({
               add this guardrail.
             </InfoBanner>
           ) : null}
-          {/* Three parts, in the order the form asks them: what this checks,
-              what it is called, and how the guardrail itself is set up. The
-              rule is what stops the last one reading as more of the second. */}
+          {/* How this definition is enforced, which is about the row rather
+              than about the guardrail: an operator decides it once and it does
+              not change when they swap one vendor for another. */}
+          <div className="-mb-2 border-border-subtle border-t pt-4">
+            <span className="text-mono-overline text-subtle">How it runs</span>
+          </div>
+          <Select
+            label="When it flags a request"
+            value={mode}
+            onChange={(next) => setMode(next as GuardrailMode)}
+            options={[
+              { value: "block", label: "Block the request" },
+              { value: "monitor", label: "Report only, let it through" },
+            ]}
+            isDisabled={pending}
+            description="Blocking never calls the model. Reporting is how you watch a check before you trust it."
+            reserveMessage
+          />
+          <Select
+            label="When it cannot answer"
+            value={onUnavailable}
+            onChange={(next) => setOnUnavailable(next as GuardrailFallback)}
+            options={[
+              { value: "block", label: "Block the request" },
+              { value: "allow", label: "Let it through" },
+            ]}
+            isDisabled={pending}
+            // Not the same as an inconclusive verdict, which is the guardrail
+            // answering and never blocks. This is nobody answering at all.
+            description="Covers a vendor outage, a timeout, and an answer Otari cannot read."
+            reserveMessage
+          />
+          <Select
+            label="Where it runs"
+            value={everywhere ? "all" : "chosen"}
+            onChange={(next) => setEverywhere(next === "all")}
+            options={[
+              { value: "all", label: "Every workspace" },
+              { value: "chosen", label: "Chosen workspaces" },
+            ]}
+            isDisabled={pending}
+            description={
+              everywhere
+                ? "Including a workspace created later."
+                : "Only the workspaces you pick. A new one inherits nothing."
+            }
+            reserveMessage
+          />
+          {everywhere ? null : (
+            <MultiSelect
+              label="Workspaces"
+              value={workspaceIds}
+              onChange={setWorkspaceIds}
+              options={(workspaces.data ?? []).map((workspace) => ({
+                id: workspace.id,
+                label: workspace.name,
+              }))}
+              emptyMessage="This deployment has no workspaces yet."
+              countNoun={{ one: "workspace", other: "workspaces" }}
+              isInvalid={workspaceIds.length === 0}
+              errorMessage={
+                workspaceIds.length === 0
+                  ? "Pick at least one workspace."
+                  : undefined
+              }
+              reserveMessage
+            />
+          )}
+          {/* Four parts, in the order the form asks them: what this checks,
+              what it is called, how it is enforced, and how the guardrail
+              itself is set up. The rules are what stop each reading as more of
+              the one above it. */}
           {createSpecs.length > 0 ? (
             <div className="-mb-2 border-border-subtle border-t pt-4">
               <span className="text-mono-overline text-subtle">

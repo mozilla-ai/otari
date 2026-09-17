@@ -29,17 +29,24 @@ import {
 import { docsSourceHref } from "@/shared/helpers/docs"
 
 // The guardrails this deployment defines, each built and run inside the gateway
-// rather than sent to a separate service. A row's name is what a caller puts in
-// a guardrail entry's `profile` field.
+// rather than sent to a separate service. An enabled row checks every request
+// from the workspaces it covers, whether the caller asked for it or not, and its
+// name is also what a caller may put in a guardrail entry's `profile` field.
 //
 // Shaped as the providers page is, and for the same reason: this is a list of
 // credentialed things an operator adds, edits and removes, not a set of
 // settings. Add opens a dialog over the page, the table is the destination, and
 // a credential is encrypted at rest and never returned.
 
-/** Whether the definition's credentials survived the current OTARI_SECRET_KEY. */
+/** What a row is doing to traffic right now, and the switch that stops it. */
 function StatusCell({ guardrail }: { guardrail: StoredGuardrail }) {
   const update = useUpdateGuardrailDefinition()
+  // "Running" would no longer say enough: a row can run and refuse nothing.
+  const state = !guardrail.enabled
+    ? "Paused"
+    : guardrail.mode === "block"
+      ? "Blocking"
+      : "Monitoring"
   return (
     <div className="flex items-center gap-3">
       <Toggle
@@ -53,11 +60,17 @@ function StatusCell({ guardrail }: { guardrail: StoredGuardrail }) {
           })
         }
       />
-      <span className="text-caption text-subtle">
-        {guardrail.enabled ? "Running" : "Paused"}
-      </span>
+      <span className="text-caption text-subtle">{state}</span>
     </div>
   )
+}
+
+/** How many workspaces a definition covers, in as few words as say it. */
+function scopeLabel(guardrail: StoredGuardrail): string {
+  if (guardrail.applies_to_all_workspaces) return "Every workspace"
+  const count = guardrail.workspace_ids?.length ?? 0
+  if (count === 0) return "No workspaces"
+  return count === 1 ? "1 workspace" : `${count} workspaces`
 }
 
 export function GuardrailsPage() {
@@ -96,6 +109,14 @@ export function GuardrailsPage() {
               Credentials unreadable: check OTARI_SECRET_KEY
             </span>
           )}
+          {/* Enabled and not built means its checks do not run, which is the one
+              state that would otherwise be invisible: the row reads as healthy
+              while traffic goes past it unchecked. */}
+          {row.enabled && !row.loaded && row.decryptable ? (
+            <span className="text-caption text-warning">
+              Failed to build: it is checking nothing. See the gateway log.
+            </span>
+          ) : null}
         </div>
       ),
     },
@@ -134,6 +155,13 @@ export function GuardrailsPage() {
           </div>
         )
       },
+    },
+    {
+      id: "scope",
+      header: "Where",
+      cell: (row) => (
+        <span className="text-caption text-subtle">{scopeLabel(row)}</span>
+      ),
     },
     {
       id: "status",
@@ -198,8 +226,9 @@ export function GuardrailsPage() {
         }
       >
         Add checks that run on your LLM requests: prompt injection, personal
-        data, harmful content and more. A request asks for a check by the name
-        you give it here. Credentials are encrypted at rest.
+        data, harmful content and more. An enabled guardrail checks every
+        request from the workspaces you choose, without the caller asking for
+        it. Credentials are encrypted at rest.
       </PageIntro>
 
       <ErrorBanner error={context.error ?? catalog.error ?? stored.error} />
@@ -273,7 +302,7 @@ export function GuardrailsPage() {
         heading="Remove guardrail"
         body={
           pendingDelete
-            ? `${pendingDelete} and the credentials stored with it are removed. A request that still names it as a profile is refused, so update the callers that use it.`
+            ? `${pendingDelete} and the credentials stored with it are removed, and the requests it was checking stop being checked. A request that still names it as a profile is refused, so update any callers that use it.`
             : null
         }
         confirmLabel="Remove permanently"

@@ -87,3 +87,31 @@ class GuardrailCredentialExistsError(GuardrailCredentialError):
 
     def __init__(self, name: str) -> None:
         super().__init__(f"A stored guardrail '{name}' already exists; use PATCH to update it.")
+
+
+class GuardrailWorkspaceNotFoundError(GuardrailCredentialError):
+    """A scope entry names a workspace that does not exist.
+
+    Refused before anything is written, so a mistyped id fails the request
+    rather than silently dropping that one workspace and leaving a definition
+    narrower than the operator believes.
+    """
+
+    def __init__(self, workspace_id: object) -> None:
+        super().__init__(f"Workspace {workspace_id} does not exist.")
+
+
+class EnforcedGuardrailLimitReachedError(GuardrailCredentialError):
+    """Too many definitions are enabled at once.
+
+    An enabled definition is one more vendor call in front of every request the
+    workspaces it covers make, and the checks run one after another. The bound
+    is on how many are enabled rather than how many are stored, so an operator
+    who wants an eleventh switches one off and is told which lever to pull.
+    """
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(
+            f"At most {limit} guardrails can be enabled at once, because each one runs before "
+            f"every request it covers. Disable one first."
+        )

@@ -32,10 +32,11 @@ four characters of a map are not one.
 """
 
 import asyncio
-from typing import Annotated, Any
+import uuid
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,6 +48,10 @@ from gateway.exceptions.guardrail_credentials import (
 )
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig, GuardrailCredential
+from gateway.repositories.guardrail_credentials_repository import (
+    MAX_ENFORCED_GUARDRAILS,
+    workspace_ids_by_credential,
+)
 from gateway.services.guardrail_credential_service import (
     UNSET,
     create_guardrail_credential,
@@ -91,6 +96,17 @@ class StoredGuardrailSchema(BaseModel):
         default_factory=dict, description="The per-call arguments, with credential-shaped entries masked."
     )
     enabled: bool
+    mode: Literal["block", "monitor"] = Field(
+        description="What happens when this guardrail flags a request: block refuses it, monitor serves it."
+    )
+    on_unavailable: Literal["block", "allow"] = Field(
+        description="What Otari does when the guardrail returns no verdict at all."
+    )
+    applies_to_all_workspaces: bool
+    workspace_ids: list[uuid.UUID] = Field(
+        default_factory=list,
+        description="The workspaces this definition checks. Empty when it applies to all of them.",
+    )
     created_at: str | None = None
     updated_at: str | None = None
     decryptable: bool = Field(
@@ -100,11 +116,25 @@ class StoredGuardrailSchema(BaseModel):
             "The definition is intact; re-enter its credentials or restore the key that wrote them."
         ),
     )
+    loaded: bool = Field(
+        default=False,
+        description=(
+            "Whether this worker has the guardrail built and ready. False on a definition that failed "
+            "to build, whose checks therefore do not run. Answered by the worker that served the read."
+        ),
+    )
 
     @classmethod
-    def from_model(cls, row: GuardrailCredential) -> "StoredGuardrailSchema":
+    def from_model(
+        cls, row: GuardrailCredential, *, workspace_ids: list[uuid.UUID] | None = None
+    ) -> "StoredGuardrailSchema":
         names, decryptable = stored_secret_names(row)
-        return cls(**row.to_public_dict(secret_names=names), decryptable=decryptable)
+        return cls(
+            **row.to_public_dict(secret_names=names),
+            workspace_ids=[] if row.applies_to_all_workspaces else (workspace_ids or []),
+            decryptable=decryptable,
+            loaded=get_guardrail_runner().knows(row.name),
+        )
 
 
 class CreateGuardrailCredentialRequest(BaseModel):
@@ -142,7 +172,51 @@ class CreateGuardrailCredentialRequest(BaseModel):
     validate_kwargs: dict[str, Any] = Field(
         default_factory=dict, description="Per-call arguments sent with the text on every check."
     )
-    enabled: bool = Field(default=True, description="A disabled definition is kept but does not run.")
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "A disabled definition is kept but checks nothing. At most "
+            f"{MAX_ENFORCED_GUARDRAILS} may be enabled at once."
+        ),
+    )
+    mode: Literal["block", "monitor"] = Field(
+        default="block",
+        description=(
+            "What happens when this guardrail flags a request. 'block' refuses it with a 403 and "
+            "never calls the provider; 'monitor' serves it and reports the verdict on the response."
+        ),
+    )
+    on_unavailable: Literal["block", "allow"] = Field(
+        default="block",
+        description=(
+            "What Otari does when the guardrail returns no verdict at all, because the vendor failed, "
+            "timed out or answered malformed. 'block' refuses the request, 'allow' serves it. Not the "
+            "same as an inconclusive verdict, which never blocks."
+        ),
+    )
+    applies_to_all_workspaces: bool = Field(
+        default=False,
+        description=(
+            "True checks every workspace, including one created later; false checks only the "
+            "workspaces named by workspace_ids."
+        ),
+    )
+    workspace_ids: list[uuid.UUID] = Field(
+        default_factory=list,
+        description="Workspaces this guardrail checks. Must be empty when applies_to_all_workspaces is true.",
+    )
+
+    @model_validator(mode="after")
+    def _reject_redundant_scope(self) -> "CreateGuardrailCredentialRequest":
+        """Refuse a workspace list alongside ``applies_to_all_workspaces``.
+
+        The two say different things about the same definition and the flag wins
+        at resolve time, so accepting both would store a list that never decides
+        anything while reading as though it does.
+        """
+        if self.applies_to_all_workspaces and self.workspace_ids:
+            raise ValueError("workspace_ids must be empty when applies_to_all_workspaces is true")
+        return self
 
 
 class UpdateGuardrailCredentialRequest(BaseModel):
@@ -170,6 +244,12 @@ class UpdateGuardrailCredentialRequest(BaseModel):
     )
     validate_kwargs: dict[str, Any] | None = None
     enabled: bool | None = None
+    mode: Literal["block", "monitor"] | None = None
+    on_unavailable: Literal["block", "allow"] | None = None
+    applies_to_all_workspaces: bool | None = None
+    workspace_ids: list[uuid.UUID] | None = Field(
+        default=None, description="Replaces the scope whole when sent; [] clears it."
+    )
     expected_updated_at: str | None = Field(
         default=None,
         description="Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.",
@@ -273,7 +353,11 @@ async def list_stored_guardrails(
     ``OTARI_SECRET_KEY``; a row that cannot be read is listed rather than
     hidden, because the operator is the person who can fix it.
     """
-    return [StoredGuardrailSchema.from_model(row) for row in await list_guardrail_credentials(db)]
+    scoped = await workspace_ids_by_credential(db)
+    return [
+        StoredGuardrailSchema.from_model(row, workspace_ids=scoped.get(row.name, []))
+        for row in await list_guardrail_credentials(db)
+    ]
 
 
 @router.post("/reencrypt")
@@ -324,6 +408,10 @@ async def create_stored_guardrail(
             create_kwargs=request.create_kwargs,
             validate_kwargs=request.validate_kwargs,
             enabled=request.enabled,
+            mode=request.mode,
+            on_unavailable=request.on_unavailable,
+            applies_to_all_workspaces=request.applies_to_all_workspaces,
+            workspace_ids=request.workspace_ids,
         )
     except GuardrailCredentialExistsError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
@@ -334,7 +422,7 @@ async def create_stored_guardrail(
         raise _database_error() from None
 
     _rebuild(row)
-    return StoredGuardrailSchema.from_model(row)
+    return StoredGuardrailSchema.from_model(row, workspace_ids=list(request.workspace_ids))
 
 
 @router.post("/{name}/test")
@@ -391,7 +479,8 @@ async def get_stored_guardrail(
     row = await get_guardrail_credential(db, name)
     if row is None:
         raise _not_found(name)
-    return StoredGuardrailSchema.from_model(row)
+    scoped = await workspace_ids_by_credential(db, name=name)
+    return StoredGuardrailSchema.from_model(row, workspace_ids=scoped.get(name, []))
 
 
 @router.patch("/{name}")
@@ -425,7 +514,8 @@ async def update_stored_guardrail(
         """The value the caller sent, or UNSET when they sent nothing for this field.
 
         An omitted field and an explicit null both keep the stored value. None of
-        these four is nullable, so there is no third state for a null to mean.
+        these is nullable, so there is no third state for a null to mean. An empty
+        ``workspace_ids`` is a value rather than an omission, and clears the scope.
         """
         value = getattr(request, field)
         return value if field in sent and value is not None else UNSET
@@ -438,6 +528,10 @@ async def update_stored_guardrail(
             create_kwargs=supplied("create_kwargs"),
             validate_kwargs=supplied("validate_kwargs"),
             enabled=supplied("enabled"),
+            mode=supplied("mode"),
+            on_unavailable=supplied("on_unavailable"),
+            applies_to_all_workspaces=supplied("applies_to_all_workspaces"),
+            workspace_ids=supplied("workspace_ids"),
         )
     except (GuardrailCredentialError, SecretBoxUnavailableError, SecretDecryptionError) as exc:
         await db.rollback()
@@ -446,7 +540,8 @@ async def update_stored_guardrail(
         raise _database_error() from None
 
     _rebuild(updated)
-    return StoredGuardrailSchema.from_model(updated)
+    scoped = await workspace_ids_by_credential(db, name=updated.name)
+    return StoredGuardrailSchema.from_model(updated, workspace_ids=scoped.get(updated.name, []))
 
 
 @router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT)

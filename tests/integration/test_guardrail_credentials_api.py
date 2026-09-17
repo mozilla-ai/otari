@@ -19,6 +19,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
+from gateway.repositories.guardrail_credentials_repository import MAX_ENFORCED_GUARDRAILS
 from gateway.services.guardrail_runner import get_guardrail_runner, reset_guardrail_runner
 from gateway.services.secret_box import SecretDecryptionError, generate_secret_key
 
@@ -728,3 +729,174 @@ def test_a_test_run_refuses_empty_text(client: TestClient, master_key_header: di
     assert _create(client, master_key_header).status_code == 201
 
     assert _test_run(client, master_key_header, input_text="").status_code == 422
+
+
+def _workspace_id(client: TestClient, headers: dict[str, str], name: str | None = None) -> str:
+    """The default workspace, or a freshly made one when ``name`` is given."""
+    if name is not None:
+        created = client.post(f"{API_ROOT}/workspaces", json={"name": name}, headers=headers)
+        assert created.status_code in (200, 201), created.text
+        return str(created.json()["id"])
+    listed = client.get(f"{API_ROOT}/workspaces", headers=headers)
+    assert listed.status_code == 200, listed.text
+    return str(listed.json()["data"][0]["id"])
+
+
+def test_a_definition_enforces_and_reaches_nothing_until_it_is_scoped(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The defaults: enforcing when it runs, and running nowhere until told where."""
+    body = _create(client, master_key_header).json()
+
+    assert body["mode"] == "block"
+    assert body["on_unavailable"] == "block"
+    assert body["applies_to_all_workspaces"] is False
+    assert body["workspace_ids"] == []
+
+
+def test_how_and_where_a_definition_is_enforced_round_trips(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    workspace_id = _workspace_id(client, master_key_header)
+
+    body = _create(
+        client,
+        master_key_header,
+        mode="monitor",
+        on_unavailable="allow",
+        workspace_ids=[workspace_id],
+    ).json()
+
+    assert body["mode"] == "monitor"
+    assert body["on_unavailable"] == "allow"
+    assert body["workspace_ids"] == [workspace_id]
+
+    listed = client.get(f"{API_ROOT}/guardrail-credentials", headers=master_key_header).json()
+    assert listed[0]["workspace_ids"] == [workspace_id]
+    one = client.get(f"{API_ROOT}/guardrail-credentials/prompt-injection", headers=master_key_header)
+    assert one.json()["workspace_ids"] == [workspace_id]
+
+
+def test_a_workspace_list_beside_every_workspace_is_refused(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The two say different things and the flag wins, so a list would never decide anything."""
+    workspace_id = _workspace_id(client, master_key_header)
+
+    resp = _create(client, master_key_header, applies_to_all_workspaces=True, workspace_ids=[workspace_id])
+
+    assert resp.status_code == 422, resp.text
+
+
+def test_a_scope_naming_a_workspace_that_does_not_exist_is_refused(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Refused whole, rather than storing a definition narrower than the operator believes."""
+    resp = _create(client, master_key_header, workspace_ids=["00000000-0000-4000-8000-000000000000"])
+
+    assert resp.status_code == 400, resp.text
+    assert client.get(f"{API_ROOT}/guardrail-credentials", headers=master_key_header).json() == []
+
+
+def test_an_update_that_leaves_out_the_mode_keeps_it(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    assert _create(client, master_key_header, mode="monitor", on_unavailable="allow").status_code == 201
+
+    resp = client.patch(
+        f"{API_ROOT}/guardrail-credentials/prompt-injection",
+        json={"enabled": False},
+        headers=master_key_header,
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["mode"] == "monitor"
+    assert resp.json()["on_unavailable"] == "allow"
+
+
+def test_an_empty_workspace_list_clears_the_scope(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """``[]`` is a value rather than an omission, which is how a scope is taken away."""
+    workspace_id = _workspace_id(client, master_key_header)
+    assert _create(client, master_key_header, workspace_ids=[workspace_id]).status_code == 201
+
+    resp = client.patch(
+        f"{API_ROOT}/guardrail-credentials/prompt-injection",
+        json={"workspace_ids": []},
+        headers=master_key_header,
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["workspace_ids"] == []
+
+
+def test_widening_to_every_workspace_drops_the_list_it_replaces(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The flag wins at resolve time, so a list left behind would read as though it decided something."""
+    workspace_id = _workspace_id(client, master_key_header)
+    assert _create(client, master_key_header, workspace_ids=[workspace_id]).status_code == 201
+
+    resp = client.patch(
+        f"{API_ROOT}/guardrail-credentials/prompt-injection",
+        json={"applies_to_all_workspaces": True},
+        headers=master_key_header,
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["applies_to_all_workspaces"] is True
+    assert resp.json()["workspace_ids"] == []
+
+
+def test_an_eleventh_enabled_definition_is_refused_and_disabling_one_makes_room(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Each enabled definition is one more vendor call in front of every request it covers."""
+    for index in range(MAX_ENFORCED_GUARDRAILS):
+        assert _create(client, master_key_header, name=f"check-{index}").status_code == 201
+
+    refused = _create(client, master_key_header, name="one-too-many")
+    assert refused.status_code == 400, refused.text
+    assert "Disable one first" in refused.json()["detail"]
+
+    # Storing one is never refused, only enforcing it, and the refusal names the lever.
+    assert _create(client, master_key_header, name="one-too-many", enabled=False).status_code == 201
+
+    paused = client.patch(
+        f"{API_ROOT}/guardrail-credentials/check-0", json={"enabled": False}, headers=master_key_header
+    )
+    assert paused.status_code == 200, paused.text
+    resumed = client.patch(
+        f"{API_ROOT}/guardrail-credentials/one-too-many", json={"enabled": True}, headers=master_key_header
+    )
+    assert resumed.status_code == 200, resumed.text
+
+
+def test_a_definition_that_built_reports_itself_ready(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """``loaded`` is how a definition that failed to build stops being silent."""
+    assert _create(client, master_key_header).status_code == 201
+    assert _built(lambda: get_guardrail_runner().knows("prompt-injection"))
+
+    listed = client.get(f"{API_ROOT}/guardrail-credentials", headers=master_key_header).json()
+
+    assert listed[0]["loaded"] is True
+
+
+def test_a_definition_that_would_not_build_is_listed_as_not_ready(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The row is stored and enabled, and its checks still do not run."""
+
+    def _explode(*_args: Any, **_kwargs: Any) -> object:
+        raise RuntimeError("vendor client refused the key")
+
+    monkeypatch.setattr(AnyGuardrail, "create", _explode)
+    assert _create(client, master_key_header).status_code == 201
+
+    listed = client.get(f"{API_ROOT}/guardrail-credentials", headers=master_key_header).json()
+
+    assert listed[0]["enabled"] is True
+    assert listed[0]["loaded"] is False

@@ -422,11 +422,15 @@ export type BuiltInGuardrailCatalog = Schemas["BuiltInGuardrailCatalog"]
 export type BuiltInGuardrailSpec = Schemas["BuiltInGuardrailSpec"]
 export type GuardrailCategory = BuiltInGuardrailSpec["primary_category"]
 export type StoredGuardrail = Schemas["StoredGuardrailSchema"]
-// `enabled` carries a server-side default the generator cannot see, so
+export type GuardrailMode = StoredGuardrail["mode"]
+// `allow` where `GuardrailConfig.on_unavailable` says `monitor`: a guardrail
+// that returned no verdict has nothing to monitor, so the choice is Otari's.
+export type GuardrailFallback = StoredGuardrail["on_unavailable"]
+// These four carry a server-side default the generator cannot see, so
 // `Defaulted` puts it back.
 export type CreateGuardrailRequest = Defaulted<
   Schemas["CreateGuardrailCredentialRequest"],
-  "enabled"
+  "enabled" | "mode" | "on_unavailable" | "applies_to_all_workspaces"
 >
 export type UpdateGuardrailRequest = Schemas["UpdateGuardrailCredentialRequest"]
 export type TestGuardrailRequest = Schemas["TestGuardrailRequest"]

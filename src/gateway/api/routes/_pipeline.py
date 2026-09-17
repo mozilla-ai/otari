@@ -140,6 +140,8 @@ from gateway.services.budget_service import (
     refund_reservation,
     reserve_budget,
 )
+from gateway.services.guardrail_credential_service import resolve_workspace_guardrails
+from gateway.services.guardrail_runner import get_guardrail_runner
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
@@ -340,6 +342,7 @@ WEB_SEARCH_REQUEST_DOMAIN_INVALID_DETAIL = (
     f"{MAX_WEB_SEARCH_DOMAINS} bare valid hostnames"
 )
 ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not be resolved for this request"
+STORED_GUARDRAILS_UNRESOLVABLE_DETAIL = "Configured guardrails could not be resolved for this request"
 ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL = (
     "A configured organization guardrail's credential could not be read"
 )
@@ -2365,20 +2368,28 @@ def merge_guardrail_layers(
     ctx: RequestContext,
     requested: list[GuardrailConfig] | None,
     organization: Sequence[ResolvedOrganizationGuardrail],
+    deployment: Sequence[GuardrailConfig] = (),
 ) -> EffectiveGuardrails:
     """The effective guardrails for this request, and the credentials they need.
 
-    Three layers fold in one order, each able to add a check or tighten one and
+    Four layers fold in one order, each able to add a check or tighten one and
     none able to weaken what is already there: the caller's own request, then
     what the caller's organization mandates for this workspace (otari#654), then
-    what the deployment's routing policy mandates. The operator's layer is last
-    because it is the outermost one: where a policy and an organization name the
-    same profile, the operator's entry owns the endpoint the check is sent to.
+    the deployment's own stored definitions scoped to it, then what the
+    deployment's routing policy mandates.
 
-    That last point is also why a profile the policy layer claims loses its
-    organization credential here. The credential was stored for the endpoint the
-    organization named; once the policy's URL has replaced it, sending the
-    secret on would be sending it somewhere it was never meant for.
+    The last two are both the operator's, and they are ordered by how specific
+    the instruction is. A stored definition beats an organization entry of the
+    same name, because the deployment operator owns the gateway and the
+    definition is a guardrail this process already built. A routing policy beats
+    both, because it names an endpoint on purpose and is the outermost layer the
+    manual describes.
+
+    A profile an outer layer claims loses the credential an inner one carried.
+    The credential was stored for the endpoint that entry named; once another
+    layer's URL has replaced it, or a stored definition has moved the check into
+    this process, sending the secret on would be sending it somewhere it was
+    never meant for.
 
     Returns the caller's own list unchanged, `None` included, when no layer
     mandated anything, alongside an empty credential map and an empty mandated
@@ -2387,7 +2398,7 @@ def merge_guardrail_layers(
     exactly as it did.
     """
     policy = ctx.plan.guardrails if ctx.plan is not None else []
-    if not organization and not policy:
+    if not organization and not policy and not deployment:
         return EffectiveGuardrails(requested, {}, frozenset())
 
     # Caller entries first, so a mandating layer of the same profile overwrites them.
@@ -2399,9 +2410,11 @@ def merge_guardrail_layers(
         mandated.add(entry.config.profile)
         if entry.credential:
             credentials[entry.config.profile] = entry.credential
-    if policy:
-        _overlay_mandate(merged, policy)
-        for guardrail in policy:
+    for layer in (deployment, policy):
+        if not layer:
+            continue
+        _overlay_mandate(merged, layer)
+        for guardrail in layer:
             mandated.add(guardrail.profile)
             credentials.pop(guardrail.profile, None)
     return EffectiveGuardrails(list(merged.values()), credentials, frozenset(mandated))
@@ -2454,6 +2467,41 @@ async def _resolve_organization_guardrails(
             exc,
         )
         raise adapter.error(500, ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL, ErrorKind.API) from exc
+
+
+async def _resolve_workspace_guardrails(
+    adapter: FormatAdapter[Any, Any], ctx: RequestContext
+) -> list[GuardrailConfig]:
+    """The deployment's own stored definitions that check this workspace's requests.
+
+    Standalone only. The store is not mounted in hybrid mode and the loader
+    builds nothing there, so a hybrid request is checked exactly as it was
+    before definitions existed.
+
+    One indexed read per request, unconditional, for the reason
+    ``_resolve_organization_guardrails`` beside this one gives: a check that only
+    ran when the caller asked for it would not be a mandate. Both fail closed on
+    a missing precondition, because what they guard is an enforcement decision.
+
+    A definition this worker never built is dropped rather than run. It would
+    otherwise fall through to the sidecar branch of ``run_input_guardrails`` and
+    send a stored profile name to ``guardrails_url``, which is a service that has
+    never heard of it. The cost is that its check does not run, which the startup
+    log records once and the ``loaded`` field of
+    ``GET /guardrail-credentials`` reports for as long as it lasts.
+    """
+    if ctx.hybrid_mode:
+        return []
+    if ctx.db is None or ctx.workspace_id is None:
+        raise adapter.error(500, STORED_GUARDRAILS_UNRESOLVABLE_DETAIL, ErrorKind.API)
+    runner = get_guardrail_runner()
+    enforced: list[GuardrailConfig] = []
+    for guardrail in await resolve_workspace_guardrails(ctx.db, workspace_id=ctx.workspace_id):
+        if runner.knows(guardrail.profile):
+            enforced.append(guardrail)
+        else:
+            logger.debug("Stored guardrail %r is enabled but not built on this worker", guardrail.profile)
+    return enforced
 
 
 async def _resolve_mcp_server_ids(
@@ -2545,7 +2593,12 @@ async def prepare_gateway_tools(
         # rather than at each route, so every completion endpoint enforces a
         # mandate identically and none can forget to. `guardrails` as passed is
         # the caller's own list.
-        effective = merge_guardrail_layers(ctx, guardrails, await _resolve_organization_guardrails(adapter, ctx))
+        effective = merge_guardrail_layers(
+            ctx,
+            guardrails,
+            await _resolve_organization_guardrails(adapter, ctx),
+            await _resolve_workspace_guardrails(adapter, ctx),
+        )
         await apply_input_guardrails(
             effective.configs,
             guardrail_text,

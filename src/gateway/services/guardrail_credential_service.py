@@ -24,22 +24,25 @@ lines carry names and counts.
 """
 
 import json
-from collections.abc import AsyncIterator
+import uuid
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.exceptions.guardrail_credentials import (
+    EnforcedGuardrailLimitReachedError,
     GuardrailCredentialExistsError,
+    GuardrailWorkspaceNotFoundError,
     MissingGuardrailParameterError,
     UnknownGuardrailError,
     UnknownGuardrailParameterError,
     UnstorableGuardrailParameterError,
 )
 from gateway.log_config import logger
-from gateway.models.guardrails import GuardrailCredential
+from gateway.models.guardrails import GuardrailConfig, GuardrailCredential
 from gateway.models.secret_fields import REDACTED_VALUE, restore_redacted_values
 from gateway.repositories import guardrail_credentials_repository as repository
 from gateway.services.guardrail_catalog import (
@@ -249,6 +252,42 @@ async def _write(db: AsyncSession) -> AsyncIterator[None]:
         raise
 
 
+def _enforcing(value: str) -> Literal["block", "monitor"]:
+    """Narrow a stored mode column, resolving anything unexpected to ``block``.
+
+    Both columns are plain strings whose only writers are ``Literal`` fields on
+    the two request schemas, so this is unreachable through the API. It resolves
+    to the enforcing side rather than the observing one for the reason
+    ``organization_guardrail_service._stored_mode`` gives: a guardrail that
+    silently stops enforcing when something writes around those schemas is the
+    failure a security control must not have.
+    """
+    return "monitor" if value == "monitor" else "block"
+
+
+def stored_guardrail_config(row: GuardrailCredential) -> GuardrailConfig:
+    """The stored definition as the guardrail the request path already knows how to run.
+
+    Where the two vocabularies for "it could not answer" meet. The column says
+    ``allow``, because Otari is the one deciding and the two things it can do are
+    refuse the request or serve it; :class:`GuardrailConfig` says ``monitor``,
+    which is right on a request-body entry, where the guardrail did answer and
+    there is a verdict to report. Translated here rather than by widening the
+    request-body field, which is a published contract on three surfaces.
+
+    No ``url``: a stored definition runs in this process
+    (``services/guardrails.run_input_guardrails`` dispatches on
+    ``GuardrailRunner.knows``), and an endpoint here would send it to a sidecar
+    instead.
+    """
+    return GuardrailConfig(
+        profile=row.name,
+        mode=_enforcing(row.mode),
+        on_unavailable="block" if row.on_unavailable != "allow" else "monitor",
+        validate_kwargs=dict(row.validate_kwargs or {}),
+    )
+
+
 async def list_guardrail_credentials(db: AsyncSession) -> list[GuardrailCredential]:
     """Every stored guardrail, ordered by name."""
     return await repository.list_guardrail_credentials(db)
@@ -264,6 +303,48 @@ async def get_guardrail_credential_for_update(db: AsyncSession, name: str) -> Gu
     return await repository.get_guardrail_credential_for_update(db, name)
 
 
+async def _check_scope(db: AsyncSession, workspace_ids: Sequence[uuid.UUID]) -> list[uuid.UUID]:
+    """Deduplicate a scope list and refuse the write if it names a workspace that is gone."""
+    requested = list(dict.fromkeys(workspace_ids))
+    missing = await repository.missing_workspace_ids(db, requested)
+    if missing:
+        raise GuardrailWorkspaceNotFoundError(next(iter(sorted(missing, key=str))))
+    return requested
+
+
+async def _check_enforced_limit(db: AsyncSession, *, enabling: bool, excluding: str | None = None) -> None:
+    """Hold the number of enabled definitions to the ceiling, before anything is staged.
+
+    Only a write that leaves the row enabled is checked: disabling one is always
+    allowed, which is what makes the refusal actionable.
+    """
+    if not enabling:
+        return
+    existing = await repository.count_enabled_guardrail_credentials(db, excluding=excluding)
+    if existing >= repository.MAX_ENFORCED_GUARDRAILS:
+        raise EnforcedGuardrailLimitReachedError(repository.MAX_ENFORCED_GUARDRAILS)
+
+
+async def resolve_workspace_guardrails(db: AsyncSession, *, workspace_id: uuid.UUID) -> list[GuardrailConfig]:
+    """The stored definitions that check this workspace's requests.
+
+    Returned as request-path guardrails rather than rows, for the reason
+    :class:`ResolvedOrganizationGuardrail` is a value type: the admission check
+    must not lazily touch the session after the request has moved on, and
+    nothing ORM-identified should ride into a streaming response that outlives
+    the handler.
+
+    No credential travels with them, unlike the organization layer's entries. A
+    stored definition is built in this process from the arguments the row
+    carries, so there is no endpoint to authenticate to.
+
+    No authorization check, and none is missing: ``workspace_id`` comes off the
+    key that authenticated the request, never off a header.
+    """
+    rows = await repository.list_enforced_guardrail_credentials(db, workspace_id=workspace_id)
+    return [stored_guardrail_config(row) for row in rows]
+
+
 async def create_guardrail_credential(
     db: AsyncSession,
     *,
@@ -272,14 +353,21 @@ async def create_guardrail_credential(
     create_kwargs: dict[str, Any],
     validate_kwargs: dict[str, Any],
     enabled: bool = True,
+    mode: str = "block",
+    on_unavailable: str = "block",
+    applies_to_all_workspaces: bool = False,
+    workspace_ids: Sequence[uuid.UUID] = (),
 ) -> GuardrailCredential:
     """Store a new guardrail definition.
 
     Validation and encryption both run before anything is staged, so a refused
-    definition and a deployment with no ``OTARI_SECRET_KEY`` each leave the
+    definition, a scope naming a workspace that is gone, an eleventh enabled
+    definition, and a deployment with no ``OTARI_SECRET_KEY`` each leave the
     session untouched.
     """
     validate_guardrail_kwargs(guardrail_name, create_kwargs=create_kwargs, validate_kwargs=validate_kwargs)
+    scope = await _check_scope(db, () if applies_to_all_workspaces else workspace_ids)
+    await _check_enforced_limit(db, enabling=enabled)
     plain, secrets = split_create_kwargs(guardrail_name, create_kwargs)
     row = GuardrailCredential(
         name=name,
@@ -288,11 +376,15 @@ async def create_guardrail_credential(
         validate_kwargs=dict(validate_kwargs),
         encrypted_create_secrets=_encrypted(secrets),
         enabled=enabled,
+        mode=mode,
+        on_unavailable=on_unavailable,
+        applies_to_all_workspaces=applies_to_all_workspaces,
     )
 
     try:
         async with _write(db):
             await repository.add_guardrail_credential(db, row)
+            await repository.replace_guardrail_credential_workspaces(db, name=name, workspace_ids=scope)
             await db.commit()
     except IntegrityError:
         # The route's pre-check races the insert; the primary key is what
@@ -342,6 +434,10 @@ async def update_guardrail_credential(
     create_kwargs: dict[str, Any] | _Unset = UNSET,
     validate_kwargs: dict[str, Any] | _Unset = UNSET,
     enabled: bool | _Unset = UNSET,
+    mode: str | _Unset = UNSET,
+    on_unavailable: str | _Unset = UNSET,
+    applies_to_all_workspaces: bool | _Unset = UNSET,
+    workspace_ids: Sequence[uuid.UUID] | _Unset = UNSET,
 ) -> GuardrailCredential:
     """Update a stored definition. A field left at ``UNSET`` keeps its stored value.
 
@@ -354,9 +450,25 @@ async def update_guardrail_credential(
     Changing ``guardrail_name`` without sending ``create_kwargs`` re-splits the
     stored arguments under the new class, so the plain and secret halves can
     never be left classified by a guardrail the row no longer names.
+
+    ``workspace_ids`` when sent replaces the scope whole, and ``[]`` clears it.
+    Turning ``applies_to_all_workspaces`` on clears it too, because the flag wins
+    at resolve time and a list left behind would read as though it still decided
+    something.
     """
     target_guardrail = row.guardrail_name if isinstance(guardrail_name, _Unset) else guardrail_name
     spec = _require_spec(target_guardrail)
+
+    target_all = (
+        row.applies_to_all_workspaces if isinstance(applies_to_all_workspaces, _Unset) else applies_to_all_workspaces
+    )
+    scope: list[uuid.UUID] | None = None
+    if target_all:
+        scope = []
+    elif not isinstance(workspace_ids, _Unset):
+        scope = await _check_scope(db, workspace_ids)
+    target_enabled = row.enabled if isinstance(enabled, _Unset) else enabled
+    await _check_enforced_limit(db, enabling=target_enabled, excluding=row.name)
 
     if isinstance(validate_kwargs, _Unset):
         target_validate = dict(row.validate_kwargs or {})
@@ -375,10 +487,17 @@ async def update_guardrail_credential(
 
     row.guardrail_name = target_guardrail
     row.validate_kwargs = target_validate
+    row.applies_to_all_workspaces = target_all
     if not isinstance(enabled, _Unset):
         row.enabled = enabled
+    if not isinstance(mode, _Unset):
+        row.mode = mode
+    if not isinstance(on_unavailable, _Unset):
+        row.on_unavailable = on_unavailable
 
     async with _write(db):
+        if scope is not None:
+            await repository.replace_guardrail_credential_workspaces(db, name=row.name, workspace_ids=scope)
         await db.commit()
     await db.refresh(row)
     logger.info(

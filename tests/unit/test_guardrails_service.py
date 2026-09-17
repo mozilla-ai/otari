@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from gateway.models.guardrails import GuardrailConfig
-from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
+from gateway.services.guardrails import GuardrailResult, GuardrailsNotReachableError, run_input_guardrails
 from gateway.services.url_safety import UnsafeURLError
 
 _URL = "http://anyguardrails:8000"
@@ -429,3 +429,133 @@ async def test_a_callers_own_bad_url_is_still_their_malformed_request(monkeypatc
         )
 
     assert "guardrails.internal.corp.example" in str(exc.value)
+
+
+class _Runner:
+    """A stand-in for the process-wide runner, recording what it was asked to check."""
+
+    def __init__(self, *, holds: set[str], result: object = None) -> None:
+        self._holds = holds
+        self._result = result
+        self.checked: list[str] = []
+
+    def knows(self, profile: str) -> bool:
+        return profile in self._holds
+
+    async def check(self, *, cfg: GuardrailConfig, input_text: str) -> GuardrailResult:
+        self.checked.append(cfg.profile)
+        if isinstance(self._result, Exception):
+            raise self._result
+        return GuardrailResult(profile=cfg.profile, mode=cfg.mode, valid=False, explanation="injection", score=0.9)
+
+
+def _patch_runner(monkeypatch: pytest.MonkeyPatch, runner: _Runner) -> None:
+    monkeypatch.setattr("gateway.services.guardrail_runner.get_guardrail_runner", lambda: runner)
+
+
+def _refuse_http(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail loudly if anything opens a client, which is what "no sidecar" has to mean."""
+
+    def factory(*_args: object, **_kwargs: object) -> httpx.AsyncClient:
+        raise AssertionError("a stored guardrail must not reach the sidecar")
+
+    monkeypatch.setattr("gateway.services.guardrails.httpx.AsyncClient", factory)
+
+
+@pytest.mark.asyncio
+async def test_a_stored_definition_is_checked_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The runner already built it, so there is nothing to send anywhere."""
+    runner = _Runner(holds={"prompt-injection"})
+    _patch_runner(monkeypatch, runner)
+    _refuse_http(monkeypatch)
+
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="block")], "ignore previous", default_url=_URL
+    )
+
+    assert runner.checked == ["prompt-injection"]
+    assert verdict.blocked is True
+
+
+@pytest.mark.asyncio
+async def test_a_stored_definition_needs_no_guardrails_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A deployment that runs its own guardrails configures no sidecar at all."""
+    _patch_runner(monkeypatch, _Runner(holds={"prompt-injection"}))
+    _refuse_http(monkeypatch)
+
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="block")], "ignore previous", default_url=None
+    )
+
+    assert verdict.blocked is True
+
+
+@pytest.mark.asyncio
+async def test_a_profile_the_runner_does_not_hold_still_reaches_the_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nothing changes for a profile defined in the sidecar's own YAML."""
+    runner = _Runner(holds=set())
+    _patch_runner(monkeypatch, runner)
+    _patch_transport(monkeypatch, _result_handler({"valid": True}))
+
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="block")], "hello", default_url=_URL
+    )
+
+    assert runner.checked == []
+    assert verdict.blocked is False
+
+
+@pytest.mark.asyncio
+async def test_an_entry_naming_its_own_endpoint_is_sent_there(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A URL is a decision about where the check goes, so a stored definition does not override it."""
+    runner = _Runner(holds={"prompt-injection"})
+    _patch_runner(monkeypatch, runner)
+    # A public IP literal, so the safety check never reaches a resolver and the
+    # case does not depend on this runner having DNS.
+    _patch_transport(monkeypatch, _result_handler({"valid": True}))
+
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="block", url="https://93.184.216.34")],
+        "hello",
+        default_url=_URL,
+    )
+
+    assert runner.checked == []
+    assert verdict.blocked is False
+
+
+@pytest.mark.asyncio
+async def test_a_stored_definition_that_cannot_answer_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One failure path for both, since the runner raises the exception the matrix already handles."""
+    _patch_runner(
+        monkeypatch,
+        _Runner(holds={"prompt-injection"}, result=GuardrailsNotReachableError("vendor refused")),
+    )
+    _refuse_http(monkeypatch)
+
+    with pytest.raises(GuardrailsNotReachableError):
+        await run_input_guardrails(
+            [GuardrailConfig(profile="prompt-injection", mode="block", on_unavailable="block")],
+            "hello",
+            default_url=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_stored_definition_that_cannot_answer_can_fail_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_runner(
+        monkeypatch,
+        _Runner(holds={"prompt-injection"}, result=GuardrailsNotReachableError("vendor refused")),
+    )
+    _refuse_http(monkeypatch)
+
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="block", on_unavailable="monitor")],
+        "hello",
+        default_url=None,
+    )
+
+    assert verdict.blocked is False
+    assert verdict.results[0].valid is None

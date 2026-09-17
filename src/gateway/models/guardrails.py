@@ -109,6 +109,23 @@ class GuardrailCredential(Base):
     encrypted_create_secrets: Mapped[str | None] = mapped_column(Text, default=None)
     validate_kwargs: Mapped[dict[str, Any]] = mapped_column("validate_kwargs", JSON, default=dict)
     enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # What to do when the guardrail flags the input: "block" refuses the request,
+    # "monitor" serves it and reports the verdict. Spelled as
+    # ``GuardrailConfig.mode`` is, because it becomes one.
+    mode: Mapped[str] = mapped_column(default="block", nullable=False)
+    # What Otari does when no verdict came back at all: the vendor API failed or
+    # timed out, or the answer was malformed. "allow" rather than the "monitor"
+    # ``GuardrailConfig.on_unavailable`` spells, because a guardrail that never
+    # answered monitors nothing and there is no verdict to report; the choice is
+    # Otari's, and the two things it can do are refuse the request or serve it.
+    # ``services/guardrail_credential_service.stored_guardrail_config`` is where
+    # the two vocabularies meet.
+    on_unavailable: Mapped[str] = mapped_column(default="block", nullable=False)
+    # True means every workspace runs this, including one created tomorrow, and
+    # the scope rows below are not consulted. False means only the workspaces
+    # named there, and a new workspace inherits nothing. The rule, and the
+    # wording, are ``OrganizationGuardrail``'s.
+    applies_to_all_workspaces: Mapped[bool] = mapped_column(default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -137,9 +154,43 @@ class GuardrailCredential(Base):
             "create_secrets": {name: REDACTED_VALUE for name in sorted(secret_names)},
             "validate_kwargs": redact_secret_like_values(self.validate_kwargs) or {},
             "enabled": self.enabled,
+            "mode": self.mode,
+            "on_unavailable": self.on_unavailable,
+            "applies_to_all_workspaces": self.applies_to_all_workspaces,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class GuardrailCredentialWorkspace(Base):
+    """One workspace a stored guardrail definition runs in.
+
+    Membership only, the way ``OrganizationGuardrailWorkspace`` is: a row means
+    "this definition checks this workspace's requests", and its absence means it
+    does not. Ignored entirely when the definition's
+    ``applies_to_all_workspaces`` is set, so rows left behind by flipping that on
+    are inert rather than contradictory.
+
+    Scoped by workspace and not by organization, although the definition is
+    deployment-wide and the credential in it belongs to the operator. An
+    organization can already mandate a check over its own workspaces through
+    ``organization_guardrails``, with an endpoint and a credential of its own;
+    what an operator needs here is the other thing, one vendor account they hold
+    pointed at whichever workspaces they choose, which an organization-keyed
+    scope could not express.
+
+    Both sides cascade: the pairing has no meaning once either end is gone.
+    """
+
+    __tablename__ = "guardrail_credential_workspaces"
+
+    credential_name: Mapped[str] = mapped_column(
+        ForeignKey("guardrail_credentials.name", ondelete="CASCADE"), primary_key=True
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
 
 
 class OrganizationGuardrail(Base):
