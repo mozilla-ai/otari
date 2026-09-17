@@ -78,16 +78,16 @@ describe("nav registry", () => {
       "Routing",
       "Tools",
       "API keys",
-      "Providers",
       "Members",
       "Usage",
       "Workspaces",
       "Members & roles",
       "Email domains",
-      "Providers",
       "Spend & budgets",
       "Model pricing",
       "Guardrails",
+      "Providers",
+      "Providers",
       "Org settings",
       "Settings",
       "Accounts",
@@ -194,6 +194,29 @@ describe("nav registry", () => {
     expect(navContextForPath("/docs")).toBe("workspace")
   })
 
+  it.each([
+    ["standalone", "providers", "/providers"],
+    ["hosted", "organization_providers", "/organization/provider-keys"],
+  ])(
+    "places %s providers above Org settings in General",
+    (_, surface, path) => {
+      const visible = (item: NavItem) =>
+        item.surface === surface || item.surface === "organizations"
+      const general = visibleNavSections(ORG_NAV_SECTIONS, visible).find(
+        ({ section }) => section.id === "org-general",
+      )
+      expect(general?.items.map((item) => item.to)).toEqual([
+        path,
+        "/organization",
+      ])
+      expect(navContextForPath(path)).toBe("organization")
+      expect(navContextForPath(`${path}/detail`)).toBe("organization")
+      expect(
+        visibleNavSections(NAV_SECTIONS, visible).flatMap(({ items }) => items),
+      ).toEqual([])
+    },
+  )
+
   it("splits the tenancy pages across their two surfaces", () => {
     // The organization pages and the workspace pages are separate management
     // prefixes, so they gate separately: a deployment that served one without
@@ -205,7 +228,6 @@ describe("nav registry", () => {
       ["Workspaces", "workspaces"],
       ["Members & roles", "organizations"],
       ["Email domains", "organizations"],
-      ["Providers", "organization_providers"],
     ])
     const money = ORG_NAV_SECTIONS.find((section) => section.id === "org-money")
     expect(money?.items.map((item) => [item.label, item.surface])).toEqual([
@@ -411,19 +433,15 @@ describe("nav registry", () => {
     const gateway = NAV_SECTIONS.find((section) => section.id === "gateway")
     expect(gateway?.label).toBe("Build")
     expect(gateway?.items.map((item) => item.label)).toContain("Routing")
-    // `org-general` keeps its heading with one row in it, where the index
-    // section at the top of the workspace rail has none with one row in it. The
-    // registry's comment there is about a section that is *first*, with nothing
-    // above it to be absorbed into; General is last, under two labelled
-    // siblings, so without a heading its row reads as the tail of the section
-    // above rather than as a group of its own. Same rule, different
-    // surroundings: a heading earns its place when the section has labelled
-    // siblings.
     const general = ORG_NAV_SECTIONS.find(
       (section) => section.id === "org-general",
     )
     expect(general?.label).toBe("General")
-    expect(general?.items.map((item) => item.label)).toContain("Org settings")
+    expect(general?.items.map((item) => item.to)).toEqual([
+      "/providers",
+      "/organization/provider-keys",
+      "/organization",
+    ])
   })
 
   it("keeps section ids unique across all three rails", () => {

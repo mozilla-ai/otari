@@ -91,7 +91,7 @@ The workspace view contains day-to-day gateway operations:
   and the price your organization is charged. It is read-only; a rate is set on
   Model pricing.
 - Tools
-- API keys, providers, and workspace members
+- API keys and workspace members
 
 The organization view contains tenant-wide administration:
 
@@ -100,7 +100,8 @@ The organization view contains tenant-wide administration:
 - Email domains, for joining colleagues automatically
 - Spend and budgets
 - Organization pricing
-- Organization settings and, in hosted mode, provider keys
+- General: Providers, followed by Org settings. Providers manages deployment
+  credentials in standalone mode and organization provider keys in hosted mode.
 
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the

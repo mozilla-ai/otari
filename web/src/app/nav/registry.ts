@@ -44,8 +44,8 @@ import type {
  * below it are the design's: "Observe" is where you look (the request log and
  * the usage rollups over it), "Build" is what the gateway serves (models, the
  * policies that route over them, and the tools it can call; the roles matrix's
- * name for the section, otari-ai#1942), and "Access" is who may call it (keys,
- * the upstream credentials those keys spend, and the workspace's roster).
+ * name for the section, otari-ai#1942), and "Access" is who may call it (keys
+ * and the workspace's roster).
  *
  * Each entry declares its own gating, and the two axes are independent:
  * `surface` (does this deployment host it) and `capability` (is it entitled).
@@ -188,16 +188,6 @@ const BASE_NAV_SECTIONS = [
         surface: "keys",
         icon: FiKey,
       },
-      // "Providers", not "Provider credentials": the page manages the
-      // credential *and* the instance it belongs to, the rail has one line for
-      // it, and a two-word label is what the rest of this group reads like.
-      {
-        to: "/providers",
-        label: "Providers",
-        surface: "providers",
-        icon: FiBox,
-        operatorOnly: "refused",
-      },
       // The selected workspace's roster, not the organization's. The
       // organization roster is "Members & roles" in the other context, and the
       // two pages cross-link, which is the distinction the prototype draws.
@@ -231,7 +221,8 @@ const BASE_NAV_SECTIONS = [
  * provider credentials are the other, and that one is a *choice* rather than an
  * absence: the API and the page both exist, and a hosted deployment reports
  * `organization_providers` in place of the process-global `providers`, because
- * a credential keyed on an instance name alone is served to every tenant.
+ * a credential keyed on an instance name alone is served to every tenant. Both
+ * are rows under General, beside the row they belong with.
  *
  * The design draws two more, Billing and Gateways, and neither is declared here
  * at all, because neither is this build's to declare: Billing is
@@ -251,14 +242,6 @@ const BASE_NAV_SECTIONS = [
  * entry names to be in `BASE_CAPABILITIES`, that is, to be granted, so a
  * capability gate cannot express "declared but not served" without relaxing that
  * invariant. A surface gate says exactly this and needs no test change.
- *
- * Both have a page on the *workspace* rail that looks like them and is not:
- * `/providers` is this process's credentials, and `/tools/guardrails` is
- * what this process refuses. The organization ones are a tenant-wide credential
- * set and a ceiling over every workspace, which are different tables behind
- * different endpoints. Pointing the organization rows at the workspace pages
- * would put one destination on both rails, which `navContextForPath` cannot
- * express and `registry.test.ts` forbids.
  */
 const ORGANIZATION_NAV_SECTIONS = [
   {
@@ -313,17 +296,6 @@ const ORGANIZATION_NAV_SECTIONS = [
         label: "Email domains",
         surface: "organizations",
         icon: FiAtSign,
-      },
-      // The organization's own upstream credentials, which is a different table
-      // from the workspace rail's `/providers`: over there a credential belongs
-      // to the process, here it belongs to the tenant. A deployment reports one
-      // surface or the other, never both, so exactly one of the two rows renders.
-      // See the note above.
-      {
-        to: "/organization/provider-keys",
-        label: "Providers",
-        surface: "organization_providers",
-        icon: FiBox,
       },
     ],
   },
@@ -390,15 +362,27 @@ const ORGANIZATION_NAV_SECTIONS = [
   },
   {
     id: "org-general",
-    // Keeps its heading with one row in it, where the index section at the top
-    // of the workspace rail has none. That is the same rule read in different
-    // surroundings rather than an exception to it: the index is first, with
-    // nothing above it to be absorbed into, and General is last under two
-    // labelled siblings, so a row with no heading here reads as the tail of
-    // Cost & billing. A heading earns its place when the section has labelled
-    // siblings, which is also why the deployment rail's one section has none.
     label: "General",
     items: [
+      // Two rows, one label, and exactly one of them ever renders: a
+      // deployment reports the process-global surface or the tenant-scoped one,
+      // never both. They are different tables behind different endpoints, so
+      // the shared label is the honest one rather than a duplicate. "Providers"
+      // and not "Provider credentials" either way: the page manages the
+      // credential *and* the instance it belongs to, and the rail has one line.
+      {
+        to: "/providers",
+        label: "Providers",
+        surface: "providers",
+        icon: FiBox,
+        operatorOnly: "refused",
+      },
+      {
+        to: "/organization/provider-keys",
+        label: "Providers",
+        surface: "organization_providers",
+        icon: FiBox,
+      },
       {
         to: "/organization",
         label: "Org settings",

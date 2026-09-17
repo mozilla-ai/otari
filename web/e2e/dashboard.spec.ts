@@ -117,15 +117,8 @@ test.describe("dashboard core flows", () => {
     await login(page)
     // The workspace rail, then the organization one. The sidebar label and the
     // page heading are no longer always the same word, so both are named.
-    for (const [link, heading] of [
-      ["Models", "Models"],
-      ["Providers", "Providers"],
-    ]) {
-      await nav(page).getByRole("link", { name: link }).click()
-      // Exact match: the Budgets onboarding heading ("No budgets yet") would
-      // otherwise also substring-match the page title.
-      await expect(pageHeading(page, heading)).toBeVisible()
-    }
+    await nav(page).getByRole("link", { name: "Models", exact: true }).click()
+    await expect(pageHeading(page, "Models")).toBeVisible()
 
     // Routing and Tools nest their pages, so each is reached through its group.
     await openNested(page, "Routing", "Policies")
@@ -139,6 +132,7 @@ test.describe("dashboard core flows", () => {
 
     await openOrganization(page)
     for (const [link, heading] of [
+      ["Providers", "Providers"],
       ["Spend & budgets", "Budgets"],
       ["Model pricing", "Model pricing"],
     ]) {
