@@ -22,13 +22,9 @@ from gateway.models.budgets import Budget, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.money import as_float
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
-    Organization,
-    User,
-    Workspace,
     WorkspaceAssignmentRequest,
 )
 from gateway.repositories.tenancy import (
-    OrganizationMemberRepository,
     OrganizationRepository,
     UserRepository,
     WorkspaceMemberRepository,
@@ -53,40 +49,9 @@ from gateway.services.tenancy.workspace_budget_default_service import (
     WorkspaceMemberBudgetPolicyUpdate,
 )
 
+from .tenancy_helpers import create_budget, create_member, create_organization, create_workspace
+
 pytestmark = pytest.mark.asyncio
-
-
-async def _organization(db: AsyncSession, *, slug: str) -> Organization:
-    return await OrganizationRepository(db).create_organization(name=slug.title(), slug=slug, created_by_user_id=None)
-
-
-async def _member(
-    db: AsyncSession,
-    organization: Organization,
-    *,
-    role: str,
-    full_name: str,
-) -> User:
-    user = await UserRepository(db).create_local_identity(
-        full_name=full_name,
-        active_organization_id=organization.id,
-    )
-    await OrganizationMemberRepository(db).create_membership(
-        organization_id=organization.id,
-        user_id=user.id,
-        role=role,
-    )
-    return user
-
-
-async def _workspace(db: AsyncSession, organization: Organization, *, name: str, owner: User) -> Workspace:
-    workspace = await WorkspaceRepository(db).create_workspace(
-        name=name,
-        organization_id=organization.id,
-        created_by_user_id=owner.id,
-    )
-    await WorkspaceMemberRepository(db).create(workspace_id=workspace.id, user_id=owner.id, role="owner")
-    return workspace
 
 
 async def _member_budget(
@@ -115,35 +80,11 @@ async def _limit(db: AsyncSession, ceiling: ScopedBudget) -> float | None:
     return as_float(budget.max_budget)
 
 
-async def _budget(
-    db: AsyncSession,
-    *,
-    max_budget: float | None = None,
-    budget_duration_sec: int | None = None,
-    reset_alignment: str | None = None,
-    name: str | None = None,
-) -> str:
-    """A budget for a default to hand out, returning its id.
-
-    A default no longer carries a limit of its own: it names a ``budgets`` row,
-    which is what lets the Budgets page say a limit is a workspace's default.
-    """
-    budget = Budget(
-        name=name,
-        max_budget=max_budget,
-        budget_duration_sec=budget_duration_sec,
-        reset_alignment=reset_alignment,
-    )
-    db.add(budget)
-    await db.flush()
-    return budget.budget_id
-
-
 async def test_create_materializes_onto_existing_members_but_skips_an_override(async_db: AsyncSession) -> None:
-    org = await _organization(async_db, slug="acme-create")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    other = await _member(async_db, org, role="member", full_name="Other")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-create")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    other = await create_member(async_db, org, role="member", full_name="Other")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
     workspace_members = WorkspaceMemberRepository(async_db)
     other_member = await workspace_members.create(workspace_id=workspace.id, user_id=other.id, role="member")
 
@@ -151,7 +92,7 @@ async def test_create_materializes_onto_existing_members_but_skips_an_override(a
     override = ScopedBudget(
         scope_type="workspace_member",
         scope_id=str(other_member.id),
-        budget_id=await _budget(async_db, max_budget=999.0),
+        budget_id=await create_budget(async_db, max_budget=999.0),
     )
     async_db.add(override)
     await async_db.commit()
@@ -161,7 +102,7 @@ async def test_create_materializes_onto_existing_members_but_skips_an_override(a
         user=owner,
         workspace_id=workspace.id,
         request=WorkspaceMemberBudgetPolicyCreate(
-            budget_id=await _budget(async_db, name="Default", max_budget=50.0, budget_duration_sec=86400)
+            budget_id=await create_budget(async_db, name="Default", max_budget=50.0, budget_duration_sec=86400)
         ),
     )
     assert created.max_budget == 50.0
@@ -185,16 +126,16 @@ async def test_create_materializes_onto_existing_members_but_skips_an_override(a
 
 
 async def test_member_added_afterwards_is_materialized_on_join(async_db: AsyncSession) -> None:
-    org = await _organization(async_db, slug="acme-join")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    joiner = await _member(async_db, org, role="member", full_name="Joiner")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-join")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    joiner = await create_member(async_db, org, role="member", full_name="Joiner")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
 
     service = WorkspaceBudgetDefaultService(async_db)
     await service.create_default(
         user=owner,
         workspace_id=workspace.id,
-        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await _budget(async_db, max_budget=25.0)),
+        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=25.0)),
     )
 
     workspace_service = WorkspaceService(async_db)
@@ -206,15 +147,15 @@ async def test_member_added_afterwards_is_materialized_on_join(async_db: AsyncSe
 
 
 async def test_member_added_via_organization_workspace_assignment_is_materialized(async_db: AsyncSession) -> None:
-    org = await _organization(async_db, slug="acme-assign")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-assign")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
 
     service = WorkspaceBudgetDefaultService(async_db)
     await service.create_default(
         user=owner,
         workspace_id=workspace.id,
-        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await _budget(async_db, max_budget=15.0)),
+        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=15.0)),
     )
 
     organization_service = OrganizationService(async_db)
@@ -244,9 +185,9 @@ async def test_reviving_a_suspended_workspace_membership_is_materialized(async_d
     look if one arrives (an import, or a future suspend action) and a default
     was created while it was suspended.
     """
-    org = await _organization(async_db, slug="acme-revive")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-revive")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
 
     target = await UserRepository(async_db).create_local_identity(
         full_name="Revived",
@@ -265,7 +206,7 @@ async def test_reviving_a_suspended_workspace_membership_is_materialized(async_d
     await service.create_default(
         user=owner,
         workspace_id=workspace.id,
-        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await _budget(async_db, max_budget=35.0)),
+        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=35.0)),
     )
     # The default fans out to active members only; the suspended row gets
     # nothing from it yet.
@@ -301,10 +242,10 @@ async def test_reapplying_an_active_assignment_does_not_rematerialize_a_deleted_
     resurrect a per-member ceiling an admin deliberately deleted through
     `/api/v1/scoped-budgets`.
     """
-    org = await _organization(async_db, slug="acme-reapply")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    member_user = await _member(async_db, org, role="member", full_name="Member")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-reapply")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    member_user = await create_member(async_db, org, role="member", full_name="Member")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
     workspace_member = await WorkspaceMemberRepository(async_db).create(
         workspace_id=workspace.id, user_id=member_user.id, role="member"
     )
@@ -314,7 +255,7 @@ async def test_reapplying_an_active_assignment_does_not_rematerialize_a_deleted_
     await service.create_default(
         user=owner,
         workspace_id=workspace.id,
-        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await _budget(async_db, max_budget=50.0)),
+        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=50.0)),
     )
     budget = await _member_budget(async_db, workspace_member.id)
     assert budget is not None
@@ -337,16 +278,16 @@ async def test_reapplying_an_active_assignment_does_not_rematerialize_a_deleted_
 
 
 async def test_update_is_not_retroactive(async_db: AsyncSession) -> None:
-    org = await _organization(async_db, slug="acme-update")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    later_joiner = await _member(async_db, org, role="member", full_name="Later")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-update")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    later_joiner = await create_member(async_db, org, role="member", full_name="Later")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
 
     service = WorkspaceBudgetDefaultService(async_db)
     default = await service.create_default(
         user=owner,
         workspace_id=workspace.id,
-        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await _budget(async_db, max_budget=10.0)),
+        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=10.0)),
     )
     owner_member = await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(workspace.id, owner.id)
     assert owner_member is not None
@@ -358,7 +299,7 @@ async def test_update_is_not_retroactive(async_db: AsyncSession) -> None:
         user=owner,
         workspace_id=workspace.id,
         default_id=default.id,
-        request=WorkspaceMemberBudgetPolicyUpdate(budget_id=await _budget(async_db, max_budget=20.0)),
+        request=WorkspaceMemberBudgetPolicyUpdate(budget_id=await create_budget(async_db, max_budget=20.0)),
     )
 
     owner_budget_after = await _member_budget(async_db, owner_member.id)
@@ -373,16 +314,16 @@ async def test_update_is_not_retroactive(async_db: AsyncSession) -> None:
 
 
 async def test_delete_preserves_materialized_rows_and_stops_future_ones(async_db: AsyncSession) -> None:
-    org = await _organization(async_db, slug="acme-delete")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    later_joiner = await _member(async_db, org, role="member", full_name="Later")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-delete")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    later_joiner = await create_member(async_db, org, role="member", full_name="Later")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
 
     service = WorkspaceBudgetDefaultService(async_db)
     default = await service.create_default(
         user=owner,
         workspace_id=workspace.id,
-        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await _budget(async_db, max_budget=30.0)),
+        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=30.0)),
     )
     owner_member = await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(workspace.id, owner.id)
     assert owner_member is not None
@@ -401,37 +342,37 @@ async def test_delete_preserves_materialized_rows_and_stops_future_ones(async_db
 
 
 async def test_duplicate_aggregate_default_conflicts(async_db: AsyncSession) -> None:
-    org = await _organization(async_db, slug="acme-conflict")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-conflict")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
 
     service = WorkspaceBudgetDefaultService(async_db)
     await service.create_default(
         user=owner,
         workspace_id=workspace.id,
-        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await _budget(async_db, max_budget=10.0)),
+        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=10.0)),
     )
 
     with pytest.raises(WorkspaceBudgetDefaultAlreadyExistsError):
         await service.create_default(
             user=owner,
             workspace_id=workspace.id,
-            request=WorkspaceMemberBudgetPolicyCreate(budget_id=await _budget(async_db, max_budget=20.0)),
+            request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=20.0)),
         )
 
 
 async def test_non_management_member_may_list_but_not_write(async_db: AsyncSession) -> None:
-    org = await _organization(async_db, slug="acme-authz")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    plain = await _member(async_db, org, role="member", full_name="Plain")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-authz")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    plain = await create_member(async_db, org, role="member", full_name="Plain")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
     await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=plain.id, role="member")
 
     service = WorkspaceBudgetDefaultService(async_db)
     default = await service.create_default(
         user=owner,
         workspace_id=workspace.id,
-        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await _budget(async_db, max_budget=10.0)),
+        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=10.0)),
     )
 
     listed = await service.list_defaults(user=plain, workspace_id=workspace.id)
@@ -441,7 +382,7 @@ async def test_non_management_member_may_list_but_not_write(async_db: AsyncSessi
         await service.create_default(
             user=plain,
             workspace_id=workspace.id,
-            request=WorkspaceMemberBudgetPolicyCreate(budget_id=await _budget(async_db, max_budget=99.0)),
+            request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=99.0)),
         )
 
     with pytest.raises(NotAuthorizedError):
@@ -449,7 +390,7 @@ async def test_non_management_member_may_list_but_not_write(async_db: AsyncSessi
             user=plain,
             workspace_id=workspace.id,
             default_id=default.id,
-            request=WorkspaceMemberBudgetPolicyUpdate(budget_id=await _budget(async_db, max_budget=99.0)),
+            request=WorkspaceMemberBudgetPolicyUpdate(budget_id=await create_budget(async_db, max_budget=99.0)),
         )
 
     with pytest.raises(NotAuthorizedError):
@@ -457,11 +398,11 @@ async def test_non_management_member_may_list_but_not_write(async_db: AsyncSessi
 
 
 async def test_foreign_workspace_is_not_found(async_db: AsyncSession) -> None:
-    org_a = await _organization(async_db, slug="acme-foreign-a")
-    org_b = await _organization(async_db, slug="acme-foreign-b")
-    owner_a = await _member(async_db, org_a, role="owner", full_name="Owner A")
-    owner_b = await _member(async_db, org_b, role="owner", full_name="Owner B")
-    workspace_b = await _workspace(async_db, org_b, name="Elsewhere", owner=owner_b)
+    org_a = await create_organization(async_db, slug="acme-foreign-a")
+    org_b = await create_organization(async_db, slug="acme-foreign-b")
+    owner_a = await create_member(async_db, org_a, role="owner", full_name="Owner A")
+    owner_b = await create_member(async_db, org_b, role="owner", full_name="Owner B")
+    workspace_b = await create_workspace(async_db, org_b, name="Elsewhere", owner=owner_b)
 
     service = WorkspaceBudgetDefaultService(async_db)
     with pytest.raises(WorkspaceNotFoundError):
@@ -487,16 +428,17 @@ async def test_materialize_batch_recovers_from_a_missed_collision(async_db: Asyn
     otherwise wraps the same existence check around every id and would just
     filter the colliding one out before ever attempting to insert it.
     """
-    org = await _organization(async_db, slug="acme-collision")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    other = await _member(async_db, org, role="member", full_name="Other")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-collision")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    other = await create_member(async_db, org, role="member", full_name="Other")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
     workspace_members = WorkspaceMemberRepository(async_db)
     other_member = await workspace_members.create(workspace_id=workspace.id, user_id=other.id, role="member")
     owner_member = await workspace_members.get_by_workspace_and_user(workspace.id, owner.id)
     assert owner_member is not None
 
-    default = WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=await _budget(async_db, max_budget=40.0))
+    budget_id = await create_budget(async_db, max_budget=40.0)
+    default = WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=budget_id)
     async_db.add(default)
     await async_db.flush()
 
@@ -505,7 +447,7 @@ async def test_materialize_batch_recovers_from_a_missed_collision(async_db: Asyn
     collision = ScopedBudget(
         scope_type="workspace_member",
         scope_id=str(other_member.id),
-        budget_id=await _budget(async_db, max_budget=999.0),
+        budget_id=await create_budget(async_db, max_budget=999.0),
     )
     async_db.add(collision)
     await async_db.flush()
@@ -568,14 +510,14 @@ async def test_concurrent_default_create_and_member_add_both_land(
     ceiling from a default that, from the outside, looks like it was already
     there when they joined.
     """
-    org = await _organization(async_db, slug="acme-race")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    joiner = await _member(async_db, org, role="member", full_name="Joiner")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-race")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    joiner = await create_member(async_db, org, role="member", full_name="Joiner")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
     # The racing sessions below are separate connections and must see this
     # graph committed, not merely flushed on `async_db`. The budget the default
     # will name is part of that graph.
-    budget_id = await _budget(async_db, max_budget=40.0)
+    budget_id = await create_budget(async_db, max_budget=40.0)
     await async_db.commit()
 
     async def create_default_attempt() -> object:
@@ -626,16 +568,16 @@ async def test_a_calendar_aligned_budget_materializes_a_window_that_rolls(async_
     cadence was silently ignored forever and spend accumulated until the member
     was permanently refused. Nothing surfaced it: the row looked normal.
     """
-    org = await _organization(async_db, slug="acme-aligned")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-aligned")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
 
     service = WorkspaceBudgetDefaultService(async_db)
     await service.create_default(
         user=owner,
         workspace_id=workspace.id,
         request=WorkspaceMemberBudgetPolicyCreate(
-            budget_id=await _budget(async_db, max_budget=500.0, reset_alignment="calendar_month")
+            budget_id=await create_budget(async_db, max_budget=500.0, reset_alignment="calendar_month")
         ),
     )
 
@@ -663,11 +605,11 @@ async def test_editing_a_budget_moves_every_ceiling_naming_it(async_db: AsyncSes
     one edit moves every ceiling naming it. Asserted at the enforcement layer's
     own read rather than through the ORM object, since that is what the gate uses.
     """
-    org = await _organization(async_db, slug="acme-retro")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-retro")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
 
-    budget_id = await _budget(async_db, max_budget=10.0)
+    budget_id = await create_budget(async_db, max_budget=10.0)
     service = WorkspaceBudgetDefaultService(async_db)
     await service.create_default(
         user=owner, workspace_id=workspace.id, request=WorkspaceMemberBudgetPolicyCreate(budget_id=budget_id)
@@ -697,16 +639,16 @@ async def test_removing_a_member_takes_their_workspace_ceiling_with_them(async_d
     it holds a RESTRICT reference to its budget, so leaving one behind refuses
     that budget's deletion forever with no page listing ceilings to find it on.
     """
-    org = await _organization(async_db, slug="acme-sweep")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    leaver = await _member(async_db, org, role="member", full_name="Leaver")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-sweep")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    leaver = await create_member(async_db, org, role="member", full_name="Leaver")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
 
     service = WorkspaceBudgetDefaultService(async_db)
     await service.create_default(
         user=owner,
         workspace_id=workspace.id,
-        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await _budget(async_db, max_budget=25.0)),
+        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await create_budget(async_db, max_budget=25.0)),
     )
 
     workspace_service = WorkspaceService(async_db)
@@ -728,16 +670,16 @@ async def test_the_read_surface_reports_a_calendar_alignment(async_db: AsyncSess
     resets. ``ScopedBudgetResponse`` already carries both off the budget for the
     same reason, and so does the platform's own policy read shape.
     """
-    org = await _organization(async_db, slug="acme-read-aligned")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-read-aligned")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
 
     service = WorkspaceBudgetDefaultService(async_db)
     created = await service.create_default(
         user=owner,
         workspace_id=workspace.id,
         request=WorkspaceMemberBudgetPolicyCreate(
-            budget_id=await _budget(async_db, max_budget=250.0, reset_alignment="calendar_month")
+            budget_id=await create_budget(async_db, max_budget=250.0, reset_alignment="calendar_month")
         ),
     )
 
@@ -750,15 +692,15 @@ async def test_the_read_surface_reports_a_calendar_alignment(async_db: AsyncSess
 
 async def test_a_rolling_budget_still_reads_back_with_no_alignment(async_db: AsyncSession) -> None:
     """The other arm of the exclusive pair, so the new field cannot be a constant."""
-    org = await _organization(async_db, slug="acme-read-rolling")
-    owner = await _member(async_db, org, role="owner", full_name="Owner")
-    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    org = await create_organization(async_db, slug="acme-read-rolling")
+    owner = await create_member(async_db, org, role="owner", full_name="Owner")
+    workspace = await create_workspace(async_db, org, name="Engineering", owner=owner)
 
     created = await WorkspaceBudgetDefaultService(async_db).create_default(
         user=owner,
         workspace_id=workspace.id,
         request=WorkspaceMemberBudgetPolicyCreate(
-            budget_id=await _budget(async_db, max_budget=250.0, budget_duration_sec=86400)
+            budget_id=await create_budget(async_db, max_budget=250.0, budget_duration_sec=86400)
         ),
     )
 
@@ -787,7 +729,7 @@ async def test_bootstrap_provisioning_materializes_the_default_workspaces_defaul
     workspace = await workspaces.get_by_organization_and_name(organization.id, DEFAULT_WORKSPACE_NAME)
     assert workspace is not None
 
-    budget_id = await _budget(async_db, max_budget=125.0, reset_alignment="calendar_month")
+    budget_id = await create_budget(async_db, max_budget=125.0, reset_alignment="calendar_month")
     async_db.add(WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=budget_id))
     await async_db.commit()
 
@@ -822,7 +764,7 @@ async def test_bootstrap_survives_a_default_naming_a_budget_that_is_gone(
         organization.id, DEFAULT_WORKSPACE_NAME
     )
     assert workspace is not None
-    budget_id = await _budget(async_db, max_budget=125.0)
+    budget_id = await create_budget(async_db, max_budget=125.0)
     async_db.add(WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=budget_id))
     await async_db.commit()
 
@@ -854,16 +796,16 @@ async def test_a_default_may_not_name_another_organizations_budget(async_db: Asy
 
     404, not 403, for the reason every other foreign-row refusal here is.
     """
-    theirs = await _organization(async_db, slug="globex-default")
-    their_owner = await _member(async_db, theirs, role="owner", full_name="Their owner")
-    their_budget_id = await _budget(async_db, max_budget=10.0)
+    theirs = await create_organization(async_db, slug="globex-default")
+    their_owner = await create_member(async_db, theirs, role="owner", full_name="Their owner")
+    their_budget_id = await create_budget(async_db, max_budget=10.0)
     their_budget = await async_db.get(Budget, their_budget_id)
     assert their_budget is not None
     their_budget.organization_id = theirs.id
 
-    mine = await _organization(async_db, slug="acme-default")
-    my_owner = await _member(async_db, mine, role="owner", full_name="My owner")
-    my_workspace = await _workspace(async_db, mine, name="Engineering", owner=my_owner)
+    mine = await create_organization(async_db, slug="acme-default")
+    my_owner = await create_member(async_db, mine, role="owner", full_name="My owner")
+    my_workspace = await create_workspace(async_db, mine, name="Engineering", owner=my_owner)
     await async_db.flush()
     service = WorkspaceBudgetDefaultService(async_db)
 
@@ -876,7 +818,7 @@ async def test_a_default_may_not_name_another_organizations_budget(async_db: Asy
 
     # Their own workspace may still name it, which is what makes the check about
     # the tenant boundary rather than about the column being set at all.
-    their_workspace = await _workspace(async_db, theirs, name="Theirs", owner=their_owner)
+    their_workspace = await create_workspace(async_db, theirs, name="Theirs", owner=their_owner)
     created = await service.create_default(
         user=their_owner,
         workspace_id=their_workspace.id,
@@ -892,10 +834,10 @@ async def test_a_default_may_still_name_a_deployment_budget(async_db: AsyncSessi
     otari-ai cutover minted, all of which read NULL. Narrowing them out here would
     refuse the very defaults that already exist.
     """
-    organization = await _organization(async_db, slug="acme-deployment-budget")
-    owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    workspace = await _workspace(async_db, organization, name="Engineering", owner=owner)
-    deployment_budget_id = await _budget(async_db, max_budget=10.0)
+    organization = await create_organization(async_db, slug="acme-deployment-budget")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
+    deployment_budget_id = await create_budget(async_db, max_budget=10.0)
     await async_db.flush()
 
     created = await WorkspaceBudgetDefaultService(async_db).create_default(
