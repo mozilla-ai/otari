@@ -87,14 +87,12 @@ only gate for them.
 ## Errors
 
 A domain error carries its own `status_code`, and one registered handler
-renders its family. Today only tenancy errors have such a family:
-`TenancyError`, rendered by `_tenancy_error_handler` in `gateway.main`.
+renders its family. One family exists: `TenancyError` and the status bases
+under it, in `exceptions/__init__.py`, rendered by `_tenancy_error_handler` in
+`gateway.main`. A domain's own error module subclasses those bases.
 
 - Flag a route that catches a tenancy error to turn it into an
   `HTTPException`.
-- Flag an error class outside tenancy that subclasses `TenancyError`. Its
-  family base is not decided, and the tenancy handler would change its
-  response contract.
 
 ## Module size
 
