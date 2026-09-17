@@ -36,8 +36,10 @@ function spentLabel(ceiling: OrganizationSpendCeiling): string {
 }
 
 export function SpendCeilingsCard({
+  organizationId,
   organizationName,
 }: {
+  organizationId: string
   organizationName: string
 }) {
   const ceilings = useOrganizationSpendCeilings()
@@ -190,6 +192,7 @@ export function SpendCeilingsCard({
         editing={editing}
         budgets={budgets.data ?? []}
         workspaces={workspaceRows}
+        organizationId={organizationId}
         organizationName={organizationName}
         onSaved={() => setDialogOpen(false)}
       />

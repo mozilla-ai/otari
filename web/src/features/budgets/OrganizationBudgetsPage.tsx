@@ -35,7 +35,10 @@ export function OrganizationBudgetsPage({
         request is refused when any ceiling covering it is out of headroom.
       </PageIntro>
       <OrganizationBudgetsCard />
-      <SpendCeilingsCard organizationName={organization.organization.name} />
+      <SpendCeilingsCard
+        organizationId={organization.organization.id}
+        organizationName={organization.organization.name}
+      />
     </div>
   )
 }

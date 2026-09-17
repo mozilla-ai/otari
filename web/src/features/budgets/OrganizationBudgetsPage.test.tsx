@@ -9,6 +9,7 @@ import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,
+  organization,
   organizationContext,
   organizationSpendCeiling as spendCeiling,
   workspace,
@@ -452,10 +453,45 @@ describe("OrganizationBudgetsPage", () => {
         request.url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
     )
     // The scope an admin reaches this page to set, held to the organization's
-    // own first budget.
+    // own first budget. `scope_id` is asserted because the endpoint resolves it
+    // as a uuid: a word standing in for "the organization" is refused, and the
+    // scope type alone cannot tell the two apart (otari-ai#2147).
     expect(posted?.body).toMatchObject({
       scope_type: "organization",
+      scope_id: organization().id,
       budget_id: organizationBudget().budget_id,
+    })
+  })
+
+  it("creates a ceiling against the workspace that was picked", async () => {
+    // The other half of the target control. Both options carry a real id, so
+    // the one guard against them being swapped is that each posts its own.
+    const requests = mockApi()
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole("grid", { name: "Organization spend ceilings" })
+
+    await user.click(screen.getByRole("button", { name: "Add ceiling" }))
+    await user.click(screen.getByRole("button", { name: /Capping/ }))
+    await user.click(
+      await screen.findByRole("option", { name: "Engineering (workspace)" }),
+    )
+    await user.click(
+      screen
+        .getAllByRole("button", { name: "Add ceiling" })
+        .at(-1) as HTMLElement,
+    )
+
+    await waitFor(() => {
+      const posted = requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
+      )
+      expect(posted?.body).toMatchObject({
+        scope_type: "workspace",
+        scope_id: workspace().id,
+      })
     })
   })
 
