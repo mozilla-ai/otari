@@ -10,12 +10,13 @@ name: Otari Release (open PR)
 # (baked in as OTARI_VERSION; see src/gateway/version.py), so this workflow only
 # regenerates the changelog.
 #
-# Runs as the Otari Release GitHub App (RELEASE_APP_ID +
-# RELEASE_APP_PRIVATE_KEY), so the PR is authored by a bot rather than by
-# whichever maintainer owned a personal access token. The default GITHUB_TOKEN
-# cannot be used instead: a branch it pushes and a PR it opens do not trigger
-# the PR's CI, so the release PR could not satisfy required status checks. An
-# App installation token is a distinct identity and does. See RELEASE.md.
+# Runs as the otari-bot GitHub App (RELEASE_APP_CLIENT_ID +
+# RELEASE_APP_PRIVATE_KEY), so the PR is authored by otari-bot[bot] rather than
+# by whichever maintainer owned a personal access token. The default
+# GITHUB_TOKEN cannot be used instead: a PR it opens starts no workflows at
+# all, so the PR title and template checks would not run on the release PR, and
+# step 2 would publish a Release that never triggers the Docker build. An App
+# installation token is a distinct identity and does start them. See RELEASE.md.
 #
 # The App token is minted in the last step rather than the first, so that it
 # does not exist while the job is running git-cliff.
@@ -133,8 +134,15 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
+          # client-id, not app-id: the action deprecated app-id, and a Client ID
+          # is public identification rather than a secret, so it lives in a
+          # repository variable.
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          # Narrowed from what the App installation holds to what this job
+          # uses: a branch push and a pull request.
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Commit, push, open PR
         env:

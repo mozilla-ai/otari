@@ -6,7 +6,7 @@ name: Otari Release (tag + publish)
 # the Release fires otari-docker.yml (`release: published`), which builds and
 # pushes the image with OTARI_VERSION baked to the tag.
 #
-# Runs as the Otari Release GitHub App (RELEASE_APP_ID +
+# Runs as the otari-bot GitHub App (RELEASE_APP_CLIENT_ID +
 # RELEASE_APP_PRIVATE_KEY) so that `gh release create` triggers
 # otari-docker.yml; a Release created with the default GITHUB_TOKEN would not
 # start downstream workflows. See RELEASE.md.
@@ -84,8 +84,13 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
+          # client-id, not app-id: the action deprecated app-id, and a Client ID
+          # is public identification rather than a secret, so it lives in a
+          # repository variable.
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          # This job creates a tag and a Release and touches nothing else.
+          permission-contents: write
 
       - name: Create tag and publish GitHub Release
         env:
