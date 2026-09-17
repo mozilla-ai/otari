@@ -379,11 +379,8 @@ class CatalogScope:
     which is where its own writes land.
     """
 
-    deployment_supplied_providers: frozenset[str] = frozenset()
-    """Hosted providers the deployment pays for in at least one of the organization's workspaces.
-
-    It is empty for an operator, a master key, an API key and a visitor.
-    """
+    deployment_supplied_providers: frozenset[str]
+    """Hosted providers the deployment pays for in at least one of the organization's workspaces."""
 
 
 async def catalog_scope(
@@ -407,10 +404,14 @@ async def catalog_scope(
     # instances and nothing that belongs to a tenant. Not a member of anything,
     # so no BYO key, no workspace's aliases or policies.
     if anonymous:
-        return CatalogScope(allowlist=[f"{instance}:*" for instance in config.providers], reads_workspace_layer=False)
+        return CatalogScope(
+            allowlist=[f"{instance}:*" for instance in config.providers],
+            reads_workspace_layer=False,
+            deployment_supplied_providers=frozenset(),
+        )
     if session_identity is not None:
         if await DeploymentUserService(db).has_administration_access(session_identity):
-            return CatalogScope(allowlist=None, reads_workspace_layer=True)
+            return CatalogScope(allowlist=None, reads_workspace_layer=True, deployment_supplied_providers=frozenset())
         scope = await resolve_session_catalog_scope(db, config, user=session_identity, model_provider=model_provider)
         return CatalogScope(
             allowlist=scope.allowlist,
@@ -418,9 +419,11 @@ async def catalog_scope(
             deployment_supplied_providers=scope.deployment_supplied_providers,
         )
     api_key, is_master_key = auth
+    # An API key's hosted models stay unflagged, because this does not resolve the key's organization.
     return CatalogScope(
         allowlist=None if is_master_key else await resolve_request_allowlist(db, api_key),
         reads_workspace_layer=True,
+        deployment_supplied_providers=frozenset(),
     )
 
 
