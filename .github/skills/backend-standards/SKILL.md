@@ -77,6 +77,10 @@ remove a name when you move its code, and never add one.
 - **Services** never import `sqlalchemy` or `sqlmodel`. A service that handles a database failure catches
   `DATABASE_ERRORS` from `core/database.py`, which also covers the bare `TimeoutError` a
   connect timeout raises.
+- **Reacting to another domain.** Dependencies between domains run one way. A domain that must
+  react to a change in a domain that does not depend on it receives a listener interface by
+  constructor injection, defined by the domain where the change happens. The listener runs in the
+  caller's transaction and never commits.
 - **Repositories** inherit `BaseRepository`, flush and never commit. A repository that turns a
   specific database error, such as `IntegrityError`, into a domain error is the module that
   imports it.

@@ -39,6 +39,12 @@ How a domain fits together:
   `api/`, so the code that starts a worker passes the builder in.
 - **Imports** follow the
   [layer and import rules](../ARCHITECTURE.md#the-modular-monolith).
+- **Reacting to another domain.** Dependencies between domains run one way.
+  When a domain must react to a change in a domain that does not depend on it,
+  the domain where the change happens defines a listener interface and receives
+  an implementation by constructor injection (Observer, and the Dependency
+  Inversion Principle). The listener runs inside the caller's transaction and
+  never commits. A package root may export a listener it offers another domain.
 - **Divider comments** that cut a module into sections mean the module splits
   along them.
 - **The domain test.** A domain that cannot offer a small public API is more
@@ -315,6 +321,10 @@ down for the domain, and the pull request records them.
 - Simon Brown, "Package by component and architecturally-aligned testing"
   (2016), republished as "The Missing Chapter" in Robert C. Martin, *Clean
   Architecture* (2017): https://simonbrown.je/modular-monolith/
+- Erich Gamma, Richard Helm, Ralph Johnson and John Vlissides, *Design
+  Patterns: Elements of Reusable Object-Oriented Software* (1994): Observer
+- Robert C. Martin, *Agile Software Development, Principles, Patterns, and
+  Practices* (2002): the Dependency Inversion Principle
 - Martin Fowler, *Patterns of Enterprise Application Architecture* (2002):
   Service Layer, Repository and Unit of Work,
   https://martinfowler.com/eaaCatalog/

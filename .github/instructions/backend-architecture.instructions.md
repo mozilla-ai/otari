@@ -75,7 +75,11 @@ same" as a reason.
 - Only the domain's own service package and `api/deps.py` import
   `gateway.repositories.<domain>`.
 - Flag an import that makes two domain services depend on each other in a
-  cycle.
+  cycle. A domain that must react to a change in a domain that does not depend
+  on it receives a listener interface by constructor injection, defined by the
+  domain where the change happens.
+- Flag a listener implementation that commits or rolls back. The caller owns
+  the transaction.
 
 The boundary check does not enforce these import rules yet, so review is the
 only gate for them.
