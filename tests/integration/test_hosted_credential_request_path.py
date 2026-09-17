@@ -58,7 +58,7 @@ class FleetModelProviderAdapter:
             response_provider="together",
         )
 
-    async def hosted_providers(self, *, organization_id):
+    async def get_hosted_providers(self, *, organization_id):
         return frozenset({"together"})
 
 

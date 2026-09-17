@@ -77,7 +77,7 @@ class _NoHostedCredential:
     async def resolve_hosted_credential(self, **kwargs: object) -> None:
         return None
 
-    async def hosted_providers(self, **kwargs: object) -> frozenset[str]:
+    async def get_hosted_providers(self, **kwargs: object) -> frozenset[str]:
         return frozenset()
 
 

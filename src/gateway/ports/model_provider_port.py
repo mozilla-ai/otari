@@ -90,7 +90,7 @@ class ModelProviderPort(Protocol):
         """
         ...
 
-    async def hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
+    async def get_hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
         """The providers this build would serve ``organization_id`` a candidate for.
 
         Bare any-llm provider names (``openai``, never a selector). This is the

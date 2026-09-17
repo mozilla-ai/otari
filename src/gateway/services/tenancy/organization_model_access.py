@@ -93,7 +93,7 @@ class SessionCatalogScope:
     """
 
 
-async def _hosted_providers(model_provider: ModelProviderPort | None, organization_id: uuid.UUID) -> frozenset[str]:
+async def _get_hosted_providers(model_provider: ModelProviderPort | None, organization_id: uuid.UUID) -> frozenset[str]:
     """The providers the bound port would serve this organization, or none.
 
     Degrades to none rather than failing the read: the adapter is another
@@ -105,7 +105,7 @@ async def _hosted_providers(model_provider: ModelProviderPort | None, organizati
     if model_provider is None:
         return frozenset()
     try:
-        hosted = await model_provider.hosted_providers(organization_id=organization_id)
+        hosted = await model_provider.get_hosted_providers(organization_id=organization_id)
     except Exception:
         logger.exception("Hosted providers could not be resolved for organization %s", organization_id)
         return frozenset()
@@ -230,7 +230,7 @@ async def resolve_session_catalog_scope(
             organization_id=scope.organization.id,
             workspace_ids=scope.workspace_ids or [],
         )
-    hosted = await _hosted_providers(model_provider, scope.organization.id)
+    hosted = await _get_hosted_providers(model_provider, scope.organization.id)
     entries |= byo_entries
     entries.update(f"{provider}:*" for provider in hosted)
     return SessionCatalogScope(

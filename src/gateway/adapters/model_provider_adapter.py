@@ -38,5 +38,5 @@ class SelfHostedModelProviderAdapter:
     ) -> HostedCredential | None:
         return None
 
-    async def hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
+    async def get_hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
         return frozenset()

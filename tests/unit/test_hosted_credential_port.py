@@ -91,7 +91,7 @@ class RecordingPort:
             raise self.error
         return self.credential
 
-    async def hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
+    async def get_hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
         del organization_id
         return frozenset({self.credential.response_provider}) if self.credential is not None else frozenset()
 
@@ -563,4 +563,4 @@ async def test_fresh_resolution_also_reaches_the_port() -> None:
 @pytest.mark.asyncio
 async def test_the_plain_build_serves_no_hosted_provider() -> None:
     """The catalog's hosted rung is empty on a build with no overlay, so nothing it lists changes."""
-    assert await _plain_build_port().hosted_providers(organization_id=ORGANIZATION_ID) == frozenset()
+    assert await _plain_build_port().get_hosted_providers(organization_id=ORGANIZATION_ID) == frozenset()

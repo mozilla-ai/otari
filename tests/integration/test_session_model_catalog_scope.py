@@ -246,7 +246,7 @@ class _HostedPort:
             return HostedCredential(api_key="fleet", api_base=None, response_provider=provider)
         return None
 
-    async def hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
+    async def get_hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
         self.asked_for.append(organization_id)
         if self.error is not None:
             raise self.error
