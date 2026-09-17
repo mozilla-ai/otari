@@ -61,7 +61,7 @@ jobs:
             echo "::error::Branch version v$VERSION disagrees with PR marker v$MARKER"
             exit 1
           fi
-          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[-a-zA-Z0-9]+(\.[-a-zA-Z0-9]+)*)?$'; then
             echo "::error::Could not parse a semver version from branch '$BRANCH'"
             exit 1
           fi

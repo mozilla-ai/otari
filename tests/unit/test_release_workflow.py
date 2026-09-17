@@ -39,14 +39,27 @@ def _git(repo: Path, *args: str) -> None:
     )
 
 
-@pytest.mark.parametrize("version", ["0.7.0", "0.7.0-rc.1"])
+@pytest.mark.parametrize("version", ["0.7.0", "0.7.0-rc.1", "0.7.0-rc-1"])
 def test_a_semver_version_is_accepted(tmp_path: Path, version: str) -> None:
     result = _run_step("Validate version format", tmp_path, {"VERSION": version})
 
     assert result.returncode == 0, result.stdout
 
 
-@pytest.mark.parametrize("version", ["v0.7.0", "0.7", "0.7.0\n", "0.7.0\nextra", "a[$(touch pwned)]\n0.7.0"])
+@pytest.mark.parametrize(
+    "version",
+    [
+        "v0.7.0",
+        "0.7",
+        "0.7.0-",
+        "0.7.0-.",
+        "0.7.0-rc.",
+        "0.7.0-rc..1",
+        "0.7.0\n",
+        "0.7.0\nextra",
+        "a[$(touch pwned)]\n0.7.0",
+    ],
+)
 def test_a_version_that_is_not_exactly_semver_is_refused(tmp_path: Path, version: str) -> None:
     result = _run_step("Validate version format", tmp_path, {"VERSION": version})
 
