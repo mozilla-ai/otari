@@ -9920,6 +9920,13 @@ export interface components {
              */
             changed_paths?: string[] | null;
             /**
+             * Command Scope
+             * @description What `commands` covers: `call` for the single tool call about to run, `session` for every command the session has run so far.
+             * @default call
+             * @enum {string}
+             */
+            command_scope: "call" | "session";
+            /**
              * Commands
              * @description Shell commands the caller observed run or is about to run.
              */
