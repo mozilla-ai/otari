@@ -12,6 +12,13 @@ it answers for rather than the size of a table that holds every key on the
 deployment. Both engines support a partial index, and the predicate matches the
 query's exactly, so neither has to be talked into using it.
 
+``created_at`` and ``id`` trail the two equality columns because they are the
+resolver's tie-break, so the read is ordered by the index rather than sorted
+after it. They earn their place only where the race that resolver tolerates has
+left a second row, and they cost nothing the rest of the time: neither column is
+ever updated, so the per-message write that refreshes the row's allow-list does
+not touch this index.
+
 Separate from ``c4e7a9b1d3f6``, which added the column: that revision is on
 ``main`` and has been applied, so a database that already ran it would never see
 an index added to it in place.
@@ -38,7 +45,7 @@ def upgrade() -> None:
     op.create_index(
         _DISPATCH_INDEX,
         "api_keys",
-        ["user_id", "workspace_id"],
+        ["user_id", "workspace_id", "created_at", "id"],
         unique=False,
         postgresql_where=sa.text("internal_secret IS NOT NULL"),
         sqlite_where=sa.text("internal_secret IS NOT NULL"),
