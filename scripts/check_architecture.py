@@ -26,6 +26,11 @@ Enforces:
     new code goes in its domain's package, and every directory of modules in
     either layer has an __init__.py. The flat modules that exist are named on
     a baseline, and the baseline only shrinks.
+14. Transaction control: only the Unit of Work calls commit or rollback, so a
+    transaction ends where its block does. Modules that still call either are
+    named on a baseline, and the baseline only shrinks.
+15. Session accessor: only a repository imports session_for, so every query
+    stays in the repository layer.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -44,6 +49,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = REPO_ROOT / "src"
 GATEWAY_ROOT = SRC_ROOT / "gateway"
 TESTS_ROOT = REPO_ROOT / "tests"
+
+
+# session_for hands out the Unit of Work's session, so the repositories package is
+# the one place that may import it. The rule sits on the gateway root so that
+# every layer answers to it; see check_file for the exemption.
+SESSION_ACCESSOR_IMPORT = "gateway.core.unit_of_work.session_for"
+SESSION_ACCESSOR_PACKAGE = "gateway/repositories/"
+SESSION_ACCESSOR_RULE = "Repositories only (a query, and the session it runs on, stays in the repository layer)"
 
 
 class LayerRule(TypedDict):
@@ -77,7 +90,7 @@ RULES: dict[str, LayerRule] = {
         # (gateway/main.py, gateway/cli.py, gateway/core, gateway/auth, ...)
         # free to shortcut past the seam. COMPOSITION_ROOT and the adapters
         # package itself are the two exemptions; see check_file.
-        "forbidden": ["gateway.overlay", "overlay", "gateway.adapters"],
+        "forbidden": ["gateway.overlay", "overlay", "gateway.adapters", SESSION_ACCESSOR_IMPORT],
         "description": "OSS base",
     },
     # The OSS test suite answers to the same boundary: a test of overlay
@@ -251,6 +264,11 @@ def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
         forbidden = [(prefix, file_rule["description"]) for prefix in file_rule["forbidden"]] + forbidden
     if relative_path == COMPOSITION_ROOT or relative_path.startswith(ADAPTERS_PACKAGE):
         forbidden = [entry for entry in forbidden if entry[0] != ADAPTER_IMPORT]
+    forbidden = [
+        (prefix, SESSION_ACCESSOR_RULE if prefix == SESSION_ACCESSOR_IMPORT else description)
+        for prefix, description in forbidden
+        if not (prefix == SESSION_ACCESSOR_IMPORT and relative_path.startswith(SESSION_ACCESSOR_PACKAGE))
+    ]
     if relative_path.startswith(DISCOVERY_SCOPE):
         forbidden += [(prefix, DISCOVERY_RULE) for prefix in DISCOVERY_IMPORTS]
     if not forbidden:
@@ -455,6 +473,109 @@ def check_database_imports(src_root: Path) -> list[str]:
     ]
 
 
+TRANSACTION_CALLS = ("commit", "rollback")
+UNIT_OF_WORK = "gateway/core/unit_of_work.py"
+# Modules that ended a transaction themselves when rule 14 landed. An entry
+# that stops calling commit and rollback fails the check until it is removed,
+# so the list only shrinks.
+TRANSACTION_CONTROL_BASELINE = (
+    "gateway/adapters/telemetry_storage_adapter.py",
+    "gateway/api/deps.py",
+    "gateway/api/routes/_passthrough.py",
+    "gateway/api/routes/_pipeline.py",
+    "gateway/api/routes/aliases.py",
+    "gateway/api/routes/auth_oauth.py",
+    "gateway/api/routes/auth_session.py",
+    "gateway/api/routes/auth_webauthn.py",
+    "gateway/api/routes/batches.py",
+    "gateway/api/routes/budgets.py",
+    "gateway/api/routes/files.py",
+    "gateway/api/routes/keys.py",
+    "gateway/api/routes/maintenance_mode.py",
+    "gateway/api/routes/organization_keys.py",
+    "gateway/api/routes/organization_pricing.py",
+    "gateway/api/routes/pricing.py",
+    "gateway/api/routes/providers.py",
+    "gateway/api/routes/routing.py",
+    "gateway/api/routes/routing_memory.py",
+    "gateway/api/routes/scoped_budgets.py",
+    "gateway/api/routes/search_tools.py",
+    "gateway/api/routes/settings.py",
+    "gateway/api/routes/tool_settings.py",
+    "gateway/api/routes/users.py",
+    "gateway/core/database.py",
+    "gateway/services/batch_service.py",
+    "gateway/services/bootstrap_service.py",
+    "gateway/services/budget_reservation_ledger.py",
+    "gateway/services/budget_service.py",
+    "gateway/services/dashboard_session_service.py",
+    "gateway/services/external_usage_service.py",
+    "gateway/services/log_writer.py",
+    "gateway/services/master_key_service.py",
+    "gateway/services/organization_pricing_service.py",
+    "gateway/services/playground_dispatch.py",
+    "gateway/services/playground_service.py",
+    "gateway/services/pricing_init_service.py",
+    "gateway/services/pricing_refresh_service.py",
+    "gateway/services/routing/knn.py",
+    "gateway/services/scoped_budget_service.py",
+    "gateway/services/tenancy/deployment_user_service.py",
+    "gateway/services/tenancy/org_provider_key_service.py",
+    "gateway/services/tenancy/organization_budget_service.py",
+    "gateway/services/tenancy/organization_domain_service.py",
+    "gateway/services/tenancy/organization_guardrail_service.py",
+    "gateway/services/tenancy/organization_service.py",
+    "gateway/services/tenancy/provisioning_service.py",
+    "gateway/services/tenancy/user_service.py",
+    "gateway/services/tenancy/webauthn_service.py",
+    "gateway/services/tenancy/workspace_activation_service.py",
+    "gateway/services/tenancy/workspace_budget_default_service.py",
+    "gateway/services/tenancy/workspace_code_execution_policy_service.py",
+    "gateway/services/tenancy/workspace_mcp_server_service.py",
+    "gateway/services/tenancy/workspace_service.py",
+    "gateway/services/tenancy/workspace_web_search_service.py",
+    "gateway/services/usage_admin_service.py",
+)
+
+
+def _transaction_calls(tree: ast.Module) -> list[tuple[int, str]]:
+    """Return the line and name of each commit or rollback call in a module."""
+    return sorted(
+        (node.lineno, node.func.attr)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in TRANSACTION_CALLS
+    )
+
+
+def check_transaction_control(src_root: Path) -> list[str]:
+    """Check that no module off the baseline ends a transaction itself, and that every baseline entry still does."""
+    violations: list[str] = []
+    ending: set[str] = set()
+    for py_file in sorted((src_root / "gateway").rglob("*.py")):
+        relative_path = py_file.relative_to(src_root).as_posix()
+        if relative_path == UNIT_OF_WORK or "__pycache__" in py_file.parts:
+            continue
+        try:
+            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        except SyntaxError:
+            continue  # check_file already reports an unparseable file.
+        calls = _transaction_calls(tree)
+        if not calls:
+            continue
+        ending.add(relative_path)
+        if relative_path not in TRANSACTION_CONTROL_BASELINE:
+            violations.extend(
+                f"{relative_path}:{line} calls {call}; only a Unit of Work block ends a transaction"
+                for line, call in calls
+            )
+    violations.extend(
+        f"{relative_path} is on the transaction control baseline but calls neither commit nor rollback; "
+        "remove it from the baseline"
+        for relative_path in sorted(set(TRANSACTION_CONTROL_BASELINE) - ending)
+    )
+    return violations
+
+
 # Service modules are purpose-named (guardrails.py, url_safety.py, ...), so
 # there is no *_service.py naming rule to enforce.
 def check_naming_conventions(src_root: Path) -> list[str]:
@@ -625,6 +746,7 @@ def main() -> int:
     package_violations = check_top_level_packages(SRC_ROOT)
     flat_module_violations = check_flat_modules(SRC_ROOT)
     database_violations = check_database_imports(SRC_ROOT)
+    transaction_violations = check_transaction_control(SRC_ROOT)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -651,13 +773,26 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal database import violations: {len(database_violations)}")
 
+    if transaction_violations:
+        print("\n❌ Transaction control violations:\n")
+        for violation in transaction_violations:
+            print(f"  {violation}")
+        print(f"\nTotal transaction control violations: {len(transaction_violations)}")
+
     if flat_module_violations:
         print("\n❌ Flat module violations:\n")
         for violation in flat_module_violations:
             print(f"  {violation}")
         print(f"\nTotal flat module violations: {len(flat_module_violations)}")
 
-    if import_violations or naming_violations or package_violations or database_violations or flat_module_violations:
+    if (
+        import_violations
+        or naming_violations
+        or package_violations
+        or database_violations
+        or transaction_violations
+        or flat_module_violations
+    ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1
 

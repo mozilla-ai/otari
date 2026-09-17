@@ -560,3 +560,98 @@ def test_main_fails_on_a_new_top_level_service_module(tmp_path: Path, monkeypatc
     assert check.main() == 0
     _write(tmp_path, "src/gateway/services/things.py", "")
     assert check.main() == 1
+
+
+_TRANSACTION_REMEDY = "only a Unit of Work block ends a transaction"
+
+
+@pytest.mark.parametrize(
+    ("source", "call"),
+    [
+        ("async def save(db: object) -> None:\n    await db.commit()\n", "commit"),
+        ("async def save(db: object) -> None:\n    await db.rollback()\n", "rollback"),
+        ("class Store:\n    async def save(self) -> None:\n        await self.db.commit()\n", "commit"),
+    ],
+)
+def test_a_commit_or_rollback_outside_the_unit_of_work_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, call: str
+) -> None:
+    monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ())
+    _write(tmp_path, "gateway/services/thing_service.py", source)
+    line = source.count("\n")
+    assert check.check_transaction_control(tmp_path) == [
+        f"gateway/services/thing_service.py:{line} calls {call}; {_TRANSACTION_REMEDY}"
+    ]
+
+
+def test_the_unit_of_work_may_commit_and_roll_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ())
+    _write(
+        tmp_path,
+        "gateway/core/unit_of_work.py",
+        "class UnitOfWork:\n    async def end(self) -> None:\n        await self._session.commit()\n",
+    )
+    assert check.check_transaction_control(tmp_path) == []
+
+
+def test_a_module_on_the_transaction_baseline_may_commit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ("gateway/services/thing_service.py",))
+    _write(
+        tmp_path, "gateway/services/thing_service.py", "async def save(db: object) -> None:\n    await db.commit()\n"
+    )
+    assert check.check_transaction_control(tmp_path) == []
+
+
+@pytest.mark.parametrize("source", ["async def save(db: object) -> None:\n    await db.flush()\n", None])
+def test_a_transaction_baseline_entry_that_ends_no_transaction_must_leave_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str | None
+) -> None:
+    monkeypatch.setattr(check, "TRANSACTION_CONTROL_BASELINE", ("gateway/services/thing_service.py",))
+    _write(tmp_path, "gateway/services/other_service.py", "")
+    if source is not None:
+        _write(tmp_path, "gateway/services/thing_service.py", source)
+    assert check.check_transaction_control(tmp_path) == [
+        "gateway/services/thing_service.py is on the transaction control baseline but calls neither commit nor "
+        "rollback; remove it from the baseline"
+    ]
+
+
+@pytest.mark.parametrize(
+    "relative_path", ["gateway/services/thing_service.py", "gateway/api/routes/things.py", "gateway/core/thing.py"]
+)
+def test_importing_the_session_accessor_outside_repositories_is_flagged(tmp_path: Path, relative_path: str) -> None:
+    file_path = _write(tmp_path, relative_path, "from gateway.core.unit_of_work import session_for\n")
+    assert check.check_file(file_path, tmp_path) == [
+        (1, "gateway.core.unit_of_work.session_for", f"Forbidden import in {check.SESSION_ACCESSOR_RULE}")
+    ]
+
+
+def test_a_repository_may_import_the_session_accessor(tmp_path: Path) -> None:
+    file_path = _write(
+        tmp_path,
+        "gateway/repositories/thing_repository.py",
+        "from gateway.core.unit_of_work import UnitOfWork, session_for\n",
+    )
+    assert check.check_file(file_path, tmp_path) == []
+
+
+def test_a_service_may_import_the_unit_of_work_itself(tmp_path: Path) -> None:
+    file_path = _write(
+        tmp_path, "gateway/services/thing_service.py", "from gateway.core.unit_of_work import UnitOfWork\n"
+    )
+    assert check.check_file(file_path, tmp_path) == []
+
+
+def test_main_fails_on_a_commit_outside_the_unit_of_work(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path, "src/gateway/services/__init__.py", "")
+    _write(tmp_path, "src/gateway/services/thing_service.py", "")
+    _write(tmp_path, "tests/__init__.py", "")
+    _point_main_at(tmp_path, monkeypatch)
+    monkeypatch.setattr(check, "FLAT_MODULE_BASELINE", ("gateway/services/thing_service.py",))
+    assert check.main() == 0
+    _write(
+        tmp_path,
+        "src/gateway/services/thing_service.py",
+        "async def save(db: object) -> None:\n    await db.commit()\n",
+    )
+    assert check.main() == 1

@@ -54,10 +54,14 @@ same" as a reason.
 ## Commits
 
 - A commit happens only when a Unit of Work block ends, and only a service
-  opens a block. Flag a direct `commit()` or `rollback()` in code the PR adds,
-  and a route or a repository that opens a block.
-- A repository reaches the session only through `session_for(uow)`. Flag any
-  other code that calls `session_for`.
+  opens a block. Flag a route or a repository that opens a block.
+- The check refuses a `commit()` or `rollback()` call outside
+  `core/unit_of_work.py`, except in a module on
+  `TRANSACTION_CONTROL_BASELINE`. Flag such a call added to a module already
+  on that baseline. The check does not catch that case.
+- A repository reaches the session only through `session_for(uow)`. The check
+  refuses that import anywhere else. Flag other code that reaches
+  `session_for` without importing it by name.
 - A request gets its Unit of Work from `get_unit_of_work`, and a worker job
   from `create_unit_of_work()` or `create_log_unit_of_work()`.
 - Code still in the old shape commits in its services. Do not flag a commit

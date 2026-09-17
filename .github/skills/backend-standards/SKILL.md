@@ -132,6 +132,10 @@ Code still in the old shape commits in its services, and some routes still commi
 commits move into blocks when the domain moves
 ([step 4](../../../docs/domains.md#what-one-domain-change-does)).
 
+The boundary check refuses a `commit()` or `rollback()` call outside `core/unit_of_work.py`, except
+in the modules on `TRANSACTION_CONTROL_BASELINE`, which names that code. It also refuses an import
+of `session_for` outside `repositories/`.
+
 ### Sources
 
 - Service Layer (Randy Stafford), Repository (Edward Hieatt and Rob Mee) and Unit of Work, in
