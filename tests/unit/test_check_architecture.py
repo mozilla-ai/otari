@@ -380,6 +380,8 @@ def test_every_spelling_of_entry_point_discovery_is_forbidden(tmp_path: Path, so
         ("import sqlalchemy as sa\n\nsa.update\n", 3, "update"),
         ("import sqlalchemy.sql\n\nsqlalchemy.sql.delete\n", 3, "delete"),
         ("from sqlalchemy import text\n", 1, "text"),
+        ("from sqlalchemy import sql\n\nsql.select\n", 3, "select"),
+        ("from sqlalchemy.sql import expression as e\n\ne.update\n", 3, "update"),
     ],
 )
 def test_a_route_or_service_that_builds_a_query_is_flagged(

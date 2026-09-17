@@ -351,6 +351,12 @@ def _query_primitives(tree: ast.Module) -> list[tuple[int, str]]:
         if isinstance(node, ast.Import)
         for alias in node.names
         if alias.name.split(".")[0] in QUERY_LIBRARIES
+    } | {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module is not None
+        if node.module.split(".")[0] in QUERY_LIBRARIES
+        for alias in node.names
     }
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
