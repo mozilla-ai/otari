@@ -9,6 +9,10 @@ import pytest
 
 _SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "check_architecture.py"
 _DISCOVERY_MESSAGE = "Forbidden import in OSS base (no entry-point discovery; the feature registry is a literal tuple)"
+_SESSION_MESSAGE = (
+    "takes a session; move it onto its domain's service, "
+    "which receives repositories and a Unit of Work, never a session"
+)
 
 
 def _load() -> ModuleType:
@@ -457,9 +461,7 @@ def test_a_module_level_service_function_that_takes_a_session_is_flagged(
 ) -> None:
     monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
     _write(tmp_path, "gateway/services/thing_service.py", f"{signature}\n")
-    assert check.check_session_parameters(tmp_path) == [
-        "gateway/services/thing_service.py:1 find takes a session; a service receives its session when it is built"
-    ]
+    assert check.check_session_parameters(tmp_path) == [f"gateway/services/thing_service.py:1 find {_SESSION_MESSAGE}"]
 
 
 @pytest.mark.parametrize(
@@ -491,9 +493,7 @@ def test_a_function_on_the_session_baseline_may_take_a_session(tmp_path: Path, m
         "gateway/services/thing_service.py",
         "async def find(db: AsyncSession) -> None: ...\nasync def count(db: AsyncSession) -> None: ...\n",
     )
-    assert check.check_session_parameters(tmp_path) == [
-        "gateway/services/thing_service.py:2 count takes a session; a service receives its session when it is built"
-    ]
+    assert check.check_session_parameters(tmp_path) == [f"gateway/services/thing_service.py:2 count {_SESSION_MESSAGE}"]
 
 
 @pytest.mark.parametrize("source", ["def find(owner: str) -> None: ...\n", None])
@@ -546,9 +546,7 @@ def test_a_wrapped_session_annotation_is_flagged(
 ) -> None:
     monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
     _write(tmp_path, "gateway/services/thing_service.py", f"async def find(db: {annotation}) -> None: ...\n")
-    assert check.check_session_parameters(tmp_path) == [
-        "gateway/services/thing_service.py:1 find takes a session; a service receives its session when it is built"
-    ]
+    assert check.check_session_parameters(tmp_path) == [f"gateway/services/thing_service.py:1 find {_SESSION_MESSAGE}"]
 
 
 @pytest.mark.parametrize(
@@ -565,9 +563,7 @@ def test_a_function_defined_in_module_level_control_flow_is_flagged(
     monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
     _write(tmp_path, "gateway/services/thing_service.py", source)
     violations = check.check_session_parameters(tmp_path)
-    assert [violation.split(" ", 1)[1] for violation in violations] == [
-        "find takes a session; a service receives its session when it is built"
-    ]
+    assert [violation.split(" ", 1)[1] for violation in violations] == [f"find {_SESSION_MESSAGE}"]
 
 
 @pytest.mark.parametrize(
@@ -581,9 +577,7 @@ def test_a_function_defined_in_module_level_control_flow_is_flagged(
 def test_an_aliased_session_annotation_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str) -> None:
     monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
     _write(tmp_path, "gateway/services/thing_service.py", source)
-    assert check.check_session_parameters(tmp_path) == [
-        "gateway/services/thing_service.py:3 find takes a session; a service receives its session when it is built"
-    ]
+    assert check.check_session_parameters(tmp_path) == [f"gateway/services/thing_service.py:3 find {_SESSION_MESSAGE}"]
 
 
 def test_a_type_that_shares_an_alias_name_is_not_a_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

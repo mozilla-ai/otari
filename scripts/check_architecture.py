@@ -20,9 +20,9 @@ Enforces:
     belongs in a repository. Modules that still do are named on a baseline,
     and the baseline only shrinks.
 12. Session parameters: a module-level function under services/ takes no
-    AsyncSession, because a service receives its session when it is built.
-    Functions that still take one are named on a baseline, and the baseline
-    only shrinks.
+    AsyncSession, because it belongs on its domain's service, which receives
+    repositories and a Unit of Work, never a session. Functions that still
+    take one are named on a baseline, and the baseline only shrinks.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -520,7 +520,7 @@ def check_session_parameters(src_root: Path) -> list[str]:
             if entry not in SESSION_PARAMETER_BASELINE:
                 violations.append(
                     f"{relative_path}:{node.lineno} {node.name} takes a session; "
-                    "a service receives its session when it is built"
+                    "move it onto its domain's service, which receives repositories and a Unit of Work, never a session"
                 )
     violations.extend(
         f"{entry} is on the session parameter baseline but takes no session; remove it from the baseline"
