@@ -1,12 +1,15 @@
 """The ``--shard`` option that splits a test run across CI jobs."""
 
 import argparse
+from pathlib import Path
 
 import pytest
+import yaml
 
 from conftest import Shard, parse_shard
 
 NODE_IDS = [f"tests/unit/test_example_{n}.py::test_case[{n}]" for n in range(500)]
+TESTS_WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "otari-tests.yml"
 
 
 @pytest.mark.parametrize("count", [1, 2, 4, 7])
@@ -24,3 +27,16 @@ def test_a_shard_is_parsed_from_index_and_count() -> None:
 def test_a_shard_outside_its_count_or_malformed_is_refused(value: str) -> None:
     with pytest.raises(argparse.ArgumentTypeError):
         parse_shard(value)
+
+
+def test_each_sharded_ci_job_lists_every_shard() -> None:
+    jobs = yaml.safe_load(TESTS_WORKFLOW.read_text())["jobs"]
+    matrices = {name: job["strategy"]["matrix"]["shard"] for name, job in jobs.items() if "strategy" in job}
+
+    assert matrices, "no sharded job found"
+    for name, values in matrices.items():
+        shards = [parse_shard(value) for value in values]
+        count = shards[0].count
+        assert sorted(shards, key=lambda shard: shard.index) == [
+            Shard(index=index, count=count) for index in range(1, count + 1)
+        ], name
