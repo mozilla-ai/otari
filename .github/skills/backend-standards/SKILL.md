@@ -63,9 +63,9 @@ cannot attach to more than one table, so a shared mixin passes `sa_type` plus
 ## Layering
 
 The backend is a modular monolith. [ARCHITECTURE.md](../../../ARCHITECTURE.md#the-modular-monolith)
-names the shape and says which layer may import which, and
-[docs/domains.md](../../../docs/domains.md) assigns every module to its domain. These are the rules
-for writing code in each layer.
+names the shape and gives the layer and import rules, and
+[docs/domains.md](../../../docs/domains.md) assigns every module to its domain and gives the steps
+for moving one domain into the shape. These are the rules for writing code in each layer.
 
 **New and moved code follows these rules. Most existing code does not, so never copy the module
 beside yours.** `QUERY_BASELINE` and `SESSION_PARAMETER_BASELINE` in
@@ -78,10 +78,12 @@ remove a name when you move its code, and never add one.
 - **Schemas** (`schemas/<domain>.py`) hold the domain's Pydantic request and response models,
   and nothing else.
 - **Services** (`services/<domain>/`) hold the use cases: business rules and orchestration. A
-  service builds no query, holds no session, and touches no HTTP.
+  service imports no `sqlalchemy`, so it builds no query and holds no session, and it touches no
+  HTTP.
 - **Repositories** (`repositories/<domain>/`, modules ending in `_repository.py`) run every
   query, over `BaseRepository`. A repository write flushes and never commits, and a repository
-  holds no business rule.
+  holds no business rule. Only the domain's own service package and the builders in
+  `api/deps.py` import it.
 - **Exceptions** (`exceptions/<domain>_exceptions.py`) hold the domain's error classes. Each
   class carries its own `status_code`, and one registered handler renders the family as
   FastAPI's `{"detail": ...}` shape, so a route needs no `try`/`except`. A 5xx member has its
@@ -101,12 +103,15 @@ A domain's service is its Service Layer: the one place its use cases run.
 - **One service per domain, with a small public API.** Each public method is one use case. The
   implementation sits in the package's private modules, whose names start with `_`, so the
   service is a deep module. The package's `__init__.py` exports the service and the types its
-  public methods use, and nothing else.
+  public methods use, and nothing else. Code outside the domain imports only that package root.
+- **The domain test.** A domain that cannot offer a small public API is more than one domain.
+  No check can tell whether an API is small, so review carries this rule.
 - **Constructor injection.** The service receives its own domain's repositories, the Unit of
   Work, config, ports, and the services of other domains it needs. It never receives the
   session or another domain's repository, so it cannot run a query.
 - **One builder.** A builder in `api/deps.py` builds the service for a request. A worker calls
-  the same builder with a Unit of Work it creates from its own session.
+  the same builder with a Unit of Work it creates from its own session. A hybrid gateway has no
+  local database, so a service that needs one is not built there.
 - **Moving old code.** A module-level function that takes a session becomes a method of its
   domain's service, or a repository method when all it does is run a query. A helper that
   needs no database stays a plain function.
@@ -117,16 +122,23 @@ A Unit of Work marks where a business transaction starts, commits and rolls back
 
 - Each request, and each worker job, has one Unit of Work over its one session. Every service
   built in that scope shares it.
-- A business step is one `async with uow:` block. The block commits when it ends, and rolls back
-  and re-raises on an error. Either way the connection goes back to the pool.
-- Blocks nest. Only the outermost block commits, so a step that writes to two domains is atomic.
+- A business step is one `async with uow:` block, an async context manager. The block commits
+  when it ends, and rolls back and re-raises on an error. Either way the connection goes back to
+  the pool.
+- Blocks nest. An inner block joins the outer one, and only the outermost block commits, so a step
+  that writes to two domains is atomic.
+- A step in which an inner block failed is rolled back as a whole, even when the code around that
+  block caught the error: the outermost block rolls back and raises instead of committing.
+- Every database call runs inside a block, and a repository call outside a block raises. No
+  transaction stays open by accident, so a request whose database work all runs in blocks needs
+  no `release_session` before it dispatches upstream.
 - Only a service opens a block. A repository never commits, and a route never opens a block.
 - Hybrid mode has no local database and no Unit of Work.
 
 **Planned:** the Unit of Work type in `core/unit_of_work.py`, with a request dependency over
-`get_db` and a worker helper over `create_session()` and `create_log_session()`. Until it exists,
-a domain that has not moved keeps its commits in its services, and a route or a repository never
-commits.
+`get_db` and a worker helper over `create_session()` and `create_log_session()`. #1306 adds it and
+is not merged yet. Until it lands, a domain that has not moved keeps its commits in its services,
+and a route or a repository never commits.
 
 ### Sources
 
@@ -134,11 +146,13 @@ commits.
   Martin Fowler, *Patterns of Enterprise Application Architecture* (2002):
   <https://martinfowler.com/eaaCatalog/>
 - Harry Percival and Bob Gregory, *Architecture Patterns with Python* (2020), chapter 2
-  (Repository) and chapter 6 (Unit of Work): <https://www.cosmicpython.com/book/>
+  (Repository), chapter 4 (Service Layer) and chapter 6 (Unit of Work):
+  <https://www.cosmicpython.com/book/>
 - Constructor injection: Martin Fowler, "Inversion of Control Containers and the Dependency
   Injection pattern" (2004): <https://martinfowler.com/articles/injection.html>
 - Deep modules: John Ousterhout, *A Philosophy of Software Design* (2018), chapter 4, "Modules
   Should Be Deep"
+- Async context manager: PEP 492, <https://peps.python.org/pep-0492/>
 
 ## The budget / reservation lifecycle is load-bearing
 

@@ -26,9 +26,9 @@ same" as a reason.
 
 | Layer | Path | Does | Flag when it |
 | --- | --- | --- | --- |
-| Routes | `api/routes/<domain>.py` | Parses the request, calls one service method, returns a schema | Builds a query, holds a business rule, defines a Pydantic model, imports a repository, or commits |
+| Routes | `api/routes/<domain>.py` | Parses the request, calls one service method, returns a schema | Imports `sqlalchemy`, builds a query, holds a business rule, defines a Pydantic model, imports a repository, or commits |
 | Schemas | `schemas/<domain>.py` | Holds Pydantic request and response models | Holds anything else |
-| Services | `services/<domain>/` | Runs use cases: business rules and orchestration | Builds a query, takes or holds a session, touches HTTP, or imports another domain's repository |
+| Services | `services/<domain>/` | Runs use cases: business rules and orchestration | Imports `sqlalchemy`, builds a query, takes or holds a session, touches HTTP, or imports another domain's repository |
 | Repositories | `repositories/<domain>/`, modules ending in `_repository.py` | Runs every query, over `BaseRepository`, and flushes | Commits, or holds a business rule |
 | Exceptions | `exceptions/<domain>_exceptions.py` | Declares error classes, each with its own `status_code` | Handles an error |
 | Models | `models/<domain>.py` | Declares ORM tables | Holds logic |
@@ -38,6 +38,8 @@ same" as a reason.
 - One service per domain. The package's `__init__.py` exports the service and
   the types its public methods use, and nothing else. Each public method is one
   use case, and helpers sit in private modules whose names start with `_`.
+- A domain whose service cannot offer a small public API is more than one
+  domain. Flag a service that grows a wide interface.
 - The service receives its own domain's repositories, the Unit of Work, config,
   ports and other domains' services through its constructor. Flag a service
   that receives the session or another domain's repository.

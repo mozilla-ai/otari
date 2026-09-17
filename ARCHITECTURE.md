@@ -221,29 +221,31 @@ These rules are enforced mechanically, not only in review. The boundary check (`
 
 ## The modular monolith
 
-Otari's backend is a modular monolith: one process and one deploy, with the code cut by domain (Simon Brown, "Package by component and architecturally-aligned testing", 2016, republished as "The Missing Chapter" in Robert C. Martin, *Clean Architecture*, 2017, <https://simonbrown.je/modular-monolith/>). Otari differs from Brown's package by component in one way: the layers stay the top-level folders under `src/gateway/`, and each layer holds one package or module per domain.
+Otari's backend is a modular monolith: one process and one deploy, with the code cut into modules by domain (Simon Brown, "Package by component and architecturally-aligned testing", 2016, republished as "The Missing Chapter" in Robert C. Martin, *Clean Architecture*, 2017; Brown, "Modular Monoliths", GOTO Berlin 2018; <https://simonbrown.je/modular-monolith/>). Otari differs from Brown in one way: he packages by component first, and Otari keeps the layers as the top-level folders under `src/gateway/` and packages by domain inside the service and repository layers. A domain is held together across layers by its name and by the import rules below.
 
 | Layer | A domain's code |
 |---|---|
 | Routes | `api/routes/<domain>.py` |
 | Schemas | `schemas/<domain>.py` |
-| Services | `services/<domain>/`, a package |
+| Services | `services/<domain>/`, a package whose root exports the domain's one service |
 | Repositories | `repositories/<domain>/`, a package |
 | Exceptions | `exceptions/<domain>_exceptions.py` |
 | Models | `models/<domain>.py` |
 
-[docs/domains.md](docs/domains.md) assigns every backend module to its domain. The [backend standards](.github/skills/backend-standards/SKILL.md#layering) give the rules for writing code in each layer, including how a service is built and who commits.
+Models, schemas and exceptions stay one module per domain, because they hold no hidden implementation. [docs/domains.md](docs/domains.md) assigns every backend module to its domain and gives the steps for moving one. The [backend standards](.github/skills/backend-standards/SKILL.md#layering) give the rules for writing code in each layer, including how a service is built and who commits.
 
-**Which layer may import which.**
+**Layer and import rules.**
 
-- A route imports its domain's service, schemas and exceptions. It never imports a repository and never builds a query.
-- A service imports its own domain's repositories, the services of other domains, ports, models and exceptions. It never imports the API layer, an adapter, or another domain's repositories.
-- A repository imports models. It never imports a service or the API layer.
-- Code outside a domain reaches its service only through the package root, `gateway.services.<domain>`. A module whose name starts with `_` is private to its package.
-- `api/deps.py` builds each domain's service, so it is the one module outside a domain's service package that imports that domain's repositories.
-- Domain services never import each other in a cycle.
+1. Nothing under `services/` imports `sqlalchemy`, so a service can neither hold a session nor build a query.
+2. Nothing under `api/routes/` imports `sqlalchemy`.
+3. Only the Unit of Work calls `commit()` or `rollback()`. The Unit of Work is planned; the [backend standards](.github/skills/backend-standards/SKILL.md#who-commits) describe it.
+4. Only a domain's own service package and the builders in `api/deps.py` import `repositories.<domain>`.
+5. Code outside a domain imports only the package root of `services.<domain>`. A module whose name starts with `_` is private to its package.
+6. Domain service packages never import each other in a cycle.
 
-**What the boundary check enforces.** `scripts/check_architecture.py` refuses a service that imports the API layer or an adapter, a repository that imports a service or the API layer, a route or a service that builds a query, and a module-level service function that takes a session. The last two rules start from baselines, `QUERY_BASELINE` and `SESSION_PARAMETER_BASELINE`, which name the code still in the old shape. A baseline only shrinks. The rules about which domain may import which are review rules until the check covers them. New and moved code follows the target shape, and never copies code named on a baseline.
+A service imports its own domain's repositories, the services of other domains, ports, models and exceptions, and never the API layer or an adapter. A repository imports models, and never a service or the API layer. A route imports its domain's service, schemas and exceptions.
+
+**What the boundary check enforces.** `scripts/check_architecture.py` enforces part of the rules above today. It refuses a service that imports the API layer or an adapter, a repository that imports a service or the API layer, and a route that imports `sqlalchemy.orm`. It refuses any top-level package under `src/` but `gateway`. Of rules 1 and 2 it enforces two parts: a route or a service builds no query, and a module-level function under `services/` takes no `AsyncSession`. Those two start from baselines, `QUERY_BASELINE` and `SESSION_PARAMETER_BASELINE`, which name the code still in the old shape, and a baseline only shrinks. The rest of rules 1 and 2, and rules 3 to 6, are review rules until the check covers them. No check can tell whether a service's API is small, so review carries that rule too. New and moved code follows the target shape, and never copies code named on a baseline.
 
 **The feature registry.** A core feature is a domain in this shape plus one entry in `src/gateway/features.py`, the one wiring list for optional features. That list is a literal tuple edited by hand. The app asks each listed feature once, when it is built, whether it is enabled, and router registration, the lifespan and the deployment bootstrap all use that one answer. A feature's switch is therefore a startup setting, never one the dashboard can change. A listed feature mounts as core routes, ungated, and hosts its surface when its own setting enables it. `OTARI_BOOTSTRAP` is not involved. Nothing is discovered from installed packages, and a feature never registers itself on import.
 
@@ -282,7 +284,7 @@ Once the seam exists, an overlay adds its own adapter by registering it through 
 
 A recipe for an optional feature the core ships. [The modular monolith](#the-modular-monolith) defines a core feature; a capability that needs a port follows [How to add a capability](#how-to-add-a-capability) instead.
 
-1. **Write the feature's modules** in its domain's shape, as [The modular monolith](#the-modular-monolith) lays it out. One of them declares the feature's `CoreFeature` (`src/gateway/core/feature.py`). None of them imports `src/gateway/features.py`: the boundary check refuses a service or a route that imports the registry. Its queries go in its repository module, because the boundary check also refuses a route or a service that builds one. Its service is built with its own repositories and a Unit of Work, and never receives the database session. The boundary check refuses a module-level service function that takes one.
+1. **Write the feature's modules** in its domain's shape, as [The modular monolith](#the-modular-monolith) lays it out. One of them declares the feature's `CoreFeature` (`src/gateway/core/feature.py`). None of them imports `src/gateway/features.py`: the boundary check refuses a service or a route that imports the registry. Its queries go in its repository package, because the boundary check also refuses a route or a service that builds one. Its service is built with its own repositories and a Unit of Work, and never receives the database session. The boundary check refuses a module-level service function that takes one.
 2. **Add its settings.** A setting goes in its domain's module under `src/gateway/core/settings/`. A domain with no module there adds one, and adds its class to the bases of `GatewayConfig` in `src/gateway/core/config.py`. Every field declares its settings view (`src/gateway/core/settings_view.py`). The feature's switch is one of these settings, and it stays out of `_SPECS` in `src/gateway/services/runtime_settings_service.py`, because `enabled` is asked once when the app is built and a dashboard override would never take effect.
 3. **Add its tables.** A table goes in its domain's model module under `src/gateway/models/`, and a new module joins the import list in `src/gateway/models/__init__.py`. Its migration goes in `alembic/versions/`, chained to the current head. The tables live on core's metadata and core's chain, so switching the feature off leaves its tables and rows in place, and switching it back on changes no schema.
 4. **Declare its metrics** in the module that increments them, on `REGISTRY` from `src/gateway/metrics.py`.
