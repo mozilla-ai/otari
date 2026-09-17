@@ -30,7 +30,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.usage import UsageLog
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
-from gateway.services.secret_box import decrypt_secret, generate_secret_key
+from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
 
 from .conftest import build_test_client
 
@@ -254,6 +254,9 @@ def test_a_duplicate_key_from_a_race_is_read_rather_than_refused(
     _send(hosted_client, token, workspace_id)
     first = _internal_keys(db_session_factory)[0]
 
+    # A credential of its own, and explicitly the newer row. Copying the first
+    # row's secret would let the assertion below pass whichever row the lookup
+    # picked, which is the one thing this test exists to tell apart.
     session = db_session_factory()
     try:
         session.add(
@@ -262,7 +265,8 @@ def test_a_duplicate_key_from_a_race_is_read_rather_than_refused(
                 workspace_id=first.workspace_id,
                 key_hash="a-second-row-from-a-race",
                 user_id=first.user_id,
-                internal_secret=first.internal_secret,
+                created_at=first.created_at + timedelta(minutes=1),
+                internal_secret=encrypt_secret("gw-the-loser-of-the-race"),
             )
         )
         session.commit()
@@ -273,6 +277,7 @@ def test_a_duplicate_key_from_a_race_is_read_rather_than_refused(
 
     assert response.status_code == status.HTTP_200_OK
     assert seen["authorization"] == f"Bearer {decrypt_secret(first.internal_secret or '')}"
+    assert seen["authorization"] != "Bearer gw-the-loser-of-the-race"
 
 
 def test_the_internal_key_is_absent_from_the_key_surfaces(

@@ -24,6 +24,14 @@ credential has to be something the resolve path already accepts. The key carries
 the caller's own user, workspace and model allow-list, so spend, budgets and the
 allow-list gate bind exactly as they would for a key of theirs.
 
+**Transport.** This hop carries a credential, so it belongs on a network the
+operator controls or behind TLS. ``data_plane_url`` accepts ``http`` for the same
+reason ``platform.base_url`` does, and deliberately: the two are one protocol's
+two directions between the same pair of processes, and the reverse one carries
+the caller's own API key. Holding this direction to https while that one accepts
+plaintext would describe a boundary that is not there. otari#1295 settles the
+pair together.
+
 **Why it is stored, and why that is not otari-ai#1598 again.** This deployment
 has to *present* the credential rather than merely verify one, which is the one
 thing a hash cannot do, so the plaintext is encrypted at rest with the same
