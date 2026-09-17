@@ -38,9 +38,10 @@ from gateway.models.provider_keys import (
     WorkspaceProviderModelRestriction,
 )
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
-from gateway.ports.model_provider_port import HostedCredential, ModelProviderPort
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
+
+from .hosted_port_helpers import HostedModelProvider, bind_model_provider
 
 # Priced but undiscovered models: phase 2 of the listing publishes them, so the
 # catalog is deterministic without dialing a provider.
@@ -234,35 +235,6 @@ def _catalog_as(client: TestClient, world: _World, who: str) -> set[str]:
     return set(_listing_as(client, world, who))
 
 
-class _HostedPort:
-    """A stand-in for an overlay's adapter: serves the named providers on the deployment's credential."""
-
-    def __init__(self, *providers: str, error: Exception | None = None) -> None:
-        self.providers = frozenset(providers)
-        self.error = error
-        self.asked_for: list[uuid.UUID] = []
-
-    async def resolve_hosted_credential(
-        self, *, organization_id: uuid.UUID, workspace_id: uuid.UUID | None, provider: str, model: str | None
-    ) -> HostedCredential | None:
-        del organization_id, workspace_id, model
-        if provider in self.providers:
-            return HostedCredential(api_key="fleet", api_base=None, response_provider=provider)
-        return None
-
-    async def get_hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
-        self.asked_for.append(organization_id)
-        if self.error is not None:
-            raise self.error
-        return self.providers
-
-
-def _bind_hosted(client: TestClient, port: _HostedPort) -> None:
-    """Rebind the port on the app under test. The conftest rebuilds the container per test."""
-    container: Any = client.app.state.container  # type: ignore[attr-defined]
-    container.bind(ModelProviderPort, lambda session: port)
-
-
 def test_the_master_key_still_sees_every_priced_model(
     client: TestClient, master_key_header: dict[str, str], world: _World
 ) -> None:
@@ -419,8 +391,8 @@ def test_a_hosted_provider_is_listed_for_a_member_of_an_organization_holding_no_
     Alpha holds a BYO key for openai only. Without the hosted rung the member is
     shown openai alone, though a request for the mistral model would be served.
     """
-    port = _HostedPort("mistral")
-    _bind_hosted(client, port)
+    port = HostedModelProvider("mistral")
+    bind_model_provider(client, port)
 
     listed = _listing_as(client, world, "alpha_member")
     assert set(listed) == {_OPENAI_MODEL, _OPENAI_OTHER, _MISTRAL_MODEL}
@@ -438,7 +410,7 @@ def test_a_hosted_provider_the_organization_also_holds_a_key_for_is_the_organiza
     the deployment's, so the same model id carries a different flag for each,
     which is the flag the dashboard reads to offer or withhold the rate override.
     """
-    _bind_hosted(client, _HostedPort("openai"))
+    bind_model_provider(client, HostedModelProvider("openai"))
 
     alpha = _listing_as(client, world, "alpha_member")
     assert alpha[_OPENAI_MODEL]["deployment_managed"] is False
@@ -466,7 +438,7 @@ def test_the_deployment_managed_flag_agrees_with_the_rate_override_gate(
     deployment_managed: bool,
 ) -> None:
     """The dashboard offers a rate override only where the flag is false, so the gate must accept exactly those."""
-    _bind_hosted(client, _HostedPort("openai", "mistral"))
+    bind_model_provider(client, HostedModelProvider("openai", "mistral"))
     if disabled_in_alpha_two:
         session = db_session_factory()
         try:
@@ -535,7 +507,7 @@ def test_a_hosted_provider_is_listed_only_where_dispatch_would_ask_the_port(
     expected: set[str],
 ) -> None:
     """Dispatch asks the port only when a workspace has no active key with a credential for the provider."""
-    _bind_hosted(client, _HostedPort(*hosted))
+    bind_model_provider(client, HostedModelProvider(*hosted))
     session = db_session_factory()
     try:
         if restricted_in_alpha_one:
@@ -565,7 +537,7 @@ def test_a_hosted_provider_is_listed_only_where_dispatch_would_ask_the_port(
 
 
 def test_the_single_model_read_agrees_with_the_listing_about_a_hosted_model(client: TestClient, world: _World) -> None:
-    _bind_hosted(client, _HostedPort("mistral"))
+    bind_model_provider(client, HostedModelProvider("mistral"))
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
     try:
         response = client.get(f"{API_ROOT}/models/{_MISTRAL_MODEL}")
@@ -578,7 +550,7 @@ def test_the_single_model_read_agrees_with_the_listing_about_a_hosted_model(clie
 
 def test_the_grouped_catalog_lists_a_hosted_model_for_a_member(client: TestClient, world: _World) -> None:
     """The dashboard's Models page reads the grouped catalog, which builds the same merged view."""
-    _bind_hosted(client, _HostedPort("mistral"))
+    bind_model_provider(client, HostedModelProvider("mistral"))
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
     try:
         response = client.get(f"{API_ROOT}/catalog/models")
@@ -592,7 +564,7 @@ def test_the_grouped_catalog_lists_a_hosted_model_for_a_member(client: TestClien
 
 def test_the_grouped_catalog_labels_a_hosted_offering_hosted(client: TestClient, world: _World) -> None:
     """The Models page offers a rate override only on an offering labeled ``organization``."""
-    _bind_hosted(client, _HostedPort("mistral"))
+    bind_model_provider(client, HostedModelProvider("mistral"))
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
     credentials: dict[str, str] = {}
     try:
@@ -612,7 +584,7 @@ def test_the_grouped_catalog_labels_a_hosted_offering_hosted(client: TestClient,
 
 def test_an_operator_session_is_not_flagged_by_the_hosted_rung(client: TestClient, world: _World) -> None:
     """The operator is exempt from the pricing rule, and their catalog was never narrowed."""
-    _bind_hosted(client, _HostedPort("mistral"))
+    bind_model_provider(client, HostedModelProvider("mistral"))
     listed = _listing_as(client, world, "superuser")
     assert set(listed) == set(_ALL_MODELS)
     assert listed[_MISTRAL_MODEL]["deployment_managed"] is False
@@ -620,14 +592,14 @@ def test_an_operator_session_is_not_flagged_by_the_hosted_rung(client: TestClien
 
 def test_a_hosted_port_failure_fails_the_read(client: TestClient, world: _World) -> None:
     """A catalog that hid the failure would list fewer models and flag them wrongly."""
-    _bind_hosted(client, _HostedPort("mistral", error=RuntimeError("fleet store unreachable")))
+    bind_model_provider(client, HostedModelProvider("mistral", error=RuntimeError("fleet store unreachable")))
     with pytest.raises(RuntimeError, match="fleet store unreachable"):
         _catalog_as(client, world, "alpha_member")
 
 
 def test_an_identity_with_no_live_membership_is_not_shown_hosted_models(client: TestClient, world: _World) -> None:
     """The hosted rung is keyed on an organization, which this caller does not have."""
-    port = _HostedPort("mistral")
-    _bind_hosted(client, port)
+    port = HostedModelProvider("mistral")
+    bind_model_provider(client, port)
     assert _catalog_as(client, world, "orphan") == set()
     assert port.asked_for == []
