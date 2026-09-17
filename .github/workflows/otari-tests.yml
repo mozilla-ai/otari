@@ -11,6 +11,8 @@ on:
       # Two unit tests read the tool cards to pin the UI ceilings to the server's.
       - 'web/src/features/tools/**'
       - 'scripts/**'
+      # A unit test renders the release notes from this config.
+      - 'cliff.toml'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-tests.yml'
@@ -24,6 +26,8 @@ on:
       # Two unit tests read the tool cards to pin the UI ceilings to the server's.
       - 'web/src/features/tools/**'
       - 'scripts/**'
+      # A unit test renders the release notes from this config.
+      - 'cliff.toml'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-tests.yml'

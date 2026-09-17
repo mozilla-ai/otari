@@ -27,7 +27,7 @@ body = """
 ### {{ group }}
 
 {% for commit in commits %}\
-- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | split(pat="\n") | first | upper_first }}\
+- {% if commit.breaking %}**BREAKING:** {% endif %}{% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | split(pat="\n") | first | upper_first }}\
 {% if commit.remote.pr_number %} in [#{{ commit.remote.pr_number }}](https://github.com/mozilla-ai/otari/pull/{{ commit.remote.pr_number }}){% endif %}\
 {% if commit.remote.username %} by [@{{ commit.remote.username }}](https://github.com/{{ commit.remote.username }}){% endif %} ([`{{ commit.id | truncate(length=7, end="") }}`](https://github.com/mozilla-ai/otari/commit/{{ commit.id }}))
 {% endfor %}
@@ -93,15 +93,18 @@ commit_parsers = [
 
   { message = "^chore: bump version", skip = true },
   { message = "^chore: release", skip = true },
-  { message = "^chore\\(deps\\)", skip = true },
 
-  { message = "^chore", skip = true },
-  { message = "^build", skip = true },
-  { message = "^ci", skip = true },
-  { message = "^docs", skip = true },
-  { message = "^style", skip = true },
-  { message = "^refactor", skip = true },
-  { message = "^test", skip = true },
+  # protect_breaking_commits overrides skip, so a breaking commit of a hidden
+  # type still renders, under this group. A parser on the `breaking` field would
+  # drop non-conventional commits instead, because they lack that field.
+  { message = "^chore\\(deps\\)", skip = true, group = "Maintenance" },
+  { message = "^chore", skip = true, group = "Maintenance" },
+  { message = "^build", skip = true, group = "Maintenance" },
+  { message = "^ci", skip = true, group = "Maintenance" },
+  { message = "^docs", skip = true, group = "Maintenance" },
+  { message = "^style", skip = true, group = "Maintenance" },
+  { message = "^refactor", skip = true, group = "Maintenance" },
+  { message = "^test", skip = true, group = "Maintenance" },
 
   # Catch-all: any commit that didn't match a typed prefix above (e.g. a
   # squash-merge that landed without a conventional-commit type) lands in

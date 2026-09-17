@@ -70,13 +70,29 @@ User-visible prefixes appear in release notes:
 Routine maintenance is intentionally hidden: `chore:` (including `chore(deps):`
 and `chore: release`), `build:`, `ci:`, `docs:`, `style:`, `refactor:`, `test:`.
 Scope visibility via the prefix: `feat(web): ...` / `fix(web): ...` show up;
-`refactor(web):` / `chore(web):` / `test(web):` stay out.
+`refactor(web):` / `chore(web):` / `test(web):` stay out. A breaking change is
+never hidden: see [Breaking changes](#breaking-changes).
 
 A non-conventional title is not silently dropped: `cliff.toml`'s catch-all parser
 routes anything without a recognized prefix into a generic "Other" group, and the
 release workflow fails if git-cliff still flags a parse-error skip. The PR Title
 Check refuses the merge before that can happen, so "Other" should only ever catch
 direct pushes to `main`.
+
+### Breaking changes
+
+A change is breaking when a deployment must do work of its own to upgrade. For
+example, a new required method on a port breaks every adapter that a deployment
+wrote against the old port.
+
+Mark a breaking change with `!` in the PR title, after the type or the scope:
+`feat(api)!: remove GET /v1/usage/summary.csv`. The squash title is what
+git-cliff parses. git-cliff also reads a `BREAKING CHANGE:` footer, but a footer
+reaches the squash commit only from a branch commit message, so do not rely on it.
+
+The release notes put the marker **BREAKING:** at the start of each breaking
+entry. The entry stays in the group of its type. A breaking commit of a hidden
+type, such as `refactor(ports)!:`, appears under "Maintenance".
 
 ### Prerequisites (repository secrets)
 
