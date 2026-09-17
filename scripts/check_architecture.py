@@ -228,6 +228,7 @@ def _imported_modules(node: ast.Import | ast.ImportFrom, file_path: Path, src_ro
 
 SESSION_SCOPE = "gateway/services"
 SESSION_TYPE = "AsyncSession"
+SESSION_MODULE = "sqlalchemy.ext.asyncio"
 # Module-level service functions that took a session when the rule landed, as
 # "<module>::<function>". An entry that stops taking one fails the check until
 # it is removed, so the list only shrinks.
@@ -433,15 +434,33 @@ def _type_name(node: ast.expr) -> str | None:
     return None
 
 
-def _annotation_names_session(annotation: ast.expr | None) -> bool:
+def _session_names(tree: ast.Module) -> frozenset[str]:
+    """Return the names a module binds to the async session type, its own name included."""
+    return frozenset(
+        {SESSION_TYPE}
+        | {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module is not None and _matches(node.module, SESSION_MODULE)
+            for alias in node.names
+            if alias.name == SESSION_TYPE
+        }
+    )
+
+
+def _annotation_names_session(annotation: ast.expr | None, session_names: frozenset[str]) -> bool:
     """Return whether a parameter annotation is the async session type, optionally wrapped.
 
     A session inside another type, such as a factory that returns one, is not a session.
     """
-    if isinstance(annotation, ast.Name | ast.Attribute):
-        return _type_name(annotation) == SESSION_TYPE
+    if isinstance(annotation, ast.Name):
+        return annotation.id in session_names
+    if isinstance(annotation, ast.Attribute):
+        return annotation.attr == SESSION_TYPE
     if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
-        return _annotation_names_session(annotation.left) or _annotation_names_session(annotation.right)
+        return _annotation_names_session(annotation.left, session_names) or _annotation_names_session(
+            annotation.right, session_names
+        )
     if isinstance(annotation, ast.Subscript):
         wrapper = _type_name(annotation.value)
         if wrapper not in SESSION_WRAPPERS:
@@ -450,10 +469,10 @@ def _annotation_names_session(annotation: ast.expr | None) -> bool:
         # Only the first member of Annotated is the type; the rest is metadata.
         if wrapper == "Annotated":
             members = members[:1]
-        return any(_annotation_names_session(member) for member in members)
+        return any(_annotation_names_session(member, session_names) for member in members)
     if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
         try:
-            return _annotation_names_session(ast.parse(annotation.value, mode="eval").body)
+            return _annotation_names_session(ast.parse(annotation.value, mode="eval").body, session_names)
         except SyntaxError:
             return False
     return False
@@ -472,11 +491,14 @@ def _module_scope_functions(statements: list[ast.stmt]) -> Iterator[ast.Function
                     yield from _module_scope_functions(child.body)
 
 
-def _takes_session(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+def _takes_session(function: ast.FunctionDef | ast.AsyncFunctionDef, session_names: frozenset[str]) -> bool:
     """Return whether any parameter of a function is annotated with the async session type."""
     arguments = function.args
     parameters = [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs, arguments.vararg, arguments.kwarg]
-    return any(parameter is not None and _annotation_names_session(parameter.annotation) for parameter in parameters)
+    return any(
+        parameter is not None and _annotation_names_session(parameter.annotation, session_names)
+        for parameter in parameters
+    )
 
 
 def check_session_parameters(src_root: Path) -> list[str]:
@@ -489,8 +511,9 @@ def check_session_parameters(src_root: Path) -> list[str]:
             tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
         except SyntaxError:
             continue  # check_file already reports an unparseable file.
+        session_names = _session_names(tree)
         for node in _module_scope_functions(tree.body):
-            if not _takes_session(node):
+            if not _takes_session(node, session_names):
                 continue
             entry = f"{relative_path}::{node.name}"
             taking.add(entry)

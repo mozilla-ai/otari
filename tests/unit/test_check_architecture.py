@@ -568,3 +568,29 @@ def test_a_function_defined_in_module_level_control_flow_is_flagged(
     assert [violation.split(" ", 1)[1] for violation in violations] == [
         "find takes a session; a service receives its session when it is built"
     ]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from sqlalchemy.ext.asyncio import AsyncSession as DBSession\n\nasync def find(db: DBSession) -> None: ...\n",
+        "from sqlalchemy.ext.asyncio import AsyncSession as DBSession\n\n"
+        "async def find(db: DBSession | None) -> None: ...\n",
+    ],
+)
+def test_an_aliased_session_annotation_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str) -> None:
+    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
+    _write(tmp_path, "gateway/services/thing_service.py", source)
+    assert check.check_session_parameters(tmp_path) == [
+        "gateway/services/thing_service.py:3 find takes a session; a service receives its session when it is built"
+    ]
+
+
+def test_a_type_that_shares_an_alias_name_is_not_a_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
+    _write(
+        tmp_path,
+        "gateway/services/thing_service.py",
+        "from gateway.types import Session as DBSession\n\nasync def find(db: DBSession) -> None: ...\n",
+    )
+    assert check.check_session_parameters(tmp_path) == []
