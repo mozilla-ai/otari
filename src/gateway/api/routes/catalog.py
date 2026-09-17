@@ -604,7 +604,9 @@ async def _merged_for(
     model_provider: ModelProviderPort,
 ) -> MergedCatalog:
     if caller is None:
-        return await build_merged_catalog(db, config, auth=(None, False), session_identity=None, anonymous=True)
+        return await build_merged_catalog(
+            db, config, auth=(None, False), session_identity=None, anonymous=True, model_provider=model_provider
+        )
     return await build_merged_catalog(
         db, config, auth=caller, session_identity=session_identity, model_provider=model_provider
     )

@@ -187,7 +187,7 @@ async def resolve_session_catalog_scope(
     *,
     user: User,
     organizations: OrganizationService | None = None,
-    model_provider: ModelProviderPort | None = None,
+    model_provider: ModelProviderPort | None,
 ) -> SessionCatalogScope:
     """What this session identity may be shown. Unrestricted is the caller's own call.
 
@@ -246,7 +246,7 @@ async def resolve_session_model_allowlist(
     *,
     user: User,
     organizations: OrganizationService | None = None,
-    model_provider: ModelProviderPort | None = None,
+    model_provider: ModelProviderPort | None,
 ) -> list[str]:
     """The allow-list half of :func:`resolve_session_catalog_scope`.
 

@@ -123,7 +123,7 @@ async def _writable_workspace_id(
     user: TenancyUser,
     workspace_id: uuid.UUID | None,
     targets: list[str],
-    model_provider: ModelProviderPort | None = None,
+    model_provider: ModelProviderPort | None,
 ) -> uuid.UUID:
     """Resolve the workspace a tenant write lands in, refusing what it may not do.
 
@@ -158,7 +158,7 @@ async def _require_reachable_targets(
     *,
     user: TenancyUser,
     targets: list[str],
-    model_provider: ModelProviderPort | None = None,
+    model_provider: ModelProviderPort | None,
 ) -> None:
     """Refuse a target the caller's organization cannot already reach.
 
@@ -337,6 +337,7 @@ async def delete_organization_routing_policy(
         user=current_identity,
         workspace_id=workspace_id,
         targets=[],
+        model_provider=None,
     )
     await delete_policy_in_workspace(name, db, config, workspace_id=resolved, user_id=None)
 
@@ -416,5 +417,6 @@ async def delete_organization_alias(
         user=current_identity,
         workspace_id=workspace_id,
         targets=[],
+        model_provider=None,
     )
     await delete_alias_in_workspace(name, db, config, workspace_id=resolved, user_id=None)

@@ -409,7 +409,7 @@ async def catalog_scope(
     auth: tuple[APIKey | None, bool],
     session_identity: TenancyUser | None,
     anonymous: bool = False,
-    model_provider: ModelProviderPort | None = None,
+    model_provider: ModelProviderPort | None,
 ) -> CatalogScope:
     """What this caller may be shown, by the rule that fits how they authenticated.
 
@@ -468,7 +468,7 @@ async def build_merged_catalog(
     provider: str | None = None,
     anonymous: bool = False,
     cached_only: bool = False,
-    model_provider: ModelProviderPort | None = None,
+    model_provider: ModelProviderPort | None,
 ) -> MergedCatalog:
     """Merge discovery, stored prices, defaults, aliases and policies for one caller.
 

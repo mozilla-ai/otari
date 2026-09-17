@@ -106,7 +106,9 @@ async def rebuild_selector_index(db: AsyncSession, config: GatewayConfig, *, fet
     dial even while ``model_cache_ttl_seconds`` is 0, whose whole meaning is that
     the reads do their own dialing.
     """
-    merged = await build_merged_catalog(db, config, auth=(None, True), session_identity=None, cached_only=not fetch)
+    merged = await build_merged_catalog(
+        db, config, auth=(None, True), session_identity=None, cached_only=not fetch, model_provider=None
+    )
     catalog = (
         await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))
         if fetch
