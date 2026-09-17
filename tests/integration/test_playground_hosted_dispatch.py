@@ -20,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import httpx2
 import pytest
+from cryptography.fernet import Fernet
 from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -278,6 +279,46 @@ def test_a_duplicate_key_from_a_race_is_read_rather_than_refused(
     assert response.status_code == status.HTTP_200_OK
     assert seen["authorization"] == f"Bearer {decrypt_secret(first.internal_secret or '')}"
     assert seen["authorization"] != "Bearer gw-the-loser-of-the-race"
+
+
+def test_an_unreadable_stored_key_is_replaced_rather_than_refused(
+    hosted_client: TestClient,
+    caller: tuple[uuid.UUID, uuid.UUID, str],
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A secret this deployment cannot read is one only this code can mend.
+
+    Rotating ``OTARI_SECRET_KEY`` without carrying the old value leaves every
+    ciphertext undecryptable. For a provider credential that has to be a refusal,
+    because the plaintext was the customer's. This one is ours and nobody else
+    holds it, so the row is rewritten and the page keeps working.
+    """
+    _, workspace_id, token = caller
+    seen: dict[str, object] = {}
+    _answer_from_the_data_plane(monkeypatch, seen)
+    _send(hosted_client, token, workspace_id)
+    original = _internal_keys(db_session_factory)[0]
+    original_id, original_hash = original.id, original.key_hash
+
+    session = db_session_factory()
+    try:
+        row = session.get(APIKey, original_id)
+        assert row is not None
+        # Ciphertext from somebody else's key, which is what a rotation leaves.
+        row.internal_secret = Fernet(generate_secret_key()).encrypt(b"gw-unreadable").decode()
+        session.commit()
+    finally:
+        session.close()
+
+    response = _send(hosted_client, token, workspace_id)
+
+    assert response.status_code == status.HTTP_200_OK
+    keys = _internal_keys(db_session_factory)
+    # The same row, mended, rather than a second one beside it.
+    assert [key.id for key in keys] == [original_id]
+    assert keys[0].key_hash != original_hash
+    assert seen["authorization"] == f"Bearer {decrypt_secret(keys[0].internal_secret or '')}"
 
 
 def test_the_internal_key_is_absent_from_the_key_surfaces(

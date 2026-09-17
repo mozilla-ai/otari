@@ -54,8 +54,9 @@ from sqlmodel import col
 
 from gateway.auth.models import generate_api_key, hash_key, key_prefix, key_suffix
 from gateway.core.config import API_ROOT
+from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
-from gateway.services.secret_box import decrypt_secret, encrypt_secret
+from gateway.services.secret_box import SecretDecryptionError, decrypt_secret, encrypt_secret
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -92,6 +93,24 @@ def completions_url(data_plane_url: str) -> str:
     return f"{data_plane_url}{API_ROOT}/chat/completions"
 
 
+def _readable_secret(row: APIKey) -> str | None:
+    """This row's stored plaintext, or ``None`` when it cannot be read.
+
+    A stored credential outlives the key that encrypted it: rotate
+    ``OTARI_SECRET_KEY`` without carrying the old value and every ciphertext on
+    the deployment stops decrypting. For a provider credential that is a refusal,
+    because the plaintext was the customer's and is not ours to replace. This one
+    is ours, so it is not a refusal; see the call site.
+    """
+    if row.internal_secret is None:
+        return None
+    try:
+        return decrypt_secret(row.internal_secret)
+    except SecretDecryptionError:
+        logger.warning("Playground dispatch key %s could not be decrypted; minting a replacement", row.id)
+        return None
+
+
 async def resolve_dispatch_key(db: AsyncSession, *, principal: SessionPrincipal) -> str:
     """The credential standing for this caller on the data plane, minted once.
 
@@ -123,8 +142,12 @@ async def resolve_dispatch_key(db: AsyncSession, *, principal: SessionPrincipal)
         )
     ).scalars().first()
 
+    # Read once: the answer decides both whether to mint and whether the existing
+    # row needs rewriting, and decrypting twice would log the failure twice.
+    stored = None if row is None else _readable_secret(row)
+    plaintext = stored if stored is not None else generate_api_key()
+
     if row is None:
-        plaintext = generate_api_key()
         row = APIKey(
             id=str(uuid.uuid4()),
             workspace_id=principal.workspace_id,
@@ -141,7 +164,15 @@ async def resolve_dispatch_key(db: AsyncSession, *, principal: SessionPrincipal)
         )
         db.add(row)
     else:
-        plaintext = decrypt_secret(row.internal_secret or "")
+        # Rewritten when the stored ciphertext could not be read, which leaves the
+        # old plaintext gone for good. Nobody holds this credential but this
+        # process, so a replacement costs nothing and is the repair; refusing
+        # would strand the page on a row only this code can mend.
+        if stored is None:
+            row.key_hash = hash_key(plaintext)
+            row.key_prefix = key_prefix(plaintext)
+            row.key_suffix = key_suffix(plaintext)
+            row.internal_secret = encrypt_secret(plaintext)
         row.allowed_models = principal.allowed_models
         # An operator who deactivated this row was deactivating the Playground for
         # nobody: it is not on any screen they could have meant. Reactivated
