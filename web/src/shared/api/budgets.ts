@@ -226,7 +226,15 @@ export function useOrganizationSpendCeilings(enabled = true) {
   // The context the caller's `enabled` was read from, whatever it read off it.
   const context = useOrganizationContext().data
   return useQuery({
-    queryKey: [ORGANIZATION_SPEND_CEILINGS],
+    // The organization is part of the key, not only of the request, which
+    // carries it implicitly: the server scopes this read by the session's
+    // active organization, so a walk still in flight when the caller switches
+    // is answered about the organization just left. Keyed per organization, it
+    // lands under the one it asked about rather than under the one now on
+    // screen. `invalidateOrganizationSpend` matches on the head, so the extra
+    // segment costs it nothing, and a context that names no organization keys
+    // as `null` rather than taking the page down over a cache entry.
+    queryKey: [ORGANIZATION_SPEND_CEILINGS, context?.organization?.id ?? null],
     queryFn: () =>
       fetchAllPaged<OrganizationSpendCeiling>(
         "/organizations/me/spend-ceilings",

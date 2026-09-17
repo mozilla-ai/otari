@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -60,7 +60,14 @@ function emptySummary(): UsageSummary {
  * admin of it, which is the gate `require_active_organization_management_access`
  * draws on the server.
  */
-function mockApi({ roleThere }: { roleThere: MembershipRole }) {
+function mockApi({
+  roleThere,
+  holdCeilingsHere,
+}: {
+  roleThere: MembershipRole
+  /** Holds this organization's ceilings walk open, so a switch can overtake it. */
+  holdCeilingsHere?: { held: Promise<void>; answered: () => void }
+}) {
   let active: "here" | "there" = "here"
   const requests: string[] = []
 
@@ -120,13 +127,33 @@ function mockApi({ roleThere }: { roleThere: MembershipRole }) {
       return { data: rows, count: rows.length } as never
     }
     if (url.startsWith("/organizations/me/spend-ceilings")) {
-      if (active === "there" && roleThere !== "admin") {
-        throw new apiClient.ApiError(
-          403,
-          "Not enough privileges to perform this action",
-        )
+      if (active === "there") {
+        if (roleThere !== "admin") {
+          throw new apiClient.ApiError(
+            403,
+            "Not enough privileges to perform this action",
+          )
+        }
+        // A different figure from the one here, so the cell says which
+        // organization answered it: 10 of 100.
+        return {
+          data: [
+            organizationSpendCeiling({ max_budget: 100, current_spend: 10 }),
+          ],
+          count: 1,
+        } as never
       }
-      return { data: [organizationSpendCeiling()], count: 1 } as never
+      if (holdCeilingsHere) {
+        await holdCeilingsHere.held
+        holdCeilingsHere.answered()
+      }
+      // 200 of 250, which the budget-health cell reads as 80.0%.
+      return {
+        data: [
+          organizationSpendCeiling({ max_budget: 250, current_spend: 200 }),
+        ],
+        count: 1,
+      } as never
     }
     if (url.startsWith("/organizations/me/usage/summary")) {
       return emptySummary() as never
@@ -180,6 +207,15 @@ async function switchOrganization() {
   await screen.findByRole("button", { name: /in Research$/ })
 }
 
+/** A promise the test resolves by hand, for holding a request open. */
+function deferred() {
+  let resolve: () => void = () => {}
+  const promise = new Promise<void>((r) => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
+
 /** What was asked for after the switch itself, which is the part at issue. */
 function afterSwitch(requests: string[]): string[] {
   return requests.slice(requests.findIndex((r) => r.startsWith("POST")) + 1)
@@ -226,6 +262,34 @@ describe("switching organization", () => {
     expect(
       afterSwitch(requests).filter((r) => r === "GET /organizations/me"),
     ).toEqual([])
+  })
+
+  it("does not read the organization it left under the one it landed on", async () => {
+    // A ceilings walk still in flight when the switch lands. The switch no
+    // longer refetches it, so nothing cancels it either, and `apiFetch` does
+    // not carry the query's signal: the answer arrives after the move and is
+    // about the organization it was asked in. Keyed per organization, it lands
+    // under that one rather than under the organization now on screen.
+    const hold = deferred()
+    const answered = deferred()
+    mockApi({
+      roleThere: "admin",
+      holdCeilingsHere: { held: hold.promise, answered: answered.resolve },
+    })
+    renderShellOverPage()
+    await screen.findByText(/At-a-glance spend/)
+
+    await switchOrganization()
+    // The organization switched into has answered, so the cell has a figure of
+    // its own for the late one to overwrite.
+    expect(await screen.findByText("10.0%")).toBeInTheDocument()
+
+    hold.resolve()
+    await answered.promise
+    await act(async () => {})
+
+    expect(screen.getByText("10.0%")).toBeInTheDocument()
+    expect(screen.queryByText("80.0%")).toBeNull()
   })
 
   it("makes the gated read again where the role survives the switch", async () => {
