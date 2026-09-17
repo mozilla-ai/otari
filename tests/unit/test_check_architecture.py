@@ -30,6 +30,16 @@ def _write(src_root: Path, relative_path: str, content: str) -> Path:
     return file_path
 
 
+def _point_main_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Every baseline is emptied, so an entry that is stale in the temporary tree cannot fail main() on its own.
+    monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
+    monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
+    monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
+    for name in [name for name in vars(check) if name.endswith("_BASELINE")]:
+        monkeypatch.setattr(check, name, ())
+
+
 def test_service_importing_models_is_clean(tmp_path: Path) -> None:
     file_path = _write(tmp_path, "gateway/services/thing.py", "from gateway.models.users import User\n")
     assert check.check_file(file_path, tmp_path) == []
@@ -290,11 +300,10 @@ def test_main_discovers_tests_root_and_fails_on_overlay_import(tmp_path: Path, m
     # it walks TESTS_ROOT (not just GATEWAY_ROOT) and resolves those paths
     # against REPO_ROOT, using the gateway-composed overlay spelling.
     _write(tmp_path, "src/gateway/__init__.py", "")
+    _write(tmp_path, "tests/unit/test_thing.py", "")
+    _point_main_at(tmp_path, monkeypatch)
+    assert check.main() == 0
     _write(tmp_path, "tests/unit/test_thing.py", "from gateway.overlay.billing import charge\n")
-    monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
-    monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
-    monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
     assert check.main() == 1
 
 
@@ -326,12 +335,10 @@ def test_a_directory_without_python_source_is_not_a_package(tmp_path: Path) -> N
 
 def test_main_fails_on_a_new_top_level_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write(tmp_path, "src/gateway/__init__.py", "")
-    _write(tmp_path, "src/otari_probe/__init__.py", "")
     _write(tmp_path, "tests/__init__.py", "")
-    monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
-    monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
-    monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
+    _point_main_at(tmp_path, monkeypatch)
+    assert check.main() == 0
+    _write(tmp_path, "src/otari_probe/__init__.py", "")
     assert check.main() == 1
 
 
@@ -472,12 +479,8 @@ def test_main_fails_on_a_service_that_imports_a_database_library(
     _write(tmp_path, "src/gateway/services/__init__.py", "")
     _write(tmp_path, "src/gateway/services/thing_service.py", "")
     _write(tmp_path, "tests/__init__.py", "")
-    _use_empty_database_baselines(monkeypatch)
+    _point_main_at(tmp_path, monkeypatch)
     monkeypatch.setattr(check, "FLAT_MODULE_BASELINE", ("gateway/services/thing_service.py",))
-    monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
-    monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
-    monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
     assert check.main() == 0
     _write(tmp_path, "src/gateway/services/thing_service.py", "from sqlalchemy import select\n")
     assert check.main() == 1
@@ -553,12 +556,7 @@ def test_a_flat_module_baseline_entry_that_no_longer_exists_must_leave_the_basel
 def test_main_fails_on_a_new_top_level_service_module(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write(tmp_path, "src/gateway/services/__init__.py", "")
     _write(tmp_path, "tests/__init__.py", "")
-    _use_empty_flat_module_baseline(monkeypatch)
-    _use_empty_database_baselines(monkeypatch)
-    monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
-    monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
-    monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
-    monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
+    _point_main_at(tmp_path, monkeypatch)
     assert check.main() == 0
     _write(tmp_path, "src/gateway/services/things.py", "")
     assert check.main() == 1
