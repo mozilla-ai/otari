@@ -1,6 +1,8 @@
 # Guardrails
 
-A guardrail is a request-level check Otari runs on the input before the provider is ever called. The caller opts in per request via a top-level `guardrails` field (a sibling of `tools`, not an entry inside it), and the model can't see or decline it.
+A guardrail is a request-level check Otari runs on the input before the provider is ever called, and the model can't see or decline it.
+
+There are two ways one runs. A caller opts in per request via a top-level `guardrails` field (a sibling of `tools`, not an entry inside it), which is what the next few sections describe. Or an operator stores a definition in Otari and switches it on, and it then checks every request from the workspaces it covers without anyone asking: see [what an enabled definition does to a request](#what-an-enabled-definition-does-to-a-request).
 
 Guardrails work on `/api/v1/chat/completions`, `/api/v1/messages`, and `/api/v1/responses`.
 
@@ -175,9 +177,20 @@ curl -X POST http://localhost:8000/api/v1/guardrail-credentials \
   -d '{
         "name": "prompt-injection",
         "guardrail_name": "lakera_guard",
-        "create_kwargs": {"api_key": "lak-...", "endpoint": "https://api.lakera.ai/v2/guard"}
+        "create_kwargs": {"api_key": "lak-...", "endpoint": "https://api.lakera.ai/v2/guard"},
+        "mode": "block",
+        "on_unavailable": "block",
+        "applies_to_all_workspaces": true
       }'
 ```
+
+The last three say what the definition does once it is switched on, and are
+described under
+[what an enabled definition does to a request](#what-an-enabled-definition-does-to-a-request).
+`mode` and `on_unavailable` default to `block`, the value shown above.
+`applies_to_all_workspaces` defaults to `false`, unlike the example, so a
+definition left to the defaults reaches no workspace until one is named or that
+flag is set.
 
 Send the constructor arguments as one `create_kwargs` map, secret and plain
 together. Otari splits them by the catalog's own `secret` flag: the plain half
@@ -195,7 +208,12 @@ name and masked:
   "create_kwargs": {"endpoint": "https://api.lakera.ai/v2/guard"},
   "create_secrets": {"api_key": "***"},
   "enabled": true,
-  "decryptable": true
+  "mode": "block",
+  "on_unavailable": "block",
+  "applies_to_all_workspaces": false,
+  "workspace_ids": [],
+  "decryptable": true,
+  "loaded": true
 }
 ```
 
@@ -272,8 +290,59 @@ takes any-guardrail's `azure-content-safety` extra for it. A hosted guardrail
 added later whose client sits behind an extra needs that extra taken too, or the
 catalog offers a row the runner cannot build.
 
-Nothing on the request path reads these rows yet, so storing a definition still
-does not change how a request behaves.
+### What an enabled definition does to a request
+
+A definition that is enabled and scoped to a workspace checks the input of every
+request from that workspace, on `/api/v1/chat/completions`, `/api/v1/messages`
+and `/api/v1/responses`, before the provider is called. The caller sends
+nothing: there is no `guardrails` field to fill in, and nothing a caller can do
+to opt out.
+
+Four fields on the row decide what that means.
+
+| Field | Meaning |
+| --- | --- |
+| `enabled` | `false` keeps the definition and checks nothing with it. |
+| `mode` | `block` refuses a flagged request with a 403 and never calls the provider. `monitor` serves it and reports the verdict on `X-Otari-Guardrails`. |
+| `applies_to_all_workspaces` | `true` checks every workspace, including one created later. |
+| `workspace_ids` | The workspaces it checks, when it does not check all of them. A definition that names none checks nothing. |
+
+`on_unavailable` is the fifth, and it answers a different question: what Otari
+does when the guardrail returned **no verdict at all**. That covers a vendor API
+that failed or timed out, and an answer Otari cannot read. `block` refuses the
+request, `allow` serves it. It is the lever that keeps a vendor outage from
+stopping every request the definition covers. Only a `block` definition
+consults it: a `monitor` one serves the request either way, and reports the
+missing verdict on `X-Otari-Guardrails` as it would any other.
+
+An inconclusive verdict is not the same thing and never blocks: there the
+guardrail answered and said it could not decide.
+
+The permissive value is spelled `allow` here, while the request-body and
+organization fields of the same name spell it `monitor`. The difference is
+deliberate. On those, the guardrail answered and there is a verdict worth
+reporting. Here nothing answered, so there is nothing to monitor and the
+decision is Otari's: refuse the request, or serve it.
+
+At most ten definitions may be enabled at once. Each one is another check that
+runs before every request it covers, and they run one after another, so the
+bound is on added latency rather than on table size. Storing an eleventh is
+fine; enabling it is refused.
+
+A definition this gateway has built beats a profile of the same name on the
+sidecar `guardrails_url` points at: it is the operator's explicit one, and it
+needs no round trip. A request entry that names its own `url` is still sent
+there, because naming an endpoint is a decision about where the check goes.
+
+Two cases leave a request unchecked, and both are visible rather than silent. A
+disabled definition, which is the point of the switch. And one that failed to
+build, whose check cannot run: the startup log records the failure, and
+`GET /api/v1/guardrail-credentials` reports `"loaded": false` for as long as it
+lasts. The dashboard row says **Failed to build** beside the name.
+
+Hybrid mode enforces none of this. The store is not mounted there and nothing is
+built, so a [hybrid gateway](modes.md) is checked exactly as it was before
+definitions existed.
 
 ### Defining a guardrail from the dashboard
 
@@ -316,24 +385,36 @@ without losing its settings, and removed. Three things are worth knowing:
   stored at all. The page says so once such a guardrail is chosen; one that needs
   no credential is unaffected.
 
+Three more controls say what switching a definition on actually does: whether a
+flagged request is blocked or only reported, whether one the guardrail could not
+answer for is blocked or let through, and which workspaces it covers. The table
+then reads **Blocking**, **Monitoring** or **Paused** rather than merely on or
+off, beside the workspaces each row reaches.
+
 The page is operator-only, as every route behind it is. It configures no separate
 guardrails service: `guardrails_url` is a config-file and environment setting,
 and organization-level mandates are not edited here.
 
 ### How the layers compose
 
-Three layers can name a guardrail: the caller's request, the caller's
-organization, and a [routing policy](routing.md) the operator wrote. They are
-merged by profile, and each layer may add a check or tighten one but never
-weaken what another asked for: `block` beats `monitor` for both `mode` and
-`on_unavailable`. So a caller who sends `"mode": "monitor"` for a profile their
-organization mandates in `block` mode still gets `block`.
+Four layers can name a guardrail: the caller's request, the caller's
+organization, a [routing policy](routing.md) the operator wrote, and the
+deployment's own stored definitions. They are merged by profile, and
+each layer may add a check or tighten one but never weaken what another asked
+for: `block` beats `monitor` for both `mode` and `on_unavailable`. So a caller
+who sends `"mode": "monitor"` for a profile their organization mandates in
+`block` mode still gets `block`. A profile two layers name is checked once, not
+twice.
 
 Where two layers name one profile, the outer layer owns the endpoint the check
 is sent to, so a caller cannot point a mandated check at a service of their
-choosing. The operator's routing policy is the outermost of the three; an
-organization's entry loses its credential where a policy has taken over the
-profile, because that credential was stored for the endpoint the organization
+choosing. The last two layers are both the operator's, and a stored definition
+is the outermost of all four because it is the most explicit instruction: the
+operator built that guardrail in this gateway and switched it on for the
+workspace. So where a routing policy or an organization entry names the same
+profile, the check runs in this process rather than at the endpoint that entry
+named. A profile an outer layer claims loses the credential an inner one
+carried, because that credential was stored for the endpoint the inner entry
 named.
 
 A new workspace inherits the entries marked `applies_to_all_workspaces` and
