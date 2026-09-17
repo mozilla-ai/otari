@@ -72,10 +72,10 @@ class CommandMatchGate:
     substring check would get both wrong. A phrase matches a token run in any
     position, not only at the head, so a one-word phrase also matches where
     that word is an argument; prefer a phrase naming a real invocation
-    (``"npm install"``) over a bare tool name. See domain/evaluators.py for
-    the tokenizer, its known gap (operators glued with no surrounding
-    whitespace, e.g. ``"a&&b"``, are not split into separate segments), and
-    its whitespace-split fallback for a command shlex cannot parse.
+    (``"npm install"``) over a bare tool name. A separator needs no whitespace
+    around it (``"npm install;"`` and ``"(npm install)"`` split the same as the
+    spaced forms). See domain/evaluators.py for the tokenizer and its
+    whitespace-split fallback for a command shlex cannot parse.
 
     This gate sees only the literal command text of one tool call; it does
     not, and cannot, see what a script or program that command invokes does

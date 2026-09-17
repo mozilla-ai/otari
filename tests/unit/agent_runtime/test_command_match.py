@@ -1,5 +1,7 @@
 import time
 
+import pytest
+
 from gateway.agent_runtime.domain.evaluators import (
     _command_segments,
     _contains_subsequence,
@@ -158,17 +160,44 @@ def test_an_unparseable_heredoc_does_not_block_an_unrelated_command() -> None:
     assert evaluate_command_match(gate, CommandEvidence(commands=(heredoc,))).outcome is Outcome.PASS
 
 
-def test_operators_glued_with_no_surrounding_whitespace_are_a_known_gap() -> None:
-    """Documented, not fixed: shlex only sees '&&' as its own token when
-
-    whitespace-separated, so 'a&&b' stays one token ('a&&b'/'frontend&&npm')
-    and is never split into two segments. Pinned here so a future change to
-    this behavior is a deliberate decision, not a silent regression either
-    way.
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd frontend&&npm install",
+        "npm install;",
+        "npm install&",
+        ";npm install",
+        "(npm install)",
+        "ls|npm install",
+        "cd web && (npm install)",
+    ],
+)
+def test_a_separator_glued_to_a_word_still_splits(command: str) -> None:
+    """Every one of these fails open without _normalize_separators: shlex only
+    isolates a separator that whitespace already surrounds, so the operator
+    stays glued to the word beside it ('install;', '(npm') and matches no
+    phrase. A trailing ';' is the common one, not an evasion.
     """
-    gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("cd frontend&&npm install",)))
-    assert result.outcome is Outcome.PASS
+    gate = _gate(id="use-pnpm", forbidden=("npm install",), message="Use pnpm, not npm.")
+    assert evaluate_command_match(gate, CommandEvidence(commands=(command,))).outcome is Outcome.FAIL
+
+
+def test_a_redirect_ampersand_is_not_a_separator() -> None:
+    """'2>&1' joins a descriptor to a target; splitting there would cut one
+    command into two segments at a point no shell does.
+    """
+    assert _command_segments("npm install 2>&1") == [["npm", "install", "2>&1"]]
+    assert _command_segments("npm install &>out") == [["npm", "install", "&>out"]]
+
+
+def test_a_comment_after_a_metacharacter_is_still_a_comment() -> None:
+    """'ls;# npm install' is entirely a comment to Bash. Treating only
+    whitespace as ending a word left the commented-out text to match as if it
+    were a real command, blocking a safe command.
+    """
+    gate = _gate(id="use-pnpm", forbidden=("npm install",), message="Use pnpm, not npm.")
+    for command in ("ls;# npm install", "ls &# npm install", "ls|# npm install"):
+        assert evaluate_command_match(gate, CommandEvidence(commands=(command,))).outcome is Outcome.PASS
 
 
 # --- _command_segments / _contains_subsequence: direct unit coverage -------

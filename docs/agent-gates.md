@@ -110,18 +110,22 @@ that exact path. This does not follow indirection through a prefix
 command: `sudo /usr/bin/npm install` still has `sudo`, not `npm`, in that
 position, so `forbidden: ["npm install"]` does not catch it.
 
-Three things this gate does not do, on purpose, for now:
+A separator does not need whitespace around it. `cd web;npm install`,
+`npm install;`, and `(npm install)` are each split the same as the spaced
+forms, and a subshell's parentheses separate what they enclose as a command
+of its own. An `&` that belongs to a redirect (`2>&1`, `&>out`) is left
+alone, since it joins a descriptor to a target rather than ending a command.
+
+A comment is stripped before any of that, at the same word boundaries Bash
+uses, so `ls;# npm install` is a comment in full and matches nothing.
+
+Two things this gate does not do, on purpose, for now:
 
 - It sees only the literal command text of one tool call. It does not, and
   cannot, see what a script or program that command invokes does internally:
   `./deploy.sh` is one opaque token to this gate even if the script itself
   runs `git push --force`. This is a footgun-catcher for a cooperative agent,
   not a sandbox against one deliberately working around it.
-- It only splits a command into segments on `&&`/`;`/`|`/`||` when they are
-  whitespace-separated, and it **fails open** when they are not. `cd
-  web;npm install` tokenizes to `web;npm`, which equals no phrase, so a gate
-  forbidding `npm install` reports `pass` on it. Write compound commands with
-  spaces around the operator if you want them checked.
 - A command it cannot tokenize as a shell command (an unbalanced quote, or a
   heredoc carrying another language) falls back to a plain whitespace split.
   That still catches a forbidden phrase spelled as bare words, and it can
