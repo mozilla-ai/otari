@@ -13,12 +13,12 @@ from gateway.core.config import GatewayConfig
 from gateway.services import code_execution_tool, web_search_tool
 from gateway.services._tool_loop import ToolBackend
 from gateway.services.builtin_tool import BuiltinTool
-from gateway.services.builtin_tools import BUILTIN_TOOLS
+from gateway.services.builtin_tool_registry import BUILTIN_TOOLS
 from gateway.services.sandbox_backend import SandboxBackend
 from gateway.services.web_retrieval_backend import WebRetrievalBackend
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-REGISTRY_PATH = REPO_ROOT / "src" / "gateway" / "services" / "builtin_tools.py"
+REGISTRY_PATH = REPO_ROOT / "src" / "gateway" / "services" / "builtin_tool_registry.py"
 TOOL_ENV = (
     "OTARI_SANDBOX_URL",
     "OTARI_WEB_SEARCH_URL",
