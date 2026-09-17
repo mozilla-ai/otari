@@ -63,6 +63,15 @@ class APIKey(Base):
     # instance:model entries (with instance:* / instance:prefix* wildcards).
     allowed_models: Mapped[list[str] | None] = mapped_column(JSON)
 
+    # Set only on a key this deployment mints for itself and has to present
+    # again later, which today is the one the hosted Playground forwards with
+    # (``services/playground_dispatch``). Holds that key's plaintext encrypted
+    # with ``secret_box``, because presenting a credential is the one thing the
+    # hash above cannot do. NULL on every key a person created, which is what the
+    # key listings filter on: a row with a value here is machinery rather than a
+    # credential anybody manages, and no endpoint ever returns the value itself.
+    internal_secret: Mapped[str | None] = mapped_column()
+
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
 
     user = relationship("User", back_populates="api_keys")

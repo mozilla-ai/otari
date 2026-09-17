@@ -36,6 +36,15 @@ router = APIRouter(
 SURFACE = Surface("keys")
 
 
+# Every key surface reads the keys a person created, and none of them reads the
+# ones this deployment minted for itself: an internal key carries a stored
+# credential (``models/api_keys.APIKey.internal_secret``), so a rotation or a
+# revoke through these routes would leave the holder presenting a key that no
+# longer authenticates, with nothing on screen to explain it. A read is excluded
+# for the same reason a write is, because the id a read hands back is what a write
+# is aimed with, and a 404 is the answer a route with no business in a row gives.
+NOT_INTERNAL = col(APIKey.internal_secret).is_(None)
+
 
 async def _load_key_in_organization(
     db: AsyncSession,
@@ -61,7 +70,11 @@ async def _load_key_in_organization(
     statement = (
         select(APIKey)
         .join(Workspace, col(Workspace.id) == col(APIKey.workspace_id))
-        .where(col(APIKey.id) == key_id, col(Workspace.organization_id) == organization_id)
+        .where(
+            col(APIKey.id) == key_id,
+            col(Workspace.organization_id) == organization_id,
+            NOT_INTERNAL,
+        )
     )
     if owner_user_id is not None:
         statement = statement.where(col(APIKey.user_id) == owner_user_id)
@@ -354,7 +367,7 @@ async def list_keys(
     statement = (
         select(APIKey)
         .join(Workspace, col(Workspace.id) == col(APIKey.workspace_id))
-        .where(col(Workspace.organization_id) == organization_id)
+        .where(col(Workspace.organization_id) == organization_id, NOT_INTERNAL)
     )
     if workspace_id is not None:
         statement = statement.where(col(APIKey.workspace_id) == workspace_id)

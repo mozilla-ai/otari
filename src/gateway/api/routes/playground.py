@@ -35,16 +35,25 @@ comparisons list that trusted a client-supplied scope and leaked prompts and
 model outputs across organizations; the predicate is what makes that
 unreachable rather than merely fixed.
 
-Standalone only. Hybrid mode has no dashboard session and no local tenancy to
-resolve one against, and a hosted control plane serves no inference at all
-(otari#822), so ``main._register_core_routers`` mounts this behind both gates
-and ``hosted_mode.DATA_PLANE_PREFIXES`` answers the prefix there with the 404
-that names the data plane.
+**Hosted serves the same page and forwards the one request that dispatches.**
+A hosted control plane runs no inference (otari#822), so on that deployment the
+completion below hands the resolved principal to
+``services/playground_dispatch`` instead of to the local pipeline: it is
+presented to ``config.data_plane_url`` as an API key that never leaves this
+process, and the gateway there runs the pipeline and reports the usage that
+debits the wallet. Everything else on this router is management traffic and is
+served locally either way, so the page is whole rather than half-mounted.
+
+Hybrid mode is the one deployment that serves none of this. It has no dashboard
+session and no local tenancy to resolve one against, so
+``main._register_core_routers`` mounts the router for standalone and hosted and
+not for hybrid.
 """
 
 import uuid
 from typing import Annotated
 
+import httpx
 from any_llm.types.completion import ChatCompletion
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
@@ -61,7 +70,9 @@ from gateway.api.deps import (
 )
 from gateway.api.routes.chat import ChatCompletionRequest, run_chat_completion
 from gateway.core.config import GatewayConfig
+from gateway.core.database import release_session
 from gateway.core.surface import Surface
+from gateway.log_config import logger
 from gateway.models.playground import (
     PlaygroundComparisonCreate,
     PlaygroundComparisonsPublic,
@@ -75,8 +86,10 @@ from gateway.models.playground import (
     PlaygroundFavoriteModelsUpdate,
     PlaygroundMessagesPublic,
 )
-from gateway.services import playground_service
+from gateway.services import playground_dispatch, playground_service
 from gateway.services.log_writer import LogWriter
+from gateway.services.secret_box import SecretBoxUnavailableError
+from gateway.types.session_principal import SessionPrincipal
 
 router = APIRouter(
     prefix="/playground",
@@ -89,8 +102,12 @@ router = APIRouter(
     dependencies=[Depends(verify_master_key)],
 )
 
-# A hosted deployment serves no inference, and the Playground sends completions.
-SURFACE = Surface("playground", hosted=False)
+# Published everywhere a dashboard session exists. A hosted control plane serves
+# no inference of its own, which is why the completion below forwards rather than
+# dispatches, and ``bootstrap.published_surfaces`` withholds the surface there
+# while ``data_plane_url`` is unset: with nowhere to forward to, the page has
+# nothing to offer.
+SURFACE = Surface("playground")
 
 _CONVERSATION_NOT_FOUND = "Conversation not found"
 _COMPARISON_NOT_FOUND = "Comparison not found"
@@ -177,12 +194,24 @@ async def playground_chat_completions(
 
     ``user`` in the body is the one field the pipeline will not read here: spend
     binds to the session's own attribution user, derived and never accepted.
+
+    On a hosted control plane there is no local pipeline to call, so the same
+    principal is forwarded to the data-plane gateway instead
+    (:func:`_dispatch_to_data_plane`). The request and the response are the same
+    either way.
     """
     principal = await playground_service.resolve_playground_principal(
         db,
         identity=identity,
         workspace_id=workspace_id,
     )
+    if config.is_hosted_mode:
+        return await _dispatch_to_data_plane(
+            request=request,
+            principal=principal,
+            db=db,
+            config=config,
+        )
     return await run_chat_completion(
         raw_request=raw_request,
         response=response,
@@ -194,6 +223,71 @@ async def playground_chat_completions(
         model_provider=model_provider,
         session_principal=principal,
     )
+
+
+_NO_DATA_PLANE_DETAIL = (
+    "This deployment does not serve inference, and no data-plane gateway is configured for it. "
+    "An operator sets data_plane_url to the gateway that serves this deployment's traffic."
+)
+_DATA_PLANE_UNREACHABLE_DETAIL = "The gateway that serves this deployment's inference could not be reached"
+_NO_SECRET_KEY_DETAIL = "This deployment cannot store the credential it needs to reach its data-plane gateway"
+
+
+async def _dispatch_to_data_plane(
+    *,
+    request: ChatCompletionRequest,
+    principal: SessionPrincipal,
+    db: AsyncSession,
+    config: GatewayConfig,
+) -> StreamingResponse:
+    """Run this completion on the deployment's data plane rather than here.
+
+    The hosted half of the route above. ``services/playground_dispatch`` owns why
+    a forward and which key; this is the request-shaped part: resolve the key,
+    release the session, and forward.
+
+    The body is re-sent as the caller sent it (``exclude_unset``) rather than as
+    this deployment's model defaults would fill it in, so a field the gateway
+    understands and this build does not still arrives, and a default the data
+    plane would have chosen is not overridden by one chosen here.
+
+    The answer is streamed back whatever its shape. A non-streaming completion is
+    one chunk of JSON carrying the upstream's own content type, so the page reads
+    the same body it reads standalone and neither this nor the page has to branch
+    on ``stream``.
+    """
+    if config.data_plane_url is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_NO_DATA_PLANE_DETAIL)
+
+    try:
+        api_key = await playground_dispatch.resolve_dispatch_key(db, principal=principal)
+    except SecretBoxUnavailableError:
+        # The deployment stores provider credentials through the same key, so this
+        # is a control plane that could not have served a completion anyway.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_NO_SECRET_KEY_DETAIL,
+        ) from None
+    # Released for the reason every dispatching route releases it: a pooled
+    # connection must not be held across an upstream call, and a streamed answer
+    # holds this one for as long as the model takes.
+    await release_session(db)
+    try:
+        status_code, headers, body = await playground_dispatch.forward_completion(
+            url=playground_dispatch.completions_url(config.data_plane_url),
+            api_key=api_key,
+            payload=request.model_dump(mode="json", exclude_unset=True),
+        )
+    except httpx.HTTPError as exc:
+        # Logged with the cause and answered without it: the transport error names
+        # this deployment's own hosts and ports, which is topology a tenant is not
+        # owed and the error-detail boundary does not carry.
+        logger.warning("Playground dispatch to the data plane failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=_DATA_PLANE_UNREACHABLE_DETAIL,
+        ) from None
+    return StreamingResponse(body, status_code=status_code, headers=headers)
 
 
 @router.get("/tools")

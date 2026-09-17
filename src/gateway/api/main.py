@@ -193,15 +193,16 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig, enabled_featur
     # flat for an SDK. Same reader gate as /v1/models.
     api.include_router(catalog.router)
     api.include_router(catalog.operator_router)
-    if serves_data_plane:
-        # Both planes at once, which is why it is mounted here rather than with
-        # the data plane above: the Playground page reads the management surface
-        # (its own saved transcripts, the workspace's tools) and dispatches a
-        # completion. So it needs the management session hybrid mode does not
-        # have, and the data plane a hosted control plane does not serve
-        # (otari#822); ``hosted_mode.DATA_PLANE_PREFIXES`` answers its prefix
-        # there with the 404 that names the data plane.
-        api.include_router(playground.router)
+    # Both planes at once, which is why it is mounted here rather than with the
+    # data plane above: the Playground page reads the management surface (its own
+    # saved transcripts, the workspace's tools) and dispatches a completion. The
+    # management session is what hybrid mode cannot offer, so hybrid is the one
+    # mode that returns before this. A hosted control plane has the session and
+    # not the data plane, and serves the page by forwarding that one request to
+    # ``data_plane_url`` (``services/playground_dispatch``), so its prefix is not
+    # in ``hosted_mode.DATA_PLANE_PREFIXES``: a stub there would shadow this
+    # router, which is registered later.
+    api.include_router(playground.router)
     # The provider registry, which the organization provider-key form reads to
     # offer its BYO choices. Split off the operator router because that form's
     # audience is a tenant's owners and admins, who operate nothing.

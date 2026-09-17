@@ -102,14 +102,26 @@ def published_surfaces(config: GatewayConfig, enabled_features: tuple[CoreFeatur
     """The surfaces this deployment publishes, sorted.
 
     Covers the fixed set and each enabled feature's surface.
-    Empty for hybrid, which hosts none.
+    Empty for hybrid, which hosts none, and one row short on a hosted deployment
+    with no data plane configured; see below.
     """
     if config.is_hybrid_mode:
         return []
     featured = [feature.surface for feature in enabled_features if feature.surface is not None]
     surfaces = (*_DECLARED_SURFACES, *featured)
     if config.is_hosted_mode:
-        return sorted({surface.name for surface in surfaces if surface.hosted})
+        names = {surface.name for surface in surfaces if surface.hosted}
+        # The one surface a hosted deployment publishes conditionally. The
+        # Playground forwards its completion to ``data_plane_url``
+        # (``services/playground_dispatch``), so a control plane that has not been
+        # told where its data plane is cannot serve the page at all. Decided here
+        # rather than declared ``hosted=False`` on the surface, because what
+        # settles it is this deployment's configuration and not the topology:
+        # every other row on the roster is the same answer for every deployment of
+        # that type.
+        if config.data_plane_url is None:
+            names.discard(playground.SURFACE.name)
+        return sorted(names)
     return sorted({surface.name for surface in surfaces if surface.standalone})
 
 

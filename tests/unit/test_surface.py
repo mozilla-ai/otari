@@ -48,6 +48,10 @@ def test_the_surface_lists_are_spelled_out() -> None:
         "organization_providers",
         "organization_usage",
         "organizations",
+        # Declared on both, and withheld at publish time by a hosted deployment
+        # that has no ``data_plane_url`` to forward a completion to. This roster
+        # is the topology axis, which is why the configuration one is not in it.
+        "playground",
         "pricing",
         "routing",
         "settings",
