@@ -1,17 +1,9 @@
 """How a budget's reset cadence becomes a window, and the vocabulary for saying it.
 
-A leaf module on purpose. Both the code that enforces a scoped ceiling
-(:mod:`gateway.services.scoped_budget_service`) and the code that materializes one
-from a workspace default (:mod:`gateway.services.tenancy.workspace_budget_default_service`)
-have to derive a window, and the second cannot import the first: that module
-imports ``workspace_scope``, which reaches ``tenancy.provisioning_service``,
-``tenancy/__init__`` and ``workspace_service``, which imports the default service
-back. The cycle is real, and the previous answer to it was a second copy of the
-derivation that only understood durations, so a calendar-aligned budget
-materialized a ceiling with no window at all and never reset.
-
-Nothing here imports from the gateway, so both sides can depend on it and
-``tests/unit/test_service_module_imports.py`` keeps the graph acyclic.
+A leaf module on purpose.
+Every surface that caps spend derives its window here, so a calendar-aligned
+budget cannot get a real window on one path and none on another.
+Nothing here imports from the gateway, so any surface can depend on it.
 """
 
 from datetime import UTC, datetime, timedelta

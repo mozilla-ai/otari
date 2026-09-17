@@ -1,18 +1,11 @@
 """Move a budget's ceilings onto the cadence it now carries.
 
 A leaf module for the same reason :mod:`gateway.services.budget_periods` is one,
-and it sits directly on top of it. Two surfaces change a budget's period, and
-neither can import the other's module:
-
-- ``api/routes/budgets.py``, the deployment-wide surface.
-- ``services/tenancy/organization_budget_service.py``, the tenant-scoped one,
-  which cannot reach ``scoped_budget_service`` because that module imports
-  ``workspace_scope`` and closes a cycle back through ``tenancy/__init__``.
-
-Without a shared home the retiming would be written twice, and a rule with two
-copies is a rule that will hold on one surface and not the other. This imports
-the entity models and ``budget_periods`` only, so nothing that depends on it
-gains a cycle, and ``tests/unit/test_service_module_imports.py`` pins that.
+and it sits directly on top of it.
+Both the deployment-wide and the tenant-scoped surface change a budget's period,
+and without a shared home the retiming would be written twice, which is a rule
+that holds on one surface and not the other.
+This imports the entity models and ``budget_periods`` only.
 
 **Why retiming is necessary at all.** A ceiling holds its own
 ``period_start``/``period_end`` and reads the cadence *through* the budget it
