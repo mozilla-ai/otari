@@ -1,13 +1,18 @@
+import ast
 import logging
 import os
+from functools import cache
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
+from alembic.runtime.environment import NameFilterType
 from alembic.runtime.migration import MigrationContext
-from alembic.script import ScriptDirectory
+from alembic.script import Script, ScriptDirectory
 from alembic.util import CommandError
 from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import Engine
+from sqlalchemy.sql.schema import SchemaItem
 
 from gateway.core.database import to_sync_url
 
@@ -139,6 +144,68 @@ def _reject_foreign_history(engine: Engine) -> None:
     raise CommandError(msg)
 
 
+def _table_name_argument(call: ast.Call, position: int, keyword: str) -> ast.expr | None:
+    """Return the argument a table operation received for one parameter, by position or by keyword."""
+    if len(call.args) > position:
+        return call.args[position]
+    return next((argument.value for argument in call.keywords if argument.arg == keyword), None)
+
+
+def _tables_created_by(script: Script) -> set[str]:
+    """Return the tables one revision creates, or renames a table to.
+
+    A table name must be a string literal or a module-level constant of the revision,
+    so it is read without running the migration.
+    """
+    tree = ast.parse(Path(script.path).read_text(encoding="utf-8"), filename=script.path)
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr == "create_table":
+            argument = _table_name_argument(node, 0, "table_name")
+        elif node.func.attr == "rename_table":
+            argument = _table_name_argument(node, 1, "new_table_name")
+        else:
+            continue
+        if isinstance(argument, ast.Constant):
+            name = argument.value
+        elif isinstance(argument, ast.Name):
+            name = getattr(script.module, argument.id, None)
+        else:
+            name = None
+        if not isinstance(name, str):
+            written = ast.unparse(argument) if argument is not None else "no name"
+            msg = (
+                f"Revision {script.revision} names a table with {written}, which is neither a string nor a "
+                "module-level constant, so autogenerate cannot tell whether the table belongs to otari's chain."
+            )
+            raise CommandError(msg)
+        names.add(name)
+    return names
+
+
+@cache
+def _tables_this_chain_creates() -> frozenset[str]:
+    """Return every table a revision in this chain creates, or renames a table to."""
+    scripts = ScriptDirectory.from_config(config).walk_revisions()
+    return frozenset(name for script in scripts for name in _tables_created_by(script))
+
+
+def _include_object(
+    obj: SchemaItem, name: str | None, type_: NameFilterType, reflected: bool, compare_to: SchemaItem | None
+) -> bool:
+    """Leave out of autogenerate a table that exists only in the database and that this chain never created.
+
+    A database can hold another migration chain's tables beside otari's,
+    and autogenerate must not propose dropping them.
+    A table that otari's own models stop declaring was created by this chain, so it still gets its drop.
+    """
+    if type_ == "table" and reflected and compare_to is None:
+        return name in _tables_this_chain_creates()
+    return True
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -155,6 +222,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=url,
         target_metadata=target_metadata,
+        include_object=_include_object,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -179,7 +247,7 @@ def run_migrations_online() -> None:
     _reject_foreign_history(connectable)
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(connection=connection, target_metadata=target_metadata, include_object=_include_object)
 
         with context.begin_transaction():
             context.run_migrations()
