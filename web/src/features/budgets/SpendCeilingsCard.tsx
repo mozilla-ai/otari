@@ -51,6 +51,12 @@ export function SpendCeilingsCard({
   // Bumped on every open and used as the dialog's key, so the draft is cleared
   // on the way in rather than on the way out.
   const [openCount, setOpenCount] = useState(0)
+  // The organization joins that key because the dialog seeds its target from
+  // the id on mount, and switching organization invalidates every query rather
+  // than remounting this page: an open dialog would otherwise hold the previous
+  // organization's id, which submits as a workspace and is not among the
+  // options it is offering.
+  const dialogKey = `${organizationId}:${openCount}`
   const [editing, setEditing] = useState<OrganizationSpendCeiling>()
   const [pendingDelete, setPendingDelete] = useState<OrganizationSpendCeiling>()
 
@@ -186,7 +192,7 @@ export function SpendCeilingsCard({
       </Card>
 
       <SpendCeilingDialog
-        key={openCount}
+        key={dialogKey}
         isOpen={isDialogOpen}
         onOpenChange={setDialogOpen}
         editing={editing}

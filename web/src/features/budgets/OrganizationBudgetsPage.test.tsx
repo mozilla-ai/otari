@@ -3,7 +3,11 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { OrganizationBudget, OrganizationSpendCeiling } from "@/client"
+import type {
+  OrganizationBudget,
+  OrganizationContext,
+  OrganizationSpendCeiling,
+} from "@/client"
 import { OrganizationBudgetsPage } from "@/features/budgets/OrganizationBudgetsPage"
 import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
@@ -113,25 +117,35 @@ function mockApi({
   return requests
 }
 
+// The caller this page exists for: an admin who does not operate the
+// deployment. The fixture defaults to an owner who does, which is the one
+// caller that would reach the other page instead.
+const admin = (overrides: Partial<OrganizationContext> = {}) =>
+  organizationContext({
+    role: "admin",
+    deployment_operator: false,
+    ...overrides,
+  })
+
 function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(
+  const tree = (context: OrganizationContext) => (
     <DeploymentProvider value={bootstrap()}>
       <QueryClientProvider client={client}>
-        <OrganizationBudgetsPage
-          // The caller this page exists for: an admin who does not operate the
-          // deployment. The fixture defaults to an owner who does, which is the
-          // one caller that would reach the other page instead.
-          organization={organizationContext({
-            role: "admin",
-            deployment_operator: false,
-          })}
-        />
+        <OrganizationBudgetsPage organization={context} />
       </QueryClientProvider>
-    </DeploymentProvider>,
+    </DeploymentProvider>
   )
+  const result = render(tree(admin()))
+  // Switching organization invalidates every query rather than remounting this
+  // page, so the page seeing a new context in place is what a switch looks like
+  // from here.
+  return {
+    ...result,
+    switchTo: (context: OrganizationContext) => result.rerender(tree(context)),
+  }
 }
 
 afterEach(() => {
@@ -491,6 +505,43 @@ describe("OrganizationBudgetsPage", () => {
       expect(posted?.body).toMatchObject({
         scope_type: "workspace",
         scope_id: workspace().id,
+      })
+    })
+  })
+
+  it("re-seeds an open dialog when the organization changes under it", async () => {
+    // The dialog stays mounted between opens and seeds its target on mount, and
+    // a switch invalidates every query rather than remounting this page. So an
+    // open dialog can outlive the organization it was seeded from, and the
+    // stale id is not among the options it is offering: it would submit as a
+    // workspace.
+    const requests = mockApi()
+    const user = userEvent.setup()
+    const { switchTo } = renderPage()
+    await screen.findByRole("grid", { name: "Organization spend ceilings" })
+    await user.click(screen.getByRole("button", { name: "Add ceiling" }))
+    await screen.findByRole("dialog", { name: "New spend ceiling" })
+
+    const moved = organization({
+      id: "77777777-7777-7777-7777-777777777777",
+      name: "Second Organization",
+    })
+    switchTo(admin({ organization: moved }))
+    await user.click(
+      screen
+        .getAllByRole("button", { name: "Add ceiling" })
+        .at(-1) as HTMLElement,
+    )
+
+    await waitFor(() => {
+      const posted = requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
+      )
+      expect(posted?.body).toMatchObject({
+        scope_type: "organization",
+        scope_id: moved.id,
       })
     })
   })
