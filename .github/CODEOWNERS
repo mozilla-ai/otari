@@ -9,4 +9,4 @@
 /scripts/check_architecture.py  @mozilla-ai/otari-team
 /.github/CODEOWNERS             @mozilla-ai/otari-team
 /src/gateway/container.py       @mozilla-ai/otari-team
-/src/gateway/packages.py        @mozilla-ai/otari-team
+/src/gateway/features.py        @mozilla-ai/otari-team
