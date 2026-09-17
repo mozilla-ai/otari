@@ -92,8 +92,7 @@ class RecordingPort:
         return self.credential
 
     async def get_hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
-        del organization_id
-        return frozenset({self.credential.response_provider}) if self.credential is not None else frozenset()
+        raise AssertionError("dispatch must not ask for the hosted provider list")
 
 
 def _plain_build_port() -> ModelProviderPort:
