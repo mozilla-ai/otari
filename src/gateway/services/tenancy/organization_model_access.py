@@ -54,7 +54,7 @@ from gateway.repositories.tenancy.org_provider_key_repository import (
 from gateway.services.provider_kwargs import provider_key
 from gateway.services.tenancy.authorization import VisibleWorkspaceScope, resolve_visible_workspace_scope
 from gateway.services.tenancy.errors import TenancyForbiddenError, TenancyNotFoundError
-from gateway.services.tenancy.org_provider_key_service import key_is_usable
+from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, key_is_usable
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.workspace_scope import lookup_default_workspace_id
 
@@ -81,15 +81,7 @@ class SessionCatalogScope:
     """
 
     deployment_supplied_providers: frozenset[str]
-    """Bare providers the deployment's own credential serves this caller.
-
-    The hosted providers no BYO key of the caller's covers, so a request on
-    them dispatches on a deployment-owned credential and is billed at the
-    deployment's rate. The catalog flags their models ``deployment_managed`` for
-    the same reason it flags a configured instance's: the organization may not
-    set its own rate for a bill the deployment pays
-    (``OrganizationPricingService.raise_if_deployment_supplied``).
-    """
+    """Hosted providers the deployment pays for in at least one of the organization's workspaces."""
 
 
 async def _get_hosted_providers(model_provider: ModelProviderPort | None, organization_id: uuid.UUID) -> frozenset[str]:
@@ -97,11 +89,6 @@ async def _get_hosted_providers(model_provider: ModelProviderPort | None, organi
         return frozenset()
     hosted = await model_provider.get_hosted_providers(organization_id=organization_id)
     return frozenset(provider_key(provider) for provider in hosted)
-
-
-def _providers_of(entries: set[str]) -> set[str]:
-    """The provider prefix of each ``model_access`` entry."""
-    return {entry.split(":", 1)[0] for entry in entries}
 
 
 async def _byo_entries_for_workspaces(
@@ -184,9 +171,7 @@ async def resolve_session_catalog_scope(
     a query.
 
     ``model_provider`` is the port this build bound; ``None`` reads as a build
-    that serves nothing hosted. A hosted provider the organization also holds a
-    BYO key for is reachable either way and listed once, but it is the BYO key
-    that dispatch would use, so it is not flagged as deployment-supplied.
+    that serves nothing hosted.
 
     A caller with no live organization membership is answered with the configured
     instances rather than refused. That is the same rule applied to an empty
@@ -218,12 +203,17 @@ async def resolve_session_catalog_scope(
             workspace_ids=scope.workspace_ids or [],
         )
     hosted = await _get_hosted_providers(model_provider, scope.organization.id)
+    byo_providers = (
+        await OrgProviderKeyService(db).get_byo_providers(organization_id=scope.organization.id)
+        if hosted
+        else frozenset()
+    )
     entries |= byo_entries
     entries.update(f"{provider}:*" for provider in hosted)
     return SessionCatalogScope(
         allowlist=sorted(entries),
         reads_default_workspace=await _sees_default_workspace(db, scope),
-        deployment_supplied_providers=hosted - _providers_of(byo_entries),
+        deployment_supplied_providers=hosted - byo_providers,
     )
 
 

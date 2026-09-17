@@ -32,7 +32,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
-from gateway.models.provider_keys import OrgProviderKey, WorkspaceProviderModelRestriction
+from gateway.models.provider_keys import (
+    OrgProviderKey,
+    WorkspaceProviderKeyOverride,
+    WorkspaceProviderModelRestriction,
+)
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.ports.model_provider_port import HostedCredential, ModelProviderPort
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
@@ -443,6 +447,55 @@ def test_a_hosted_provider_the_organization_also_holds_a_key_for_is_the_organiza
     assert set(beta) == {_OPENAI_MODEL, _OPENAI_OTHER, _ANTHROPIC_MODEL}
     assert beta[_OPENAI_MODEL]["deployment_managed"] is True
     assert beta[_ANTHROPIC_MODEL]["deployment_managed"] is False
+
+
+@pytest.mark.parametrize(
+    ("model", "disabled_in_alpha_two", "deployment_managed"),
+    [
+        pytest.param(_MISTRAL_MODEL, False, True, id="no-byo-key"),
+        pytest.param(_OPENAI_MODEL, False, False, id="byo-key-in-every-workspace"),
+        pytest.param(_OPENAI_MODEL, True, True, id="one-workspace-disables-the-byo-key"),
+    ],
+)
+def test_the_deployment_managed_flag_agrees_with_the_rate_override_gate(
+    client: TestClient,
+    world: _World,
+    db_session_factory: Callable[[], Session],
+    model: str,
+    disabled_in_alpha_two: bool,
+    deployment_managed: bool,
+) -> None:
+    """The dashboard offers a rate override only where the flag is false, so the gate must accept exactly those."""
+    _bind_hosted(client, _HostedPort("openai", "mistral"))
+    if disabled_in_alpha_two:
+        session = db_session_factory()
+        try:
+            session.add(
+                WorkspaceProviderKeyOverride(
+                    workspace_id=world.workspaces["alpha_two"],
+                    organization_id=world.alpha,
+                    org_provider_key_id=world.keys["alpha_openai"],
+                    is_default=False,
+                    disabled=True,
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+    listed = _listing_as(client, world, "alpha_owner")
+    assert listed[model]["deployment_managed"] is deployment_managed
+
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_owner"])
+    try:
+        written = client.post(
+            f"{API_ROOT}/organizations/me/pricing",
+            json={"model_key": model, "input_price_per_million": 2.5, "output_price_per_million": 5.0},
+        )
+    finally:
+        client.cookies.clear()
+    expected = status.HTTP_403_FORBIDDEN if deployment_managed else status.HTTP_201_CREATED
+    assert written.status_code == expected, written.text
 
 
 def test_the_single_model_read_agrees_with_the_listing_about_a_hosted_model(client: TestClient, world: _World) -> None:
