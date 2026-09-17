@@ -2211,6 +2211,16 @@
         "title": "CatalogCapabilities",
         "type": "object"
       },
+      "CatalogCredential": {
+        "description": "Whose key serves a catalog offering.",
+        "enum": [
+          "deployment",
+          "organization",
+          "hosted"
+        ],
+        "title": "CatalogCredential",
+        "type": "string"
+      },
       "CatalogElsewhere": {
         "description": "A provider models.dev lists for this model that this deployment has not configured.",
         "properties": {
@@ -2733,14 +2743,8 @@
             "title": "Context Window"
           },
           "credential": {
-            "description": "Whose key serves it: `deployment` for a `providers:` instance the operator configured, `organization` for a key the viewer's organization holds.",
-            "enum": [
-              "deployment",
-              "organization",
-              "hosted"
-            ],
-            "title": "Credential",
-            "type": "string"
+            "$ref": "#/components/schemas/CatalogCredential",
+            "description": "Whose key serves it: `deployment` for a `providers:` instance the operator configured, `organization` for a key the viewer's organization holds."
           },
           "discovered": {
             "description": "Whether the provider itself reported this model.",

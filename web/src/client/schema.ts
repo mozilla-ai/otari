@@ -6107,6 +6107,12 @@ export interface components {
             tool_call: boolean;
         };
         /**
+         * CatalogCredential
+         * @description Whose key serves a catalog offering.
+         * @enum {string}
+         */
+        CatalogCredential: "deployment" | "organization" | "hosted";
+        /**
          * CatalogElsewhere
          * @description A provider models.dev lists for this model that this deployment has not configured.
          */
@@ -6328,12 +6334,8 @@ export interface components {
         CatalogOffering: {
             /** Context Window */
             context_window?: number | null;
-            /**
-             * Credential
-             * @description Whose key serves it: `deployment` for a `providers:` instance the operator configured, `organization` for a key the viewer's organization holds.
-             * @enum {string}
-             */
-            credential: "deployment" | "organization" | "hosted";
+            /** @description Whose key serves it: `deployment` for a `providers:` instance the operator configured, `organization` for a key the viewer's organization holds. */
+            credential: components["schemas"]["CatalogCredential"];
             /**
              * Discovered
              * @description Whether the provider itself reported this model.

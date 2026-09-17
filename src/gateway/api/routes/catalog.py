@@ -27,7 +27,8 @@ import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, Literal
+from enum import StrEnum
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -111,10 +112,12 @@ operator_router = APIRouter(
 # it as "nobody" rather than as a key that failed to verify.
 CatalogCaller = tuple[APIKey | None, bool] | None
 
-# The reserved instance a hosted edition serves deployment-owned offerings under;
-# the base gateway never configures one, so the label only ever appears where an
-# overlay contributes such an offering.
-Credential = Literal["deployment", "organization", "hosted"]
+class CatalogCredential(StrEnum):
+    """Whose key serves a catalog offering."""
+
+    DEPLOYMENT = "deployment"
+    ORGANIZATION = "organization"
+    HOSTED = "hosted"
 
 # The window the viewer's own usage is rolled up over on a detail read.
 _USAGE_WINDOW = timedelta(days=30)
@@ -164,7 +167,7 @@ class CatalogOffering(BaseModel):
     )
     provider: str = Field(description="The provider instance the selector names.")
     provider_type: str = Field(description="The any-llm implementation behind the instance.")
-    credential: Credential = Field(
+    credential: CatalogCredential = Field(
         description=(
             "Whose key serves it: `deployment` for a `providers:` instance the operator configured, "
             "`organization` for a key the viewer's organization holds."
@@ -480,7 +483,7 @@ async def _with_usage(db: AsyncSession, grouped: _Grouped, members: list[_Offeri
     return [member.wire.model_copy(update={"usage_30d": usage.get(member.wire.selector)}) for member in members]
 
 
-def _credential(config: GatewayConfig, instance: str) -> Credential:
+def _credential(config: GatewayConfig, instance: str) -> CatalogCredential:
     """Whose key an instance runs on, from its name alone.
 
     The reserved name is the seam: ``config`` refuses it in ``providers:``
@@ -488,8 +491,8 @@ def _credential(config: GatewayConfig, instance: str) -> Credential:
     what makes the name readable here without the route knowing the overlay.
     """
     if instance == HOSTED_OFFERING_INSTANCE:
-        return "hosted"
-    return "deployment" if instance in config.providers else "organization"
+        return CatalogCredential.HOSTED
+    return CatalogCredential.DEPLOYMENT if instance in config.providers else CatalogCredential.ORGANIZATION
 
 
 def _first(values: Iterable[str | None]) -> str | None:
