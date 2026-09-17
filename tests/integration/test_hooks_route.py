@@ -162,6 +162,16 @@ def test_duplicated_globs_and_paths_resolve_quickly_instead_of_blocking(
     ~5s of synchronous blocking. Deduplicating at parse time and at the
     evidence boundary (domain.policy, PolicyCheckRequest.changed_path_evidence)
     collapses this to one pattern against one path.
+
+    The budget below is deliberately far above what the deduplicated work
+    costs. What the timer actually spans is a whole HTTP round trip, and most
+    of what is left in it once the quadratic blowup is gone is the unavoidable
+    cost of the payload itself: parsing and validating 10,000 paths and a
+    2,500-entry policy. That floor scales with the request rather than with
+    the bug, so a budget pressed close to it measures how loaded the runner
+    is, not whether the blowup is back (it failed at 1.07s against a 1.0s
+    budget on a four-worker CI runner). Three seconds still catches a return
+    to ~5s, which is the regression this exists to hold.
     """
     quoted_b = '"b"'
     policy = (
@@ -176,7 +186,7 @@ def test_duplicated_globs_and_paths_resolve_quickly_instead_of_blocking(
         json={"policy_yaml": policy, "changed_paths": changed_paths},
         headers=master_key_header,
     )
-    assert time.time() - start < 1.0
+    assert time.time() - start < 3.0
     assert response.status_code == 200, response.text
     assert response.json()["blocked"] is False
 
