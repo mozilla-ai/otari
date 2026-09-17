@@ -23,6 +23,9 @@ Enforces:
     AsyncSession, because it belongs on its domain's service, which receives
     repositories and a Unit of Work, never a session. Functions that still
     take one are named on a baseline, and the baseline only shrinks.
+13. Domain packages: services/ and repositories/ gain no top-level module, so
+    new code goes in its domain's package. The flat modules that exist are
+    named on a baseline, and the baseline only shrinks.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -734,6 +737,110 @@ def check_top_level_packages(src_root: Path) -> list[str]:
     return violations
 
 
+DOMAIN_PACKAGE_LAYERS = ("gateway/services", "gateway/repositories")
+# The flat modules the domain layers held when rule 13 landed. An entry whose
+# module no longer exists fails the check until it is removed.
+FLAT_MODULE_BASELINE = (
+    "gateway/repositories/base_repository.py",
+    "gateway/repositories/users_repository.py",
+    "gateway/services/_tool_loop.py",
+    "gateway/services/agent_telemetry_admin_service.py",
+    "gateway/services/agent_telemetry_service.py",
+    "gateway/services/alias_service.py",
+    "gateway/services/batch_service.py",
+    "gateway/services/bedrock_gateway_auth.py",
+    "gateway/services/bootstrap_service.py",
+    "gateway/services/budget_periods.py",
+    "gateway/services/budget_reservation_ledger.py",
+    "gateway/services/budget_retiming.py",
+    "gateway/services/budget_service.py",
+    "gateway/services/catalog_selectors.py",
+    "gateway/services/claude_code_import.py",
+    "gateway/services/content_normalizer.py",
+    "gateway/services/dashboard_session_service.py",
+    "gateway/services/external_usage_service.py",
+    "gateway/services/file_extractors.py",
+    "gateway/services/file_service.py",
+    "gateway/services/file_store.py",
+    "gateway/services/guardrail_catalog.py",
+    "gateway/services/guardrails.py",
+    "gateway/services/log_writer.py",
+    "gateway/services/maintenance_mode_service.py",
+    "gateway/services/master_key_service.py",
+    "gateway/services/mcp_client.py",
+    "gateway/services/mcp_loop.py",
+    "gateway/services/mcp_loop_messages.py",
+    "gateway/services/mcp_loop_responses.py",
+    "gateway/services/mcp_stateless.py",
+    "gateway/services/merged_catalog_service.py",
+    "gateway/services/model_access.py",
+    "gateway/services/model_capabilities.py",
+    "gateway/services/model_catalog_service.py",
+    "gateway/services/model_discovery_service.py",
+    "gateway/services/model_identity.py",
+    "gateway/services/oauth_service.py",
+    "gateway/services/organization_pricing_service.py",
+    "gateway/services/password_service.py",
+    "gateway/services/playground_dispatch.py",
+    "gateway/services/playground_service.py",
+    "gateway/services/policy_store.py",
+    "gateway/services/pricing_init_service.py",
+    "gateway/services/pricing_refresh_service.py",
+    "gateway/services/pricing_service.py",
+    "gateway/services/provider_health_service.py",
+    "gateway/services/provider_kwargs.py",
+    "gateway/services/provider_metadata_service.py",
+    "gateway/services/provider_store_service.py",
+    "gateway/services/runtime_settings_service.py",
+    "gateway/services/sandbox_backend.py",
+    "gateway/services/scoped_budget_service.py",
+    "gateway/services/search_backend.py",
+    "gateway/services/search_tool_store_service.py",
+    "gateway/services/secret_box.py",
+    "gateway/services/selector_index_service.py",
+    "gateway/services/tool_format.py",
+    "gateway/services/tool_settings_service.py",
+    "gateway/services/tool_usage.py",
+    "gateway/services/upstream_redaction.py",
+    "gateway/services/url_safety.py",
+    "gateway/services/usage_admin_service.py",
+    "gateway/services/vision.py",
+    "gateway/services/web_extraction.py",
+    "gateway/services/web_fetch_service.py",
+    "gateway/services/web_retrieval_backend.py",
+    "gateway/services/web_retrieval_network.py",
+    "gateway/services/web_retrieval_policy.py",
+    "gateway/services/web_search_backend.py",
+    "gateway/services/web_search_budget.py",
+    "gateway/services/web_search_providers.py",
+    "gateway/services/workspace_scope.py",
+)
+
+
+def check_flat_modules(src_root: Path) -> list[str]:
+    """Check that the domain layers hold no top-level module off the baseline, and no package without an __init__.py."""
+    violations: list[str] = []
+    for layer in DOMAIN_PACKAGE_LAYERS:
+        layer_root = src_root / layer
+        if not layer_root.is_dir():
+            continue
+        for entry in sorted(layer_root.iterdir()):
+            relative_path = entry.relative_to(src_root).as_posix()
+            if entry.is_file() and entry.suffix == ".py" and entry.name != "__init__.py":
+                if relative_path not in FLAT_MODULE_BASELINE:
+                    violations.append(
+                        f"{relative_path} is a new top-level module; put it in its domain's package under {layer}/"
+                    )
+            elif entry.is_dir() and not (entry / "__init__.py").is_file() and any(entry.rglob("*.py")):
+                violations.append(f"{relative_path} has no __init__.py; a domain package needs one")
+    violations.extend(
+        f"{relative_path} is on the flat module baseline but no longer exists; remove it from the baseline"
+        for relative_path in FLAT_MODULE_BASELINE
+        if not (src_root / relative_path).is_file()
+    )
+    return violations
+
+
 def main() -> int:
     """Run the architecture checks over the gateway package and the OSS test suite."""
     # Both must exist: silently skipping either would let its rules (including
@@ -761,6 +868,7 @@ def main() -> int:
 
     naming_violations = check_naming_conventions(SRC_ROOT)
     package_violations = check_top_level_packages(SRC_ROOT)
+    flat_module_violations = check_flat_modules(SRC_ROOT)
     query_violations = check_query_layering(SRC_ROOT)
     session_violations = check_session_parameters(SRC_ROOT)
 
@@ -795,7 +903,20 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal session parameter violations: {len(session_violations)}")
 
-    if import_violations or naming_violations or package_violations or query_violations or session_violations:
+    if flat_module_violations:
+        print("\n❌ Flat module violations:\n")
+        for violation in flat_module_violations:
+            print(f"  {violation}")
+        print(f"\nTotal flat module violations: {len(flat_module_violations)}")
+
+    if (
+        import_violations
+        or naming_violations
+        or package_violations
+        or query_violations
+        or session_violations
+        or flat_module_violations
+    ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1
 

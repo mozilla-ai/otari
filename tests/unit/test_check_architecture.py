@@ -588,3 +588,67 @@ def test_a_type_that_shares_an_alias_name_is_not_a_session(tmp_path: Path, monke
         "from gateway.types import Session as DBSession\n\nasync def find(db: DBSession) -> None: ...\n",
     )
     assert check.check_session_parameters(tmp_path) == []
+
+
+def _use_empty_flat_module_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "FLAT_MODULE_BASELINE", ())
+
+
+@pytest.mark.parametrize("layer", ["services", "repositories"])
+def test_a_new_top_level_module_in_a_domain_layer_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layer: str
+) -> None:
+    _use_empty_flat_module_baseline(monkeypatch)
+    _write(tmp_path, f"gateway/{layer}/__init__.py", "")
+    _write(tmp_path, f"gateway/{layer}/things.py", "")
+    assert check.check_flat_modules(tmp_path) == [
+        f"gateway/{layer}/things.py is a new top-level module; put it in its domain's package under gateway/{layer}/"
+    ]
+
+
+@pytest.mark.parametrize("layer", ["services", "repositories"])
+def test_a_domain_package_in_a_domain_layer_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layer: str
+) -> None:
+    _use_empty_flat_module_baseline(monkeypatch)
+    _write(tmp_path, f"gateway/{layer}/__init__.py", "")
+    _write(tmp_path, f"gateway/{layer}/things/__init__.py", "")
+    _write(tmp_path, f"gateway/{layer}/things/_store.py", "")
+    _write(tmp_path, f"gateway/{layer}/things/nested/deep.py", "")
+    assert check.check_flat_modules(tmp_path) == []
+
+
+def test_a_directory_of_modules_without_an_init_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_empty_flat_module_baseline(monkeypatch)
+    _write(tmp_path, "gateway/services/things/store.py", "")
+    _write(tmp_path, "gateway/services/cache/readme.txt", "")
+    assert check.check_flat_modules(tmp_path) == [
+        "gateway/services/things has no __init__.py; a domain package needs one"
+    ]
+
+
+def test_a_module_on_the_flat_module_baseline_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "FLAT_MODULE_BASELINE", ("gateway/repositories/users_repository.py",))
+    _write(tmp_path, "gateway/repositories/users_repository.py", "")
+    assert check.check_flat_modules(tmp_path) == []
+
+
+def test_a_flat_module_baseline_entry_that_no_longer_exists_must_leave_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "FLAT_MODULE_BASELINE", ("gateway/services/things.py",))
+    _write(tmp_path, "gateway/services/things/__init__.py", "")
+    assert check.check_flat_modules(tmp_path) == [
+        "gateway/services/things.py is on the flat module baseline but no longer exists; remove it from the baseline"
+    ]
+
+
+def test_main_fails_on_a_new_top_level_service_module(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path, "src/gateway/services/things.py", "")
+    _write(tmp_path, "tests/__init__.py", "")
+    _use_empty_flat_module_baseline(monkeypatch)
+    monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
+    monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
+    monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
+    assert check.main() == 1

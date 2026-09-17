@@ -16,11 +16,11 @@ from `gateway.core.database` rather than importing `sqlalchemy`. Review new and 
 against the rules below, and do not accept "the module next to it does the
 same" as a reason.
 
-`QUERY_BASELINE` and `SESSION_PARAMETER_BASELINE` in
+`QUERY_BASELINE`, `SESSION_PARAMETER_BASELINE` and `FLAT_MODULE_BASELINE` in
 `scripts/check_architecture.py` name the code still in the old shape.
 
 - Do not flag an existing baseline entry the PR does not touch.
-- Flag a PR that adds a name to either baseline.
+- Flag a PR that adds a name to any baseline.
 - A PR that moves code out of the old shape removes its names from the
   baseline. The check fails until it does.
 

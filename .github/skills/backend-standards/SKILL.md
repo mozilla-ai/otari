@@ -69,7 +69,7 @@ domain fits together and the domain test, assigns every module to its domain, an
 for moving one domain into the shape. This section adds the house style for code in those layers.
 
 **New and moved code follows the target shape. Most existing code does not, so never copy the
-module beside yours.** `QUERY_BASELINE` and `SESSION_PARAMETER_BASELINE` in
+module beside yours.** `QUERY_BASELINE`, `SESSION_PARAMETER_BASELINE` and `FLAT_MODULE_BASELINE` in
 `scripts/check_architecture.py` name the code still in the old shape. A baseline only shrinks:
 remove a name when you move its code, and never add one.
 
