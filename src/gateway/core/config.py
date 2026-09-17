@@ -1754,6 +1754,13 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
             and not entry.get("api_base")
         ]
 
+    def sandbox_configured(self) -> bool:
+        """Whether this deployment can run ``otari_code_execution`` at all.
+
+        Gotcha: a cleared dashboard override leaves ``sandbox_url`` as ``None``, so the environment value still counts.
+        """
+        return bool(self.sandbox_url or otari_env("SANDBOX_URL"))
+
     def effective_sandbox_image(self) -> str | None:
         """The image this deployment asks a sandbox session for, or ``None``.
 
