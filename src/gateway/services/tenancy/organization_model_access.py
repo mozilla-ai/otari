@@ -42,7 +42,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
-from gateway.log_config import logger
 from gateway.models.tenancy import User, Workspace
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.repositories.tenancy.org_provider_key_repository import (
@@ -94,21 +93,9 @@ class SessionCatalogScope:
 
 
 async def _get_hosted_providers(model_provider: ModelProviderPort | None, organization_id: uuid.UUID) -> frozenset[str]:
-    """The providers the bound port would serve this organization, or none.
-
-    Degrades to none rather than failing the read: the adapter is another
-    build's code dialing its own store, and a catalog that loses its hosted rung
-    is still the configured-plus-BYO view every caller had before, where a 500
-    is a page that does not render. Logged, because a hosted deployment whose
-    members suddenly see fewer models has an adapter to look at.
-    """
     if model_provider is None:
         return frozenset()
-    try:
-        hosted = await model_provider.get_hosted_providers(organization_id=organization_id)
-    except Exception:
-        logger.exception("Hosted providers could not be resolved for organization %s", organization_id)
-        return frozenset()
+    hosted = await model_provider.get_hosted_providers(organization_id=organization_id)
     return frozenset(provider_key(provider) for provider in hosted)
 
 

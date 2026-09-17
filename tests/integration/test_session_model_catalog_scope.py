@@ -479,10 +479,11 @@ def test_an_operator_session_is_not_flagged_by_the_hosted_rung(client: TestClien
     assert listed[_MISTRAL_MODEL]["deployment_managed"] is False
 
 
-def test_a_hosted_port_that_fails_degrades_the_catalog_to_the_byo_view(client: TestClient, world: _World) -> None:
-    """A read must not 500 because another build's adapter could not answer; it loses the hosted rung."""
+def test_a_hosted_port_failure_fails_the_read(client: TestClient, world: _World) -> None:
+    """A catalog that hid the failure would list fewer models and flag them wrongly."""
     _bind_hosted(client, _HostedPort("mistral", error=RuntimeError("fleet store unreachable")))
-    assert _catalog_as(client, world, "alpha_member") == {_OPENAI_MODEL, _OPENAI_OTHER}
+    with pytest.raises(RuntimeError, match="fleet store unreachable"):
+        _catalog_as(client, world, "alpha_member")
 
 
 def test_an_identity_with_no_live_membership_is_not_shown_hosted_models(client: TestClient, world: _World) -> None:
