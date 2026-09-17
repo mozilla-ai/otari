@@ -33,7 +33,7 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
         a workspace's own rows, decides something from their combined state,
         and writes based on that decision needs the whole read-decide-write
         sequence to run as if serialized, which no single row's unique index
-        can enforce on its own. Two independent races share this lock:
+        can enforce on its own. Three independent races share this lock:
 
         - "At most one pinned provider-key override per workspace+provider"
           spans a variable set of override rows, one per candidate key.
@@ -47,6 +47,9 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
           excepted, since a just-created workspace has no default that could
           race it) takes this same lock before its own read, so the two either
           serialize or, for ``create_workspace``, never overlap.
+        - A workspace's deletion reads its memberships before announcing them,
+          and a membership created after that read rides the delete cascade
+          while the ceiling keyed on it survives.
 
         ``FOR UPDATE`` is a no-op on SQLite, which admits one writer at a time
         for the whole database anyway; PostgreSQL is where this is

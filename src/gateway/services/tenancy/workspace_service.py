@@ -290,6 +290,11 @@ class WorkspaceService:
         if remaining <= 1:
             raise LastWorkspaceError
 
+        # The same lock every membership-creation path takes. Without it a member
+        # added concurrently lands after this snapshot, rides the cascade, and
+        # leaves an orphaned ceiling behind.
+        await self.workspaces.lock(workspace_id)
+
         try:
             member_ids = await self.members.ids_for_workspace(workspace_id)
             await self._membership_listener.workspace_deleted(workspace_id, member_ids)
