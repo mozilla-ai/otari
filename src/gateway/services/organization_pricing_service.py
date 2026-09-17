@@ -48,14 +48,8 @@ from gateway.models.money import to_usd, to_usd_or_none
 from gateway.models.pricing import OrganizationModelPricing
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
-from gateway.repositories.tenancy import (
-    OrgProviderKeyRepository,
-    WorkspaceProviderKeyOverrideRepository,
-    WorkspaceRepository,
-    resolve_active_key,
-)
 from gateway.services.pricing_service import normalize_effective_at
-from gateway.services.provider_kwargs import is_deployment_instance_key, provider_key, split_selector
+from gateway.services.provider_kwargs import is_deployment_instance_key, split_selector
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.errors import (
     OrganizationPricingManagedModelError,
@@ -63,7 +57,7 @@ from gateway.services.tenancy.errors import (
     OrganizationPricingOverlapError,
     TenancyValidationError,
 )
-from gateway.services.tenancy.org_provider_key_service import key_is_usable
+from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
 
 
@@ -116,6 +110,7 @@ class OrganizationPricingService:
         self.db = db
         self.config = config
         self.organizations = OrganizationService(db)
+        self.provider_keys = OrgProviderKeyService(db)
         self.model_provider = model_provider
 
     async def _writable_organization_id(self, user: TenancyUser) -> uuid.UUID:
@@ -181,7 +176,7 @@ class OrganizationPricingService:
             return False
         provider, model = split
         # Gotcha: keep this before the port call. The port's contract only covers a candidate no BYO key serves.
-        if await self._organization_has_byo_credential(organization_id, provider):
+        if provider in await self.provider_keys.get_byo_providers(organization_id=organization_id):
             return False
         try:
             credential = await self.model_provider.resolve_hosted_credential(
@@ -193,45 +188,6 @@ class OrganizationPricingService:
         except HostedAccessDeniedError:
             return True
         return credential is not None
-
-    async def _organization_has_byo_credential(self, organization_id: uuid.UUID, provider: str) -> bool:
-        """Whether every workspace in the organization would dispatch ``provider`` on a usable BYO key.
-
-        A key counts only when it has an API key or a base URL, and its secret decrypts.
-        A workspace that disables the key for itself is not covered.
-        """
-        normalized = provider_key(provider)
-        key_repository = OrgProviderKeyRepository(self.db)
-        keys = await key_repository.list_live_keys(organization_id)
-        matching_keys = [
-            key
-            for key in keys
-            if provider_key(key.provider) == normalized
-            and (key.encrypted_api_key is not None or key.api_base is not None)
-            and key_is_usable(key)
-        ]
-        if not matching_keys:
-            return False
-
-        workspace_ids = await WorkspaceRepository(self.db).get_ids_by_organization(organization_id)
-        if not workspace_ids:
-            return True
-
-        matching_key_ids = {key.id for key in matching_keys}
-        candidates_by_workspace = await WorkspaceProviderKeyOverrideRepository(self.db).candidates_for_workspaces(
-            organization_id=organization_id,
-            workspace_ids=workspace_ids,
-        )
-        for workspace_id in workspace_ids:
-            candidates = [
-                (key, override)
-                for key, override in candidates_by_workspace.get(workspace_id, [])
-                if provider_key(key.provider) == normalized
-            ]
-            active = resolve_active_key(candidates)
-            if active is None or active.id not in matching_key_ids:
-                return False
-        return True
 
     async def raise_if_overlapping(
         self,

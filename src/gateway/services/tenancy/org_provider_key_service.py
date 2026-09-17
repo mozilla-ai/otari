@@ -149,6 +149,11 @@ def key_is_usable(key: OrgProviderKey) -> bool:
     return True
 
 
+def has_credential(key: OrgProviderKey) -> bool:
+    """Whether this key holds an API key or a base URL, and its secret decrypts."""
+    return (key.encrypted_api_key is not None or key.api_base is not None) and key_is_usable(key)
+
+
 def cached_org_provider_kwargs(workspace_id: uuid.UUID, provider: str) -> dict[str, Any] | None:
     """The decrypted overlay entry this worker last loaded for this workspace+provider, if any."""
     entry = _org_cache.get((workspace_id, provider))
@@ -377,6 +382,7 @@ class OrgProviderKeyService:
         self.keys = OrgProviderKeyRepository(db)
         self.overrides = WorkspaceProviderKeyOverrideRepository(db)
         self.restrictions = WorkspaceProviderModelRestrictionRepository(db)
+        self.workspaces = WorkspaceRepository(db)
         self.organizations = OrganizationService(db)
 
     # ------------------------------------------------------------------
@@ -833,11 +839,58 @@ class OrgProviderKeyService:
             await refresh_org_provider_cache(self.db)
 
 
+    async def get_active_keys(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        workspace_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, dict[str, OrgProviderKey]]:
+        """Returns each workspace's active key for each provider.
+
+        NOTE: an active key may not decrypt, so check it before relying on it.
+        """
+        candidates = await self.overrides.candidates_for_workspaces(
+            organization_id=organization_id, workspace_ids=workspace_ids
+        )
+        active: dict[uuid.UUID, dict[str, OrgProviderKey]] = {}
+        for workspace_id, rows in candidates.items():
+            by_provider: dict[str, list[Candidate]] = defaultdict(list)
+            for key, override in rows:
+                by_provider[key.provider].append((key, override))
+            active[workspace_id] = {
+                provider: chosen
+                for provider, group in by_provider.items()
+                if (chosen := resolve_active_key(group)) is not None
+            }
+        return active
+
+    async def get_byo_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
+        """Returns the providers that every workspace in the organization calls with its own key.
+
+        An organization with no workspaces counts every provider it holds a key with a credential for.
+        """
+        keys = await self.keys.list_live_keys(organization_id)
+        credentialed = {key.id: key.provider for key in keys if has_credential(key)}
+        workspace_ids = await self.workspaces.get_ids_by_organization(organization_id)
+        if not workspace_ids:
+            return frozenset(credentialed.values())
+        active = await self.get_active_keys(organization_id=organization_id, workspace_ids=workspace_ids)
+        return frozenset(
+            provider
+            for provider in set(credentialed.values())
+            if all(
+                (chosen := active[workspace_id].get(provider)) is not None and chosen.id in credentialed
+                for workspace_id in workspace_ids
+            )
+        )
+
+
 __all__ = [
     "ORG_PROVIDER_CACHE_TTL_SECONDS",
     "OrgProviderKeyService",
     "cached_org_model_restriction",
     "cached_org_provider_kwargs",
+    "has_credential",
     "load_org_provider_keys_at_startup",
     "org_cache_is_stale",
     "refresh_org_provider_cache",

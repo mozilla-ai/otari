@@ -28,12 +28,14 @@ from gateway.models.tenancy import Organization, User, Workspace
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
+    OrgProviderKeyRepository,
     UserRepository,
     WorkspaceMemberRepository,
+    WorkspaceProviderKeyOverrideRepository,
     WorkspaceRepository,
 )
 from gateway.services.provider_kwargs import resolve_provider_selector
-from gateway.services.secret_box import generate_secret_key
+from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import OrgProviderKeyService
 from gateway.services.tenancy.errors import (
     NotAuthorizedError,
@@ -774,3 +776,53 @@ async def test_dispatch_without_workspace_id_ignores_organization_scoped_keys(as
     config = GatewayConfig(providers={})
     resolved = resolve_provider_selector(config, "openai:gpt-4o")
     assert resolved.kwargs == {}
+
+
+def _stored_api_key(key_state: str) -> str | None:
+    if key_state == "decrypts":
+        return encrypt_secret("sk-live-1234")
+    if key_state == "does_not_decrypt":
+        return "not-a-fernet-token"
+    return None
+
+
+@pytest.mark.parametrize(
+    ("key_state", "workspace_count", "disabled_in_last_workspace", "expected"),
+    [
+        pytest.param(None, 1, False, frozenset(), id="no-key"),
+        pytest.param("decrypts", 0, False, frozenset({"openai"}), id="no-workspaces"),
+        pytest.param("decrypts", 2, False, frozenset({"openai"}), id="every-workspace-uses-the-key"),
+        pytest.param("decrypts", 2, True, frozenset(), id="one-workspace-disables-the-key"),
+        pytest.param("no_api_key_or_base_url", 1, False, frozenset(), id="key-without-a-credential"),
+        pytest.param("does_not_decrypt", 1, False, frozenset(), id="key-that-does-not-decrypt"),
+    ],
+)
+async def test_get_byo_providers(
+    async_db: AsyncSession,
+    key_state: str | None,
+    workspace_count: int,
+    disabled_in_last_workspace: bool,
+    expected: frozenset[str],
+) -> None:
+    organization = await _organization(async_db)
+    workspaces = [await _workspace(async_db, organization, name=f"W{index}") for index in range(workspace_count)]
+    if key_state is not None:
+        key = await OrgProviderKeyRepository(async_db).create_key(
+            organization_id=organization.id,
+            provider="openai",
+            name="primary",
+            encrypted_api_key=_stored_api_key(key_state),
+            last4=None,
+            api_base=None,
+            client_args=None,
+        )
+        if disabled_in_last_workspace:
+            await WorkspaceProviderKeyOverrideRepository(async_db).create(
+                workspace_id=workspaces[-1].id,
+                organization_id=organization.id,
+                org_provider_key_id=key.id,
+                is_default=False,
+                disabled=True,
+            )
+
+    assert await OrgProviderKeyService(async_db).get_byo_providers(organization_id=organization.id) == expected
