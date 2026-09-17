@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import class_mapper
 from sqlmodel import SQLModel
 
-from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.unit_of_work import UnitOfWork, session_for
 
 ModelType = TypeVar("ModelType", bound=SQLModel)
 CreateSchemaType = TypeVar("CreateSchemaType", bound=SQLModel)
@@ -58,7 +58,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             OutsideUnitOfWorkError: the repository was built on a unit of work and no block is open.
         """
         if isinstance(self._db, UnitOfWork):
-            return self._db.session
+            return session_for(self._db)
         return self._db
 
     async def get(self, entity_id: Any) -> ModelType | None:

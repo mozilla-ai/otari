@@ -16,7 +16,7 @@ from sqlalchemy import text
 from gateway.api.deps import get_unit_of_work
 from gateway.core.config import GatewayConfig
 from gateway.core.database import LOG_POOL, REQUEST_POOL, dispose_db, get_db, init_db, pool_stats
-from gateway.core.unit_of_work import UnitOfWork, create_log_unit_of_work, create_unit_of_work
+from gateway.core.unit_of_work import UnitOfWork, create_log_unit_of_work, create_unit_of_work, session_for
 
 
 @pytest_asyncio.fixture
@@ -43,7 +43,7 @@ async def test_a_block_that_commits_returns_its_connection(
 ) -> None:
     async with helper() as uow:
         async with uow:
-            await uow.session.execute(text("SELECT 1"))
+            await session_for(uow).execute(text("SELECT 1"))
             assert _checked_out(pool) == 1
 
         assert _checked_out(pool) == 0, "the block ended but its session kept the connection"
@@ -54,7 +54,7 @@ async def test_a_block_that_rolls_back_returns_its_connection(engines: None) -> 
     async with create_unit_of_work() as uow:
         with pytest.raises(ValueError, match="step failed"):
             async with uow:
-                await uow.session.execute(text("SELECT 1"))
+                await session_for(uow).execute(text("SELECT 1"))
                 raise ValueError("step failed")
 
         assert _checked_out(REQUEST_POOL) == 0, "the block rolled back but its session kept the connection"
@@ -67,7 +67,7 @@ async def test_the_request_unit_of_work_returns_its_connection_before_the_reques
     try:
         uow = get_unit_of_work(session)
         async with uow:
-            await uow.session.execute(text("SELECT 1"))
+            await session_for(uow).execute(text("SELECT 1"))
 
         assert _checked_out(REQUEST_POOL) == 0, "the request session held its connection past the block"
     finally:

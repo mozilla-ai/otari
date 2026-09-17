@@ -25,6 +25,7 @@ from gateway.core.unit_of_work import (
     UnitOfWorkRolledBackError,
     create_log_unit_of_work,
     create_unit_of_work,
+    session_for,
 )
 from gateway.models.tenancy import OAuthPendingState
 from gateway.repositories.base_repository import BaseRepository
@@ -66,7 +67,7 @@ def _count_commits(session: AsyncSession) -> Callable[[], int]:
 async def test_a_block_commits_when_it_ends(notes_database: None) -> None:
     async with create_unit_of_work() as uow:
         async with uow:
-            await _write(uow.session, "a")
+            await _write(session_for(uow), "a")
 
         assert await _committed_bodies() == ["a"]
 
@@ -77,7 +78,7 @@ async def test_a_block_rolls_back_and_reraises_on_an_error(notes_database: None,
     async with create_unit_of_work() as uow:
         with pytest.raises(type(error)):
             async with uow:
-                session = uow.session
+                session = session_for(uow)
                 await _write(session, "a")
                 raise error
 
@@ -96,7 +97,7 @@ async def test_a_failed_commit_rolls_back_and_reraises(notes_database: None, mon
 
         with pytest.raises(OperationalError):
             async with uow:
-                await _write(uow.session, "a")
+                await _write(session_for(uow), "a")
 
         rollback.assert_awaited_once()
 
@@ -116,7 +117,7 @@ async def test_a_failed_rollback_keeps_the_error_that_ended_the_block(
 
         with pytest.raises(ValueError, match="step failed"):
             async with uow:
-                await _write(uow.session, "a")
+                await _write(session_for(uow), "a")
                 raise ValueError("step failed")
 
 
@@ -132,7 +133,7 @@ async def test_a_failed_rollback_keeps_the_error_of_a_failed_commit(
 
         with pytest.raises(OperationalError) as caught:
             async with uow:
-                await _write(uow.session, "a")
+                await _write(session_for(uow), "a")
 
         assert caught.value is commit_failure
 
@@ -158,9 +159,9 @@ async def test_a_nested_block_joins_the_outer_one_and_only_the_outermost_commits
         uow = UnitOfWork(session)
         commits = _count_commits(session)
         async with uow:
-            await _write(uow.session, "outer")
+            await _write(session_for(uow), "outer")
             async with uow:
-                await _write(uow.session, "inner")
+                await _write(session_for(uow), "inner")
             assert commits() == 0
             assert await _committed_bodies() == []
 
@@ -175,16 +176,16 @@ async def test_a_step_whose_inner_block_failed_is_rolled_back_even_when_the_erro
     async with create_unit_of_work() as uow:
         with pytest.raises(UnitOfWorkRolledBackError):
             async with uow:
-                await _write(uow.session, "outer")
+                await _write(session_for(uow), "outer")
                 with pytest.raises(ValueError, match="inner step failed"):
                     async with uow:
-                        await _write(uow.session, "inner")
+                        await _write(session_for(uow), "inner")
                         raise ValueError("inner step failed")
 
         assert await _committed_bodies() == []
 
         async with uow:
-            await _write(uow.session, "next step")
+            await _write(session_for(uow), "next step")
         assert await _committed_bodies() == ["next step"]
 
 
@@ -205,11 +206,11 @@ async def test_a_rolled_back_step_names_the_inner_failure_as_its_cause(notes_dat
 async def test_the_session_is_unavailable_outside_a_block(notes_database: None) -> None:
     async with create_unit_of_work() as uow:
         with pytest.raises(OutsideUnitOfWorkError):
-            _ = uow.session
+            _ = session_for(uow)
         async with uow:
             pass
         with pytest.raises(OutsideUnitOfWorkError):
-            _ = uow.session
+            _ = session_for(uow)
 
 
 @pytest.mark.asyncio
@@ -217,7 +218,7 @@ async def test_a_repository_built_on_a_unit_of_work_raises_outside_a_block(notes
     async with create_unit_of_work() as uow:
         async with uow:
             table = SQLModel.metadata.tables["oauth_pending_state"]
-            await uow.session.run_sync(lambda sync: table.create(sync.connection()))
+            await session_for(uow).run_sync(lambda sync: table.create(sync.connection()))
         repository: BaseRepository[OAuthPendingState, Any, Any] = BaseRepository(uow, OAuthPendingState)
 
         with pytest.raises(OutsideUnitOfWorkError):
@@ -242,7 +243,7 @@ async def test_a_worker_helper_produces_a_unit_of_work(
     async with helper() as uow:
         assert isinstance(uow, UnitOfWork)
         async with uow:
-            await _write(uow.session, "from a worker")
+            await _write(session_for(uow), "from a worker")
 
     assert await _committed_bodies() == ["from a worker"]
 
@@ -258,7 +259,7 @@ def test_the_request_dependency_produces_a_unit_of_work_over_the_request_session
         uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     ) -> dict[str, bool]:
         async with uow:
-            return {"is_unit_of_work": isinstance(uow, UnitOfWork), "wraps_request_session": uow.session is db}
+            return {"is_unit_of_work": isinstance(uow, UnitOfWork), "wraps_request_session": session_for(uow) is db}
 
     try:
         response = TestClient(app).get("/probe")

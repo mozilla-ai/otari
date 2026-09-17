@@ -43,18 +43,6 @@ class UnitOfWork:
         self._depth = 0
         self._first_failure: BaseException | None = None
 
-    @property
-    def session(self) -> AsyncSession:
-        """The session for repositories to run on inside a block.
-
-        Raises:
-            OutsideUnitOfWorkError: no block is open.
-        """
-        if self._depth == 0:
-            msg = "The database session was used outside a unit of work block"
-            raise OutsideUnitOfWorkError(msg)
-        return self._session
-
     async def __aenter__(self) -> Self:
         self._depth += 1
         return self
@@ -93,6 +81,21 @@ class UnitOfWork:
             logger.warning("Could not roll back a unit of work", exc_info=True)
 
 
+def session_for(uow: UnitOfWork) -> AsyncSession:
+    """Give a repository the session of the Unit of Work's open block.
+
+    NOTE: only a repository should call this.
+    Other code must reach the database through a repository, so that every query stays in the repository layer.
+
+    Raises:
+        OutsideUnitOfWorkError: no block is open.
+    """
+    if uow._depth == 0:
+        msg = "The database session was used outside a unit of work block"
+        raise OutsideUnitOfWorkError(msg)
+    return uow._session
+
+
 @asynccontextmanager
 async def create_unit_of_work() -> AsyncIterator[UnitOfWork]:
     """Yield a Unit of Work for a worker job, on the request pool."""
@@ -113,4 +116,5 @@ __all__ = [
     "UnitOfWorkRolledBackError",
     "create_log_unit_of_work",
     "create_unit_of_work",
+    "session_for",
 ]
