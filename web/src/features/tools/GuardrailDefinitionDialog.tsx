@@ -12,6 +12,12 @@ import { Select } from "@/design-system/forms/Select"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Disclosure } from "@/design-system/navigation/Disclosure"
 import { DocsLink } from "@/design-system/navigation/DocsLink"
+import { FormSectionRule } from "@/features/tools/FormSectionRule"
+import {
+  enforcementFields,
+  type GuardrailEnforcement,
+  GuardrailEnforcementFields,
+} from "@/features/tools/GuardrailEnforcementFields"
 import { GuardrailExtraJsonField } from "@/features/tools/GuardrailExtraJsonField"
 import { GuardrailParameterFields } from "@/features/tools/GuardrailParameterFields"
 import { splitParameters } from "@/features/tools/guardrailFieldSplit"
@@ -34,9 +40,11 @@ import {
   useCreateGuardrailDefinition,
   useUpdateGuardrailDefinition,
 } from "@/shared/api/tools"
+import { useWorkspaces } from "@/shared/api/workspaces"
 
-// Defining one guardrail, in three stages: what should be checked, which
-// guardrail does it, then whatever that guardrail asks for.
+// Defining one guardrail, in the order the decision is made: what should be
+// checked, which guardrail does it, how the deployment wants it enforced, then
+// whatever that guardrail asks for.
 //
 // The second control is disabled rather than absent before the first is
 // answered: it exists and is about to be usable, which is a different thing from
@@ -86,6 +94,13 @@ export function GuardrailDefinitionDialog({
   const [nameDraft, setNameDraft] = useState<string | null>(
     editing ? editing.name : null,
   )
+  const [enforcement, setEnforcement] = useState<GuardrailEnforcement>(() => ({
+    mode: editing?.mode ?? "block",
+    onUnavailable: editing?.on_unavailable ?? "block",
+    everywhere: editing?.applies_to_all_workspaces ?? true,
+    workspaceIds: editing?.workspace_ids ?? [],
+  }))
+  const workspaces = useWorkspaces()
 
   const spec = findGuardrail(guardrails, guardrailName)
   const createSpecs = spec?.create_parameters ?? []
@@ -148,6 +163,7 @@ export function GuardrailDefinitionDialog({
     operation,
     guardrailName,
     nameDraft,
+    enforcement,
     values: setup.values,
     perCallValues: perCall.values,
     extraJson: perCall.extraJson,
@@ -162,7 +178,11 @@ export function GuardrailDefinitionDialog({
     perCall.rawError !== undefined
 
   const pending = create.isPending || update.isPending
-  const ready = name.trim() !== "" && guardrailName !== "" && !secretBlocked
+  // A chosen scope with nothing in it would store a definition that checks
+  // nothing, which is what the "Every workspace" option is for.
+  const scoped = enforcement.everywhere || enforcement.workspaceIds.length > 0
+  const ready =
+    name.trim() !== "" && guardrailName !== "" && !secretBlocked && scoped
 
   const submit = () => {
     if (pending || !ready) return
@@ -185,6 +205,7 @@ export function GuardrailDefinitionDialog({
       const body: UpdateGuardrailRequest = {
         create_kwargs,
         validate_kwargs,
+        ...enforcementFields(enforcement),
         expected_updated_at: editing.updated_at,
       }
       update.mutate({ name: editing.name, body }, { onSuccess: onClose })
@@ -196,6 +217,7 @@ export function GuardrailDefinitionDialog({
         guardrail_name: guardrailName,
         create_kwargs,
         validate_kwargs,
+        ...enforcementFields(enforcement),
       },
       { onSuccess: onCreated ?? onClose },
     )
@@ -311,15 +333,20 @@ export function GuardrailDefinitionDialog({
               add this guardrail.
             </InfoBanner>
           ) : null}
-          {/* Three parts, in the order the form asks them: what this checks,
-              what it is called, and how the guardrail itself is set up. The
-              rule is what stops the last one reading as more of the second. */}
+          <GuardrailEnforcementFields
+            value={enforcement}
+            onChange={setEnforcement}
+            workspaces={workspaces.data ?? []}
+            isLoadingWorkspaces={workspaces.isPending && !workspaces.data}
+            workspacesError={workspaces.data ? undefined : workspaces.error}
+            isDisabled={pending}
+          />
+          {/* Four parts, in the order the form asks them: what this checks,
+              what it is called, how it is enforced, and how the guardrail
+              itself is set up. The rules are what stop each reading as more of
+              the one above it. */}
           {createSpecs.length > 0 ? (
-            <div className="-mb-2 border-border-subtle border-t pt-4">
-              <span className="text-mono-overline text-subtle">
-                {spec.display_name} settings
-              </span>
-            </div>
+            <FormSectionRule label={`${spec.display_name} settings`} />
           ) : null}
           {createDecisions.length > 0 ? (
             <GuardrailParameterFields

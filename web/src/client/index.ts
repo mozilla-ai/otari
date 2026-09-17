@@ -422,6 +422,8 @@ export type BuiltInGuardrailCatalog = Schemas["BuiltInGuardrailCatalog"]
 export type BuiltInGuardrailSpec = Schemas["BuiltInGuardrailSpec"]
 export type GuardrailCategory = BuiltInGuardrailSpec["primary_category"]
 export type StoredGuardrail = Schemas["StoredGuardrailSchema"]
+export type GuardrailMode = StoredGuardrail["mode"]
+export type GuardrailFallback = StoredGuardrail["on_unavailable"]
 // These four carry a server-side default the generator cannot see, so
 // `Defaulted` puts it back.
 export type CreateGuardrailRequest = Defaulted<

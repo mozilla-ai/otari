@@ -154,6 +154,10 @@ function mockApi({
   encryptionAvailable = true,
   isOperator = true,
   testResult,
+  workspaces = [
+    { id: "ws-1", name: "Platform" },
+    { id: "ws-2", name: "Research" },
+  ],
 }: {
   stored?: StoredGuardrail[]
   catalog?: BuiltInGuardrailSpec[]
@@ -161,6 +165,7 @@ function mockApi({
   encryptionAvailable?: boolean
   isOperator?: boolean
   testResult?: TestGuardrailResponse
+  workspaces?: { id: string; name: string }[]
 } = {}) {
   const calls: { url: string; method: string; body: unknown }[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -185,6 +190,9 @@ function mockApi({
     if (url.includes(`${API_ROOT}/tool-settings/guardrails/catalog`)) {
       calls.push({ url, method, body: undefined })
       return Response.json({ guardrails: catalog })
+    }
+    if (url.includes(`${API_ROOT}/workspaces`)) {
+      return Response.json({ data: workspaces, count: workspaces.length })
     }
     if (url.includes(`${API_ROOT}/organizations/me`)) {
       return Response.json(
@@ -454,8 +462,154 @@ describe("defining a guardrail", () => {
         guardrail_name: "lakera_guard",
         create_kwargs: { api_key: "lak-123" },
         validate_kwargs: {},
+        // The enforcement defaults the form opens with: refuse a flagged
+        // request, refuse one it could not check, and cover every workspace.
+        mode: "block",
+        on_unavailable: "block",
+        applies_to_all_workspaces: true,
+        workspace_ids: [],
       })
     })
+  })
+
+  it("stores the enforcement the operator chose rather than the defaults", async () => {
+    const calls = mockApi()
+    const user = userEvent.setup()
+    renderPage(<GuardrailsPage />)
+    const dialog = await openAdd(user)
+
+    await pickOption(
+      user,
+      "What do you want checked?",
+      "Prompt injection",
+      dialog,
+    )
+    await pickOption(user, "Which guardrail?", /Lakera Guard/, dialog)
+    await user.type(within(dialog).getByLabelText("Api key"), "lak-123")
+    // The fallback first: once the mode is "Report only" the fallback control
+    // has nothing to decide and is disabled.
+    await pickOption(user, "When it cannot answer", "Let it through", dialog)
+    await pickOption(
+      user,
+      "When it flags a request",
+      "Report only, let it through",
+      dialog,
+    )
+    await user.click(
+      within(dialog).getByRole("button", { name: /Add guardrail/ }),
+    )
+
+    await waitFor(() => {
+      const post = calls.find((call) => call.method === "POST")
+      expect(post?.body).toMatchObject({
+        mode: "monitor",
+        on_unavailable: "allow",
+      })
+    })
+  })
+
+  it("sends the workspaces a narrowed definition was pointed at", async () => {
+    const calls = mockApi()
+    const user = userEvent.setup()
+    renderPage(<GuardrailsPage />)
+    const dialog = await openAdd(user)
+
+    await pickOption(
+      user,
+      "What do you want checked?",
+      "Prompt injection",
+      dialog,
+    )
+    await pickOption(user, "Which guardrail?", /Lakera Guard/, dialog)
+    await user.type(within(dialog).getByLabelText("Api key"), "lak-123")
+    await pickOption(user, "Where it runs", "Chosen workspaces", dialog)
+    await user.click(
+      within(dialog).getByRole("combobox", { name: /Workspaces/ }),
+    )
+    await user.click(await screen.findByRole("option", { name: /Research/ }))
+    await user.click(
+      within(dialog).getByRole("button", { name: /Add guardrail/ }),
+    )
+
+    await waitFor(() => {
+      const post = calls.find((call) => call.method === "POST")
+      expect(post?.body).toMatchObject({
+        applies_to_all_workspaces: false,
+        workspace_ids: ["ws-2"],
+      })
+    })
+  })
+
+  it("refuses to save a narrowed definition that names no workspace", async () => {
+    // It would check nothing, which is what "Every workspace" is not, and what
+    // switching the row off is for.
+    mockApi()
+    const user = userEvent.setup()
+    renderPage(<GuardrailsPage />)
+    const dialog = await openAdd(user)
+
+    await pickOption(
+      user,
+      "What do you want checked?",
+      "Prompt injection",
+      dialog,
+    )
+    await pickOption(user, "Which guardrail?", /Lakera Guard/, dialog)
+    await pickOption(user, "Where it runs", "Chosen workspaces", dialog)
+
+    expect(
+      within(dialog).getByRole("button", { name: /Add guardrail/ }),
+    ).toBeDisabled()
+  })
+
+  it("says what each row is doing to traffic, not just that it is on", async () => {
+    // "Running" cannot tell a check that refuses from one that only reports.
+    mockApi({
+      stored: [
+        storedGuardrail({ name: "blocking" }),
+        storedGuardrail({ name: "watching", mode: "monitor" }),
+        storedGuardrail({ name: "paused", enabled: false }),
+      ],
+    })
+    renderPage(<GuardrailsPage />)
+
+    expect(await screen.findByText("Blocking")).toBeInTheDocument()
+    expect(screen.getByText("Monitoring")).toBeInTheDocument()
+    expect(screen.getByText("Paused")).toBeInTheDocument()
+  })
+
+  it("warns that a definition which did not build is checking nothing", async () => {
+    // The one state that would otherwise be invisible: the row reads as healthy
+    // while traffic goes past it unchecked.
+    mockApi({ stored: [storedGuardrail({ loaded: false })] })
+    renderPage(<GuardrailsPage />)
+
+    expect(await screen.findByText(/Failed to build/)).toBeInTheDocument()
+  })
+
+  it("says nothing about building for a row that is switched off", async () => {
+    mockApi({ stored: [storedGuardrail({ loaded: false, enabled: false })] })
+    renderPage(<GuardrailsPage />)
+
+    expect(await screen.findByText("Paused")).toBeInTheDocument()
+    expect(screen.queryByText(/Failed to build/)).not.toBeInTheDocument()
+  })
+
+  it("says which workspaces a definition covers", async () => {
+    mockApi({
+      stored: [
+        storedGuardrail({ name: "everywhere" }),
+        storedGuardrail({
+          name: "narrow",
+          applies_to_all_workspaces: false,
+          workspace_ids: ["ws-1", "ws-2"],
+        }),
+      ],
+    })
+    renderPage(<GuardrailsPage />)
+
+    expect(await screen.findByText("Every workspace")).toBeInTheDocument()
+    expect(screen.getByText("2 workspaces")).toBeInTheDocument()
   })
 
   it("asks for a JSON argument as switches, with the chosen operation already on", async () => {
@@ -638,6 +792,10 @@ describe("editing a definition", () => {
           endpoint: "https://elsewhere.example",
         },
         validate_kwargs: {},
+        mode: "block",
+        on_unavailable: "block",
+        applies_to_all_workspaces: true,
+        workspace_ids: [],
         expected_updated_at: "2026-09-16T00:00:00Z",
       })
     })
