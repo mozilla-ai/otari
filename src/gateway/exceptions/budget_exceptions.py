@@ -30,10 +30,9 @@ class OrganizationBudgetNotFoundError(TenancyNotFoundError):
     """No budget under this id belongs to the caller's organization.
 
     One status and one message for three different facts: the id names nothing,
-    it names a deployment budget, or it names another tenant's. Deliberately
-    indistinguishable, for the reason :class:`TenancyNotFoundError` gives; telling
-    them apart would make the response an existence oracle over other tenants'
-    spend configuration.
+    it names a deployment budget, or it names another tenant's. Telling them apart
+    would make the response an existence oracle over other tenants' spend
+    configuration.
     """
 
     def __init__(self, budget_id: object):
@@ -43,9 +42,9 @@ class OrganizationBudgetNotFoundError(TenancyNotFoundError):
 class OrganizationBudgetInUseError(TenancyConflictError):
     """The budget still holds ceilings or workspace defaults.
 
-    Both foreign keys are ``RESTRICT``, so the database would refuse the delete
-    anyway, as an ``IntegrityError`` with nothing naming what to go and change.
-    Raised here so the refusal can say which and how many.
+    Both foreign keys are ``RESTRICT``, so the database refuses the delete anyway,
+    without naming what to change. Raised here so the refusal can say which rows
+    hold the budget and how many.
     """
 
     def __init__(self, budget_id: object, *, ceilings: int, defaults: int):
@@ -62,13 +61,8 @@ class OrganizationBudgetInUseError(TenancyConflictError):
 class OrganizationBudgetHeldElsewhereError(TenancyConflictError):
     """Something outside this organization's own surface still names the budget.
 
-    ``users.budget_id`` and ``budget_reset_logs.budget_id``, neither of which is
-    a tenant's to see. Since otari#881 neither assignment site will point a
-    gateway user at a tenant's budget, so a live hold is one made before that,
-    and a reset record outlives the assignment that produced it either way. Left
-    unchecked the first is nulled out by the ORM and the second fails at the
-    commit, so the refusal says the budget is held without naming the rows
-    holding it.
+    ``users.budget_id`` and ``budget_reset_logs.budget_id``, neither of which is a
+    tenant's to see, so the refusal does not name the rows holding it.
     """
 
     def __init__(self, budget_id: object):
@@ -82,10 +76,9 @@ class OrganizationScopeNotFoundError(TenancyNotFoundError):
     """The identity a ceiling would cap is not one in the caller's organization.
 
     Covers a scope id that names nothing and one that names a row in another
-    organization, as one answer and for the same reason as
-    :class:`OrganizationBudgetNotFoundError`. This is the cross-tenant check on
-    the ceilings surface: a scope id travels as a bare uuid with nothing in it
-    saying whose it is.
+    organization, as one answer and for the reason
+    :class:`OrganizationBudgetNotFoundError` gives. A scope id is a bare uuid, so
+    this is the cross-tenant check on the ceilings surface.
     """
 
     def __init__(self, scope_type: object, scope_id: object):
@@ -100,9 +93,9 @@ class OrganizationScopedBudgetNotFoundError(TenancyNotFoundError):
 class OrganizationScopedBudgetAlreadyExistsError(TenancyConflictError):
     """One ceiling per scope, and per scope and provider.
 
-    The two partial unique indexes on ``scoped_budgets`` are the real
-    enforcement; this reports the same rule in words a caller can act on, since
-    neither index name says anything useful to one.
+    The two partial unique indexes on ``scoped_budgets`` are the enforcement. This
+    reports the same rule in words a caller can act on, because an index name does
+    not.
     """
 
     def __init__(self, scope_type: object, scope_id: object):
