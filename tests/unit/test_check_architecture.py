@@ -441,3 +441,81 @@ def test_main_fails_on_a_service_that_builds_a_query(tmp_path: Path, monkeypatch
     monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
     monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
     assert check.main() == 1
+
+
+@pytest.mark.parametrize(
+    "signature",
+    [
+        "async def find(db: AsyncSession) -> None: ...",
+        "async def find(owner: str, *, db: AsyncSession | None = None) -> None: ...",
+        'async def find(db: "AsyncSession") -> None: ...',
+        "def find(db: asyncio.AsyncSession) -> None: ...",
+    ],
+)
+def test_a_module_level_service_function_that_takes_a_session_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, signature: str
+) -> None:
+    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
+    _write(tmp_path, "gateway/services/thing_service.py", f"{signature}\n")
+    assert check.check_session_parameters(tmp_path) == [
+        "gateway/services/thing_service.py:1 find takes a session; a service receives its session when it is built"
+    ]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "class ThingService:\n    def __init__(self, db: AsyncSession) -> None: ...\n",
+        "def outer() -> None:\n    async def inner(db: AsyncSession) -> None: ...\n",
+        "def find(owner: str) -> None: ...\n",
+    ],
+)
+def test_a_method_a_nested_function_or_a_sessionless_function_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
+    _write(tmp_path, "gateway/services/thing_service.py", source)
+    assert check.check_session_parameters(tmp_path) == []
+
+
+def test_a_function_outside_services_may_take_a_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
+    _write(tmp_path, "gateway/repositories/thing_repository.py", "async def find(db: AsyncSession) -> None: ...\n")
+    assert check.check_session_parameters(tmp_path) == []
+
+
+def test_a_function_on_the_session_baseline_may_take_a_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ("gateway/services/thing_service.py::find",))
+    _write(
+        tmp_path,
+        "gateway/services/thing_service.py",
+        "async def find(db: AsyncSession) -> None: ...\nasync def count(db: AsyncSession) -> None: ...\n",
+    )
+    assert check.check_session_parameters(tmp_path) == [
+        "gateway/services/thing_service.py:2 count takes a session; a service receives its session when it is built"
+    ]
+
+
+@pytest.mark.parametrize("source", ["def find(owner: str) -> None: ...\n", None])
+def test_a_session_baseline_entry_that_takes_no_session_must_leave_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str | None
+) -> None:
+    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ("gateway/services/thing_service.py::find",))
+    _write(tmp_path, "gateway/services/other_service.py", "")
+    if source is not None:
+        _write(tmp_path, "gateway/services/thing_service.py", source)
+    assert check.check_session_parameters(tmp_path) == [
+        "gateway/services/thing_service.py::find is on the session parameter baseline but takes no session; "
+        "remove it from the baseline"
+    ]
+
+
+def test_main_fails_on_a_service_function_that_takes_a_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path, "src/gateway/services/thing_service.py", "async def find(db: AsyncSession) -> None: ...\n")
+    _write(tmp_path, "tests/__init__.py", "")
+    monkeypatch.setattr(check, "SESSION_PARAMETER_BASELINE", ())
+    monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
+    monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
+    monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
+    assert check.main() == 1

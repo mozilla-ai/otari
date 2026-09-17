@@ -19,6 +19,10 @@ Enforces:
 11. Query layering: a route or a service builds no query, because a query
     belongs in a repository. Modules that still do are named on a baseline,
     and the baseline only shrinks.
+12. Session parameters: a module-level function under services/ takes no
+    AsyncSession, because a service receives its session when it is built.
+    Functions that still take one are named on a baseline, and the baseline
+    only shrinks.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -219,6 +223,254 @@ def _imported_modules(node: ast.Import | ast.ImportFrom, file_path: Path, src_ro
         return []
     # `from pkg import name` may bind the submodule pkg.name, so check it too.
     return [base] + [f"{base}.{alias.name}" for alias in node.names]
+
+
+SESSION_SCOPE = "gateway/services"
+SESSION_TYPE = "AsyncSession"
+# Module-level service functions that took a session when the rule landed, as
+# "<module>::<function>". An entry that stops taking one fails the check until
+# it is removed, so the list only shrinks.
+SESSION_PARAMETER_BASELINE = (
+    "gateway/services/agent_telemetry_service.py::ingest",
+    "gateway/services/alias_service.py::load_aliases_at_startup",
+    "gateway/services/alias_service.py::refresh_alias_cache",
+    "gateway/services/batch_service.py::claim_batch_accounting",
+    "gateway/services/batch_service.py::get_batch_record",
+    "gateway/services/batch_service.py::get_batch_records",
+    "gateway/services/batch_service.py::record_batch",
+    "gateway/services/bootstrap_service.py::bootstrap_first_api_key",
+    "gateway/services/budget_reservation_ledger.py::_reclaim",
+    "gateway/services/budget_reservation_ledger.py::_release_holds",
+    "gateway/services/budget_reservation_ledger.py::grow",
+    "gateway/services/budget_reservation_ledger.py::prune_terminal",
+    "gateway/services/budget_reservation_ledger.py::reclaim_expired_for_user",
+    "gateway/services/budget_reservation_ledger.py::record",
+    "gateway/services/budget_reservation_ledger.py::sweep_expired",
+    "gateway/services/budget_reservation_ledger.py::try_settle_reclaimed",
+    "gateway/services/budget_reservation_ledger.py::try_terminate",
+    "gateway/services/budget_retiming.py::retime_ceilings_for_budget",
+    "gateway/services/budget_service.py::_cas_reset_user_budget",
+    "gateway/services/budget_service.py::_get_budget",
+    "gateway/services/budget_service.py::_held_handle",
+    "gateway/services/budget_service.py::_is_model_free",
+    "gateway/services/budget_service.py::get_budget_state",
+    "gateway/services/budget_service.py::increase_reservation",
+    "gateway/services/budget_service.py::reconcile_reservation",
+    "gateway/services/budget_service.py::record_external_spend",
+    "gateway/services/budget_service.py::refund_reservation",
+    "gateway/services/budget_service.py::reserve_budget",
+    "gateway/services/content_normalizer.py::_classify",
+    "gateway/services/content_normalizer.py::_normalize_block",
+    "gateway/services/content_normalizer.py::_resolve_from_ref",
+    "gateway/services/content_normalizer.py::normalize_messages",
+    "gateway/services/dashboard_session_service.py::create_dashboard_session",
+    "gateway/services/dashboard_session_service.py::record_session_key_marker",
+    "gateway/services/dashboard_session_service.py::resolve_dashboard_session",
+    "gateway/services/dashboard_session_service.py::revoke_all_dashboard_sessions",
+    "gateway/services/dashboard_session_service.py::revoke_dashboard_session",
+    "gateway/services/dashboard_session_service.py::revoke_sessions_on_master_key_change",
+    "gateway/services/dashboard_session_service.py::revoke_user_dashboard_sessions",
+    "gateway/services/external_usage_service.py::_existing_event_ids",
+    "gateway/services/external_usage_service.py::_insert_rows",
+    "gateway/services/external_usage_service.py::_load_pricing_index",
+    "gateway/services/external_usage_service.py::ingest_external_events",
+    "gateway/services/file_service.py::fetch_file",
+    "gateway/services/maintenance_mode_service.py::is_maintenance_mode",
+    "gateway/services/maintenance_mode_service.py::stage_maintenance_mode",
+    "gateway/services/master_key_service.py::ensure_master_key",
+    "gateway/services/master_key_service.py::load_master_key_hash",
+    "gateway/services/master_key_service.py::stage_generated_master_key_rotation",
+    "gateway/services/merged_catalog_service.py::build_merged_catalog",
+    "gateway/services/merged_catalog_service.py::catalog_scope",
+    "gateway/services/merged_catalog_service.py::get_pricing_map",
+    "gateway/services/model_access.py::resolve_request_allowlist",
+    "gateway/services/oauth_service.py::_client",
+    "gateway/services/oauth_service.py::authorization_url",
+    "gateway/services/oauth_service.py::exchange_code",
+    "gateway/services/playground_dispatch.py::resolve_dispatch_key",
+    "gateway/services/playground_service.py::_prune_oldest",
+    "gateway/services/playground_service.py::_require_consent",
+    "gateway/services/playground_service.py::delete_comparison",
+    "gateway/services/playground_service.py::delete_conversation",
+    "gateway/services/playground_service.py::list_comparisons",
+    "gateway/services/playground_service.py::list_conversations",
+    "gateway/services/playground_service.py::list_favorite_models",
+    "gateway/services/playground_service.py::read_consent",
+    "gateway/services/playground_service.py::read_conversation_messages",
+    "gateway/services/playground_service.py::replace_favorite_models",
+    "gateway/services/playground_service.py::resolve_playground_principal",
+    "gateway/services/playground_service.py::resolve_playground_workspace",
+    "gateway/services/playground_service.py::resolve_tool_availability",
+    "gateway/services/playground_service.py::save_comparison",
+    "gateway/services/playground_service.py::save_conversation",
+    "gateway/services/playground_service.py::update_consent",
+    "gateway/services/policy_store.py::load_policies_at_startup",
+    "gateway/services/policy_store.py::refresh_policy_cache",
+    "gateway/services/pricing_init_service.py::initialize_pricing_from_config",
+    "gateway/services/pricing_init_service.py::warn_if_gateway_tools_lack_pricing",
+    "gateway/services/pricing_init_service.py::warn_if_require_pricing_without_pricing",
+    "gateway/services/pricing_init_service.py::warn_if_router_candidates_lack_pricing",
+    "gateway/services/pricing_init_service.py::warn_if_search_tools_lack_flat_pricing",
+    "gateway/services/pricing_refresh_service.py::_get_active_snapshot_row",
+    "gateway/services/pricing_refresh_service.py::_prune_history",
+    "gateway/services/pricing_refresh_service.py::claim_poll_tick",
+    "gateway/services/pricing_refresh_service.py::confirm_price_refresh",
+    "gateway/services/pricing_refresh_service.py::list_accepted_snapshots",
+    "gateway/services/pricing_refresh_service.py::load_persisted_price_snapshot",
+    "gateway/services/pricing_refresh_service.py::poll_price_updates",
+    "gateway/services/pricing_refresh_service.py::prepare_price_refresh",
+    "gateway/services/pricing_refresh_service.py::preview_pending_refresh",
+    "gateway/services/pricing_refresh_service.py::refresh_price_snapshot",
+    "gateway/services/pricing_refresh_service.py::reject_price_refresh",
+    "gateway/services/pricing_service.py::_find_by_model_key",
+    "gateway/services/pricing_service.py::_find_organization_override",
+    "gateway/services/pricing_service.py::_tool_rates",
+    "gateway/services/pricing_service.py::find_model_pricing",
+    "gateway/services/pricing_service.py::load_organization_override_index",
+    "gateway/services/pricing_service.py::price_tool_calls",
+    "gateway/services/pricing_service.py::rates_in_force",
+    "gateway/services/provider_store_service.py::delete_credential",
+    "gateway/services/provider_store_service.py::get_credential",
+    "gateway/services/provider_store_service.py::get_credential_for_update",
+    "gateway/services/provider_store_service.py::list_credentials",
+    "gateway/services/provider_store_service.py::load_providers_at_startup",
+    "gateway/services/provider_store_service.py::reencrypt_credentials",
+    "gateway/services/provider_store_service.py::refresh_provider_cache",
+    "gateway/services/provider_store_service.py::save_credential",
+    "gateway/services/routing/knn.py::unpriced_router_candidates",
+    "gateway/services/runtime_settings_service.py::apply_overrides_from_db",
+    "gateway/services/runtime_settings_service.py::load_overrides",
+    "gateway/services/runtime_settings_service.py::stage_override",
+    "gateway/services/scoped_budget_service.py::_resolve_identities",
+    "gateway/services/scoped_budget_service.py::_roll_expired_periods",
+    "gateway/services/scoped_budget_service.py::applicable_budgets",
+    "gateway/services/scoped_budget_service.py::blocked_axis",
+    "gateway/services/scoped_budget_service.py::release",
+    "gateway/services/scoped_budget_service.py::reserve",
+    "gateway/services/scoped_budget_service.py::settle",
+    "gateway/services/search_tool_store_service.py::delete_search_tool",
+    "gateway/services/search_tool_store_service.py::get_search_tool",
+    "gateway/services/search_tool_store_service.py::get_search_tool_for_update",
+    "gateway/services/search_tool_store_service.py::list_search_tools",
+    "gateway/services/search_tool_store_service.py::load_search_tools_at_startup",
+    "gateway/services/search_tool_store_service.py::reencrypt_search_tools",
+    "gateway/services/search_tool_store_service.py::refresh_search_tool_cache",
+    "gateway/services/search_tool_store_service.py::save_search_tool",
+    "gateway/services/selector_index_service.py::rebuild_selector_index",
+    "gateway/services/tenancy/authorization.py::has_workspace_management_access",
+    "gateway/services/tenancy/authorization.py::require_workspace_management_access",
+    "gateway/services/tenancy/authorization.py::resolve_visible_workspace",
+    "gateway/services/tenancy/authorization.py::resolve_visible_workspace_scope",
+    "gateway/services/tenancy/authorization.py::resolve_workspace_in_organization",
+    "gateway/services/tenancy/org_provider_key_service.py::load_org_provider_keys_at_startup",
+    "gateway/services/tenancy/org_provider_key_service.py::refresh_org_provider_cache",
+    "gateway/services/tenancy/organization_guardrail_service.py::resolve_organization_guardrails",
+    "gateway/services/tenancy/organization_model_access.py::_get_byo_allowlist",
+    "gateway/services/tenancy/organization_model_access.py::_sees_default_workspace",
+    "gateway/services/tenancy/organization_model_access.py::resolve_session_catalog_scope",
+    "gateway/services/tenancy/organization_model_access.py::resolve_session_model_allowlist",
+    "gateway/services/tenancy/provisioning_service.py::_provision",
+    "gateway/services/tenancy/provisioning_service.py::_refuse_to_shadow_existing_tenancy",
+    "gateway/services/tenancy/provisioning_service.py::ensure_bootstrap_identity",
+    "gateway/services/tenancy/provisioning_service.py::load_bootstrap_identity",
+    "gateway/services/tenancy/provisioning_service.py::password_claims_deployment",
+    "gateway/services/tenancy/user_service.py::_claimable_email",
+    "gateway/services/tenancy/user_service.py::authenticate",
+    "gateway/services/tenancy/user_service.py::create_user_for_signup",
+    "gateway/services/tenancy/user_service.py::operator_has_password",
+    "gateway/services/tenancy/user_service.py::password_sign_in_possible",
+    "gateway/services/tenancy/user_service.py::request_password_reset",
+    "gateway/services/tenancy/user_service.py::resend_verification_email",
+    "gateway/services/tenancy/user_service.py::reset_password",
+    "gateway/services/tenancy/user_service.py::set_password",
+    "gateway/services/tenancy/user_service.py::update_full_name",
+    "gateway/services/tenancy/user_service.py::update_password",
+    "gateway/services/tenancy/user_service.py::verify_email",
+    "gateway/services/tenancy/webauthn_service.py::_all_credentials_for",
+    "gateway/services/tenancy/webauthn_service.py::_credentials_for",
+    "gateway/services/tenancy/webauthn_service.py::_issue_challenge",
+    "gateway/services/tenancy/webauthn_service.py::_owned_credential",
+    "gateway/services/tenancy/webauthn_service.py::_refuse_at_the_ceiling",
+    "gateway/services/tenancy/webauthn_service.py::_spend_challenge",
+    "gateway/services/tenancy/webauthn_service.py::begin_authentication",
+    "gateway/services/tenancy/webauthn_service.py::begin_registration",
+    "gateway/services/tenancy/webauthn_service.py::delete_credential",
+    "gateway/services/tenancy/webauthn_service.py::finish_authentication",
+    "gateway/services/tenancy/webauthn_service.py::finish_registration",
+    "gateway/services/tenancy/webauthn_service.py::has_any_credential",
+    "gateway/services/tenancy/webauthn_service.py::list_credentials",
+    "gateway/services/tenancy/webauthn_service.py::rename_credential",
+    "gateway/services/tenancy/workspace_code_execution_policy_service.py::resolve_workspace_code_execution_policy",
+    "gateway/services/tenancy/workspace_mcp_server_service.py::resolve_workspace_mcp_server",
+    "gateway/services/tenancy/workspace_mcp_server_service.py::resolve_workspace_mcp_servers",
+    "gateway/services/tenancy/workspace_web_search_service.py::resolve_workspace_web_search_config",
+    "gateway/services/tool_settings_service.py::apply_overrides_from_db",
+    "gateway/services/tool_settings_service.py::load_overrides",
+    "gateway/services/tool_settings_service.py::stage_override",
+    "gateway/services/usage_admin_service.py::delete_usage",
+    "gateway/services/usage_admin_service.py::set_usage_price",
+    "gateway/services/workspace_scope.py::_create_default_workspace",
+    "gateway/services/workspace_scope.py::default_workspace_id",
+    "gateway/services/workspace_scope.py::lookup_default_workspace_id",
+    "gateway/services/workspace_scope.py::organization_default_workspace_id",
+    "gateway/services/workspace_scope.py::organization_for_key_id",
+    "gateway/services/workspace_scope.py::organization_for_workspace_id",
+    "gateway/services/workspace_scope.py::resolve_workspace_id",
+    "gateway/services/workspace_scope.py::workspace_for_key_id",
+)
+
+
+def _annotation_names_session(annotation: ast.expr | None) -> bool:
+    """Return whether a parameter annotation names the async session type, including in a string annotation."""
+    if annotation is None:
+        return False
+    for node in ast.walk(annotation):
+        if isinstance(node, ast.Name) and node.id == SESSION_TYPE:
+            return True
+        if isinstance(node, ast.Attribute) and node.attr == SESSION_TYPE:
+            return True
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            try:
+                forward_reference = ast.parse(node.value, mode="eval").body
+            except SyntaxError:
+                continue
+            if _annotation_names_session(forward_reference):
+                return True
+    return False
+
+
+def _takes_session(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Return whether any parameter of a function is annotated with the async session type."""
+    arguments = function.args
+    parameters = [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs, arguments.vararg, arguments.kwarg]
+    return any(parameter is not None and _annotation_names_session(parameter.annotation) for parameter in parameters)
+
+
+def check_session_parameters(src_root: Path) -> list[str]:
+    """Check that no module-level service function off the baseline takes a session, and that every entry still does."""
+    violations: list[str] = []
+    taking: set[str] = set()
+    for py_file in sorted((src_root / SESSION_SCOPE).rglob("*.py")):
+        relative_path = py_file.relative_to(src_root).as_posix()
+        try:
+            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        except SyntaxError:
+            continue  # check_file already reports an unparseable file.
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) or not _takes_session(node):
+                continue
+            entry = f"{relative_path}::{node.name}"
+            taking.add(entry)
+            if entry not in SESSION_PARAMETER_BASELINE:
+                violations.append(
+                    f"{relative_path}:{node.lineno} {node.name} takes a session; "
+                    "a service receives its session when it is built"
+                )
+    violations.extend(
+        f"{entry} is on the session parameter baseline but takes no session; remove it from the baseline"
+        for entry in sorted(set(SESSION_PARAMETER_BASELINE) - taking)
+    )
+    return violations
 
 
 def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
@@ -454,6 +706,7 @@ def main() -> int:
     naming_violations = check_naming_conventions(SRC_ROOT)
     package_violations = check_top_level_packages(SRC_ROOT)
     query_violations = check_query_layering(SRC_ROOT)
+    session_violations = check_session_parameters(SRC_ROOT)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -480,7 +733,13 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal query layering violations: {len(query_violations)}")
 
-    if import_violations or naming_violations or package_violations or query_violations:
+    if session_violations:
+        print("\n❌ Session parameter violations:\n")
+        for violation in session_violations:
+            print(f"  {violation}")
+        print(f"\nTotal session parameter violations: {len(session_violations)}")
+
+    if import_violations or naming_violations or package_violations or query_violations or session_violations:
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1
 
