@@ -1,16 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
+  BuiltInGuardrailCatalog,
+  CreateGuardrailRequest,
   CreateOrganizationGuardrailRequest,
   CreateSearchToolRequest,
   CreateWorkspaceMcpServerRequest,
-  GuardrailCatalog,
   OrganizationGuardrail,
   SearchProviderInfo,
   SearchToolsResponse,
+  StoredGuardrail,
   StoredSearchTool,
+  TestGuardrailRequest,
+  TestGuardrailResponse,
   TestServiceResponse,
   ToolSettingsResponse,
   ToolsResponse,
+  UpdateGuardrailRequest,
   UpdateOrganizationGuardrailRequest,
   UpdateSearchToolRequest,
   UpdateToolSettingsRequest,
@@ -25,7 +30,8 @@ import type {
 import { apiFetch } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
-  GUARDRAIL_PROFILES,
+  GUARDRAIL_CATALOG,
+  GUARDRAIL_DEFINITIONS,
   ORGANIZATION_GUARDRAILS,
   SEARCH_PROVIDERS,
   SEARCH_TOOLS,
@@ -71,10 +77,6 @@ export function useUpdateToolSettings() {
       // which this PATCH may have just changed, so the endpoint a blank box
       // resolves to (and whether one is required at all) has to be re-read.
       void queryClient.invalidateQueries({ queryKey: [SEARCH_PROVIDERS] })
-      // Same reasoning one service over: the guardrail catalog is whatever the
-      // host `guardrails_url` names answered with, so pointing that field at a
-      // different sidecar changes which profiles exist.
-      void queryClient.invalidateQueries({ queryKey: [GUARDRAIL_PROFILES] })
     },
   })
 }
@@ -162,23 +164,101 @@ export function useTestService() {
 // rather than truncating: a gateway with a long price history could otherwise
 // have older rows silently vanish from the models table.
 
-// The profiles an organization guardrail may name, and the validate_kwargs each
-// one takes. Read from the guardrails service through the gateway, so an
-// unreachable or unconfigured service resolves to `available: false` with a
-// reason rather than to a query error: the form falls back to naming a profile
-// by hand and has to render either way.
+// The guardrails this build can construct and run in its own process, with the
+// constructor and per-call arguments each one takes. Unlike the profile list
+// above this is not a remote service's answer: it is a property of the installed
+// any-guardrail, so it moves only when the process is redeployed. Hence the same
+// window that read takes.
 //
-// Longer-lived than the tool settings beside it, because the answer only changes
-// when the operator edits the sidecar's own YAML and restarts it, which is not
-// something the dashboard can do. The window `useSearchProviders` takes, for the
-// reason it takes it.
-export function useGuardrailProfiles(enabled = true) {
+// Every route behind the guardrail store is operator-gated, so this takes
+// `enabled` rather than firing and catching the 403.
+export function useBuiltInGuardrailCatalog(enabled = true) {
   return useQuery({
-    queryKey: [GUARDRAIL_PROFILES],
+    queryKey: [GUARDRAIL_CATALOG],
     queryFn: () =>
-      apiFetch<GuardrailCatalog>("/tool-settings/guardrails/profiles"),
+      apiFetch<BuiltInGuardrailCatalog>("/tool-settings/guardrails/catalog"),
     staleTime: 300_000,
     enabled,
+  })
+}
+
+// The definitions stored against those guardrails. A row's `name` is the profile
+// a caller sends, so this list is where the mandate card's profile names come
+// from on a deployment running no sidecar.
+export function useGuardrailDefinitions(enabled = true) {
+  return useQuery({
+    queryKey: [GUARDRAIL_DEFINITIONS],
+    queryFn: () => apiFetch<StoredGuardrail[]>("/guardrail-credentials"),
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+export function useCreateGuardrailDefinition() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateGuardrailRequest) =>
+      apiFetch<StoredGuardrail>("/guardrail-credentials", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [GUARDRAIL_DEFINITIONS] }),
+  })
+}
+
+// A PATCH replaces `create_kwargs` rather than merging into it, so the caller
+// sends the whole map every time, with the mask standing in for a credential it
+// means to keep. `buildCreateKwargs` in `features/tools/guardrailParameters.ts`
+// is where that rule is applied.
+export function useUpdateGuardrailDefinition() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      name,
+      body,
+    }: {
+      name: string
+      body: UpdateGuardrailRequest
+    }) =>
+      apiFetch<StoredGuardrail>(
+        `/guardrail-credentials/${encodeURIComponent(name)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [GUARDRAIL_DEFINITIONS] }),
+  })
+}
+
+export function useDeleteGuardrailDefinition() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) =>
+      apiFetch<void>(`/guardrail-credentials/${encodeURIComponent(name)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [GUARDRAIL_DEFINITIONS] }),
+  })
+}
+
+// Run one stored definition against a sample input. Read-only, so it invalidates
+// nothing, like `useTestService` above. A guardrail that cannot run answers 200
+// with `ok: false` and the reason rather than failing the request, so the caller
+// reads the body rather than the error.
+export function useTestGuardrailDefinition() {
+  return useMutation({
+    mutationFn: ({
+      name,
+      body,
+    }: {
+      name: string
+      body: TestGuardrailRequest
+    }) =>
+      apiFetch<TestGuardrailResponse>(
+        `/guardrail-credentials/${encodeURIComponent(name)}/test`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
   })
 }
 

@@ -34,11 +34,12 @@ export const TOOL_SETTINGS = "tool-settings"
 export const TOOLS = "tools"
 export const SEARCH_TOOLS = "search-tools"
 export const SEARCH_PROVIDERS = "search-providers"
-// The guardrails service's own profile list, keyed apart from TOOL_SETTINGS
-// even though `guardrails_url` is where it is read from: the catalog is the
-// remote service's answer, so a settings save that changes that URL invalidates
-// it, while every other tool-settings write must not re-dial the sidecar.
-export const GUARDRAIL_PROFILES = "guardrail-profiles"
+// The guardrails this build can construct and run itself, and the definitions
+// an operator has stored for them. Two keys rather than one: the catalog is a
+// fact about the installed packages and moves only on a redeploy, while a
+// stored definition moves on every write from the card that edits it.
+export const GUARDRAIL_CATALOG = "guardrail-catalog"
+export const GUARDRAIL_DEFINITIONS = "guardrail-definitions"
 // Both carry the surface they were read from and the workspace they were scoped
 // to as trailing key segments, so the deployment-wide list and its tenant-scoped
 // sibling share a head that one invalidation covers. See `useRoutingScope`.

@@ -1,5 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react"
-import { FiCheck } from "react-icons/fi"
+import { Fragment } from "react"
 import type {
   ToolServiceName,
   ToolSettingField,
@@ -11,7 +10,6 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { CONTROL_LANE } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { isDeploymentOperator } from "@/features/organization/roles"
-import { OrganizationGuardrailsCard } from "@/features/tools/OrganizationGuardrailsCard"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
 import type { FieldCopy } from "@/features/tools/ToolSettingRows"
 import { ToolPriceRow, ToolSettingRow } from "@/features/tools/ToolSettingRows"
@@ -96,12 +94,6 @@ const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
     label: "Purpose hint",
     help: "Sent to the backend when a tool entry has none of its own.",
     placeholder: "Run untrusted analysis code",
-  },
-  guardrails_url: {
-    label: "Backend URL",
-    help: "Used when a request does not pass a guardrail URL of its own.",
-    placeholder: "http://guardrails:8000",
-    machine: true,
   },
 }
 
@@ -203,57 +195,9 @@ const SERVICES: ServiceSpec[] = [
       },
     ],
   },
-  {
-    key: "guardrails",
-    label: "Guardrails",
-    intro:
-      "The input-guardrails service this deployment checks requests against, and what your organization mandates.",
-    docsAnchor: "who-runs-a-tool",
-    groups: [
-      {
-        title: "Backend",
-        blurb:
-          "Used when a request does not pass a guardrail URL of its own. Guardrails are a check, so they are never priced.",
-        docsAnchor: "who-runs-a-tool",
-        keys: ["guardrails_url"],
-        catchAll: true,
-      },
-    ],
-  },
 ]
 
 const toolsDocs = (anchor?: string) => docsSourceHref("tools.md", anchor)
-
-// Two sibling cards still submit with a Save button of their own and have no
-// row to report into, so they keep the page-level acknowledgement. The setting
-// rows do not use it: each says what happened where it happened.
-function useSaveToast(): [string | null, (message: string) => void] {
-  const [message, setMessage] = useState<string | null>(null)
-  const timer = useRef<number | undefined>(undefined)
-  useEffect(() => () => window.clearTimeout(timer.current), [])
-  return [
-    message,
-    (next: string) => {
-      setMessage(next)
-      window.clearTimeout(timer.current)
-      timer.current = window.setTimeout(() => setMessage(null), 2500)
-    },
-  ]
-}
-
-function SaveToast({ message }: { message: string | null }) {
-  if (!message) return null
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="fixed right-4 bottom-4 z-50 flex items-center gap-2 rounded-lg border border-success bg-success-subtle px-4 py-3 text-sm font-medium text-success shadow-elevation-lg"
-    >
-      <FiCheck aria-hidden="true" className="h-5 w-5" />
-      {message}
-    </div>
-  )
-}
 
 /** The frames, at the real row height, so settings arriving does not move the page. */
 function LoadingGroups() {
@@ -306,7 +250,6 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   const pricing = usePricing(isOperator)
   const setPricing = useSetPricing()
   const update = useUpdateToolSettings()
-  const [toast, showToast] = useSaveToast()
 
   // Latest rate per key. /api/v1/pricing is history-shaped (one row per
   // effective_at), and the newest row is the one in force.
@@ -463,9 +406,6 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                 docsHref={toolsDocs("per-workspace-code-policy")}
               />
             ) : null}
-            {service.key === "guardrails" ? (
-              <OrganizationGuardrailsCard onSaved={showToast} />
-            ) : null}
           </Fragment>
         )
       })}
@@ -474,8 +414,6 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
           every narrowed view, each of which is one service. `/tools/mcp-servers`
           renders the same card. */}
       {only ? null : <WorkspaceMcpServersCard />}
-
-      <SaveToast message={toast} />
     </div>
   )
 }

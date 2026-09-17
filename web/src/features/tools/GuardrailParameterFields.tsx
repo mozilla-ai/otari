@@ -1,4 +1,4 @@
-import { Description, Label, TextArea, TextField } from "@heroui/react"
+import type { ReactNode } from "react"
 
 import type { GuardrailParameterSpec } from "@/client"
 import { Checkbox } from "@/design-system/forms/Checkbox"
@@ -6,6 +6,8 @@ import { Field } from "@/design-system/forms/Field"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { DocstringText } from "@/features/tools/DocstringText"
+import { GuardrailJsonField } from "@/features/tools/GuardrailJsonField"
 import {
   type ParameterErrors,
   type ParameterValues,
@@ -27,24 +29,103 @@ function placeholderFor(spec: GuardrailParameterSpec): string | undefined {
   return `default: ${shown}`
 }
 
+/**
+ * The environment variable that fills a parameter left blank.
+ *
+ * Kept although the sentence carrying it is trimmed away: "or set $X" is the
+ * difference between a required-looking field and one the deployment may
+ * already answer, and it is three words rather than the clause upstream spends
+ * on it.
+ */
+function envNote(spec: GuardrailParameterSpec): ReactNode {
+  if (!spec.env_var) return null
+  return (
+    <>
+      {" "}
+      Or set <code className="text-mono-caption">{spec.env_var}</code>.
+    </>
+  )
+}
+
+/**
+ * What a secret's field says about the value behind it.
+ *
+ * `SecretField` is never prefilled, so on an edit the only way to tell a stored
+ * credential from an absent one is to say so. `storedSecrets` is undefined while
+ * creating, where there is nothing to report and the schema's own help is what
+ * the operator needs.
+ */
+function secretNote(
+  spec: GuardrailParameterSpec,
+  storedSecrets: readonly string[] | undefined,
+): ReactNode {
+  const help = (
+    <>
+      <DocstringText>{spec.description ?? undefined}</DocstringText>
+      {envNote(spec)}
+    </>
+  )
+  if (!spec.secret || storedSecrets === undefined) return help
+  const status = storedSecrets.includes(spec.name)
+    ? "Set already, and never shown again. Leave blank to keep it."
+    : "Not set."
+  return (
+    <>
+      {status} {help}
+    </>
+  )
+}
+
 function ParameterControl({
   spec,
+  guardrailName,
+  operation,
   scopeName,
   value,
   error,
   disabled,
+  storedSecrets,
   onChange,
 }: {
   spec: GuardrailParameterSpec
+  /** The class the parameter belongs to, which is how a JSON suggestion is found. */
+  guardrailName: string
+  /** The category it was picked under. See `GuardrailJsonField`. */
+  operation?: string
   /** Names the entry, so a parameter that repeats down the card is still distinct. */
   scopeName: string
   value: ParameterValues[string]
   error: string | undefined
   disabled: boolean
+  /** See `secretNote`. Undefined for a form that is creating rather than editing. */
+  storedSecrets?: readonly string[]
   onChange: (next: ParameterValues[string]) => void
 }) {
   const label = parameterLabel(spec.name)
-  const description = spec.description ?? undefined
+  // An unstorable argument is rendered rather than hidden, disabled and saying
+  // why: upstream types it as a live client or session object, so no database
+  // can hold one and the gateway refuses it. An absent field would leave the
+  // operator hunting for the credential argument it is not.
+  if (spec.storable === false) {
+    return (
+      <Field
+        label={label}
+        value=""
+        onChange={() => undefined}
+        isDisabled
+        description="Cannot be stored: this argument takes a live client object. Use the credential arguments beside it."
+        reserveMessage
+      />
+    )
+  }
+  const description: ReactNode = spec.secret ? (
+    secretNote(spec, storedSecrets)
+  ) : (
+    <>
+      <DocstringText>{spec.description ?? undefined}</DocstringText>
+      {envNote(spec)}
+    </>
+  )
 
   if (spec.type === "boolean") {
     return (
@@ -111,28 +192,16 @@ function ParameterControl({
 
   if (spec.type === "json") {
     return (
-      <TextField
+      <GuardrailJsonField
+        spec={spec}
+        guardrailName={guardrailName}
+        operation={operation}
         value={String(value ?? "")}
+        error={error}
+        disabled={disabled}
+        description={description}
         onChange={onChange}
-        isDisabled={disabled}
-        isInvalid={Boolean(error)}
-        className="flex max-w-md flex-col gap-1"
-      >
-        <Label className="text-body">{label} (JSON)</Label>
-        <TextArea
-          rows={3}
-          spellCheck={false}
-          placeholder={placeholderFor(spec) ?? "[]"}
-          className="font-mono text-xs"
-        />
-        <FieldMessages reserve>
-          <Description
-            className={error ? "text-caption text-danger" : "text-caption"}
-          >
-            {error ?? description}
-          </Description>
-        </FieldMessages>
-      </TextField>
+      />
     )
   }
 
@@ -159,31 +228,55 @@ function ParameterControl({
 // still arrives on the field, announced, through `isInvalid` and `errorMessage`.
 export function GuardrailParameterFields({
   specs,
+  guardrailName,
+  operation,
   scopeName,
   values,
   errors,
   disabled,
+  storedSecrets,
   onChange,
 }: {
   specs: GuardrailParameterSpec[]
+  /** See `ParameterControl`. */
+  guardrailName: string
+  operation?: string
   scopeName: string
   values: ParameterValues
   errors: ParameterErrors
   disabled: boolean
+  /** Secret names the entry already holds, which marks this an edit. See `secretNote`. */
+  storedSecrets?: readonly string[]
   onChange: (name: string, next: ParameterValues[string]) => void
 }) {
   return (
-    <div className="flex flex-col gap-3 sm:grid sm:grid-cols-2">
+    <div className="flex flex-col gap-4 sm:grid sm:grid-cols-2 sm:items-start">
       {specs.map((spec) => (
-        <ParameterControl
+        // A JSON argument brings a layout of its own, a column of switches or
+        // of rows, and is several times the height of the one-line fields
+        // beside it. Half a row leaves it cramped and its neighbour stranded
+        // above a gap, so it takes the whole row and the flat fields pair up
+        // around it.
+        <div
           key={spec.name}
-          spec={spec}
-          scopeName={scopeName}
-          value={values[spec.name]}
-          error={errors[spec.name]}
-          disabled={disabled}
-          onChange={(next) => onChange(spec.name, next)}
-        />
+          className={
+            spec.type === "json" && spec.storable !== false
+              ? "sm:col-span-2"
+              : undefined
+          }
+        >
+          <ParameterControl
+            spec={spec}
+            guardrailName={guardrailName}
+            operation={operation}
+            scopeName={scopeName}
+            value={values[spec.name]}
+            error={errors[spec.name]}
+            disabled={disabled}
+            storedSecrets={storedSecrets}
+            onChange={(next) => onChange(spec.name, next)}
+          />
+        </div>
       ))}
     </div>
   )

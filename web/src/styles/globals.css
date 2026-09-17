@@ -2889,6 +2889,28 @@ main {
   width: 96px;
   min-width: 96px;
 }
+.otari-guardrails-table .table__row .table__cell {
+  height: 64px;
+  padding-block: 0;
+}
+.otari-guardrails-table .table__column[data-key="name"] {
+  width: 200px;
+  min-width: 200px;
+}
+/* Wide enough for the longest name the catalog ships, "Azure Content Safety",
+   on one line. Checks takes the slack. */
+.otari-guardrails-table .table__column[data-key="guardrail"] {
+  width: 200px;
+  min-width: 200px;
+}
+.otari-guardrails-table .table__column[data-key="status"] {
+  width: 160px;
+  min-width: 160px;
+}
+.otari-guardrails-table .table__column[data-key="actions"] {
+  width: 132px;
+  min-width: 132px;
+}
 .otari-budgets-table .table__row .table__cell {
   height: 58px;
   padding-block: 0;

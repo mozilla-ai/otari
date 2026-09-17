@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import type { GuardrailCatalog, GuardrailParameterSpec } from "@/client"
+import type { GuardrailParameterSpec } from "@/client"
 import {
+  buildCreateKwargs,
   buildValidateKwargs,
   parameterErrors,
   parameterLabel,
   parseExtraJson,
-  profileIdentity,
   seedParameters,
 } from "@/features/tools/guardrailParameters"
 import { REDACTED_SECRET } from "@/shared/helpers/redaction"
@@ -189,53 +189,6 @@ describe("buildValidateKwargs", () => {
   })
 })
 
-describe("profileIdentity", () => {
-  // A pair differing only in the model they pin, which is how an operator's
-  // guardrails configuration is ordinarily written.
-  const catalog: GuardrailCatalog = {
-    available: true,
-    reason: null,
-    profiles: [
-      {
-        profile: "house-policy-fast",
-        guardrail: "any_llm",
-        model_id: "openai/gpt-4o-mini",
-        parameters_known: true,
-        parameters: [spec({ name: "policy", type: "string", required: true })],
-      },
-      {
-        profile: "house-policy-strict",
-        guardrail: "any_llm",
-        model_id: "openai/gpt-4o",
-        parameters_known: true,
-        parameters: [spec({ name: "policy", type: "string", required: true })],
-      },
-    ],
-  }
-
-  it("separates two profiles the catalog describes identically", () => {
-    expect(profileIdentity(catalog, "house-policy-fast")).not.toBe(
-      profileIdentity(catalog, "house-policy-strict"),
-    )
-  })
-
-  it("gives every name the catalog does not describe the same identity", () => {
-    // Including the prefixes of one being typed, which is what keeps the form
-    // from resetting under the operator.
-    expect(profileIdentity(catalog, "p")).toBe(profileIdentity(catalog, "pii"))
-    expect(profileIdentity(catalog, "")).toBe(profileIdentity(catalog, "pii"))
-    expect(profileIdentity(undefined, "house-policy-fast")).toBe(
-      profileIdentity(catalog, "pii"),
-    )
-  })
-
-  it("never gives a described profile an undescribed one's identity", () => {
-    expect(profileIdentity(catalog, "house-policy-fast")).not.toBe(
-      profileIdentity(catalog, "pii"),
-    )
-  })
-})
-
 describe("parseExtraJson", () => {
   it("reads blank as no parameters at all", () => {
     expect(parseExtraJson("   ")).toEqual({ value: {} })
@@ -312,5 +265,75 @@ describe("a stored secret parameter", () => {
     expect(buildValidateKwargs([booleanSecret], seeded.values, "")).toEqual({
       use_api_key: REDACTED_SECRET,
     })
+  })
+})
+
+describe("buildCreateKwargs", () => {
+  const SPECS = [
+    spec({ name: "api_key", type: "string", required: true, secret: true }),
+    spec({ name: "endpoint", type: "string" }),
+    spec({ name: "threshold", type: "number" }),
+  ]
+
+  it("sends what was typed, coerced to the type the catalog reported", () => {
+    expect(
+      buildCreateKwargs(SPECS, {
+        api_key: "lak-123",
+        endpoint: "https://api.lakera.ai/v2/guard",
+        threshold: "0.8",
+      }),
+    ).toEqual({
+      api_key: "lak-123",
+      endpoint: "https://api.lakera.ai/v2/guard",
+      threshold: 0.8,
+    })
+  })
+
+  it("keeps a stored credential the operator left blank", () => {
+    // The whole reason this is not `buildValidateKwargs`: a PATCH replaces the
+    // map, so omitting the key would delete it while saving the endpoint.
+    expect(
+      buildCreateKwargs(
+        SPECS,
+        { api_key: "", endpoint: "https://elsewhere.example" },
+        ["api_key"],
+      ),
+    ).toEqual({
+      api_key: REDACTED_SECRET,
+      endpoint: "https://elsewhere.example",
+    })
+  })
+
+  it("rotates a credential the operator retyped", () => {
+    expect(
+      buildCreateKwargs(SPECS, { api_key: "lak-new" }, ["api_key"]),
+    ).toEqual({ api_key: "lak-new" })
+  })
+
+  it("sends no credential at all while creating, where none is stored yet", () => {
+    expect(buildCreateKwargs(SPECS, { endpoint: "https://x.example" })).toEqual(
+      {
+        endpoint: "https://x.example",
+      },
+    )
+  })
+
+  it("drops an argument the catalog says cannot be stored", () => {
+    // The gateway refuses one with a 400, and there is no value to send: the
+    // field is rendered disabled so the operator can see why.
+    const specs = [
+      spec({ name: "session", type: "json", secret: true, storable: false }),
+      spec({ name: "region_name", type: "string" }),
+    ]
+
+    expect(
+      buildCreateKwargs(specs, { session: "{}", region_name: "us-east-1" }),
+    ).toEqual({ region_name: "us-east-1" })
+  })
+
+  it("is an empty map for a guardrail that takes no constructor arguments", () => {
+    // Not null, which is what `buildValidateKwargs` answers: taking none is
+    // ordinary rather than unconfigured.
+    expect(buildCreateKwargs([], {})).toEqual({})
   })
 })

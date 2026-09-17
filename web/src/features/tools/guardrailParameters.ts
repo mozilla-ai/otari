@@ -21,7 +21,7 @@
  * as a number means holding `NaN` while someone types a minus sign.
  */
 
-import type { GuardrailCatalog, GuardrailParameterSpec } from "@/client"
+import type { GuardrailParameterSpec } from "@/client"
 import { REDACTED_SECRET } from "@/shared/helpers/redaction"
 
 export type ParameterValue = string | boolean
@@ -37,45 +37,6 @@ export function parameterLabel(name: string): string {
       index === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word,
     )
     .join(" ")
-}
-
-/** The catalog entry for a profile, or undefined when it names none. */
-export function findProfile(
-  catalog: GuardrailCatalog | undefined,
-  profile: string,
-) {
-  return catalog?.profiles?.find((entry) => entry.profile === profile)
-}
-
-/** The parameters of a profile the catalog describes, and none otherwise. */
-export function parameterSpecs(
-  catalog: GuardrailCatalog | undefined,
-  profile: string,
-): GuardrailParameterSpec[] {
-  return findProfile(catalog, profile)?.parameters ?? []
-}
-
-/** Stands in for every profile name the catalog does not describe. */
-const UNDESCRIBED_PROFILE = "\u0000undescribed"
-
-/**
- * What a parameter form re-seeds on, beside the schema and the stored values.
- *
- * Two profiles of one guardrail class differing only in the model they pin
- * declare the same parameters, so a schema cannot tell them apart and a form
- * keyed on it alone carries one profile's values onto the other. A name can.
- *
- * Every name the catalog does not describe shares one identity, because such a
- * name is typed a character at a time: keying on it would reset the form on
- * every keystroke, and there is no schema behind it to re-seed from anyway.
- */
-export function profileIdentity(
-  catalog: GuardrailCatalog | undefined,
-  profile: string,
-): string {
-  return findProfile(catalog, profile) === undefined
-    ? UNDESCRIBED_PROFILE
-    : profile
 }
 
 function isBlank(value: ParameterValue | undefined): boolean {
@@ -264,4 +225,46 @@ export function buildValidateKwargs(
     kwargs[spec.name] = coerce(spec, value)
   }
   return Object.keys(kwargs).length > 0 ? kwargs : null
+}
+
+/**
+ * Assemble the typed fields into the `create_kwargs` map a stored definition is
+ * built from.
+ *
+ * Here rather than beside the form that calls it, because the mask rule above is
+ * the thing it has to get right and that rule lives in this file. Three ways it
+ * differs from `buildValidateKwargs`:
+ *
+ * A blank secret that is already stored sends the mask rather than nothing. A
+ * PATCH **replaces** `create_kwargs` instead of merging into it, so a key left
+ * out is a key deleted: saving an endpoint would otherwise take the credential
+ * with it.
+ *
+ * An argument the catalog marks unstorable is dropped. Upstream types it as a
+ * live client or session object, the gateway refuses it with a 400, and the form
+ * offers no value to send.
+ *
+ * And there is no raw editor and no null: a guardrail taking no constructor
+ * arguments is ordinary rather than unconfigured, so it sends an empty map.
+ */
+export function buildCreateKwargs(
+  specs: GuardrailParameterSpec[],
+  values: ParameterValues,
+  /** Secret names the row already holds. Undefined while creating a new one. */
+  storedSecrets?: readonly string[],
+): Record<string, unknown> {
+  const stored = new Set(storedSecrets ?? [])
+  const kwargs: Record<string, unknown> = {}
+  for (const spec of specs) {
+    if (spec.storable === false) continue
+    const value = values[spec.name]
+    if (isBlank(value)) {
+      if (spec.secret && stored.has(spec.name)) {
+        kwargs[spec.name] = REDACTED_SECRET
+      }
+      continue
+    }
+    kwargs[spec.name] = coerce(spec, value)
+  }
+  return kwargs
 }

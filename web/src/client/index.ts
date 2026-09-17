@@ -413,6 +413,25 @@ export type GuardrailProfileSpec = Schemas["GuardrailProfileSpec"]
 export type GuardrailParameterSpec = Schemas["GuardrailParameterSpec"]
 export type GuardrailParameterType = GuardrailParameterSpec["type"]
 
+// The guardrails this gateway constructs and runs in its own process, and the
+// definitions an operator has stored against them. A stored row's `name` is the
+// profile a caller sends, so these are the write target of the catalog above's
+// built-in sibling. See `src/gateway/services/guardrail_catalog.py` and
+// `src/gateway/api/routes/guardrail_credentials.py`.
+export type BuiltInGuardrailCatalog = Schemas["BuiltInGuardrailCatalog"]
+export type BuiltInGuardrailSpec = Schemas["BuiltInGuardrailSpec"]
+export type GuardrailCategory = BuiltInGuardrailSpec["primary_category"]
+export type StoredGuardrail = Schemas["StoredGuardrailSchema"]
+// `enabled` carries a server-side default the generator cannot see, so
+// `Defaulted` puts it back.
+export type CreateGuardrailRequest = Defaulted<
+  Schemas["CreateGuardrailCredentialRequest"],
+  "enabled"
+>
+export type UpdateGuardrailRequest = Schemas["UpdateGuardrailCredentialRequest"]
+export type TestGuardrailRequest = Schemas["TestGuardrailRequest"]
+export type TestGuardrailResponse = Schemas["TestGuardrailResponse"]
+
 // ---------------------------------------------------------------------------
 // Search tools
 // ---------------------------------------------------------------------------

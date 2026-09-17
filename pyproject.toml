@@ -16,14 +16,37 @@ dependencies = [
     # Read by the catalog (`services/guardrail_catalog.py`) and called by the
     # runner (`services/guardrail_runner.py`). Its `parameter_registry` is a
     # stdlib+pydantic leaf built so a consumer can render a configuration form
-    # without importing a model backend. No extra is taken, and none is needed:
-    # only a guardrail whose backend is a hosted API is built here, and each of
-    # those is a client and a request rather than a model download. What is
-    # imported is `GuardrailName`, `GUARDRAIL_METADATA`, `get_parameter_schema`
-    # and the shape of the `ParameterSpec` it returns, plus `AnyGuardrail`,
-    # `Guardrail`, `EvaluateArgumentError` and `BackendType`; bounded below 0.8
-    # rather than trusting a 0.x minor to keep them.
-    "any-guardrail>=0.7.7,<0.8.0",
+    # without importing a model backend. What is imported is `GuardrailName`,
+    # `GUARDRAIL_METADATA`, `get_parameter_schema` and the shape of the
+    # `ParameterSpec` it returns, plus `AnyGuardrail`, `Guardrail`,
+    # `EvaluateArgumentError` and `BackendType`; bounded below 0.8 rather than
+    # trusting a 0.x minor to keep them.
+    #
+    # Four extras, one per guardrail in the catalog that speaks over a vendor SDK
+    # rather than plain `requests`. The rule behind them is that every guardrail
+    # the catalog offers must be constructible: the catalog is the picker the
+    # dashboard's form writes against, so a row it lists and the runner cannot
+    # build is a form that fails after the operator has typed a credential into
+    # it. `runs_in_process` is what claims a guardrail is buildable, and these
+    # extras are what make that claim true.
+    #
+    # Three of the four resolve to packages already in the tree, so taking them
+    # adds nothing to the image: `openai` is a core any-llm-sdk dependency, and
+    # `boto3` and `ibm-watsonx-ai` arrive with `any-llm-sdk[all]`. They are named
+    # anyway, because arriving through somebody else's extra is not a dependency,
+    # it is a coincidence: any-llm narrowing `[all]` would break Bedrock and
+    # watsonx at runtime with an ImportError the catalog never warned about,
+    # which is exactly how Azure Content Safety was found. Only that fourth one
+    # actually installs anything here, two pure-Python packages
+    # (azure-ai-contentsafety, pathvalidate) and no model backend.
+    #
+    # The eight extras left out are the local-model backends (torch,
+    # transformers, onnxruntime and friends). No guardrail behind them is in this
+    # catalog, because `runs_in_process` admits only `BackendType.HOSTED_API`, so
+    # taking one would put model weights in a gateway process that never loads
+    # them. A hosted guardrail added later whose client sits behind an extra
+    # belongs in the list above.
+    "any-guardrail[azure-content-safety,bedrock,openai,watsonx]>=0.7.7,<0.8.0",
     "alembic>=1.13.0",
     "aiosqlite>=0.19.0",
     # OAuth protocol mechanics for dashboard sign-in: provider endpoints, the

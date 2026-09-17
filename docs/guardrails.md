@@ -265,11 +265,60 @@ checking one before turning it on is the point. It changes nothing about what th
 gateway is enforcing: what it built is thrown away, and a profile becomes live
 through a write, never through a test.
 
-One guardrail in the catalog needs a vendor package the published image does not
-carry: Azure Content Safety. Its build fails with a message naming the package.
+Every guardrail the catalog lists can be built by this image. Most hosted
+backends are a client and a request over packages Otari already carries; Azure
+Content Safety is the one that speaks over a vendor SDK, so `pyproject.toml`
+takes any-guardrail's `azure-content-safety` extra for it. A hosted guardrail
+added later whose client sits behind an extra needs that extra taken too, or the
+catalog offers a row the runner cannot build.
 
 Nothing on the request path reads these rows yet, so storing a definition still
 does not change how a request behaves.
+
+### Defining a guardrail from the dashboard
+
+The dashboard does all of the above without a `curl`. Sign in as the deployment
+operator and open **Tools** and then **Guardrails**. The page lists every
+definition this deployment has stored, one row each, the way the providers page
+lists provider credentials.
+
+**Add guardrail** asks in three stages, in the order the decision is actually
+made:
+
+1. **What do you want checked.** Prompt injection, personal data, harmful
+   content, and so on. The list is not one Otari keeps: it is every category the
+   catalog's own entries declare, so a category a newer any-guardrail ships
+   appears here with no change to the dashboard.
+2. **Which guardrail.** Only the ones that do that job, each named with the
+   vendor that publishes it, because two guardrails doing one job are told apart
+   by who runs them far more often than by their own names. A guardrail appears
+   under every category it detects rather than only its headline one, which is
+   how any-guardrail groups them itself: Lakera Guard is offered for personal
+   data as well as for prompt injection.
+3. **Its own fields.** Whatever that guardrail's constructor and per-call
+   arguments are, typed from the catalog. A credential is masked, and an
+   argument that takes a live client object is shown disabled, because no
+   database can hold one.
+
+The name suggested for the row is the one a caller sends as its `profile`, so in
+the ordinary case the credential is the only field to fill.
+
+A stored row can then be edited, tested against a sample input, switched off
+without losing its settings, and removed. Three things are worth knowing:
+
+- **A credential is never shown again.** The edit form leaves its box empty and
+  says whether one is already set. Leaving it blank keeps the stored value, and
+  typing a new one rotates it.
+- **Test runs the guardrail once** and reports the verdict, or a readable reason
+  it could not run. It enforces nothing and stores nothing, so it is how a
+  mistyped API key is caught where it was typed rather than by a user.
+- **Without `OTARI_SECRET_KEY`** a guardrail that takes a credential cannot be
+  stored at all. The page says so once such a guardrail is chosen; one that needs
+  no credential is unaffected.
+
+The page is operator-only, as every route behind it is. It configures no separate
+guardrails service: `guardrails_url` is a config-file and environment setting,
+and organization-level mandates are not edited here.
 
 ### How the layers compose
 

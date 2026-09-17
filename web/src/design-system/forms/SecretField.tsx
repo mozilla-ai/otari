@@ -1,4 +1,5 @@
 import { Description, FieldError, Input, Label, TextField } from "@heroui/react"
+import type { ReactNode } from "react"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 
 // A masked, never-prefilled secret input. Native password masking protects
@@ -28,7 +29,7 @@ export function SecretField({
   onChange: (next: string) => void
   label: string
   placeholder?: string
-  description?: string
+  description?: ReactNode
   /** Marks the input invalid, which is what makes `errorMessage` render. */
   isInvalid?: boolean
   /** Shown under the field and announced with it. Needs `isInvalid` to appear. */

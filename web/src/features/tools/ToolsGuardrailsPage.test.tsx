@@ -233,14 +233,14 @@ describe("ToolsGuardrailsPage", () => {
     expect(
       screen.getByRole("heading", { name: "Code execution · Backend" }),
     ).toBeInTheDocument()
+    // Guardrails has no settings group: its only one configured the separate
+    // guardrails service, which a guardrail Otari runs itself does not need.
     expect(
-      await screen.findByRole("heading", { name: "Guardrails · Backend" }),
-    ).toBeInTheDocument()
+      screen.queryByRole("heading", { name: "Guardrails · Backend" }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(GUARDRAILS_URL)).not.toBeInTheDocument()
     expect(screen.getByLabelText(WEB_SEARCH_URL)).toHaveValue(
       "http://searxng:8080",
-    )
-    expect(screen.getByLabelText(GUARDRAILS_URL)).toHaveValue(
-      "http://guardrails:8000",
     )
   })
 

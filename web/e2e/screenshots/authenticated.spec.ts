@@ -79,6 +79,14 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "tools-mcp-servers",
     heading: /mcp servers/i,
   },
+  // A page in its own right rather than a narrowed Tools view: it lists the
+  // guardrails this deployment defines, the way the providers page lists
+  // credentials. Captured at rest, so its three dialogs are the vitest suite's.
+  {
+    route: "/tools/guardrails",
+    name: "tools-guardrails",
+    heading: /guardrails/i,
+  },
   // The deployment's own two pages, reached from the account menu rather than
   // from a rail, and covered here all the same for the reason /account below
   // is: this matrix is about how a page renders, not about which control opens
