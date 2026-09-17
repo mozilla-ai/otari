@@ -113,9 +113,9 @@ RULES: dict[str, LayerRule] = {
         "description": "API layer",
     },
     "gateway/api/routes": {
-        # Routes reuse repository helpers (e.g. get_active_user) per the
-        # repository conventions in AGENTS.md, so gateway.repositories stays
-        # allowed here.
+        # Allowed only for the routes still in the old shape, which import
+        # repository helpers such as get_active_user. A route in the target
+        # shape calls its domain's service and imports no repository.
         "allowed": [
             "gateway.api",
             "gateway.services",

@@ -223,20 +223,11 @@ These rules are enforced mechanically, not only in review. The boundary check (`
 
 Otari's backend is a modular monolith: one process and one deploy, with the code cut into modules by domain (Simon Brown, "Package by component and architecturally-aligned testing", 2016, republished as "The Missing Chapter" in Robert C. Martin, *Clean Architecture*, 2017; Brown, "Modular Monoliths", GOTO Berlin 2018; <https://simonbrown.je/modular-monolith/>). Otari differs from Brown in one way: he packages by component first, and Otari keeps the layers as the top-level folders under `src/gateway/` and packages by domain inside the service and repository layers. A domain is held together across layers by its name and by the import rules below.
 
-| Layer | A domain's code |
-|---|---|
-| Routes | `api/routes/<domain>.py` |
-| Schemas | `schemas/<domain>.py` |
-| Services | `services/<domain>/`, a package whose root exports the domain's one service |
-| Repositories | `repositories/<domain>/`, a package |
-| Exceptions | `exceptions/<domain>_exceptions.py` |
-| Models | `models/<domain>.py` |
-
-Models, schemas and exceptions stay one module per domain, because they hold no hidden implementation. [docs/domains.md](docs/domains.md) assigns every backend module to its domain and gives the steps for moving one. The [backend standards](.github/skills/backend-standards/SKILL.md#layering) give the rules for writing code in each layer, including how a service is built and who commits.
+Services and repositories are one package per domain inside their layer, and a service package's root exports the domain's one service. Routes, schemas, exceptions and models are one module per domain, because they hold no hidden implementation. [docs/domains.md](docs/domains.md#the-target-shape) gives the path and job of each layer, assigns every backend module to its domain, and gives the steps for moving one. The [backend standards](.github/skills/backend-standards/SKILL.md#layering) give the rules for writing code in each layer, including how a service is built and who commits.
 
 **Layer and import rules.**
 
-1. Nothing under `services/` imports `sqlalchemy`, so a service can neither hold a session nor build a query.
+1. Nothing under `services/` imports `sqlalchemy`.
 2. Nothing under `api/routes/` imports `sqlalchemy`.
 3. Only the Unit of Work calls `commit()` or `rollback()`. The Unit of Work is planned; the [backend standards](.github/skills/backend-standards/SKILL.md#who-commits) describe it.
 4. Only a domain's own service package and the builders in `api/deps.py` import `repositories.<domain>`.

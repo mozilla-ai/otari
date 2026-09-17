@@ -10,7 +10,9 @@ The backend is a modular monolith. The layers are the top-level folders under
 
 ## Old shape and new shape
 
-Most existing modules are still in the old shape. Review new and moved code
+Most existing modules are still in the old shape.
+A service or route that handles a database failure catches `DATABASE_ERRORS`
+from `gateway.core.database` rather than importing `sqlalchemy`. Review new and moved code
 against the rules below, and do not accept "the module next to it does the
 same" as a reason.
 
@@ -70,10 +72,15 @@ only gate for them.
 
 ## Errors
 
-A domain error carries its own `status_code` and subclasses the family that
-one registered handler renders (`TenancyError`). Flag a route that catches a
-domain error to turn it into an `HTTPException`, and a new error class with no
-status.
+A domain error carries its own `status_code`, and one registered handler
+renders its family. Today only tenancy errors have such a family:
+`TenancyError`, rendered by `_tenancy_error_handler` in `gateway.main`.
+
+- Flag a route that catches a tenancy error to turn it into an
+  `HTTPException`.
+- Flag an error class outside tenancy that subclasses `TenancyError`. Its
+  family base is not decided, and the tenancy handler would change its
+  response contract.
 
 ## Module size
 

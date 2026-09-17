@@ -63,55 +63,41 @@ cannot attach to more than one table, so a shared mixin passes `sa_type` plus
 ## Layering
 
 The backend is a modular monolith. [ARCHITECTURE.md](../../../ARCHITECTURE.md#the-modular-monolith)
-names the shape and gives the layer and import rules, and
-[docs/domains.md](../../../docs/domains.md) assigns every module to its domain and gives the steps
-for moving one domain into the shape. These are the rules for writing code in each layer.
+names the shape and gives the layer and import rules.
+[docs/domains.md](../../../docs/domains.md#the-target-shape) gives what each layer holds, how a
+domain fits together and the domain test, assigns every module to its domain, and gives the steps
+for moving one domain into the shape. This section adds the house style for code in those layers.
 
-**New and moved code follows these rules. Most existing code does not, so never copy the module
-beside yours.** `QUERY_BASELINE` and `SESSION_PARAMETER_BASELINE` in
+**New and moved code follows the target shape. Most existing code does not, so never copy the
+module beside yours.** `QUERY_BASELINE` and `SESSION_PARAMETER_BASELINE` in
 `scripts/check_architecture.py` name the code still in the old shape. A baseline only shrinks:
 remove a name when you move its code, and never add one.
 
-- **Routes** (`api/routes/<domain>.py`) parse the request, call one service method, and return a
-  schema. A route holds no business rule, builds no query, and defines no Pydantic model. Use
-  `fastapi.status` constants.
-- **Schemas** (`schemas/<domain>.py`) hold the domain's Pydantic request and response models,
-  and nothing else.
-- **Services** (`services/<domain>/`) hold the use cases: business rules and orchestration. A
-  service imports no `sqlalchemy`, so it builds no query and holds no session, and it touches no
-  HTTP.
-- **Repositories** (`repositories/<domain>/`, modules ending in `_repository.py`) run every
-  query, over `BaseRepository`. A repository write flushes and never commits, and a repository
-  holds no business rule. Only the domain's own service package and the builders in
-  `api/deps.py` import it.
-- **Exceptions** (`exceptions/<domain>_exceptions.py`) hold the domain's error classes. Each
-  class carries its own `status_code`, and one registered handler renders the family as
-  FastAPI's `{"detail": ...}` shape, so a route needs no `try`/`except`. A 5xx member has its
-  message logged and a generic detail returned. The family's base is `TenancyError`
-  (`services/tenancy/errors.py`), rendered by `_tenancy_error_handler` in `gateway.main`.
-- **Models** (`models/<domain>.py`) hold ORM tables, and no logic.
+- **Routes** return typed schemas, not raw dicts, and use `fastapi.status` constants.
+- **Services** never import `sqlalchemy`. A service that handles a database failure catches
+  `DATABASE_ERRORS` from `core/database.py`, which also covers the bare `TimeoutError` a
+  connect timeout raises.
+- **Repositories** inherit `BaseRepository`, flush and never commit. A repository that turns a
+  specific database error, such as `IntegrityError`, into a domain error is the module that
+  imports it.
+- **Exceptions.** Each error class carries its own `status_code`, and one registered handler
+  renders its family as FastAPI's `{"detail": ...}` shape, so a route needs no `try`/`except`.
+  A 5xx member has its message logged and a generic detail returned. Today only tenancy errors
+  have such a family: `TenancyError` (`services/tenancy/errors.py`), rendered by
+  `_tenancy_error_handler` in `gateway.main`. Where the family base for other domains lives is
+  not decided. Until it is, an error class outside tenancy does not subclass `TenancyError`,
+  and keeps its current response contract.
 
-Divider comments that cut a module into sections mean the module is more than one module. Split
-it along them.
-
-Catch specific exceptions (`ValueError`, `SQLAlchemyError`), not a broad `except Exception`.
+Catch specific exceptions, not a broad `except Exception`.
 
 ### How a service is built
 
-A domain's service is its Service Layer: the one place its use cases run.
+A domain's service is its Service Layer, and [docs/domains.md](../../../docs/domains.md#the-target-shape)
+gives its shape: one service per domain with a small public API, built by constructor injection,
+from a builder in `api/deps.py`. Two rules add to it:
 
-- **One service per domain, with a small public API.** Each public method is one use case. The
-  implementation sits in the package's private modules, whose names start with `_`, so the
-  service is a deep module. The package's `__init__.py` exports the service and the types its
-  public methods use, and nothing else. Code outside the domain imports only that package root.
-- **The domain test.** A domain that cannot offer a small public API is more than one domain.
-  No check can tell whether an API is small, so review carries this rule.
-- **Constructor injection.** The service receives its own domain's repositories, the Unit of
-  Work, config, ports, and the services of other domains it needs. It never receives the
-  session or another domain's repository, so it cannot run a query.
-- **One builder.** A builder in `api/deps.py` builds the service for a request. A worker calls
-  the same builder with a Unit of Work it creates from its own session. A hybrid gateway has no
-  local database, so a service that needs one is not built there.
+- **Hybrid mode.** A hybrid gateway has no local database, so a service that needs one is not
+  built there.
 - **Moving old code.** A module-level function that takes a session becomes a method of its
   domain's service, or a repository method when all it does is run a query. A helper that
   needs no database stays a plain function.

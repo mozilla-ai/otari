@@ -34,10 +34,11 @@ How a domain fits together:
   `async with` block that commits when it ends and rolls back on an error. Only
   a service opens a block. **Planned:** the type lives in
   `core/unit_of_work.py`.
-- **Builders** live in `api/deps.py`. A worker calls the same builder with a
-  Unit of Work it creates from its own session.
-- **Imports.** Code outside a domain imports only `gateway.services.<domain>`,
-  and domain services do not import each other in a cycle.
+- **Builders** live in `api/deps.py`. A worker job calls the same builder with a
+  Unit of Work over its own session. Nothing under `services/` may import
+  `api/`, so the code that starts a worker passes the builder in.
+- **Imports** follow the
+  [layer and import rules](../ARCHITECTURE.md#the-modular-monolith).
 - **Divider comments** that cut a module into sections mean the module splits
   along them.
 - **The domain test.** A domain that cannot offer a small public API is more
