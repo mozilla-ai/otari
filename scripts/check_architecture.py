@@ -24,8 +24,9 @@ Enforces:
     repositories and a Unit of Work, never a session. Functions that still
     take one are named on a baseline, and the baseline only shrinks.
 13. Domain packages: services/ and repositories/ gain no top-level module, so
-    new code goes in its domain's package. The flat modules that exist are
-    named on a baseline, and the baseline only shrinks.
+    new code goes in its domain's package, and every directory of modules in
+    either layer has an __init__.py. The flat modules that exist are named on
+    a baseline, and the baseline only shrinks.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -818,7 +819,7 @@ FLAT_MODULE_BASELINE = (
 
 
 def check_flat_modules(src_root: Path) -> list[str]:
-    """Check that the domain layers hold no top-level module off the baseline, and no package without an __init__.py."""
+    """Check that the domain layers hold no new top-level module and no directory of modules without an __init__.py."""
     violations: list[str] = []
     for layer in DOMAIN_PACKAGE_LAYERS:
         layer_root = src_root / layer
@@ -826,13 +827,19 @@ def check_flat_modules(src_root: Path) -> list[str]:
             continue
         for entry in sorted(layer_root.iterdir()):
             relative_path = entry.relative_to(src_root).as_posix()
-            if entry.is_file() and entry.suffix == ".py" and entry.name != "__init__.py":
-                if relative_path not in FLAT_MODULE_BASELINE:
-                    violations.append(
-                        f"{relative_path} is a new top-level module; put it in its domain's package under {layer}/"
-                    )
-            elif entry.is_dir() and not (entry / "__init__.py").is_file() and any(entry.rglob("*.py")):
-                violations.append(f"{relative_path} has no __init__.py; a domain package needs one")
+            is_module = entry.is_file() and entry.suffix == ".py" and entry.name != "__init__.py"
+            if is_module and relative_path not in FLAT_MODULE_BASELINE:
+                violations.append(
+                    f"{relative_path} is a new top-level module; put it in its domain's package under {layer}/"
+                )
+        directories = sorted(
+            path for path in layer_root.rglob("*") if path.is_dir() and "__pycache__" not in path.parts
+        )
+        violations.extend(
+            f"{directory.relative_to(src_root).as_posix()} has no __init__.py; a domain package needs one"
+            for directory in directories
+            if not (directory / "__init__.py").is_file() and any(directory.rglob("*.py"))
+        )
     violations.extend(
         f"{relative_path} is on the flat module baseline but no longer exists; remove it from the baseline"
         for relative_path in FLAT_MODULE_BASELINE

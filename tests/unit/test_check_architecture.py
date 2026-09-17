@@ -614,6 +614,7 @@ def test_a_domain_package_in_a_domain_layer_is_clean(
     _write(tmp_path, f"gateway/{layer}/__init__.py", "")
     _write(tmp_path, f"gateway/{layer}/things/__init__.py", "")
     _write(tmp_path, f"gateway/{layer}/things/_store.py", "")
+    _write(tmp_path, f"gateway/{layer}/things/nested/__init__.py", "")
     _write(tmp_path, f"gateway/{layer}/things/nested/deep.py", "")
     assert check.check_flat_modules(tmp_path) == []
 
@@ -624,6 +625,19 @@ def test_a_directory_of_modules_without_an_init_is_flagged(tmp_path: Path, monke
     _write(tmp_path, "gateway/services/cache/readme.txt", "")
     assert check.check_flat_modules(tmp_path) == [
         "gateway/services/things has no __init__.py; a domain package needs one"
+    ]
+
+
+@pytest.mark.parametrize("layer", ["services", "repositories"])
+def test_a_nested_directory_of_modules_without_an_init_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layer: str
+) -> None:
+    _use_empty_flat_module_baseline(monkeypatch)
+    _write(tmp_path, f"gateway/{layer}/things/__init__.py", "")
+    _write(tmp_path, f"gateway/{layer}/things/handlers/task.py", "")
+    _write(tmp_path, f"gateway/{layer}/things/assets/readme.txt", "")
+    assert check.check_flat_modules(tmp_path) == [
+        f"gateway/{layer}/things/handlers has no __init__.py; a domain package needs one"
     ]
 
 
