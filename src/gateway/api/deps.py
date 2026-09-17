@@ -564,6 +564,8 @@ async def get_db_if_needed(
 def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork:
     """Return the request's Unit of Work over its session.
 
+    Gotcha: the rest of the request writes to this same session.
+    A block's commit also stores what that code staged outside a block, and its rollback discards it.
     Standalone and hosted only: a hybrid gateway has no local database, so it has no Unit of Work.
     """
     return UnitOfWork(db)

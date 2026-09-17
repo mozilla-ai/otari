@@ -31,8 +31,10 @@ class UnitOfWork:
     A block commits when it ends, and rolls back and re-raises when it ends on an error.
     Blocks nest: an inner block joins the outer one, and only the outermost block commits,
     so a step that writes to two domains is atomic.
-    A step in which any inner block failed is rolled back as a whole,
+    A step in which an inner block failed is rolled back as a whole,
     even when the code around that block caught the error.
+    Its outermost block then raises ``UnitOfWorkRolledBackError`` from the first such failure.
+    A Unit of Work belongs to one task, because blocks that concurrent tasks open on it would commit each other's steps.
 
     NOTE: only a service should open a block.
     Repositories flush and never commit, and routes never open a block.
