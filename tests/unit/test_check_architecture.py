@@ -366,3 +366,76 @@ def test_entry_point_discovery_is_forbidden_anywhere_under_gateway(tmp_path: Pat
 def test_every_spelling_of_entry_point_discovery_is_forbidden(tmp_path: Path, source: str, module: str) -> None:
     file_path = _write(tmp_path, "gateway/core/plugins.py", source)
     assert check.check_file(file_path, tmp_path) == [(1, module, _DISCOVERY_MESSAGE)]
+
+
+@pytest.mark.parametrize(
+    "relative_path", ["gateway/api/routes/things.py", "gateway/services/thing_service.py", "gateway/services/sub/x.py"]
+)
+@pytest.mark.parametrize(
+    ("source", "line", "name"),
+    [
+        ("from sqlalchemy import select\n", 1, "select"),
+        ("from sqlmodel import select\n", 1, "select"),
+        ("from sqlalchemy.dialects.postgresql import insert\n", 1, "insert"),
+        ("import sqlalchemy as sa\n\nsa.update\n", 3, "update"),
+        ("import sqlalchemy.sql\n\nsqlalchemy.sql.delete\n", 3, "delete"),
+        ("from sqlalchemy import text\n", 1, "text"),
+    ],
+)
+def test_a_route_or_service_that_builds_a_query_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str, source: str, line: int, name: str
+) -> None:
+    monkeypatch.setattr(check, "QUERY_BASELINE", ())
+    _write(tmp_path, relative_path, source)
+    assert check.check_query_layering(tmp_path) == [
+        f"{relative_path}:{line} builds a query with {name}; a query belongs in a repository"
+    ]
+
+
+def test_a_repository_may_build_a_query(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "QUERY_BASELINE", ())
+    _write(tmp_path, "gateway/repositories/thing_repository.py", "from sqlalchemy import select\n")
+    assert check.check_query_layering(tmp_path) == []
+
+
+def test_a_service_may_use_query_types_and_column_helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "QUERY_BASELINE", ())
+    _write(
+        tmp_path,
+        "gateway/services/thing_service.py",
+        "from sqlalchemy import Select, func\n"
+        "from sqlalchemy.ext.asyncio import AsyncSession\n"
+        "from sqlmodel import col\n",
+    )
+    assert check.check_query_layering(tmp_path) == []
+
+
+def test_a_module_on_the_query_baseline_may_build_a_query(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "QUERY_BASELINE", ("gateway/services/thing_service.py",))
+    _write(tmp_path, "gateway/services/thing_service.py", "from sqlalchemy import select\n")
+    assert check.check_query_layering(tmp_path) == []
+
+
+@pytest.mark.parametrize("source", ["from gateway.repositories.thing_repository import find\n", None])
+def test_a_baseline_entry_that_builds_no_query_must_leave_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str | None
+) -> None:
+    # The baseline only shrinks: a module that stops querying, or no longer exists, fails until removed.
+    monkeypatch.setattr(check, "QUERY_BASELINE", ("gateway/services/thing_service.py",))
+    _write(tmp_path, "gateway/services/other_service.py", "")
+    if source is not None:
+        _write(tmp_path, "gateway/services/thing_service.py", source)
+    assert check.check_query_layering(tmp_path) == [
+        "gateway/services/thing_service.py is on the query baseline but builds no query; remove it from the baseline"
+    ]
+
+
+def test_main_fails_on_a_service_that_builds_a_query(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path, "src/gateway/services/thing_service.py", "from sqlalchemy import select\n")
+    _write(tmp_path, "tests/__init__.py", "")
+    monkeypatch.setattr(check, "QUERY_BASELINE", ())
+    monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
+    monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
+    monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
+    assert check.main() == 1

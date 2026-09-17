@@ -16,6 +16,9 @@ Enforces:
    discovered.
 10. Top-level packages: src/ holds only the packages on an explicit list, so a
     feature cannot sit beside gateway/, outside every rule above.
+11. Query layering: a route or a service builds no query, because a query
+    belongs in a repository. Modules that still do are named on a baseline,
+    and the baseline only shrinks.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -266,6 +269,126 @@ def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
     return violations
 
 
+QUERY_SCOPES = ("gateway/api/routes", "gateway/services")
+QUERY_LIBRARIES = ("sqlalchemy", "sqlmodel")
+QUERY_PRIMITIVES = ("select", "insert", "update", "delete", "text")
+# Modules that built a query when the rule landed. An entry that stops building
+# one fails the check until it is removed, so the list only shrinks.
+QUERY_BASELINE = (
+    "gateway/api/routes/_helpers.py",
+    "gateway/api/routes/agent_telemetry.py",
+    "gateway/api/routes/aliases.py",
+    "gateway/api/routes/budgets.py",
+    "gateway/api/routes/catalog.py",
+    "gateway/api/routes/files.py",
+    "gateway/api/routes/health.py",
+    "gateway/api/routes/keys.py",
+    "gateway/api/routes/models.py",
+    "gateway/api/routes/organization_keys.py",
+    "gateway/api/routes/organization_routing.py",
+    "gateway/api/routes/organization_usage.py",
+    "gateway/api/routes/pricing.py",
+    "gateway/api/routes/routing.py",
+    "gateway/api/routes/routing_memory.py",
+    "gateway/api/routes/scoped_budgets.py",
+    "gateway/api/routes/usage.py",
+    "gateway/api/routes/users.py",
+    "gateway/services/alias_service.py",
+    "gateway/services/batch_service.py",
+    "gateway/services/bootstrap_service.py",
+    "gateway/services/budget_reservation_ledger.py",
+    "gateway/services/budget_retiming.py",
+    "gateway/services/budget_service.py",
+    "gateway/services/dashboard_session_service.py",
+    "gateway/services/external_usage_service.py",
+    "gateway/services/file_service.py",
+    "gateway/services/maintenance_mode_service.py",
+    "gateway/services/master_key_service.py",
+    "gateway/services/merged_catalog_service.py",
+    "gateway/services/model_access.py",
+    "gateway/services/oauth_service.py",
+    "gateway/services/organization_pricing_service.py",
+    "gateway/services/playground_dispatch.py",
+    "gateway/services/playground_service.py",
+    "gateway/services/policy_store.py",
+    "gateway/services/pricing_init_service.py",
+    "gateway/services/pricing_refresh_service.py",
+    "gateway/services/pricing_service.py",
+    "gateway/services/provider_store_service.py",
+    "gateway/services/routing/knn.py",
+    "gateway/services/runtime_settings_service.py",
+    "gateway/services/scoped_budget_service.py",
+    "gateway/services/search_tool_store_service.py",
+    "gateway/services/tenancy/org_provider_key_service.py",
+    "gateway/services/tenancy/organization_budget_service.py",
+    "gateway/services/tenancy/organization_guardrail_service.py",
+    "gateway/services/tenancy/organization_model_access.py",
+    "gateway/services/tenancy/provisioning_service.py",
+    "gateway/services/tenancy/webauthn_service.py",
+    "gateway/services/tenancy/workspace_activation_service.py",
+    "gateway/services/tenancy/workspace_budget_default_service.py",
+    "gateway/services/tenancy/workspace_mcp_server_service.py",
+    "gateway/services/tenancy/workspace_service.py",
+    "gateway/services/tool_settings_service.py",
+    "gateway/services/usage_admin_service.py",
+    "gateway/services/workspace_scope.py",
+)
+
+
+def _root_name(node: ast.expr) -> str | None:
+    """Return the name an attribute chain starts from, or None when it starts from an expression."""
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _query_primitives(tree: ast.Module) -> list[tuple[int, str]]:
+    """Return the line and name of each query-building primitive a module imports or references."""
+    # An unaliased `import sqlalchemy.sql` binds the name `sqlalchemy`.
+    library_names = {
+        alias.asname or alias.name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name.split(".")[0] in QUERY_LIBRARIES
+    }
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module is not None:
+            if node.module.split(".")[0] in QUERY_LIBRARIES:
+                found.extend((node.lineno, alias.name) for alias in node.names if alias.name in QUERY_PRIMITIVES)
+        elif isinstance(node, ast.Attribute) and node.attr in QUERY_PRIMITIVES and _root_name(node) in library_names:
+            found.append((node.lineno, node.attr))
+    return sorted(found)
+
+
+def check_query_layering(src_root: Path) -> list[str]:
+    """Check that no route or service off the baseline builds a query, and that every baseline entry still does."""
+    violations: list[str] = []
+    querying: set[str] = set()
+    for scope in QUERY_SCOPES:
+        for py_file in sorted((src_root / scope).rglob("*.py")):
+            relative_path = py_file.relative_to(src_root).as_posix()
+            try:
+                tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+            except SyntaxError:
+                continue  # check_file already reports an unparseable file.
+            primitives = _query_primitives(tree)
+            if not primitives:
+                continue
+            querying.add(relative_path)
+            if relative_path not in QUERY_BASELINE:
+                violations.extend(
+                    f"{relative_path}:{line} builds a query with {name}; a query belongs in a repository"
+                    for line, name in primitives
+                )
+    violations.extend(
+        f"{relative_path} is on the query baseline but builds no query; remove it from the baseline"
+        for relative_path in sorted(set(QUERY_BASELINE) - querying)
+    )
+    return violations
+
+
 # Service modules are purpose-named (guardrails.py, url_safety.py, ...), so
 # there is no *_service.py naming rule to enforce.
 def check_naming_conventions(src_root: Path) -> list[str]:
@@ -324,6 +447,7 @@ def main() -> int:
 
     naming_violations = check_naming_conventions(SRC_ROOT)
     package_violations = check_top_level_packages(SRC_ROOT)
+    query_violations = check_query_layering(SRC_ROOT)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -344,7 +468,13 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal top-level package violations: {len(package_violations)}")
 
-    if import_violations or naming_violations or package_violations:
+    if query_violations:
+        print("\n❌ Query layering violations:\n")
+        for violation in query_violations:
+            print(f"  {violation}")
+        print(f"\nTotal query layering violations: {len(query_violations)}")
+
+    if import_violations or naming_violations or package_violations or query_violations:
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1
 
