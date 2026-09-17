@@ -16,6 +16,9 @@ name: Otari Release (open PR)
 # cannot be used instead: a branch it pushes and a PR it opens do not trigger
 # the PR's CI, so the release PR could not satisfy required status checks. An
 # App installation token is a distinct identity and does. See RELEASE.md.
+#
+# The App token is minted in the last step rather than the first, so that it
+# does not exist while the job is running git-cliff.
 
 on:
   workflow_dispatch:
@@ -25,9 +28,11 @@ on:
         required: true
         type: string
 
+# Only git-cliff uses GITHUB_TOKEN, and only to read PR metadata. Every write
+# is made with the App token, which is minted in the last step.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 jobs:
   open-release-pr:
@@ -36,20 +41,16 @@ jobs:
     env:
       VERSION: ${{ github.event.inputs.version }}
     steps:
-      - name: Generate App token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           # git-cliff walks tag history to render the changelog, so it needs
           # the full history, not the default shallow clone.
           fetch-depth: 0
-          token: ${{ steps.app-token.outputs.token }}
+          # Checked out read-only and with no credential left in .git/config:
+          # the steps below run git-cliff, which is resolved from PyPI at run
+          # time, and it must not be able to read a token that can write here.
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -128,6 +129,13 @@ jobs:
             echo "- [x] No AI was used."
           } > /tmp/pr-body.md
 
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - name: Commit, push, open PR
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -143,7 +151,8 @@ jobs:
           git checkout -b "$BRANCH"
           git add CHANGELOG.md
           git commit -m "chore: release v$VERSION"
-          git push -u origin "$BRANCH"
+          git push "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" \
+            "HEAD:refs/heads/$BRANCH"
           gh label create release \
             --color "0e8a16" \
             --description "Release PRs: tagged and published on merge" \

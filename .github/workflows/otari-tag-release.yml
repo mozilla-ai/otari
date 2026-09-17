@@ -10,14 +10,20 @@ name: Otari Release (tag + publish)
 # RELEASE_APP_PRIVATE_KEY) so that `gh release create` triggers
 # otari-docker.yml; a Release created with the default GITHUB_TOKEN would not
 # start downstream workflows. See RELEASE.md.
+#
+# The App token is minted in the last step rather than the first, so that it
+# does not exist while the job is running git-cliff.
 
 on:
   pull_request:
     types: [closed]
     branches: [main]
 
+# Only git-cliff uses GITHUB_TOKEN, and only to read PR metadata. The tag and
+# the Release are created with the App token, minted in the last step.
 permissions:
-  contents: write
+  contents: read
+  pull-requests: read
 
 jobs:
   tag-and-release:
@@ -27,18 +33,14 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'release')
     runs-on: ubuntu-latest
     steps:
-      - name: Generate App token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ steps.app-token.outputs.token }}
+          # Nothing here pushes over git: the tag is created by the Release
+          # below. So this needs no write credential, and leaves none behind
+          # for the git-cliff step to find.
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -77,6 +79,13 @@ jobs:
             exit 1
           fi
           cat /tmp/notes.md
+
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Create tag and publish GitHub Release
         env:
