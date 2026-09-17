@@ -1912,6 +1912,178 @@
     {
       "item": [
         {
+          "name": "List Stored Guardrails",
+          "request": {
+            "description": "List every stored guardrail definition.\n\nCredentials are never returned. Each row reports which credentials it holds\nby name and whether they can still be read with the current\n``OTARI_SECRET_KEY``; a row that cannot be read is listed rather than\nhidden, because the operator is the person who can fix it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "guardrail-credentials"
+              ],
+              "raw": "{{baseUrl}}/api/v1/guardrail-credentials"
+            }
+          }
+        },
+        {
+          "name": "Create Stored Guardrail",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"create_kwargs\": {\n    \"api_key\": \"lak-...\",\n    \"endpoint\": \"https://api.lakera.ai/v2/guard\"\n  },\n  \"guardrail_name\": \"lakera_guard\",\n  \"name\": \"prompt-injection\"\n}"
+            },
+            "description": "Store a guardrail definition.\n\nThe definition is held to what the catalog says its guardrail accepts: an\nunknown guardrail, an argument it does not take, a live object that cannot\nbe written down, and a required argument nothing else supplies are each a\n400 naming the rule. Storing a credential requires ``OTARI_SECRET_KEY``.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "guardrail-credentials"
+              ],
+              "raw": "{{baseUrl}}/api/v1/guardrail-credentials"
+            }
+          }
+        },
+        {
+          "name": "Reencrypt Stored Guardrail Credentials",
+          "request": {
+            "description": "Re-encrypt stored guardrail credentials with the primary OTARI_SECRET_KEY.\n\nThe guardrail half of the key-rotation procedure; run it alongside\n``POST /api/v1/provider-credentials/reencrypt`` and\n``POST /api/v1/search-tools/reencrypt``. Maps that cannot be decrypted are\nleft untouched and must be recovered by re-entering that guardrail's\ncredentials.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "guardrail-credentials",
+                "reencrypt"
+              ],
+              "raw": "{{baseUrl}}/api/v1/guardrail-credentials/reencrypt"
+            }
+          }
+        },
+        {
+          "name": "Get Stored Guardrail",
+          "request": {
+            "description": "Read one stored guardrail definition. Credentials are returned by name only.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "guardrail-credentials",
+                ":name"
+              ],
+              "raw": "{{baseUrl}}/api/v1/guardrail-credentials/:name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Stored Guardrail",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"create_kwargs\": {\n    \"api_key\": \"***\",\n    \"endpoint\": \"https://api.lakera.ai/v2/guard\"\n  },\n  \"enabled\": false\n}"
+            },
+            "description": "Update a stored guardrail definition. Omitted fields are left as they are.\n\nThe row is locked ``FOR UPDATE`` so the ``expected_updated_at`` check and\nthe write it guards are atomic. The definition as it will be *after* the\nupdate is validated, so a change that would leave it unbuildable (clearing a\nrequired argument, or moving to a guardrail that does not take an argument\nthe row carries) is refused rather than stored.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "guardrail-credentials",
+                ":name"
+              ],
+              "raw": "{{baseUrl}}/api/v1/guardrail-credentials/:name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Stored Guardrail",
+          "request": {
+            "description": "Delete a stored guardrail definition, credentials and all.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "guardrail-credentials",
+                ":name"
+              ],
+              "raw": "{{baseUrl}}/api/v1/guardrail-credentials/:name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "guardrail-credentials"
+    },
+    {
+      "item": [
+        {
           "name": "Health Check",
           "request": {
             "description": "General health check endpoint.\n\nReturns basic health status. For infrastructure monitoring,\nuse /health/readiness or /health/liveness instead.",

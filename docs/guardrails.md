@@ -154,6 +154,76 @@ The catalog reaches no service, so unlike the profiles read it has no
 unavailable state. It is on the operator gate, because it is the picker behind a
 form that stores a vendor credential for the whole deployment.
 
+### Storing a guardrail definition
+
+`/api/v1/guardrail-credentials` is where a choice from that catalog is saved.
+A row names the guardrail, carries the arguments that build and call it, and is
+itself named by the `profile` a caller would send. Operator-gated, and never
+mounted in hybrid mode, like the provider and search-tool stores it is modeled
+on.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/guardrail-credentials \
+  -H "Authorization: Bearer $OTARI_MASTER_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "name": "prompt-injection",
+        "guardrail_name": "lakera_guard",
+        "create_kwargs": {"api_key": "lak-...", "endpoint": "https://api.lakera.ai/v2/guard"}
+      }'
+```
+
+Send the constructor arguments as one `create_kwargs` map, secret and plain
+together. Otari splits them by the catalog's own `secret` flag: the plain half
+is stored as it is, and every secret goes into one map encrypted with
+`OTARI_SECRET_KEY`. Guardrails carry between zero and three credentials each, so
+the map is what lets one shape serve all of them.
+
+A response never carries a credential. It reports which ones the row holds, by
+name and masked:
+
+```json
+{
+  "name": "prompt-injection",
+  "guardrail_name": "lakera_guard",
+  "create_kwargs": {"endpoint": "https://api.lakera.ai/v2/guard"},
+  "create_secrets": {"api_key": "***"},
+  "enabled": true,
+  "decryptable": true
+}
+```
+
+`PATCH /api/v1/guardrail-credentials/{name}` leaves out what you leave out. A
+sent `create_kwargs` replaces the whole map, and `***` in it keeps the stored
+credential of that name, so an editor that loads a row, changes the endpoint and
+submits the whole object does not overwrite the key it was never shown. A new
+value rotates that credential, and one you leave out is cleared.
+
+A definition is held to what the catalog says its guardrail accepts, so four
+things are refused with a 400 rather than stored: a guardrail Otari cannot run,
+an argument the guardrail does not take, a required argument that nothing else
+supplies, and an argument that is a live Python object. The last is the
+`storable: false` flag in the catalog. Bedrock's `boto3_session` and watsonx's
+`api_client` are already-built clients holding a connection and refreshed
+tokens, so no row can hold one; configure those two with
+`aws_access_key_id` and `aws_secret_access_key`, and with `api_key` and `url`,
+instead.
+
+A required argument that names an environment variable may be left out, because
+the deployment can supply it that way. Otari does not check whether the variable
+is set: that belongs to the process that builds the guardrail, not to the one
+storing the row.
+
+`decryptable: false` means the credentials were written under an
+`OTARI_SECRET_KEY` this deployment no longer has. The row is listed rather than
+hidden so an operator can repair it, either by restoring the old key or by
+re-entering the credentials. `POST /api/v1/guardrail-credentials/reencrypt` is
+the guardrail half of a key rotation; run it beside the provider and search-tool
+endpoints of the same name.
+
+Nothing on the request path reads these rows yet, so storing a definition does
+not change how a request behaves.
+
 ### How the layers compose
 
 Three layers can name a guardrail: the caller's request, the caller's

@@ -64,6 +64,7 @@ _CREDENTIAL_COLUMNS = {
 _TOKEN_INDEX = "ix_user_email_verification_token"
 
 _ALIAS_WIDEN_REVISION = "c1e4a7b9d3f6"
+_GUARDRAIL_CREDENTIALS_REVISION = "d3f5a7c9e1b4"
 _SURVIVALS_REVISION = "d2f5b8c0e4a7"
 _SURVIVAL_TABLES = ("routing_memory", "router_preferences", "file_objects")
 
@@ -958,3 +959,57 @@ def test_the_migrated_survival_tables_match_their_models(sqlite_at_head: tuple[C
         declared = SQLModel.metadata.tables[table]
         migrated = {column["name"] for column in inspect(engine).get_columns(table)}
         assert migrated == set(declared.columns.keys()), table
+
+
+def test_the_guardrail_credential_table_matches_its_model(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Hand-written revision, so nothing else would notice the two drifting apart."""
+    _, engine = sqlite_at_head
+
+    declared = SQLModel.metadata.tables["guardrail_credentials"]
+    migrated = {column["name"] for column in inspect(engine).get_columns("guardrail_credentials")}
+    assert migrated == set(declared.columns.keys())
+
+
+def test_a_guardrail_credential_round_trips_on_sqlite(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """SQLite carries the JSON columns and the boolean default.
+
+    The OSS smoke gate migrates SQLite and the integration suite migrates only
+    PostgreSQL, so this is the one place the revision is held to both engines.
+    ``enabled`` is asserted through an insert that omits it, because a server
+    default is what the column needs to exist for rows written before it did.
+    """
+    _, engine = sqlite_at_head
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO guardrail_credentials (name, guardrail_name, create_kwargs, validate_kwargs) "
+                "VALUES (:name, :guardrail_name, :create_kwargs, :validate_kwargs)"
+            ),
+            {
+                "name": "prompt-injection",
+                "guardrail_name": "lakera_guard",
+                "create_kwargs": '{"endpoint": "https://api.lakera.ai/v2/guard"}',
+                "validate_kwargs": "{}",
+            },
+        )
+
+    with engine.connect() as connection:
+        row = connection.execute(
+            text("SELECT guardrail_name, encrypted_create_secrets, enabled FROM guardrail_credentials")
+        ).one()
+
+    assert row.guardrail_name == "lakera_guard"
+    assert row.encrypted_create_secrets is None
+    assert bool(row.enabled) is True
+
+
+def test_downgrading_removes_the_guardrail_credential_table(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """And upgrading brings it back, so the revision is genuinely reversible."""
+    config, engine = sqlite_at_head
+
+    command.downgrade(config, _parent_of(_GUARDRAIL_CREDENTIALS_REVISION))
+    assert "guardrail_credentials" not in inspect(engine).get_table_names()
+
+    command.upgrade(config, "head")
+    assert "guardrail_credentials" in inspect(engine).get_table_names()

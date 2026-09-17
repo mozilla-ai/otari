@@ -96,6 +96,11 @@ def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest
             f"{API_ROOT}/settings/mail",
             f"{API_ROOT}/aliases",
             f"{API_ROOT}/providers",
+            # A stored guardrail definition holds a vendor credential for the
+            # whole deployment, and a hybrid gateway has no local table to keep
+            # one in. Its own router, so re-mounting it would not show up in any
+            # other entry here.
+            f"{API_ROOT}/guardrail-credentials",
             f"{API_ROOT}/pricing",
             f"{API_ROOT}/organizations/me",
             f"{API_ROOT}/workspaces",

@@ -12,20 +12,22 @@ operator-controlled guardrails service (``otari-anyguardrails-container``,
 which exposes ``POST /validate``), and strips the field before forwarding the
 request upstream. Omit the field entirely → no guardrail runs.
 
-Also holds the organization guardrail tables.
+Also holds the stored guardrail definitions and the organization guardrail tables.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-from sqlalchemy import JSON, ForeignKey, Text, UniqueConstraint, Uuid
+from sqlalchemy import JSON, DateTime, ForeignKey, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
+from gateway.models.secret_fields import REDACTED_VALUE, redact_secret_like_values
 
 GuardrailDirection = Literal["input", "output"]
 
@@ -79,6 +81,65 @@ class GuardrailConfig(BaseModel):
     validate_kwargs: dict[str, Any] = Field(default_factory=dict)
     """Extra kwargs forwarded to the guardrails service ``/validate`` call,
     merged on top of the profile's own ``validate_kwargs`` server-side."""
+
+
+class GuardrailCredential(Base):
+    """A guardrail defined in Otari rather than in a sidecar's YAML.
+
+    ``name`` is the ``profile`` a caller sends, and ``guardrail_name`` is the
+    ``any_guardrail`` class the catalog offered. The arguments that build it are
+    split across two columns rather than typed as their own, because the
+    guardrails a hosted API reaches do not share a secret shape: Bedrock carries
+    three secret constructor arguments, watsonx two, most one, and two carry
+    none. A column per credential would have to chase every guardrail upstream
+    adds. So every secret goes into one ``{name: value}`` map encrypted as a
+    single string, and the split is made by the catalog's own ``secret`` flag
+    (``services/guardrail_credential_service.split_create_kwargs``), which needs
+    no per-guardrail knowledge.
+
+    Nothing on the request path reads this yet. Standalone and hosted only,
+    never the hybrid platform path.
+    """
+
+    __tablename__ = "guardrail_credentials"
+
+    name: Mapped[str] = mapped_column(primary_key=True)
+    guardrail_name: Mapped[str] = mapped_column()
+    create_kwargs: Mapped[dict[str, Any]] = mapped_column("create_kwargs", JSON, default=dict)
+    encrypted_create_secrets: Mapped[str | None] = mapped_column(Text, default=None)
+    validate_kwargs: Mapped[dict[str, Any]] = mapped_column("validate_kwargs", JSON, default=dict)
+    enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    def to_public_dict(self, *, secret_names: Collection[str] = ()) -> dict[str, Any]:
+        """Serialize for the API. Never includes a secret, only the names of the stored ones.
+
+        ``secret_names`` comes from the caller, because the service is the only
+        layer that may decrypt. Passing none is what a row whose map will not
+        decrypt reports, so an unreadable credential costs the operator the names
+        and not the listing.
+
+        ``validate_kwargs`` is masked by key name the way
+        ``organization_guardrails`` masks its own: a guardrail class can take its
+        vendor key as a per-call argument, so the column held in clear is as much
+        a credential as the encrypted one. That mask reaches top-level keys only,
+        a gap this inherits along with the pattern and #1125 tracks.
+        """
+        return {
+            "name": self.name,
+            "guardrail_name": self.guardrail_name,
+            "create_kwargs": dict(self.create_kwargs or {}),
+            "create_secrets": {name: REDACTED_VALUE for name in sorted(secret_names)},
+            "validate_kwargs": redact_secret_like_values(self.validate_kwargs) or {},
+            "enabled": self.enabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
 
 
 class OrganizationGuardrail(Base):

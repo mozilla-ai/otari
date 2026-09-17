@@ -20,6 +20,7 @@ from gateway.api.routes import (
     chat,
     embeddings,
     files,
+    guardrail_credentials,
     health,
     hooks,
     hosted_mode,
@@ -262,6 +263,10 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig, enabled_featur
     api.include_router(tool_settings.operator_router)
     api.include_router(tool_settings.reader_router)
     api.include_router(search_tools.router)
+    # The write target for the guardrail picker the tool-settings operator
+    # router serves, so it sits beside the other credential stores rather than
+    # with the tenant-scoped organization_guardrails router above.
+    api.include_router(guardrail_credentials.router)
     api.include_router(tools.router)
     # Enabled features, mounted as core routes: no capability gate, because a
     # listed feature is part of this build. Management plane only, after the

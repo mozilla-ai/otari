@@ -398,3 +398,21 @@ def build_builtin_guardrail_catalog() -> BuiltInGuardrailCatalog:
             key=lambda spec: spec.display_name.casefold(),
         )
     )
+
+
+def builtin_guardrail_spec(guardrail_name: str) -> BuiltInGuardrailSpec | None:
+    """One guardrail's row by the name a stored definition selects, or None.
+
+    The lookup the guardrail store validates against, so that what may be
+    written is exactly what the picker offered rather than a second list that
+    would drift from it. ``None`` therefore covers two cases a caller need not
+    tell apart: a name that is no any-guardrail class, and one that is a class
+    this gateway cannot build because it would hold model weights.
+
+    Uncached deliberately. It rebuilds the catalog, which is cheap and does no
+    I/O, and a cache here would outlive a test that swaps the registry under it.
+    """
+    for spec in build_builtin_guardrail_catalog().guardrails:
+        if spec.guardrail_name == guardrail_name:
+            return spec
+    return None

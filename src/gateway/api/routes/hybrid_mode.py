@@ -68,6 +68,12 @@ async def providers_disabled() -> None:
     _raise_disabled()
 
 
+@router.api_route("/guardrail-credentials/{path:path}", methods=_METHODS)
+@router.api_route("/guardrail-credentials", methods=_METHODS)
+async def guardrail_credentials_disabled() -> None:
+    _raise_disabled()
+
+
 @router.api_route("/pricing/{path:path}", methods=_METHODS)
 @router.api_route("/pricing", methods=_METHODS)
 async def pricing_disabled() -> None:

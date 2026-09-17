@@ -54,6 +54,7 @@ _DEPLOYMENT_WIDE_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/models/discoverable"),
     ("GET", f"{API_ROOT}/provider-credentials"),
     ("GET", f"{API_ROOT}/search-tools"),
+    ("GET", f"{API_ROOT}/guardrail-credentials"),
     ("GET", f"{API_ROOT}/settings"),
     ("GET", f"{API_ROOT}/settings/mail"),
     ("GET", f"{API_ROOT}/settings/maintenance-mode"),
