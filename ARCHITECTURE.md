@@ -221,11 +221,26 @@ These are the rules that keep the boundary from eroding. They apply to anyone ad
 
 These rules are enforced mechanically, not only in review. The boundary check (`scripts/check_architecture.py`, run by `make lint` in CI) asserts the layering: ports may import models, exceptions, and core, but not services, the API, or any adapter; services may import ports but not a concrete adapter; only the composition root may import an adapter. This document is the human-readable companion to that check; the two are kept in step so the boundary the doc describes is the boundary CI enforces.
 
+## Where new code goes
+
+Choose the mechanism by what you are adding, not by the extension point you already know.
+
+| You are adding | Home | Mechanism |
+|---|---|---|
+| An optional feature any deployment may run, with its own routes, tables, settings, worker or page | Core | An entry in `src/gateway/features.py`, switched by a startup setting. See [How to add a core feature](#how-to-add-a-core-feature). |
+| An always-on route or service with one implementation, such as a new endpoint in an existing domain | Core | The domain's own modules, with a new router registered in `register_routers` (`src/gateway/api/main.py`). No port and no registry entry. |
+| A second implementation of work the core hands off, such as billing, code execution or an identity policy | A port and its adapters | See [How to add a capability](#how-to-add-a-capability). |
+| An adapter, route or page that only an overlay ships | The overlay | `OTARI_BOOTSTRAP`: bind a port, or contribute a router gated on a capability. Pages register through the dashboard's overlay modules (see [Deployment and entitlements](#deployment-and-entitlements)). |
+| A built-in tool the model calls inside the tool loop | Core | **Planned:** one built-in tool interface that the tool loop dispatches through. Today each built-in tool is wired by hand into the tool loop (`src/gateway/services/mcp_loop.py` and its per-dialect siblings). |
+| Code loaded at runtime from an installed package, a directory or a download | Not supported | None. The boundary check refuses `importlib.metadata`, `importlib_metadata` and `pkg_resources` under `src/gateway/`. |
+
+`OTARI_BOOTSTRAP` is the overlay's hook, and it never loads or switches a core feature. It takes one module and an overlay already holds it, so a feature wired through it either displaces the overlay or makes the overlay register the feature a second time. A capability gates a route on what a deployment is entitled to, not on whether a feature is switched on, so a core feature names none.
+
 ## How to add a capability
 
 A step-by-step recipe for adding a capability without crossing the boundary. The `AuthzPort` seam is the reference template every later capability copies.
 
-1. **Decide whether you need a port at all.** Apply rule 7. If the capability is plain management CRUD with no second implementation on the horizon, skip the ceremony: write a normal service and repository in the core and stop here. Only continue if a second implementation is genuinely on the table, or a hard boundary runs through it.
+1. **Decide whether you need a port at all.** Apply rule 7. If the capability is plain management CRUD with no second implementation on the horizon, skip the ceremony: write a normal service and repository in the core and stop here. An optional feature follows [How to add a core feature](#how-to-add-a-core-feature). Only continue if a second implementation is genuinely on the table, or a hard boundary runs through it.
 2. **Define the port.** Add a domain-named `Protocol` to `src/gateway/ports/`, one module per port. Its methods are `async`. It may depend on models, exceptions, and core only, never on services, the API, or an adapter.
 3. **Route callers through the port.** Services depend on the port, resolved from the container; they never name a concrete adapter.
 4. **Ship a working core adapter.** Add a real lightweight implementation, or an honest Null Object, to `src/gateway/adapters/`. Verify the capability behaves correctly with only this adapter present.
@@ -234,6 +249,19 @@ A step-by-step recipe for adding a capability without crossing the boundary. The
 7. **Verify Otari still stands alone.** It must boot standalone with only the core adapters bound (no overlay bootstrap configured) and pass its smoke suite, and the boundary check must pass. Both are automated: `uv run --frozen --no-dev python scripts/oss_edition_smoke.py` is the smoke suite (run by `.github/workflows/otari-oss-edition.yml` on any pull request that touches the app, the migrations, or dependency resolution), and `make check-architecture` is the boundary check.
 
 Once the seam exists, an overlay adds its own adapter by registering it through these same extension points, with zero edits to Otari's source. Building the seam is core work; using it is overlay work.
+
+## How to add a core feature
+
+A recipe for an optional feature the core ships. [How a port is resolved](#how-a-port-is-resolved) defines a core feature; a capability that needs a port follows [How to add a capability](#how-to-add-a-capability) instead.
+
+1. **Write the feature's modules.** One module per layer, each named for the feature's domain. One of them declares the feature's `CoreFeature` (`src/gateway/core/feature.py`). None of them imports `src/gateway/features.py`: the boundary check refuses a service or a route that imports the registry.
+2. **Add its settings.** A setting goes in its domain's module under `src/gateway/core/settings/`. A domain with no module there adds one, and adds its class to the bases of `GatewayConfig` in `src/gateway/core/config.py`. Every field declares its settings view (`src/gateway/core/settings_view.py`). The feature's switch is one of these settings, and it stays out of `_SPECS` in `src/gateway/services/runtime_settings_service.py`, because `enabled` is asked once when the app is built and a dashboard override would never take effect.
+3. **Add its tables.** A table goes in its domain's model module under `src/gateway/models/`, and a new module joins the import list in `src/gateway/models/__init__.py`. Its migration goes in `alembic/versions/`, chained to the current head. The tables live on core's metadata and core's chain, so switching the feature off leaves its tables and rows in place, and switching it back on changes no schema.
+4. **Declare its metrics** in the module that increments them, on `REGISTRY` from `src/gateway/metrics.py`.
+5. **List it.** Add the feature's `CoreFeature` to `CORE_FEATURES` in `src/gateway/features.py`. The entry gives the feature's name, its `surface` (a `Surface` from `src/gateway/core/surface.py`, or `None` for a feature with no page), its `enabled` check, its routers and an optional worker. Its routers mount beside the management routers and its worker runs under the lifespan, in standalone and hosted mode only; a hybrid gateway runs neither.
+6. **Add its page.** Its nav entry in `web/src/app/nav/registry.ts` names the feature's surface, so wherever the feature is off the dashboard hides the entry and answers its route with a panel rather than a page. A surface whose name is not its route prefix needs an entry in `SURFACE_ROUTE_PREFIXES` (`tests/unit/test_deployment_bootstrap.py`), which checks that every published surface names a mounted route.
+7. **Regenerate the artifacts** a new route owes, as "Generated Artifacts" in [AGENTS.md](AGENTS.md) lists them.
+8. **Verify it switched on and switched off:** `make lint`, the tests, and `uv run --frozen --no-dev python scripts/oss_edition_smoke.py`.
 
 ## Glossary
 
