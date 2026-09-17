@@ -13,7 +13,8 @@ from typing import Self
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.database import create_log_session, create_session
+from gateway.core.database import DATABASE_ERRORS, create_log_session, create_session
+from gateway.log_config import logger
 
 
 class OutsideUnitOfWorkError(RuntimeError):
@@ -72,7 +73,7 @@ class UnitOfWork:
 
         failed, self._failed = self._failed, False
         if failed:
-            await self._session.rollback()
+            await self._roll_back()
             if exc is None:
                 msg = "The step was rolled back because a step inside it failed"
                 raise UnitOfWorkRolledBackError(msg)
@@ -81,8 +82,15 @@ class UnitOfWork:
         try:
             await self._session.commit()
         except BaseException:
-            await self._session.rollback()
+            await self._roll_back()
             raise
+
+    async def _roll_back(self) -> None:
+        """Roll back, leaving the error that ended the step as the one the caller sees."""
+        try:
+            await self._session.rollback()
+        except DATABASE_ERRORS:
+            logger.warning("Could not roll back a unit of work", exc_info=True)
 
 
 @asynccontextmanager

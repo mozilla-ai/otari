@@ -101,6 +101,57 @@ async def test_a_failed_commit_rolls_back_and_reraises(notes_database: None, mon
         rollback.assert_awaited_once()
 
 
+def _fail_rollback(monkeypatch: pytest.MonkeyPatch, session: AsyncSession) -> None:
+    failure = OperationalError("ROLLBACK", None, Exception("connection lost"))
+    monkeypatch.setattr(session, "rollback", AsyncMock(side_effect=failure))
+
+
+@pytest.mark.asyncio
+async def test_a_failed_rollback_keeps_the_error_that_ended_the_block(
+    notes_database: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with create_session() as session:
+        uow = UnitOfWork(session)
+        _fail_rollback(monkeypatch, session)
+
+        with pytest.raises(ValueError, match="step failed"):
+            async with uow:
+                await _write(uow.session, "a")
+                raise ValueError("step failed")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_rollback_keeps_the_error_of_a_failed_commit(
+    notes_database: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with create_session() as session:
+        uow = UnitOfWork(session)
+        commit_failure = OperationalError("COMMIT", None, Exception("connection lost"))
+        monkeypatch.setattr(session, "commit", AsyncMock(side_effect=commit_failure))
+        _fail_rollback(monkeypatch, session)
+
+        with pytest.raises(OperationalError) as caught:
+            async with uow:
+                await _write(uow.session, "a")
+
+        assert caught.value is commit_failure
+
+
+@pytest.mark.asyncio
+async def test_a_failed_rollback_still_reports_a_step_whose_inner_block_failed(
+    notes_database: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with create_session() as session:
+        uow = UnitOfWork(session)
+        _fail_rollback(monkeypatch, session)
+
+        with pytest.raises(UnitOfWorkRolledBackError):
+            async with uow:
+                with pytest.raises(ValueError, match="inner step failed"):
+                    async with uow:
+                        raise ValueError("inner step failed")
+
+
 @pytest.mark.asyncio
 async def test_a_nested_block_joins_the_outer_one_and_only_the_outermost_commits(notes_database: None) -> None:
     async with create_session() as session:
