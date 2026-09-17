@@ -39,7 +39,7 @@ def test_welcome_tutorial_page_is_available(tmp_path: Path) -> None:
     assert "Proxy Server" not in response.text
     assert "Otari Quickstart" in response.text
     assert "bootstrap API key" in response.text
-    assert "from openai import OpenAI" in response.text
+    assert "from otari import OtariClient" in response.text
     assert "YOUR_BOOTSTRAP_OTARI_KEY" in response.text
     assert "https://github.com/mozilla-ai/otari/blob/main/docs/quickstart.md" in response.text
     assert "mozilla-ai.github.io/otari/gateway/quickstart" not in response.text

@@ -91,9 +91,11 @@ describe("buildCurlSnippet", () => {
 })
 
 describe("buildPythonSnippet", () => {
-  it("points the OpenAI SDK at the gateway", () => {
+  it("points the Otari SDK at the gateway origin", () => {
+    // The origin and nothing more: the SDK appends /api/v1 itself and raises
+    // on a base that already carries it.
     expect(buildPythonSnippet(INPUT)).toContain(
-      'client = OpenAI(base_url="https://otari.example.com/v1", api_key="gw-abc123")',
+      'client = OtariClient(api_base="https://otari.example.com", api_key="gw-abc123")',
     )
   })
 
@@ -122,7 +124,7 @@ describe("buildPythonSnippet", () => {
       baseUrl: 'https://gw.example/x"',
     })
 
-    expect(snippet).toContain('base_url="https://gw.example/x\\"/v1"')
+    expect(snippet).toContain('api_base="https://gw.example/x\\""')
   })
 })
 

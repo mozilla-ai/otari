@@ -83,7 +83,13 @@ export function buildCurlSnippet({
   ].join("\n")
 }
 
-/** Python through the OpenAI SDK, which the gateway is wire-compatible with. */
+/**
+ * Python through the Otari SDK (`pip install otari`), which sends the key in
+ * the same `Otari-Key` header the cURL snippet teaches.
+ *
+ * `api_base` is the gateway origin with no path: the SDK appends `/api/v1`
+ * itself and rejects a value that already carries it.
+ */
 export function buildPythonSnippet({
   baseUrl,
   apiKey,
@@ -91,10 +97,10 @@ export function buildPythonSnippet({
   message = DEFAULT_MESSAGE,
 }: RequestSnippetInput): string {
   return [
-    "from openai import OpenAI",
+    "from otari import OtariClient",
     "",
-    `client = OpenAI(base_url=${literal(`${baseUrl}/v1`)}, api_key="${apiKey}")`,
-    "resp = client.chat.completions.create(",
+    `client = OtariClient(api_base=${literal(baseUrl)}, api_key="${apiKey}")`,
+    "resp = client.completion(",
     `    model=${literal(model)},`,
     `    messages=[{"role": "user", "content": ${literal(message)}}],`,
     ")",
@@ -102,7 +108,7 @@ export function buildPythonSnippet({
   ].join("\n")
 }
 
-/** TypeScript through the OpenAI SDK, the same call the Python snippet makes. */
+/** TypeScript through the Otari SDK (`@mozilla-ai/otari`), the same call the Python snippet makes. */
 export function buildTypescriptSnippet({
   baseUrl,
   apiKey,
@@ -110,10 +116,10 @@ export function buildTypescriptSnippet({
   message = DEFAULT_MESSAGE,
 }: RequestSnippetInput): string {
   return [
-    'import OpenAI from "openai"',
+    'import { OtariClient } from "@mozilla-ai/otari"',
     "",
-    `const client = new OpenAI({ baseURL: ${literal(`${baseUrl}/v1`)}, apiKey: "${apiKey}" })`,
-    "const resp = await client.chat.completions.create({",
+    `const client = new OtariClient({ apiBase: ${literal(baseUrl)}, apiKey: "${apiKey}" })`,
+    "const resp = await client.completion({",
     `  model: ${literal(model)},`,
     `  messages: [{ role: "user", content: ${literal(message)} }],`,
     "})",

@@ -417,7 +417,7 @@ describe("KeysPage", () => {
     expect(
       (
         within(reveal).getByLabelText(
-          "Python (OpenAI SDK)",
+          "Python (Otari SDK)",
         ) as HTMLTextAreaElement
       ).value,
     ).not.toContain(NEW_SECRET)
@@ -427,7 +427,7 @@ describe("KeysPage", () => {
     expect(within(reveal).getByLabelText("Secret key")).toHaveValue(NEW_SECRET)
     const curl = within(reveal).getByLabelText("curl") as HTMLTextAreaElement
     const python = within(reveal).getByLabelText(
-      "Python (OpenAI SDK)",
+      "Python (Otari SDK)",
     ) as HTMLTextAreaElement
     expect(curl.value).toContain(`Otari-Key: ${NEW_SECRET}`)
     expect(curl.value).toContain(
