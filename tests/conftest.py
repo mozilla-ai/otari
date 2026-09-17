@@ -1,5 +1,6 @@
 import argparse
 import re
+import shutil
 import sys
 import zlib
 from collections.abc import Generator
@@ -128,6 +129,47 @@ def _reset_default_pricing() -> Generator[None, None, None]:
     configure_default_pricing(False)
     configure_provider_types(None)
     reset_price_refresh_state()
+
+
+@pytest.fixture(scope="session")
+def _migrated_sqlite_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A SQLite database migrated to head once per worker, for new databases to start from."""
+    from gateway.core.database import _run_migrations
+
+    template = tmp_path_factory.mktemp("migrated-template") / "gateway.db"
+    _run_migrations(f"sqlite:///{template}")
+    return template
+
+
+@pytest.fixture(autouse=True)
+def _start_new_sqlite_databases_migrated(monkeypatch: pytest.MonkeyPatch, _migrated_sqlite_template: Path) -> None:
+    """Start an app's new SQLite database from a migrated copy instead of an empty file.
+
+    Migrating an empty SQLite file takes about a third of a second, and most apps a test builds get a new one.
+    Startup still runs the real migration step on the copy, and that step finds nothing left to apply.
+    A file that already exists, and any database other than a SQLite file, migrates as it would without this fixture.
+    """
+    from gateway.core import database
+
+    run_migrations = database._run_migrations
+
+    def run_migrations_from_template(database_url: str) -> None:
+        new_file = _new_sqlite_file(database_url)
+        if new_file is not None:
+            shutil.copyfile(_migrated_sqlite_template, new_file)
+        run_migrations(database_url)
+
+    monkeypatch.setattr(database, "_run_migrations", run_migrations_from_template)
+
+
+def _new_sqlite_file(database_url: str) -> Path | None:
+    from sqlalchemy.engine import make_url
+
+    url = make_url(database_url)
+    if url.get_backend_name() != "sqlite" or not url.database or url.database == ":memory:" or "uri" in url.query:
+        return None
+    path = Path(url.database)
+    return path if path.parent.is_dir() and not path.exists() else None
 
 
 def seed_workspace_id(db: Any) -> Any:
