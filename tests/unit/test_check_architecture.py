@@ -302,6 +302,39 @@ def test_real_gateway_tree_is_clean() -> None:
     assert check.main() == 0
 
 
+def test_the_gateway_package_is_an_allowed_top_level_package(tmp_path: Path) -> None:
+    _write(tmp_path, "gateway/__init__.py", "")
+    assert check.check_top_level_packages(tmp_path) == []
+
+
+@pytest.mark.parametrize("relative_path", ["otari_probe/__init__.py", "otari_probe/routes.py", "otari_probe.py"])
+def test_a_new_top_level_package_is_refused(tmp_path: Path, relative_path: str) -> None:
+    _write(tmp_path, "gateway/__init__.py", "")
+    _write(tmp_path, relative_path, "")
+    assert check.check_top_level_packages(tmp_path) == [
+        f"Top-level package src/{relative_path.split('/')[0]} is not allowed; "
+        "a feature in this repository belongs under src/gateway and in its feature registry"
+    ]
+
+
+def test_a_directory_without_python_source_is_not_a_package(tmp_path: Path) -> None:
+    # Installing the project in editable mode writes gateway.egg-info beside the package.
+    _write(tmp_path, "gateway/__init__.py", "")
+    _write(tmp_path, "gateway.egg-info/PKG-INFO", "")
+    assert check.check_top_level_packages(tmp_path) == []
+
+
+def test_main_fails_on_a_new_top_level_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path, "src/gateway/__init__.py", "")
+    _write(tmp_path, "src/otari_probe/__init__.py", "")
+    _write(tmp_path, "tests/__init__.py", "")
+    monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
+    monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
+    monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
+    assert check.main() == 1
+
+
 def test_a_service_may_not_import_the_feature_registry(tmp_path: Path) -> None:
     # Only the app wiring reads the registry; a service that imported it could
     # register itself, which is discovery by another name.

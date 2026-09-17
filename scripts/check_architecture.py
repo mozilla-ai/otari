@@ -14,6 +14,8 @@ Enforces:
    route may not import it; and nothing under gateway/ imports
    importlib.metadata, importlib_metadata or pkg_resources, so nothing is
    discovered.
+10. Top-level packages: src/ holds only the packages on an explicit list, so a
+    feature cannot sit beside gateway/, outside every rule above.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -185,6 +187,8 @@ DISCOVERY_SCOPE = "gateway/"
 DISCOVERY_IMPORTS = ("importlib.metadata", "importlib_metadata", "pkg_resources")
 DISCOVERY_RULE = "OSS base (no entry-point discovery; the feature registry is a literal tuple)"
 
+ALLOWED_TOP_LEVEL_PACKAGES = ("gateway",)
+
 
 def _matches(module: str, prefix: str) -> bool:
     """Return whether a module path is the prefix module itself or lives inside it."""
@@ -278,6 +282,21 @@ def check_naming_conventions(src_root: Path) -> list[str]:
     return violations
 
 
+def check_top_level_packages(src_root: Path) -> list[str]:
+    """Check that src/ holds no importable package or module outside the allowed list."""
+    violations: list[str] = []
+    for entry in sorted(src_root.iterdir()):
+        is_module = entry.is_file() and entry.suffix == ".py"
+        is_package = entry.is_dir() and any(entry.rglob("*.py"))
+        name = entry.stem if is_module else entry.name
+        if (is_module or is_package) and name not in ALLOWED_TOP_LEVEL_PACKAGES:
+            violations.append(
+                f"Top-level package src/{entry.name} is not allowed; "
+                "a feature in this repository belongs under src/gateway and in its feature registry"
+            )
+    return violations
+
+
 def main() -> int:
     """Run the architecture checks over the gateway package and the OSS test suite."""
     # Both must exist: silently skipping either would let its rules (including
@@ -304,6 +323,7 @@ def main() -> int:
         )
 
     naming_violations = check_naming_conventions(SRC_ROOT)
+    package_violations = check_top_level_packages(SRC_ROOT)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -318,7 +338,13 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal naming violations: {len(naming_violations)}")
 
-    if import_violations or naming_violations:
+    if package_violations:
+        print("\n❌ Top-level package violations:\n")
+        for violation in package_violations:
+            print(f"  {violation}")
+        print(f"\nTotal top-level package violations: {len(package_violations)}")
+
+    if import_violations or naming_violations or package_violations:
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1
 
