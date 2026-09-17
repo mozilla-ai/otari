@@ -661,6 +661,7 @@ def test_command_if_changed_passes_when_required_command_ran(
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
             "changed_paths": ["docs/public/openapi.json"],
             "commands": ["make postman"],
+            "command_scope": "session",
         },
         headers=master_key_header,
     )
@@ -679,6 +680,7 @@ def test_command_if_changed_blocks_when_required_command_did_not_run(
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
             "changed_paths": ["docs/public/openapi.json"],
             "commands": ["git status"],
+            "command_scope": "session",
         },
         headers=master_key_header,
     )
@@ -779,3 +781,81 @@ def test_command_if_changed_oversized_workload_is_rejected(
     )
     assert response.status_code == 422, response.text
     assert "match operations" in response.json()["detail"]
+
+
+def test_command_if_changed_defers_call_scoped_evidence(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The default scope is one tool call, which cannot answer this gate.
+
+    A PreToolUse call submits the path it is about to edit and its own
+    command, before the edit has run: failing there would block every edit to
+    a when_changed-matched path, the edit being the very thing blocked.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
+            "changed_paths": ["docs/public/openapi.json"],
+            "commands": ["git status"],
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "not_applicable"
+
+
+def test_command_if_changed_blocks_when_the_session_ran_no_commands(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Session-scoped and empty is a real answer: the required command is
+
+    among the commands the session did not run. Before command_scope existed
+    this was indistinguishable from a PreToolUse edit call's empty list, so
+    it had to resolve not_applicable and a session could satisfy the gate by
+    never invoking Bash.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
+            "changed_paths": ["docs/public/openapi.json"],
+            "commands": [],
+            "command_scope": "session",
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is True
+    assert body["results"][0]["outcome"] == "fail"
+
+
+def test_command_match_does_not_judge_session_scoped_evidence(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A forbidden command is judged at the call about to run it.
+
+    Session evidence only grows, so matching against it would fail every
+    remaining check of the session over one command already run, with nothing
+    left that could clear it.
+    """
+
+
+    def outcome_for(scope: str) -> str:
+        response = client.post(
+            f"{API_ROOT}/hooks/check",
+            json={
+                "policy_yaml": _COMMAND_MATCH_POLICY,
+                "commands": ["git push --force"],
+                "command_scope": scope,
+            },
+            headers=master_key_header,
+        )
+        assert response.status_code == 200, response.text
+        return str(response.json()["results"][0]["outcome"])
+
+    assert outcome_for("session") == "not_applicable"
+    assert outcome_for("call") == "fail"

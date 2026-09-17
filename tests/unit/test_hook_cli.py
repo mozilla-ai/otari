@@ -902,3 +902,103 @@ def test_advisory_only_failure_warns_without_blocking(monkeypatch: pytest.Monkey
     stdout_payload = json.loads(result.stdout)
     assert "please reconsider" in stdout_payload["systemMessage"]
     assert "advisory" in stdout_payload["systemMessage"].lower()
+
+
+def test_pretooluse_submits_call_scoped_evidence(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """One tool call's own command is call-scoped, which is what lets the
+
+    server judge it with command_match and skip command_if_changed, rather
+    than inferring either from an empty list.
+    """
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Bash",
+        "tool_input": {"command": "npm install"},
+    }
+    assert _invoke(payload).exit_code == 0
+    assert captured["json"]["command_scope"] == "call"
+
+
+def test_stop_event_submits_session_scoped_evidence(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    """A Stop event really has seen every command the session ran, and saying
+
+    so is what lets command_if_changed resolve at all and takes command_match
+    out of the picture (where a cumulative match could never be cleared).
+    """
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(_transcript_line(command="make postman") + "\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    assert _invoke(payload).exit_code == 0
+    assert captured["json"]["command_scope"] == "session"
+
+
+def test_a_repeat_stop_block_says_the_block_is_finite(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """Claude Code overrides a Stop hook after 8 consecutive blocks and lets the
+
+    turn end. Blocking silently through that budget leaves a required gate
+    looking clean at exactly the moment it is firing hardest, so a repeat
+    block says what the budget is and that it is running out.
+    """
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *a, **k: _FakeResponse(
+            {
+                "blocked": True,
+                "results": [{"gate_id": "g", "enforcement": "required", "outcome": "fail", "message": "no"}],
+            }
+        ),
+    )
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "stop_hook_active": True}
+    result = _invoke(payload)
+    assert result.exit_code == 2
+    assert "already blocked once this turn" in result.output
+    assert "8 consecutive blocks" in result.output
+
+
+def test_a_first_stop_block_does_not_mention_the_budget(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *a, **k: _FakeResponse(
+            {
+                "blocked": True,
+                "results": [{"gate_id": "g", "enforcement": "required", "outcome": "fail", "message": "no"}],
+            }
+        ),
+    )
+    payload = {"hook_event_name": "Stop", "cwd": str(repo)}
+    result = _invoke(payload)
+    assert result.exit_code == 2
+    assert "already blocked once" not in result.output

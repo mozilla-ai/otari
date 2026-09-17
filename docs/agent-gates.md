@@ -157,20 +157,24 @@ of the other two gate types can: each checks one independent condition.
 
 This gate resolves for real only when both a changed-path list and a command
 list were actually submitted: either being omitted resolves `unknown`
-(evidence was never collected), not a silent pass. An explicitly empty
-`commands` list resolves `not_applicable`, not `fail`, once a matching path
-is found, mirroring `command_match`'s own empty-commands rule: this matters
-here specifically because a `PreToolUse` call for the edit itself submits
-its own target as the changed path and an empty `commands` (an edit call
-never collects command evidence), before the edit has run. Treating that as
-`fail` would permanently block editing a `when_changed`-matched path at all,
-since the required command can never have already run in response to a
-change that has not happened yet. This gate is therefore meaningful mainly
-on `Stop`, where `otari hook` submits real, whole-session command evidence
-(see below); the one gap this leaves, symmetric with `command_match`'s own,
-is a session that changes a matched path without ever invoking `Bash`,
-which also resolves `not_applicable` rather than the `fail` it arguably
-deserves.
+(evidence was never collected), not a silent pass.
+
+It also resolves only against `session`-scoped command evidence, which in
+practice means a `Stop` event. A `PreToolUse` call for the edit itself
+submits its own target as the changed path and its one command (or none,
+for an edit tool) as `call`-scoped evidence, before the edit has even run:
+the required command cannot have run in response to a change that has not
+happened yet, so failing there would permanently block editing a
+`when_changed`-matched path at all, the edit being the very thing blocked.
+`call` scope therefore resolves `not_applicable`, deferring the gate to
+`Stop`.
+
+Under `session` scope an empty `commands` list resolves `fail`, not
+`not_applicable`: a session that changed a matched path and ran no command
+at all did not run the required one. Telling that apart from "this caller
+collects no command evidence here" is what `command_scope` exists for.
+Without it both arrive as an empty list, and the gate has to read an honest
+failure as non-applicable.
 
 ### Not built yet
 
@@ -244,6 +248,7 @@ required gate rather than passing it. Request/response fields:
 | `policy_yaml` | The full text of the caller's `.otari-gates.yml`, read and submitted by the caller. |
 | `changed_paths` | Repo-relative paths the caller observed changed. Send `[]` if evidence was collected and there is none (a `changed_path` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects path evidence at all (a required `changed_path` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
 | `commands` | Shell commands the caller observed run or is about to run. Send `[]` if evidence was collected and there is none right now (a `command_match` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects command evidence at all (a required `command_match` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
+| `command_scope` | What `commands` covers: `call` (the default) for the single tool call about to run, `session` for every command the session has run so far. This decides which gates can resolve at all: `command_match` judges only `call` scope, `command_if_changed` only `session` scope. A caller that omits it keeps the `call` semantics it was written against. |
 | `blocked` | `true` when a `required` gate's outcome is not `pass`/`not_applicable`. An unresolved gate never counts as a pass. |
 | `results[].outcome` | `pass`, `fail`, `unknown`, `error`, `not_applicable`, or `not_run`. |
 
@@ -282,11 +287,21 @@ clean pass.
 On a `Stop` event, `changed_path` instead submits `git status
 --porcelain`'s output, which does cover shell-written file changes (anything
 a `Bash` call touched), at the cost of only catching them after the fact
-rather than preventing them. `command_match` and `command_if_changed` both
-submit whatever `Bash` commands `otari hook` finds in the session's own
-transcript (see below): every `Bash` tool call the session made so far, not
-just the most recent one, so a required `command_match` gate now evaluates
-for real on `Stop` too, not only on `PreToolUse`.
+rather than preventing them. Alongside it `otari hook` submits every `Bash`
+command it finds in the session's own transcript (see below), marked
+`command_scope: "session"`. That is what lets `command_if_changed` resolve:
+"did the required command ever run" is a question only a whole session can
+answer.
+
+`command_match` deliberately does not evaluate against that list. A
+forbidden command is judged where it can still be refused, at the
+`PreToolUse` call about to run it. Session evidence only grows, so matching
+against it would fail every remaining check of the session over one command
+already run, with no action left that could clear it: the session would
+dead-end. Nothing is lost by skipping it, because `otari hook setup` puts
+`Bash` in the `PreToolUse` matcher exactly when the policy carries a
+`command_match` gate, so every command this would have seen was already
+judged before it ran.
 
 `otari hook` collects both kinds of Stop-time evidence itself, because
 Claude Code's own Stop payload carries neither directly: `git status` for
@@ -301,6 +316,17 @@ evidence (`commands: null`, not `[]`): the difference between "collected,
 and there is none" and "could not collect" is what keeps a required
 `command_match`/`command_if_changed` gate from reading a failed read as a
 clean pass (it resolves `unknown`, and blocks, instead).
+
+**A blocking `Stop` gate has a finite budget.** Claude Code overrides a
+`Stop` hook after it blocks eight times in a row without progress, then ends
+the turn with a warning (raise it with `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`).
+Every gate that can block here is fixable, by running the required command or
+reverting the forbidden change, so `otari hook` keeps blocking rather than
+standing down the moment Claude Code sets `stop_hook_active`. What it does on
+a repeat block is say that the budget exists and is running out, so the
+remaining attempts go into fixing the gate or telling the user why it cannot
+be fixed, rather than into blind retries that end with the gate silently
+overridden.
 
 **`claude -p` does not appear to enforce the `Stop` hook.** Verified: a
 zero-tool-use `claude -p` prompt run against a policy violation showed no
@@ -330,8 +356,7 @@ whether the gate itself is working.
    `changed_path` gate, so it always passes), but there is no reason to pay
    it. `Stop` carries no `matcher` at all; it is registered unconditionally,
    since `changed_path` always benefits from its Git-status fallback there
-   and a `command_match`/`command_if_changed` gate now needs it for real
-   command evidence.
+   and a `command_if_changed` gate has no other event it can resolve on.
 
    For a credential, it tries the same automatic resolution `otari hook`
    itself does at runtime (config file, `.env`, environment) before asking;

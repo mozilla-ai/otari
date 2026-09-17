@@ -37,6 +37,7 @@ from gateway.agent_runtime.domain.types import (
     CommandEvidence,
     CommandIfChangedGate,
     CommandMatchGate,
+    EvidenceScope,
     GateResult,
     GateSpec,
 )
@@ -199,6 +200,19 @@ class PolicyCheckRequest(BaseModel):
         max_length=_MAX_COMMANDS,
         description="Shell commands the caller observed run or is about to run.",
     )
+    # Defaults to "call" so a client written before this field existed keeps
+    # the semantics it was written against: one tool call's own command,
+    # judged by command_match. Only a caller that really can see the whole
+    # session (otari hook on a Stop event) says "session", and saying it is
+    # what lets command_if_changed resolve and what takes command_match out
+    # of the picture. See CommandEvidence.scope.
+    command_scope: EvidenceScope = Field(
+        default="call",
+        description=(
+            "What `commands` covers: `call` for the single tool call about to run, "
+            "`session` for every command the session has run so far."
+        ),
+    )
 
     @property
     def changed_path_evidence(self) -> ChangedPathEvidence | None:
@@ -214,7 +228,7 @@ class PolicyCheckRequest(BaseModel):
     def command_evidence(self) -> CommandEvidence | None:
         if self.commands is None:
             return None
-        return CommandEvidence(commands=tuple(dict.fromkeys(self.commands)))
+        return CommandEvidence(commands=tuple(dict.fromkeys(self.commands)), scope=self.command_scope)
 
 
 class GateResultResponse(BaseModel):

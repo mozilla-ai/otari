@@ -18,7 +18,7 @@ def test_pass_when_changed_path_matches_and_required_command_ran() -> None:
     result = evaluate_command_if_changed(
         _gate(),
         ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
-        CommandEvidence(commands=("make postman",)),
+        CommandEvidence(commands=("make postman",), scope="session"),
     )
     assert result.outcome is Outcome.PASS
     assert not result.outcome.is_blocking
@@ -28,37 +28,54 @@ def test_fail_when_changed_path_matches_and_required_command_did_not_run() -> No
     result = evaluate_command_if_changed(
         _gate(),
         ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
-        CommandEvidence(commands=("git status", "make lint")),
+        CommandEvidence(commands=("git status", "make lint"), scope="session"),
     )
     assert result.outcome is Outcome.FAIL
     assert "docs/public/openapi.json" in (result.detail or "")
 
 
-def test_not_applicable_when_changed_path_matches_but_no_commands_were_submitted() -> None:
-    """An explicitly empty commands list resolves not_applicable, not fail,
+def test_not_applicable_under_call_scope_even_when_a_changed_path_matches() -> None:
+    """A PreToolUse call cannot answer this gate, so it must not try.
 
-    mirroring evaluate_command_match's own rule. This is load-bearing here:
-    a PreToolUse edit-tool call submits its own edited path as changed_paths
-    and an explicit commands: [] (it never collects command evidence for an
-    edit call), before the edit itself has run. Reading that as fail would
-    permanently block every edit to a when_changed-matched path, since the
-    required command can never have already run in response to a change
-    that has not happened yet.
+    Such a call submits its own edited path as changed_paths and its one
+    command (or none, for an edit tool) as call-scoped evidence, before the
+    edit has even run. Failing there would permanently block every edit to a
+    when_changed-matched path, since the required command can never have
+    already run in response to a change that has not happened yet.
     """
     result = evaluate_command_if_changed(
         _gate(),
         ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
-        CommandEvidence(commands=()),
+        CommandEvidence(commands=("git status",), scope="call"),
     )
     assert result.outcome is Outcome.NOT_APPLICABLE
     assert not result.outcome.is_blocking
+
+
+def test_fail_when_session_scope_collected_no_commands_at_all() -> None:
+    """Session-scoped and empty is a real answer, not a missing one.
+
+    The session changed a matched path and ran no command at all, so the
+    required one is among the commands it did not run. Reading this as
+    not_applicable (which it had to be before scope existed, since an empty
+    list from a PreToolUse edit call looked identical) let a session satisfy
+    the gate by never invoking Bash.
+    """
+    result = evaluate_command_if_changed(
+        _gate(),
+        ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
+        CommandEvidence(commands=(), scope="session"),
+    )
+    assert result.outcome is Outcome.FAIL
+    assert result.outcome.is_blocking
+    assert "docs/public/openapi.json" in (result.detail or "")
 
 
 def test_not_applicable_when_no_changed_path_matches() -> None:
     result = evaluate_command_if_changed(
         _gate(),
         ChangedPathEvidence(changed_paths=("README.md",)),
-        CommandEvidence(commands=()),
+        CommandEvidence(commands=(), scope="session"),
     )
     assert result.outcome is Outcome.NOT_APPLICABLE
     assert not result.outcome.is_blocking
@@ -72,13 +89,13 @@ def test_not_applicable_wins_over_missing_commands_when_nothing_relevant_changed
     result = evaluate_command_if_changed(
         _gate(),
         ChangedPathEvidence(changed_paths=()),
-        CommandEvidence(commands=()),
+        CommandEvidence(commands=(), scope="session"),
     )
     assert result.outcome is Outcome.NOT_APPLICABLE
 
 
 def test_unknown_when_changed_path_evidence_was_not_collected() -> None:
-    result = evaluate_command_if_changed(_gate(), None, CommandEvidence(commands=("make postman",)))
+    result = evaluate_command_if_changed(_gate(), None, CommandEvidence(commands=("make postman",), scope="session"))
     assert result.outcome is Outcome.UNKNOWN
     assert result.outcome.is_blocking, "unknown must block a required gate, never pass silently"
 
@@ -100,7 +117,7 @@ def test_any_one_require_phrase_satisfies_the_gate() -> None:
     result = evaluate_command_if_changed(
         gate,
         ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
-        CommandEvidence(commands=("python scripts/generate_postman.py --check",)),
+        CommandEvidence(commands=("python scripts/generate_postman.py --check",), scope="session"),
     )
     assert result.outcome is Outcome.PASS
 
@@ -110,7 +127,7 @@ def test_advisory_gate_does_not_block_required() -> None:
     result = evaluate_command_if_changed(
         gate,
         ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
-        CommandEvidence(commands=("git status",)),
+        CommandEvidence(commands=("git status",), scope="session"),
     )
     assert result.outcome is Outcome.FAIL
     assert result.enforcement == "advisory"
@@ -123,7 +140,7 @@ def test_shares_a_precomputed_segment_cache() -> None:
     tokenizes once via tokenize_commands and passes the same cache to every
     call, rather than each call re-tokenizing from scratch.
     """
-    evidence = CommandEvidence(commands=("make postman",))
+    evidence = CommandEvidence(commands=("make postman",), scope="session")
     cache = tokenize_commands(evidence.commands)
     result = evaluate_command_if_changed(
         _gate(),

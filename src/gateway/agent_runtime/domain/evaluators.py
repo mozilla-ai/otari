@@ -552,16 +552,29 @@ def evaluate_command_match(
             message="Command evidence was not submitted.",
         )
 
+    if evidence.scope == "session":
+        # A forbidden command is judged where it can still be refused: the
+        # call that is about to run it. Session-scoped evidence is the whole
+        # transcript, which only ever grows, so matching against it would
+        # fail every remaining check of the session over one command already
+        # refused (or already run, and by then unrunnable in reverse) with no
+        # action left that could clear it. The call-scoped check is not
+        # weakened by skipping this: `otari hook setup` puts Bash in the
+        # PreToolUse matcher precisely when the policy has a command_match
+        # gate, so every command this would have seen was already judged
+        # before it ran.
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.NOT_APPLICABLE,
+            message="Forbidden commands are checked per call, not over session history.",
+        )
+
     if not evidence.commands:
-        # An explicitly empty commands list is not "checked, none forbidden":
-        # a caller submits it both for a PreToolUse call that never collects
-        # command evidence at all (an edit tool rather than Bash) and for a
-        # Stop event whose real, whole-session scan (see cli.py's
-        # _hook_collect_transcript_commands) genuinely found none; see
-        # docs/agent-gates.md. Reporting PASS there would read as a check
-        # that ran and found nothing, when this gate never had anything to
-        # check. not_applicable is the non-blocking outcome that says so
-        # honestly.
+        # Call-scoped and empty: a PreToolUse call for an edit tool rather
+        # than Bash, which never collects command evidence at all (see
+        # docs/agent-gates.md). Reporting PASS would read as a check that ran
+        # and found nothing, when this gate never had anything to check.
         return GateResult(
             gate_id=gate.id,
             enforcement=gate.enforcement,
@@ -618,29 +631,26 @@ def evaluate_command_if_changed(
     the required command ran. Either being absent (``None``, not merely
     empty) resolves ``unknown``, the same as either evaluator alone treats a
     missing evidence list: a check that could not run must never read as one
-    that passed.
+    that passed. An empty list is not absent evidence; see ``scope`` below.
 
-    An explicitly empty ``command_evidence.commands`` resolves
-    ``not_applicable``, not ``fail``, once a matching path is found: this
-    mirrors ``evaluate_command_match``'s own empty-commands rule, and is
-    load-bearing here for a reason that rule did not have to consider. A
-    single ``PreToolUse`` edit-tool call submits its own target as
-    ``changed_paths`` and an explicit ``commands: []`` (it collected no
-    command evidence for this call, same as any other edit call), before
-    the edit itself has even run. Failing there would block every attempt
-    to edit a ``when_changed``-matched path forever, since the required
-    command can never have already run in response to a change that has
-    not happened yet: the edit that would need it is the very thing being
-    blocked. Reading empty commands as ``not_applicable`` defers this gate
-    to where it can actually resolve: a ``Stop`` event, where `otari hook`
-    submits the session's real, cumulative command evidence (see
-    docs/agent-gates.md). The one gap this leaves, symmetric with
-    `command_match`'s own: a session that changes a matched path without
-    ever invoking `Bash` at all (submitting real, comprehensive, and
-    genuinely empty command evidence) also resolves ``not_applicable``
-    rather than the ``fail`` it arguably deserves, since this evaluator
-    cannot distinguish "no command evidence to check" from "checked, and
-    none ran" any more than `command_match` can.
+    Resolves only against ``session``-scoped command evidence. A
+    ``PreToolUse`` call submits its own target as ``changed_paths`` and its
+    one command (or none, for an edit tool) as ``call``-scoped evidence,
+    before the edit itself has even run: the required command cannot have
+    run in response to a change that has not happened yet, so failing there
+    would block every attempt to edit a ``when_changed``-matched path
+    forever, the edit being the very thing blocked. ``call`` scope
+    therefore resolves ``not_applicable``, deferring the gate to the
+    ``Stop`` event where `otari hook` submits the session's real command
+    history (see docs/agent-gates.md).
+
+    Under ``session`` scope an empty command list is a real answer rather
+    than a missing one, and resolves ``fail``: a session that changed a
+    matched path and ran no commands at all did not run the required one.
+    Distinguishing that from "this caller collects no command evidence
+    here" is exactly what ``CommandEvidence.scope`` exists for; without it
+    both arrive as an empty list and the gate has to read the honest
+    failure as non-applicable.
 
     ``segment_cache`` and ``phrase_cache`` both mirror ``evaluate_command_match``'s
     own parameters: a caller evaluating several command-evidence gates
@@ -670,12 +680,28 @@ def evaluate_command_if_changed(
             message="No changed path matched this gate's when_changed globs.",
         )
 
-    if not command_evidence.commands:
+    if command_evidence.scope == "call":
+        # One tool call's own command cannot answer "did the required
+        # command run at some point", and this gate is evaluated on every
+        # PreToolUse call against a matched path, before the edit that would
+        # need the command has even happened. Deferred to the Stop event,
+        # where session-scoped evidence can answer it.
         return GateResult(
             gate_id=gate.id,
             enforcement=gate.enforcement,
             outcome=Outcome.NOT_APPLICABLE,
-            message="No commands were submitted to check.",
+            message="Required-command checks resolve against session history, not one call.",
+        )
+
+    if not command_evidence.commands:
+        # Session-scoped and empty is a real answer, not a missing one: the
+        # session ran no commands at all, so the required one is among them.
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.FAIL,
+            message=gate.message,
+            detail=", ".join(matched_paths),
         )
 
     # A cache built for a different gate is tolerated rather than a KeyError,

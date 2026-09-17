@@ -522,6 +522,10 @@ def hook(ctx: click.Context, harness: str, config: str | None, url: str | None, 
     # it collected no evidence at all rather than collecting and finding
     # nothing.
     commands: list[str] | None = []
+    # "call" unless the Stop branch below really does collect the whole
+    # session: this is what tells the server which command-evidence gates can
+    # resolve at all, rather than leaving each to guess from an empty list.
+    command_scope = "call"
     if event == "PreToolUse":
         tool_name = payload.get("tool_name", "")
         tool_input = payload.get("tool_input") or {}
@@ -579,6 +583,7 @@ def hook(ctx: click.Context, harness: str, config: str | None, url: str | None, 
         # actually is (see docs/agent-gates.md).
         transcript_path = payload.get("transcript_path")
         commands = _hook_collect_transcript_commands(Path(transcript_path)) if transcript_path else None
+        command_scope = "session"
         if commands:
             # Same truncation the PreToolUse Bash branch applies to its one
             # command, applied per command here: a whole session's worth of
@@ -624,6 +629,7 @@ def hook(ctx: click.Context, harness: str, config: str | None, url: str | None, 
                 "policy_yaml": gates_file.read_text(encoding="utf-8"),
                 "changed_paths": changed_paths,
                 "commands": commands,
+                "command_scope": command_scope,
             },
             headers={API_KEY_HEADER: resolved_key},
             timeout=15.0,
@@ -673,7 +679,25 @@ def hook(ctx: click.Context, harness: str, config: str | None, url: str | None, 
         for gate in failing
     )
     if blocked:
-        click.echo(f"otari hook: blocked ({harness}, {event}):\n{summary}", err=True)
+        # stop_hook_active is Claude Code's own signal that this Stop is
+        # already the continuation a previous block forced. It matters because
+        # Claude Code overrides a Stop hook that blocks eight times running
+        # without progress, and then simply lets the turn end: a required gate
+        # that quietly stops enforcing at the moment it is firing hardest is
+        # worse than one that never fired, because the turn ends looking
+        # clean. Exiting 0 here instead (the shape a hook with no fixable
+        # failure wants) is not right for this one: every gate that can block
+        # here is fixable, by running the required command or reverting the
+        # forbidden change. So keep blocking, and say plainly that the block
+        # is finite, so the agent spends the remaining attempts fixing the
+        # gate or telling the user it cannot, rather than retrying blind.
+        repeat_note = (
+            "\n  (already blocked once this turn; Claude Code overrides a Stop hook after 8 "
+            "consecutive blocks, so fix this now or say why you cannot.)"
+            if payload.get("stop_hook_active")
+            else ""
+        )
+        click.echo(f"otari hook: blocked ({harness}, {event}):\n{summary}{repeat_note}", err=True)
         raise SystemExit(2)
     # An advisory gate failed but nothing required did: warn without
     # blocking. Checking `blocked` alone here would silently drop this,

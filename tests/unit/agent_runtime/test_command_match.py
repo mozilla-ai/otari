@@ -555,3 +555,28 @@ def test_shared_segment_cache_avoids_retokenizing_per_gate() -> None:
         evaluate_command_match(gate, evidence, segment_cache=cache)
     elapsed = time.perf_counter() - start
     assert elapsed < 1.0
+
+
+def test_session_scoped_evidence_is_not_this_gates_to_judge() -> None:
+    """A forbidden command is judged at the call that is about to run it.
+
+    Session-scoped evidence is the whole transcript, which only grows, so
+    matching against it would fail every remaining check of the session over
+    one command already run, with nothing left that could clear it. Nothing
+    is lost by skipping it: `otari hook setup` puts Bash in the PreToolUse
+    matcher exactly when the policy carries a command_match gate, so every
+    command this would see was already judged before it ran.
+    """
+    gate = CommandMatchGate(
+        id="no-npm",
+        enforcement="required",
+        forbidden=("npm install",),
+        message="Use pnpm.",
+    )
+    result = evaluate_command_match(gate, CommandEvidence(commands=("npm install",), scope="session"))
+    assert result.outcome is Outcome.NOT_APPLICABLE
+    assert not result.outcome.is_blocking
+
+    # Same evidence at call scope is exactly what this gate does judge.
+    blocked = evaluate_command_match(gate, CommandEvidence(commands=("npm install",), scope="call"))
+    assert blocked.outcome is Outcome.FAIL

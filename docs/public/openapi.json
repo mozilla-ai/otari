@@ -10217,6 +10217,16 @@
             "description": "Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).",
             "title": "Changed Paths"
           },
+          "command_scope": {
+            "default": "call",
+            "description": "What `commands` covers: `call` for the single tool call about to run, `session` for every command the session has run so far.",
+            "enum": [
+              "call",
+              "session"
+            ],
+            "title": "Command Scope",
+            "type": "string"
+          },
           "commands": {
             "anyOf": [
               {

@@ -13,6 +13,9 @@ from typing import Literal
 
 Enforcement = Literal["required", "advisory"]
 
+# What a submitted command list covers. See CommandEvidence.scope.
+EvidenceScope = Literal["call", "session"]
+
 # Gate results that mean "no objection". Every other outcome blocks a required
 # gate: unknown and error are deliberately on the blocking side, not the
 # passing one, so a check that could not run is never mistaken for one that
@@ -148,9 +151,19 @@ class CommandEvidence:
     """Shell commands the caller reports as run or about to run.
 
     Otari does not collect or verify this itself; see the module docstring.
+
+    ``scope`` says what the list covers, which decides which gate types can
+    resolve against it at all. ``"call"`` is one tool call about to run (a
+    ``PreToolUse`` hook): complete for "is this command forbidden", useless
+    for "did that command ever run". ``"session"`` is every command the
+    session has run so far (a ``Stop`` hook reading its own transcript): the
+    reverse. Without this, an evaluator has to guess from an empty list
+    alone, which cannot tell "nothing to collect here" from "collected, and
+    there was none".
     """
 
     commands: tuple[str, ...]
+    scope: EvidenceScope = "call"
 
 
 @dataclass(frozen=True, slots=True)
