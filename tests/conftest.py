@@ -1,5 +1,9 @@
+import argparse
+import re
 import sys
+import zlib
 from collections.abc import Generator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +15,48 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 if "gateway" in sys.modules:
     del sys.modules["gateway"]
+
+
+@dataclass(frozen=True)
+class Shard:
+    """One of ``count`` disjoint slices of a test run, numbered from 1.
+
+    Every test belongs to exactly one shard, so running all ``count`` shards runs the whole suite once.
+    """
+
+    index: int
+    count: int
+
+    def includes(self, nodeid: str) -> bool:
+        # Not hash(): it is salted per process, and every xdist worker must select the same tests.
+        return zlib.crc32(nodeid.encode()) % self.count == self.index - 1
+
+
+def parse_shard(value: str) -> Shard:
+    """Parse ``INDEX/COUNT``, such as ``2/4``, into a shard."""
+    match = re.fullmatch(r"([0-9]+)/([0-9]+)", value)
+    if match is None or not 1 <= int(match[1]) <= int(match[2]):
+        raise argparse.ArgumentTypeError(f"expected INDEX/COUNT with 1 <= INDEX <= COUNT, got {value!r}")
+    return Shard(index=int(match[1]), count=int(match[2]))
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--shard",
+        type=parse_shard,
+        default=None,
+        metavar="INDEX/COUNT",
+        help="Run only the tests in shard INDEX of COUNT.",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    shard: Shard | None = config.getoption("shard")
+    if shard is None:
+        return
+    selected = [item for item in items if shard.includes(item.nodeid)]
+    config.hook.pytest_deselected(items=[item for item in items if not shard.includes(item.nodeid)])
+    items[:] = selected
 
 
 @pytest.fixture(autouse=True)
