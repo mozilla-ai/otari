@@ -352,6 +352,7 @@ def test_list_usage_response_shape(
         "cache_read_tokens": None,
         "cache_write_tokens": None,
         "cache_write_1h_tokens": None,
+        "provider_latency_ms": None,
         "billing_meters": None,
         "pricing_breakdown": None,
         "cost": 1.23,

@@ -117,6 +117,7 @@ from gateway.core.usage import (
     cache_tokens_in_prompt_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
+    provider_latency_ms_of,
 )
 from gateway.inflight import track_request
 from gateway.log_config import logger
@@ -160,7 +161,12 @@ from gateway.services.pricing_service import (
     price_tool_calls,
     pricing_required_but_missing,
 )
-from gateway.services.provider_kwargs import ResolvedProvider, credential_ladder_exhausted, resolve_provider_selector
+from gateway.services.provider_kwargs import (
+    ResolvedProvider,
+    credential_ladder_exhausted,
+    provider_key,
+    resolve_provider_selector,
+)
 from gateway.services.routing import (
     BudgetState,
     CompiledPlan,
@@ -1331,6 +1337,7 @@ async def _bill_vision_side_call(
         api_key_id=api_key_id,
         model=resolved.model,
         provider=resolved.instance,
+        provider_type=resolved.provider.value,
         endpoint=endpoint,
         user_id=user_id,
         usage_override=usage,
@@ -3192,6 +3199,7 @@ async def log_usage(
     user_id: str | None = None,
     response: ChatCompletion | AsyncIterator[ChatCompletionChunk] | None = None,
     usage_override: CompletionUsage | None = None,
+    provider_type: str | None = None,
     error: str | None = None,
     status_code: int | None = None,
     cost_override: Decimal | float | None = None,
@@ -3232,6 +3240,13 @@ async def log_usage(
         user_id: User identifier for tracking
         response: Response object (if successful)
         usage_override: Usage data for streaming requests
+        provider_type: Resolved any-llm implementation backing ``provider``
+            (``config.provider_instance_type(provider)`` / ``Attempt.provider`` /
+            ``ResolvedProvider.provider``), used only to look up provider-reported
+            latency fields that are keyed by implementation rather than by the
+            configured instance name. Falls back to ``provider`` when omitted, so
+            latency capture is a no-op rather than wrong for a caller that hasn't
+            resolved one.
         error: Error message (if failed)
         status_code: HTTP status classifying the failure (see
             ``UsageLog.status_code``), or None when nothing was rejected over HTTP
@@ -3293,6 +3308,7 @@ async def log_usage(
         # Which convention those cache counts were reported under, recorded rather
         # than left to be inferred from the numbers later (mozilla-ai/otari#690).
         usage_log.cache_tokens_in_prompt = cache_tokens_in_prompt_of(usage_data)
+        usage_log.provider_latency_ms = provider_latency_ms_of(usage_data, provider_type or provider)
 
         record_tokens(
             str(provider or ""),
@@ -3861,6 +3877,12 @@ def build_streaming_response(
       reservation does not leak.
     """
     platform_active = platform_correlation_id is not None
+    # Resolved once: ``provider`` here is otari's routing key (may be a
+    # configured instance name, a bare implementation name, or an
+    # ``LLMProvider`` member), and provider-latency lookup is keyed by
+    # implementation (see log_usage's ``provider_type``).
+    provider_type = config.provider_instance_type(provider_key(provider))
+
     first_chunk_at: float | None = None
 
     def _on_first_chunk() -> None:
@@ -3890,6 +3912,7 @@ def build_streaming_response(
             api_key_id=api_key_id,
             model=model,
             provider=provider,
+            provider_type=provider_type,
             endpoint=adapter.endpoint,
             user_id=user_id,
             usage_override=usage_data,
@@ -4913,6 +4936,7 @@ async def run_standalone_non_stream(
                     api_key_id=ctx.api_key_id,
                     model=model,
                     provider=provider,
+                    provider_type=ctx.config.provider_instance_type(provider_key(provider)),
                     endpoint=adapter.endpoint,
                     user_id=ctx.user_id,
                     usage_override=usage_data,
