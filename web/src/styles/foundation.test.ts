@@ -654,7 +654,7 @@ describe("design foundation tokens", () => {
 // Three of those reached this file from scripted edits and were found by
 // somebody reading the lines next to them, which is not a way of finding
 // things.
-it("has no comment opened inside another comment in globals.css", () => {
+it("has no comment opened inside another comment in the foundation", () => {
   const offenders: string[] = []
   let inComment = false
   for (let i = 0; i < CSS.length - 1; i++) {
@@ -927,7 +927,7 @@ describe("semantic tokens only", () => {
     // able to name the thing it is explaining.
     expect(
       stripComments(source),
-      "a focus ring is defined once in globals.css; use `otari-focus-ring`, do not spell one here",
+      "a focus ring is defined once; use `otari-focus-ring`, do not spell one here",
     ).not.toMatch(
       /\b(?:ring|outline)-(?:accent|primary|focus)\b|\boutline-offset-\d|\b(?:ring|outline)-[1-9]\b/,
     )
@@ -1430,9 +1430,9 @@ describe("the phone viewport's touch-target floor", () => {
     // Asserted as a pair: the dense height exists, and it is undone at 767px.
     //
     // Both halves are now a custom property on the PLACE rather than a height
-    // on its descendants, which is why these read `--field-height` (see
-    // globals.css, and Toolbar's docstring, for why a variable and not a
-    // descendant selector). What is being held is the pair, not the spelling:
+    // on its descendants, which is why these read `--field-height` (see the
+    // field-metrics family in globals.css, and Toolbar's docstring, for why a
+    // variable and not a descendant selector). What is being held is the pair, not the spelling:
     // if a rewrite drops the 767px half, a phone gets a 32px search box.
     expect(CSS).toMatch(
       /\.otari-toolbar,\s*\.otari-pagination,\s*\.otari-settings \{\s*--field-height: 2rem;/,
