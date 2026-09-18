@@ -14,7 +14,15 @@ from gateway.services.url_safety import UnsafeURLError, validate_provider_api_ba
 
 @asynccontextmanager
 async def provider_client(account: FileAccount, *, idle_timeout: float = 30) -> AsyncIterator[Any]:
-    base = account.api_base or "https://api.anthropic.com"
+    provider_class = AnyLLM.get_provider_class(account.provider)
+    # any-llm exposes no API_BASE for Anthropic; preserve its explicit endpoint.
+    base = account.api_base or provider_class.API_BASE
+    if base is None and account.provider == "anthropic":
+        base = "https://api.anthropic.com"
+    if not base:
+        raise FilesError(502, "Provider file account requires an explicit endpoint")
+    if account.workspace and account.provider != "anthropic":
+        raise FilesError(502, "Invalid provider file account options")
     parsed = urlsplit(base)
     if (
         parsed.scheme != "https"
@@ -31,7 +39,7 @@ async def provider_client(account: FileAccount, *, idle_timeout: float = 30) -> 
         raise FilesError(502, "Invalid provider file endpoint") from None
     async with AsyncClient(timeout=idle_timeout, follow_redirects=False) as http_client:
         client = AnyLLM.create(
-            "anthropic",
+            account.provider,
             api_key=account.api_key.get_secret_value(),
             api_base=base,
             http_client=http_client,

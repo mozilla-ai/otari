@@ -11,6 +11,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, SecretStr
 
 from gateway.services.provider_files import inference
+from gateway.services.provider_files.anthropic_inference import AnthropicFileOutputBinder
 from gateway.services.provider_files.client import PlatformFilesClient
 from gateway.services.provider_files.contracts import FileAccount, FileMetadata, FilesError, Operation
 
@@ -64,7 +65,7 @@ async def test_file_block_is_held_until_registration(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(inference, "provider_client", provider)
     monkeypatch.setattr(PlatformFilesClient, "retry", retry)
-    binder = inference.FileOutputBinder(PlatformFilesClient("https://authority", "gateway", "user"), operation, [])
+    binder = AnthropicFileOutputBinder(PlatformFilesClient("https://authority", "gateway", "user"), operation, [])
 
     async def source() -> AsyncIterator[Event]:
         yield Event(type="message_start")
@@ -93,3 +94,40 @@ async def test_file_block_is_held_until_registration(monkeypatch: pytest.MonkeyP
     else:
         await task
         assert emitted == ["message_start", "content_block_start", "content_block_stop", "message_stop"]
+
+
+@pytest.mark.asyncio
+async def test_generic_output_registration_accepts_ids_without_anthropic_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = Operation(
+        id=uuid.uuid4(),
+        cleanup_token=SecretStr("cleanup"),
+        deadline=datetime.now(UTC) + timedelta(minutes=1),
+        account=FileAccount(generation_id=uuid.uuid4(), provider="openai", api_key=SecretStr("key")),
+        max_bytes=100,
+        expires_in_seconds=3600,
+    )
+    metadata = FileMetadata(id="file_generated", purpose="user_data")
+    calls: list[str] = []
+
+    class Provider:
+        async def aretrieve_file(self, file_id: str, **kwargs: Any) -> FileMetadata:
+            calls.append(file_id)
+            return metadata
+
+    @asynccontextmanager
+    async def provider(account: FileAccount, **kwargs: Any) -> AsyncIterator[Provider]:
+        assert account.provider == "openai"
+        yield Provider()
+
+    async def retry(self: Any, path: str, body: dict[str, Any], result_type: type[Any]) -> Any:
+        assert path == "outputs/register"
+        assert body["metadata"]["purpose"] == "user_data"
+        return metadata
+
+    monkeypatch.setattr(inference, "provider_client", provider)
+    monkeypatch.setattr(PlatformFilesClient, "retry", retry)
+    binder = inference.FileOutputBinder(PlatformFilesClient("https://authority", "gateway", "user"), operation, [])
+    await binder.register_ids(["file_generated", "file_generated"])
+    assert calls == ["file_generated"]

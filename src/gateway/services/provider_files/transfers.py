@@ -101,7 +101,8 @@ async def receive_upload(
     *,
     max_bytes: int,
     idle_seconds: float,
-) -> AsyncIterator[tuple[UploadFile, int | None]]:
+    allowed_fields: frozenset[str] = frozenset({"expires_in_seconds"}),
+) -> AsyncIterator[tuple[UploadFile, dict[str, str]]]:
     async def bounded() -> AsyncGenerator[bytes, None]:
         total = 0
         iterator = aiter(stream)
@@ -116,28 +117,29 @@ async def receive_upload(
                 raise FilesError(413, "File size limit exceeded")
             yield chunk
 
-    parser = MultiPartParser(headers, bounded(), max_files=1, max_fields=1, max_part_size=_ENVELOPE_BYTES)
+    parser = MultiPartParser(
+        headers, bounded(), max_files=1, max_fields=len(allowed_fields), max_part_size=_ENVELOPE_BYTES
+    )
     form: FormData | None = None
     try:
         form = await parser.parse()
-        if set(form.keys()) - {"file", "expires_in_seconds"}:
+        if set(form.keys()) - {"file", *allowed_fields}:
             raise FilesError(400, "Unsupported upload field")
-        if len(form.getlist("file")) != 1 or len(form.getlist("expires_in_seconds")) > 1:
-            raise FilesError(400, "Expected one file")
+        if len(form.getlist("file")) != 1 or any(len(form.getlist(name)) > 1 for name in allowed_fields):
+            raise FilesError(400, "Expected one file and unique upload fields")
         upload = form.get("file")
         if not isinstance(upload, UploadFile):
             raise FilesError(400, "Expected one file")
         if upload.size is None or upload.size > max_bytes:
             raise FilesError(413, "File size limit exceeded")
-        raw = form.get("expires_in_seconds")
-        duration = None
-        if raw is not None:
-            if not isinstance(raw, str) or not raw.isascii() or not raw.isdigit() or len(raw) > 8:
-                raise FilesError(400, "Invalid file retention")
-            duration = int(raw)
-            if not 3600 <= duration <= 7776000:
-                raise FilesError(400, "File retention must be between one hour and 90 days")
-        yield upload, duration
+        fields: dict[str, str] = {}
+        for name in allowed_fields:
+            value = form.get(name)
+            if value is not None:
+                if not isinstance(value, str):
+                    raise FilesError(400, "Invalid upload field")
+                fields[name] = value
+        yield upload, fields
     except MultiPartException:
         raise FilesError(400, "Invalid multipart upload") from None
     finally:

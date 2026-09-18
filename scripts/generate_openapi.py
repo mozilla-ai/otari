@@ -21,11 +21,11 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from fastapi import APIRouter, FastAPI, Request
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.routes.hybrid_files import router as hybrid_files_router
 from gateway.api.routes.provider_files import create_provider_files_router
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.main import create_app
 from gateway.services.provider_files.contracts import FileAccount, FileScope, OutputPrepare
 
@@ -66,11 +66,11 @@ def generate_openapi_spec() -> dict[str, object]:
         return cast(dict[str, object], spec)
 
 
-async def _schema_identity(request: Request, db: AsyncSession) -> FileScope:
+async def _schema_identity(request: Request, uow: UnitOfWork) -> FileScope:
     raise RuntimeError("Schema-only authentication dependency")
 
 
-async def _schema_attempt(scope: FileScope, request: OutputPrepare, db: AsyncSession) -> FileAccount:
+async def _schema_attempt(scope: FileScope, request: OutputPrepare, uow: UnitOfWork) -> FileAccount:
     raise RuntimeError("Schema-only inference authorization dependency")
 
 
@@ -86,12 +86,14 @@ def _merge_hybrid_files(spec: dict[str, Any]) -> None:
         for method, operation in methods.items():
             target = spec["paths"][path][method]
             target["description"] = target.get("description", "") + (
-                "\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. "
-                "It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. "
+                "\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. "
+                "X-Otari-Files-Provider selects anthropic (default) or openai. "
+                "The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. "
+                "OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. "
                 "Hosted mode does not serve public file bytes."
             )
             schema = operation["responses"].get("200", {}).get("content", {}).get("application/json", {}).get("schema")
-            if schema and "$ref" in schema:
+            if schema:
                 media = target["responses"]["200"]["content"]["application/json"]
                 media["schema"] = {"anyOf": [media["schema"], schema]}
             target.setdefault("parameters", []).append(
@@ -100,7 +102,16 @@ def _merge_hybrid_files(spec: dict[str, Any]) -> None:
                     "in": "header",
                     "required": False,
                     "schema": {"type": "string"},
-                    "description": "Required in hybrid provider-native mode.",
+                    "description": "Required for the Anthropic hybrid Files envelope only.",
+                }
+            )
+            target["parameters"].append(
+                {
+                    "name": "X-Otari-Files-Provider",
+                    "in": "header",
+                    "required": False,
+                    "schema": {"type": "string", "enum": ["anthropic", "openai"], "default": "anthropic"},
+                    "description": "Hybrid Files provider selector; credentials remain authority-selected.",
                 }
             )
     listing = spec["paths"][f"{API_ROOT}/files"]["get"]
@@ -122,13 +133,39 @@ def _merge_hybrid_files(spec: dict[str, Any]) -> None:
             },
         ]
     )
+    existing_names = {parameter["name"] for parameter in listing["parameters"]}
+    for name in ("after", "before", "order", "purpose"):
+        if name not in existing_names:
+            listing["parameters"].append(
+                {
+                    "name": name,
+                    "in": "query",
+                    "required": False,
+                    "schema": {"type": "string"},
+                    "description": "OpenAI hybrid Files listing filter or cursor.",
+                }
+            )
     upload = spec["paths"][f"{API_ROOT}/files"]["post"]
     body_ref = upload["requestBody"]["content"]["multipart/form-data"]["schema"]["$ref"].split("/")[-1]
     spec["components"]["schemas"][body_ref]["properties"]["expires_in_seconds"] = {
         "type": "integer",
         "minimum": 3600,
         "maximum": 7776000,
-        "description": "Hybrid provider retention, capped by the control-plane maximum.",
+        "description": "Anthropic hybrid retention, capped by the control-plane maximum.",
+    }
+    properties = spec["components"]["schemas"][body_ref]["properties"]
+    properties["purpose"]["description"] = (
+        "Required for OpenAI hybrid uploads; unsupported for Anthropic hybrid uploads."
+    )
+    properties["expires_after[anchor]"] = {
+        "type": "string",
+        "enum": ["created_at"],
+        "description": "OpenAI hybrid expiry anchor.",
+    }
+    properties["expires_after[seconds]"] = {
+        "type": "integer",
+        "minimum": 1,
+        "description": "OpenAI hybrid retention, capped by the control-plane maximum.",
     }
 
 

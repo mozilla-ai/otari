@@ -3,7 +3,7 @@
 import pytest
 
 from gateway.services.provider_files.contracts import FileListRequest, FilesError
-from gateway.services.provider_files.references import collect_file_references
+from gateway.services.provider_files.references import collect_anthropic_file_references
 
 
 def test_complete_history_and_nested_results() -> None:
@@ -23,12 +23,12 @@ def test_complete_history_and_nested_results() -> None:
         },
         {"role": "user", "content": [{"type": "container_upload", "file_id": "file_old"}]},
     ]
-    assert collect_file_references(history) == ["file_old", "file_out"]
+    assert collect_anthropic_file_references(history) == ["file_old", "file_out"]
 
 
 def test_text_and_tool_input_are_not_references() -> None:
     assert (
-        collect_file_references(
+        collect_anthropic_file_references(
             [
                 {"role": "user", "content": "file_secret"},
                 {
@@ -52,7 +52,7 @@ def test_text_and_tool_input_are_not_references() -> None:
 )
 def test_unsupported_or_excessive_references_fail_closed(value: object) -> None:
     with pytest.raises(FilesError):
-        collect_file_references(value)
+        collect_anthropic_file_references(value)
 
 
 def test_nested_reference_limit() -> None:
@@ -60,7 +60,7 @@ def test_nested_reference_limit() -> None:
     for _ in range(33):
         value = {"content": value}
     with pytest.raises(FilesError):
-        collect_file_references(value)
+        collect_anthropic_file_references(value)
 
 
 def test_ids_cannot_change_pagination_semantics() -> None:

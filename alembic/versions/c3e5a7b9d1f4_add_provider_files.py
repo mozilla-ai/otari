@@ -119,6 +119,8 @@ def upgrade() -> None:
         sa.Column("workspace_id", sa.Uuid(), nullable=False),
         sa.Column("user_id", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
         sa.Column("encrypted_metadata", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+        sa.Column("purpose", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=True),
+        sa.Column("provider_created_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("size_bytes", sa.Integer(), nullable=False),
         sa.Column("downloadable", sa.Boolean(), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),

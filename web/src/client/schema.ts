@@ -1102,7 +1102,7 @@ export interface paths {
          *     ``workspace_id`` narrows a master-key listing to one workspace; a keyed
          *     request is already confined to its key's own and cannot widen or move it.
          *
-         *     Hybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.
+         *     Hybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.
          */
         get: operations["files-list_files"];
         put?: never;
@@ -1110,7 +1110,7 @@ export interface paths {
          * Create File
          * @description OpenAI-compatible file upload endpoint.
          *
-         *     Hybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.
+         *     Hybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.
          */
         post: operations["files-create_file"];
         delete?: never;
@@ -1130,7 +1130,7 @@ export interface paths {
          * Get File
          * @description Retrieve metadata for a single file.
          *
-         *     Hybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.
+         *     Hybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.
          */
         get: operations["files-get_file"];
         put?: never;
@@ -1139,7 +1139,7 @@ export interface paths {
          * Delete File
          * @description Soft-delete a file's metadata and remove its bytes from the backend.
          *
-         *     Hybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.
+         *     Hybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.
          */
         delete: operations["files-delete_file"];
         options?: never;
@@ -1158,7 +1158,7 @@ export interface paths {
          * Get File Content
          * @description Download the raw bytes of a file, streamed rather than buffered whole.
          *
-         *     Hybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.
+         *     Hybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.
          */
         get: operations["files-get_file_content"];
         put?: never;
@@ -5885,6 +5885,52 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** AnthropicFileDeleted */
+        AnthropicFileDeleted: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default file_deleted
+             * @constant
+             */
+            type: "file_deleted";
+        };
+        /** AnthropicFileMetadata */
+        AnthropicFileMetadata: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Downloadable */
+            downloadable: boolean;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Filename */
+            filename: string;
+            /** Id */
+            id: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Type
+             * @default file
+             * @constant
+             */
+            type: "file";
+        } & {
+            [key: string]: unknown;
+        };
+        /** AnthropicFilePage */
+        AnthropicFilePage: {
+            /** Data */
+            data: components["schemas"]["AnthropicFileMetadata"][];
+            /** Next Page */
+            next_page?: string | null;
+        };
         /**
          * AudioContent
          * @description Audio content for a message.
@@ -6043,12 +6089,20 @@ export interface components {
         };
         /** Body_files-create_file */
         "Body_files-create_file": {
-            /** @description Hybrid provider retention, capped by the control-plane maximum. */
+            /**
+             * @description OpenAI hybrid expiry anchor.
+             * @enum {string}
+             */
+            "expires_after[anchor]"?: "created_at";
+            /** @description OpenAI hybrid retention, capped by the control-plane maximum. */
+            "expires_after[seconds]"?: number;
+            /** @description Anthropic hybrid retention, capped by the control-plane maximum. */
             expires_in_seconds?: number;
             /** File */
             file: string;
             /**
              * Purpose
+             * @description Required for OpenAI hybrid uploads; unsupported for Anthropic hybrid uploads.
              * @default user_data
              */
             purpose: string;
@@ -7799,50 +7853,61 @@ export interface components {
         };
         /** FileListRequest */
         FileListRequest: {
+            /** After Id */
+            after_id?: string | null;
+            /** Before Id */
+            before_id?: string | null;
             /** Ids */
             ids?: string[] | null;
             /** Limit */
             limit?: number | null;
+            /**
+             * Order
+             * @default desc
+             * @enum {string}
+             */
+            order: "asc" | "desc";
             /** Page */
             page?: string | null;
+            /**
+             * Provider
+             * @default anthropic
+             */
+            provider: string;
+            /** Purpose */
+            purpose?: string | null;
+            /**
+             * Sort By
+             * @default binding_created_at
+             * @enum {string}
+             */
+            sort_by: "binding_created_at" | "provider_created_at";
         };
         /**
          * FileMetadata
-         * @description Anthropic's public metadata, without provider-neutral-only fields.
+         * @description Bounded any-llm metadata; absent provider fields remain unknown.
          */
         FileMetadata: {
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
+            /** Created At */
+            created_at?: string | null;
             /** Downloadable */
-            downloadable: boolean;
+            downloadable?: boolean | null;
             /** Expires At */
             expires_at?: string | null;
             /** Filename */
-            filename: string;
+            filename?: string | null;
             /** Id */
             id: string;
             /** Mime Type */
-            mime_type: string;
+            mime_type?: string | null;
+            /** Purpose */
+            purpose?: string | null;
             /** Size Bytes */
-            size_bytes: number;
-            /**
-             * Type
-             * @default file
-             * @constant
-             */
-            type: "file";
+            size_bytes?: number | null;
+            /** Status */
+            status?: string | null;
         } & {
             [key: string]: unknown;
-        };
-        /** FilePage */
-        FilePage: {
-            /** Data */
-            data: components["schemas"]["FileMetadata"][];
-            /** Next Page */
-            next_page?: string | null;
         };
         /** FinalizeUpload */
         FinalizeUpload: {
@@ -8932,17 +8997,6 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
-        /** NativeFileDeleted */
-        NativeFileDeleted: {
-            /** Id */
-            id: string;
-            /**
-             * Type
-             * @default file_deleted
-             * @constant
-             */
-            type: "file_deleted";
-        };
         /**
          * OAuthCallbackRequest
          * @description The authorization code a provider handed the browser.
@@ -9024,6 +9078,65 @@ export interface components {
             spend_usd: number;
             /** Total Tokens */
             total_tokens: number;
+        };
+        /** OpenAIFileDeleted */
+        OpenAIFileDeleted: {
+            /**
+             * Deleted
+             * @default true
+             * @constant
+             */
+            deleted: true;
+            /** Id */
+            id: string;
+            /**
+             * Object
+             * @default file
+             * @constant
+             */
+            object: "file";
+        };
+        /** OpenAIFileMetadata */
+        OpenAIFileMetadata: {
+            /** Bytes */
+            bytes?: number | null;
+            /** Created At */
+            created_at?: number | null;
+            /** Expires At */
+            expires_at?: number | null;
+            /** Filename */
+            filename?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Object
+             * @default file
+             * @constant
+             */
+            object: "file";
+            /** Purpose */
+            purpose?: string | null;
+            /** Status */
+            status?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** OpenAIFilePage */
+        OpenAIFilePage: {
+            /** Data */
+            data: components["schemas"]["OpenAIFileMetadata"][];
+            /** First Id */
+            first_id: string | null;
+            /** Has More */
+            has_more: boolean;
+            /** Last Id */
+            last_id: string | null;
+            /**
+             * Object
+             * @default list
+             * @constant
+             */
+            object: "list";
         };
         /**
          * OrgProviderKeyCreateRequest
@@ -10417,6 +10530,11 @@ export interface components {
              * Format: uuid
              */
             operation_id: string;
+            /**
+             * Provider
+             * @default anthropic
+             */
+            provider: string;
             /** Size Bytes */
             size_bytes: number;
         };
@@ -10774,6 +10892,11 @@ export interface components {
         References: {
             /** Ids */
             ids: string[];
+            /**
+             * Provider
+             * @default anthropic
+             */
+            provider: string;
         };
         /**
          * RegisterPasskeyRequest
@@ -10902,6 +11025,11 @@ export interface components {
              * @enum {string}
              */
             operation: "metadata" | "download" | "delete";
+            /**
+             * Provider
+             * @default anthropic
+             */
+            provider: string;
         };
         /**
          * ResourceLink
@@ -14777,10 +14905,18 @@ export interface operations {
                 page?: string;
                 /** @description Hybrid IDs filter; mutually exclusive with page and limit. */
                 "ids[]"?: string[];
+                /** @description OpenAI hybrid Files listing filter or cursor. */
+                after?: string;
+                /** @description OpenAI hybrid Files listing filter or cursor. */
+                before?: string;
+                /** @description OpenAI hybrid Files listing filter or cursor. */
+                order?: string;
             };
             header?: {
-                /** @description Required in hybrid provider-native mode. */
+                /** @description Required for the Anthropic hybrid Files envelope only. */
                 "anthropic-version"?: string;
+                /** @description Hybrid Files provider selector; credentials remain authority-selected. */
+                "X-Otari-Files-Provider"?: "anthropic" | "openai";
             };
             path?: never;
             cookie?: never;
@@ -14795,7 +14931,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: unknown;
-                    } | components["schemas"]["FilePage"];
+                    } | (components["schemas"]["AnthropicFilePage"] | components["schemas"]["OpenAIFilePage"]);
                 };
             };
             /** @description Validation Error */
@@ -14813,8 +14949,10 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Required in hybrid provider-native mode. */
+                /** @description Required for the Anthropic hybrid Files envelope only. */
                 "anthropic-version"?: string;
+                /** @description Hybrid Files provider selector; credentials remain authority-selected. */
+                "X-Otari-Files-Provider"?: "anthropic" | "openai";
             };
             path?: never;
             cookie?: never;
@@ -14833,7 +14971,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: unknown;
-                    } | components["schemas"]["FileMetadata"];
+                    } | (components["schemas"]["AnthropicFileMetadata"] | components["schemas"]["OpenAIFileMetadata"]);
                 };
             };
             /** @description Validation Error */
@@ -14853,8 +14991,10 @@ export interface operations {
                 user?: string | null;
             };
             header?: {
-                /** @description Required in hybrid provider-native mode. */
+                /** @description Required for the Anthropic hybrid Files envelope only. */
                 "anthropic-version"?: string;
+                /** @description Hybrid Files provider selector; credentials remain authority-selected. */
+                "X-Otari-Files-Provider"?: "anthropic" | "openai";
             };
             path: {
                 file_id: string;
@@ -14871,7 +15011,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: unknown;
-                    } | components["schemas"]["FileMetadata"];
+                    } | (components["schemas"]["AnthropicFileMetadata"] | components["schemas"]["OpenAIFileMetadata"]);
                 };
             };
             /** @description Validation Error */
@@ -14891,8 +15031,10 @@ export interface operations {
                 user?: string | null;
             };
             header?: {
-                /** @description Required in hybrid provider-native mode. */
+                /** @description Required for the Anthropic hybrid Files envelope only. */
                 "anthropic-version"?: string;
+                /** @description Hybrid Files provider selector; credentials remain authority-selected. */
+                "X-Otari-Files-Provider"?: "anthropic" | "openai";
             };
             path: {
                 file_id: string;
@@ -14909,7 +15051,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: unknown;
-                    } | components["schemas"]["NativeFileDeleted"];
+                    } | (components["schemas"]["AnthropicFileDeleted"] | components["schemas"]["OpenAIFileDeleted"]);
                 };
             };
             /** @description Validation Error */
@@ -14929,8 +15071,10 @@ export interface operations {
                 user?: string | null;
             };
             header?: {
-                /** @description Required in hybrid provider-native mode. */
+                /** @description Required for the Anthropic hybrid Files envelope only. */
                 "anthropic-version"?: string;
+                /** @description Hybrid Files provider selector; credentials remain authority-selected. */
+                "X-Otari-Files-Provider"?: "anthropic" | "openai";
             };
             path: {
                 file_id: string;

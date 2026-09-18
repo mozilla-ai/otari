@@ -49,13 +49,12 @@ async def test_official_sdk_upload_list_retrieve_download_delete(monkeypatch: py
     )
     metadata = FileMetadata(
         id="file_contract",
-        type="file",
         filename="input.csv",
         mime_type="text/csv",
         size_bytes=4,
         created_at=datetime.now(UTC),
         downloadable=True,
-    )
+    ).model_copy(update={"type": "file"})
     calls: list[str] = []
 
     async def authority(self: Any, path: str, body: dict[str, Any], result_type: type[Any]) -> Any:

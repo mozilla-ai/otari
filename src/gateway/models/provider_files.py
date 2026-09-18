@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
-from gateway.models.tenancy import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, UtcDateTime
+from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, UtcDateTime
 
 
 class ProviderAccountGeneration(SQLModel, PrimaryKeyMixin, CreatedAtMixin, table=True):
@@ -55,6 +55,8 @@ class ProviderFileBinding(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMi
     workspace_id: uuid.UUID = Field(index=True)
     user_id: str = Field(max_length=255, index=True)
     encrypted_metadata: str | None = None
+    purpose: str | None = Field(default=None, max_length=255)
+    provider_created_at: datetime | None = Field(default=None, sa_type=UtcDateTime)
     size_bytes: int = 0
     downloadable: bool = False
     expires_at: datetime = Field(sa_type=UtcDateTime)

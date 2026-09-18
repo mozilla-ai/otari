@@ -636,10 +636,16 @@ The control plane transfers no file bytes. A hybrid gateway uses any-llm's Files
 interface directly and stores no durable bindings or cleanup jobs.
 
 All Files responses, including errors, carry `Cache-Control: private, no-store`
-and `X-Otari-Files-Protocol: 1`. A 404 without that protocol marker is treated as
-an older peer and becomes a fixed public 502. Consumers ignore unknown response
-fields. Metadata preserves native fields and omitted values, excluding normalized
-`purpose` and `status` fields that are not Anthropic Files fields.
+and `X-Otari-Files-Protocol: 2`. Gateway requests carry the same version header.
+The authority rejects other request versions after authentication, before file
+operations. The gateway rejects any response with a missing or different version,
+including a successful response, with a fixed public 502. This prevents a version-1
+peer from ignoring provider selection. Deploy authority and gateway updates together.
+
+Metadata follows any-llm's normalized `FileMetadata`, preserving provider extras,
+`purpose`, `status`, and absent values. The Anthropic public envelope alone drops
+normalized-only fields; the OpenAI envelope maps byte counts and timestamps to its
+native shape. The control plane never stores a public API envelope as its schema.
 
 ### Authentication and composition
 
@@ -663,15 +669,28 @@ revocation, never new reads or inference. Lease tokens additionally bind the
 current lease generation, its deadline, and exact work items.
 
 BYO resolution is core-owned: a workspace pin wins, then the organization
-default, then a unique usable Anthropic key. Multiple candidates return 409.
+default, then a unique usable key for the requested provider. Multiple candidates
+return 409. `PrepareUpload`, `FileListRequest`, `ResolveFile`, and `References`
+carry `provider` (default `anthropic`); account generations and transient
+`FileAccount` credentials carry the same provider. The authority checks that the
+requested, stored, and credential providers agree.
 A disabled explicit selection fails closed. There is no oldest-key fallback.
 A hosted resolver is called only after BYO selection and only for the trusted
 default gateway, before a managed secret is read. It supplies an existing core
 account generation and a transient credential, including any trusted upstream
-workspace selection. Keep credential-source locking and generation creation in
-that same transaction. An adapter must retire every affected generation through
-`retire_account_generation` before releasing an old hosted secret, and prevent
-new source selection throughout retirement.
+workspace selection. Its callback signature is
+`resolve_hosted(scope, provider, generation_id, cleanup, uow)`. All router
+callbacks receive the request's open `UnitOfWork`, not a raw database session;
+they use repositories and never commit independently. Standard API-key credentials
+are supported; arbitrary `client_args` remain rejected. Keep credential-source
+locking and generation creation in that same transaction.
+
+An adapter must call `retire_account_generation(uow, generation, release_secret=...)`
+inside the same Unit of Work block as secret replacement or deletion, and prevent
+new source selection throughout retirement. A `True` result means cleanup blocks
+secret release: leave the secret intact, let the block commit revocation, and only
+then report the conflict. A `False` result permits the secret change within that
+block, so failure rolls back both the change and retirement.
 
 `authorize_attempt` must intersect the original authorized inference request and
 attempt, including its model, workspace tool policy, and account generation.
@@ -702,8 +721,11 @@ plan. The gateway rejects missing generation identity for file-aware dispatch.
 requests a maximum reservation, capped by the control plane. Preparation is
 idempotent and precedes multipart receipt. `Operation` returns the committed
 intent ID, scoped cleanup token, deadline, account credential, size cap, and
-finite retention cap. A smaller caller retention is passed to Anthropic and to
-finalization as `expires_in_seconds`; it cannot widen the prepared cap.
+finite retention cap. A smaller caller retention is passed through any-llm and to
+finalization as `expires_in_seconds`; it cannot widen the prepared cap. The OpenAI
+public adapter further caps default upstream retention at 30 days and validates
+explicit expiry against its native 1-hour to 30-day range. Local policy may be
+stricter; provider expiry is never silently omitted.
 
 Finalization accepts metadata observed from that one provider upload. Identical
 retries return the committed metadata; ownership collisions or incompatible
@@ -716,15 +738,31 @@ cleanup. Unknown outcomes release reservations at the operation deadline but
 retain their diagnostic marker for `files_diagnostic_retention_days` after the
 deadline (default 30 days).
 
-Lists query active bindings for the uploader and workspace. Default page size
-is 20, maximum 1000, and at most 100 `ids[]` values are accepted. Cursors are
-opaque encrypted values bound to scope, page size, a snapshot, and the stable
-`(created_at, id)` order. Files activated after the snapshot do not enter later
-pages. Deletion and expiry can shrink later pages. Unknown and foreign `ids[]`
-values are omitted without disclosing their existence.
+Lists query active bindings for the uploader, workspace, and provider, with an
+optional normalized `purpose` filter. Default page size is 20, maximum 1000,
+and at most 100 `ids[]` values are accepted. Anthropic `page` cursors are opaque
+encrypted values bound to tenant scope, provider, purpose, order, page size,
+and snapshot. Files activated after the snapshot do not enter later pages.
+Deletion and expiry can shrink later pages. Unknown and foreign `ids[]` values
+are omitted without disclosing their existence.
+
+OpenAI `after` and `before` map to internal `after_id` and `before_id`, using an
+owned active binding as the cursor anchor and `order` (`asc` or `desc`). The
+OpenAI adapter requests `sort_by: provider_created_at`; the authority orders by
+the persisted provider timestamp, falling back to binding creation when unknown.
+The default `sort_by: binding_created_at` preserves Anthropic snapshot ordering.
+Native ID cursors are not snapshot cursors. Only one cursor form is accepted. A cursor
+from another provider or owner is invalid; IDs ambiguous across accounts of one
+provider fail closed. The public OpenAI envelope emits `first_id`, `last_id`, and
+`has_more`; the internal result remains `FilePage`.
 
 Resolve supports `metadata`, `download`, and `delete`. Metadata is local to the
-control plane. Download requires the stored provider download permission.
+control plane. Explicit `downloadable: false` denies downloads. Unknown permission
+stays unknown: the gateway checks ownership and any-llm's download capability,
+then defers the provider's per-file permission decision to its download response.
+An absent size retains the upload reservation or charges the generated-file maximum;
+it never counts as zero bytes. The normalized purpose and provider creation time
+are stored separately by migration `c3e5a7b9d1f4`; remaining metadata stays encrypted.
 Delete first marks the binding `pending_cleanup`, then returns cleanup authority.
 This contract uses the internal **binding ID** for `cleanup-result`, rather than
 an ambiguous account-wide provider ID. A successful provider deletion or provider
@@ -733,7 +771,14 @@ an ambiguous account-wide provider ID. A successful provider deletion or provide
 Output operations reserve capacity before dispatch, including attempts without
 input files. Registration retrieves provider metadata and commits a binding
 before a non-streaming response or a structured streaming file block is released.
-Streaming event order is preserved while the block is held. Echoed input IDs
+Anthropic Messages is the only enabled inference envelope. Its reference parser
+and stream buffer wrap shared provider-neutral registration; OpenAI Files CRUD
+does not enable file use in Responses or Chat Completions. Those hybrid routes
+reject native code-interpreter/file-search/shell tools, stored item/compaction
+references, conversation reuse, and file references in tool options before
+resolution, since each could bypass file ownership.
+Streaming event order
+is preserved while the block is held. Echoed input IDs
 are not registered again. Non-streaming usage settlement occurs before output
 binding finalization, so a registration failure does not lose provider usage.
 

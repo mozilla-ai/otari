@@ -53,6 +53,7 @@ from sqlmodel import col
 
 from gateway.core.config import PROVIDER_TYPE_ALIASES
 from gateway.core.database import create_session
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.models.provider_keys import (
     OrgProviderKey,
@@ -97,6 +98,7 @@ from gateway.services.tenancy.errors import (
     OrgProviderKeyUnknownProviderError,
     OrgProviderKeyUnsafeApiBaseError,
     SecretBoxUnavailableTenancyError,
+    TenancyConflictError,
     WorkspaceProviderKeyOverrideConflictError,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -381,6 +383,7 @@ class OrgProviderKeyService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.uow = UnitOfWork(db)
         self.keys = OrgProviderKeyRepository(db)
         self.overrides = WorkspaceProviderKeyOverrideRepository(db)
         self.restrictions = WorkspaceProviderModelRestrictionRepository(db)
@@ -498,18 +501,20 @@ class OrgProviderKeyService:
             update_data["encrypted_api_key"] = encrypted_api_key
             update_data["last4"] = last4
 
-        if {"encrypted_api_key", "api_base", "client_args"} & update_data.keys():
-            await retire_byo_account(self.db, key, release_secret=True)
-
+        blocked = False
+        provider, name = key.provider, str(update_data.get("name", key.name))
         try:
-            updated = await self.keys.update_key(key, update_data)
-            await self.db.commit()
+            async with self.uow:
+                if {"encrypted_api_key", "api_base", "client_args"} & update_data.keys():
+                    blocked = await retire_byo_account(self.uow, key, release_secret=True)
+                if not blocked:
+                    await self.keys.update_key(key, update_data)
         except IntegrityError:
-            await self.db.rollback()
-            raise OrgProviderKeyAlreadyExistsError(key.provider, str(update_data.get("name", key.name))) from None
+            raise OrgProviderKeyAlreadyExistsError(provider, name) from None
+        self._raise_if_file_cleanup_pending(blocked)
 
         await refresh_org_provider_cache(self.db)
-        return updated.to_public(usable=key_is_usable(updated))
+        return key.to_public(usable=key_is_usable(key))
 
     async def archive_key_for_user(self, *, user: User, key_id: uuid.UUID) -> OrgProviderKeyPublic:
         """Archive a key. Organization owners and admins only.
@@ -525,9 +530,9 @@ class OrgProviderKeyService:
         if key is None:
             raise OrgProviderKeyNotFoundError(key_id)
 
-        await retire_byo_account(self.db, key, release_secret=False)
-        updated = await self.keys.update_key(key, {"archived_at": datetime.now(UTC), "is_org_default": False})
-        await self.db.commit()
+        async with self.uow:
+            await retire_byo_account(self.uow, key, release_secret=False)
+            updated = await self.keys.update_key(key, {"archived_at": datetime.now(UTC), "is_org_default": False})
         await refresh_org_provider_cache(self.db)
         return updated.to_public(usable=key_is_usable(updated))
 
@@ -540,11 +545,13 @@ class OrgProviderKeyService:
         if key is None:
             raise OrgProviderKeyNotFoundError(key_id)
 
-        await retire_byo_account(self.db, key, release_secret=True)
-        updated = await self.keys.update_key(key, {"archived_at": None})
-        await self.db.commit()
+        async with self.uow:
+            blocked = await retire_byo_account(self.uow, key, release_secret=True)
+            if not blocked:
+                await self.keys.update_key(key, {"archived_at": None})
+        self._raise_if_file_cleanup_pending(blocked)
         await refresh_org_provider_cache(self.db)
-        return updated.to_public(usable=key_is_usable(updated))
+        return key.to_public(usable=key_is_usable(key))
 
     async def delete_key_for_user(self, *, user: User, key_id: uuid.UUID) -> None:
         """Permanently delete an archived key. Organization owners and admins only.
@@ -560,10 +567,17 @@ class OrgProviderKeyService:
         if key.archived_at is None:
             raise OrgProviderKeyNotArchivedError(key_id)
 
-        await retire_byo_account(self.db, key, release_secret=True)
-        await self.keys.delete_key(key)
-        await self.db.commit()
+        async with self.uow:
+            blocked = await retire_byo_account(self.uow, key, release_secret=True)
+            if not blocked:
+                await self.keys.delete_key(key)
+        self._raise_if_file_cleanup_pending(blocked)
         await refresh_org_provider_cache(self.db)
+
+    @staticmethod
+    def _raise_if_file_cleanup_pending(blocked: bool) -> None:
+        if blocked:
+            raise TenancyConflictError("Provider file cleanup must finish before replacing or deleting this credential")
 
     async def set_org_default_for_user(self, *, user: User, key_id: uuid.UUID) -> OrgProviderKeyPublic:
         """Make a key the organization's default for its provider. Organization owners and admins only."""

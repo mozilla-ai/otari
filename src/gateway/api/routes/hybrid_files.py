@@ -1,4 +1,4 @@
-"""Anthropic-compatible provider-native Files on a stateless hybrid gateway."""
+"""Provider-native Files with thin native API envelopes on a stateless gateway."""
 
 import asyncio
 import uuid
@@ -11,19 +11,27 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
-from pydantic import ValidationError
 from starlette.types import Receive, Scope, Send
 
 from gateway.api.deps import _extract_bearer_token, get_config
+from gateway.api.routes._file_formats import (
+    AnthropicFileDeleted,
+    AnthropicFileMetadata,
+    AnthropicFilePage,
+    OpenAIFileDeleted,
+    OpenAIFileMetadata,
+    OpenAIFilePage,
+    files_format,
+)
 from gateway.core.config import GatewayConfig
 from gateway.inflight import track_request
+from gateway.services.provider_files.capabilities import check_file_account, require_download, require_file_operation
 from gateway.services.provider_files.client import PlatformFilesClient
 from gateway.services.provider_files.contracts import (
-    FileListRequest,
+    FILES_PROTOCOL_VERSION,
     FileMetadata,
     FilePage,
     FilesError,
-    NativeFileDeleted,
     Operation,
     ResolvedFile,
     WireModel,
@@ -57,14 +65,18 @@ class FilesRoute(APIRoute):
                     "Invalid file operation",
                     headers={
                         "Cache-Control": "private, no-store",
-                        "X-Otari-Files-Protocol": "1",
+                        "X-Otari-Files-Protocol": FILES_PROTOCOL_VERSION,
                     },
                 ) from None
             except FilesError as exc:
                 raise HTTPException(
                     exc.status_code,
                     exc.detail,
-                    headers={"Cache-Control": "private, no-store", "X-Otari-Files-Protocol": "1", **exc.headers},
+                    headers={
+                        "Cache-Control": "private, no-store",
+                        "X-Otari-Files-Protocol": FILES_PROTOCOL_VERSION,
+                        **exc.headers,
+                    },
                 ) from None
             except TimeoutError:
                 raise HTTPException(
@@ -72,11 +84,11 @@ class FilesRoute(APIRoute):
                     "File transfer timed out",
                     headers={
                         "Cache-Control": "private, no-store",
-                        "X-Otari-Files-Protocol": "1",
+                        "X-Otari-Files-Protocol": FILES_PROTOCOL_VERSION,
                     },
                 ) from None
             result.headers["Cache-Control"] = "private, no-store"
-            result.headers["X-Otari-Files-Protocol"] = "1"
+            result.headers["X-Otari-Files-Protocol"] = FILES_PROTOCOL_VERSION
             return result
 
         return handle
@@ -86,20 +98,10 @@ router = APIRouter(tags=["files"], route_class=FilesRoute)
 Config = Annotated[GatewayConfig, Depends(get_config)]
 
 
-def file_headers(request: Request) -> dict[str, str]:
-    version = request.headers.get("anthropic-version")
-    if not version:
-        raise FilesError(400, "Hybrid provider-native Files require the Anthropic API contract (anthropic-version)")
-    beta = request.headers.get("anthropic-beta", "")
-    if "files-api-2025-04-14" in {value.strip() for value in beta.split(",")}:
-        raise FilesError(400, "Hybrid Files require the GA API; the legacy Files beta is unsupported")
-    return {"anthropic-version": version, **({"anthropic-beta": beta} if beta else {})}
-
-
 def files_client(request: Request, config: GatewayConfig) -> PlatformFilesClient:
     if not config.files_enabled or not config.files_provider_native_enabled:
         raise FilesError(404, "Provider-native Files are not enabled")
-    file_headers(request)
+    files_format(request)
     token = _extract_bearer_token(request, config)
     base = config.platform.get("base_url")
     if not base or not config.platform_token:
@@ -117,10 +119,13 @@ def _admission(request: Request, config: GatewayConfig) -> UploadAdmission:
     return admission
 
 
-@router.post("/files", response_model=FileMetadata, response_model_exclude_unset=True)
-async def upload_file(request: Request, config: Config) -> FileMetadata:
+@router.post("/files", response_model=AnthropicFileMetadata | OpenAIFileMetadata, response_model_exclude_unset=True)
+async def upload_file(request: Request, config: Config) -> AnthropicFileMetadata | OpenAIFileMetadata:
     client = files_client(request, config)
-    headers = file_headers(request)
+    envelope = files_format(request)
+    require_file_operation(envelope.provider, "upload")
+    require_file_operation(envelope.provider, "delete")
+    headers = envelope.headers(request)
     operation: Operation | None = None
     metadata: FileMetadata | None = None
     started = False
@@ -131,16 +136,27 @@ async def upload_file(request: Request, config: Config) -> FileMetadata:
                 {
                     "operation_id": str(uuid.uuid4()),
                     "size_bytes": config.files_max_bytes,
+                    "provider": envelope.provider,
                 },
                 Operation,
             )
+            check_file_account(operation.account, envelope.provider)
             maximum = min(config.files_max_bytes, operation.max_bytes)
-            track_request(request, endpoint="/files", model="files", provider="anthropic")
+            track_request(request, endpoint="/files", model="files", provider=operation.account.provider)
             async with _admission(request, config).reserve(maximum + 65536):
                 async with receive_upload(
-                    request.headers, request.stream(), max_bytes=maximum, idle_seconds=config.files_idle_timeout_seconds
-                ) as (upload, duration):
-                    retention = min(duration or operation.expires_in_seconds, operation.expires_in_seconds)
+                    request.headers,
+                    request.stream(),
+                    max_bytes=maximum,
+                    idle_seconds=config.files_idle_timeout_seconds,
+                    allowed_fields=envelope.upload_fields,
+                ) as (upload, fields):
+                    duration, purpose = envelope.upload_options(fields)
+                    retention = min(
+                        duration or operation.expires_in_seconds,
+                        operation.expires_in_seconds,
+                        envelope.max_retention_seconds,
+                    )
                     async with provider_client(
                         operation.account, idle_timeout=config.files_idle_timeout_seconds
                     ) as provider:
@@ -150,11 +166,12 @@ async def upload_file(request: Request, config: Config) -> FileMetadata:
                             filename=upload.filename,
                             mime_type=upload.content_type,
                             expires_in=retention,
+                            purpose=purpose,
                             max_retries=0,
                             extra_headers=headers,
                         )
                         metadata = FileMetadata.model_validate(result.model_dump(exclude_unset=True))
-                    return await client.retry(
+                    finalized = await client.retry(
                         f"uploads/{operation.id}/finalize",
                         {
                             "metadata": metadata.model_dump(mode="json", exclude_unset=True),
@@ -162,6 +179,7 @@ async def upload_file(request: Request, config: Config) -> FileMetadata:
                         },
                         FileMetadata,
                     )
+                    return envelope.metadata(finalized)
     except BaseException as exc:
         if operation is not None:
             await _compensate_upload(client, operation, metadata, headers, started, exc)
@@ -215,40 +233,39 @@ async def _compensate_upload(
         task.cancel()
 
 
-@router.get("/files", response_model=FilePage, response_model_exclude_unset=True)
-async def list_files(request: Request, config: Config) -> FilePage:
+@router.get("/files", response_model=AnthropicFilePage | OpenAIFilePage, response_model_exclude_unset=True)
+async def list_files(request: Request, config: Config) -> AnthropicFilePage | OpenAIFilePage:
     client = files_client(request, config)
-    query = request.query_params
-    if set(query) - {"page", "limit", "ids[]"}:
-        raise FilesError(400, "Hybrid Files require GA pagination (page, limit, ids[])")
-    if len(query.getlist("page")) > 1 or len(query.getlist("limit")) > 1:
-        raise FilesError(400, "Duplicate pagination parameter")
-    try:
-        parsed = FileListRequest(
-            page=query.get("page"),
-            limit=int(query["limit"]) if "limit" in query else None,
-            ids=query.getlist("ids[]") if "ids[]" in query else None,
-        )
-    except (ValueError, ValidationError):
-        raise FilesError(400, "Invalid Files pagination") from None
-    return await client.post("list", parsed.model_dump(exclude_none=True), FilePage)
+    envelope = files_format(request)
+    parsed = envelope.list_request(request)
+    result = await client.post("list", parsed.model_dump(exclude_none=True), FilePage)
+    return envelope.page(result)
 
 
-@router.get("/files/{file_id}", response_model=FileMetadata, response_model_exclude_unset=True)
-async def retrieve_file(file_id: str, request: Request, config: Config) -> FileMetadata:
-    resolved = await files_client(request, config).post(
-        f"{quote(file_id, safe='')}/resolve", {"operation": "metadata"}, ResolvedFile
+@router.get(
+    "/files/{file_id}", response_model=AnthropicFileMetadata | OpenAIFileMetadata, response_model_exclude_unset=True
+)
+async def retrieve_file(file_id: str, request: Request, config: Config) -> AnthropicFileMetadata | OpenAIFileMetadata:
+    client = files_client(request, config)
+    envelope = files_format(request)
+    resolved = await client.post(
+        f"{quote(file_id, safe='')}/resolve", {"operation": "metadata", "provider": envelope.provider}, ResolvedFile
     )
-    return resolved.metadata
+    return envelope.metadata(resolved.metadata)
 
 
 @router.get("/files/{file_id}/content")
 async def download_file(file_id: str, request: Request, config: Config) -> Response:
     client = files_client(request, config)
-    resolved = await client.post(f"{quote(file_id, safe='')}/resolve", {"operation": "download"}, ResolvedFile)
-    if resolved.account is None or not resolved.metadata.downloadable:
-        raise FilesError(400, "This file is not downloadable")
-    track_request(request, endpoint="/files", model="files", provider="anthropic")
+    envelope = files_format(request)
+    resolved = await client.post(
+        f"{quote(file_id, safe='')}/resolve", {"operation": "download", "provider": envelope.provider}, ResolvedFile
+    )
+    if resolved.account is None:
+        raise FilesError(502, "Authorization service returned an invalid file account")
+    check_file_account(resolved.account, envelope.provider)
+    require_download(envelope.provider, resolved.metadata)
+    track_request(request, endpoint="/files", model="files", provider=resolved.account.provider)
     stack = AsyncExitStack()
     deadline = asyncio.get_running_loop().time() + config.files_transfer_timeout_seconds
     try:
@@ -257,7 +274,7 @@ async def download_file(file_id: str, request: Request, config: Config) -> Respo
         )
         async with asyncio.timeout(config.files_idle_timeout_seconds):
             download = await stack.enter_async_context(
-                provider.adownload_file(file_id, max_retries=0, extra_headers=file_headers(request))
+                provider.adownload_file(file_id, max_retries=0, extra_headers=envelope.headers(request))
             )
         headers = {
             name: value
@@ -292,20 +309,25 @@ async def download_file(file_id: str, request: Request, config: Config) -> Respo
     return FileDownloadResponse(chunks(), stack=stack, headers=headers, media_type="application/octet-stream")
 
 
-@router.delete("/files/{file_id}", response_model=NativeFileDeleted)
-async def delete_file(file_id: str, request: Request, config: Config) -> dict[str, str]:
+@router.delete("/files/{file_id}", response_model=AnthropicFileDeleted | OpenAIFileDeleted)
+async def delete_file(file_id: str, request: Request, config: Config) -> AnthropicFileDeleted | OpenAIFileDeleted:
     client = files_client(request, config)
-    resolved = await client.post(f"{quote(file_id, safe='')}/resolve", {"operation": "delete"}, ResolvedFile)
+    envelope = files_format(request)
+    require_file_operation(envelope.provider, "delete")
+    resolved = await client.post(
+        f"{quote(file_id, safe='')}/resolve", {"operation": "delete", "provider": envelope.provider}, ResolvedFile
+    )
     if resolved.account is None or resolved.cleanup_token is None or resolved.operation_id is None:
         raise FilesError(502, "Authorization service returned an invalid cleanup response")
-    track_request(request, endpoint="/files", model="files", provider="anthropic")
+    check_file_account(resolved.account, envelope.provider)
+    track_request(request, endpoint="/files", model="files", provider=resolved.account.provider)
     failure = None
     try:
         async with (
             asyncio.timeout(config.files_transfer_timeout_seconds),
             provider_client(resolved.account) as provider,
         ):
-            await provider.adelete_file(file_id, max_retries=0, extra_headers=file_headers(request))
+            await provider.adelete_file(file_id, max_retries=0, extra_headers=envelope.headers(request))
     except Exception as exc:
         failure = provider_error(exc)
         if failure.status_code == 404:
@@ -320,4 +342,4 @@ async def delete_file(file_id: str, request: Request, config: Config) -> dict[st
     )
     if failure is not None:
         raise failure
-    return {"id": file_id, "type": "file_deleted"}
+    return envelope.deleted(file_id)
