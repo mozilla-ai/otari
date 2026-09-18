@@ -120,25 +120,32 @@ that says why it could not.
 
 401 sign-out and the query client's no-retry handling for 401 and 403 are centralized.
 
-## Bounded pagination
+## Ask for a page, not for everything
 
-When a hook fetches "everything," cap the walk so a backend or proxy that ignores `skip`
-can't turn it into an unbounded request loop. Copy the `fetchAllPricing` shape:
+A list hook asks for the page on screen. `skip` and `limit` come from the URL state so the view
+is shareable and survives the back button, and `placeholderData: (previous) => previous` keeps
+the last page rendered while the next one loads:
 
 ```ts
-const PRICING_PAGE_SIZE = 1000;   // matches the server-side cap
-const PRICING_MAX_PAGES = 100;    // hard stop: 100k rows, far beyond any real history
-
-async function fetchAllPricing(): Promise<PricingResponse[]> {
-  const all: PricingResponse[] = [];
-  for (let page = 0; page < PRICING_MAX_PAGES; page += 1) {
-    const rows = await apiFetch<PricingResponse[]>(`/v1/pricing?skip=${page * PRICING_PAGE_SIZE}&limit=${PRICING_PAGE_SIZE}`);
-    all.push(...rows);
-    if (rows.length < PRICING_PAGE_SIZE) break;
-  }
-  return all;
+export function useKeys({ skip, limit }: { skip: number; limit: number }) {
+  return useQuery({
+    queryKey: [KEYS, skip, limit],
+    queryFn: () => apiFetch<ApiKey[]>(`/keys?skip=${skip}&limit=${limit}`),
+    placeholderData: (previous) => previous,
+  });
 }
 ```
+
+Every list route in the gateway accepts `skip` and `limit`, and rejects a `limit` above 1000
+rather than clamping it, so a page size is a number the dashboard and the gateway agree on
+rather than a hint.
+
+**Reading a whole collection is what [performance.md](./performance.md) forbids**, and a cap
+on the walk does not make it acceptable: it only stops the walk looping. `fetchAllPaged` and
+`fetchAllRows` in `shared/api/paging.ts` serve the nineteen reads that predate the rule (#1376)
+and are not the shape to copy. A new hook that seems to need one needs something from the
+endpoint instead: a search parameter for a picker, an embedded label or a batch lookup where a
+page is resolving ids.
 
 ## Polling
 

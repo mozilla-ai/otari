@@ -1,6 +1,15 @@
 /**
  * The bounded "fetch everything" walk, in one place.
  *
+ * **Not the shape to copy.** Reading a whole collection is what
+ * `performance.md` forbids, and the cap below only stops the walk looping: it
+ * does not paginate the read, and everything downstream still sorts and filters
+ * in the browser. This module serves the nineteen reads that predate that rule
+ * (otari#1376) and exists to be deleted as they are worked down. A new caller
+ * wants something from its endpoint instead: `skip` and `limit` for a table, a
+ * search parameter for a picker, an embedded label or a batch lookup where a
+ * page is resolving ids.
+ *
  * Two shapes reach it because the gateway answers two. The tenancy routes wrap
  * their rows in a `{ data, count }` envelope; `/keys`, `/users`, `/budgets`,
  * `/scoped-budgets` and `/pricing` answer a bare array. That is the only thing

@@ -71,8 +71,16 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    `placeholderData: (prev) => prev`, or the page blanks on every filter change. Don't call
    `fetch()` directly for authenticated management requests; `apiFetch` uses the HttpOnly
    session cookie and signs out on 401, while public sign-in helpers stay outside that path.
-   Never mirror server state into `useState`, and never swallow a mutation error. Bound every
-   "fetch all" loop with a hard page cap. A fire-and-forget call is prefixed with `void`, which
+   Never mirror server state into `useState`, and never swallow a mutation error. **A list hook
+   asks for the page on screen**, taking `skip` and `limit` from the URL state with
+   `placeholderData: (prev) => prev`; every gateway list route accepts both and rejects a
+   `limit` above 1000 rather than clamping. Reading a whole collection is the finding, and a
+   cap on the walk does not answer it: the cap stops the walk looping, it does not paginate the
+   read, and everything downstream still sorts and filters in the browser. A hook that looks
+   like it needs one needs something from the endpoint instead: a search parameter for a
+   picker, an embedded label or a batch lookup where a page is resolving ids. `fetchAllPaged`
+   and `fetchAllRows` serve the nineteen reads that predate the rule (#1376); a new caller of
+   either is a finding. A fire-and-forget call is prefixed with `void`, which
    marks it as deliberately not awaited and is what lets the floating-promise lint flag the
    ones that were forgotten. It is a marker and not error handling: `void` discards the
    rejection too, so it is correct only where the promise cannot reject meaningfully

@@ -92,9 +92,30 @@ ten thousand rows to `.filter()` them in the browser is both slow and wrong: it 
 the page that was fetched, so the result is a subset of a subset and the count is a lie. A
 small list already in memory, rendered in a table, is fine.
 
-When a hook genuinely has to walk everything, bound the walk. `fetchAllPricing` in
-The domain modules under `shared/api/` are the shape to copy, and [data-fetching.md](./data-fetching.md)
-explains the cap.
+**Reading a whole collection is not an exception to that, it is the thing it forbids.** A cap
+on such a walk stops it looping forever against a backend that ignores `skip`; it does not make
+the read paginated, and everything downstream still sorts and filters in the browser. A hook
+that looks like it has to read everything is a hook whose endpoint does not offer what the page
+needs, and that is a reason to change the endpoint.
+
+What to reach for instead, by what the page is doing:
+
+- **A table** takes `skip` and `limit` from the URL state, with
+  `placeholderData: (previous) => previous` so the rows do not blank between pages. Every list
+  route in the gateway already accepts both, capped at `limit=1000`, so this needs nothing
+  from the backend.
+- **A picker** needs the endpoint to search. Fetching every option to filter in memory offers
+  a subset the moment the collection passes one page, and says nothing about it. No list route
+  accepts a search term today except the two usage ones, so a picker over a large collection is
+  a gateway change before it is a dashboard one.
+- **A lookup** (a row carries a `user_id`, the page wants a name) belongs in the response.
+  Either the row carries its own label or there is a batch endpoint to resolve the ids on the
+  page. Reading the whole table to join it in the browser is the dashboard doing the server's
+  join, and it pays for every row to answer for the handful on screen.
+
+Nineteen reads in `shared/api/` predate this rule and still walk. #1376 tracks working them
+down; `fetchAllPaged` and `fetchAllRows` in `shared/api/paging.ts` exist to be deleted, not to
+be reached for.
 
 ## Long lists
 
