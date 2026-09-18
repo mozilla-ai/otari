@@ -239,7 +239,7 @@ describe("KeysPage", () => {
     vi.unstubAllGlobals()
   })
 
-  it("keeps selection, full identity, and prefix copying available in the mobile list", async () => {
+  it("keeps selection and full identity available in the mobile list", async () => {
     stubRegionWidth(390)
     const name = "prod-gateway-eu-west-1-primary-ingress-router"
     const owner = "alexandra.constantinescu@platform-engineering.example.com"
@@ -249,9 +249,6 @@ describe("KeysPage", () => {
       ],
     })
     const user = userEvent.setup()
-    const copy = vi
-      .spyOn(navigator.clipboard, "writeText")
-      .mockResolvedValue(undefined)
     renderPage(<KeysPage />)
     await screen.findByRole("button", { name: `Actions for ${name}` })
     expect(screen.queryByRole("grid")).not.toBeInTheDocument()
@@ -273,10 +270,9 @@ describe("KeysPage", () => {
     expect(
       await screen.findByRole("checkbox", { name: `Select ${name}` }),
     ).toBeChecked()
-    await user.click(
-      screen.getByRole("button", { name: `Copy key prefix for ${name}` }),
-    )
-    expect(copy).toHaveBeenCalledWith("gw-prefix")
+    expect(
+      screen.queryByRole("button", { name: `Copy key prefix for ${name}` }),
+    ).not.toBeInTheDocument()
   })
 
   it("keeps two faces in Owner and folds the lanes into the menu only once they leave the row", async () => {
@@ -385,6 +381,11 @@ describe("KeysPage", () => {
     const activeRow = (await screen.findByText("ci-bot")).closest("tr")!
     expect(within(activeRow).getByText("Active")).toBeInTheDocument()
     expect(within(activeRow).getByText("gw-AbC3dE…1234")).toBeInTheDocument()
+    expect(
+      within(activeRow).queryByRole("button", {
+        name: "Copy key prefix for ci-bot",
+      }),
+    ).not.toBeInTheDocument()
 
     const prefixOnlyRow = screen.getByText("prefix-only").closest("tr")!
     expect(within(prefixOnlyRow).getByText("gw-Older…")).toBeInTheDocument()
