@@ -88,10 +88,12 @@ its listeners, and its queries exist while it is closed.
 ## The server does the shaping
 
 **The dashboard is a thin rendering layer. It does not filter, search, sort, join or aggregate
-server data.** Those belong to the endpoint. Pulling ten thousand rows to `.filter()` them in
-the browser is both slow and wrong: it filters only the page that was fetched, so the result is
-a subset of a subset and the count is a lie. A small list already in memory, rendered in a
-table, is fine.
+server data.** Those belong to the endpoint, and filtering in the browser fails in one of three
+ways depending on what was fetched. Filter the page on screen and every match on another page
+is missed. Walk the collection first and the answer is right, paid for with a full scan, and
+there is still no server-side count to put under it. Walk a collection past the hundred-page cap
+and the tail is gone with nothing said, so the answer is wrong and looks right. A small list
+already in memory, rendered in a table, is fine.
 
 **Nor does it assemble a view out of several responses.** Reading members, users, budgets and
 ceilings to join them by id in the browser is four round trips and four whole tables to render
