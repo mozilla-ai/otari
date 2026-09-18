@@ -96,7 +96,19 @@ export function useCreateAlias() {
   changes the model catalog too).
 - Use `setQueryData` when the mutation already returns the fresh object (`useUpdateSettings`
   seeds `[SETTINGS]` from the response, then invalidates the derived model lists).
-- Prefix fire-and-forget invalidations with `void` so the floating-promise lint stays happy.
+- Prefix fire-and-forget invalidations with `void`. What that buys is a marker: it separates
+  "not awaited on purpose" from "forgot to await", which are otherwise the same line, and it
+  is what lets the floating-promise lint flag the second without flagging the first.
+
+  **It is a marker, not error handling.** `void` evaluates the promise and discards the
+  result, rejection included, so a promise that rejects behind one still rejects unhandled and
+  the warning that would have said so is gone. Correct only where the promise cannot reject
+  meaningfully, which is a fact about the call rather than a style choice, and worth checking
+  rather than assuming: `invalidateQueries` and `refetch` resolve with state rather than
+  rejecting, and `useAutosave`'s `run` catches into its own `error`. Anything that can reject
+  gets real handling instead, a `.catch` that reports or an `await` in a function that owns
+  the failure. Reaching for `void` to quiet the lint on a call that can fail converts a
+  warning into a silent failure.
 
 ### An error has to go somewhere
 

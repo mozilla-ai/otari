@@ -72,7 +72,13 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    `fetch()` directly for authenticated management requests; `apiFetch` uses the HttpOnly
    session cookie and signs out on 401, while public sign-in helpers stay outside that path.
    Never mirror server state into `useState`, and never swallow a mutation error. Bound every
-   "fetch all" loop with a hard page cap. See
+   "fetch all" loop with a hard page cap. A fire-and-forget call is prefixed with `void`, which
+   marks it as deliberately not awaited and is what lets the floating-promise lint flag the
+   ones that were forgotten. It is a marker and not error handling: `void` discards the
+   rejection too, so it is correct only where the promise cannot reject meaningfully
+   (`invalidateQueries` and `refetch` resolve with state; `useAutosave`'s `run` catches into
+   its own error). A `void` on a call that can fail is the finding, and the fix is a `.catch`
+   that reports or an `await` in a function that owns the failure. See
    [data-fetching.md](../skills/frontend-standards/data-fetching.md).
 
 5. **TypeScript + React hygiene.** An absent value in your own types and props is the type's
