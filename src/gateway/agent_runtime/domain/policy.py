@@ -268,9 +268,9 @@ def _parse_gate(raw: Any) -> GateSpec:
     # glob/phrase list, rather than silently treated as "always applies" too:
     # an author who writes `when_changed: []` almost certainly meant
     # something, and guessing which is worse than a 422.
-    when_changed: list[str] = []
+    judge_when_changed: list[str] = []
     if "when_changed" in raw:
-        when_changed = _parse_glob_list(
+        judge_when_changed = _parse_glob_list(
             gate_id, "when_changed", _require_string_list(raw, "when_changed", gate_id, gate_type)
         )
     # enforcement_value is already proven "advisory" by the _JUDGE_ENFORCEMENTS
@@ -280,7 +280,7 @@ def _parse_gate(raw: Any) -> GateSpec:
         id=gate_id,
         enforcement=cast(Literal["advisory"], enforcement_value),
         rubric=rubric,
-        when_changed=tuple(when_changed),
+        when_changed=tuple(judge_when_changed),
         message=message,
     )
 

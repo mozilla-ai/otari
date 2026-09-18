@@ -7996,6 +7996,24 @@ export interface components {
             status: "invited";
         };
         /**
+         * JudgeVerdictRequest
+         * @description One judge gate's verdict, as the caller's own model call produced it.
+         */
+        JudgeVerdictRequest: {
+            /** Gate Id */
+            gate_id: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "pass" | "fail" | "error";
+            /**
+             * Reasoning
+             * @default
+             */
+            reasoning: string;
+        };
+        /**
          * KeyInfo
          * @description Response model for key information.
          */
@@ -10039,6 +10057,11 @@ export interface components {
              * @description Shell commands the caller observed run or is about to run.
              */
             commands?: string[] | null;
+            /**
+             * Judge Results
+             * @description Model verdicts the caller collected for this request's judge gates.
+             */
+            judge_results?: components["schemas"]["JudgeVerdictRequest"][];
             /** Policy Yaml */
             policy_yaml: string;
         };
