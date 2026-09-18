@@ -75,9 +75,9 @@ export function TablePagination({
   // number is uncommitted by definition, and the page moving is the operator
   // having pressed something else.
   const [pageText, setPageText] = useState(String(page + 1))
-  const [seenPage, setSeenPage] = useState(page)
-  if (page !== seenPage) {
-    setSeenPage(page)
+  const [lastSeenPage, setLastSeenPage] = useState(page)
+  if (page !== lastSeenPage) {
+    setLastSeenPage(page)
     setPageText(String(page + 1))
   }
 

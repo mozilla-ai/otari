@@ -66,9 +66,9 @@ when that value moves. **Adjust the state during render. Do not run an effect**,
 `key` only when the draft is genuinely worth nothing.
 
 ```tsx
-const [seen, setSeen] = useState(value)
-if (value !== seen) {
-  setSeen(value)
+const [lastSeenValue, setLastSeenValue] = useState(value)
+if (value !== lastSeenValue) {
+  setLastSeenValue(value)
   // the condition is the design decision; see below
 }
 ```
@@ -83,7 +83,7 @@ goes:
 | Where | Condition | What it protects |
 | --- | --- | --- |
 | `design-system/forms/ComboBoxField.tsx` | `if (value !== typed)` | a value this field itself reported, so a list that drops a row does not move a value under a mounted field |
-| `features/settings/SettingsPage.tsx` (`useDraft`) | `if (draft === seen)` | an unsaved edit, so another operator's save does not take a half-typed value out from under the cursor |
+| `features/settings/SettingsPage.tsx` (`useDraft`) | `if (draft === lastSeenValue)` | an unsaved edit, so another operator's save does not take a half-typed value out from under the cursor |
 | `design-system/data/TablePagination.tsx` | unconditional | nothing: the page box commits on Enter or blur, so a half-typed number is uncommitted by definition |
 
 Because the condition differs at every site, these do not share a hook. One would need the

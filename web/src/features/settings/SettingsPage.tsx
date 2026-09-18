@@ -64,10 +64,10 @@ export function fieldMatches(field: ConfigField, query: string): boolean {
 // `design-system/forms/ComboBoxField.tsx` uses.
 function useDraft(committed: string) {
   const [draft, setDraft] = useState(committed)
-  const [seen, setSeen] = useState(committed)
-  if (committed !== seen) {
-    setSeen(committed)
-    if (draft === seen) setDraft(committed)
+  const [lastSeenValue, setLastSeenValue] = useState(committed)
+  if (committed !== lastSeenValue) {
+    setLastSeenValue(committed)
+    if (draft === lastSeenValue) setDraft(committed)
   }
   return [draft, setDraft] as const
 }

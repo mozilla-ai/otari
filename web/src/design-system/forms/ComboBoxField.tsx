@@ -171,9 +171,9 @@ export function ComboBoxField({
   // moved from one this field reported. The first kind leaves whatever is in the
   // box stale: a list of these fields that drops a row moves a value under a
   // field that is still mounted.
-  const [seen, setSeen] = useState(value)
-  if (value !== seen) {
-    setSeen(value)
+  const [lastSeenValue, setLastSeenValue] = useState(value)
+  if (value !== lastSeenValue) {
+    setLastSeenValue(value)
     if (value !== typed) setTyped(undefined)
   }
 
