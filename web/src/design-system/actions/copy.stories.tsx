@@ -196,6 +196,7 @@ export const CoupledReveal: Story = {
   render: function CoupledRevealStory() {
     const [isRevealed, setIsRevealed] = useState(false)
     const key = "otari-sk-9f3a1c77b0e244d1e8a972fc0a3bc5d8"
+    const fingerprint = concealedFingerprint(key.slice(0, 15), key.slice(-4))
     const request = (secret: string) =>
       `curl https://gateway.example.com/v1/chat/completions \\\n  -H "Authorization: Bearer ${secret}"`
     return (
@@ -203,7 +204,7 @@ export const CoupledReveal: Story = {
         <CopyField
           label="Secret key"
           value={key}
-          concealed={concealedFingerprint(key)}
+          concealed={fingerprint}
           isRevealed={isRevealed}
           onRevealChange={setIsRevealed}
         />
@@ -211,7 +212,7 @@ export const CoupledReveal: Story = {
           label="Example request"
           multiline
           value={request(key)}
-          concealed={request(concealedFingerprint(key))}
+          concealed={request(fingerprint)}
           isRevealed={isRevealed}
           onRevealChange={setIsRevealed}
         />

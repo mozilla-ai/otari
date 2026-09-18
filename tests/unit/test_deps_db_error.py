@@ -16,21 +16,24 @@ import pytest
 from fastapi import HTTPException, status
 from sqlalchemy.exc import OperationalError
 
+from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.api import deps
 from gateway.api.deps import _verify_and_update_api_key, is_valid_master_key
-from gateway.auth.models import generate_api_key, hash_key
+from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
 from gateway.services.master_key_service import generate_master_key
+
+KEY_FORMAT = DefaultApiKeyFormatAdapter(None)
 
 
 @pytest.mark.asyncio
 async def test_lookup_db_error_raises_503_not_500() -> None:
-    token = generate_api_key()
+    token = KEY_FORMAT.mint()
     db: Any = AsyncMock()
     db.execute.side_effect = OperationalError("SELECT", {}, Exception("database is locked"))
 
     with pytest.raises(HTTPException) as exc_info:
-        await _verify_and_update_api_key(db, token)
+        await _verify_and_update_api_key(db, token, KEY_FORMAT)
 
     assert exc_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     assert isinstance(exc_info.value.detail, str)
@@ -57,7 +60,7 @@ async def test_failed_last_used_bump_logs_warning_and_does_not_poison_request_se
     never committed or rolled back by auth, and a ``SQLAlchemyError`` from the
     bump is swallowed after a warning rather than surfaced to the caller.
     """
-    token = generate_api_key()
+    token = KEY_FORMAT.mint()
     api_key: Any = SimpleNamespace(
         id="key-abc123",
         key_hash=hash_key(token),
@@ -89,7 +92,7 @@ async def test_failed_last_used_bump_logs_warning_and_does_not_poison_request_se
         patch.object(deps, "create_session", lambda: _FailingSessionCM()),
         patch("gateway.api.deps.logger.warning") as mock_warning,
     ):
-        result = await _verify_and_update_api_key(db, token)
+        result = await _verify_and_update_api_key(db, token, KEY_FORMAT)
 
     assert result is api_key
     mock_warning.assert_called_once()

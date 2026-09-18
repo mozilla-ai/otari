@@ -66,19 +66,22 @@ export function CopyableValue({
 export const CONCEALED_SECRET = "••••••••••••••••"
 
 /**
- * A credential's stand-in that still identifies it: the first eight characters,
- * a fixed bullet run, then the last four.
+ * A credential's stand-in that still identifies it: the fingerprint the server
+ * stored for the key, a fixed bullet run, then the stored suffix.
  *
  * Shown where an operator has to tell one key from another while it is
- * concealed. The bullet run is fixed for `CONCEALED_SECRET`'s reason, so the
- * length of the key stays off the screen; a value too short to keep those two
- * ends apart falls back to the plain stand-in rather than showing most of
- * itself.
+ * concealed. Built from the `key_prefix` and `key_suffix` the create response
+ * carries rather than sliced off the plaintext here, so the reveal shows the
+ * same fingerprint the Keys table will, whatever length the bound key format
+ * gives its prefix. The bullet run is fixed for `CONCEALED_SECRET`'s reason, so
+ * the length of the key stays off the screen. A response with no fingerprint
+ * falls back to the plain stand-in.
  */
-export function concealedFingerprint(value: string): string {
-  return value.length >= 16
-    ? `${value.slice(0, 8)}••••••••${value.slice(-4)}`
-    : CONCEALED_SECRET
+export function concealedFingerprint(
+  keyPrefix: string | null | undefined,
+  keySuffix: string | null | undefined,
+): string {
+  return keyPrefix ? `${keyPrefix}••••••••${keySuffix ?? ""}` : CONCEALED_SECRET
 }
 
 // A 44x44 target below `md` for an icon-only control, back to the button's own

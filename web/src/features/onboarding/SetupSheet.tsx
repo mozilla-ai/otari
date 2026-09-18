@@ -45,6 +45,8 @@ import {
 export function SetupSheet({
   workspaceName,
   apiKey,
+  keyPrefix,
+  keySuffix,
   baseUrl,
   model,
   failure,
@@ -61,6 +63,9 @@ export function SetupSheet({
   workspaceName?: string
   /** The issued key's plaintext, or undefined while it is being minted. */
   apiKey?: string
+  /** The fingerprint the server stored for the issued key, shown while it is concealed. */
+  keyPrefix?: string | null
+  keySuffix?: string | null
   /** Where a request belongs, or undefined when the deployment names none. */
   baseUrl?: string
   /** The first model the gateway can serve, when it can serve one. */
@@ -84,7 +89,9 @@ export function SetupSheet({
   const [isRevealed, setIsRevealed] = useState(false)
 
   const concealedKey =
-    apiKey === undefined ? CONCEALED_SECRET : concealedFingerprint(apiKey)
+    apiKey === undefined
+      ? CONCEALED_SECRET
+      : concealedFingerprint(keyPrefix, keySuffix)
 
   const instruction = SETUP_TABS.find(({ id }) => id === tab)?.instruction ?? ""
   // Built from the stand-in whenever the key is not on screen, which includes

@@ -29,6 +29,7 @@ from typing import Any, TypeVar, cast
 from fastapi import APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
@@ -36,6 +37,7 @@ from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAda
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.log_config import logger
+from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.growth_signal_port import GrowthSignalPort
@@ -161,6 +163,11 @@ class Container:
         return tuple(self._router_contributions)
 
 
+def _api_key_format_adapter(session: AsyncSession | None) -> ApiKeyFormatPort:
+    """Build the core ``ApiKeyFormatPort`` adapter for one request."""
+    return DefaultApiKeyFormatAdapter(session)
+
+
 def _billing_adapter(session: AsyncSession | None) -> BillingPort:
     """Build the core ``BillingPort`` adapter for one request."""
     return NullBillingAdapter(session)
@@ -283,6 +290,10 @@ def build_container(bootstrap_selector: str | None = None) -> Container:
     # This one is a real implementation rather than a Null Object, because
     # refusing an unknown identity is itself the base's answer.
     container.bind(IdentityProviderPort, _identity_provider_adapter)
+    # API key format: the base mints the open-source shape and checks every
+    # presented key against its own rows. A hosted overlay binds a format that
+    # carries a region and a checksum, and routes a key minted elsewhere away.
+    container.bind(ApiKeyFormatPort, _api_key_format_adapter)
 
     if bootstrap_selector is None:
         # No selector is a legitimate deployment (the plain open-source one), so

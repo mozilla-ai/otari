@@ -4,16 +4,17 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.auth import generate_api_key, hash_key, key_prefix, key_suffix
+from gateway.auth import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.log_config import log_secret
 from gateway.models.api_keys import APIKey
+from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.users_repository import get_or_create_default_user
 from gateway.services.workspace_scope import default_workspace_id
 
 
-async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession) -> None:
-    """Create a first API key for new installations."""
+async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession, key_format: ApiKeyFormatPort) -> None:
+    """Create a first API key for new installations, in this build's format."""
 
     if not config.bootstrap_api_key:
         return
@@ -22,7 +23,7 @@ async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession) -> No
     if existing_key:
         return
 
-    api_key = generate_api_key()
+    api_key = key_format.mint()
     key_id = str(uuid.uuid4())
 
     # The bootstrap key has no explicit owner, so it lands on the shared "default"
@@ -36,7 +37,7 @@ async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession) -> No
         # have picked one.
         workspace_id=await default_workspace_id(db),
         key_hash=hash_key(api_key),
-        key_prefix=key_prefix(api_key),
+        key_prefix=key_format.fingerprint(api_key),
         key_suffix=key_suffix(api_key),
         key_name="bootstrap",
         user_id=user.user_id,

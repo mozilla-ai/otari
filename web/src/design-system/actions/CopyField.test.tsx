@@ -666,21 +666,25 @@ describe("CopyableValue", () => {
 })
 
 describe("concealedFingerprint", () => {
-  it("keeps both ends of a key and a fixed run between them", () => {
+  it("joins the stored prefix and suffix with a fixed run between them", () => {
     // Fixed rather than a bullet per character: the length of a key is itself
-    // something not to put on screen.
-    expect(concealedFingerprint("gw-NEWSECRETVALUE0000")).toBe(
-      "gw-NEWSE••••••••0000",
+    // something not to put on screen. The halves are the server's, not slices
+    // of the plaintext, so the reveal matches what the Keys table shows.
+    expect(concealedFingerprint("tk-NEWSECR", "0000")).toBe(
+      "tk-NEWSECR••••••••0000",
     )
-    expect(concealedFingerprint("0123456789abcdef")).toBe(
-      "01234567••••••••cdef",
+    expect(concealedFingerprint("otr_tk_v1_us_9f3a1c7", "c5d8")).toBe(
+      "otr_tk_v1_us_9f3a1c7••••••••c5d8",
     )
   })
 
-  it("falls back to the plain stand-in when the ends would meet", () => {
-    // Below sixteen characters the two slices overlap, so the fingerprint would
-    // show more of the value than it hides.
-    expect(concealedFingerprint("0123456789abcde")).toBe(CONCEALED_SECRET)
-    expect(concealedFingerprint("")).toBe(CONCEALED_SECRET)
+  it("shows the prefix alone when the row stored no suffix", () => {
+    expect(concealedFingerprint("tk-Older00", null)).toBe("tk-Older00••••••••")
+  })
+
+  it("falls back to the plain stand-in without a prefix", () => {
+    expect(concealedFingerprint(null, "0000")).toBe(CONCEALED_SECRET)
+    expect(concealedFingerprint(undefined, undefined)).toBe(CONCEALED_SECRET)
+    expect(concealedFingerprint("", "")).toBe(CONCEALED_SECRET)
   })
 })

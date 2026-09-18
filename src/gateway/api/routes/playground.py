@@ -61,6 +61,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    ApiKeyFormatPortDep,
     CurrentIdentity,
     ModelProviderPortDep,
     get_config,
@@ -86,6 +87,7 @@ from gateway.models.playground import (
     PlaygroundFavoriteModelsUpdate,
     PlaygroundMessagesPublic,
 )
+from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.services import playground_dispatch, playground_service
 from gateway.services.log_writer import LogWriter
 from gateway.services.secret_box import SecretBoxUnavailableError
@@ -174,6 +176,7 @@ async def playground_chat_completions(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
+    key_format: ApiKeyFormatPortDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> ChatCompletion | StreamingResponse:
     """Run one chat completion for the signed-in caller.
@@ -211,6 +214,7 @@ async def playground_chat_completions(
             principal=principal,
             db=db,
             config=config,
+            key_format=key_format,
         )
     return await run_chat_completion(
         raw_request=raw_request,
@@ -239,6 +243,7 @@ async def _dispatch_to_data_plane(
     principal: SessionPrincipal,
     db: AsyncSession,
     config: GatewayConfig,
+    key_format: ApiKeyFormatPort,
 ) -> StreamingResponse:
     """Run this completion on the deployment's data plane rather than here.
 
@@ -262,7 +267,7 @@ async def _dispatch_to_data_plane(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_NO_DATA_PLANE_DETAIL)
 
     try:
-        api_key = await playground_dispatch.resolve_dispatch_key(db, principal=principal)
+        api_key = await playground_dispatch.resolve_dispatch_key(db, principal=principal, key_format=key_format)
     except SecretBoxUnavailableError:
         # The deployment stores provider credentials through the same key, so this
         # is a control plane that could not have served a completion anyway.

@@ -1,9 +1,7 @@
-from gateway.auth.models import generate_api_key, hash_key, key_prefix, key_suffix, validate_api_key_format
+from gateway.auth.models import API_KEY_PREFIX, hash_key, key_suffix
 
 __all__ = [
-    "generate_api_key",
+    "API_KEY_PREFIX",
     "hash_key",
-    "key_prefix",
     "key_suffix",
-    "validate_api_key_format",
 ]

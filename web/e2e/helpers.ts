@@ -9,12 +9,16 @@ import { API_ROOT } from "@/shared/api/client"
 // Matches web/e2e/otari.yml. The login step needs a known key.
 export const MASTER_KEY = "e2e-master-key"
 
-// Mirrors API_KEY_PREFIX in src/gateway/auth/models.py, which stamps every minted key.
+// Mirrors API_KEY_PREFIX in src/gateway/auth/models.py, which stamps every key
+// the open-source format mints.
 export const API_KEY_PREFIX = "tk-"
+// The fingerprint the default adapter stores: the prefix plus seven random
+// characters (FINGERPRINT_RANDOM_CHARS in src/gateway/adapters/api_key_format_adapter.py).
+const FINGERPRINT_LENGTH = API_KEY_PREFIX.length + 7
 
 // Independent of the UI helper so these assertions can catch its regressions.
 export function expectedKeyFingerprint(key: string): string {
-  return `${key.slice(0, 8)}${"•".repeat(8)}${key.slice(-4)}`
+  return `${key.slice(0, FINGERPRINT_LENGTH)}${"•".repeat(8)}${key.slice(-4)}`
 }
 
 // Scope link lookups to the sidebar navigation landmark. The Overview landing

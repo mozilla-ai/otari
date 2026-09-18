@@ -27,6 +27,7 @@ import pytest
 from fastapi import FastAPI
 
 from gateway import main as gateway_main
+from gateway.container import build_container
 from gateway.core.config import GatewayConfig
 from gateway.main import (
     _LIFESPAN_WORKERS,
@@ -160,6 +161,9 @@ async def test_lifespan_shutdown_completes_despite_a_stuck_refresher(
     app = FastAPI()
     app.state.config = config
     app.state.enabled_features = ()
+    # The first-run key is minted through the bound key format, which create_app
+    # would have put here.
+    app.state.container = build_container()
 
     # No asyncio.timeout wrapper: if shutdown regresses this hangs, and the
     # suite-wide pytest timeout reports it. A short bound here would be

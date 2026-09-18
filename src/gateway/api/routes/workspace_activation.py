@@ -23,7 +23,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
+from gateway.api.deps import ApiKeyFormatPortDep, CurrentIdentity, get_config, get_db, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.core.config import GatewayConfig
 from gateway.services.tenancy.workspace_activation_service import (
@@ -42,9 +42,10 @@ router = APIRouter(
 def get_workspace_activation_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    key_format: ApiKeyFormatPortDep,
 ) -> WorkspaceActivationService:
-    """Build the service on the request's session and this app's config."""
-    return WorkspaceActivationService(db, config)
+    """Build the service on the request's session, this app's config and its key format."""
+    return WorkspaceActivationService(db, config, key_format)
 
 
 WorkspaceActivationServiceDep = Annotated[WorkspaceActivationService, Depends(get_workspace_activation_service)]

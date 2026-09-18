@@ -84,6 +84,7 @@ A **port** is a domain-named interface (a Python `Protocol`), named for what it 
 | `BillingPort` | Metering and charging for usage. |
 | `GrowthSignalPort` | Telling an outside CRM or support messenger about a user's lifecycle. |
 | `TelemetryStoragePort` | Where captured agent telemetry is stored and read back. |
+| `ApiKeyFormatPort` | The shape of the API keys a build mints, and where a presented key is checked. |
 
 The cardinal property: **every port ships with a working adapter in Otari's core**, a real lightweight implementation or an honest [Null Object](https://en.wikipedia.org/wiki/Null_object_pattern). Otari must stand alone with no overlay present. `BillingPort`, for example, is a Null Object in the core: it is present and callable, and does nothing, so nothing in the core needs to know whether real billing exists anywhere.
 
@@ -108,6 +109,7 @@ flowchart LR
         BP[BillingPort]
         GP[GrowthSignalPort]
         TP[TelemetryStoragePort]
+        KP[ApiKeyFormatPort]
     end
     UI --> API --> SVC --> REPO --> MOD
     SVC --> AP
@@ -119,9 +121,10 @@ flowchart LR
     SVC --> BP
     SVC --> GP
     SVC --> TP
+    SVC --> KP
 ```
 
-> **Where the ports are today.** `src/gateway/ports/` holds six of them, `ModelProviderPort`, `BillingPort`, `EntitlementPort`, `GrowthSignalPort`, `TelemetryStoragePort` and `IdentityProviderPort`, each with a working core adapter in `src/gateway/adapters/`. Three have core callers. `TelemetryStoragePort` is resolved by the OTLP receiver, the telemetry read endpoints and the purge paths. `ModelProviderPort` is asked on the standalone dispatch path (`resolve_dispatch_provider` in `api/routes/_pipeline.py`) for a candidate the credential ladder could not serve, after an organization's key, a stored instance and `config.yml` have all missed; a routed multi-candidate chain does not reach it yet, because those candidates are credentialed by the routing compiler, which is synchronous and does no I/O. `IdentityProviderPort` is resolved by the OAuth sign-in route, whose core adapter answers with the base build's roster policy (sign in as an account an operator already added; never provision one). The other three are still the seam's mechanism rather than its surface, so the choices they describe (when to meter, what a deployment is entitled to) are made by the mode switch and the hand-wired dependencies described next. The remaining ports in the table above arrive as they gain callers.
+> **Where the ports are today.** `src/gateway/ports/` holds seven of them, `ModelProviderPort`, `BillingPort`, `EntitlementPort`, `GrowthSignalPort`, `TelemetryStoragePort`, `IdentityProviderPort` and `ApiKeyFormatPort`, each with a working core adapter in `src/gateway/adapters/`. Four have core callers. `ApiKeyFormatPort` is asked by every key-mint site (the two key routers, the setup guide, the playground and the first-run bootstrap) and by the verify path, which routes a presented key before it looks it up; the core adapter mints the open-source `tk-` shape and checks every key locally, and a hosted overlay binds a region-tagged, checksummed format behind it (otari-ai#1665). `TelemetryStoragePort` is resolved by the OTLP receiver, the telemetry read endpoints and the purge paths. `ModelProviderPort` is asked on the standalone dispatch path (`resolve_dispatch_provider` in `api/routes/_pipeline.py`) for a candidate the credential ladder could not serve, after an organization's key, a stored instance and `config.yml` have all missed; a routed multi-candidate chain does not reach it yet, because those candidates are credentialed by the routing compiler, which is synchronous and does no I/O. `IdentityProviderPort` is resolved by the OAuth sign-in route, whose core adapter answers with the base build's roster policy (sign in as an account an operator already added; never provision one). The other three are still the seam's mechanism rather than its surface, so the choices they describe (when to meter, what a deployment is entitled to) are made by the mode switch and the hand-wired dependencies described next. The remaining ports in the table above arrive as they gain callers.
 >
 > `IdentityProviderPort` is also where the table's own wording is narrower than it reads. It is listed as "authenticating users/sign-in", but authenticating is not behind it: proving somebody controls a Google or GitHub account is protocol work that does not vary by edition, so it stays a plain service. What the port carries is the *policy* applied to a proven identity, which is the half an overlay replaces.
 

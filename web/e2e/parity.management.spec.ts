@@ -177,7 +177,7 @@ test.describe("api keys", () => {
     await expect(reveal).toContainText("shown only once")
     const secretField = reveal.getByLabel("Secret key", { exact: true })
     await expect(secretField).toHaveValue(
-      new RegExp(`^${API_KEY_PREFIX}.{5}•{8}.{4}$`),
+      new RegExp(`^${API_KEY_PREFIX}.{7}•{8}.{4}$`),
     )
     const masked = await secretField.inputValue()
     await reveal.getByRole("button", { name: "Show Secret key" }).click()

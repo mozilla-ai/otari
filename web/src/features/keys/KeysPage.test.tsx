@@ -108,11 +108,17 @@ function mockApi(
         if (url.endsWith("/rotate") && method === "POST") {
           const id = url.split("/").slice(-2)[0]
           const prefix = REGEN_SECRET.slice(0, 10)
+          const suffix = REGEN_SECRET.slice(-4)
           list = list.map((k) =>
-            k.id === id ? { ...k, key_prefix: prefix } : k,
+            k.id === id ? { ...k, key_prefix: prefix, key_suffix: suffix } : k,
           )
           const row = list.find((k) => k.id === id) ?? apiKey({ id })
-          return jsonResponse({ ...row, key: REGEN_SECRET, key_prefix: prefix })
+          return jsonResponse({
+            ...row,
+            key: REGEN_SECRET,
+            key_prefix: prefix,
+            key_suffix: suffix,
+          })
         }
         if (method === "POST") {
           const body = JSON.parse(String(init?.body)) as {
@@ -409,7 +415,7 @@ describe("KeysPage", () => {
       name: /API key created|New secret for/,
     })
     expect(within(reveal).getByLabelText("Secret key")).toHaveValue(
-      "gw-NEWSE••••••••0000",
+      "gw-NEWSECR••••••••0000",
     )
     expect(
       (within(reveal).getByLabelText("curl") as HTMLTextAreaElement).value,
@@ -754,7 +760,7 @@ describe("KeysPage", () => {
       name: /API key created|New secret for/,
     })
     expect(within(reveal).getByLabelText("Secret key")).toHaveValue(
-      "gw-REGEN••••••••0000",
+      "gw-REGEN00••••••••0000",
     )
     expect(
       (within(reveal).getByLabelText("curl") as HTMLTextAreaElement).value,
@@ -1571,7 +1577,7 @@ describe("KeysPage", () => {
         name: /API key created|New secret for/,
       })
       expect(within(reveal).getByLabelText("Secret key")).toHaveValue(
-        "gw-NEWSE••••••••0000",
+        "gw-NEWSECR••••••••0000",
       )
 
       const post = fetchMock.mock.calls.find(

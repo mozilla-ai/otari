@@ -52,10 +52,11 @@ import httpx
 from sqlalchemy import select
 from sqlmodel import col
 
-from gateway.auth.models import generate_api_key, hash_key, key_prefix, key_suffix
+from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import API_ROOT
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
+from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.services.secret_box import SecretDecryptionError, decrypt_secret, encrypt_secret
 
 if TYPE_CHECKING:
@@ -111,7 +112,7 @@ def _readable_secret(row: APIKey) -> str | None:
         return None
 
 
-async def resolve_dispatch_key(db: AsyncSession, *, principal: SessionPrincipal) -> str:
+async def resolve_dispatch_key(db: AsyncSession, *, principal: SessionPrincipal, key_format: ApiKeyFormatPort) -> str:
     """The credential standing for this caller on the data plane, minted once.
 
     Looked up by the caller and the workspace they are about to spend in, so two
@@ -145,14 +146,14 @@ async def resolve_dispatch_key(db: AsyncSession, *, principal: SessionPrincipal)
     # Read once: the answer decides both whether to mint and whether the existing
     # row needs rewriting, and decrypting twice would log the failure twice.
     stored = None if row is None else _readable_secret(row)
-    plaintext = stored if stored is not None else generate_api_key()
+    plaintext = stored if stored is not None else key_format.mint()
 
     if row is None:
         row = APIKey(
             id=str(uuid.uuid4()),
             workspace_id=principal.workspace_id,
             key_hash=hash_key(plaintext),
-            key_prefix=key_prefix(plaintext),
+            key_prefix=key_format.fingerprint(plaintext),
             key_suffix=key_suffix(plaintext),
             key_name=_KEY_NAME,
             user_id=principal.user_id,
@@ -170,7 +171,7 @@ async def resolve_dispatch_key(db: AsyncSession, *, principal: SessionPrincipal)
         # would strand the page on a row only this code can mend.
         if stored is None:
             row.key_hash = hash_key(plaintext)
-            row.key_prefix = key_prefix(plaintext)
+            row.key_prefix = key_format.fingerprint(plaintext)
             row.key_suffix = key_suffix(plaintext)
             row.internal_secret = encrypt_secret(plaintext)
         row.allowed_models = principal.allowed_models

@@ -15,6 +15,7 @@ import pytest
 from fastapi import APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
@@ -28,6 +29,7 @@ from gateway.container import (
     RouterContribution,
     build_container,
 )
+from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.growth_signal_port import GrowthSignalPort
@@ -90,6 +92,7 @@ def test_core_defaults_are_bound_for_every_port() -> None:
     assert isinstance(container.resolve(GrowthSignalPort, NO_SESSION), NullGrowthSignalAdapter)
     assert isinstance(container.resolve(TelemetryStoragePort, NO_SESSION), DatabaseTelemetryStorageAdapter)
     assert isinstance(container.resolve(IdentityProviderPort, NO_SESSION), RosterIdentityProviderAdapter)
+    assert isinstance(container.resolve(ApiKeyFormatPort, NO_SESSION), DefaultApiKeyFormatAdapter)
 
 
 def test_no_selector_contributes_no_routers_and_says_so() -> None:

@@ -19,6 +19,7 @@ from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
+from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.growth_signal_port import GrowthSignalPort
@@ -150,13 +151,36 @@ def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:
     )
 
 
-async def _verify_and_update_api_key(db: AsyncSession, token: str) -> APIKey:
+def misdirected_key_detail(host: str) -> str:
+    """The body of a 421, naming where the presented key is served."""
+    return f"This API key belongs to {host}. Send the request there instead."
+
+
+async def _verify_and_update_api_key(db: AsyncSession, token: str, key_format: ApiKeyFormatPort) -> APIKey:
     """Verify API key token and update last_used_at.
 
-    The token's shape is not checked: any presented token is hashed and looked
-    up, so a key minted elsewhere (a migrated platform key) authenticates on its
-    hash and an unrecognized one gets the ordinary "Invalid API key" 401.
+    The bound key format says where the token is checked before anything is
+    looked up. A key another deployment minted is answered 421 naming that
+    deployment, and a key that claims this build's format and fails it is
+    answered 401; neither costs a database round trip. Everything else, which
+    for the open-source format is every key, is hashed and looked up whatever
+    its shape, so a key minted elsewhere (a migrated platform key) authenticates
+    on its hash and an unrecognized one gets the ordinary "Invalid API key" 401.
     """
+    match key_format.route(token):
+        case Misdirected(host=host):
+            record_auth_failure("misdirected_key")
+            raise HTTPException(
+                status_code=status.HTTP_421_MISDIRECTED_REQUEST,
+                detail=misdirected_key_detail(host),
+            )
+        case Malformed():
+            record_auth_failure("invalid_format")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API key",
+            )
+
     key_hash = hash_key(token)
 
     try:
@@ -312,6 +336,16 @@ async def _load_generated_master_key_hash(config: GatewayConfig, db: AsyncSessio
     return stored_hash
 
 
+def _api_key_format(request: Request, db: AsyncSession) -> ApiKeyFormatPort:
+    """Resolve the key format for a verify path, off the request rather than a dependency.
+
+    ``verify_api_key_or_master_key`` is called directly from routes that already
+    hold the session, not only as a dependency, so the container is read from the
+    app the request reached instead of being one more positional argument.
+    """
+    return get_container(request).resolve(ApiKeyFormatPort, db)
+
+
 async def verify_api_key(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -332,7 +366,7 @@ async def verify_api_key(
 
     """
     token = _extract_bearer_token(request, config)
-    return await _verify_and_update_api_key(db, token)
+    return await _verify_and_update_api_key(db, token, _api_key_format(request, db))
 
 
 async def verify_master_key(
@@ -471,7 +505,7 @@ async def verify_api_key_or_master_key(
     if await is_valid_master_key(token, config, db):
         return None, True
 
-    api_key = await _verify_and_update_api_key(db, token)
+    api_key = await _verify_and_update_api_key(db, token, _api_key_format(request, db))
     return api_key, False
 
 
@@ -637,6 +671,11 @@ ContainerDep = Annotated[Container, Depends(get_container)]
 PortSessionDep = Annotated[AsyncSession | None, Depends(get_db_if_needed)]
 
 
+def get_api_key_format_port(db: PortSessionDep, container: ContainerDep) -> ApiKeyFormatPort:
+    """Resolve the key-format adapter this build bound at startup."""
+    return container.resolve(ApiKeyFormatPort, db)
+
+
 def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort:
     """Resolve the billing adapter this build bound at startup."""
     return container.resolve(BillingPort, db)
@@ -700,6 +739,7 @@ def get_telemetry_storage_port(
     return container.resolve(TelemetryStoragePort, db)
 
 
+ApiKeyFormatPortDep = Annotated[ApiKeyFormatPort, Depends(get_api_key_format_port)]
 BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
 EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
 GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]

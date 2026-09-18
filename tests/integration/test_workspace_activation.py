@@ -16,11 +16,13 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import Organization, User, Workspace, WorkspaceActivationState
 from gateway.models.usage import UsageLog
+from gateway.ports.api_key_format_port import KeyRoute, Local
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -28,6 +30,9 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.repositories.users_repository import get_or_create_attribution_user
+from gateway.services import playground_dispatch
+from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy.errors import (
     NotAuthorizedError,
     WorkspaceActivationUnavailableError,
@@ -38,8 +43,12 @@ from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
     WorkspaceActivationService,
 )
+from gateway.types.session_principal import SessionPrincipal
 
 pytestmark = pytest.mark.asyncio
+
+# The open-source format, which is what a service built outside a request would get.
+KEY_FORMAT = DefaultApiKeyFormatAdapter(None)
 
 
 def _config(*, activation_guide: bool = True) -> GatewayConfig:
@@ -133,7 +142,9 @@ async def _setup(db: AsyncSession, *, slug: str, classification: str = "eligible
 async def test_a_workspace_with_no_traffic_is_waiting_and_is_offered_the_guide(async_db: AsyncSession) -> None:
     owner, workspace = await _setup(async_db, slug="acme-waiting")
 
-    status = await WorkspaceActivationService(async_db, _config()).get_status(user=owner, workspace_id=workspace.id)
+    status = await WorkspaceActivationService(async_db, _config(), KEY_FORMAT).get_status(
+        user=owner, workspace_id=workspace.id
+    )
 
     assert status.status == "waiting"
     assert status.activation_attempt is None
@@ -148,7 +159,9 @@ async def test_a_failed_request_is_reported_with_its_category_while_the_guide_ke
     owner, workspace = await _setup(async_db, slug="acme-failed")
     row = await _usage(async_db, workspace.id, status="error", status_code=403, cost=None, latency_ms=None)
 
-    status = await WorkspaceActivationService(async_db, _config()).get_status(user=owner, workspace_id=workspace.id)
+    status = await WorkspaceActivationService(async_db, _config(), KEY_FORMAT).get_status(
+        user=owner, workspace_id=workspace.id
+    )
 
     assert status.status == "failed"
     assert status.activation_attempt is None
@@ -167,7 +180,9 @@ async def test_the_first_success_activates_the_workspace_and_retires_the_offer(a
     first = await _usage(async_db, workspace.id, seconds_ago=120)
     await _usage(async_db, workspace.id, model="openai:gpt-4o", seconds_ago=1)
 
-    status = await WorkspaceActivationService(async_db, _config()).get_status(user=owner, workspace_id=workspace.id)
+    status = await WorkspaceActivationService(async_db, _config(), KEY_FORMAT).get_status(
+        user=owner, workspace_id=workspace.id
+    )
 
     assert status.status == "activated"
     assert status.activation_attempt is not None
@@ -186,7 +201,9 @@ async def test_imported_usage_does_not_activate_a_workspace(async_db: AsyncSessi
     owner, workspace = await _setup(async_db, slug="acme-imported")
     await _usage(async_db, workspace.id, source="claude_code")
 
-    status = await WorkspaceActivationService(async_db, _config()).get_status(user=owner, workspace_id=workspace.id)
+    status = await WorkspaceActivationService(async_db, _config(), KEY_FORMAT).get_status(
+        user=owner, workspace_id=workspace.id
+    )
 
     assert status.status == "waiting"
     assert status.latest_attempt is None
@@ -203,7 +220,9 @@ async def test_migrated_hosted_history_activates_a_workspace(async_db: AsyncSess
     owner, workspace = await _setup(async_db, slug="acme-migrated")
     first = await _usage(async_db, workspace.id, source="otari-ai:gateway", seconds_ago=120)
 
-    status = await WorkspaceActivationService(async_db, _config()).get_status(user=owner, workspace_id=workspace.id)
+    status = await WorkspaceActivationService(async_db, _config(), KEY_FORMAT).get_status(
+        user=owner, workspace_id=workspace.id
+    )
 
     assert status.status == "activated"
     assert status.activation_attempt is not None
@@ -220,7 +239,9 @@ async def test_migrated_imported_usage_does_not_activate_a_workspace(async_db: A
     owner, workspace = await _setup(async_db, slug="acme-migrated-import")
     await _usage(async_db, workspace.id, source="otari-ai:claude_code")
 
-    status = await WorkspaceActivationService(async_db, _config()).get_status(user=owner, workspace_id=workspace.id)
+    status = await WorkspaceActivationService(async_db, _config(), KEY_FORMAT).get_status(
+        user=owner, workspace_id=workspace.id
+    )
 
     assert status.status == "waiting"
     assert status.latest_attempt is None
@@ -232,7 +253,9 @@ async def test_an_absorbed_attempt_is_not_reported_as_a_failure(async_db: AsyncS
     owner, workspace = await _setup(async_db, slug="acme-absorbed")
     await _usage(async_db, workspace.id, status="absorbed", status_code=502)
 
-    status = await WorkspaceActivationService(async_db, _config()).get_status(user=owner, workspace_id=workspace.id)
+    status = await WorkspaceActivationService(async_db, _config(), KEY_FORMAT).get_status(
+        user=owner, workspace_id=workspace.id
+    )
 
     assert status.status == "waiting"
     assert status.latest_attempt is None
@@ -243,7 +266,7 @@ async def test_a_workspace_in_another_organization_is_not_found(async_db: AsyncS
     other_organization = await _organization(async_db, slug="acme-foreign-other")
     outsider = await _member(async_db, other_organization, role="owner", full_name="Outsider")
 
-    service = WorkspaceActivationService(async_db, _config())
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
     with pytest.raises(WorkspaceNotFoundError):
         await service.get_status(user=outsider, workspace_id=workspace.id)
 
@@ -255,7 +278,7 @@ async def test_a_workspace_in_another_organization_is_not_found(async_db: AsyncS
 
 async def test_a_disabled_deployment_withdraws_the_offer_and_refuses_a_key(async_db: AsyncSession) -> None:
     owner, workspace = await _setup(async_db, slug="acme-disabled")
-    service = WorkspaceActivationService(async_db, _config(activation_guide=False))
+    service = WorkspaceActivationService(async_db, _config(activation_guide=False), KEY_FORMAT)
 
     status = await service.get_status(user=owner, workspace_id=workspace.id)
     assert status.status == "waiting"
@@ -268,7 +291,7 @@ async def test_a_disabled_deployment_withdraws_the_offer_and_refuses_a_key(async
 
 async def test_a_workspace_classified_out_of_the_guide_is_not_offered_it(async_db: AsyncSession) -> None:
     owner, workspace = await _setup(async_db, slug="acme-internal", classification="internal")
-    service = WorkspaceActivationService(async_db, _config())
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
 
     status = await service.get_status(user=owner, workspace_id=workspace.id)
     assert status.experience_eligible is False
@@ -284,7 +307,7 @@ async def test_a_member_who_cannot_manage_the_workspace_is_not_offered_the_guide
     workspace = await _workspace(async_db, organization, name="Engineering", owner=owner)
     await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=viewer.id, role="member")
 
-    service = WorkspaceActivationService(async_db, _config())
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
     status = await service.get_status(user=viewer, workspace_id=workspace.id)
     # Visible, and honestly reported, rather than refused: the guide simply is
     # not theirs to act on.
@@ -304,7 +327,7 @@ async def test_a_member_who_cannot_manage_the_workspace_is_not_offered_the_guide
 
 async def test_issuing_the_key_twice_rotates_one_row_rather_than_collecting_two(async_db: AsyncSession) -> None:
     owner, workspace = await _setup(async_db, slug="acme-rotate")
-    service = WorkspaceActivationService(async_db, _config())
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
 
     first = await service.issue_api_key(user=owner, workspace_id=workspace.id)
     second = await service.issue_api_key(user=owner, workspace_id=workspace.id)
@@ -346,7 +369,7 @@ async def test_rotating_the_key_moves_its_owner_to_whoever_asked_last(async_db: 
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
     workspace = await _workspace(async_db, organization, name="Engineering", owner=owner)
 
-    service = WorkspaceActivationService(async_db, _config())
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
     first = await service.issue_api_key(user=owner, workspace_id=workspace.id)
     second = await service.issue_api_key(user=admin, workspace_id=workspace.id)
 
@@ -360,7 +383,7 @@ async def test_issuing_the_key_is_refused_once_the_workspace_has_activated(async
     owner, workspace = await _setup(async_db, slug="acme-retired")
     await _usage(async_db, workspace.id)
 
-    service = WorkspaceActivationService(async_db, _config())
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
     with pytest.raises(WorkspaceAlreadyActivatedError):
         await service.issue_api_key(user=owner, workspace_id=workspace.id)
     assert await _keys_in(async_db, workspace.id) == []
@@ -368,7 +391,7 @@ async def test_issuing_the_key_is_refused_once_the_workspace_has_activated(async
 
 async def test_a_key_deleted_from_the_keys_page_is_replaced_rather_than_resurrected(async_db: AsyncSession) -> None:
     owner, workspace = await _setup(async_db, slug="acme-deleted-key")
-    service = WorkspaceActivationService(async_db, _config())
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
     issued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
 
     deleted = await async_db.get(APIKey, issued.key_id)
@@ -390,7 +413,7 @@ async def test_a_key_deleted_from_the_keys_page_is_replaced_rather_than_resurrec
 
 async def test_dismiss_retires_the_guide_idempotently(async_db: AsyncSession) -> None:
     owner, workspace = await _setup(async_db, slug="acme-dismiss")
-    service = WorkspaceActivationService(async_db, _config())
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
     await service.issue_api_key(user=owner, workspace_id=workspace.id)
 
     await service.dismiss(user=owner, workspace_id=workspace.id)
@@ -419,7 +442,7 @@ async def test_dismiss_leaves_the_key_it_issued_working(async_db: AsyncSession) 
     a 200. Revoking a key is the Keys page's job.
     """
     owner, workspace = await _setup(async_db, slug="acme-dismiss-key")
-    service = WorkspaceActivationService(async_db, _config())
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
     issued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
 
     await service.dismiss(user=owner, workspace_id=workspace.id)
@@ -433,7 +456,7 @@ async def test_dismiss_leaves_the_key_it_issued_working(async_db: AsyncSession) 
 async def test_dismiss_before_the_guide_ever_issued_a_key_still_records_it(async_db: AsyncSession) -> None:
     """Skip has to work on the presentation that never got as far as a key."""
     owner, workspace = await _setup(async_db, slug="acme-dismiss-early")
-    service = WorkspaceActivationService(async_db, _config())
+    service = WorkspaceActivationService(async_db, _config(), KEY_FORMAT)
 
     await service.dismiss(user=owner, workspace_id=workspace.id)
 
@@ -441,3 +464,45 @@ async def test_dismiss_before_the_guide_ever_issued_a_key_still_records_it(async
     assert state is not None
     assert state.dismissed_at is not None
     assert state.api_key_id is None
+
+
+class _ProbeKeyFormat:
+    """A format an overlay might bind, to show the service mints through the port."""
+
+    def mint(self) -> str:
+        return "probe-" + uuid.uuid4().hex + uuid.uuid4().hex
+
+    def fingerprint(self, api_key: str) -> str:
+        return api_key[:13]
+
+    def route(self, presented: str) -> KeyRoute:
+        return Local()
+
+
+async def test_the_setup_key_is_minted_in_the_bound_format(async_db: AsyncSession) -> None:
+    owner, workspace = await _setup(async_db, slug="acme-probe-format")
+    service = WorkspaceActivationService(async_db, _config(), _ProbeKeyFormat())
+
+    issued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
+
+    assert issued.key.startswith("probe-")
+    assert issued.key_prefix == issued.key[:13]
+    assert issued.key_suffix == issued.key[-4:]
+
+
+async def test_the_playground_key_is_minted_in_the_bound_format(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    owner, workspace = await _setup(async_db, slug="acme-probe-playground")
+    principal_user = await get_or_create_attribution_user(async_db, user_id=str(owner.id), alias="Owner")
+    principal = SessionPrincipal(user_id=principal_user.user_id, workspace_id=workspace.id, allowed_models=None)
+
+    plaintext = await playground_dispatch.resolve_dispatch_key(
+        async_db, principal=principal, key_format=_ProbeKeyFormat()
+    )
+
+    assert plaintext.startswith("probe-")
+    stored = (await async_db.execute(select(APIKey).where(APIKey.user_id == principal_user.user_id))).scalar_one()
+    assert stored.key_prefix == plaintext[:13]
+    assert stored.key_suffix == plaintext[-4:]

@@ -9,8 +9,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.api.deps import CallerOrganization, get_config, get_db, require_deployment_operator
-from gateway.auth.models import generate_api_key, hash_key, key_prefix, key_suffix
+from gateway.api.deps import ApiKeyFormatPortDep, CallerOrganization, get_config, get_db, require_deployment_operator
+from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
@@ -225,6 +225,7 @@ async def create_key(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     organization_id: CallerOrganization,
+    key_format: ApiKeyFormatPortDep,
 ) -> CreateKeyResponse:
     """Create a new API key in the caller's organization.
 
@@ -245,7 +246,7 @@ async def create_key(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    api_key = generate_api_key()
+    api_key = key_format.mint()
     key_hash = hash_key(api_key)
     key_id = uuid.uuid4()
 
@@ -320,7 +321,7 @@ async def create_key(
         id=str(key_id),
         workspace_id=workspace_id,
         key_hash=key_hash,
-        key_prefix=key_prefix(api_key),
+        key_prefix=key_format.fingerprint(api_key),
         key_suffix=key_suffix(api_key),
         key_name=request.key_name,
         user_id=user_id,
@@ -459,6 +460,7 @@ async def rotate_key(
     key_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
     organization_id: CallerOrganization,
+    key_format: ApiKeyFormatPortDep,
 ) -> CreateKeyResponse:
     """Rotate an API key's secret in place, within the caller's organization.
 
@@ -471,9 +473,9 @@ async def rotate_key(
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
 
-    new_api_key = generate_api_key()
+    new_api_key = key_format.mint()
     key.key_hash = hash_key(new_api_key)
-    key.key_prefix = key_prefix(new_api_key)
+    key.key_prefix = key_format.fingerprint(new_api_key)
     key.key_suffix = key_suffix(new_api_key)
     key.last_used_at = None
 

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
@@ -69,6 +70,9 @@ from gateway.services.tenancy.workspace_activation_service import (
 from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 pytestmark = pytest.mark.asyncio
+
+# The open-source format, which is what a service built outside a request would get.
+KEY_FORMAT = DefaultApiKeyFormatAdapter(None)
 
 _RACERS = 4
 
@@ -174,11 +178,7 @@ async def test_concurrent_claims_of_one_address_leave_exactly_one_holder(
 
     users = UserRepository(async_db)
     racer_ids = [
-        (
-            await users.create_local_identity(
-                full_name=f"Claimer {index}", active_organization_id=organization.id
-            )
-        ).id
+        (await users.create_local_identity(full_name=f"Claimer {index}", active_organization_id=organization.id)).id
         for index in range(_RACERS)
     ]
     await async_db.commit()
@@ -212,9 +212,7 @@ async def test_concurrent_claims_of_one_address_leave_exactly_one_holder(
     # what makes this a test of the mapping and not of the pre-check.
     assert mapped == [True] * (_RACERS - 1), mapped
 
-    holders = (
-        (await async_db.execute(select(User).where(col(User.email) == "contested@example.com"))).scalars().all()
-    )
+    holders = (await async_db.execute(select(User).where(col(User.email) == "contested@example.com"))).scalars().all()
     assert len(holders) == 1
 
 
@@ -737,7 +735,7 @@ async def test_concurrent_first_issuance_leaves_one_setup_key(
     async def attempt(session: AsyncSession) -> object:
         user = await UserRepository(session).get(owner.id)
         assert user is not None
-        return await WorkspaceActivationService(session, GatewayConfig()).issue_api_key(
+        return await WorkspaceActivationService(session, GatewayConfig(), KEY_FORMAT).issue_api_key(
             user=user,
             workspace_id=workspace.id,
         )

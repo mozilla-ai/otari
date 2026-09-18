@@ -538,7 +538,7 @@ async def _post_resolve(
 
     Owns the pieces every resolve helper shares: the base_url guard, the
     gateway/user token headers, the bounded POST, and the status-code ladder.
-    A 200 returns the parsed payload; client errors (400/401/402/403/404/429)
+    A 200 returns the parsed payload; client errors (400/401/402/403/404/421/429)
     are forwarded with the platform's detail when it is a safe string (falling
     back to ``client_error_detail``), keeping Retry-After on a 429; timeouts,
     network errors, the platform's server-side failures, and any unexpected
@@ -584,7 +584,9 @@ async def _post_resolve(
                 detail="Authorization service unavailable",
             ) from None
 
-    if response.status_code in {400, 401, 402, 403, 404, 429}:
+    # 421 is the platform saying the user token belongs to another region; its
+    # detail names the host, and the caller needs both to go there (otari-ai#1665).
+    if response.status_code in {400, 401, 402, 403, 404, 421, 429}:
         detail = _safe_detail_from_platform(response, client_error_detail)
         response_headers: dict[str, str] | None = None
         if response.status_code == 429 and response.headers.get("Retry-After"):

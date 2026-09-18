@@ -26,7 +26,8 @@ from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.auth.models import generate_api_key, hash_key, key_prefix
+from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
+from gateway.auth.models import hash_key
 from gateway.core.config import API_ROOT
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
@@ -416,7 +417,7 @@ def test_a_key_the_member_owns_but_did_not_mint_is_theirs_to_manage(
     owner predicate on its own, and that it carries the whole lifecycle rather
     than the list alone.
     """
-    raw = generate_api_key()
+    raw = DefaultApiKeyFormatAdapter(None).mint()
     key_id = str(uuid.uuid4())
     owner_id = str(world.users["alpha_member"])
     session = db_session_factory()
@@ -430,7 +431,7 @@ def test_a_key_the_member_owns_but_did_not_mint_is_theirs_to_manage(
                 id=key_id,
                 workspace_id=world.workspaces["alpha_one"],
                 key_hash=hash_key(raw),
-                key_prefix=key_prefix(raw),
+                key_prefix=DefaultApiKeyFormatAdapter(None).fingerprint(raw),
                 key_name="handed-over",
                 user_id=owner_id,
             )

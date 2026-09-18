@@ -23,7 +23,7 @@ import { renderWithRouter } from "@/tests/router"
 
 const WORKSPACE = "44444444-4444-4444-4444-444444444444"
 const KEY = "gw-setup-guide-key"
-const CONCEALED_KEY = "gw-setup••••••••-key"
+const CONCEALED_KEY = "gw-setup-g••••••••-key"
 const OTHER_KEY = "gw-other-workspace-key"
 
 const OTHER_WORKSPACE = "55555555-5555-5555-5555-555555555555"
@@ -37,6 +37,8 @@ interface ApiOptions {
   activation?: WorkspaceActivation
   models?: string[]
   apiKey?: string
+  /** Whether the mint reports the fingerprint it stored; a row without one has nothing to show concealed. */
+  withFingerprint?: boolean
 }
 
 /**
@@ -50,6 +52,7 @@ interface ApiOptions {
 function mockApi({
   activation = workspaceActivation(),
   apiKey = KEY,
+  withFingerprint = true,
   models = ["openai:gpt-4o-mini"],
 }: ApiOptions = {}) {
   let current = activation
@@ -65,7 +68,8 @@ function mockApi({
         return Response.json({
           key,
           key_id: "88888888-8888-8888-8888-888888888888",
-          key_prefix: key.slice(0, 10),
+          key_prefix: withFingerprint ? key.slice(0, 10) : null,
+          key_suffix: withFingerprint ? key.slice(-4) : null,
           key_name: "Setup guide",
         })
       }
@@ -320,9 +324,9 @@ describe("SetupGuide", () => {
     expect(snippet("curl")).toHaveTextContent(CONCEALED_KEY)
   })
 
-  // Exercise the helper's 15-character guard through the sheet.
-  it("fully conceals a 15-character activation key in the field and examples", async () => {
-    mockApi({ apiKey: "123456789012345" })
+  // Exercise the helper's no-fingerprint fallback through the sheet.
+  it("fully conceals a key whose mint stored no fingerprint", async () => {
+    mockApi({ withFingerprint: false })
     const user = userEvent.setup()
     await renderGuide()
 

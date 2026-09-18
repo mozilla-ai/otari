@@ -17,8 +17,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException, status
 
+from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.api.deps import _verify_and_update_api_key
 from gateway.metrics import REGISTRY
+
+# The open-source format routes every key locally, which is the behavior under test.
+KEY_FORMAT = DefaultApiKeyFormatAdapter(None)
 
 # A key with the shape otari-ai mints: neither the ``gw-``/``gw_`` prefix nor the
 # ``gw[-_][A-Za-z0-9_-]+`` charset the old check enforced.
@@ -60,7 +64,7 @@ async def test_migrated_key_authenticates_when_its_hash_is_on_a_row() -> None:
         last_used_at=datetime.now(UTC),
     )
 
-    verified = await _verify_and_update_api_key(_db_returning(api_key), MIGRATED_KEY)
+    verified = await _verify_and_update_api_key(_db_returning(api_key), MIGRATED_KEY, KEY_FORMAT)
 
     assert verified is api_key
 
@@ -71,7 +75,7 @@ async def test_unknown_migrated_shape_key_gets_the_ordinary_invalid_key_401() ->
     before_invalid_format = _sample({"reason": "invalid_format"})
 
     with pytest.raises(HTTPException) as exc_info:
-        await _verify_and_update_api_key(_db_returning(None), MIGRATED_KEY)
+        await _verify_and_update_api_key(_db_returning(None), MIGRATED_KEY, KEY_FORMAT)
 
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "Invalid API key"
