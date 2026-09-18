@@ -38,11 +38,7 @@ import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { ShareDialog } from "@/features/usage/ShareDialog"
-import {
-  billedTokenTotal,
-  cacheSums,
-  formatLatency,
-} from "@/features/usage/usageTotals"
+import { billedTokenTotal, cacheSums } from "@/features/usage/usageTotals"
 import { type UserDisplay, userDisplay } from "@/features/users/userDisplay"
 import { ApiError } from "@/shared/api/client"
 import {
@@ -54,6 +50,7 @@ import {
 import { useWorkspaces } from "@/shared/api/workspaces"
 import {
   deltaFraction,
+  formatLatency,
   formatNumber,
   formatPct,
   formatTokens,
@@ -268,7 +265,7 @@ function BreakdownTable({
         // name is the share bar, and a row that reads as a name here and as a
         // UUID in the picker above reads as two different people (otari#1153).
         const name = row.is_other
-          ? { label: `Other (${row.requests.toLocaleString()} req)` }
+          ? { label: `Other (${formatNumber(row.requests)} req)` }
           : row.key === null
             ? { label: unknownLabel }
             : rowName(row)

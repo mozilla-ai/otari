@@ -1,17 +1,35 @@
 /**
- * The two display formatters the components here need, and nothing else.
+ * The display formatters the components here need, and nothing else.
  *
  * The application's formatter module (`@/shared/helpers/format`) is still the
- * one a page reaches for, and still the only one DESIGN.md documents. These two
- * live here because `TrendChip` and `RefreshButton` need them and this layer
- * cannot import that one; the rest of that module (`formatUsd`, `formatTokens`,
- * `formatCost`, `formatContext`) stays there, because a spend figure and a
- * token count are this product's vocabulary rather than a design system's.
+ * one a page reaches for, and still the only one DESIGN.md documents. These
+ * live here because components in this layer need them and cannot import that
+ * one: `TrendChip` and `RefreshButton` for the percentage and the relative
+ * time, `TablePagination` and `BulkActionBar` for the grouped count. The rest
+ * of that module (`formatUsd`, `formatTokens`, `formatCost`, `formatContext`)
+ * stays there, because a spend figure and a token count are this product's
+ * vocabulary where a grouped integer is not.
  *
  * There is one implementation of each: `@/shared/helpers/format` re-exports
  * these under the names it already published, so no call site moved and there
  * is no second copy to drift.
  */
+
+const GROUPED = new Intl.NumberFormat("en-US")
+
+/**
+ * A grouped integer: 1234567 -> "1,234,567".
+ *
+ * Pinned like every formatter here. A bare `toLocaleString()` follows the
+ * browser, so the same count renders "1.234.567" for one reader and
+ * "1,234,567" for the next while the words either side of it stay English.
+ */
+export function formatNumber(value: number | null | undefined): string {
+  if (value == null) {
+    return "0"
+  }
+  return GROUPED.format(value)
+}
 
 /** A fraction as a percentage, to one decimal place. */
 export function formatPct(fraction: number): string {

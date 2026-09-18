@@ -12,6 +12,7 @@ import {
   TrendChart,
 } from "@/design-system/metrics/charts"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
+import { formatNumber } from "@/shared/helpers/format"
 import {
   bucketDurationMs,
   bucketIndexRange,
@@ -336,7 +337,7 @@ export function ActivityTimeline({
             <TrendChart
               data={data}
               series={chartSeries}
-              formatValue={(value) => value.toLocaleString()}
+              formatValue={(value) => formatNumber(value)}
               formatXTick={(iso) => formatTick(iso, bucket)}
               ariaLabel={ariaLabel}
               height={90}

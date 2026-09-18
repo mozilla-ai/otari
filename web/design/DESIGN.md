@@ -135,13 +135,15 @@ Everything else moved, including two things that look like they should not have:
   `ApiError extends Error`, so the first branch could never change an answer.
   Deleting the dead branch was the whole cost of moving it, and `ErrorBanner`
   came with it.
-- **`formatPct` and `formatRelative`** live in `design-system/helpers/format`
-  because `TrendChip` and `RefreshButton` need them. `@/shared/helpers/format`
-  is still the module a page reaches for and still the only one named above: it
-  re-exports those two, so there is one implementation and no call site moved.
-  The rest of it (`formatUsd`, `formatTokens`, `formatCost`, `formatContext`)
-  stayed, because a spend figure and a token count are this product's vocabulary
-  rather than a design system's.
+- **`formatPct`, `formatRelative` and `formatNumber`** live in
+  `design-system/helpers/format` because components in this layer need them:
+  the first two for `TrendChip` and `RefreshButton`, the grouped count for
+  `TablePagination` and `BulkActionBar`. `@/shared/helpers/format` is still the
+  module a page reaches for and still the only one named above: it re-exports
+  all three, so there is one implementation and no call site moved. The rest of
+  it (`formatUsd`, `formatTokens`, `formatCost`, `formatContext`) stayed,
+  because a spend figure and a token count are this product's vocabulary where a
+  grouped integer is not.
 
 **The stylesheet is the half the import rule cannot see.** Biome checks imports. It does not
 read CSS, and twenty-one `.otari-*` classes the primitives wear (`otari-dialog` and its

@@ -46,20 +46,6 @@ export function cacheHitRate(points: UsageSeriesPoint[]): number | undefined {
   return input > 0 ? read / input : undefined
 }
 
-// Latency is nullable on the wire (null when no row recorded one). The page
-// renders the em-dash placeholder to keep table cells aligned; the card drops the
-// stat instead, so this returns undefined rather than a placeholder and each
-// surface decides how to show "no value".
-export function formatLatency(ms: number | null): string | undefined {
-  if (ms === null) {
-    return undefined
-  }
-  if (ms < 1000) {
-    return `${Math.round(ms)} ms`
-  }
-  return `${(ms / 1000).toFixed(2)} s`
-}
-
 // Whether a published cost figure needs its "N unpriced" caveat. `undefined`
 // means the gateway predates the field, which is *more* likely to be missing
 // prices, not less, so unknown counts as needing the caveat. A truthy check on

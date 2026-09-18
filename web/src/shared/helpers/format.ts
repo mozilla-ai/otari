@@ -1,44 +1,71 @@
-// `formatPct` and `formatRelative` are re-exported rather than defined here:
-// they carry no product vocabulary, so `TrendChip` and `RefreshButton` in the
-// design system need them, and that layer may not import this one. This module
-// stays the single formatter module a page reaches for (DESIGN.md, "Where
-// things come from"), so the names it published are unchanged and there is one
-// implementation of each.
-export { formatPct, formatRelative } from "@/design-system/helpers/format"
+// These three are re-exported rather than defined here: they carry no product
+// vocabulary, so components in the design system need them, and that layer may
+// not import this one. This module stays the single formatter module a page
+// reaches for (DESIGN.md, "Where things come from"), so the names it published
+// are unchanged and there is one implementation of each.
+export {
+  formatNumber,
+  formatPct,
+  formatRelative,
+} from "@/design-system/helpers/format"
 
-export function formatNumber(value: number | null | undefined): string {
-  if (value == null) {
-    return "0"
-  }
-  return new Intl.NumberFormat("en-US").format(value)
-}
+const usdPerRequest = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 4,
+})
 
+// What one request or one charge line cost. Four decimals throughout rather
+// than only below a cent: a gateway's per-request costs sit in the hundredths
+// and thousandths, so 2.34 cents rendered as "$0.02" drops the two digits an
+// operator reading a request log is there for. Two decimals at least, so a
+// whole-dollar cost still reads as money.
 export function formatCost(value: number | null | undefined): string {
   if (value == null) {
     return "$0.00"
   }
-  // Show more precision for tiny per-request costs so they don't read as $0.00.
-  const fractionDigits = value !== 0 && Math.abs(value) < 0.01 ? 4 : 2
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: fractionDigits,
-  }).format(value)
+  return usdPerRequest.format(value)
 }
 
-// A per-million rate, as opposed to a spend. `formatCost` rounds to cents above
-// a cent, which is right for a bill and wrong for a rate: $0.075 per million is
-// a real published rate and "$0.08" is a figure nobody set. Two decimals at
-// least so a whole-dollar rate still reads as money, four at most because no
-// published rate carries a fifth.
+// A per-million rate, as opposed to a spend. Same precision as a cost and a
+// separate name on purpose: $0.075 per million is a real published rate and
+// "$0.08" is a figure nobody set, so the reason these carry four decimals is
+// not the reason a cost does, and one moving should not drag the other.
 export function formatRate(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
-  }).format(value)
+  return usdPerRequest.format(value)
+}
+
+// Below what four decimals can show, fall back to significant digits. A
+// per-call rate is routinely smaller than a per-million one: $0.00002 per
+// search renders as "$0.0000" above and reads as free.
+const usdSignificant = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumSignificantDigits: 3,
+})
+
+export function formatUnitRate(value: number): string {
+  if (value === 0) return usdPerRequest.format(0)
+  return value < 0.0001
+    ? usdSignificant.format(value)
+    : usdPerRequest.format(value)
+}
+
+// A millisecond duration an operator reads at a glance: "820 ms", "1.50 s".
+// `undefined` rather than a placeholder when the row recorded none, so a table
+// cell can render the em dash that keeps it aligned and a stat card can drop
+// the figure instead.
+export function formatLatency(
+  ms: number | null | undefined,
+): string | undefined {
+  if (ms == null) {
+    return undefined
+  }
+  if (ms < 1000) {
+    return `${Math.round(ms)} ms`
+  }
+  return `${(ms / 1000).toFixed(2)} s`
 }
 
 // Compact token counts for context windows: 128000 -> "128K", 1000000 -> "1M".

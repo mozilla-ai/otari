@@ -68,6 +68,7 @@ import {
   useUpdateWorkspaceMemberRole,
   useWorkspaces,
 } from "@/shared/api/workspaces"
+import { formatUsd } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -101,11 +102,6 @@ import {
 // because it was soft-deleted afterwards. Those cells stay empty rather than
 // reading as zero, which would claim the person is on the gateway and has spent
 // nothing. otari-ai#1727 decides how the two tables converge.
-const usd = new Intl.NumberFormat(undefined, {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 2,
-})
 
 /** One workspace a person is in, with the ceiling they hold there. */
 interface WorkspacePlacement {
@@ -1089,7 +1085,7 @@ export function OrganizationMembersPage() {
                   </span>
                   {placement.ceiling?.max_budget != null ? (
                     <span className="text-subtle tabular-nums">
-                      {usd.format(placement.ceiling.max_budget)}
+                      {formatUsd(placement.ceiling.max_budget)}
                     </span>
                   ) : null}
                 </span>
@@ -1111,10 +1107,10 @@ export function OrganizationMembersPage() {
           }
           return (
             <div className="flex flex-col items-end gap-0.5">
-              <span className="text-body">{usd.format(spendRow.spend)}</span>
+              <span className="text-body">{formatUsd(spendRow.spend)}</span>
               {spendRow.reserved > 0 ? (
                 <span className="text-caption">
-                  {usd.format(spendRow.reserved)} in flight
+                  {formatUsd(spendRow.reserved)} in flight
                 </span>
               ) : null}
             </div>

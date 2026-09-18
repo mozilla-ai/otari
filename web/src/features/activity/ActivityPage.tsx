@@ -48,7 +48,14 @@ import {
   useUsageScope,
   useUsageSummary,
 } from "@/shared/api/usage"
-import { formatRelative } from "@/shared/helpers/format"
+import {
+  formatCost,
+  formatDateTime,
+  formatLatency,
+  formatNumber,
+  formatRelative,
+  formatUnitRate,
+} from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
 import {
   resolveSelectedIds,
@@ -69,33 +76,15 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // ---------- formatting ----------
 
-const usd = new Intl.NumberFormat(undefined, {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 4,
-})
-
 function formatUSD(value: number | null): string {
-  return value === null ? "—" : usd.format(value)
+  return value === null ? "—" : formatCost(value)
 }
 
-function formatTokens(value: number | null): string {
-  return value === null ? "—" : value.toLocaleString()
-}
-
-// A per-call rate, unlike a per-million-token one, is routinely smaller than the
-// 4 decimal places `usd` keeps: $0.00002 per search would render as "$0.0000" and
-// read as free. Fall back to significant digits once the value is below what the
-// currency format can show, so a real rate is never displayed as zero.
-const usdPrecise = new Intl.NumberFormat(undefined, {
-  style: "currency",
-  currency: "USD",
-  maximumSignificantDigits: 3,
-})
-
-function formatUnitRate(value: number): string {
-  if (value === 0) return usd.format(0)
-  return value < 0.0001 ? usdPrecise.format(value) : usd.format(value)
+// The full grouped count rather than the compact `formatTokens`: a request log
+// is read for the exact number of tokens a call billed, where a tile is read
+// for scale.
+function formatTokenCount(value: number | null): string {
+  return value === null ? "—" : formatNumber(value)
 }
 
 // A charge line is discriminated by which rate it carries: token meters price per
@@ -109,17 +98,11 @@ function sortedBreakdown(lines: readonly ChargeLine[]): ChargeLine[] {
   )
 }
 
-// Humanize a millisecond duration: "820 ms", "1.4 s". Null (historical rows,
-// batch jobs) renders as an em-dash so the column reads cleanly.
-function formatLatency(ms: number | null): string {
-  if (ms === null) return "—"
-  if (ms < 1000) return `${ms} ms`
-  return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`
-}
-
-function absolute(iso: string): string {
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
+// A row that recorded no latency (historical rows, batch jobs) renders as an em
+// dash so the column stays aligned, which is what the shared helper's
+// `undefined` leaves each surface to decide.
+function latency(ms: number | null): string {
+  return formatLatency(ms) ?? "—"
 }
 
 // Relative time reads better in a scan than a full timestamp; the absolute value
@@ -218,7 +201,7 @@ function InFlightControl({
           }`}
           aria-hidden="true"
         />
-        {data.total.toLocaleString()} in flight
+        {formatNumber(data.total)} in flight
       </Button>
       <Popover.Content placement="bottom end">
         <Popover.Dialog>
@@ -261,9 +244,9 @@ function InFlightControl({
                 concurrency than a live list can usefully show anyway. */}
             {hidden > 0 ? (
               <p className="text-caption">
-                {hidden.toLocaleString()} further{" "}
+                {formatNumber(hidden)} further{" "}
                 {hidden === 1 ? "request is" : "requests are"} in flight beyond
-                the {shown.length.toLocaleString()} listed.
+                the {formatNumber(shown.length)} listed.
               </p>
             ) : null}
           </div>
@@ -600,7 +583,9 @@ function TokenBar({ entry }: { entry: UsageEntry }) {
   const composition = tokenComposition(entry)
   if (composition === null) {
     return (
-      <span className="tabular-nums">{formatTokens(entry.total_tokens)}</span>
+      <span className="tabular-nums">
+        {formatTokenCount(entry.total_tokens)}
+      </span>
     )
   }
   const parts = TOKEN_SEGMENTS.map((segment) => ({
@@ -609,7 +594,7 @@ function TokenBar({ entry }: { entry: UsageEntry }) {
   }))
   const summary = parts
     .filter((part) => part.value > 0)
-    .map((part) => `${part.label} ${part.value.toLocaleString()}`)
+    .map((part) => `${part.label} ${formatNumber(part.value)}`)
     .join(", ")
 
   let offset = 0
@@ -622,7 +607,7 @@ function TokenBar({ entry }: { entry: UsageEntry }) {
 
   return (
     <span className="inline-flex flex-col items-end gap-1.5" title={summary}>
-      <span className="tabular-nums">{composition.total.toLocaleString()}</span>
+      <span className="tabular-nums">{formatNumber(composition.total)}</span>
       <svg
         viewBox="0 0 100 4"
         preserveAspectRatio="none"
@@ -896,7 +881,7 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
                   {attemptOutcome(attempt)}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">
-                  {formatLatency(attempt.latency_ms)}
+                  {latency(attempt.latency_ms)}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">
                   {formatUSD(attempt.cost)}
@@ -1033,20 +1018,20 @@ function RequestDetail({
           {entry.api_key_id ?? "—"}
         </DetailField>
         <DetailField label="Prompt tokens">
-          {formatTokens(entry.prompt_tokens)}
+          {formatTokenCount(entry.prompt_tokens)}
         </DetailField>
         <DetailField label="Completion tokens">
-          {formatTokens(entry.completion_tokens)}
+          {formatTokenCount(entry.completion_tokens)}
         </DetailField>
         <DetailField label="Total tokens">
-          {formatTokens(entry.total_tokens)}
+          {formatTokenCount(entry.total_tokens)}
         </DetailField>
         {/* The Tokens column's number, spelled out here because it can exceed the
             provider-reported total above: the row's composition counts the cache
             buckets, which an additive-convention provider reports outside the prompt. */}
         <DetailField label="Billed tokens">
           <span title="Fresh input, cache reads and writes, and output: the tokens this request was priced on, and the total the activity row's bar splits.">
-            {formatTokens(tokenComposition(entry)?.total ?? null)}
+            {formatTokenCount(tokenComposition(entry)?.total ?? null)}
           </span>
         </DetailField>
         <DetailField label="Cost">{formatUSD(entry.cost)}</DetailField>
@@ -1070,16 +1055,16 @@ function RequestDetail({
           </>
         ) : null}
         <DetailField label="Cache read tokens">
-          {formatTokens(entry.cache_read_tokens)}
+          {formatTokenCount(entry.cache_read_tokens)}
         </DetailField>
         <DetailField label="Cache write tokens">
-          {formatTokens(entry.cache_write_tokens)}
+          {formatTokenCount(entry.cache_write_tokens)}
         </DetailField>
         <DetailField label="1h cache writes">
-          {formatTokens(entry.cache_write_1h_tokens ?? null)}
+          {formatTokenCount(entry.cache_write_1h_tokens ?? null)}
         </DetailField>
         <DetailField label="Total time">
-          {formatLatency(entry.latency_ms)}
+          {latency(entry.latency_ms)}
         </DetailField>
         <DetailField label="Request ID" copyValue={entry.id}>
           {entry.id}
@@ -1128,9 +1113,9 @@ function RequestDetail({
               return (
                 <DetailField key={meter} label={meter.replaceAll("_", " ")}>
                   {isUnitChargeLine(line)
-                    ? `${formatTokens(line.units)} at ${formatUnitRate(line.unit_rate)} each, ${formatUSD(line.cost)}`
+                    ? `${formatTokenCount(line.units)} at ${formatUnitRate(line.unit_rate)} each, ${formatUSD(line.cost)}`
                     : isTokenChargeLine(line)
-                      ? `${formatTokens(line.units)} at ${formatUSD(line.rate_per_million)} / 1M, ${formatUSD(line.cost)}`
+                      ? `${formatTokenCount(line.units)} at ${formatUSD(line.rate_per_million)} / 1M, ${formatUSD(line.cost)}`
                       : formatUSD(Number(line.cost ?? 0))}
                 </DetailField>
               )
@@ -1968,7 +1953,7 @@ export function ActivityPage() {
         id: "time",
         header: "Time",
         cell: (e) => (
-          <span title={absolute(e.timestamp)} className="text-muted">
+          <span title={formatDateTime(e.timestamp)} className="text-muted">
             {formatRelative(e.timestamp)}
           </span>
         ),
@@ -2050,7 +2035,7 @@ export function ActivityPage() {
         id: "latency",
         header: "Total time",
         align: "end",
-        cell: (e) => formatLatency(e.latency_ms),
+        cell: (e) => latency(e.latency_ms),
       },
       {
         id: "status",
@@ -2117,7 +2102,7 @@ export function ActivityPage() {
                   onPress={refresh}
                   isDisabled={usage.isFetching}
                 >
-                  {newRows.toLocaleString()} new · load
+                  {formatNumber(newRows)} new · load
                 </Button>
               ) : null}
               {newRowsUnknown ? (
@@ -2298,7 +2283,7 @@ export function ActivityPage() {
         isOpen={deleteOpen}
         onOpenChange={setDeleteOpen}
         heading="Delete usage rows"
-        body={`Delete ${effectiveCount.toLocaleString()} imported ${
+        body={`Delete ${formatNumber(effectiveCount)} imported ${
           effectiveCount === 1 ? "row" : "rows"
         }? Only imported rows are removed, and this cannot be undone.`}
         confirmLabel="Delete"

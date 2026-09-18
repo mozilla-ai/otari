@@ -52,10 +52,12 @@ import {
   useAllWorkspaceBudgetDefaults,
   useWorkspaces,
 } from "@/shared/api/workspaces"
+import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import {
   resolveSelectedIds,
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
+
 import {
   budgetLabel,
   budgetLabeler,
@@ -66,16 +68,6 @@ import { OrganizationBudgetsPage } from "./OrganizationBudgetsPage"
 import { hasNoLimit, limitLabel } from "./organizationBudget"
 
 // ---------- formatting ----------
-
-const usd = new Intl.NumberFormat(undefined, {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 2,
-})
-
-function formatUSD(value: number): string {
-  return usd.format(value)
-}
 
 const DAY = 86_400
 const HOUR = 3_600
@@ -96,12 +88,6 @@ function formatDuration(seconds: number | null): string {
   if (seconds % DAY === 0) return `Every ${seconds / DAY} days`
   if (seconds % HOUR === 0) return `Every ${seconds / HOUR} hours`
   return `Every ${seconds}s`
-}
-
-function absolute(iso: string | null): string {
-  if (!iso) return "—"
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString()
 }
 
 // The segment that opens the custom-days field. A sentinel rather than a number,
@@ -414,7 +400,7 @@ function UsageCell({ budget }: { budget: Budget }) {
   if (budget.max_budget === null) {
     return (
       <span className="text-xs text-foreground">
-        {formatUSD(spent)} spent
+        {formatUsd(spent)} spent
         {/* "dollar", because this cell is a spend bar and the budget may still
             cap tokens or requests: the Limit column beside it names those, and
             an unqualified "no limit" here contradicts it. */}
@@ -430,9 +416,9 @@ function UsageCell({ budget }: { budget: Budget }) {
         {/* The one number in this product that changes color, and only in the
             state that has already gone past the limit. */}
         <span className={state === "over" ? "text-danger" : "text-foreground"}>
-          {formatUSD(spent)}
+          {formatUsd(spent)}
         </span>
-        <span className="text-muted">of {formatUSD(allocated)}</span>
+        <span className="text-muted">of {formatUsd(allocated)}</span>
       </div>
       <SpendMeter
         spent={spent}
@@ -526,13 +512,13 @@ function ResetHistory({
                   )}
                 </td>
                 <td className="py-1.5 pr-4 text-foreground">
-                  {formatUSD(log.previous_spend)}
+                  {formatUsd(log.previous_spend)}
                 </td>
                 <td className="py-1.5 pr-4 text-muted">
-                  {absolute(log.reset_at)}
+                  {formatDateTime(log.reset_at)}
                 </td>
                 <td className="py-1.5 text-muted">
-                  {absolute(log.next_reset_at)}
+                  {formatDateTime(log.next_reset_at)}
                 </td>
               </tr>
             )

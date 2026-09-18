@@ -6,6 +6,7 @@ import { isDeploymentOperator } from "@/features/organization/roles"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
 import { useFailureCount } from "@/shared/api/usage"
+import { formatNumber } from "@/shared/helpers/format"
 import { HOUR_S } from "@/shared/helpers/timeRange"
 
 // A gateway-wide alarm, shown on every management page: when `require_pricing` is
@@ -92,7 +93,7 @@ export function PricingWarning() {
               <>
                 {" "}
                 <strong className="font-semibold">
-                  {failureCount.toLocaleString()}{" "}
+                  {formatNumber(failureCount)}{" "}
                   {failureCount === 1 ? "request" : "requests"} failed in the
                   last hour.
                 </strong>{" "}

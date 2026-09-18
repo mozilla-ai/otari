@@ -73,6 +73,13 @@ import { isVirtualUser, keyFingerprint, secretCaption } from "./secretCaption"
 
 // ---------- helpers ----------
 
+// Once per module rather than once per row, and pinned like every other
+// formatter here: an expiry reading "in 2 Tagen" beside an English column
+// heading is the mixed page formatting-and-i18n.md exists to prevent. This one
+// is not `formatRelative`, which is past-only by design; an expiry is the one
+// place the dashboard speaks about the future.
+const expiryRelative = new Intl.RelativeTimeFormat("en-US", { numeric: "auto" })
+
 function relative(iso: string | null): string | null {
   if (!iso) return null
   const then = new Date(iso).getTime()
@@ -84,11 +91,11 @@ function relative(iso: string | null): string | null {
     ["hour", 3_600],
     ["minute", 60],
   ]
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
   for (const [unit, sec] of units) {
-    if (abs >= sec) return rtf.format(Math.round(diffSec / sec), unit)
+    if (abs >= sec)
+      return expiryRelative.format(Math.round(diffSec / sec), unit)
   }
-  return rtf.format(diffSec, "second")
+  return expiryRelative.format(diffSec, "second")
 }
 
 type Layout = "wide" | "compact" | "mobile"

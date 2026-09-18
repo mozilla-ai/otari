@@ -1,17 +1,13 @@
 import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/client"
 
 import {
+  formatLatency,
   formatNumber,
   formatPct,
   formatTokens,
   formatUsdHeadline,
 } from "@/shared/helpers/format"
-import {
-  billedTokenTotal,
-  cacheHitRate,
-  costNeedsCaveat,
-  formatLatency,
-} from "./usageTotals"
+import { billedTokenTotal, cacheHitRate, costNeedsCaveat } from "./usageTotals"
 
 // Derivations for the share card. Everything here is pure so the numbers the card
 // publishes can be tested without a browser: the rasterizer cannot run in jsdom,

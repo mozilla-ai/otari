@@ -1,14 +1,19 @@
+import { readdirSync, readFileSync } from "node:fs"
+import { join } from "node:path"
+
 import { describe, expect, it } from "vitest"
 
 import {
   deltaFraction,
   formatCost,
+  formatLatency,
   formatNumber,
   formatPct,
   formatRate,
   formatRelative,
   formatReleaseDate,
   formatTokens,
+  formatUnitRate,
   formatUsd,
   formatUsdHeadline,
 } from "@/shared/helpers/format"
@@ -81,9 +86,54 @@ describe("formatCost", () => {
     expect(formatCost(0.0001)).toBe("$0.0001")
   })
 
-  it("uses two decimals for normal amounts", () => {
+  it("keeps four decimals above a cent too", () => {
+    // The case the Activity log is read for: 2.34 cents is a real per-request
+    // cost, and cents-only precision renders it as "$0.02" and drops the two
+    // digits an operator opened the row to see.
+    expect(formatCost(0.0234)).toBe("$0.0234")
+    expect(formatCost(1.23456)).toBe("$1.2346")
+  })
+
+  it("uses two decimals for whole amounts", () => {
     expect(formatCost(12.5)).toBe("$12.50")
     expect(formatCost(null)).toBe("$0.00")
+  })
+})
+
+describe("formatUnitRate", () => {
+  it("falls back to significant digits below what four decimals can show", () => {
+    // A per-call rate is routinely smaller than a per-million one. Without this
+    // a real charge renders as "$0.0000" and reads as free.
+    expect(formatUnitRate(0.00002)).toBe("$0.00002")
+    expect(formatUnitRate(0.000001234)).toBe("$0.00000123")
+  })
+
+  it("uses the ordinary cost precision at or above a hundredth of a cent", () => {
+    expect(formatUnitRate(0.0001)).toBe("$0.0001")
+    expect(formatUnitRate(0.5)).toBe("$0.50")
+  })
+
+  it("renders zero as money rather than as significant digits", () => {
+    expect(formatUnitRate(0)).toBe("$0.00")
+  })
+})
+
+describe("formatLatency", () => {
+  it("reads sub-second durations in whole milliseconds", () => {
+    expect(formatLatency(820)).toBe("820 ms")
+    expect(formatLatency(820.4)).toBe("820 ms")
+  })
+
+  it("switches to seconds at a thousand, with two decimals throughout", () => {
+    expect(formatLatency(1000)).toBe("1.00 s")
+    expect(formatLatency(15_000)).toBe("15.00 s")
+  })
+
+  it("returns undefined rather than a placeholder when nothing was recorded", () => {
+    // Each surface decides: a table cell renders the em dash that keeps the
+    // column aligned, a stat card drops the figure instead.
+    expect(formatLatency(null)).toBeUndefined()
+    expect(formatLatency(undefined)).toBeUndefined()
   })
 })
 
@@ -150,5 +200,78 @@ describe("formatRelative", () => {
 
   it("returns 'never' for missing timestamps", () => {
     expect(formatRelative(null, now)).toBe("never")
+  })
+})
+
+/**
+ * The locale sweep, over the whole of `src`.
+ *
+ * The cases above are the formatters this module owns. This one is about the
+ * ones it does not: a page that builds its own `Intl` formatter, or calls
+ * `toLocaleString()` on a number, renders a figure in whatever locale the
+ * browser reports while the words around it stay English. Three pages had done
+ * exactly that, so the same session showed a spend as "1.234,56 $" on one page
+ * and "$1,234.56" on another.
+ *
+ * Unit cases cannot catch it, because the test runner's own locale is the one
+ * that makes the wrong code look right. Reading the source can.
+ *
+ * Dates are deliberately out of scope. `toLocaleDateString` and
+ * `toLocaleTimeString` are still unpinned here and in `formatDateTime` itself,
+ * and whether a timestamp should read as US or as the reader's is a decision
+ * nobody has taken. Numbers and money are decided: the dashboard bills in USD.
+ */
+describe("formatters are locale-pinned", () => {
+  const SRC = join(process.cwd(), "src")
+
+  function sourceFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) return sourceFiles(full)
+      if (!/\.tsx?$/.test(entry.name)) return []
+      if (entry.name.includes(".test.") || entry.name.includes(".stories."))
+        return []
+      return [full]
+    })
+  }
+
+  /** Relative to `src`, so a failure names the file the way an import does. */
+  function relative(file: string): string {
+    return file.slice(SRC.length + 1)
+  }
+
+  it("covers the source tree", () => {
+    // A guard on the guard: a wrong root finds no files and passes.
+    expect(sourceFiles(SRC).length).toBeGreaterThan(100)
+  })
+
+  it("passes an explicit locale to every Intl formatter", () => {
+    const offenders = sourceFiles(SRC).flatMap((file) => {
+      const source = readFileSync(file, "utf8")
+      return [...source.matchAll(/new Intl\.\w+\(\s*([^,)\s]+)/g)]
+        .filter((match) => !match[1].startsWith('"'))
+        .map((match) => `${relative(file)}: new Intl.…(${match[1]}`)
+    })
+    expect(offenders).toEqual([])
+  })
+
+  it("formats a number through the helper rather than through the browser", () => {
+    // `toLocaleString()` with no argument is the same bug in one call: it is
+    // the browser's locale, not ours. `formatNumber` is the replacement, and it
+    // lives in `design-system/helpers` so this layer can reach it too.
+    const offenders = sourceFiles(SRC).flatMap((file) => {
+      const source = readFileSync(file, "utf8")
+      return [...source.matchAll(/\.toLocaleString\(\s*\)/g)].map(() =>
+        relative(file),
+      )
+    })
+    expect([...new Set(offenders)].sort()).toEqual([
+      // The two date call sites this sweep does not decide. Both render a
+      // timestamp, where the open question is US versus the reader's own, and
+      // both are a `new Date(...)` rather than a number.
+      "features/keys/KeysPage.tsx",
+      "features/overview/OverviewPage.tsx",
+      "shared/helpers/format.ts",
+    ])
   })
 })

@@ -1,7 +1,7 @@
 import { Button, Spinner } from "@heroui/react"
 import { useEffect, useId, useState } from "react"
-
 import { INPUT_CLASS } from "@/design-system/forms/inputClass"
+import { formatNumber } from "@/design-system/helpers/format"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 
 // Shared pager for the dashboard tables: rows-per-page on the left, a truthful
@@ -59,9 +59,9 @@ export function TablePagination({
     total != null
       ? total === 0
         ? "0 of 0"
-        : `${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()} of ${total.toLocaleString()}`
+        : `${formatNumber(rangeStart)}–${formatNumber(rangeEnd)} of ${formatNumber(total)}`
       : rowsOnPage > 0
-        ? `${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()}`
+        ? `${formatNumber(rangeStart)}–${formatNumber(rangeEnd)}`
         : "0"
 
   // Local, editable page box synced to `page`; commits on Enter or blur so
@@ -169,9 +169,7 @@ export function TablePagination({
               className={`w-12 text-center tabular-nums ${INPUT_CLASS}`}
             />
             {pageCount != null ? (
-              <span className="tabular-nums">
-                / {pageCount.toLocaleString()}
-              </span>
+              <span className="tabular-nums">/ {formatNumber(pageCount)}</span>
             ) : null}
           </span>
           <Button
