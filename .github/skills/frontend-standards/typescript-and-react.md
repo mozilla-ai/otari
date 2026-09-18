@@ -4,10 +4,18 @@ TypeScript runs in `strict` mode; `pnpm --dir web run typecheck` must pass. Reac
 
 ## TypeScript
 
-- **`undefined`, not `null`, for absent values** in your own types and props. The API layer may
-  hand back `null` (it mirrors the server JSON), convert at the boundary rather than letting
-  `null` spread through the component tree. (`ApiError`-style third-party shapes that
-  explicitly use `null` are the exception.)
+- **An absent value is an empty value first, `undefined` second, never `null`**, in your own
+  types and props. Reach for the empty value the type already carries (`""`, `[]`, `{}`) before
+  widening it: a union grows a case every reader and every call site has to handle, where an
+  empty value is the one the code around it already handles. `ProvidersPage`'s add-provider
+  form spells "no provider chosen" as an empty `providerId` rather than as
+  `string | undefined`, and every check around it reads the same either way. Widen to
+  `undefined` only where the type has no empty value that cannot collide with a real one, and
+  say so where it is declared. `null` stays out either way: the API layer hands it back because
+  it mirrors the server JSON, so convert at the boundary rather than letting it spread through
+  the component tree. (`ApiError`-style third-party shapes that explicitly use `null` are the
+  exception.) This applies to a `null` **carried over** by a refactor as much as to a new one:
+  moving it is what puts it in your diff.
 - **Named exports**, not default exports, for components/hooks/helpers, consistent names
   across imports, better tooling and tree-shaking. (`web/` already does this throughout.)
 - **Named imports**, not namespace imports (`import * as …`).

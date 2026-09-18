@@ -70,8 +70,11 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    "fetch all" loop with a hard page cap. See
    [data-fetching.md](../skills/frontend-standards/data-fetching.md).
 
-5. **TypeScript + React hygiene.** `undefined` (not `null`) for absent values in your own
-   types; `unknown` plus a guard where a type is genuinely unknown, not `any`; a discriminated
+5. **TypeScript + React hygiene.** An absent value in your own types and props is the type's
+   own empty value first (`""`, `[]`, `{}`), `undefined` only where no empty value can stand in
+   without colliding with a real one, and never `null` (the API layer mirrors the server JSON,
+   so convert at the boundary). A `null` a refactor merely moves is a finding against that
+   refactor. `unknown` plus a guard where a type is genuinely unknown, not `any`; a discriminated
    union rather than a bag of optionals; named exports and named imports, no barrel files;
    correct effect dependency arrays with cleanup; derive from props/query data rather than
    duplicating into state. The React Compiler is enabled, so hand-written

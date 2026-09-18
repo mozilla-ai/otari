@@ -95,8 +95,10 @@ can link Vite's esbuild binary at all.
   shell already switches to a drawer below `md`, and the screenshot matrix captures every page
   at 390px. Touch targets ≥44px, no hover-only controls, a table needs an answer below `md`.
   See [responsiveness.md](./responsiveness.md).
-- Prefer `undefined` over `null` for absent values in your own types (the API layer may return
-  `null`; convert at the boundary). See [typescript-and-react.md](./typescript-and-react.md).
+- Spell an absent value as the type's own empty value first (`""`, `[]`, `{}`), `undefined`
+  only where there is no empty value that cannot collide with a real one, and never `null` (the
+  API layer may return it; convert at the boundary). See
+  [typescript-and-react.md](./typescript-and-react.md).
 - Gate a deployment-dependent surface through `useDeployment()` / `useSurfaces()`, the one place
   that knows which deployment served the page. Mind the vocabulary: a *surface* is the
   deployment axis, a *capability* is the entitlement axis.
@@ -165,7 +167,7 @@ AA for the small text a pill uses. **Brand text on the brand tint does not follo
 - [components.md](./components.md): HeroUI v3 patterns, the order to reach for when customizing (variable, shared utility, prop, then a rule into the library's DOM), internal links, the UI primitives in `design-system/`.
 - [component-architecture.md](./component-architecture.md): what a page composes, what gets its own file, route files, no duplicated markup.
 - [data-fetching.md](./data-fetching.md): TanStack Query conventions: query keys, `staleTime`, guards, invalidation, bounded pagination.
-- [typescript-and-react.md](./typescript-and-react.md): strict TS, `undefined` over `null`, discriminated unions, hook and effect hygiene.
+- [typescript-and-react.md](./typescript-and-react.md): strict TS, the empty value before `undefined` and never `null`, discriminated unions, hook and effect hygiene.
 - [responsiveness.md](./responsiveness.md): breakpoints, touch targets, tables on a phone, `rem` over `px`.
 - [layout-stability.md](./layout-stability.md): loading guards, skeletons, the pre-paint theme script, no reload-as-refresh.
 - [performance.md](./performance.md): the React Compiler, code splitting, lazy loading, bundle watch, effect cleanup.
