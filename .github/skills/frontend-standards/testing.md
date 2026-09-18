@@ -34,8 +34,8 @@ site which layout fact is being pinned, and only for a fact no user-visible quer
 
 **The exception covers the assertion, not the query.** Reach the element the way any other test
 would, by its role, its text, or a structural step from either, and assert the class on what you
-found: the description's own parent is the caption line, the value's next sibling is the tile's
-aside row. `container.querySelector(".text-caption")` is the exception reopening as the rule it
+found: the description's own parent is the caption line, and a step down from the value reaches
+the tile's aside row. `container.querySelector(".text-caption")` is the exception reopening as the rule it
 was carved out of, and it fails the "one scoped element" clause anyway, since a subtree search
 is not a scope. An absence follows the same shape: "this tile reserves no row" is the row not
 being rendered, not a class going unfound.

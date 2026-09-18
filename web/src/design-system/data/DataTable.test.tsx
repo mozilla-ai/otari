@@ -454,15 +454,12 @@ describe("DataTable", () => {
       screen.getByText("detail for Charlie, seeded from Charlie"),
     ).toBeInTheDocument()
     expect(mounts).toBe(2)
-    // One panel, now sitting under the row it belongs to. Bravo's row has
-    // nothing under it any more, which is what "moved" rather than "copied"
-    // means here.
+    // One panel, moved rather than copied: it sits under the row it belongs to
+    // and Bravo's is gone rather than left behind.
     expect(
       screen.getByRole("row", { name: /Charlie/ }).nextElementSibling,
     ).toHaveTextContent("detail for Charlie")
-    expect(
-      screen.getByRole("row", { name: /Bravo/ }).nextElementSibling,
-    ).not.toHaveTextContent("detail for")
+    expect(screen.queryByText(/detail for Bravo/)).not.toBeInTheDocument()
   })
 
   it("still fires onRowAction on a row click while a selection is active", async () => {
