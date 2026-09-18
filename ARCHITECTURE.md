@@ -248,6 +248,8 @@ A service imports its own domain's repositories, the services of other domains, 
 
 ## Where new code goes
 
+**Before this table applies, decide whether the feature is part of the open-source product.** The table says where code goes once that is settled; it does not settle it. A feature released here cannot be withdrawn, every deployment inherits it, and the project carries its schema, tests and maintenance from then on. So the decision belongs to the project's product and engineering leads together, not to whoever writes the code. Open an issue that says what the feature is and who it is for, and wait for that confirmation before building it. A feature that is not confirmed for the open-source product belongs in an overlay, and may move here later. The reverse move is not possible.
+
 Choose the mechanism by what you are adding, not by the extension point you already know.
 
 | You are adding | Home | Mechanism |
