@@ -103,12 +103,18 @@ here runs that request without its attachments seeded.
 
 A file the code writes into the working directory comes back as a new stored
 file owned by the same user and workspace, with purpose `code_execution_output`.
+Otari finds it two ways and unions them: the result block's own list of produced
+files, and a listing of the workspace after each call compared with the one
+before, so a backend that leaves the block's list empty (the reference container
+does) still has its files collected. A seeded input the code rewrote counts as
+produced.
 The model sees it in the tool result as `chart.png (file_id: file-...)` and is
 asked to pass that id on, and the caller downloads it with
 `GET /v1/files/{id}/content`. A caller who declared Anthropic's own code tool
 also gets the id in the `code_execution_tool_result` block's
 `code_execution_output` entries, where Anthropic's SDK looks for it. Both directions need a sandbox backend that
-implements the protocol's optional `PutFile` and `GetFile` operations; a seed the
+implements the protocol's optional `PutFile` and `GetFile` operations, and
+collecting a file the block does not name needs `ListFiles` as well; a seed the
 backend refuses fails the request rather than running code over a missing input,
 while an output that cannot be fetched is named without an id and the run stands.
 

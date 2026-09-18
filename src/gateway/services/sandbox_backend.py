@@ -20,11 +20,12 @@ three operations used here:
                                         timeout_seconds: int}``
                               → returns ``{result_block: {…}}``
 * ``DELETE /sessions/{id}``  → tears the session down
-* ``POST /sessions/{id}/files`` and ``GET /sessions/{id}/files?path=…``
+* ``POST /sessions/{id}/files``, ``GET /sessions/{id}/files/list`` and
+  ``GET /sessions/{id}/files?path=…``
                               → seed the request's uploads into the workspace
-                              before the first call, and fetch what a run
-                              produced afterwards, when a
-                              :class:`SandboxFiles` bridge is attached
+                              before the first call, then after each call list
+                              the workspace and fetch what appeared or changed,
+                              when a :class:`SandboxFiles` bridge is attached
 
 Session lifecycle is per-request: enter creates a session, exit
 destroys it. State does not persist across separate chat-completion
@@ -271,6 +272,9 @@ class SandboxBackend:
         # calls it made, which is what keeps a batch's blocks paired with the
         # right calls: every tool loop runs its calls one at a time and in order.
         self._executions: list[CodeExecution] = []
+        # The workspace as last listed, path -> (size, modified_at). What a call
+        # produced is whatever differs from this afterwards; see ``_collect_outputs``.
+        self._workspace: dict[str, tuple[int, float | None]] = {}
         # Minted per backend, so per request: what a Responses caller sees as the
         # ``container_id`` of every interpreter call this request ran.
         self.container_id = f"{CONTAINER_ID_PREFIX}{uuid.uuid4().hex}"
@@ -298,6 +302,8 @@ class SandboxBackend:
             raise SandboxNotReachableError(f"failed to create sandbox session at {self._sandbox_url}: {exc}") from exc
         try:
             await self._seed_inputs()
+            if self._files is not None:
+                self._workspace = await self._list_workspace()
         except BaseException:
             # The session exists but the request cannot run as asked; release it
             # rather than leaving it to the backend's idle reclaim.
@@ -331,30 +337,73 @@ class SandboxBackend:
                 raise SandboxNotReachableError(f"sandbox refused attachment {staged.file_id}: {exc}") from exc
             logger.info("sandbox session %s seeded with file %s", self._session_id, staged.file_id)
 
+    async def _list_workspace(self) -> dict[str, tuple[int, float | None]]:
+        """The session workspace's files, path -> (size, modified_at); empty when unlistable.
+
+        ``ListFiles`` is optional in the contract, so a backend without it (404,
+        or any other failure) simply leaves the diff empty and the result block's
+        own file list as the only source of produced files.
+        """
+        assert self._client is not None and self._session_id is not None
+        try:
+            response = await self._client.get(f"{self._sandbox_url}/sessions/{self._session_id}/files/list")
+            response.raise_for_status()
+            entries = response.json().get("files")
+        except (httpx.HTTPError, ValueError, AttributeError) as exc:
+            logger.debug("sandbox session %s workspace not listable: %s", self._session_id, exc)
+            return {}
+        listed: dict[str, tuple[int, float | None]] = {}
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+                continue
+            size = entry.get("size_bytes")
+            modified = entry.get("modified_at")
+            listed[entry["path"]] = (
+                size if isinstance(size, int) else -1,
+                float(modified) if isinstance(modified, int | float) else None,
+            )
+        return listed
+
+    async def _produced_files(self, block: ResultBlock) -> list[str]:
+        """The files this call produced: what the block names, plus what the workspace diff shows.
+
+        The contract's result block carries a list of produced files, but not
+        every backend fills it in (the reference container reports files only
+        through ``ListFiles``), so the two sources are unioned: the block's names
+        first, in its order, then every path that appeared or changed since the
+        last listing. A seeded input the code rewrote counts as produced.
+        """
+        names = [ref.filename for ref in block.content.content if ref.filename]
+        if self._files is None:
+            return names
+        after = await self._list_workspace()
+        if after:
+            names += [path for path, stamp in after.items() if path not in names and self._workspace.get(path) != stamp]
+            self._workspace = after
+        return names
+
     async def _collect_outputs(self, block: ResultBlock) -> dict[str, str]:
         """Fetch the files a run produced and store each; returns filename to file_id.
 
         Best-effort per file: one that cannot be fetched or stored is still named
         in the rendered result, just without an id, and the run itself stands.
         """
-        if self._files is None or not block.content.content:
+        if self._files is None:
             return {}
         assert self._client is not None and self._session_id is not None
         ids: dict[str, str] = {}
-        for ref in block.content.content:
-            if not ref.filename:
-                continue
+        for filename in await self._produced_files(block):
             try:
-                data = await self._fetch_output(ref.filename)
+                data = await self._fetch_output(filename)
             except httpx.HTTPError as exc:
-                logger.warning("sandbox output %r could not be fetched: %s", ref.filename, exc)
+                logger.warning("sandbox output %r could not be fetched: %s", filename, exc)
                 continue
             if data is None:
                 continue
             try:
-                ids[ref.filename] = await self._files.store_output(ref.filename, data)
+                ids[filename] = await self._files.store_output(filename, data)
             except Exception as exc:  # noqa: BLE001 — a storage failure must not fail the run
-                logger.warning("sandbox output %r could not be stored: %s", ref.filename, exc)
+                logger.warning("sandbox output %r could not be stored: %s", filename, exc)
         return ids
 
     async def _fetch_output(self, filename: str) -> bytes | None:
@@ -514,7 +563,9 @@ def _flatten_result_block(block: ResultBlock, file_ids: dict[str, str] | None = 
     ``is_error`` flag.
 
     ``file_ids`` maps a produced filename to the ``file_id`` it was stored
-    under, so the model can hand the user something downloadable. Passing the
+    under, so the model can hand the user something downloadable; a file found
+    by the workspace diff rather than named by the block is listed from it too.
+    Passing the
     full structured result through to the caller (file refs as content blocks,
     per-step exit codes) is a future enhancement that lands alongside the
     Anthropic-content-block lift.
@@ -529,11 +580,10 @@ def _flatten_result_block(block: ResultBlock, file_ids: dict[str, str] | None = 
         parts.append(f"stderr:\n{content.stderr}")
     if content.return_code not in (None, 0):
         parts.append(f"return_code: {content.return_code}")
-    if content.content:
-        names = []
-        for ref in content.content:
-            name = ref.filename or "?"
-            names.append(f"{name} (file_id: {file_ids[name]})" if name in file_ids else name)
+    listed = [ref.filename or "?" for ref in content.content]
+    listed += [name for name in file_ids if name not in listed]
+    if listed:
+        names = [f"{name} (file_id: {file_ids[name]})" if name in file_ids else name for name in listed]
         parts.append("files: " + ", ".join(names))
 
     flattened = "\n".join(parts)

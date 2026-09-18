@@ -1227,3 +1227,133 @@ async def test_an_output_that_grows_past_the_cap_is_abandoned_mid_stream(monkeyp
     # Read just past the cap and no further: 32 bytes is four chunks, the fifth trips it.
     assert _EndlessStream.chunks == 5
     assert "file_id" not in result
+
+
+def _empty_result_block(stdout: str = "saved\n") -> dict[str, Any]:
+    """A result block that names no files, as the reference container returns."""
+    return {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {"type": "code_execution_result", "stdout": stdout, "stderr": "", "return_code": 0, "content": []},
+    }
+
+
+def _listing(*entries: tuple[str, int, float]) -> dict[str, Any]:
+    return {"files": [{"path": p, "size_bytes": s, "mime_type": None, "modified_at": m} for p, s, m in entries]}
+
+
+_Handlers = dict[tuple[str, str], httpx.Response | list[httpx.Response]]
+
+
+class _SequenceTransport(httpx.AsyncBaseTransport):
+    """Like ``_MockTransport``, but a handler may be a list answered in order."""
+
+    def __init__(self, handlers: _Handlers) -> None:
+        self._handlers = handlers
+        self.captured: list[httpx.Request] = []
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.captured.append(request)
+        handler = self._handlers.get((request.method, request.url.path))
+        if handler is None:
+            return httpx.Response(404, json={"error": "no handler"})
+        if isinstance(handler, list):
+            return handler.pop(0) if len(handler) > 1 else handler[0]
+        return handler
+
+
+def _patched_sequence_client(handlers: _Handlers, monkeypatch: pytest.MonkeyPatch) -> _SequenceTransport:
+    transport = _SequenceTransport(handlers)
+    original_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: Any, **kwargs: Any) -> None:
+        kwargs["transport"] = transport
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+    return transport
+
+
+@pytest.mark.asyncio
+async def test_a_file_the_block_does_not_name_is_found_by_the_workspace_diff(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _patched_sequence_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/files"): httpx.Response(201, json={"path": "data.csv", "size": 8}),
+            # Listed once after seeding (the input only), once after the call (the output too).
+            ("GET", "/sessions/s1/files/list"): [
+                httpx.Response(200, json=_listing(("data.csv", 8, 1.0))),
+                httpx.Response(200, json=_listing(("data.csv", 8, 1.0), ("out.txt", 5, 2.0))),
+            ],
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": _empty_result_block()}),
+            ("GET", "/sessions/s1/files"): httpx.Response(200, content=b"hello"),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([_staged()])
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "open('out.txt','w').write('hello')"})
+        execution = backend.take_executions()[0]
+
+    # Only the new file was fetched: the unchanged seeded input was not re-read.
+    fetched = [
+        r.url.params.get("path") for r in transport.captured if r.method == "GET" and r.url.path.endswith("/files")
+    ]
+    assert fetched == ["out.txt"]
+    assert files.stored == [("out.txt", b"hello")]
+    assert "files: out.txt (file_id: file-1)" in result
+    assert execution.file_ids == {"out.txt": "file-1"}
+
+
+@pytest.mark.asyncio
+async def test_the_diff_moves_forward_so_a_later_call_collects_only_its_own_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patched_sequence_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("GET", "/sessions/s1/files/list"): [
+                httpx.Response(200, json=_listing()),
+                httpx.Response(200, json=_listing(("a.txt", 1, 1.0))),
+                # a.txt rewritten (new stamp) and b.txt new: both are this call's.
+                httpx.Response(200, json=_listing(("a.txt", 2, 3.0), ("b.txt", 1, 3.0))),
+            ],
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": _empty_result_block()}),
+            ("GET", "/sessions/s1/files"): httpx.Response(200, content=b"x"),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([])
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "one"})
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "two"})
+        first, second = backend.take_executions()
+
+    assert list(first.file_ids) == ["a.txt"]
+    assert sorted(second.file_ids) == ["a.txt", "b.txt"]
+
+
+@pytest.mark.asyncio
+async def test_a_backend_without_list_files_still_collects_what_the_block_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            # No /files/list handler: the mock answers 404, as a backend without the operation would.
+            ("POST", "/sessions/s1/exec"): httpx.Response(
+                200, json={"result_block": _result_block_naming("chart.png")}
+            ),
+            ("GET", "/sessions/s1/files"): httpx.Response(200, content=b"\x89PNG"),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([])
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+
+    assert files.stored == [("chart.png", b"\x89PNG")]
+    assert "chart.png (file_id: file-1)" in result

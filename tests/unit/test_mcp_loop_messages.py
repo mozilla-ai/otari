@@ -2286,3 +2286,34 @@ async def test_stream_announces_the_execution_as_native_blocks(monkeypatch: pyte
     assert cast(Any, starts[0]).input == {"code": "print(1)"}
     # Renumbered continuously: the client sees one message.
     assert [event.index for event in events if event.type == "content_block_start"] == [0, 1, 2]
+
+
+@pytest.mark.asyncio
+async def test_native_result_announces_a_stored_file_the_block_did_not_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ``code_execution_output`` entries come from what was stored, not from the block's own list."""
+
+    class _DiffPool(_FakeSandboxPool):
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+            self.calls.append((name, arguments))
+            block = _exec_result()
+            block.content.content = []  # the backend named nothing; the workspace diff found out.txt
+            self._executions.append(
+                CodeExecution(code=str(arguments.get("code") or ""), result=block, file_ids={"out.txt": "file-9"})
+            )
+            return "stdout:\n42"
+
+    responses = [
+        _message_response(stop_reason="tool_use", content=[_code_use()]),
+        _message_response(stop_reason="end_turn", content=[_text_block("done")]),
+    ]
+    monkeypatch.setattr(messages_loop_module, "amessages", _fake_amessages_for(responses))
+
+    result = await anthropic_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+        pool=cast(Any, _DiffPool()),
+        max_iterations=5,
+        emit_native_code_execution=True,
+    )
+
+    tool_result = cast(Any, result.content[1])
+    assert [o.file_id for o in tool_result.content.content] == ["file-9"]
