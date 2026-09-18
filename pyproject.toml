@@ -12,7 +12,7 @@ version = "0.0.0"
 description = "otari, an OpenAI-compatible LLM gateway"
 requires-python = ">=3.13"
 dependencies = [
-    "any-llm-sdk[all]>=1.27.1",
+    "any-llm-sdk[all]>=1.28.0",
     # The guardrail catalog only (`services/guardrail_catalog.py`). Its
     # `parameter_registry` is a stdlib+pydantic leaf built so a consumer can
     # render a configuration form without importing a model backend, so no

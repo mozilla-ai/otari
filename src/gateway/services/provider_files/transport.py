@@ -38,8 +38,6 @@ async def provider_client(account: FileAccount, *, idle_timeout: float = 30) -> 
             max_retries=0,
             default_headers={"anthropic-workspace-id": account.workspace} if account.workspace else {},
         )
-        if not hasattr(client, "aupload_file"):
-            raise FilesError(502, "Provider-native Files require any-llm-sdk 1.28 or later")
         yield client
 
 
