@@ -161,6 +161,16 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    JSX; no structural markup copy-pasted between files. See
    [component-architecture.md](../skills/frontend-standards/component-architecture.md).
 
+   **A file is named for what it exports**, and nothing enforces that, so it is review's to
+   catch: a file with one component subject is `PascalCase.tsx` named for that component, a
+   hook is `useCamelCase.ts(x)`, and a helper or pure module is `camelCase.ts`. A file under
+   `web/src/routes/` takes whatever file-based routing requires (`tools.guardrails.tsx`) and
+   is never renamed by hand. One component sitting in a `camelCase.tsx`, or a `PascalCase.ts`
+   holding only helpers, is the finding. A module whose exports share no one subject keeps a
+   camelCase name and is not (`design-system/metrics/charts.tsx`,
+   `features/providers/providerFields.tsx`), the same carve-out `tabs.test.tsx` has. See
+   [naming-conventions.md](../skills/frontend-standards/naming-conventions.md).
+
 8. **Navigation is data, and its three gates stay three.** A *rail* destination is declared in
    `web/src/app/nav/registry.ts` and nowhere else; flag a sidebar link hand-written into a
    component. `/playground`, `/docs`, and `/account` are chrome destinations, so they
