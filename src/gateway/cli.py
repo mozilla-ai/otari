@@ -6,6 +6,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -327,15 +328,19 @@ def _hook_collect_changed_paths(repo_root: Path) -> list[str] | None:
     ever named. Specific to changed_path: a future gate type collects its
     own evidence in its own way, not through this function.
     """
-    result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
-        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",  # not the platform locale default, which is not always UTF-8
-        timeout=10,
-        check=False,
-    )
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
+            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",  # not the platform locale default, which is not always UTF-8
+            errors="replace",  # a pathologically-named file's bytes need not be valid UTF-8 either
+            timeout=10,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
     if result.returncode != 0:
         return None
     # -z: NUL-delimited and never quotes or octal-escapes a path (unlike the
@@ -495,6 +500,23 @@ _HOOK_JUDGE_TIMEOUT_SECONDS = 300
 # the same gates run first every time rather than an arbitrary subset.
 _HOOK_JUDGE_MAX_GATES_PER_RUN = 5
 
+# A per-call cap does not bound the total: 5 gates at up to 300s each, each
+# with its own possible retry (_HOOK_JUDGE_PROMPT_TOO_LONG_MARKER), is up to
+# 3,000s of judge calls alone. Claude Code's own command-hook timeout
+# defaults to 600s, after which it kills the hook and discards its output
+# entirely (see the hooks reference) -- meaning the Hook Server never gets
+# contacted at all, and every gate in the policy, mechanical and required
+# ones included, goes unevaluated for that Stop event, not just the slow
+# judge gates. This is a *total* elapsed-time budget shared across every
+# judge gate and retry in one run (_hook_collect_judge_verdicts computes one
+# deadline before its gate loop, not one budget per gate), leaving real
+# margin under the 600s default for the git evidence collection and the
+# /hooks/check request that still have to happen afterward. A gate whose
+# turn comes up after the deadline has passed reports "error" without
+# attempting the call at all, the same fail-open contract a missing `claude`
+# binary already has.
+_HOOK_JUDGE_TOTAL_BUDGET_SECONDS = 480
+
 # Haiku, not the session's own (often larger) default model: a judge call is a
 # small, structured pass/fail classification over bounded text, not the kind
 # of task that needs a frontier model, and every judge gate in a policy costs
@@ -574,18 +596,36 @@ def _hook_collect_diff(repo_root: Path) -> str | None:
     a known gap in this first iteration, not a silent one, since
     `_hook_collect_changed_paths` already reports its path in `changed_paths`
     even though this diff carries none of its content. Returns None only when
-    Git itself could not answer (no HEAD yet, not a repository), mirroring
-    `_hook_collect_changed_paths`'s own fail-open sentinel.
+    Git itself could not answer (no HEAD yet, not a repository, a timeout, or
+    `git` itself missing), mirroring `_hook_collect_changed_paths`'s own
+    fail-open sentinel: a diff collection failure must degrade this one
+    judge gate's own evidence, never crash `otari hook` and take every other
+    gate in the policy, mechanical and required ones included, down with it
+    before the request ever reaches the Hook Server (confirmed: an uncaught
+    `subprocess.run` exception here does exactly that, exiting nonzero
+    without ever calling `httpx.post`).
+
+    `errors="replace"`: `git diff` emits a tracked file's own content bytes,
+    which are not necessarily valid UTF-8 (a Latin-1-encoded tracked file, a
+    binary blob committed by mistake, ...); `encoding="utf-8"` alone decodes
+    strictly and raises `UnicodeDecodeError` from inside `subprocess.run`
+    itself on the first non-UTF-8 byte (confirmed against a real repo with
+    such a file), which is not one of the exceptions below and would
+    otherwise still crash this command outright.
     """
-    result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
-        ["git", "diff", "HEAD"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=10,
-        check=False,
-    )
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
+            ["git", "diff", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
     if result.returncode != 0:
         return None
     diff = result.stdout
@@ -718,7 +758,7 @@ _HOOK_JUDGE_PROMPT_TOO_LONG_MARKER = "prompt is too long"
 _HOOK_MAX_JUDGE_REASONING_LENGTH = 4_096
 
 
-def _hook_call_claude_p(claude_path: str, model: str, prompt: str) -> tuple[str, str]:
+def _hook_call_claude_p(claude_path: str, model: str, prompt: str, *, deadline: float) -> tuple[str, str]:
     """One `claude -p --model <model>` invocation; return (outcome, reasoning).
 
     outcome is always one of "pass"/"fail"/"error": a nonzero exit, a
@@ -732,19 +772,53 @@ def _hook_call_claude_p(claude_path: str, model: str, prompt: str) -> tuple[str,
     judged: see that function's own docstring for why (a real recursive
     incident) and why that is an isolated directory rather than a
     hooks-disabling flag.
+
+    `--tools ""` and `--strict-mcp-config`: this call's own prompt embeds the
+    diff and transcript verbatim, both attacker-influenceable (a crafted diff
+    or transcript could talk the model into more than a verdict; see the
+    `judge` gate type's own docstring on this), and it never needs a tool to
+    do its one job (read a prompt, emit one JSON object). `--tools ""`
+    disables every built-in tool; `--strict-mcp-config` with no `--mcp-config`
+    means no MCP server loads either, including one configured for the
+    repo being judged. Confirmed this still produces a normal verdict (and,
+    since it skips loading tool/MCP definitions into the system prompt,
+    measured cheaper than the same call without these flags).
+
+    `deadline` (a `time.monotonic()` timestamp, see
+    `_HOOK_JUDGE_TOTAL_BUDGET_SECONDS`) is shared across every gate and retry
+    in one run, not a fresh budget per call: already past it, this returns
+    "error" without ever touching `subprocess`; still short of it, the
+    subprocess timeout is capped to whatever is left, never more than
+    `_HOOK_JUDGE_TIMEOUT_SECONDS`.
     """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return "error", "judge time budget exhausted before this call could start"
+
     try:
         result = subprocess.run(  # noqa: S603 - fixed argv, no shell, resolved executable path
-            [claude_path, "--model", model, "-p", prompt],
+            [claude_path, "--model", model, "--tools", "", "--strict-mcp-config", "-p"],
+            input=prompt,
             cwd=_hook_judge_workdir(),
             capture_output=True,
             text=True,
             encoding="utf-8",
-            timeout=_HOOK_JUDGE_TIMEOUT_SECONDS,
+            timeout=min(_HOOK_JUDGE_TIMEOUT_SECONDS, remaining),
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return "error", f"claude -p did not respond within {_HOOK_JUDGE_TIMEOUT_SECONDS}s"
+        return "error", f"claude -p did not respond within {min(_HOOK_JUDGE_TIMEOUT_SECONDS, remaining):.0f}s"
+    except (OSError, ValueError) as exc:
+        # OSError: `_hook_judge_workdir()`'s own `mkdir` (permissions, disk
+        # full) or the subprocess launch itself (`claude` disappearing
+        # between `shutil.which` and this call). ValueError: an embedded NUL
+        # byte, which a diff or transcript can carry (confirmed: `subprocess`
+        # raises "embedded null byte" for one in an argv element, the reason
+        # the prompt goes over stdin above rather than as a trailing
+        # argument). Both used to propagate uncaught, exiting `otari hook`
+        # before it ever reached `httpx.post` and skipping every other gate
+        # in the policy, mechanical and required ones included.
+        return "error", f"could not run claude -p ({exc})"
 
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
@@ -764,7 +838,7 @@ def _hook_call_claude_p(claude_path: str, model: str, prompt: str) -> tuple[str,
 
 
 def _hook_run_judge(
-    rubric: str, diff: str, transcript: str, *, model: str, dry_run: bool = False
+    rubric: str, diff: str, transcript: str, *, model: str, deadline: float, dry_run: bool = False
 ) -> tuple[str, str]:
     """Invoke `claude -p --model <model>` for one judge gate's rubric; return (outcome, reasoning).
 
@@ -777,7 +851,10 @@ def _hook_run_judge(
     was never really run", so it reports the same `"error"` a real failed
     call would, with a `reasoning` that says so explicitly and estimates the
     prompt's size, never `"pass"`/`"fail"`, which would misrepresent a
-    verdict nothing actually produced.
+    verdict nothing actually produced. `deadline` (see
+    `_HOOK_JUDGE_TOTAL_BUDGET_SECONDS`) is passed through to both attempts
+    below unchanged either way, since it is one shared budget across the
+    whole run, not a fresh one per call.
 
     A "prompt is too long" rejection retries once with `transcript` dropped
     entirely: the transcript is supplementary "why" context for a judge
@@ -801,9 +878,13 @@ def _hook_run_judge(
     if not claude_path:
         return "error", "the `claude` CLI was not found on PATH"
 
-    outcome, reasoning = _hook_call_claude_p(claude_path, model, _hook_build_judge_prompt(rubric, diff, transcript))
+    outcome, reasoning = _hook_call_claude_p(
+        claude_path, model, _hook_build_judge_prompt(rubric, diff, transcript), deadline=deadline
+    )
     if outcome == "error" and transcript and _HOOK_JUDGE_PROMPT_TOO_LONG_MARKER in reasoning.lower():
-        outcome, reasoning = _hook_call_claude_p(claude_path, model, _hook_build_judge_prompt(rubric, diff, ""))
+        outcome, reasoning = _hook_call_claude_p(
+            claude_path, model, _hook_build_judge_prompt(rubric, diff, ""), deadline=deadline
+        )
     return outcome, reasoning
 
 
@@ -868,7 +949,15 @@ def _hook_collect_judge_verdicts(
         )
         judge_gates = judge_gates[:_HOOK_JUDGE_MAX_GATES_PER_RUN]
 
-    diff = _hook_collect_diff(repo_root) or ""
+    # None (collection genuinely failed: no HEAD, git missing, a timeout) is
+    # kept distinct from "" (collected, and there is none) until the loop
+    # below: collapsing them here, as `_hook_collect_diff(repo_root) or ""`
+    # used to, sends the model a diff-less prompt indistinguishable from a
+    # real empty one, and a model asked to judge a change it cannot see can
+    # (and, verified against a real call, does) still say "pass".
+    diff = _hook_collect_diff(repo_root)
+    diff_collection_failed = diff is None
+    diff = diff or ""
     transcript = _hook_extract_judge_transcript(Path(transcript_path)) if transcript_path else ""
     if len(transcript) > _HOOK_JUDGE_MAX_TRANSCRIPT_CHARS:
         click.echo(
@@ -882,6 +971,12 @@ def _hook_collect_judge_verdicts(
         # oldest commands first.
         transcript = transcript[-_HOOK_JUDGE_MAX_TRANSCRIPT_CHARS:]
 
+    # One deadline for the whole run, computed once, not a fresh budget per
+    # gate: see _HOOK_JUDGE_TOTAL_BUDGET_SECONDS for why a per-call cap alone
+    # does not bound the total, and why that total must stay under Claude
+    # Code's own outer hook timeout.
+    deadline = time.monotonic() + _HOOK_JUDGE_TOTAL_BUDGET_SECONDS
+
     results = []
     for gate in judge_gates:
         # Logged before the call, not after: a hung or killed `claude -p`
@@ -889,7 +984,16 @@ def _hook_collect_judge_verdicts(
         # silently vanishing along with the process that would have logged
         # its outcome.
         _hook_log_judge_call(repo_root, gate.id, "invoking")
-        outcome, reasoning = _hook_run_judge(gate.rubric, diff, transcript, model=judge_model, dry_run=judge_dry_run)
+        if diff_collection_failed:
+            # No model call at all: a diff this gate cannot see is not
+            # evidence to judge against, and every other pre-flight failure
+            # here (a missing `claude` binary, an exhausted time budget)
+            # already reports "error" without one either.
+            outcome, reasoning = "error", "could not collect the working tree diff"
+        else:
+            outcome, reasoning = _hook_run_judge(
+                gate.rubric, diff, transcript, model=judge_model, deadline=deadline, dry_run=judge_dry_run
+            )
         _hook_log_judge_call(repo_root, gate.id, outcome, detail=reasoning if judge_dry_run else None)
         results.append({"gate_id": gate.id, "outcome": outcome, "reasoning": reasoning})
     return results
@@ -991,10 +1095,15 @@ def hook(
     # session: this is what tells the server which command-evidence gates can
     # resolve at all, rather than leaving each to guess from an empty list.
     command_scope = "call"
-    # Only a Stop event collects judge verdicts (see _hook_collect_judge_verdicts):
-    # a PreToolUse call has neither a full diff nor a finished transcript to
-    # judge against yet, so it always submits none.
-    judge_results: list[dict[str, str]] = []
+    # None, not [], by default: a PreToolUse call has neither a full diff nor
+    # a finished transcript to judge against yet, and never runs
+    # _hook_collect_judge_verdicts at all, so submitting None (rather than an
+    # empty list, which would mean "ran judge gates, found none applicable")
+    # is what resolves every judge gate not_applicable on PreToolUse instead
+    # of unknown (see PolicyCheckRequest.judge_results, evaluate_judge). Only
+    # the Stop branch below ever reassigns this, to a real (possibly empty)
+    # list.
+    judge_results: list[dict[str, str]] | None = None
     if event == "PreToolUse":
         tool_name = payload.get("tool_name", "")
         tool_input = payload.get("tool_input") or {}
@@ -1153,9 +1262,19 @@ def hook(
     # 'message' (an older or otherwise mismatched otari serve behind --url)
     # must not raise KeyError here, outside that protection, and surface as a
     # traceback in place of the fail-open message this command promises.
+    # detail carries the specific "why" behind message's generic, fixed
+    # policy text (a judge gate's own model reasoning, a changed_path gate's
+    # matched paths, ...); without it, every gate of the same id shows the
+    # exact same static line no matter what a judge model actually found
+    # (confirmed: a real verdict naming "src/module.py:42" surfaced only the
+    # configured message, never that). Bounded the same way the error
+    # details elsewhere in this command are, at 500 characters: `reasoning`
+    # itself can run up to _HOOK_MAX_JUDGE_REASONING_LENGTH (4,096), too long
+    # for one stderr line.
     summary = "\n".join(
         f"  [{'x' if gate.get('enforcement') == 'required' else '!'}] "
         f"{gate.get('gate_id', '?')}: {gate.get('message', '(no message)')}"
+        + (f" ({str(gate['detail'])[:500]})" if gate.get("detail") else "")
         for gate in failing
     )
     if blocked:

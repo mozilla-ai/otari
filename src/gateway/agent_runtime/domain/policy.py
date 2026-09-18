@@ -32,6 +32,17 @@ from gateway.agent_runtime.domain.types import (
 # duplicating it.
 MAX_POLICY_BYTES = 256 * 1024
 
+# Exported for the same reason as MAX_POLICY_BYTES: JudgeVerdictRequest.gate_id
+# (routes/hooks.py) caps at this same length, since a verdict echoes back the
+# gate id the policy itself named. Enforced here too, not only there: without
+# it, a policy accepted at parse time (unbounded id length) could name a judge
+# gate whose id `otari hook` can never actually submit a verdict for -- the
+# whole /hooks/check request 422s on that one field, fail-open, taking every
+# other gate in the same policy, mechanical and required ones included, down
+# with it. A gate id this build accepts must always be one a verdict can
+# round-trip.
+MAX_GATE_ID_LENGTH = 200
+
 _SUPPORTED_SCHEMA_VERSIONS = {"1.0"}
 _SUPPORTED_GATE_TYPES = {"changed_path", "command_match", "command_if_changed", "judge"}
 _SUPPORTED_ENFORCEMENTS = {"required", "advisory"}
@@ -185,6 +196,8 @@ def _parse_gate(raw: Any) -> GateSpec:
     gate_id = raw.get("id")
     if not isinstance(gate_id, str) or not gate_id:
         raise PolicyError(f"Gate is missing a non-empty 'id': {raw!r}")
+    if len(gate_id) > MAX_GATE_ID_LENGTH:
+        raise PolicyError(f"Gate id {gate_id!r} is longer than {MAX_GATE_ID_LENGTH} characters.")
 
     gate_type = raw.get("type")
     # isinstance first: `in` on a set hashes its argument, and a caller can

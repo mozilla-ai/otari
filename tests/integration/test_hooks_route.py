@@ -951,12 +951,41 @@ def test_judge_gate_relays_a_failing_verdict_without_blocking(
     assert body["results"][0]["detail"] == "swallows exceptions"
 
 
-def test_judge_gate_is_unknown_when_no_verdict_was_submitted(
+def test_judge_gate_is_not_applicable_when_judge_results_is_omitted_entirely(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
+    """Omitting `judge_results` (as `otari hook` does on `PreToolUse`, which never
+
+    runs judge gates) resolves `not_applicable`, not `unknown`: the caller's
+    event type simply does not judge, as opposed to having judged and come
+    up short on this one gate (test_judge_gate_is_unknown_when_judge_results_
+    is_submitted_but_empty). The distinction is what keeps a `PreToolUse`
+    edit to a `when_changed`-matched path from showing an advisory warning
+    on every single one, regardless of how well-behaved the session was.
+    """
     response = client.post(
         f"{API_ROOT}/hooks/check",
         json={"policy_yaml": _JUDGE_POLICY},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "not_applicable"
+
+
+def test_judge_gate_is_unknown_when_judge_results_is_submitted_but_empty(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A caller that does run judge gates for this event (`Stop`) but collected
+
+    nothing (an empty, not omitted, `judge_results`) still resolves
+    `unknown` for a gate genuinely missing its verdict, unlike an omitted
+    field entirely (see the sibling test above).
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _JUDGE_POLICY, "judge_results": []},
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -1060,6 +1089,27 @@ def test_judge_gate_with_when_changed_still_resolves_the_verdict_once_a_matching
     assert body["blocked"] is False
     assert body["results"][0]["outcome"] == "fail"
     assert body["results"][0]["detail"] == "swallows exceptions"
+
+
+def test_judge_gate_with_when_changed_is_not_applicable_on_a_pretooluse_shaped_request(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The exact shape `otari hook` submits on a `PreToolUse` edit to a path this
+
+    gate's `when_changed` matches: `changed_paths` naming that one path,
+    `judge_results` omitted. Both conditions that could otherwise make this
+    gate warn (an omitted verdict, a matched when_changed) are present at
+    once, and the gate must still resolve `not_applicable`, not `unknown`.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _WHEN_CHANGED_JUDGE_POLICY, "changed_paths": ["src/module.py"]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "not_applicable"
 
 
 def test_judge_when_changed_oversized_workload_is_rejected(
