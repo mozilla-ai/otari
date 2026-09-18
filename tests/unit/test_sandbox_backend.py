@@ -927,3 +927,53 @@ async def test_exec_503_preserves_retry_hint(monkeypatch: pytest.MonkeyPatch) ->
         with pytest.raises(SandboxUnavailableError) as caught:
             await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(42)"})
     assert caught.value.retry_after == "15"
+
+
+@pytest.mark.asyncio
+async def test_executions_are_kept_in_order_and_drained_by_take(monkeypatch: pytest.MonkeyPatch) -> None:
+    """What a loop minting native result blocks reads: the code and the structured result."""
+    result_block = {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {"type": "code_execution_result", "stdout": "1\n", "stderr": "", "return_code": 0, "content": []},
+    }
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": result_block}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        assert backend.container_id.startswith("otari_cntr_")
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(2)"})
+        executions = backend.take_executions()
+        assert [execution.code for execution in executions] == ["print(1)", "print(2)"]
+        assert executions[0].result is not None
+        assert executions[0].result.content.stdout == "1\n"
+        # Drained: a later round cannot claim an earlier round's executions.
+        assert backend.take_executions() == []
+
+
+@pytest.mark.asyncio
+async def test_an_exec_that_never_answered_is_kept_without_a_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(500),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        with pytest.raises(SandboxNotReachableError):
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
+        executions = backend.take_executions()
+
+    assert len(executions) == 1
+    assert executions[0].code == "print(1)"
+    assert executions[0].result is None

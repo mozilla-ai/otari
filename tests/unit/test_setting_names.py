@@ -27,6 +27,7 @@ _SETTING_NAMES = frozenset(
         "budget_reservation_ttl_sec",
         "budget_strategy",
         "capture_agent_telemetry",
+        "code_execution_executor",
         "cors_allow_origins",
         "dashboard_login_rate_limit_per_minute",
         "dashboard_session_ttl_hours",

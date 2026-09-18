@@ -7,10 +7,11 @@ keywords (OpenAI `code_interpreter`, Anthropic versioned `code_execution_*` /
 extracted — they stay in `tools[]` and pass through to the upstream provider,
 which executes them server-side.
 
-Web search has one opt-in exception: with `intercept=True` the provider-named
-web-search keywords are claimed too, so a client that can only speak a
-provider's vocabulary reaches a configured gateway backend. Code execution has
-no such mode, and an OpenAI `function` named `web_search` is never claimed.
+With `intercept=True` the provider-named keywords are claimed too, so a client
+that can only speak a provider's vocabulary reaches a configured gateway
+backend. For web search that is the `web_search_intercept` opt-in; for code
+execution it is the executor decision (`tests/unit/test_code_executor.py`). An
+OpenAI `function` named `web_search` or `code_execution` is never claimed.
 """
 
 from __future__ import annotations

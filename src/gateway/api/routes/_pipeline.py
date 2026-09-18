@@ -104,8 +104,13 @@ from gateway.api.routes._tools import (
     _is_provider_web_search_tool_type,
     _resolve_sandbox_purpose_hint,
     _web_search_intercept_enabled,
+    decide_code_executor,
     declares_native_web_search,
-    has_provider_code_execution_tool,
+    first_provider_code_execution_tool,
+    native_code_execution_dialect,
+    parse_code_execution_header,
+    provider_runs_code_natively,
+    resolve_code_executor_preference,
     web_search_max_results_baseline,
 )
 from gateway.core.config import GatewayConfig
@@ -190,6 +195,7 @@ from gateway.services.tenancy.organization_guardrail_service import (
 )
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
     SERVED_TOOL_NAMES,
+    ResolvedCodeExecutionPolicy,
     resolve_workspace_code_execution_policy,
 )
 from gateway.services.tenancy.workspace_mcp_server_service import resolve_workspace_mcp_servers
@@ -235,6 +241,7 @@ from gateway.streaming import (
     streaming_generator,
 )
 from gateway.types.attempt import Attempt
+from gateway.types.code_execution import CodeExecutor
 from gateway.types.session_principal import SessionPrincipal
 
 ResultT = TypeVar("ResultT")
@@ -317,6 +324,15 @@ ALL_PROVIDERS_RATE_LIMITED_DETAIL = "All upstream providers rate-limited this re
 SANDBOX_NOT_CONFIGURED_DETAIL = (
     "otari_code_execution tool requested but no sandbox is configured on this gateway. "
     "Set OTARI_SANDBOX_URL on the gateway, or remove otari_code_execution from `tools`."
+)
+CODE_EXECUTOR_NOT_CONFIGURED_DETAIL = (
+    "code execution was asked to run on this gateway but no sandbox is configured. "
+    "Set OTARI_SANDBOX_URL on the gateway, or let the provider run it."
+)
+CODE_EXECUTION_HEADER_INVALID_DETAIL = "X-Otari-Code-Execution must be one of auto, otari, provider"
+CODE_EXECUTOR_PINNED_DETAIL = (
+    "this workspace's code-execution policy decides who runs code; the X-Otari-Code-Execution "
+    "header cannot choose otherwise"
 )
 SANDBOX_MCP_CONFLICT_DETAIL = (
     "otari_code_execution and mcp_servers cannot be combined in the same request yet; "
@@ -787,6 +803,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         on_first_response: Callable[[], None] | None = None,
         *,
         emit_native_web_search: bool = False,
+        emit_native_code_execution: bool = False,
         web_search_budget: WebSearchBudget | None = None,
     ) -> ResultT: ...
 
@@ -797,6 +814,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         max_iterations: int,
         *,
         emit_native_web_search: bool = False,
+        emit_native_code_execution: bool = False,
         web_search_budget: WebSearchBudget | None = None,
     ) -> AsyncIterator[ChunkT]: ...
 
@@ -2166,6 +2184,7 @@ class ToolContext:
         sandbox_exec_timeout_s: int | None = None,
         sandbox_session_image: str | None = None,
         sandbox_allowed_tools: frozenset[str] | None = None,
+        code_execution_executor: CodeExecutor | None = None,
         use_web_search: bool,
         web_search_tool_entry: dict[str, Any] | None,
         web_search_url: str | None,
@@ -2194,6 +2213,10 @@ class ToolContext:
         # where the request's session is live, and read again at dispatch.
         self.sandbox_session_image = sandbox_session_image
         self.sandbox_allowed_tools = sandbox_allowed_tools
+        # Who was decided to run the request's code-execution declaration, when it
+        # made one: ``OTARI`` or ``PROVIDER``, never ``AUTO``. ``None`` when the
+        # request declared no code execution at all.
+        self.code_execution_executor = code_execution_executor
         self.use_web_search = use_web_search
         self.web_search_tool_entry = web_search_tool_entry
         self.web_search_url = web_search_url
@@ -2260,6 +2283,19 @@ class ToolContext:
     def emit_native_web_search(self) -> bool:
         """Whether this request should get Anthropic-native server-tool blocks back."""
         return self.use_web_search and declares_native_web_search(self.web_search_tool_entry)
+
+    @property
+    def native_code_execution_dialect(self) -> str | None:
+        """The wire format whose native code-execution blocks this request expects.
+
+        Set only when the gateway runs a declaration made in a provider's own
+        vocabulary: the caller asked in Anthropic's or OpenAI's words and its SDK
+        will look for that provider's result shape, so the loop answers in it.
+        ``None`` for ``otari_code_execution``, whose callers get the plain result.
+        """
+        if not self.use_sandbox:
+            return None
+        return native_code_execution_dialect(self.sandbox_tool_entry)
 
     @property
     def max_web_search_uses(self) -> int | None:
@@ -2678,6 +2714,7 @@ async def prepare_gateway_tools(
     mcp_server_ids: list[uuid.UUID] | None,
     max_tool_iterations: int | None,
     tools_header: str | None,
+    code_execution_header: str | None = None,
 ) -> ToolContext:
     """Guardrails, MCP server-id resolution, and gateway-tool extraction.
 
@@ -2763,25 +2800,23 @@ async def prepare_gateway_tools(
                 raise adapter.error(400, MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL, ErrorKind.INVALID_REQUEST)
             mcp_servers = (mcp_servers or []) + stored_servers
 
-        sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
         # Read the effective config value (dashboard override / env / YAML), falling
         # back to the env var so pure-env deployments are unchanged. A dashboard
         # override mutates ctx.config, so it hot-applies on the next request.
         sandbox_url: str | None = ctx.config.sandbox_url or otari_env("SANDBOX_URL") or None
-        use_sandbox = False
-        if sandbox_tool_entry is not None:
-            if sandbox_url is None:
-                raise adapter.error(400, SANDBOX_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
-            if mcp_servers:
-                raise adapter.error(400, SANDBOX_MCP_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
-            # Two sandboxes, one request. Whichever way the gateway resolved it
-            # silently, half the caller's state would live somewhere they cannot
-            # address: the gateway sandbox's session is per-request and never
-            # named on the wire, the provider's is named by a handle the gateway
-            # would then have to route around. Refuse instead of picking.
-            if has_provider_code_execution_tool(tools_after_sandbox):
-                raise adapter.error(400, SANDBOX_PROVIDER_TOOL_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
-            use_sandbox = True
+        try:
+            requested_executor = parse_code_execution_header(code_execution_header)
+        except ValueError:
+            raise adapter.error(400, CODE_EXECUTION_HEADER_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from None
+
+        # Two declarations can ask for code execution: the explicit gateway type,
+        # and a provider's own keyword. The first is always the gateway's to run.
+        # The second is the executor's decision, taken below once the workspace's
+        # policy has had its say, so here it is only found, not claimed.
+        sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
+        provider_code_entry = first_provider_code_execution_tool(tools_after_sandbox)
+        if sandbox_tool_entry is not None and sandbox_url is None:
+            raise adapter.error(400, SANDBOX_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
 
         # Forwarded to the sandbox backend as `Authorization: Bearer`. Only set in
         # hybrid mode when the backend IS the platform (its URL is under the
@@ -2797,94 +2832,121 @@ async def prepare_gateway_tools(
         # replaced by a *narrower* workspace one below.
         sandbox_session_image: str | None = ctx.config.effective_sandbox_image()
         sandbox_allowed_tools: frozenset[str] | None = None
-        if use_sandbox and ctx.hybrid_mode:
-            assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
-            assert sandbox_tool_entry is not None  # use_sandbox implies the entry is present
-            if sandbox_url is not None and url_targets_platform(sandbox_url, ctx.config.platform.get("base_url")):
-                sandbox_auth_token = ctx.user_token
+        code_execution_executor: CodeExecutor | None = None
+        code_execution_policy: ResolvedCodeExecutionPolicy | None = None
+        use_sandbox = False
 
-            # Platform owns the per-workspace code-exec policy: 403 if the workspace
-            # has it off, otherwise apply the workspace defaults (per-request values
-            # win) — the default purpose hint and the loop-iteration ceiling. The
-            # tools allow-list + exec timeout are re-enforced by the /api/v1/sandbox proxy.
-            policy = await _resolve_platform_code_execution(config=ctx.config, user_token=ctx.user_token)
-            # Fail closed on a malformed policy: a non-bool `enabled` is a cross-service
-            # contract break, not a "disabled" signal — surface it as 502, never run.
-            enabled = policy.get("enabled")
-            if not isinstance(enabled, bool):
-                raise adapter.error(502, MALFORMED_CODE_EXEC_POLICY_DETAIL, ErrorKind.API)
-            if not enabled:
-                raise adapter.error(403, SANDBOX_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)
-            if not sandbox_tool_entry.get("purpose_hint") and policy.get("default_purpose_hint"):
-                sandbox_tool_entry["purpose_hint"] = policy["default_purpose_hint"]
-            resolved_iters = policy.get("max_iterations")
-            # `bool` is an `int` subclass — exclude it so a JSON `true` isn't read as 1.
-            if isinstance(resolved_iters, int) and not isinstance(resolved_iters, bool) and resolved_iters > 0:
-                sandbox_max_iterations = resolved_iters
-        elif use_sandbox:
-            # Standalone's counterpart to the resolve above: the policy is a row in
-            # this deployment's own database, read here at admission because this is
-            # where the request's session is live and where the values it carries
-            # (the hint, the two ceilings) still have somewhere to land. The
-            # workspace comes off the key that authenticated the request, never off
-            # a header; a master-key request resolves to the deployment's default
-            # workspace, so an operator who has narrowed that workspace is narrowed
-            # by it too (`services/workspace_scope.py`).
-            #
-            # No row means no narrowing, which is what keeps a deployment that has
-            # configured nothing per-workspace behaving exactly as it did. A row may
-            # only narrow: it refuses the tool, lowers the ceilings (applied with
-            # `min` further down and in `ToolContext`), and fills in a hint the
-            # request did not give. It can never turn on a sandbox the deployment
-            # has not configured, which the missing-URL 400 above already settled.
-            assert sandbox_tool_entry is not None  # use_sandbox implies the entry is present
-            if ctx.db is None or ctx.workspace_id is None:
-                # Fail closed. Both are invariants on this path today (a standalone
-                # request with no session is refused with `DB_UNAVAILABLE_DETAIL`
-                # before this, and `resolve_workspace_id` always answers, falling
-                # back to the default workspace), so this is unreachable, which is
-                # exactly why it refuses rather than falling through. What this arm
-                # guards is a *veto*: skipping it would serve code execution to a
-                # workspace whose row says `enabled=False`, silently, on the day one
-                # of those invariants stops holding. `_resolve_mcp_server_ids`
-                # refuses at the identical condition.
-                raise adapter.error(500, CODE_EXEC_POLICY_UNRESOLVABLE_DETAIL, ErrorKind.API)
-            workspace_policy = await resolve_workspace_code_execution_policy(ctx.db, ctx.workspace_id)
-            if workspace_policy is not None:
-                if not workspace_policy.enabled:
+        # With no sandbox configured there is nothing to bring a provider's keyword
+        # to, so it is forwarded exactly as it always was and no policy is read for
+        # it: a deployment without a sandbox is a deployment the executor does not
+        # touch. (The explicit type was refused above.)
+        if sandbox_url is not None and (sandbox_tool_entry is not None or provider_code_entry is not None):
+            deployment_executor = ctx.config.effective_code_executor()
+            native_available = provider_runs_code_natively(
+                provider_code_entry, provider=_dispatch_provider_name(ctx), dialect=adapter.name
+            )
+            if ctx.hybrid_mode:
+                # The platform's resolve answers for a workspace that may run code
+                # *here*, and refuses one that may not. So it is asked only once the
+                # decision already points here: asking it about a keyword the
+                # provider is about to serve natively would turn that request into a
+                # 403 for every workspace otari.ai has not enabled for Otari's
+                # sandbox, which today is most of them. The cost is that a
+                # platform-side pin cannot pull a natively served keyword here; that
+                # lands with the platform half of this work.
+                provisional, _ = resolve_code_executor_preference(
+                    requested=requested_executor, workspace=None, deployment=deployment_executor
+                )
+                provisional_executor = decide_code_executor(
+                    provisional, sandbox_configured=True, native_available=native_available
+                )
+                if sandbox_tool_entry is not None or provisional_executor is CodeExecutor.OTARI:
+                    code_execution_policy = await _hybrid_code_execution_policy(adapter, ctx)
+            else:
+                code_execution_policy = await _standalone_code_execution_policy(adapter, ctx)
+
+            executor_preference, executor_conflict = resolve_code_executor_preference(
+                requested=requested_executor,
+                workspace=code_execution_policy.executor if code_execution_policy is not None else None,
+                deployment=deployment_executor,
+            )
+            if executor_conflict:
+                raise adapter.error(403, CODE_EXECUTOR_PINNED_DETAIL, ErrorKind.PERMISSION)
+            code_execution_executor = decide_code_executor(
+                executor_preference, sandbox_configured=True, native_available=native_available
+            )
+
+            if provider_code_entry is not None and code_execution_executor is CodeExecutor.OTARI:
+                # The keyword is claimed: it leaves ``tools[]`` and becomes the entry
+                # the sandbox is configured from, so the caller's declaration shape
+                # (and with it the native result blocks it expects back) is kept. An
+                # explicit ``otari_code_execution`` beside it is the same request said
+                # twice; it is folded in rather than refused, contributing only the
+                # hint the keyword itself cannot carry.
+                claimed, tools_after_sandbox = _extract_code_execution_tool(tools_after_sandbox, intercept=True)
+                assert claimed is not None  # ``provider_code_entry`` was found in the same list
+                if sandbox_tool_entry is not None and not claimed.get("purpose_hint"):
+                    if sandbox_tool_entry.get("purpose_hint"):
+                        claimed["purpose_hint"] = sandbox_tool_entry["purpose_hint"]
+                sandbox_tool_entry = claimed
+            elif provider_code_entry is not None and sandbox_tool_entry is not None:
+                # Two sandboxes, one request. Whichever way the gateway resolved it
+                # silently, half the caller's state would live somewhere they cannot
+                # address: the gateway sandbox's session is per-request and never
+                # named on the wire, the provider's is named by a handle the gateway
+                # would then have to route around. Refuse instead of picking.
+                raise adapter.error(400, SANDBOX_PROVIDER_TOOL_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
+            use_sandbox = sandbox_tool_entry is not None
+        elif requested_executor is CodeExecutor.OTARI and provider_code_entry is not None:
+            raise adapter.error(400, CODE_EXECUTOR_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
+
+        if use_sandbox:
+            assert sandbox_tool_entry is not None
+            assert sandbox_url is not None
+            if mcp_servers:
+                raise adapter.error(400, SANDBOX_MCP_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
+            if ctx.hybrid_mode:
+                assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
+                if url_targets_platform(sandbox_url, ctx.config.platform.get("base_url")):
+                    sandbox_auth_token = ctx.user_token
+            # The policy narrows what the deployment allows and never widens it: a
+            # veto, two ceilings applied with ``min`` further down and in
+            # ``ToolContext``, a hint that fills in only when the request gave none,
+            # a tool list that only removes, and an image that must be one the
+            # operator curated. No policy means no narrowing, which is what keeps a
+            # deployment that has configured nothing per-workspace behaving exactly
+            # as it did. The workspace came off the key that authenticated the
+            # request (standalone) or off the caller's token (hybrid), never off a
+            # header.
+            if code_execution_policy is not None:
+                if not code_execution_policy.enabled:
                     raise adapter.error(403, SANDBOX_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)
-                if not sandbox_tool_entry.get("purpose_hint") and workspace_policy.default_purpose_hint:
-                    sandbox_tool_entry["purpose_hint"] = workspace_policy.default_purpose_hint
-                sandbox_max_iterations = workspace_policy.max_iterations
-                sandbox_exec_timeout_s = workspace_policy.exec_timeout_s
-                if workspace_policy.tools is not None:
+                if not sandbox_tool_entry.get("purpose_hint") and code_execution_policy.default_purpose_hint:
+                    sandbox_tool_entry["purpose_hint"] = code_execution_policy.default_purpose_hint
+                sandbox_max_iterations = code_execution_policy.max_iterations
+                sandbox_exec_timeout_s = code_execution_policy.exec_timeout_s
+                if code_execution_policy.tools is not None:
                     # An intersection, so it only ever removes. Nothing left to run
                     # is refused here rather than handed to a backend advertising an
                     # empty tool list, which the model would answer by not calling
                     # the tool at all: an unusable-but-successful request is the
-                    # failure mode a policy exists to make loud.
-                    #
-                    # Against ``SERVED_TOOL_NAMES``, which is the same set
-                    # ``_require_runnable_tools`` refuses a write against, so the
-                    # storable rule and the admission rule are one rule. Naming
-                    # ``CODE_EXECUTION_TOOL_NAME`` here instead would agree only
-                    # while that tuple has one entry: the day a second tool kind
-                    # joins it, a policy naming only that one becomes storable and
-                    # then 403s on every request, which is the state both guards
-                    # exist to prevent.
-                    if not set(workspace_policy.tools) & set(SERVED_TOOL_NAMES):
+                    # failure mode a policy exists to make loud. Against
+                    # ``SERVED_TOOL_NAMES``, the same set ``_require_runnable_tools``
+                    # refuses a write against, so the storable rule and the
+                    # admission rule are one rule.
+                    if not code_execution_policy.tools & set(SERVED_TOOL_NAMES):
                         raise adapter.error(403, SANDBOX_TOOLS_EXCLUDED_DETAIL, ErrorKind.PERMISSION)
-                    sandbox_allowed_tools = workspace_policy.tools
-                if workspace_policy.image is not None:
+                    sandbox_allowed_tools = code_execution_policy.tools
+                if code_execution_policy.image is not None:
                     # Re-checked against the operator's list, which the write
                     # already checked once: an operator may shrink that list after
                     # a workspace pinned from it, and running the un-curated image
                     # anyway is precisely the supply-chain hole the column is
                     # guarded for. Refuse rather than quietly serve the deployment
                     # default, so the workspace learns its pin is dead.
-                    if workspace_policy.image not in ctx.config.pinnable_sandbox_images():
+                    if code_execution_policy.image not in ctx.config.pinnable_sandbox_images():
                         raise adapter.error(403, SANDBOX_IMAGE_NOT_ALLOWED_DETAIL, ErrorKind.PERMISSION)
-                    sandbox_session_image = workspace_policy.image
+                    sandbox_session_image = code_execution_policy.image
 
         web_search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
         # Interception (claiming the provider-named web_search keywords) is opt-in and
@@ -3061,6 +3123,7 @@ async def prepare_gateway_tools(
         sandbox_exec_timeout_s=sandbox_exec_timeout_s,
         sandbox_session_image=sandbox_session_image,
         sandbox_allowed_tools=sandbox_allowed_tools,
+        code_execution_executor=code_execution_executor,
         use_web_search=use_web_search,
         web_search_tool_entry=web_search_tool_entry,
         web_search_url=web_search_url,
@@ -3077,6 +3140,90 @@ async def prepare_gateway_tools(
         ),
         tools_header=tools_header,
     )
+
+
+def _dispatch_provider_name(ctx: RequestContext) -> str | None:
+    """The any-llm provider the request's first attempt dispatches to, if known.
+
+    Standalone resolved it in the preamble; hybrid has it on the platform's first
+    attempt. ``None`` when neither could say, which the executor reads as "not
+    natively served", the answer that brings the code here rather than forwarding
+    a declaration nobody may honor.
+    """
+    if ctx.resolved_provider is not None:
+        return ctx.resolved_provider.provider.value
+    if ctx.route is not None and ctx.route.attempts:
+        return ctx.route.attempts[0].provider
+    return None
+
+
+async def _standalone_code_execution_policy(
+    adapter: FormatAdapter[Any, Any],
+    ctx: RequestContext,
+) -> ResolvedCodeExecutionPolicy | None:
+    """The request's workspace policy, read at admission where its session is live.
+
+    The workspace comes off the key that authenticated the request, never off a
+    header; a master-key request resolves to the deployment's default workspace,
+    so an operator who has narrowed that workspace is narrowed by it too
+    (``services/workspace_scope.py``). ``None`` means no row and no narrowing.
+
+    Fails closed when the session or the workspace is missing. Both are
+    invariants on this path today (a standalone request with no session is
+    refused with ``DB_UNAVAILABLE_DETAIL`` before this, and ``resolve_workspace_id``
+    always answers), so this is unreachable, which is exactly why it refuses
+    rather than falling through: what it guards is a *veto*, and skipping it
+    would serve code execution to a workspace whose row says ``enabled=False``
+    on the day one of those invariants stops holding.
+    """
+    if ctx.db is None or ctx.workspace_id is None:
+        raise adapter.error(500, CODE_EXEC_POLICY_UNRESOLVABLE_DETAIL, ErrorKind.API)
+    return await resolve_workspace_code_execution_policy(ctx.db, ctx.workspace_id)
+
+
+async def _hybrid_code_execution_policy(
+    adapter: FormatAdapter[Any, Any],
+    ctx: RequestContext,
+) -> ResolvedCodeExecutionPolicy:
+    """The platform's answer for the caller's workspace, in the standalone shape.
+
+    The platform owns the per-workspace policy: ``enabled`` is its veto, the
+    hint and the loop ceiling its defaults (per-request values win), and
+    ``executor`` its pin where it sends one. A malformed ``enabled`` is a
+    cross-service contract break, not a "disabled" signal, so it surfaces as a
+    502 and never runs. The other fields are read leniently: an unusable one
+    narrows nothing rather than failing a request over a default.
+
+    The tool allow-list and the execution timeout the payload also carries are
+    deliberately not applied here: the platform's sandbox proxy re-enforces both
+    on every call, and enforcing them twice would let this gateway refuse a tool
+    the platform admits.
+    """
+    assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
+    policy = await _resolve_platform_code_execution(config=ctx.config, user_token=ctx.user_token)
+    enabled = policy.get("enabled")
+    if not isinstance(enabled, bool):
+        raise adapter.error(502, MALFORMED_CODE_EXEC_POLICY_DETAIL, ErrorKind.API)
+    hint = policy.get("default_purpose_hint")
+    return ResolvedCodeExecutionPolicy(
+        enabled=enabled,
+        default_purpose_hint=hint if isinstance(hint, str) and hint else None,
+        max_iterations=_positive_int(policy.get("max_iterations")),
+        exec_timeout_s=None,
+        image=None,
+        tools=None,
+        executor=CodeExecutor.parse(policy.get("executor")),
+    )
+
+
+def _positive_int(value: Any) -> int | None:
+    """``value`` when it is a positive integer, else ``None``.
+
+    ``bool`` is an ``int`` subclass and is excluded so a JSON ``true`` is not read as 1.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return int(value)
 
 
 async def _require_tool_pricing(
@@ -3630,9 +3777,23 @@ def _loop_options(tool_ctx: ToolContext) -> dict[str, Any]:
     The budget itself travels, not the number it was built from: every attempt of
     one request draws on the same one.
     """
-    if tool_ctx.web_search_budget is None:
+    options: dict[str, Any] = {}
+    if tool_ctx.web_search_budget is not None:
+        options["web_search_budget"] = tool_ctx.web_search_budget
+    return options
+
+
+def _sandbox_loop_options(adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext) -> dict[str, Any]:
+    """Sandbox-loop kwargs, presence-encoded like :func:`_loop_options`.
+
+    The native flag travels only when this request's declaration is in the
+    adapter's own vocabulary: an Anthropic-dated keyword on Messages, OpenAI's
+    ``code_interpreter`` on Responses. A caller who said ``otari_code_execution``
+    gets the plain result it always has.
+    """
+    if tool_ctx.native_code_execution_dialect != adapter.name:
         return {}
-    return {"web_search_budget": tool_ctx.web_search_budget}
+    return {"emit_native_code_execution": True}
 
 
 async def dispatch_non_stream(
@@ -3657,7 +3818,13 @@ async def dispatch_non_stream(
     if tool_ctx.use_sandbox:
         async with tool_ctx.build_sandbox_backend() as backend:
             kwargs = adapter.inject_hints(call_kwargs, backend.purpose_hints(), header=tool_ctx.tools_header)
-            return await adapter.run_tool_loop(kwargs, backend, tool_ctx.max_tool_iterations, on_first_response)
+            return await adapter.run_tool_loop(
+                kwargs,
+                backend,
+                tool_ctx.max_tool_iterations,
+                on_first_response,
+                **_sandbox_loop_options(adapter, tool_ctx),
+            )
 
     assert tool_ctx.use_web_search or tool_ctx.use_web_fetch
     async with tool_ctx.build_web_retrieval_backend() as web_backend:
@@ -3703,6 +3870,7 @@ async def _eager_backend_stream(
             tool_ctx.max_tool_iterations,
             emit_native_web_search=tool_ctx.emit_native_web_search,
             **_loop_options(tool_ctx),
+            **(_sandbox_loop_options(adapter, tool_ctx) if tool_ctx.use_sandbox else {}),
         ):
             yield event
     finally:
@@ -4415,6 +4583,7 @@ async def run_streaming_with_fallback(
             tool_ctx.max_tool_iterations,
             emit_native_web_search=tool_ctx.emit_native_web_search,
             **_loop_options(tool_ctx),
+            **(_sandbox_loop_options(adapter, tool_ctx) if tool_ctx.use_sandbox else {}),
         )
 
     # See run_platform_non_stream: BackgroundTasks only run after a successful

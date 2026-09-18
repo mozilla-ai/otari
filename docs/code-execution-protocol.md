@@ -370,6 +370,7 @@ with the reference one rather than merely similar to it.
 |---|---|---|
 | `sandbox_url` | `OTARI_SANDBOX_URL` | Base URL of the backend. Unset, `otari_code_execution` requests are rejected. |
 | `sandbox_purpose_hint` | `OTARI_SANDBOX_PURPOSE_HINT` | Default purpose hint for the tool, when a request supplies none. |
+| `code_execution_executor` | `OTARI_CODE_EXECUTION_EXECUTOR` | Who runs a provider-native code-execution declaration: `auto` (default), `otari` or `provider`. See [Built-in tools](tools.md#code-execution-executor). |
 
 See [Configuration](configuration.md) for the full settings reference and
 [Built-in tools](tools.md) for the user-facing view of the tool.

@@ -868,14 +868,18 @@ def test_code_execution_combined_with_mcp_servers_returns_400(
     )
 
 
-@pytest.mark.parametrize("native_type", ["code_execution", "code_interpreter", "code_execution_20250825"])
 def test_code_execution_combined_with_a_provider_native_tool_returns_400(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
-    native_type: str,
 ) -> None:
-    """Two sandboxes in one request have no single home for the caller's state."""
+    """Two sandboxes in one request have no single home for the caller's state.
+
+    Only a declaration the provider keeps is a second sandbox: Anthropic's dated
+    keyword against an Anthropic model. A keyword the executor brings here is the
+    same request said twice and is folded in instead
+    (``test_code_execution_executor.py``).
+    """
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
     resp = client.post(
         f"{API_ROOT}/messages",
@@ -883,7 +887,7 @@ def test_code_execution_combined_with_a_provider_native_tool_returns_400(
             "model": "anthropic:claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 100,
-            "tools": [{"type": "otari_code_execution"}, {"type": native_type}],
+            "tools": [{"type": "otari_code_execution"}, {"type": "code_execution_20250825"}],
         },
         headers=api_key_header,
     )

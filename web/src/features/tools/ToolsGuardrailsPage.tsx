@@ -97,6 +97,17 @@ const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
     help: "Sent to the backend when a tool entry has none of its own.",
     placeholder: "Run untrusted analysis code",
   },
+  code_execution_executor: {
+    label: "Who runs provider code tools",
+    help: "For a request that declares a provider's own code tool (Anthropic code_execution, OpenAI code_interpreter). Auto keeps it with a provider that runs it natively and brings it here otherwise.",
+    placeholder: "",
+    defaultLabel: "Default (auto)",
+    choiceLabels: {
+      auto: "Auto: provider when native, else here",
+      otari: "Always here, on this sandbox",
+      provider: "Always the provider",
+    },
+  },
   guardrails_url: {
     label: "Backend URL",
     help: "Used when a request does not pass a guardrail URL of its own.",
@@ -196,9 +207,10 @@ const SERVICES: ServiceSpec[] = [
       },
       {
         title: "Behavior",
-        blurb: "What the gateway sends the sandbox when a request does not.",
-        docsAnchor: "code-execution",
-        keys: ["sandbox_purpose_hint"],
+        blurb:
+          "Who runs a provider's own code tool, and what the gateway sends the sandbox when a request does not.",
+        docsAnchor: "code-execution-executor",
+        keys: ["code_execution_executor", "sandbox_purpose_hint"],
         catchAll: true,
       },
     ],

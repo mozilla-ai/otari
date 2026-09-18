@@ -37,7 +37,9 @@ refactor to :func:`gateway.services.mcp_loop.mcp_tool_loop`.
 from __future__ import annotations
 
 import logging
+import uuid
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -54,6 +56,10 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
 CODE_EXECUTION_TOOL_NAME = "code_execution"
+# The gateway's own container ids. OpenAI issues ``cntr_``-prefixed ids and
+# Anthropic ``container_``-prefixed ones, so a reserved prefix is what lets an
+# echoed native item be told apart from one describing a provider's container.
+CONTAINER_ID_PREFIX = "otari_cntr_"
 # The code-execution tool kinds a policy may name, which is the vocabulary the
 # hosted ``CodeExecutionConfig.tools`` uses and the one the protocol's ``tool``
 # field carries on the wire. This backend serves the first of them and no more,
@@ -113,6 +119,21 @@ def code_execution_tool_definition() -> dict[str, Any]:
             },
         },
     }
+
+
+@dataclass(frozen=True)
+class CodeExecution:
+    """One executed call, kept for a loop that answers in a provider's native vocabulary.
+
+    ``result`` is the backend's structured result block, so the loop can mint an
+    Anthropic ``code_execution_tool_result`` or an OpenAI ``code_interpreter_call``
+    from the real stdout, stderr and exit code rather than re-parsing the string
+    the model was given. ``None`` when the call never produced one (the backend
+    was unreachable), which the loop renders as its vocabulary's error shape.
+    """
+
+    code: str
+    result: ResultBlock | None
 
 
 class SandboxNotReachableError(RuntimeError):
@@ -202,6 +223,14 @@ class SandboxBackend:
         self._client: httpx.AsyncClient | None = None
         self._session_id: str | None = None
         self._stack: AsyncExitStack = AsyncExitStack()
+        # The calls executed since the last ``take_executions``, in order. A loop
+        # that mints native result blocks drains this right after the awaited
+        # calls it made, which is what keeps a batch's blocks paired with the
+        # right calls: every tool loop runs its calls one at a time and in order.
+        self._executions: list[CodeExecution] = []
+        # Minted per backend, so per request: what a Responses caller sees as the
+        # ``container_id`` of every interpreter call this request ran.
+        self.container_id = f"{CONTAINER_ID_PREFIX}{uuid.uuid4().hex}"
 
     async def __aenter__(self) -> SandboxBackend:
         try:
@@ -262,6 +291,16 @@ class SandboxBackend:
         """
         return self._allowed_tools is None or CODE_EXECUTION_TOOL_NAME in self._allowed_tools
 
+    def take_executions(self) -> list[CodeExecution]:
+        """The calls executed since the last take, in order, clearing them.
+
+        Consumed by a loop building native result blocks right after the calls it
+        awaited. Clearing means a later loop round cannot attribute an earlier
+        round's executions to its own calls.
+        """
+        executions, self._executions = self._executions, []
+        return executions
+
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
         """Execute code and record the call on the request's tally.
 
@@ -270,21 +309,23 @@ class SandboxBackend:
         """
         if not self.owns_tool(name):
             raise KeyError(f"SandboxBackend does not own tool {name!r}")
+        code = str(arguments.get("code") or "")
         try:
-            result = await self._exec_tool(arguments)
+            result, block = await self._exec_tool(code)
         except Exception:
+            self._executions.append(CodeExecution(code=code, result=None))
             if self._tally is not None:
                 self._tally.record_failure(CODE_EXECUTION_TOOL_NAME)
             raise
+        self._executions.append(CodeExecution(code=code, result=block))
         if self._tally is not None:
             self._tally.record_result(CODE_EXECUTION_TOOL_NAME, result)
         return result
 
-    async def _exec_tool(self, arguments: dict[str, Any]) -> str:
+    async def _exec_tool(self, code: str) -> tuple[str, ResultBlock]:
         if self._client is None or self._session_id is None:
             raise RuntimeError("SandboxBackend not entered as an async context manager")
 
-        code = arguments.get("code") or ""
         payload = {
             "tool": CODE_EXECUTION_TOOL_NAME,
             "input": {"code": code},
@@ -330,7 +371,7 @@ class SandboxBackend:
             result = _flatten_result_block(exec_response.result_block)
             if result.startswith("[tool error]"):
                 span.set_status(trace.StatusCode.ERROR, result)
-            return result
+            return result, exec_response.result_block
 
 
 def _flatten_result_block(block: ResultBlock) -> str:

@@ -252,6 +252,12 @@ class WorkspaceCodeExecutionPolicy(Base):
     # ``WorkspaceWebSearchConfig`` stores its domain lists that way: short, read
     # whole, and nothing queries into it.
     tools: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    # NULL means "no workspace pin": the deployment's ``code_execution_executor``
+    # (and, where it leaves room, the request's header) decides who runs a
+    # provider-named code-execution declaration. A stored value is a pin the
+    # request cannot argue with. One of ``CodeExecutor``'s values; the service
+    # refuses anything else, and the column is sized for that vocabulary.
+    executor: Mapped[str | None] = mapped_column(String(16), default=None)
     # ``UtcDateTime`` for the same reason ``WorkspaceBudgetDefault`` uses it:
     # these are serialized with ``.isoformat()`` for the dashboard, and a plain
     # ``DateTime(timezone=True)`` round-trips naive on SQLite.

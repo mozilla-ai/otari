@@ -24,6 +24,7 @@ that direction one-way.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated, Any
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
@@ -31,10 +32,39 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 __all__ = [
     "CodeExecutionFileRef",
     "CodeExecutionResult",
+    "CodeExecutor",
     "ExecResponse",
     "ResultBlock",
     "SessionHandle",
 ]
+
+
+class CodeExecutor(StrEnum):
+    """Who runs the code a request's code-execution tool asks for.
+
+    The one vocabulary shared by the deployment setting, the workspace policy,
+    the per-request header and the platform's resolve payload, so a value read
+    from any of them means the same thing at admission.
+    """
+
+    AUTO = "auto"
+    """The provider when it runs this tool natively for this model, else Otari."""
+    OTARI = "otari"
+    """Always the configured code-execution backend, whatever the provider offers."""
+    PROVIDER = "provider"
+    """Always the provider: the declaration is forwarded untouched."""
+
+    @classmethod
+    def parse(cls, value: object) -> CodeExecutor | None:
+        """The member for a stored or wire value, or ``None`` for anything else."""
+        if isinstance(value, cls):
+            return value
+        if not isinstance(value, str):
+            return None
+        try:
+            return cls(value.strip().lower())
+        except ValueError:
+            return None
 
 
 def _rendered_text(value: Any) -> Any:
@@ -95,6 +125,7 @@ class SessionHandle(_ContractModel):
 class CodeExecutionFileRef(_ContractModel):
     """A file the execution produced (a chart, a generated CSV)."""
 
+    file_id: _RenderedStr = ""
     filename: _RenderedStr = ""
 
 

@@ -328,6 +328,7 @@ The Tools pages and `GET /api/v1/tool-settings` show effective sandbox, web-sear
 and guardrail configuration. Common startup settings are:
 
 - `sandbox_url`
+- `code_execution_executor`
 - `web_search_url`
 - `web_search_provider` and `web_search_provider_api_key`
 - `guardrails_url`

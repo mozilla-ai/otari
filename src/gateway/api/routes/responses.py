@@ -38,7 +38,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost, build_attempt_client_args
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
-from gateway.api.routes._tools import _strip_gateway_fields
+from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
@@ -47,6 +47,7 @@ from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_responses import (
+    CODE_INTERPRETER_CALL_ID_PREFIX,
     MAX_TOOL_ITERATIONS_CAP,
     responses_tool_loop,
     responses_tool_loop_stream,
@@ -176,29 +177,38 @@ def _split_codex_input_metadata(value: Any) -> tuple[Any, bool]:
 # ``response.output`` to the next ``input``, and the gateway has no
 # ``previous_response_id`` support to do that server-side, so an echoed turn would
 # otherwise ship a ``web_search_call`` to a provider that never declared a
-# web-search tool. Anthropic's equivalent hazard (an ``encrypted_content`` blob the
-# gateway cannot sign) is why Messages emits no native server-tool blocks at all.
+# web-search tool. A ``code_interpreter_call`` is stripped only when its id carries
+# the gateway's own prefix, because OpenAI's own items are legitimately echoed to
+# OpenAI and must survive.
 _GATEWAY_MINTED_ITEM_TYPES = frozenset({"web_search_call"})
+
+
+def _is_gateway_minted_item(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    item_type = item.get("type")
+    if item_type in _GATEWAY_MINTED_ITEM_TYPES:
+        return True
+    return item_type == "code_interpreter_call" and str(item.get("id") or "").startswith(
+        CODE_INTERPRETER_CALL_ID_PREFIX
+    )
 
 
 def _strip_gateway_minted_items(input_data: Any) -> Any:
     """Drop gateway-minted server-tool items from an inbound ``input``.
 
-    Only touches a list input, and only removes the item types the gateway itself
+    Only touches a list input, and only removes the items the gateway itself
     emits. A caller who genuinely used a provider-native web search still had that
     run upstream, so its items arrive on a response the gateway passed through
     untouched; those are indistinguishable here and are dropped too. That is the
     conservative direction: dropping a descriptive item loses nothing the model
     needs (the search results themselves are in the transcript), while forwarding
-    one risks a 400 from the provider.
+    one risks a 400 from the provider. A gateway-run interpreter call is told
+    apart by its id prefix, so a provider's own survives.
     """
     if not isinstance(input_data, list):
         return input_data
-    kept = [
-        item
-        for item in input_data
-        if not (isinstance(item, dict) and item.get("type") in _GATEWAY_MINTED_ITEM_TYPES)
-    ]
+    kept = [item for item in input_data if not _is_gateway_minted_item(item)]
     if len(kept) != len(input_data):
         logger.debug("Stripped %d gateway-minted output item(s) from the inbound input", len(input_data) - len(kept))
     return kept
@@ -346,11 +356,12 @@ class _ResponsesAdapter:
         on_first_response: Callable[[], None] | None = None,
         *,
         emit_native_web_search: bool = False,
+        emit_native_code_execution: bool = False,
         web_search_budget: WebSearchBudget | None = None,
     ) -> ResponsesResponse:
         # ``emit_native_web_search`` is accepted for interface parity and ignored:
-        # this format has no native vocabulary for a server-side tool call, so a
-        # gateway-run search stays invisible on the wire (see docs/tools.md).
+        # this format announces a gateway-run search natively on every request
+        # (see docs/tools.md), so the Anthropic-shaped opt-in has nothing to add.
         # ``web_search_budget`` is not: the cap bounds what the caller is billed
         # for, which every format owes whether or not it can describe the search.
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
@@ -360,6 +371,8 @@ class _ResponsesAdapter:
             extra["on_first_response"] = on_first_response
         if web_search_budget is not None:
             extra["web_search_budget"] = web_search_budget
+        if emit_native_code_execution:
+            extra["emit_native_code_execution"] = True
         return await responses_tool_loop(
             completion_kwargs=kwargs,
             pool=pool,
@@ -374,11 +387,14 @@ class _ResponsesAdapter:
         max_iterations: int,
         *,
         emit_native_web_search: bool = False,
+        emit_native_code_execution: bool = False,
         web_search_budget: WebSearchBudget | None = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
         extra: dict[str, Any] = {}
         if web_search_budget is not None:
             extra["web_search_budget"] = web_search_budget
+        if emit_native_code_execution:
+            extra["emit_native_code_execution"] = True
         return responses_tool_loop_stream(
             completion_kwargs=kwargs,
             pool=pool,
@@ -582,6 +598,7 @@ async def create_response(
         mcp_server_ids=request_body.mcp_server_ids,
         max_tool_iterations=request_body.max_tool_iterations,
         tools_header=request_body.tools_header,
+        code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
     )
 
     # Strip gateway-internal fields, flatten any caller-supplied function tools

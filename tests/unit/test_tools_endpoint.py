@@ -152,3 +152,13 @@ def test_not_registered_in_hybrid_mode(monkeypatch: pytest.MonkeyPatch) -> None:
         response = client.get(f"{API_ROOT}/tools", headers={"Authorization": "Bearer platform-user-token"})
 
     assert response.status_code == 404, response.text
+
+
+def test_a_configured_sandbox_advertises_the_provider_keywords_it_may_claim(tmp_path: Path) -> None:
+    with _client(tmp_path, sandbox_url="http://sandbox:8080") as client:
+        auto = _tools(client)["otari_code_execution"]["accepted_types"]
+    with _client(tmp_path, sandbox_url="http://sandbox:8080", code_execution_executor="provider") as client:
+        provider_only = _tools(client)["otari_code_execution"]["accepted_types"]
+
+    assert auto == ["otari_code_execution", "code_execution", "code_interpreter", "code_execution_<date>"]
+    assert provider_only == ["otari_code_execution"]
