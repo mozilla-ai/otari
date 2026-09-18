@@ -18,7 +18,6 @@ import type {
   User,
 } from "@/client"
 import { Button } from "@/design-system/actions/Button"
-import { CopyButton } from "@/design-system/actions/CopyButton"
 import {
   CopyField,
   concealedFingerprint,
@@ -120,6 +119,14 @@ const label = (k: ApiKey): string => k.key_name ?? k.id
 
 // Stable row-key getter so DataTable's per-row cache holds across re-renders.
 const getKeyRowKey = (k: ApiKey): string => k.id
+
+function renderFingerprint(k: ApiKey) {
+  return (
+    <code className="whitespace-nowrap text-mono-caption text-muted">
+      {keyFingerprint(k) ?? "—"}
+    </code>
+  )
+}
 
 // ---------- the one-time secret ----------
 
@@ -1084,23 +1091,6 @@ export function KeysPage() {
       setActive,
     ],
   )
-  const renderPrefix = useCallback(
-    (k: ApiKey) => (
-      <div className="flex items-center gap-1 whitespace-nowrap">
-        <code className="text-mono-caption text-muted">
-          {keyFingerprint(k) ?? "—"}
-        </code>
-        {k.key_prefix ? (
-          <CopyButton
-            value={k.key_prefix}
-            label={`key prefix for ${label(k)}`}
-          />
-        ) : null}
-      </div>
-    ),
-    [],
-  )
-
   // Memoized on what the cells read, so DataTable's per-row cache holds across
   // selection clicks; see its docstring.
   const columns = useMemo<DataTableColumn<ApiKey>[]>(
@@ -1185,7 +1175,7 @@ export function KeysPage() {
       {
         id: "key",
         header: "Key",
-        cell: renderPrefix,
+        cell: renderFingerprint,
       },
       {
         id: "created",
@@ -1226,14 +1216,7 @@ export function KeysPage() {
         cell: renderActions,
       },
     ],
-    [
-      layout,
-      isDeploymentWide,
-      memberLabels,
-      ownerLabel,
-      renderPrefix,
-      renderActions,
-    ],
+    [layout, isDeploymentWide, memberLabels, ownerLabel, renderActions],
   )
   const visibleColumns = useMemo(
     () =>
@@ -1464,7 +1447,7 @@ export function KeysPage() {
                   <span className="truncate text-base text-foreground">
                     {k.key_name ?? "(unnamed)"}
                   </span>
-                  {renderPrefix(k)}
+                  {renderFingerprint(k)}
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="shrink-0">
                       <StatusMark apiKey={k} />
