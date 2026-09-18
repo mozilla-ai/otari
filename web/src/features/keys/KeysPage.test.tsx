@@ -648,6 +648,15 @@ describe("KeysPage", () => {
     const trigger = within(row).getByRole("button", {
       name: "Actions for ci-bot",
     })
+    // Open it once with the pointer first. Until an overlay has been opened in
+    // this document, ArrowDown on the trigger reaches the table's own row
+    // navigation instead of the menu, and focus lands on the next row. Other
+    // specs in this file open one for their own reasons, so without this the
+    // test only passes on the order they happen to run in.
+    await user.click(trigger)
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull())
+
     trigger.focus()
     await user.keyboard("{ArrowDown}")
     const menu = await screen.findByRole("menu")
