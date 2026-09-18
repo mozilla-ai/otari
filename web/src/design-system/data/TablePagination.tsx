@@ -1,5 +1,5 @@
 import { Button, Spinner } from "@heroui/react"
-import { useEffect, useId, useState } from "react"
+import { useId, useState } from "react"
 import { INPUT_CLASS } from "@/design-system/forms/inputClass"
 import { formatNumber } from "@/design-system/helpers/format"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
@@ -66,10 +66,20 @@ export function TablePagination({
 
   // Local, editable page box synced to `page`; commits on Enter or blur so
   // intermediate keystrokes do not refetch on every digit.
+  //
+  // The page as this box last saw it, adjusted during render rather than in an
+  // effect: an effect renders the stale number once, commits, then renders
+  // again, and the box is the one thing on the row that must not lag the page
+  // it labels. The reset is unconditional here, unlike `ComboBoxField` and the
+  // settings drafts, because nothing in this box is worth keeping: a half-typed
+  // number is uncommitted by definition, and the page moving is the operator
+  // having pressed something else.
   const [pageText, setPageText] = useState(String(page + 1))
-  useEffect(() => {
+  const [seenPage, setSeenPage] = useState(page)
+  if (page !== seenPage) {
+    setSeenPage(page)
     setPageText(String(page + 1))
-  }, [page])
+  }
 
   const commitPage = () => {
     const parsed = Number.parseInt(pageText, 10)

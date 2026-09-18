@@ -59,6 +59,45 @@ TypeScript runs in `strict` mode; `pnpm --dir web run typecheck` must pass. Reac
   cannot verify. See [performance.md](./performance.md).
 - Keep a component per file, colocated with its test.
 
+## A draft that resets when the value behind it moves
+
+A control that holds an editable draft over a value the caller owns has to decide what happens
+when that value moves. **Adjust the state during render. Do not run an effect**, and reach for a
+`key` only when the draft is genuinely worth nothing.
+
+```tsx
+const [seen, setSeen] = useState(value)
+if (value !== seen) {
+  setSeen(value)
+  // the condition is the design decision; see below
+}
+```
+
+The effect form renders the stale value once, commits it, then renders again. It is also a
+second source of truth that only converges after paint, and it is the shape the rule above is
+about.
+
+Three of these are in the tree and they differ only in the condition, which is where the thought
+goes:
+
+| Where | Condition | What it protects |
+| --- | --- | --- |
+| `design-system/forms/ComboBoxField.tsx` | `if (value !== typed)` | a value this field itself reported, so a list that drops a row does not move a value under a mounted field |
+| `features/settings/SettingsPage.tsx` (`useDraft`) | `if (draft === seen)` | an unsaved edit, so another operator's save does not take a half-typed value out from under the cursor |
+| `design-system/data/TablePagination.tsx` | unconditional | nothing: the page box commits on Enter or blur, so a half-typed number is uncommitted by definition |
+
+Because the condition differs at every site, these do not share a hook. One would need the
+condition passed in, which is a knob on shared code to serve one caller and puts the three back
+on different behavior by a different route.
+
+**A `key` is not the general answer.** Keying on the value remounts the control exactly when the
+value changes, which throws the draft away and drops focus mid-edit. That is correct only when
+the draft should be discarded, and it is the wrong fix for anything the operator is still
+typing: otari#1341 was a draft being discarded, so a `key` would have preserved the bug.
+
+An effect remains right for synchronizing with something outside React, a subscription, a timer,
+an observer, and those still owe cleanup.
+
 ## Array work reads declaratively
 
 A loop that produces a value is a transformation written the long way. `map`, `filter`,

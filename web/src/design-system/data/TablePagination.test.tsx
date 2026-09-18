@@ -45,6 +45,33 @@ describe("TablePagination", () => {
     expect(onPageChange).toHaveBeenCalledWith(42) // ceil(4231/100) - 1
   })
 
+  it("follows the page it is given, discarding anything half-typed", async () => {
+    const user = userEvent.setup()
+    const props = {
+      pageSize: 100,
+      total: 4231,
+      rowsOnPage: 100,
+      onPageChange: vi.fn(),
+      onPageSizeChange: vi.fn(),
+    }
+    const { rerender } = render(<TablePagination page={0} {...props} />)
+    const box = screen.getByRole("textbox", { name: "Page number" })
+    expect(box).toHaveValue("1")
+
+    // Uncommitted: the box holds it, nothing else has been told.
+    await user.clear(box)
+    await user.type(box, "7")
+    expect(box).toHaveValue("7")
+
+    // The page moves from outside, which is the operator having pressed
+    // something else. The box reads the page it labels, not the abandoned
+    // keystrokes.
+    rerender(<TablePagination page={3} {...props} />)
+    expect(screen.getByRole("textbox", { name: "Page number" })).toHaveValue(
+      "4",
+    )
+  })
+
   it("commits a typed page, clamped to the page count", async () => {
     const user = userEvent.setup()
     const { onPageChange } = setup()

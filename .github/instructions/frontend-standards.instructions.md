@@ -101,7 +101,9 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    union rather than a bag of optionals; named exports and named imports, no barrel files;
    correct effect dependency arrays with cleanup; derive from props/query data rather than
    duplicating into state (copying a prop into `useState` and re-syncing it with an effect is
-   the finding; a `key` or an adjust-during-render is the fix). Cleanup covers **timers**, and
+   the finding; adjusting the state during render is the fix, and a `key` only where the draft
+   is worth discarding, since keying on the value remounts the control and throws away whatever
+   was being typed). Cleanup covers **timers**, and
    covers one started from an event handler or a mutation callback, not only from an effect:
    an uncleared timer touches a gone component and stacks rather than replaces when its
    trigger fires twice inside the window. Names say what a value is, and a single letter says
