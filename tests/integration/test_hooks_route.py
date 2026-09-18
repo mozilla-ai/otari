@@ -1062,6 +1062,33 @@ def test_judge_gate_with_when_changed_still_resolves_the_verdict_once_a_matching
     assert body["results"][0]["detail"] == "swallows exceptions"
 
 
+def test_judge_when_changed_oversized_workload_is_rejected(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A judge gate's `when_changed` globs share changed_path's own match-work
+
+    budget, the same as command_if_changed's own when_changed globs
+    (test_command_if_changed_oversized_workload_is_rejected's own shape):
+    evaluate_judge calls the same matched_changed_paths those globs are
+    checked against, so excluding them from the budget would let a policy
+    with enough judge gates run that same unbounded match work anyway.
+    """
+    when_changed = [f'"pattern-{i:03d}-{"x" * 40}"' for i in range(100)]
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: r\n"
+        f"    when_changed: [{', '.join(when_changed)}]\n    message: m\n"
+    )
+    changed_paths = [f"src/{'y' * 40}-{i:05d}.txt" for i in range(10_000)]
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": policy, "changed_paths": changed_paths},
+        headers=master_key_header,
+    )
+    assert response.status_code == 422, response.text
+    assert "match operations" in response.json()["detail"]
+
+
 def test_judge_gate_rejects_required_enforcement(client: TestClient, master_key_header: dict[str, str]) -> None:
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'

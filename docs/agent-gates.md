@@ -230,10 +230,17 @@ the field table below). This route only relays that verdict into a
 call has neither a finished diff nor a full transcript to judge against yet),
 for every `judge` gate in the local policy it shells out to
 `claude -p --model <model>` with a prompt built from the gate's `rubric`,
-`git diff HEAD`, and the session's own transcript, and requires exactly one
-JSON object back: `{"outcome": "pass" or "fail", "reasoning": "..."}`. This
-runs against the machine's own Claude Code subscription, not billed through
-Otari. `<model>` defaults to Haiku, not the session's own (often larger)
+`git diff HEAD`, and the assistant's own text replies from the session's
+transcript (never a `tool_use`/`tool_result` payload: a Bash call's own
+stdout or a Read's file contents dominate a raw transcript's bytes but carry
+no "why was this change made" signal a rubric can use), and requires exactly
+one JSON object back: `{"outcome": "pass" or "fail", "reasoning": "..."}`.
+This runs against the machine's own Claude Code subscription, not billed
+through Otari, from a dedicated `~/.otari/judge-workdir/` rather than the
+caller's own repo: the prompt is fully self-contained text, so the call
+never needs to run from the repo it is judging, and running it there anyway
+is how a real early version of this recursed into itself (see below).
+`<model>` defaults to Haiku, not the session's own (often larger)
 default model: a judge call is a small, structured pass/fail classification
 over bounded text, so it does not need a frontier model, and every applicable
 judge gate costs one full invocation. Override it with `--judge-model` or
@@ -241,17 +248,31 @@ judge gate costs one full invocation. Override it with `--judge-model` or
 missing `claude` binary, a timeout, a nonzero exit, or output that is not
 that one JSON object all submit `outcome: "error"` rather than raising,
 carrying the failure detail as `reasoning`; since the gate is always
-advisory, an `error` verdict can only ever warn, never block.
+advisory, an `error` verdict can only ever warn, never block. One exception:
+a nonzero exit whose message names `claude -p`'s own "prompt is too long"
+rejection retries once with the transcript dropped entirely (diff-only) before
+reporting `error`, since the transcript is supplementary context and the diff
+is the evidence the rubric actually needs.
+
+The diff and transcript are each capped independently (`_HOOK_JUDGE_MAX_DIFF_CHARS`,
+`_HOOK_JUDGE_MAX_TRANSCRIPT_CHARS` in `cli.py`), sized against a real
+measurement rather than a chars-per-token guess: a 501,517-character prompt
+(diff plus this transcript format, uncapped) came back from a real call
+"Prompt is too long · the request is ~290,782 tokens (limit 200000)", a ratio
+of ~1.7 chars/token, not the ~4 the dry-run estimate below assumes, because a
+transcript is JSONL, not English prose. A second real call at 100,505
+characters consumed ~73,383 tokens total and succeeded with comfortable
+headroom. The caps keep the worst case near that validated-safe size.
 
 `--judge-dry-run` (or `OTARI_HOOK_JUDGE_DRY_RUN`) runs everything up to the
 model call for real, policy parsing, `when_changed` filtering, diff and
 transcript collection, but skips `claude -p` itself, submitting `outcome:
 "error"` with a `reasoning` that estimates the prompt's size (`~4` chars per
-token, a rough estimate, not a real tokenizer count) instead. Paired with the
-audit log below, this answers "how often would this actually fire, and
-roughly how large would each call be" without spending a single real model
-call: useful before turning a new or newly-scoped judge gate loose on a live
-session.
+token, a rough estimate, not a real tokenizer count, and not the same ratio
+the caps above are sized against) instead. Paired with the audit log below,
+this answers "how often would this actually fire, and roughly how large
+would each call be" without spending a single real model call: useful before
+turning a new or newly-scoped judge gate loose on a live session.
 
 Every real `claude -p` attempt, dry-run or not, is appended to
 `~/.otari/judge-calls.log` (one line per gate, before the call as `outcome:
@@ -426,21 +447,41 @@ itself to find each `judge` gate's `rubric`, then makes one local `claude -p`
 call per gate (not through `otari serve`; see the `judge` gate type above)
 and submits the resulting verdicts as `judge_results`.
 
-**`claude -p` does not appear to enforce the `Stop` hook.** This is about the
-*outer* session running headless (`claude -p "do the task"`), a different
-thing from the judge gate's own inner `claude -p` call described just above:
-that one is a plain one-shot model invocation `otari hook` makes for you, not
-a hook-carrying session of its own, so nothing here applies to it. Verified: a
-zero-tool-use `claude -p` prompt run against a policy violation showed no
-trace of a `Stop` hook anywhere in that invocation's own transcript (no
-`hookEventName`, no `stop_hook_active`), and the process exited cleanly
-rather than continuing the way a genuinely blocked `Stop` hook is documented
-to. Whether headless mode skips dispatching the hook entirely or dispatches
-it and ignores a blocking exit code is Claude Code's own internal behavior,
-not something visible from here or something otari controls either way. Test
-a `command_match`/`command_if_changed` gate's `Stop`-time enforcement against
-an interactive session; a `-p` run that doesn't block proves nothing about
-whether the gate itself is working.
+**The judge gate's own inner `claude -p` call does fire this same repo's own
+hooks, confirmed by a real recursive run, not assumed.** It runs with `cwd`
+inside the repo it is judging, and Claude Code resolves
+`.claude/settings.local.json` hooks by directory, not by "is this the
+top-level session"; an unguarded call whose own `Stop` hook is this same
+`otari hook` command triggers `otari hook` again, which shells out to
+`claude -p` again, and so on. A real run with no guard produced over a dozen
+live `claude -p` processes across several minutes, each a real billed model
+call, until the process tree was killed by hand. `_hook_call_claude_p` guards
+against this by running with `cwd` set to `_hook_judge_workdir()`
+(`~/.otari/judge-workdir/`), never the caller's repo: the judge prompt is
+fully self-contained text, so it never needs to run from the repo it is
+judging, and a directory with no `.claude/settings.local.json` to find has
+no project-scoped hooks to fire in the first place. Deliberately a plain
+isolated directory rather than a hooks-disabling flag (`--safe-mode` or
+`--bare`; the latter also breaks OAuth/keychain auth, and this call is
+supposed to bill against the caller's own subscription login): either flag
+would also foreclose ever attaching a hook to this specific call on purpose,
+which is very nearly the point of a `judge` gate calling out to a model at
+all. A dedicated directory under `~/.otari/`, not the repo being judged and
+not the shared system temp root, is a stable, otari-owned place a future
+judge-specific hook or its own `.otari-gates.yml` could live, the same
+reasoning `_hook_judge_log_path` already applies to the audit log. This
+guarantee is narrower than `--safe-mode`'s (project-scoped only, not a
+hypothetical user- or enterprise-level hook), which does not matter here
+because `otari hook setup` only ever writes to a repo's own project-scoped
+settings, never to the user's.
+
+Whether the *outer* session (an interactive Claude Code session an actual
+coding agent drives, as opposed to this gate's one-shot inner call) enforces
+a blocking `Stop` hook the same way headless (`claude -p "do the task"`) and
+interactive sessions do is a separate question, still worth testing against
+an interactive session specifically: a `-p` run that exits cleanly without
+blocking proves nothing about whether an interactive session's own
+`command_match`/`command_if_changed` gate is genuinely blocking.
 
 1. Run `otari hook setup`. It writes both a `PreToolUse` hook entry and a
    `Stop` hook entry into `.claude/settings.local.json` (personal, usually

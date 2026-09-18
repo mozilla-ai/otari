@@ -334,19 +334,24 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     changed_path_gates = [gate for gate in spec.gates if isinstance(gate, ChangedPathGate)]
     command_match_gates = [gate for gate in spec.gates if isinstance(gate, CommandMatchGate)]
     command_if_changed_gates = [gate for gate in spec.gates if isinstance(gate, CommandIfChangedGate)]
+    judge_gates = [gate for gate in spec.gates if isinstance(gate, JudgeGate)]
 
     # Built once and reused below: gate.forbidden/when_changed/require are
     # already deduplicated at parse time (domain.policy), and
     # changed_path_evidence/command_evidence deduplicate their evidence lists
     # the same way, so each estimate and its matching evaluation below always
-    # agree on the same, cheaper counts. command_if_changed's when_changed
-    # globs are path-matching work exactly like changed_path's forbidden
-    # globs, so they share the same budget rather than needing a third one.
+    # agree on the same, cheaper counts. command_if_changed's and judge's own
+    # when_changed globs are path-matching work exactly like changed_path's
+    # forbidden globs (evaluate_judge calls the same matched_changed_paths),
+    # so all three share the same budget rather than needing a third or
+    # fourth one.
     changed_path_evidence = request.changed_path_evidence
     changed_paths = changed_path_evidence.changed_paths if changed_path_evidence is not None else ()
-    path_globs = [glob for gate in changed_path_gates for glob in gate.forbidden] + [
-        glob for gate in command_if_changed_gates for glob in gate.when_changed
-    ]
+    path_globs = (
+        [glob for gate in changed_path_gates for glob in gate.forbidden]
+        + [glob for gate in command_if_changed_gates for glob in gate.when_changed]
+        + [glob for gate in judge_gates for glob in gate.when_changed]
+    )
     pattern_count = len(path_globs)
     total_pattern_length = sum(len(glob) for glob in path_globs)
     path_count = len(changed_paths)

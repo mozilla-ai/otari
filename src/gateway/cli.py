@@ -463,18 +463,20 @@ def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None
 
 # A judge gate's prompt is rubric + diff + transcript excerpt, each bounded
 # independently so one huge file or one long session can't build an unbounded
-# `claude -p` argv. First-iteration bounds, not calibrated the way the Hook
-# Server's own work-estimate budgets are (routes/hooks.py): a judge call costs
-# a model invocation regardless of prompt size, so the risk here is an
-# unreasonably large local subprocess call, not a server-side DoS. The model
-# itself can read far more than this (a 200K-token context is comfortably
-# multiple megabytes of text); the bound here is deliberately much smaller
-# than what the model could handle, sized instead against real diff/transcript
-# sizes from an ordinary session and against `claude -p`'s own per-call
-# latency, which grows with prompt size on top of the fixed invocation
-# overhead _HOOK_JUDGE_TIMEOUT_SECONDS already accounts for.
-_HOOK_JUDGE_MAX_DIFF_CHARS = 300_000
-_HOOK_JUDGE_MAX_TRANSCRIPT_CHARS = 500_000
+# `claude -p` argv. Sized against a real measurement, not the "~4 chars/token"
+# English-prose estimate `_hook_estimate_tokens` uses for its dry-run label:
+# a real `claude -p` call against a 501,517-char prompt (diff + this transcript
+# format) came back "Prompt is too long · the request is ~290,782 tokens
+# (limit 200000)" — a ratio of ~1.7 chars/token, not ~4, because a session
+# transcript is JSONL (escaped strings, tool payloads), not prose. A second
+# real call at 100,505 chars consumed ~73,383 tokens total and succeeded with
+# comfortable headroom under the 200K limit. These two bounds keep the worst
+# case (diff + transcript, before the rubric/template's own much smaller
+# overhead) near that validated-safe combined size rather than the model's
+# own much larger context window, leaving margin for `claude -p`'s own fixed
+# per-invocation overhead (system prompt, tool definitions) on top.
+_HOOK_JUDGE_MAX_DIFF_CHARS = 60_000
+_HOOK_JUDGE_MAX_TRANSCRIPT_CHARS = 40_000
 # A judge call's own bound, deliberately separate from the 10s git status/diff
 # calls above: those are local filesystem operations with nothing to wait on
 # but disk, while this one is a full model invocation. 120s measured too tight
@@ -515,6 +517,54 @@ Diff of the changes made this session:
 Transcript of the session that made this change:
 {transcript}
 """
+
+
+def _hook_extract_judge_transcript(transcript_path: Path) -> str:
+    """The assistant's own text replies from the session transcript, for a judge gate's prompt.
+
+    A raw transcript is mostly `tool_use`/`tool_result` payloads (a Bash
+    call's own stdout, a Read's file contents, ...): bytes that dominate the
+    file's size but carry no "why was this change made" signal a judge rubric
+    can use, and the reason `_HOOK_JUDGE_MAX_TRANSCRIPT_CHARS` needed a real
+    ratio measurement rather than the char-per-token heuristic (see that
+    constant's own comment). Keeping only each assistant record's own `text`
+    content blocks is both smaller and more relevant than a raw byte slice of
+    the file. `isSidechain` records (a subagent's own turn) are excluded, the
+    same as `_hook_collect_transcript_commands`: not reasoning this session's
+    own agent produced about the change under judgment. `thinking` blocks are
+    excluded too: usually the more verbose, less-final restatement of the
+    same `text` reply that follows it.
+
+    Returns "" when the transcript cannot be read at all (missing,
+    permissions) or carries no assistant text, the same as an empty
+    transcript otherwise would: a judge gate degrades to diff-only evidence
+    rather than treating this as a collection failure.
+    """
+    try:
+        lines = transcript_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+
+    texts: list[str] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict) or record.get("isSidechain") or record.get("type") != "assistant":
+            continue
+        message = record.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        texts.extend(
+            block["text"]
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+        )
+    return "\n".join(texts)
 
 
 def _hook_collect_diff(repo_root: Path) -> str | None:
@@ -581,6 +631,38 @@ def _hook_judge_log_path() -> Path:
     return Path.home() / ".otari" / "judge-calls.log"
 
 
+def _hook_judge_workdir() -> Path:
+    """Where the judge gate's own `claude -p` call runs, instead of the caller's repo.
+
+    That call's prompt is fully self-contained text (rubric, diff, transcript
+    excerpt), so it never needs to run from the repo it is judging. Running it
+    there anyway is how a real early version of this recursed into itself: the
+    repo's own `.claude/settings.local.json` registers `otari hook` for
+    `Stop`, and Claude Code resolves that file by directory, not by "is this
+    the top-level session", so an unguarded call whose own `Stop` hook is this
+    same command triggered it again, and again.
+
+    A plain isolated directory, not a "disable hooks" flag (`--safe-mode` or
+    `--bare`; the latter also breaks OAuth/keychain auth) for one deliberate
+    reason: `--safe-mode`/`--bare` foreclose ever attaching a hook to this
+    specific call on purpose, which is very nearly the point of a `judge`
+    gate calling out to a model at all. A dedicated directory under
+    `~/.otari/` (not the shared system temp root, and not the repo being
+    judged) is a stable, otari-owned place a future judge-specific hook or
+    its own `.otari-gates.yml` could live, the same reasoning
+    `_hook_judge_log_path` already applies to the audit log. Today it holds
+    nothing, so nothing resolves from it: no hooks, since Claude Code walks
+    up from `cwd` looking for a `.claude/settings.local.json` and finds none
+    there, narrower than `--safe-mode`'s guarantee (project-scoped only, not
+    a hypothetical user- or enterprise-level hook), which does not matter
+    here because `otari hook setup` only ever writes to a repo's own
+    project-scoped settings, never to the user's.
+    """
+    workdir = Path.home() / ".otari" / "judge-workdir"
+    workdir.mkdir(parents=True, exist_ok=True)
+    return workdir
+
+
 def _hook_log_judge_call(repo_root: Path, gate_id: str, outcome: str, *, detail: str | None = None) -> None:
     """Append one line for a judge-gate model call this process actually attempted (or, in
     `--judge-dry-run`, would have attempted).
@@ -619,6 +701,68 @@ def _hook_strip_judge_code_fence(raw: str) -> str:
     return fence_match.group(1).strip() if fence_match else stripped
 
 
+# The exact wording of `claude -p`'s own "prompt is too long" rejection,
+# confirmed against a real call, on stdout rather than stderr and with a
+# zero-token usage report (the request was rejected before any tokenization
+# was billed). Matched case-insensitively as a substring, not parsed further:
+# this is a signal to retry smaller, not a value this command needs to carry.
+_HOOK_JUDGE_PROMPT_TOO_LONG_MARKER = "prompt is too long"
+
+# Mirrors the Hook Server's own JudgeVerdictRequest.reasoning cap
+# (routes/hooks.py, _MAX_REASONING_LENGTH): the prompt asks for "one or two
+# sentences" but nothing enforces that on the model's side, and an oversize
+# reasoning otherwise 422s the *whole* /hooks/check request, which this
+# command's own fail-open handling for a rejected request (not blocking)
+# would then silently skip every other gate in the same policy along with
+# it, mechanical and required ones included.
+_HOOK_MAX_JUDGE_REASONING_LENGTH = 4_096
+
+
+def _hook_call_claude_p(claude_path: str, model: str, prompt: str) -> tuple[str, str]:
+    """One `claude -p --model <model>` invocation; return (outcome, reasoning).
+
+    outcome is always one of "pass"/"fail"/"error": a nonzero exit, a
+    timeout, or output that is not the single JSON object the prompt demands
+    are all "error", carrying the failure detail as reasoning rather than
+    raising. `claude -p`'s own "prompt is too long" rejection exits nonzero
+    with the message on stdout, not stderr (confirmed against a real call),
+    so the error detail falls back to stdout when stderr is empty.
+
+    Runs with `cwd` set to `_hook_judge_workdir()`, never the repo being
+    judged: see that function's own docstring for why (a real recursive
+    incident) and why that is an isolated directory rather than a
+    hooks-disabling flag.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, resolved executable path
+            [claude_path, "--model", model, "-p", prompt],
+            cwd=_hook_judge_workdir(),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=_HOOK_JUDGE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return "error", f"claude -p did not respond within {_HOOK_JUDGE_TIMEOUT_SECONDS}s"
+
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        return "error", f"claude -p exited {result.returncode}: {detail[:500]}"
+
+    try:
+        verdict = json.loads(_hook_strip_judge_code_fence(result.stdout))
+    except ValueError:
+        return "error", f"claude -p did not return valid JSON: {result.stdout[:500]!r}"
+
+    outcome = verdict.get("outcome") if isinstance(verdict, dict) else None
+    reasoning = verdict.get("reasoning") if isinstance(verdict, dict) else None
+    if outcome not in ("pass", "fail") or not isinstance(reasoning, str):
+        return "error", f"claude -p returned an unrecognized verdict shape: {result.stdout[:500]!r}"
+
+    return outcome, reasoning[:_HOOK_MAX_JUDGE_REASONING_LENGTH]
+
+
 def _hook_run_judge(
     rubric: str, diff: str, transcript: str, *, model: str, dry_run: bool = False
 ) -> tuple[str, str]:
@@ -626,12 +770,7 @@ def _hook_run_judge(
 
     Otari itself never calls a model (see JudgeGate's own docstring); this is
     that call, made locally against the caller's own Claude Code
-    subscription, not billed through Otari. outcome is always one of
-    "pass"/"fail"/"error": a missing `claude` binary, a nonzero exit, a
-    timeout, or output that is not the single JSON object the prompt demands
-    are all "error", carrying the failure detail as reasoning rather than
-    raising, so one judge gate's model call failing never takes the rest of
-    this command's evidence collection down with it.
+    subscription, not billed through Otari.
 
     `dry_run` skips the real call entirely, before ever touching `shutil.which`
     or `subprocess`: the wire contract has no fourth outcome to spell "this
@@ -639,9 +778,17 @@ def _hook_run_judge(
     call would, with a `reasoning` that says so explicitly and estimates the
     prompt's size, never `"pass"`/`"fail"`, which would misrepresent a
     verdict nothing actually produced.
+
+    A "prompt is too long" rejection retries once with `transcript` dropped
+    entirely: the transcript is supplementary "why" context for a judge
+    rubric, the diff is the primary evidence, so a diff-only retry is a
+    strictly better fallback than reporting no verdict at all. Only for that
+    specific rejection, and only once: any other failure, or a rejection that
+    persists with no transcript left to drop, reports "error" as it always
+    has.
     """
-    prompt = _hook_build_judge_prompt(rubric, diff, transcript)
     if dry_run:
+        prompt = _hook_build_judge_prompt(rubric, diff, transcript)
         estimated_tokens = _hook_estimate_tokens(prompt)
         return (
             "error",
@@ -654,31 +801,9 @@ def _hook_run_judge(
     if not claude_path:
         return "error", "the `claude` CLI was not found on PATH"
 
-    try:
-        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, resolved executable path
-            [claude_path, "--model", model, "-p", prompt],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=_HOOK_JUDGE_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        return "error", f"claude -p did not respond within {_HOOK_JUDGE_TIMEOUT_SECONDS}s"
-
-    if result.returncode != 0:
-        return "error", f"claude -p exited {result.returncode}: {result.stderr[:500]}"
-
-    try:
-        verdict = json.loads(_hook_strip_judge_code_fence(result.stdout))
-    except ValueError:
-        return "error", f"claude -p did not return valid JSON: {result.stdout[:500]!r}"
-
-    outcome = verdict.get("outcome") if isinstance(verdict, dict) else None
-    reasoning = verdict.get("reasoning") if isinstance(verdict, dict) else None
-    if outcome not in ("pass", "fail") or not isinstance(reasoning, str):
-        return "error", f"claude -p returned an unrecognized verdict shape: {result.stdout[:500]!r}"
-
+    outcome, reasoning = _hook_call_claude_p(claude_path, model, _hook_build_judge_prompt(rubric, diff, transcript))
+    if outcome == "error" and transcript and _HOOK_JUDGE_PROMPT_TOO_LONG_MARKER in reasoning.lower():
+        outcome, reasoning = _hook_call_claude_p(claude_path, model, _hook_build_judge_prompt(rubric, diff, ""))
     return outcome, reasoning
 
 
@@ -744,12 +869,7 @@ def _hook_collect_judge_verdicts(
         judge_gates = judge_gates[:_HOOK_JUDGE_MAX_GATES_PER_RUN]
 
     diff = _hook_collect_diff(repo_root) or ""
-    transcript = ""
-    if transcript_path:
-        try:
-            transcript = Path(transcript_path).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            transcript = ""
+    transcript = _hook_extract_judge_transcript(Path(transcript_path)) if transcript_path else ""
     if len(transcript) > _HOOK_JUDGE_MAX_TRANSCRIPT_CHARS:
         click.echo(
             f"otari hook: transcript is {len(transcript):,} characters, over the "
