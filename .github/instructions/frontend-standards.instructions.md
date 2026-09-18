@@ -92,10 +92,11 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    value. A loop that produces a value is a transformation written the long way, so `for...of`,
    `for...in` and an index loop all read better as `map`/`filter`/`reduce`/`find`/`flatMap`
    (`for...in` additionally walks inherited keys: use `Object.entries`). `forEach` is correct
-   where the body is genuinely only a side effect and wrong where it is a transformation with
-   the result pushed into an outer variable. Consuming a stream and a bounded request walk stay
-   imperative. The React Compiler is enabled, so hand-written
-   `useMemo`/`useCallback`/`React.memo` needs a stated reason. See
+   where the body is genuinely only a side effect, and takes a block body because Biome's
+   `useIterableCallbackReturn` rejects a concise arrow there whatever the call returns; it is
+   wrong where it is a transformation with the result pushed into an outer variable.
+   Consuming a stream and a bounded request walk stay imperative. The React Compiler is
+   enabled, so hand-written `useMemo`/`useCallback`/`React.memo` needs a stated reason. See
    [typescript-and-react.md](../skills/frontend-standards/typescript-and-react.md) and
    [performance.md](../skills/frontend-standards/performance.md).
 

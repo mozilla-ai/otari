@@ -442,3 +442,123 @@ describe("the layout", () => {
     ])
   })
 })
+
+// The extraction contract has a second half the import probes above cannot see.
+// `design-system/` compiles with the rest of `src/` deleted, which is what they
+// prove; it does not *look* like itself, because the classes its primitives wear
+// are declared in `src/styles/globals.css`, one directory over. Nothing failed
+// when that drifted, so a deleted rule reached a reviewer as a component
+// rendering unstyled rather than as a red test.
+//
+// What this proves and what it does not: it catches a rule deleted or renamed out
+// from under a primitive, and a size added to a dialog's union with no rule to
+// match. It does not make the directory extractable, because the declarations are
+// still in the application's stylesheet. Moving them is the other half of #1346;
+// this is what stops the dependency rotting while that waits.
+describe("the design system's stylesheet dependency", () => {
+  const DESIGN_SYSTEM = join(WEB, "src", "design-system")
+  const GLOBALS = join(WEB, "src", "styles", "globals.css")
+
+  /** Every `.tsx` under `design-system/` that ships, so no story and no test. */
+  function sourceFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) return sourceFiles(full)
+      if (!entry.name.endsWith(".tsx")) return []
+      if (entry.name.includes(".test.") || entry.name.includes(".stories."))
+        return []
+      return [full]
+    })
+  }
+
+  // Comments come out first, and that is the whole reason this is not a bare
+  // grep: the tree cites sibling issues as `otari-ai#2110` and explains retired
+  // rules by name (`.otari-markdown`), and both read as a class to a pattern that
+  // does not know what a comment is.
+  function code(source: string): string {
+    return source
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^[ \t]*\/\/.*$/gm, "")
+  }
+
+  const CLASS = /otari-[a-z0-9]+(?:[-_][a-z0-9]+)*(?:__[a-z0-9-]+)?/g
+  // `otari-dialog--${size}`: the modifier is chosen at render, so no literal
+  // appears and only the prefix can be read off the source.
+  const MODIFIER = /(otari-[a-z-]+--)\$\{/g
+
+  function worn(): { literals: Set<string>; prefixes: Set<string> } {
+    const literals = new Set<string>()
+    const prefixes = new Set<string>()
+    for (const file of sourceFiles(DESIGN_SYSTEM)) {
+      const source = code(readFileSync(file, "utf8"))
+      for (const match of source.matchAll(CLASS)) literals.add(match[0])
+      for (const match of source.matchAll(MODIFIER)) prefixes.add(match[1])
+    }
+    // A modifier prefix also matches CLASS as its own base name. The base is
+    // declared in its own right and asserted below, so drop the partial.
+    for (const prefix of prefixes) literals.delete(prefix.slice(0, -2))
+    return { literals, prefixes }
+  }
+
+  /** Both declaration forms: a selector, and a Tailwind `@utility`. */
+  function declared(): Set<string> {
+    const css = readFileSync(GLOBALS, "utf8")
+    return new Set([
+      ...[...css.matchAll(/\.(otari-[A-Za-z0-9_-]+)/g)].map((m) => m[1]),
+      ...[...css.matchAll(/@utility\s+(otari-[A-Za-z0-9_-]+)/g)].map(
+        (m) => m[1],
+      ),
+    ])
+  }
+
+  it("covers the design system", () => {
+    // A guard on the guard: a wrong root would read no files, find no classes
+    // and pass. Same shape as deprecated.test.ts's.
+    expect(sourceFiles(DESIGN_SYSTEM).length).toBeGreaterThan(50)
+    expect(worn().literals.size).toBeGreaterThan(10)
+  })
+
+  it("declares every class a primitive wears", () => {
+    const available = declared()
+    const missing = [...worn().literals]
+      .filter((name) => !available.has(name))
+      .sort()
+    // Named rather than counted, so a failure says which rule to restore.
+    expect(missing).toEqual([])
+  })
+
+  it("declares a rule for every size a dialog can render", () => {
+    // The union is read from the component rather than repeated here: a fifth
+    // size added to `DialogSize` with no rule to match is the case this exists
+    // for, and a hardcoded list would pass straight through it.
+    const sizesOf = (file: string, type: string): string[] => {
+      const source = readFileSync(join(DESIGN_SYSTEM, file), "utf8")
+      const union = new RegExp(`export type ${type} =([^\\n]*(?:\\n[^\\n]*)?)`)
+      const declaration = union.exec(source)?.[1] ?? ""
+      return [...declaration.matchAll(/"([a-z]+)"/g)].map((m) => m[1]).sort()
+    }
+    const available = declared()
+    const cases: [string, string, string][] = [
+      ["feedback/Dialog.tsx", "DialogSize", "otari-dialog--"],
+      ["feedback/FormDialog.tsx", "FormDialogSize", "otari-form-dialog--"],
+    ]
+    for (const [file, type, prefix] of cases) {
+      const sizes = sizesOf(file, type)
+      expect(sizes.length).toBeGreaterThan(1)
+      const undeclared = sizes.filter(
+        (size) => !available.has(`${prefix}${size}`),
+      )
+      expect({ prefix, undeclared }).toEqual({ prefix, undeclared: [] })
+    }
+  })
+
+  it("reads the prefixes the dialogs build at render", () => {
+    // Pins the two that exist, so dropping a `${size}` interpolation (and with
+    // it the whole modifier mechanism) fails here rather than silently shrinking
+    // what the test above covers.
+    expect([...worn().prefixes].sort()).toEqual([
+      "otari-dialog--",
+      "otari-form-dialog--",
+    ])
+  })
+})

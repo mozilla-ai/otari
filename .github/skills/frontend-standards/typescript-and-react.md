@@ -87,6 +87,20 @@ it must not be is a `map`, a `filter` or a `reduce` with the result pushed into 
 declared above it, which is the shape that hides the transformation from the reader and gives
 the accumulator a chance to escape.
 
+**Give that `forEach` a block body.** Biome's `suspicious/useIterableCallbackReturn` rejects a
+concise arrow here, and it does so whatever the call returns, because the arrow syntactically
+returns the expression:
+
+```ts
+ids.forEach((id) => params.append("request_group_id", id))    // lint error
+ids.forEach((id) => {
+  params.append("request_group_id", id)
+})                                                            // correct
+```
+
+The rule is reading the shape, not the type, and it is right to: a concise arrow in a
+`forEach` is one keystroke from being a `map` whose result nobody took.
+
 Two cases stay imperative, because each iteration decides whether there is a next one and no
 array method expresses that:
 

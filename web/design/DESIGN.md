@@ -143,17 +143,22 @@ Everything else moved, including two things that look like they should not have:
   stayed, because a spend figure and a token count are this product's vocabulary
   rather than a design system's.
 
-**What the rule does not yet cover: the stylesheet.** Biome and `src/architecture.test.ts`
-check imports. They do not read CSS, and about two dozen `.otari-*` classes the primitives
-wear (`otari-dialog` and its family, `otari-form-dialog`, `otari-table`, `otari-pagination`,
-`otari-toolbar`, `otari-bulk-bar`, `otari-checkbox-box`, `otari-detail-*`, `otari-scan-border`,
-`otari-settings`, `otari-markdown`, `otari-bleed`, `otari-focus-ring`) are declared in
-`src/styles/globals.css`, outside the directory, along with the tokens and the 26 `@utility`
-declarations. Several components say so at the site (`BulkActionBar.tsx:9`,
-`TablePagination.tsx:94`, `Section.tsx:8`, `Dialog.tsx:120`), so the dependency is not hidden.
-It is just unchecked, which means the folder move would compile and render unstyled. Until
-that is closed, "would this directory still compile" is the question the tooling answers and
-"would it still look like itself" is one a human has to.
+**The stylesheet is the half the import rule cannot see.** Biome checks imports. It does not
+read CSS, and twenty-one `.otari-*` classes the primitives wear (`otari-dialog` and its
+family, `otari-form-dialog` and its family, `otari-table`, `otari-pagination`, `otari-toolbar`,
+`otari-bulk-bar`, `otari-checkbox-box`, the three `otari-detail-*`, `otari-scan-border`,
+`otari-settings`, `otari-bleed`, `otari-focus-ring`) are declared in `src/styles/globals.css`,
+outside the directory, along with the tokens and the 26 `@utility` declarations. Several
+components say so at the site (`BulkActionBar.tsx:9`, `TablePagination.tsx:94`,
+`Section.tsx:8`, `Dialog.tsx:120`).
+
+`src/architecture.test.ts` now reads both sides, so a rule deleted or renamed out from under a
+primitive fails by name, and a fifth `DialogSize` with no rule to match fails too. What that
+buys is narrow and worth being exact about: the dependency cannot rot silently any more, and
+the directory is still not extractable, because the declarations are in the application's
+stylesheet rather than in one the package would ship. So "would this directory still compile"
+and "are its classes still declared" are both answered by the tooling; "would it still look
+like itself somewhere else" is a move nobody has made yet.
 
 **What a component here may not do.** It is presentational and stateless: no
 TanStack Query, no `useDeployment`, no router, no context of the app's. State is
