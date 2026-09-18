@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -247,6 +247,41 @@ function mockApi(
             ),
           }
         }
+        return jsonResponse(current)
+      }
+      return jsonResponse([])
+    })
+}
+
+// The same settings after a second operator raised the cache TTL and named a
+// describe model, with this operator's own switch flip alongside them.
+const MOVED_SETTINGS: GatewaySettings = {
+  ...SETTINGS,
+  model_discovery: false,
+  config: SETTINGS.config.map((field) => {
+    if (field.key === "model_cache_ttl_seconds") return { ...field, value: 900 }
+    if (field.key === "model_discovery") return { ...field, value: false }
+    if (field.key === "vision_describe_model") {
+      return { ...field, value: "ollama/qwen2-vl" }
+    }
+    return field
+  }),
+}
+
+// Serves `before` until a PATCH lands and `after` from then on: a second
+// operator's change reaches this page on the response to its own save, which
+// writes the whole settings payload back into the cache.
+function mockApiMovingTo(before: GatewaySettings, after: GatewaySettings) {
+  let current = before
+  return vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.includes(`${API_ROOT}/settings/mail`)) {
+        return jsonResponse(MAIL_SETTINGS)
+      }
+      if (url.includes(`${API_ROOT}/settings`)) {
+        if ((init?.method ?? "GET").toUpperCase() === "PATCH") current = after
         return jsonResponse(current)
       }
       return jsonResponse([])
@@ -581,6 +616,70 @@ describe("SettingsPage", () => {
     await user.clear(input)
     await user.type(input, "5")
     expect(save).not.toBeDisabled()
+  })
+
+  it("keeps an unsaved numeric edit when another operator's value arrives", async () => {
+    mockApiMovingTo(SETTINGS, MOVED_SETTINGS)
+    const user = userEvent.setup()
+
+    renderWithClient(<SettingsPage />)
+    await screen.findByText(/Version 1.2.3/)
+
+    const input = screen.getByRole("spinbutton", {
+      name: "model_cache_ttl_seconds",
+    })
+    await user.clear(input)
+    await user.type(input, "60")
+
+    // Any save on the page writes the whole payload back, so the other
+    // operator's 900 reaches a field this one is still typing in.
+    await user.click(screen.getByRole("switch", { name: "model_discovery" }))
+    await waitFor(() => {
+      expect(
+        screen.getByRole("switch", { name: "model_discovery" }),
+      ).toHaveAttribute("aria-checked", "false")
+    })
+
+    expect(input).toHaveValue(60)
+  })
+
+  it("keeps an unsaved text edit when another operator's value arrives", async () => {
+    mockApiMovingTo(SETTINGS, MOVED_SETTINGS)
+    const user = userEvent.setup()
+
+    renderWithClient(<SettingsPage />)
+    await screen.findByText(/Version 1.2.3/)
+
+    const input = screen.getByRole("textbox", { name: "vision_describe_model" })
+    await user.type(input, "ollama/llama-vision")
+
+    await user.click(screen.getByRole("switch", { name: "model_discovery" }))
+    await waitFor(() => {
+      expect(
+        screen.getByRole("switch", { name: "model_discovery" }),
+      ).toHaveAttribute("aria-checked", "false")
+    })
+
+    expect(input).toHaveValue("ollama/llama-vision")
+  })
+
+  it("follows the server on a field with no unsaved edit", async () => {
+    mockApiMovingTo(SETTINGS, MOVED_SETTINGS)
+    const user = userEvent.setup()
+
+    renderWithClient(<SettingsPage />)
+    await screen.findByText(/Version 1.2.3/)
+
+    await user.click(screen.getByRole("switch", { name: "model_discovery" }))
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("spinbutton", { name: "model_cache_ttl_seconds" }),
+      ).toHaveValue(900)
+    })
+    expect(
+      screen.getByRole("textbox", { name: "vision_describe_model" }),
+    ).toHaveValue("ollama/qwen2-vl")
   })
 
   it("shows an empty state when nothing matches the search", async () => {

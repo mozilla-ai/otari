@@ -54,9 +54,26 @@ export function fieldMatches(field: ConfigField, query: string): boolean {
     .every((term) => haystack.includes(term) || isSubsequence(term, key))
 }
 
+// The text a control shows over a committed server value.
+//
+// A committed value that moves replaces the draft, so a field nobody is editing
+// follows the server. An unsaved edit stands, so another operator's change (any
+// save on this page writes the whole settings payload back) does not take a
+// half-typed value out from under the cursor. Adjusting state during render is
+// React's answer for a reset conditioned on a value, and the shape
+// `design-system/forms/ComboBoxField.tsx` uses.
+function useDraft(committed: string) {
+  const [draft, setDraft] = useState(committed)
+  const [seen, setSeen] = useState(committed)
+  if (committed !== seen) {
+    setSeen(committed)
+    if (draft === seen) setDraft(committed)
+  }
+  return [draft, setDraft] as const
+}
+
 // A numeric setting (int or float) with an explicit Save, so a mistyped value is
-// not applied on every keystroke. The draft resyncs whenever the committed value
-// changes (after a save round-trip).
+// not applied on every keystroke.
 function NumberSetting({
   field,
   onSave,
@@ -67,12 +84,8 @@ function NumberSetting({
   disabled?: boolean
 }) {
   const committed = typeof field.value === "number" ? field.value : 0
-  const [draft, setDraft] = useState(String(committed))
+  const [draft, setDraft] = useDraft(String(committed))
   const isFloat = field.type === "float"
-
-  useEffect(() => {
-    setDraft(String(committed))
-  }, [committed])
 
   const parsed = Number(draft)
   const wellFormed =
@@ -131,11 +144,7 @@ function TextSetting({
   disabled?: boolean
 }) {
   const committed = typeof field.value === "string" ? field.value : ""
-  const [draft, setDraft] = useState(committed)
-
-  useEffect(() => {
-    setDraft(committed)
-  }, [committed])
+  const [draft, setDraft] = useDraft(committed)
 
   const changed = draft !== committed
 
