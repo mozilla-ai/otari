@@ -18,6 +18,12 @@ from .conftest import app_for
         {"tools": [{"type": "code_interpreter", "container": "cntr_foreign"}]},
         {"tools": [{"type": "code_interpreter", "container": {"type": "auto"}}]},
         {"tools": [{"type": "file_search", "vector_store_ids": ["vs_foreign"]}]},
+        {
+            "prompt": {
+                "id": "pmpt_1",
+                "variables": {"doc": {"type": "input_file", "file_id": "file_foreign"}},
+            }
+        },
         {"previous_response_id": "resp_foreign"},
         {"conversation": "conv_foreign"},
         {"tools": [{"type": "shell", "environment": {"type": "container_reference", "container_id": "cntr_foreign"}}]},

@@ -160,7 +160,7 @@ def create_provider_files_router(
     async def abandon_output(operation_id: uuid.UUID, body: AbandonUpload, scope: Gateway, lifecycle: Service) -> Any:
         return _wire(
             await ProviderFileOutputs(lifecycle).abandon(
-                operation_id, scope.gateway_id, body.cleanup_token.get_secret_value(), body.metadata
+                operation_id, scope.gateway_id, body.cleanup_token.get_secret_value(), body.metadata, body.file_id
             )
         )
 

@@ -14,12 +14,66 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.services.provider_files.contracts import FileAccount, FileScope, FilesError, OutputPrepare
 from gateway.services.provider_files.lifecycle import ProviderFileService
+from gateway.services.provider_files.outputs import ProviderFileOutputs
 from gateway.services.secret_box import encrypt_secret
 
 from .test_provider_file_lifecycle import files_setup as files_setup
 from .test_provider_file_lifecycle import metadata
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_output_abandon_without_metadata_creates_cleanup_binding(
+    files_setup: tuple[ProviderFileService, FileScope, FileAccount],
+) -> None:
+    service, scope, account = files_setup
+    operation = await ProviderFileOutputs(service).prepare(
+        scope,
+        account,
+        OutputPrepare(
+            operation_id=uuid.uuid4(), request_id="request", attempt_id="attempt", generation_id=account.generation_id
+        ),
+    )
+
+    async def authenticate(request: Request, uow: UnitOfWork) -> FileScope:
+        return scope
+
+    async def authorize(scope: FileScope, body: OutputPrepare, uow: UnitOfWork) -> FileAccount:
+        return account
+
+    app = FastAPI()
+    app.dependency_overrides[get_unit_of_work] = lambda: service.uow
+    app.dependency_overrides[get_config] = lambda: GatewayConfig(
+        mode="hosted",
+        files_provider_native_enabled=True,
+        files_max_count=10,
+        files_max_bytes=1024,
+        files_max_outstanding_bytes=10240,
+    )
+    app.include_router(
+        create_provider_files_router(
+            authenticate=authenticate, authenticate_gateway=authenticate, authorize_attempt=authorize
+        ),
+        prefix=API_ROOT,
+    )
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://control") as client:
+        response = await client.post(
+            f"{API_ROOT}/gateway/files/outputs/{operation.id}/abandon",
+            json={
+                "cleanup_token": operation.cleanup_token.get_secret_value(),
+                "metadata": None,
+                "file_id": "file_generated",
+            },
+            headers={"X-Otari-Files-Protocol": "2"},
+        )
+    assert response.status_code == 200, response.text
+    async with service.uow:
+        stored = await service.repo.get(uuid.UUID(response.json()["operation_id"]))
+    assert stored is not None
+    assert stored.provider_file_id == "file_generated"
+    assert stored.output_operation_id == operation.id
+    assert stored.state == "pending_cleanup"
+    assert stored.encrypted_metadata is None
 
 
 @pytest.mark.parametrize("provider", ["anthropic", "openai"])

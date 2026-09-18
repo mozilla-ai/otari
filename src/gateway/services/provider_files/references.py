@@ -32,7 +32,7 @@ def collect_anthropic_file_references(value: Any) -> list[str]:
             file_id = item.get("file_id")
             if file_id is not None:
                 kind = item.get("type")
-                if kind not in {"file", "container_upload", "code_execution_output"}:
+                if kind not in {"file", "container_upload", "code_execution_output", "bash_code_execution_output"}:
                     raise FilesError(400, "Unsupported structured file reference")
                 if not isinstance(file_id, str) or not file_id or len(file_id) > 255:
                     raise FilesError(400, "Invalid file reference")
@@ -50,7 +50,7 @@ def reject_openai_file_state(payload: dict[str, Any]) -> None:
     """Reject account-scoped OpenAI state until its inference ownership protocol exists."""
     if payload.get("previous_response_id") or payload.get("conversation"):
         raise FilesError(400, "Provider conversation reuse is not supported in hybrid mode")
-    pending = [(payload, 0)]
+    pending: list[tuple[Any, int]] = [(payload, 0)]
     nodes = 0
     while pending:
         item, depth = pending.pop()
@@ -80,9 +80,14 @@ def reject_openai_file_state(payload: dict[str, Any]) -> None:
                 or isinstance(item.get("container"), str)
             ):
                 raise FilesError(400, "OpenAI provider file state is not supported in hybrid inference")
+            variables = item.get("variables")
+            if isinstance(variables, dict):
+                # Prompt variable names are arbitrary; their values are typed input blocks or text.
+                pending.append((list(variables.values()), depth + 1))
             pending.extend(
                 (item[key], depth + 1)
                 for key in (
+                    "prompt",
                     "input",
                     "messages",
                     "content",

@@ -24,7 +24,10 @@ class Event(BaseModel):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fail", [False, True])
-async def test_file_block_is_held_until_registration(monkeypatch: pytest.MonkeyPatch, fail: bool) -> None:
+@pytest.mark.parametrize("output_type", ["code_execution_output", "bash_code_execution_output"])
+async def test_file_block_is_held_until_registration(
+    monkeypatch: pytest.MonkeyPatch, fail: bool, output_type: str
+) -> None:
     entered, release = asyncio.Event(), asyncio.Event()
     operation = Operation(
         id=uuid.uuid4(),
@@ -73,7 +76,10 @@ async def test_file_block_is_held_until_registration(monkeypatch: pytest.MonkeyP
             type="content_block_start",
             content_block={
                 "type": "bash_code_execution_tool_result",
-                "content": [{"type": "code_execution_output", "file_id": "file_generated"}],
+                "content": {
+                    "type": "bash_code_execution_result",
+                    "content": [{"type": output_type, "file_id": "file_generated"}],
+                },
             },
         )
         yield Event(type="content_block_stop")
@@ -84,7 +90,14 @@ async def test_file_block_is_held_until_registration(monkeypatch: pytest.MonkeyP
             emitted.append(event.type)  # noqa: PERF401 (observe emission before the stream finishes)
 
     task = asyncio.create_task(consume())
-    await asyncio.wait_for(entered.wait(), timeout=1)
+    registration = asyncio.create_task(entered.wait())
+    try:
+        done, _ = await asyncio.wait({task, registration}, timeout=1, return_when=asyncio.FIRST_COMPLETED)
+        if task in done:
+            await task
+        assert registration in done, "Output registration did not start"
+    finally:
+        registration.cancel()
     assert emitted == ["message_start"]
     release.set()
     if fail:

@@ -3,10 +3,11 @@
 import pytest
 
 from gateway.services.provider_files.contracts import FileListRequest, FilesError
-from gateway.services.provider_files.references import collect_anthropic_file_references
+from gateway.services.provider_files.references import collect_anthropic_file_references, reject_openai_file_state
 
 
-def test_complete_history_and_nested_results() -> None:
+@pytest.mark.parametrize("output_type", ["code_execution_output", "bash_code_execution_output"])
+def test_complete_history_and_nested_results(output_type: str) -> None:
     history = [
         {"role": "user", "content": [{"type": "document", "source": {"type": "file", "file_id": "file_old"}}]},
         {
@@ -16,7 +17,7 @@ def test_complete_history_and_nested_results() -> None:
                     "type": "bash_code_execution_tool_result",
                     "content": {
                         "type": "bash_code_execution_result",
-                        "content": [{"type": "code_execution_output", "file_id": "file_out"}],
+                        "content": [{"type": output_type, "file_id": "file_out"}],
                     },
                 }
             ],
@@ -61,6 +62,20 @@ def test_nested_reference_limit() -> None:
         value = {"content": value}
     with pytest.raises(FilesError):
         collect_anthropic_file_references(value)
+
+
+def test_openai_prompt_text_variables_are_not_file_references() -> None:
+    reject_openai_file_state(
+        {
+            "prompt": {
+                "id": "pmpt_1",
+                "variables": {
+                    "doc": "file_mentioned_in_prose",
+                    "description": {"type": "input_text", "text": "file_mentioned_in_text"},
+                },
+            }
+        }
+    )
 
 
 def test_ids_cannot_change_pagination_semantics() -> None:
