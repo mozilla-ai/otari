@@ -22,6 +22,9 @@ import {
 import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
+/** Mirrors `RATING_ACKNOWLEDGEMENT_MS` in `hooks/usePlayground.ts`. */
+const RATING_ACKNOWLEDGEMENT_MS = 3000
+
 const WORKSPACE_ID = "44444444-4444-4444-4444-444444444444"
 
 const CATALOG: ModelListResponse = {
@@ -694,6 +697,54 @@ describe("comparing two models", () => {
         preference: "model_b",
       })
     })
+  })
+
+  it("does not dismiss a fresh rating with the previous one's timer", async () => {
+    // The acknowledgement clears itself after RATING_ACKNOWLEDGEMENT_MS. Anything
+    // that moves the rating state in the meantime (regenerating an answer, which
+    // makes the exchange different from the one that was rated) has to cancel it,
+    // or the pending dismissal lands on a fresh unrated exchange and takes the
+    // rating controls away from under the operator.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      mockApi({
+        consent: { store_conversations: false, store_comparisons: true },
+      })
+      mockStream([delta("an answer"), "[DONE]"])
+      renderPage()
+      await screen.findByText("Try a prompt.")
+
+      await user.click(await screen.findByRole("radio", { name: "Compare" }))
+      await user.click(screen.getByRole("button", { name: "Model B" }))
+      await user.click(await screen.findByText("claude-sonnet-4"))
+      await user.type(screen.getByLabelText("Message"), "which?")
+      await user.click(screen.getByRole("button", { name: "Send message" }))
+      await user.click(
+        await screen.findByRole("button", { name: "Model B answered better" }),
+      )
+      await screen.findByText("Recorded. Thanks for the feedback.")
+
+      // Regenerate: the exchange on screen is no longer the one that was rated,
+      // so the rating controls come back and the pending dismissal is stale.
+      mockStream([delta("a different answer"), "[DONE]"])
+      await user.click(
+        (
+          await screen.findAllByRole("button", { name: "Regenerate response" })
+        )[0],
+      )
+      await screen.findByRole("button", { name: "Model B answered better" })
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RATING_ACKNOWLEDGEMENT_MS + 500)
+      })
+
+      expect(
+        screen.getByRole("button", { name: "Model B answered better" }),
+      ).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("starts both columns level, clearing what single view had", async () => {

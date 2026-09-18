@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
@@ -237,6 +237,36 @@ describe("ActivityTimeline", () => {
     const pan = screen.getByRole("slider", { name: "Pan the selected window" })
     expect(pan).toHaveClass("inset-y-0")
     expect(pan.parentElement).toHaveClass("h-11")
+  })
+
+  it("measures the rail once per drag, not on every pointer move", () => {
+    // `getBoundingClientRect()` flushes pending layout before it can answer,
+    // and the handler writes state that dirties layout again, so reading it per
+    // move made a drag one read-write cycle per pointer event. The rail cannot
+    // resize under a pointer that is already down on it, so the width is taken
+    // where the drag starts and carried in the ref that already tracks it.
+    renderTimeline({
+      windowStart: "2026-07-11T00:00:00.000Z",
+      windowEnd: "2026-07-12T00:00:00.000Z",
+    })
+    const pan = screen.getByRole("slider", { name: "Pan the selected window" })
+    const rail = pan.parentElement as HTMLElement
+    // jsdom lays nothing out, so the rail reports a zero width and the handler
+    // would bail before it ever divided by it.
+    const measure = vi
+      .spyOn(rail, "getBoundingClientRect")
+      .mockReturnValue({ width: 300 } as DOMRect)
+    // jsdom implements no pointer capture either.
+    pan.setPointerCapture = vi.fn()
+    pan.hasPointerCapture = vi.fn(() => false)
+    pan.releasePointerCapture = vi.fn()
+
+    fireEvent.pointerDown(pan, { clientX: 0, pointerId: 1 })
+    fireEvent.pointerMove(pan, { clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(pan, { clientX: 200, pointerId: 1 })
+    fireEvent.pointerUp(pan, { clientX: 200, pointerId: 1 })
+
+    expect(measure).toHaveBeenCalledTimes(1)
   })
 
   it("renders no pan rail at the full extent (nothing to pan)", () => {

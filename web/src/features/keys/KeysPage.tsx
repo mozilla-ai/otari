@@ -1037,13 +1037,18 @@ export function KeysPage() {
     const measure = (width: number) => {
       if (width > 0) setLayout(layoutFor(window.innerWidth, width))
     }
-    const observer = new ResizeObserver(([entry]) =>
-      measure(entry.contentRect.width),
-    )
+    // The observer hands back the region's width without forcing layout, so
+    // remembering it is what lets the viewport listener below re-decide without
+    // measuring. One read here at setup, none per event.
+    let regionWidth = region.getBoundingClientRect().width
+    const observer = new ResizeObserver(([entry]) => {
+      regionWidth = entry.contentRect.width
+      measure(regionWidth)
+    })
     observer.observe(region)
     // The region can keep its width while the viewport crosses `md`, which the
-    // observer alone never reports.
-    const onResize = () => measure(region.getBoundingClientRect().width)
+    // observer alone never reports. `window.innerWidth` is not a layout read.
+    const onResize = () => measure(regionWidth)
     window.addEventListener("resize", onResize)
     return () => {
       observer.disconnect()

@@ -105,9 +105,27 @@ export function usePlayground() {
   const [savedConversationId, setSavedConversationId] = useState<
     string | undefined
   >(undefined)
-  const [ratingState, setRatingState] = useState<
+  const [ratingState, setRatingStateNow] = useState<
     "none" | "acknowledged" | "dismissed"
   >("none")
+  // The acknowledgement dismisses itself on a timer, which has to die with the
+  // hook and be cancelled by anything that moves the state itself. Without the
+  // second half a pending dismissal lands after the state has already gone back
+  // to "none" (editing the exchange, or loading a stored transcript) and
+  // overwrites it three seconds later.
+  const ratingDismissal = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  )
+  useEffect(() => () => clearTimeout(ratingDismissal.current), [])
+  // Stable, which is what lets `invalidateSavedState` below name it as a
+  // dependency without re-creating itself on every render.
+  const setRatingState = useCallback(
+    (next: "none" | "acknowledged" | "dismissed") => {
+      clearTimeout(ratingDismissal.current)
+      setRatingStateNow(next)
+    },
+    [],
+  )
   const [pendingConsent, setPendingConsent] = useState<
     PendingConsent | undefined
   >(undefined)
@@ -131,7 +149,7 @@ export function usePlayground() {
     setRatingState("none")
     setIsConversationSaved(false)
     setSavedConversationId(undefined)
-  }, [])
+  }, [setRatingState])
 
   /** Put both panels back to empty, keeping whichever models they hold. */
   const clearPanels = useCallback(() => {
@@ -293,7 +311,7 @@ export function usePlayground() {
         {
           onSuccess: () => {
             setRatingState("acknowledged")
-            window.setTimeout(
+            ratingDismissal.current = setTimeout(
               () => setRatingState("dismissed"),
               RATING_ACKNOWLEDGEMENT_MS,
             )
@@ -301,7 +319,7 @@ export function usePlayground() {
         },
       )
     },
-    [workspaceId, panelA, panelB, saveComparison],
+    [workspaceId, panelA, panelB, saveComparison, setRatingState],
   )
 
   const requestRate = (preference: PlaygroundComparisonPreference) => {

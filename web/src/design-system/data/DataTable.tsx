@@ -252,6 +252,15 @@ export function DataTable<Row extends object>({
   // re-render remount the panel.
   useEffect(() => () => hostRef.current?.row.remove(), [])
 
+  // The optimistic highlight below clears itself on a timer, so the timer has
+  // to die with the component and be replaced rather than stacked when a second
+  // row is pressed inside its window. Same shape as `CopyField`'s
+  // acknowledgement, and the same two failures it names.
+  const openingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  )
+  useEffect(() => () => clearTimeout(openingTimer.current), [])
+
   // Row activation with instant acknowledgment: the detail panel can only land
   // after react-aria's O(rows) interaction render (~1.6 ms/row), so the clicked
   // row is highlighted in the same frame; the insert effect clears the class
@@ -264,7 +273,18 @@ export function DataTable<Row extends object>({
           `tbody tr[data-key="${CSS.escape(key)}"]`,
         )
         target?.classList.add("otari-detail-opening")
-        setTimeout(() => target?.classList.remove("otari-detail-opening"), 1500)
+        clearTimeout(openingTimer.current)
+        // Sweeps by class rather than closing over `target`, which is the row
+        // element: a closure holding it keeps a detached node alive for the
+        // window when the table repaginates or filters under it, and clearing
+        // the previous timer would otherwise strand that row highlighted. This
+        // is the same sweep the insert effect runs when the panel lands.
+        openingTimer.current = setTimeout(() => {
+          for (const el of rootRef.current?.querySelectorAll(
+            ".otari-detail-opening",
+          ) ?? [])
+            el.classList.remove("otari-detail-opening")
+        }, 1500)
       }
       onRowAction(key)
     },

@@ -202,7 +202,16 @@ export function ActivityTimeline({
   // capture and commits on release; arrow keys step one bucket, PageUp/Down a
   // whole window, Home/End to the extent edges.
   const railRef = useRef<HTMLDivElement>(null)
-  const panStart = useRef<{ x: number; startIndex: number } | null>(null)
+  // The rail's width is measured once, where the drag starts, rather than on
+  // every move. `getBoundingClientRect()` flushes pending layout before it can
+  // answer, and the line below it writes state that dirties layout again, so
+  // reading it here made the whole drag a read-write cycle per pointer event.
+  // The rail cannot resize while a pointer is down on it.
+  const panStart = useRef<{
+    x: number
+    startIndex: number
+    railWidth: number
+  } | null>(null)
 
   const panTo = (
     startIndex: number,
@@ -234,11 +243,11 @@ export function ActivityTimeline({
   }
 
   const onPanMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!panStart.current || !railRef.current) return
-    const width = railRef.current.getBoundingClientRect().width
-    if (width <= 0) return
-    const dx = Math.round(((event.clientX - panStart.current.x) / width) * n)
-    setPan(panTo(panStart.current.startIndex + dx))
+    if (!panStart.current) return
+    const { x, startIndex, railWidth } = panStart.current
+    if (railWidth <= 0) return
+    const dx = Math.round(((event.clientX - x) / railWidth) * n)
+    setPan(panTo(startIndex + dx))
   }
 
   const endPan = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -402,6 +411,8 @@ export function ActivityTimeline({
                     panStart.current = {
                       x: event.clientX,
                       startIndex: sel.startIndex,
+                      railWidth:
+                        railRef.current?.getBoundingClientRect().width ?? 0,
                     }
                     setPan({ ...sel })
                     event.currentTarget.setPointerCapture(event.pointerId)
