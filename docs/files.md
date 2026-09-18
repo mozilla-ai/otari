@@ -130,10 +130,9 @@ libraries since Otari is a network service. OCR is optional; install the
 
 Hybrid gateways can forward the Anthropic GA Files API through any-llm while
 keeping bytes at Anthropic. Enable `files_provider_native_enabled` only after the
-control plane contributes the Files protocol and the deployed any-llm version
-contains its Files interface. The initial implementation targets any-llm 1.28.
-The gateway returns a fixed 502 if that interface or the control-plane protocol
-is unavailable. The default remains disabled.
+control plane contributes the Files protocol. The gateway requires any-llm-sdk
+1.28.0 or later, which includes the Anthropic Files interface. The gateway returns
+a fixed 502 if the control-plane protocol is unavailable. The default remains disabled.
 
 Use the official Anthropic SDK's GA `files` resource, not `beta.files`:
 
@@ -216,9 +215,10 @@ Anthropic reports it; local expiry alone cannot delete an unknown upstream ID.
 
 ### Release verification
 
-The core contract has been exercised with the merged any-llm Files implementation
-at `2524c196c4c8cbeb8698a9e0b6f90d73aa659a9d` and Anthropic Python SDK 0.125.0.
-The published any-llm 1.28 dependency pin and lockfile update remain a release
-gate. Before hosted enablement, verify the composed hosted adapter, generated
-output expiry, and the Octonous workflow without managed container reuse.
+The dependency floor is any-llm-sdk 1.28.0, and the lockfile selects that published
+release. The mandatory SDK contract test covers upload, scoped listing, metadata
+retrieval, download, and deletion through the official Anthropic client and Otari,
+using a mocked control plane and provider transport.
+Before hosted enablement, verify the composed hosted adapter, generated output
+expiry, and the Octonous workflow without managed container reuse.
 The canonical server contract is in [Hybrid mode protocol](hybrid-mode-protocol.md#provider-native-files).

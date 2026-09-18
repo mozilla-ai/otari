@@ -1,4 +1,4 @@
-"""Official GA Anthropic client through Otari and the merged any-llm Files transport."""
+"""Official GA Anthropic client through Otari and the released any-llm Files transport."""
 
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -7,7 +7,6 @@ from typing import Any
 import anthropic
 import httpx
 import pytest
-from any_llm import AnyLLM
 from fastapi import FastAPI
 from pydantic import SecretStr
 
@@ -25,15 +24,10 @@ from gateway.services.provider_files.contracts import (
     WireModel,
 )
 
-pytestmark = [
-    pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not hasattr(AnyLLM, "aupload_file"), reason="Requires any-llm Files interface (#1395, planned 1.28)"
-    ),
-]
+pytestmark = pytest.mark.asyncio
 
 
-async def test_official_sdk_upload_list_download_delete(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_official_sdk_upload_list_retrieve_download_delete(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_AI_TOKEN", "gateway-token")
     config = GatewayConfig(
         mode="hybrid",
@@ -74,6 +68,7 @@ async def test_official_sdk_upload_list_download_delete(monkeypatch: pytest.Monk
         if path == "list":
             return FilePage(data=[metadata], next_page=None)
         if path.endswith("/resolve"):
+            calls.append(f"resolve:{body['operation']}")
             return ResolvedFile(
                 metadata=metadata, account=account, operation_id=operation.id, cleanup_token=SecretStr("cleanup")
             )
@@ -113,6 +108,11 @@ async def test_official_sdk_upload_list_download_delete(monkeypatch: pytest.Monk
         )
         page = await sdk.files.list()
         assert [item.id for item in page.data] == [uploaded.id]
+        retrieved = await sdk.files.retrieve_metadata(uploaded.id)
+        assert retrieved.id == uploaded.id
+        assert retrieved.filename == "input.csv"
+        assert retrieved.size_bytes == 4
+        assert "resolve:metadata" in calls
         downloaded = await sdk.files.download(uploaded.id)
         assert await downloaded.read() == b"data"
         deleted = await sdk.files.delete(uploaded.id)
