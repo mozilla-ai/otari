@@ -1395,6 +1395,9 @@ describe("no font size is written at a call site", () => {
 })
 
 // Touch targets. The rule ("at least 44px on the phone viewport") is in the
+// HIG and is a device measure, so the prose here counts in pixels while the
+// stylesheet spells them in rem: 2.75rem is 44px at the default root size, and
+// larger for a reader who raised it, which is the direction that floor wants.
 // frontend-standards responsiveness guide and was written at ~180 `size="sm"`
 // call sites that do not meet it, so it is enforced as one floor in the
 // stylesheet rather than as a className each of them has to remember.
@@ -1420,14 +1423,14 @@ describe("the phone viewport's touch-target floor", () => {
     // descendant selector). What is being held is the pair, not the spelling:
     // if a rewrite drops the 767px half, a phone gets a 32px search box.
     expect(CSS).toMatch(
-      /\.otari-toolbar,\s*\.otari-pagination,\s*\.otari-settings \{\s*--field-height: 32px;/,
+      /\.otari-toolbar,\s*\.otari-pagination,\s*\.otari-settings \{\s*--field-height: 2rem;/,
     )
     // The phone override raises the two places whose height is keyed on width.
     // The pager is the third and is not here: it raises on `pointer: coarse`
     // instead, asserted below, because a fine pointer at a narrow width is a
     // resized desktop window rather than a finger.
     expect(CSS).toMatch(
-      /@media \(max-width: 767px\) \{\s*\.otari-toolbar,\s*\.otari-settings \{\s*--field-height: 44px;/,
+      /@media \(max-width: 767px\) \{\s*\.otari-toolbar,\s*\.otari-settings \{\s*--field-height: 2.75rem;/,
     )
   })
 
@@ -1436,7 +1439,7 @@ describe("the phone viewport's touch-target floor", () => {
   // `[data-slot="button"]` reaches none of them.
   it("raises the pager's own fields with its buttons on a coarse pointer", () => {
     expect(CSS).toMatch(
-      /@media \(pointer: coarse\)[\s\S]*?\.otari-pagination \{\s*--field-height: 44px;/,
+      /@media \(pointer: coarse\)[\s\S]*?\.otari-pagination \{\s*--field-height: 2.75rem;/,
     )
   })
 
@@ -1446,7 +1449,7 @@ describe("the phone viewport's touch-target floor", () => {
     // that renders in one, so making it a place would put the dense height on
     // an `.input` a future cell might hold.
     expect(CSS).toMatch(
-      /\.table__cell \.select__trigger \{\s*height: 44px;\s*min-height: 44px;/,
+      /\.table__cell \.select__trigger \{\s*height: 2.75rem;\s*min-height: 2.75rem;/,
     )
   })
 
@@ -1459,8 +1462,8 @@ describe("the phone viewport's touch-target floor", () => {
       /\.input,\s*\.select__trigger \{\s*min-height: var\(--field-height\);\s*height: var\(--field-height\);\s*padding-block: var\(--field-padding-block\);/,
     )
     // The default, so a field outside every place still has a height at all.
-    expect(CSS).toMatch(/--field-height: 36px;/)
-    expect(CSS).toMatch(/--field-padding-block: 6px;/)
+    expect(CSS).toMatch(/--field-height: 2.25rem;/)
+    expect(CSS).toMatch(/--field-padding-block: 0.375rem;/)
     // The native search input is not one of HeroUI's classes, so it reads the
     // property through a rule of its own, scoped to the toolbar.
     expect(CSS).toMatch(
@@ -1540,7 +1543,7 @@ describe("a field's trailing glyph is spaced once", () => {
   const margin = stepper.match(/margin-inline-start:\s*([^;]+);/)?.[1].trim()
 
   it("spaces the stepper from the value at all", () => {
-    expect(margin, "nothing spaces the stepper from the value").toBe("8px")
+    expect(margin, "nothing spaces the stepper from the value").toBe("0.5rem")
   })
 
   it("spaces it by the gap the trigger family already uses", () => {

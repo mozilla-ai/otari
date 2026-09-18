@@ -875,31 +875,31 @@
    * 125% and 150% zoom before these landed. Tracking lives in the @theme
    * registration above, positive on the small steps where tight setting goes
    * muddy and negative on the large ones where it goes loose. */
-  --text-xs: 12px;
-  --text-xs--line-height: 18px;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
   /* The seventh step, between 12 and 14, which Tailwind does not ship. Named
      `-step` rather than `--text-caption` on purpose: a `--text-*` key generates
      a same-named utility that would outrank `@utility text-caption` in the same
      layer and silently kill the role's own metrics. Nothing consumes this but
      that role and `text-shell-label`, so it needs no utility of its own. */
-  --text-caption-step: 13px;
-  --text-caption-step--line-height: 19px;
+  --text-caption-step: 0.8125rem;
+  --text-caption-step--line-height: 1.1875rem;
   --text-caption-step--letter-spacing: 0.0075em;
-  --text-sm: 14px;
-  --text-sm--line-height: 20px;
-  --text-base: 16px;
-  --text-base--line-height: 24px;
-  --text-lg: 18px;
-  --text-lg--line-height: 26px;
-  --text-xl: 22px;
-  --text-xl--line-height: 28px;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.625rem;
+  --text-xl: 1.375rem;
+  --text-xl--line-height: 1.75rem;
   /* 28/34 because that is what every page title in the direction is drawn at,
      and eight pages had already reached it by spelling `text-[28px]` by hand
      rather than by moving the step. The step moved instead: one scale value,
      nine consumers, no arbitrary sizes left. `text-display` is its only
      utility consumer. */
-  --text-2xl: 28px;
-  --text-2xl--line-height: 34px;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 2.125rem;
 
   /* Hierarchy comes from size and tracking, so the weight axis is two values
    * doing real work instead of four crowded together. 550 is the one emphasis
@@ -1037,8 +1037,8 @@
      tracking was written for this treatment, and the step's belongs to a token
      this role does not read. */
   font-family: var(--font-display);
-  font-size: 20px;
-  line-height: 28px;
+  font-size: 1.25rem;
+  line-height: 1.75rem;
   letter-spacing: -0.01em;
   font-weight: var(--font-weight-semibold);
   color: var(--color-text);
@@ -1171,13 +1171,13 @@
      of size. Same argument `text-overline` makes above, reaching the opposite
      answer because these are not a role the sans side also needs. */
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 @utility text-mono-overline {
   /* The overline's job at the mono family, so a call site does not spell all
      three by hand with the tracking as an arbitrary value. */
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 0.6875rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -1188,8 +1188,8 @@
      `tabular-nums` likewise, which is what stops a counting figure from
      shifting under its own digits. */
   font-family: var(--font-mono);
-  font-size: 30px;
-  line-height: 36px;
+  font-size: 1.875rem;
+  line-height: 2.25rem;
   font-variant-numeric: tabular-nums;
 }
 @utility text-mono-title {
@@ -1203,7 +1203,7 @@
      Not `text-mono-caption`: 13px inside a 16px heading is visibly smaller,
      which is a rendered regression rather than a correction. */
   font-family: var(--font-mono);
-  font-size: 15px;
+  font-size: 0.9375rem;
 }
 @utility text-shell-label {
   font-size: var(--text-caption-step);
@@ -1237,7 +1237,7 @@
   font-family: var(--font-sans);
   line-height: 1.5;
   font-weight: 400;
-  font-size: 16px;
+  font-size: 1rem;
   color-scheme: light dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -1351,8 +1351,8 @@ body {
    renders `.textarea`, which this stylesheet does not touch, so the rule below
    reaches the markdown surface's textarea alone. */
 :root {
-  --field-height: 36px;
-  --field-padding-block: 6px;
+  --field-height: 2.25rem;
+  --field-padding-block: 0.375rem;
 }
 .input,
 .select__trigger {
@@ -1388,8 +1388,8 @@ textarea.input {
 .otari-toolbar,
 .otari-pagination,
 .otari-settings {
-  --field-height: 32px;
-  --field-padding-block: 4px;
+  --field-height: 2rem;
+  --field-padding-block: 0.25rem;
 }
 .otari-toolbar input[type="search"] {
   min-height: var(--field-height);
@@ -1641,11 +1641,11 @@ main {
 .otari-checkbox-box::before {
   content: "";
   position: absolute;
-  inset: -12px;
+  inset: -0.75rem;
 }
 @media (pointer: coarse) {
   .otari-checkbox-box::before {
-    inset: -14px;
+    inset: -0.875rem;
   }
 }
 
@@ -1826,7 +1826,7 @@ main {
    drawn edge here, and the 3px moved the label off where the page shipped it. */
 .otari-auth-actions .button--ghost:not(.button--sm):not(.button--icon-only) {
   min-height: 2.75rem;
-  padding-inline: 12px;
+  padding-inline: 0.75rem;
   --button-fg: var(--color-link);
   --button-bg-hover: transparent;
   --button-bg-pressed: transparent;
@@ -1848,11 +1848,11 @@ main {
    label to inset and HeroUI zeroes its padding to keep it square. */
 .button--ghost.button--sm:not(.button--icon-only),
 .button--danger.button--sm:not(.button--icon-only) {
-  padding-inline: 11px;
+  padding-inline: 0.6875rem;
 }
 .button--ghost:not(.button--sm):not(.button--icon-only),
 .button--danger:not(.button--sm):not(.button--icon-only) {
-  padding-inline: 15px;
+  padding-inline: 0.9375rem;
 }
 
 /* The rail is the exception, and it has to be one: its two band controls set
@@ -1947,7 +1947,7 @@ main {
 .dropdown__trigger {
   border-color: var(--color-control-border);
   box-shadow: none;
-  padding-inline: 12px;
+  padding-inline: 0.75rem;
 }
 /* A number field's trailing glyph is the user agent's own stepper, and the
    family had no notion of it: the value sat hard against it in all five
@@ -1961,7 +1961,7 @@ main {
    draws its stepper with no pseudo-element to reach. */
 .input::-webkit-inner-spin-button,
 .input::-webkit-outer-spin-button {
-  margin-inline-start: 8px;
+  margin-inline-start: 0.5rem;
 }
 
 /* The slot layout is the triggers' alone: an `<input>` is a replaced element
@@ -1972,7 +1972,7 @@ main {
 .dropdown__trigger {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0.5rem;
   /* The trailing side is short by the chevron's own optical inset, so the glyph
      LOOKS the same distance from the edge as the label does on the other side.
      The rule: trailing = leading minus the trailing glyph's optical inset,
@@ -1985,16 +1985,16 @@ main {
      the SIZE LADDER owns the leading padding, and this slot spec owns only the
      relationship between leading and trailing. Change the ladder and this
      follows; it does not set the ladder. */
-  padding-inline-end: 10px;
+  padding-inline-end: 0.625rem;
 }
 /* Static, not absolute. An out-of-flow chevron is exactly what let the label
    run underneath it; in flow it takes a lane of its own and the label stops
    where it starts. */
 .select__indicator {
   position: static;
-  flex: 0 0 14px;
-  width: 14px;
-  height: 14px;
+  flex: 0 0 0.875rem;
+  width: 0.875rem;
+  height: 0.875rem;
   color: var(--color-text-subtle);
 }
 .select__value {
@@ -2035,7 +2035,7 @@ main {
 .select__popover,
 .combo-box__popover,
 .dropdown__popover {
-  margin-top: 2px;
+  margin-top: 0.125rem;
 }
 
 /* The pagination strip is the third named place, and the last: 32px controls at
@@ -2056,17 +2056,17 @@ main {
 .table__cell .select__trigger {
   /* `height` alongside the floor, because HeroUI's block padding and line box
      make 38 on their own and a floor alone leaves that untouched. */
-  height: 32px;
-  min-height: 32px;
-  padding-block: 4px;
+  height: 2rem;
+  min-height: 2rem;
+  padding-block: 0.25rem;
 }
 .otari-pagination .input,
 .otari-pagination .select__trigger {
-  padding-inline: 8px;
+  padding-inline: 0.5rem;
 }
 /* The same relationship at the dense leading padding: 8 - 2.06 rounds to 6. */
 .otari-pagination .select__trigger {
-  padding-inline-end: 6px;
+  padding-inline-end: 0.375rem;
 }
 
 /* The pager, on a coarse pointer.
@@ -2085,8 +2085,8 @@ main {
  * geometry, so what is pressable is what is drawn. */
 @media (pointer: coarse) {
   .otari-pagination .button {
-    height: 44px;
-    min-width: 44px;
+    height: 2.75rem;
+    min-width: 2.75rem;
   }
   /* The strip's fields come up with its buttons. They are not
      `[data-slot="button"]`, so neither the floor further down nor the rule
@@ -2095,10 +2095,10 @@ main {
      are not: a select and a number field are one control each, not a cluster
      of neighbors doing opposite things. */
   .otari-pagination {
-    --field-height: 44px;
+    --field-height: 2.75rem;
   }
   .otari-pagination__pager {
-    gap: 8px;
+    gap: 0.5rem;
   }
 }
 /* A settings row's phone size, the one part of it that is not a height: 16px,
@@ -2155,22 +2155,22 @@ main {
 @media (max-width: 767px) {
   .otari-toolbar,
   .otari-settings {
-    --field-height: 44px;
+    --field-height: 2.75rem;
   }
   /* A settings row's field also gains block padding, where a toolbar's keeps
      the dense 4px: the row's control stops sharing the row and stacks full
      width under its label here, so it is a form field again rather than one of
      a strip of small ones. */
   .otari-settings {
-    --field-padding-block: 6px;
+    --field-padding-block: 0.375rem;
   }
   /* A select inside a table cell is the third place the dense height outlives
      the floor. Not the same as #927: a row's Edit and Delete cannot reach 44
      without widening the lane, while a cell's select is one control with the
      row's height to grow into. */
   .table__cell .select__trigger {
-    height: 44px;
-    min-height: 44px;
+    height: 2.75rem;
+    min-height: 2.75rem;
   }
 }
 
@@ -2450,8 +2450,8 @@ main {
 
 /* Thin, theme-aware scrollbars (consume tokens so dark mode is correct) */
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 0.5rem;
+  height: 0.5rem;
 }
 *::-webkit-scrollbar-track {
   background: transparent;
@@ -2718,18 +2718,18 @@ main {
    table scrolls, which is the point. */
 .otari-breakdown .table__column[data-key="requests"],
 .otari-breakdown .table__column[data-key="tokens"] {
-  min-width: 110px;
+  min-width: 6.875rem;
 }
 .otari-breakdown .table__column[data-key="spend"],
 .otari-breakdown .table__column[data-key="calls"],
 .otari-breakdown .table__column[data-key="failed"] {
-  min-width: 100px;
+  min-width: 6.25rem;
 }
 .otari-breakdown .table__column:first-child {
-  min-width: 180px;
+  min-width: 11.25rem;
 }
 .otari-overview-activity .table__column[data-key="model"] {
-  min-width: 180px;
+  min-width: 11.25rem;
 }
 
 /* Models and Providers, on the same terms as the tables before them. Models'
@@ -2747,10 +2747,10 @@ main {
   border-bottom: 1px solid var(--color-border);
 }
 .otari-models-table .table__column[data-key="name"] {
-  min-width: 200px;
+  min-width: 12.5rem;
 }
 .otari-offerings-table .table__column[data-key="provider"] {
-  min-width: 200px;
+  min-width: 12.5rem;
 }
 /* The identity lane holds while the rest scrolls, as everywhere else. */
 .otari-models-table .table__column:first-child,
@@ -2807,38 +2807,38 @@ main {
   border-bottom: 1px solid var(--color-border);
 }
 .otari-activity-table .table__row .table__cell {
-  min-height: 59px;
+  min-height: 3.6875rem;
 }
 .otari-activity-table .table__column[data-key="time"] {
-  width: 120px;
-  min-width: 120px;
+  width: 7.5rem;
+  min-width: 7.5rem;
 }
 .otari-activity-table .table__column[data-key="user"] {
-  width: 150px;
-  min-width: 150px;
+  width: 9.375rem;
+  min-width: 9.375rem;
 }
 .otari-activity-table .table__column[data-key="model"] {
-  min-width: 204px;
+  min-width: 12.75rem;
 }
 .otari-activity-table .table__column[data-key="routing"] {
-  min-width: 200px;
+  min-width: 12.5rem;
 }
 .otari-activity-table .table__column[data-key="api_key"] {
-  width: 150px;
-  min-width: 150px;
+  width: 9.375rem;
+  min-width: 9.375rem;
 }
 .otari-activity-table .table__column[data-key="tokens"],
 .otari-activity-table .table__column[data-key="latency"] {
-  width: 120px;
-  min-width: 120px;
+  width: 7.5rem;
+  min-width: 7.5rem;
 }
 .otari-activity-table .table__column[data-key="cost"] {
-  width: 110px;
-  min-width: 110px;
+  width: 6.875rem;
+  min-width: 6.875rem;
 }
 .otari-activity-table .table__column[data-key="status"] {
-  width: 120px;
-  min-width: 120px;
+  width: 7.5rem;
+  min-width: 7.5rem;
 }
 
 /* The frozen region: the selection box and the three lanes up to and including
@@ -2859,21 +2859,21 @@ main {
 .otari-activity-table .table__column[data-key="time"],
 .otari-activity-table .table__cell[data-key="time"] {
   position: sticky;
-  left: 48px;
+  left: 3rem;
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="user"],
 .otari-activity-table .table__cell[data-key="user"] {
   position: sticky;
-  left: 168px;
+  left: 10.5rem;
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="model"],
 .otari-activity-table .table__cell[data-key="model"] {
   position: sticky;
-  left: 318px;
+  left: 19.875rem;
   z-index: 1;
   background-color: var(--color-background);
 }
@@ -2884,40 +2884,40 @@ main {
   border-right: 1px solid var(--color-control-border);
 }
 .otari-mcp-table .table__row .table__cell {
-  height: 52px;
+  height: 3.25rem;
   padding-block: 0;
 }
 .otari-mcp-table .table__column[data-key="token"] {
-  width: 140px;
-  min-width: 140px;
+  width: 8.75rem;
+  min-width: 8.75rem;
 }
 .otari-mcp-table .table__column[data-key="enabled"] {
-  width: 140px;
-  min-width: 140px;
+  width: 8.75rem;
+  min-width: 8.75rem;
 }
 .otari-mcp-table .table__column[data-key="actions"] {
-  width: 96px;
-  min-width: 96px;
+  width: 6rem;
+  min-width: 6rem;
 }
 .otari-budgets-table .table__row .table__cell {
-  height: 58px;
+  height: 3.625rem;
   padding-block: 0;
 }
 .otari-budgets-table .table__column[data-key="usage"] {
-  width: 200px;
-  min-width: 200px;
+  width: 12.5rem;
+  min-width: 12.5rem;
 }
 .otari-budgets-table .table__column[data-key="users"] {
-  width: 90px;
-  min-width: 90px;
+  width: 5.625rem;
+  min-width: 5.625rem;
 }
 .otari-budgets-table .table__column[data-key="actions"] {
-  width: 144px;
-  min-width: 144px;
+  width: 9rem;
+  min-width: 9rem;
 }
 /* The slack absorber, so the lanes after the identity stay next to it. */
 .otari-budgets-table .table__column[data-key="default-for"] {
-  min-width: 180px;
+  min-width: 11.25rem;
 }
 /* The selection box travels with the row it acts on, and the identity beside
    it, for the reason the activity table pins both. */
@@ -2931,39 +2931,39 @@ main {
 .otari-budgets-table .table__column[data-key="budget"],
 .otari-budgets-table .table__cell[data-key="budget"] {
   position: sticky;
-  left: 48px;
+  left: 3rem;
   z-index: 1;
   background-color: var(--color-background);
-  width: 260px;
-  min-width: 260px;
+  width: 16.25rem;
+  min-width: 16.25rem;
 }
 .otari-budgets-table[data-scrolled="true"] .table__column[data-key="budget"],
 .otari-budgets-table[data-scrolled="true"] .table__cell[data-key="budget"] {
   border-right: 1px solid var(--color-control-border);
 }
 .otari-accounts-table .table__row .table__cell {
-  height: 58px;
+  height: 3.625rem;
   padding-block: 0;
 }
 .otari-accounts-table .table__column[data-key="last-sign-in"] {
-  width: 140px;
-  min-width: 140px;
+  width: 8.75rem;
+  min-width: 8.75rem;
 }
 .otari-accounts-table .table__column[data-key="status"] {
-  width: 160px;
-  min-width: 160px;
+  width: 10rem;
+  min-width: 10rem;
 }
 .otari-accounts-table .table__column[data-key="access"] {
-  width: 190px;
-  min-width: 190px;
+  width: 11.875rem;
+  min-width: 11.875rem;
 }
 .otari-accounts-table .table__column[data-key="actions"] {
-  width: 96px;
-  min-width: 96px;
+  width: 6rem;
+  min-width: 6rem;
 }
 /* The slack absorber, so the lanes after the identity stay adjacent to it. */
 .otari-accounts-table .table__column[data-key="organizations"] {
-  min-width: 200px;
+  min-width: 12.5rem;
 }
 .otari-accounts-table .table__column[data-key="account"],
 .otari-accounts-table .table__cell[data-key="account"] {
@@ -2971,30 +2971,30 @@ main {
   left: 0;
   z-index: 1;
   background-color: var(--color-background);
-  width: 300px;
-  min-width: 300px;
+  width: 18.75rem;
+  min-width: 18.75rem;
 }
 .otari-accounts-table[data-scrolled="true"] .table__column[data-key="account"],
 .otari-accounts-table[data-scrolled="true"] .table__cell[data-key="account"] {
   border-right: 1px solid var(--color-control-border);
 }
 .otari-workspaces-table .table__row .table__cell {
-  height: 58px;
+  height: 3.625rem;
   padding-block: 0;
 }
 .otari-workspaces-table .table__column[data-key="created"] {
-  width: 140px;
-  min-width: 140px;
+  width: 8.75rem;
+  min-width: 8.75rem;
 }
 /* The slack absorber, for the reason the pricing tables' trailing lane is one:
    without it the identity lane takes every unused pixel and throws the three
    lanes after it against the right edge, with a void in between. */
 .otari-workspaces-table .table__column[data-key="default-budget"] {
-  min-width: 220px;
+  min-width: 13.75rem;
 }
 .otari-workspaces-table .table__column[data-key="actions"] {
-  width: 96px;
-  min-width: 96px;
+  width: 6rem;
+  min-width: 6rem;
 }
 .otari-workspaces-table .table__column[data-key="name"],
 .otari-workspaces-table .table__cell[data-key="name"] {
@@ -3002,8 +3002,8 @@ main {
   left: 0;
   z-index: 1;
   background-color: var(--color-background);
-  width: 440px;
-  min-width: 440px;
+  width: 27.5rem;
+  min-width: 27.5rem;
 }
 .otari-workspaces-table[data-scrolled="true"] .table__column[data-key="name"],
 .otari-workspaces-table[data-scrolled="true"] .table__cell[data-key="name"] {
@@ -3011,7 +3011,7 @@ main {
 }
 .otari-pricing-table .table__row .table__cell,
 .otari-rate-overrides-table .table__row .table__cell {
-  height: 52px;
+  height: 3.25rem;
   padding-block: 0;
 }
 .otari-pricing-table .table__column[data-key="input"],
@@ -3021,9 +3021,9 @@ main {
 .otari-rate-overrides-table .table__column[data-key="output"],
 .otari-rate-overrides-table .table__column[data-key="cache_read"],
 .otari-rate-overrides-table .table__column[data-key="cache_write"] {
-  width: 130px;
-  min-width: 130px;
-  padding-inline: 10px;
+  width: 8.125rem;
+  min-width: 8.125rem;
+  padding-inline: 0.625rem;
 }
 .otari-rate-overrides-table .table__cell[data-key="input"],
 .otari-rate-overrides-table .table__cell[data-key="output"],
@@ -3032,15 +3032,15 @@ main {
 .otari-pricing-table .table__cell[data-key="input"],
 .otari-pricing-table .table__cell[data-key="output"],
 .otari-pricing-table .table__cell[data-key="cacheRead"] {
-  padding-inline: 10px;
+  padding-inline: 0.625rem;
 }
 .otari-pricing-table .table__column[data-key="tiers"] {
-  width: 130px;
-  min-width: 130px;
+  width: 8.125rem;
+  min-width: 8.125rem;
 }
 .otari-pricing-table .table__column[data-key="updatedAt"] {
-  width: 130px;
-  min-width: 130px;
+  width: 8.125rem;
+  min-width: 8.125rem;
 }
 /* Deliberately unconstrained, and the only lane in either table that is.
    Something has to absorb the width a table does not otherwise use. The model
@@ -3055,15 +3055,15 @@ main {
   min-width: 0;
 }
 .otari-rate-overrides-table .table__column[data-key="period"] {
-  min-width: 200px;
+  min-width: 12.5rem;
 }
 .otari-rate-overrides-table .table__column[data-key="status"] {
-  width: 130px;
-  min-width: 130px;
+  width: 8.125rem;
+  min-width: 8.125rem;
 }
 .otari-rate-overrides-table .table__column[data-key="actions"] {
-  width: 96px;
-  min-width: 96px;
+  width: 6rem;
+  min-width: 6rem;
 }
 /* One width for both, so the model key occupies the same lane in the catalog
    and in the overrides below it. */
@@ -3075,8 +3075,8 @@ main {
   left: 0;
   z-index: 1;
   background-color: var(--color-background);
-  width: 257px;
-  min-width: 257px;
+  width: 16.0625rem;
+  min-width: 16.0625rem;
 }
 .otari-pricing-table[data-scrolled="true"] .table__column[data-key="modelKey"],
 .otari-pricing-table[data-scrolled="true"] .table__cell[data-key="modelKey"],
@@ -3087,34 +3087,34 @@ main {
   border-right: 1px solid var(--color-control-border);
 }
 .otari-provider-keys-table .table__row .table__cell {
-  height: 58px;
+  height: 3.625rem;
   padding-block: 0;
 }
 .otari-provider-keys-table .table__column[data-key="name"] {
-  min-width: 240px;
+  min-width: 15rem;
 }
 .otari-provider-keys-table .table__column[data-key="provider"] {
-  width: 150px;
-  min-width: 150px;
+  width: 9.375rem;
+  min-width: 9.375rem;
 }
 .otari-provider-keys-table .table__column[data-key="api_key"] {
-  width: 130px;
-  min-width: 130px;
+  width: 8.125rem;
+  min-width: 8.125rem;
 }
 .otari-provider-keys-table .table__column[data-key="api_base"] {
-  min-width: 200px;
+  min-width: 12.5rem;
 }
 .otari-provider-keys-table .table__column[data-key="created"] {
-  width: 120px;
-  min-width: 120px;
+  width: 7.5rem;
+  min-width: 7.5rem;
 }
 /* The one lane whose armed state is wider than its resting one: the archive
    confirm swaps a glyph for the word "Archive" and a Cancel beside it, and the
    column is fixed, so the width is the armed lane's rather than the three
    glyphs'. Sized to the words, or arming one row would reflow every column. */
 .otari-provider-keys-table .table__column[data-key="actions"] {
-  width: 230px;
-  min-width: 230px;
+  width: 14.375rem;
+  min-width: 14.375rem;
 }
 .otari-provider-keys-table .table__column[data-key="name"],
 .otari-provider-keys-table .table__cell[data-key="name"] {
@@ -3129,31 +3129,31 @@ main {
   border-right: 1px solid var(--color-control-border);
 }
 .otari-members-table .table__row .table__cell {
-  height: 58px;
+  height: 3.625rem;
   padding-block: 0;
 }
 .otari-members-table .table__column[data-key="member"] {
-  width: 260px;
-  min-width: 260px;
+  width: 16.25rem;
+  min-width: 16.25rem;
 }
 .otari-members-table .table__column[data-key="role"] {
-  width: 140px;
-  min-width: 140px;
+  width: 8.75rem;
+  min-width: 8.75rem;
 }
 .otari-members-table .table__column[data-key="status"] {
-  width: 130px;
-  min-width: 130px;
+  width: 8.125rem;
+  min-width: 8.125rem;
 }
 .otari-members-table .table__column[data-key="workspaces"] {
-  min-width: 220px;
+  min-width: 13.75rem;
 }
 .otari-members-table .table__column[data-key="spend"] {
-  width: 120px;
-  min-width: 120px;
+  width: 7.5rem;
+  min-width: 7.5rem;
 }
 .otari-members-table .table__column[data-key="actions"] {
-  width: 144px;
-  min-width: 144px;
+  width: 9rem;
+  min-width: 9rem;
 }
 .otari-members-table .table__column[data-key="member"],
 .otari-members-table .table__cell[data-key="member"] {
@@ -3266,19 +3266,19 @@ main {
 }
 .otari-breakdown .table__column[data-key="requests"],
 .otari-breakdown .table__column[data-key="tokens"] {
-  width: 110px;
+  width: 6.875rem;
 }
 .otari-breakdown .table__column[data-key="spend"],
 .otari-breakdown .table__column[data-key="calls"],
 .otari-breakdown .table__column[data-key="failed"] {
-  width: 100px;
+  width: 6.25rem;
 } /* Header background and edges: see the divided-surface table block above, which
    is now the only place they are declared. */
 .otari-overview-activity .table__column[data-key="time"] {
   /* Back to 120. This was widened to 130 because "6 minutes ago" did not fit,
      which was a layout fix for a copy problem; the copy is compact now ("6m
      ago") and the lane no longer has to pay for the phrase. */
-  width: 120px;
+  width: 7.5rem;
 }
 /* A relative time is short but wraps at this lane width ("4 minutes ago" is
    three words), and a wrapped cell is the one thing that can break the row
@@ -3288,15 +3288,15 @@ main {
   white-space: nowrap;
 }
 .otari-overview-activity .table__column[data-key="key"] {
-  width: 200px;
+  width: 12.5rem;
 }
 .otari-overview-activity .table__column[data-key="tokens"],
 .otari-overview-activity .table__column[data-key="cost"],
 .otari-overview-activity .table__column[data-key="status"] {
-  width: 110px;
+  width: 6.875rem;
 }
 .otari-overview-activity .table__row .table__cell {
-  height: 45px;
+  height: 2.8125rem;
   padding-block: 0;
 }
 .otari-detail-reveal {
