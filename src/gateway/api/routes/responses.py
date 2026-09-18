@@ -52,7 +52,7 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop_stream,
 )
 from gateway.services.provider_files.contracts import FilesError
-from gateway.services.provider_files.references import collect_file_references
+from gateway.services.provider_files.references import reject_openai_file_state
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat
@@ -507,8 +507,7 @@ async def create_response(
         if {"extra_body", "extra_query"} & (request_body.model_extra or {}).keys():
             raise HTTPException(400, "Transport body overrides are not supported in hybrid mode")
         try:
-            if collect_file_references(request_body.input):
-                raise FilesError(400, "Use Messages for provider-native file references")
+            reject_openai_file_state(request_body.model_dump(exclude_unset=True))
         except FilesError as exc:
             raise HTTPException(exc.status_code, exc.detail) from None
 

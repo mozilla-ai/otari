@@ -7,7 +7,7 @@ import pytest
 from starlette.datastructures import Headers
 from starlette.requests import Request
 
-from gateway.api.routes.hybrid_files import file_headers
+from gateway.api.routes._file_formats import AnthropicFilesFormat
 from gateway.services.provider_files.contracts import FilesError
 from gateway.services.provider_files.transfers import UploadAdmission, receive_upload
 
@@ -18,7 +18,7 @@ def test_legacy_beta_rejected_case_insensitive_header_name(beta: str) -> None:
         {"type": "http", "headers": [(b"anthropic-version", b"2023-06-01"), (b"anthropic-beta", beta.encode())]}
     )
     with pytest.raises(FilesError, match="GA API"):
-        file_headers(request)
+        AnthropicFilesFormat().headers(request)
 
 
 def test_only_contract_headers_forwarded() -> None:
@@ -33,7 +33,10 @@ def test_only_contract_headers_forwarded() -> None:
             ],
         }
     )
-    assert file_headers(request) == {"anthropic-version": "2023-06-01", "anthropic-beta": "other-beta"}
+    assert AnthropicFilesFormat().headers(request) == {
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "other-beta",
+    }
 
 
 @pytest.mark.asyncio
@@ -49,10 +52,10 @@ async def test_spooled_upload_closes_on_success_and_failure() -> None:
         try:
             async with receive_upload(Headers(request.headers), chunks(), max_bytes=100, idle_seconds=1) as (
                 upload,
-                duration,
+                fields,
             ):
                 assert upload.file.read() == b"col\nvalue"
-                assert duration is None
+                assert fields == {}
                 if reject:
                     raise ValueError("intentional failure")
         except ValueError:

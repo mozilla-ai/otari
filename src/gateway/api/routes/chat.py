@@ -55,7 +55,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
 )
 from gateway.services.provider_files.contracts import FilesError
-from gateway.services.provider_files.references import collect_file_references
+from gateway.services.provider_files.references import reject_openai_file_state
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
@@ -474,8 +474,7 @@ async def run_chat_completion(
         if {"extra_body", "extra_query"} & (request.model_extra or {}).keys():
             raise HTTPException(400, "Transport body overrides are not supported in hybrid mode")
         try:
-            if collect_file_references(request.messages):
-                raise FilesError(400, "Use Messages for provider-native file references")
+            reject_openai_file_state(request.model_dump(exclude_unset=True))
         except FilesError as exc:
             raise HTTPException(exc.status_code, exc.detail) from None
 

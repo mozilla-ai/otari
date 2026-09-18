@@ -10,19 +10,25 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.services.provider_files.anthropic_inference import AnthropicFileOutputBinder
 from gateway.services.provider_files.client import PlatformFilesClient
 from gateway.services.provider_files.contracts import FileAccount, FilesError, Operation
-from gateway.services.provider_files.inference import FileOutputBinder
 
 from .conftest import app_for
 from .test_hybrid_mode_messages import _attempt, _message_response, _resolve_payload
 
 
-@pytest.mark.parametrize("outcome", ["success", "foreign", "wrong_generation", "registration_failure"])
+@pytest.mark.parametrize(
+    "outcome", ["success", "foreign", "wrong_generation", "wrong_provider", "registration_failure"]
+)
 def test_file_reference_dispatch_and_accounting(monkeypatch: pytest.MonkeyPatch, outcome: str) -> None:
     monkeypatch.setenv("OTARI_AI_TOKEN", "gateway-token")
     generation = uuid.uuid4()
-    account = FileAccount(generation_id=generation, api_key=SecretStr("owned-key"))
+    account = FileAccount(
+        generation_id=generation,
+        api_key=SecretStr("owned-key"),
+        provider="openai" if outcome == "wrong_provider" else "anthropic",
+    )
     attempts = [
         _attempt(0, str(uuid.uuid4()), "other-model", "other-key"),
         _attempt(1, str(uuid.uuid4()), "owned-model", "owned-key"),
@@ -52,7 +58,7 @@ def test_file_reference_dispatch_and_accounting(monkeypatch: pytest.MonkeyPatch,
     async def files(self: Any, path: str, body: dict[str, Any], result_type: Any) -> Any:
         events.append(path)
         if path == "references/resolve":
-            assert body == {"ids": ["file_history"]}
+            assert body == {"ids": ["file_history"], "provider": "anthropic"}
             if outcome == "foreign":
                 raise FilesError(404, "File not found")
             return account
@@ -83,7 +89,7 @@ def test_file_reference_dispatch_and_accounting(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", platform)
     monkeypatch.setattr("gateway.api.routes.messages.amessages", provider)
     monkeypatch.setattr(PlatformFilesClient, "post", files)
-    monkeypatch.setattr(FileOutputBinder, "register", register)
+    monkeypatch.setattr(AnthropicFileOutputBinder, "register", register)
     app = app_for(
         GatewayConfig(
             mode="hybrid",
@@ -110,9 +116,15 @@ def test_file_reference_dispatch_and_accounting(monkeypatch: pytest.MonkeyPatch,
         )
     assert (
         response.status_code
-        == {"success": 200, "foreign": 404, "wrong_generation": 403, "registration_failure": 502}[outcome]
+        == {
+            "success": 200,
+            "foreign": 404,
+            "wrong_generation": 403,
+            "wrong_provider": 502,
+            "registration_failure": 502,
+        }[outcome]
     ), response.text
-    if outcome in {"foreign", "wrong_generation"}:
+    if outcome in {"foreign", "wrong_generation", "wrong_provider"}:
         assert "provider" not in events
     else:
         assert events.count("provider") == 1

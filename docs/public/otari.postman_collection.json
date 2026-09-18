@@ -1763,7 +1763,7 @@
         {
           "name": "List Files",
           "request": {
-            "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
+            "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1805,16 +1805,34 @@
                   "disabled": true,
                   "key": "ids[]",
                   "value": ""
+                },
+                {
+                  "description": "OpenAI hybrid Files listing filter or cursor.",
+                  "disabled": true,
+                  "key": "after",
+                  "value": ""
+                },
+                {
+                  "description": "OpenAI hybrid Files listing filter or cursor.",
+                  "disabled": true,
+                  "key": "before",
+                  "value": ""
+                },
+                {
+                  "description": "OpenAI hybrid Files listing filter or cursor.",
+                  "disabled": true,
+                  "key": "order",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/files?user=&purpose=&workspace_id=&page=&ids[]="
+              "raw": "{{baseUrl}}/api/v1/files?user=&purpose=&workspace_id=&page=&ids[]=&after=&before=&order="
             }
           }
         },
         {
           "name": "Create File",
           "request": {
-            "description": "OpenAI-compatible file upload endpoint.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
+            "description": "OpenAI-compatible file upload endpoint.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.",
             "header": [],
             "method": "POST",
             "url": {
@@ -1833,7 +1851,7 @@
         {
           "name": "Get File",
           "request": {
-            "description": "Retrieve metadata for a single file.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
+            "description": "Retrieve metadata for a single file.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1868,7 +1886,7 @@
         {
           "name": "Delete File",
           "request": {
-            "description": "Soft-delete a file's metadata and remove its bytes from the backend.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
+            "description": "Soft-delete a file's metadata and remove its bytes from the backend.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -1903,7 +1921,7 @@
         {
           "name": "Get File Content",
           "request": {
-            "description": "Download the raw bytes of a file, streamed rather than buffered whole.\n\nHybrid mode uses the Anthropic GA Files contract with uploader/workspace bindings. It requires anthropic-version, rejects the legacy Files beta, and supports page/next_page pagination. Hosted mode does not serve public file bytes.",
+            "description": "Download the raw bytes of a file, streamed rather than buffered whole.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2029,7 +2047,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"ids\": [\n    \"string\"\n  ],\n  \"limit\": 0,\n  \"page\": \"string\"\n}"
+              "raw": "{\n  \"after_id\": \"string\",\n  \"before_id\": \"string\",\n  \"ids\": [\n    \"string\"\n  ],\n  \"limit\": 0,\n  \"order\": \"desc\",\n  \"page\": \"string\",\n  \"provider\": \"anthropic\",\n  \"purpose\": \"string\",\n  \"sort_by\": \"binding_created_at\"\n}"
             },
             "header": [
               {
@@ -2098,7 +2116,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"operation_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"metadata\": {\n    \"id\": \"string\",\n    \"filename\": \"string\",\n    \"mime_type\": \"string\",\n    \"size_bytes\": 0,\n    \"created_at\": \"2024-01-01T00:00:00Z\",\n    \"downloadable\": false\n  }\n}"
+              "raw": "{\n  \"operation_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"metadata\": {\n    \"id\": \"string\"\n  }\n}"
             },
             "header": [
               {
@@ -2352,7 +2370,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"metadata\": {\n    \"id\": \"string\",\n    \"filename\": \"string\",\n    \"mime_type\": \"string\",\n    \"size_bytes\": 0,\n    \"created_at\": \"2024-01-01T00:00:00Z\",\n    \"downloadable\": false\n  }\n}"
+              "raw": "{\n  \"metadata\": {\n    \"id\": \"string\"\n  }\n}"
             },
             "header": [
               {

@@ -5,7 +5,7 @@ from typing import Any, TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from gateway.services.provider_files.contracts import FilesError
+from gateway.services.provider_files.contracts import FILES_PROTOCOL_VERSION, FilesError
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -18,7 +18,7 @@ class PlatformFilesClient:
         self.timeout = timeout
 
     async def post(self, path: str, body: dict[str, Any], result_type: type[T]) -> T:
-        headers = {"X-Gateway-Token": self._gateway_token}
+        headers = {"X-Gateway-Token": self._gateway_token, "X-Otari-Files-Protocol": FILES_PROTOCOL_VERSION}
         if self._user_token is not None:
             headers["X-User-Token"] = self._user_token
         try:
@@ -26,10 +26,9 @@ class PlatformFilesClient:
                 response = await client.post(f"{self.base_url}/gateway/files/{path}", headers=headers, json=body)
         except httpx.HTTPError:
             raise FilesError(502, "Authorization service unavailable") from None
+        if response.headers.get("X-Otari-Files-Protocol") != FILES_PROTOCOL_VERSION:
+            raise FilesError(502, "Authorization service does not support this Files protocol")
         if response.status_code == 404:
-            # A supporting peer marks all Files responses, including missing bindings.
-            if response.headers.get("X-Otari-Files-Protocol") != "1":
-                raise FilesError(502, "Authorization service does not support provider-native Files")
             raise FilesError(404, "File or provider account unavailable")
         if response.status_code in {400, 401, 403, 409, 413, 429}:
             details = {

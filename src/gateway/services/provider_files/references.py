@@ -1,4 +1,4 @@
-"""Bounded inspection of structured Anthropic file references."""
+"""Bounded, envelope-specific inspection of structured file references."""
 
 from typing import Any
 
@@ -9,7 +9,7 @@ _MAX_DEPTH = 32
 _MAX_REFERENCES = 100
 
 
-def collect_file_references(value: Any) -> list[str]:
+def collect_anthropic_file_references(value: Any) -> list[str]:
     """Collect references throughout message history without interpreting ordinary text."""
     found: dict[str, None] = {}
     pending = [(value, 0)]
@@ -44,3 +44,57 @@ def collect_file_references(value: Any) -> list[str]:
                 (item[key], depth + 1) for key in ("messages", "content", "source", "output", "results") if key in item
             )
     return list(found)
+
+
+def reject_openai_file_state(payload: dict[str, Any]) -> None:
+    """Reject account-scoped OpenAI state until its inference ownership protocol exists."""
+    if payload.get("previous_response_id") or payload.get("conversation"):
+        raise FilesError(400, "Provider conversation reuse is not supported in hybrid mode")
+    pending = [(payload, 0)]
+    nodes = 0
+    while pending:
+        item, depth = pending.pop()
+        nodes += 1
+        if nodes > _MAX_NODES or depth > _MAX_DEPTH:
+            raise FilesError(400, "File reference structure exceeds configured limits")
+        if isinstance(item, list):
+            if len(item) + len(pending) > _MAX_NODES:
+                raise FilesError(400, "File reference structure exceeds configured limits")
+            pending.extend((child, depth + 1) for child in item)
+        elif isinstance(item, dict):
+            kind = item.get("type")
+            if (
+                any(item.get(key) for key in ("file_id", "file_ids", "vector_store_ids", "container_id"))
+                or (
+                    isinstance(kind, str)
+                    and kind
+                    in {
+                        "code_interpreter",
+                        "file_search",
+                        "shell",
+                        "item_reference",
+                        "container_reference",
+                        "compaction",
+                    }
+                )
+                or isinstance(item.get("container"), str)
+            ):
+                raise FilesError(400, "OpenAI provider file state is not supported in hybrid inference")
+            pending.extend(
+                (item[key], depth + 1)
+                for key in (
+                    "input",
+                    "messages",
+                    "content",
+                    "file",
+                    "tools",
+                    "container",
+                    "attachments",
+                    "environment",
+                    "input_image_mask",
+                    "output",
+                    "results",
+                    "annotations",
+                )
+                if key in item
+            )

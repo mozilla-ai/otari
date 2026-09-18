@@ -68,10 +68,11 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
+from gateway.services.provider_files.anthropic_inference import AnthropicFileOutputBinder
+from gateway.services.provider_files.capabilities import check_file_account
 from gateway.services.provider_files.client import PlatformFilesClient
 from gateway.services.provider_files.contracts import FileAccount, FilesError, Operation
-from gateway.services.provider_files.inference import FileOutputBinder
-from gateway.services.provider_files.references import collect_file_references
+from gateway.services.provider_files.references import collect_anthropic_file_references
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
@@ -617,7 +618,7 @@ class _FileMessagesAdapter(_MessagesAdapter):
         self.files_client = client
         self.files_request_id = request_id
         self.file_references = references
-        self.pending_binder: FileOutputBinder | None = None
+        self.pending_binder: AnthropicFileOutputBinder | None = None
 
     def attempt_kwargs(self, attempt: ResolvedAttempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
         result = super().attempt_kwargs(attempt, base_request_fields)
@@ -636,7 +637,7 @@ class _FileMessagesAdapter(_MessagesAdapter):
         result["_file_attempt"] = attempt
         return result
 
-    async def _binder(self, kwargs: dict[str, Any]) -> FileOutputBinder:
+    async def _binder(self, kwargs: dict[str, Any]) -> AnthropicFileOutputBinder:
         attempt = kwargs.pop("_file_attempt")
         if attempt.provider != "anthropic" or not attempt.provider_account_generation_id:
             raise FilesError(403, "Provider file outputs require an authorized Anthropic account")
@@ -650,6 +651,7 @@ class _FileMessagesAdapter(_MessagesAdapter):
             },
             Operation,
         )
+        check_file_account(operation.account, attempt.provider)
         if (
             operation.account.api_key.get_secret_value() != attempt.api_key
             or operation.account.api_base != attempt.api_base
@@ -658,7 +660,7 @@ class _FileMessagesAdapter(_MessagesAdapter):
             raise FilesError(409, "Inference provider account changed before dispatch")
         if operation.account.workspace is not None:
             kwargs["client_args"]["default_headers"] = {"anthropic-workspace-id": operation.account.workspace}
-        return FileOutputBinder(self.files_client, operation, self.file_references)
+        return AnthropicFileOutputBinder(self.files_client, operation, self.file_references)
 
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
         binder = await self._binder(kwargs)
@@ -842,7 +844,7 @@ async def create_message(
 
     if ctx.hybrid_mode:
         try:
-            references = collect_file_references(request.messages)
+            references = collect_anthropic_file_references(request.messages)
             native_outputs = (
                 any(
                     isinstance(tool, dict) and str(tool.get("type", "")).startswith("code_execution_")
@@ -856,7 +858,10 @@ async def create_message(
                 assert ctx.route is not None and ctx.user_token is not None
                 client = PlatformFilesClient(config.platform["base_url"], config.platform_token or "", ctx.user_token)
                 if references:
-                    account = await client.post("references/resolve", {"ids": references}, FileAccount)
+                    account = await client.post(
+                        "references/resolve", {"ids": references, "provider": "anthropic"}, FileAccount
+                    )
+                    check_file_account(account, "anthropic")
                     attempts = [
                         attempt
                         for attempt in ctx.route.attempts

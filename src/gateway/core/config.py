@@ -878,7 +878,7 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
     )
     files_provider_native_enabled: Annotated[bool, Shown(SettingsGroup.FILES)] = Field(
         default=False,
-        description="Enable hybrid Anthropic Files after provider and control-plane contract verification.",
+        description="Enable hybrid provider-native Files after provider and control-plane contract verification.",
     )
     files_transfer_timeout_seconds: Annotated[int, Shown(SettingsGroup.FILES)] = Field(default=300, ge=1)
     files_idle_timeout_seconds: Annotated[int, Shown(SettingsGroup.FILES)] = Field(default=30, ge=1)

@@ -2,8 +2,9 @@
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Literal, Self
 
+from any_llm.types.files import FileMetadata as SDKFileMetadata
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 
@@ -24,26 +25,23 @@ class WireModel(BaseModel):
 ProviderFileId = Annotated[str, Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9_-]+$")]
 
 
-class FileMetadata(WireModel):
-    """Anthropic's public metadata, without provider-neutral-only fields."""
+ProviderName = Annotated[str, Field(min_length=1, max_length=32, pattern=r"^[a-z][a-z0-9_]*$")]
+FILES_PROTOCOL_VERSION = "2"
+
+
+class FileMetadata(SDKFileMetadata, WireModel):
+    """Bounded any-llm metadata; absent provider fields remain unknown."""
 
     model_config = ConfigDict(extra="allow")
 
     id: ProviderFileId
-    type: Literal["file"] = "file"
-    filename: str = Field(max_length=1024)
-    mime_type: str = Field(max_length=255)
-    size_bytes: int = Field(ge=0)
-    created_at: AwareDatetime
+    filename: str | None = Field(default=None, max_length=1024)
+    mime_type: str | None = Field(default=None, max_length=255)
+    size_bytes: int | None = Field(default=None, ge=0)
+    created_at: AwareDatetime | None = None
     expires_at: AwareDatetime | None = None
-    downloadable: bool
-
-    @model_validator(mode="before")
-    @classmethod
-    def native_fields(cls, value: Any) -> Any:
-        if isinstance(value, dict):
-            return {key: item for key, item in value.items() if key not in {"purpose", "status"}}
-        return value
+    purpose: str | None = Field(default=None, max_length=255)
+    status: str | None = Field(default=None, max_length=255)
 
     @model_validator(mode="after")
     def bounded_metadata(self) -> Self:
@@ -58,13 +56,23 @@ class FilePage(WireModel):
 
 
 class FileListRequest(WireModel):
+    provider: ProviderName = "anthropic"
+    purpose: str | None = Field(default=None, max_length=255)
+    after_id: ProviderFileId | None = None
+    before_id: ProviderFileId | None = None
+    order: Literal["asc", "desc"] = "desc"
+    sort_by: Literal["binding_created_at", "provider_created_at"] = "binding_created_at"
     page: str | None = Field(default=None, max_length=4096)
     limit: int | None = Field(default=None, ge=1, le=1000)
     ids: list[ProviderFileId] | None = Field(default=None, max_length=100)
 
     @model_validator(mode="after")
     def compatible_filters(self) -> Self:
-        if self.ids is not None and (self.page is not None or self.limit is not None):
+        if sum(value is not None for value in (self.page, self.after_id, self.before_id)) > 1:
+            raise ValueError("Only one pagination cursor is allowed")
+        if self.ids is not None and any(
+            value is not None for value in (self.page, self.limit, self.after_id, self.before_id)
+        ):
             raise ValueError("ids[] cannot be combined with page or limit")
         return self
 
@@ -81,7 +89,7 @@ class FileScope(WireModel):
 
 class FileAccount(WireModel):
     generation_id: uuid.UUID
-    provider: Literal["anthropic"] = "anthropic"
+    provider: ProviderName = "anthropic"
     api_key: SecretStr
     api_base: str | None = None
     workspace: str | None = None
@@ -98,6 +106,7 @@ class Operation(WireModel):
 
 
 class PrepareUpload(WireModel):
+    provider: ProviderName = "anthropic"
     operation_id: uuid.UUID
     size_bytes: int = Field(ge=0)
     expires_in_seconds: int | None = Field(default=None, ge=3600, le=7776000)
@@ -117,6 +126,7 @@ class AbandonUpload(WireModel):
 
 
 class ResolveFile(WireModel):
+    provider: ProviderName = "anthropic"
     operation: Literal["metadata", "download", "delete"]
 
 
@@ -128,6 +138,7 @@ class ResolvedFile(WireModel):
 
 
 class References(WireModel):
+    provider: ProviderName = "anthropic"
     ids: list[ProviderFileId] = Field(min_length=1, max_length=100)
 
 
@@ -173,8 +184,3 @@ class LeaseResult(WireModel):
 class OutputCleanup(WireModel):
     operation_id: uuid.UUID
     cleanup_token: SecretStr
-
-
-class NativeFileDeleted(WireModel):
-    id: str
-    type: Literal["file_deleted"] = "file_deleted"

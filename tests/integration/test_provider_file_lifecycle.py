@@ -8,9 +8,11 @@ import pytest_asyncio
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.unit_of_work import OutsideUnitOfWorkError, UnitOfWork
 from gateway.models.provider_files import ProviderAccountGeneration
 from gateway.models.users import User
 from gateway.repositories.tenancy.organization_repository import OrganizationRepository
+from gateway.repositories.tenancy.provider_file_repository import ProviderFileRepository
 from gateway.repositories.tenancy.workspace_repository import WorkspaceRepository
 from gateway.services.provider_files.contracts import (
     FileAccount,
@@ -46,7 +48,7 @@ async def files_setup(
     scope = FileScope(
         organization_id=organization.id, workspace_id=workspace.id, user_id="uploader", gateway_id="gateway"
     )
-    service = ProviderFileService(async_db, max_bytes=1024, max_files=10, max_outstanding_bytes=10240)
+    service = ProviderFileService(UnitOfWork(async_db), max_bytes=1024, max_files=10, max_outstanding_bytes=10240)
     return service, scope, FileAccount(generation_id=account.id, api_key=SecretStr("test-key"))
 
 
@@ -62,6 +64,7 @@ def metadata(file_id: str = "file_uploaded") -> FileMetadata:
 
 
 async def test_finalize_is_idempotent_and_metadata_encrypted(
+    async_db: AsyncSession,
     files_setup: tuple[ProviderFileService, FileScope, FileAccount],
 ) -> None:
     service, scope, account = files_setup
@@ -69,7 +72,7 @@ async def test_finalize_is_idempotent_and_metadata_encrypted(
     data = metadata()
     assert await service.finalize(scope, operation.id, data) == data
     assert await service.finalize(scope, operation.id, data) == data
-    row = await service.repo.get(operation.id)
+    row = await ProviderFileRepository(async_db).get(operation.id)
     assert row is not None and row.encrypted_metadata is not None
     assert "private.csv" not in row.encrypted_metadata
     with pytest.raises(FilesError, match="conflict"):
@@ -96,21 +99,23 @@ async def test_foreign_owner_and_workspace_hidden(
 
 
 async def test_retired_upload_cannot_reactivate(
+    async_db: AsyncSession,
     files_setup: tuple[ProviderFileService, FileScope, FileAccount],
 ) -> None:
     service, scope, account = files_setup
     operation = await service.prepare(scope, account, PrepareUpload(operation_id=uuid.uuid4(), size_bytes=20))
-    generation = await service.repo.account(account.generation_id)
+    generation = await ProviderFileRepository(async_db).account(account.generation_id)
     assert generation is not None
     generation.status = "retiring"
-    await service.db.commit()
+    await async_db.commit()
     with pytest.raises(FilesError, match="revoked"):
         await service.finalize(scope, operation.id, metadata())
-    row = await service.repo.get(operation.id)
+    row = await ProviderFileRepository(async_db).get(operation.id)
     assert row is not None and row.state == "pending_cleanup" and row.provider_file_id == "file_uploaded"
 
 
 async def test_delete_revokes_before_provider_and_retries_survive(
+    async_db: AsyncSession,
     files_setup: tuple[ProviderFileService, FileScope, FileAccount],
 ) -> None:
     service, scope, account = files_setup
@@ -121,20 +126,22 @@ async def test_delete_revokes_before_provider_and_retries_survive(
     with pytest.raises(FilesError):
         await service.resolve(scope, "file_uploaded", "metadata")
     await service.cleanup_result(operation.id, scope.gateway_id, resolved.cleanup_token.get_secret_value(), False)
-    row = await service.repo.get(operation.id)
+    row = await ProviderFileRepository(async_db).get(operation.id)
     assert row is not None and row.state == "pending_cleanup" and row.cleanup_attempts == 1
     await service.cleanup_result(operation.id, scope.gateway_id, resolved.cleanup_token.get_secret_value(), True)
     assert row.state == "deleted"
 
 
-async def test_expired_files_are_hidden(files_setup: tuple[ProviderFileService, FileScope, FileAccount]) -> None:
+async def test_expired_files_are_hidden(
+    async_db: AsyncSession, files_setup: tuple[ProviderFileService, FileScope, FileAccount]
+) -> None:
     service, scope, account = files_setup
     operation = await service.prepare(scope, account, PrepareUpload(operation_id=uuid.uuid4(), size_bytes=20))
     await service.finalize(scope, operation.id, metadata())
-    row = await service.repo.get(operation.id)
+    row = await ProviderFileRepository(async_db).get(operation.id)
     assert row is not None
     row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
-    await service.db.commit()
+    await async_db.commit()
     with pytest.raises(FilesError):
         await service.references(scope, ["file_uploaded"])
 
@@ -177,6 +184,7 @@ async def test_output_only_registration_and_collision(
 
 
 async def test_output_cleanup_survives_user_revocation(
+    async_db: AsyncSession,
     files_setup: tuple[ProviderFileService, FileScope, FileAccount],
 ) -> None:
     from gateway.services.provider_files.contracts import OutputPrepare
@@ -191,15 +199,15 @@ async def test_output_cleanup_survives_user_revocation(
             operation_id=uuid.uuid4(), request_id="request", attempt_id="attempt", generation_id=account.generation_id
         ),
     )
-    await service.repo.revoke_user(scope.user_id, datetime.now(UTC))
-    user = await service.db.get(User, scope.user_id)
+    await ProviderFileRepository(async_db).revoke_user(scope.user_id, datetime.now(UTC))
+    user = await async_db.get(User, scope.user_id)
     assert user is not None
     user.deleted_at = datetime.now(UTC)
-    await service.db.commit()
+    await async_db.commit()
     cleanup = await outputs.abandon(
         operation.id, scope.gateway_id, operation.cleanup_token.get_secret_value(), None, "file_late"
     )
-    row = await service.repo.get(cleanup.operation_id)
+    row = await ProviderFileRepository(async_db).get(cleanup.operation_id)
     assert row is not None and row.state == "pending_cleanup" and row.provider_file_id == "file_late"
     await service.cleanup_result(row.id, scope.gateway_id, cleanup.cleanup_token.get_secret_value(), True)
     assert row.state == "deleted"
@@ -220,7 +228,9 @@ async def test_cursor_scope_and_snapshot(files_setup: tuple[ProviderFileService,
     assert first.data[0].id != second.data[0].id
 
 
-async def test_cleanup_lease_fencing(files_setup: tuple[ProviderFileService, FileScope, FileAccount]) -> None:
+async def test_cleanup_lease_fencing(
+    async_db: AsyncSession, files_setup: tuple[ProviderFileService, FileScope, FileAccount]
+) -> None:
     from gateway.services.provider_files.cleanup import ProviderFileCleanup
     from gateway.services.provider_files.contracts import LeaseResult
 
@@ -247,9 +257,25 @@ async def test_cleanup_lease_fencing(files_setup: tuple[ProviderFileService, Fil
     await cleanup.complete(
         scope.organization_id, scope.gateway_id, lease.id, LeaseResult(token=lease.token, results={operation.id: True})
     )
-    row = await service.repo.get(operation.id)
+    row = await ProviderFileRepository(async_db).get(operation.id)
     assert row is not None and row.state == "deleted"
-    assert not await service.repo.account_busy(account.generation_id, datetime.now(UTC))
+    assert not await ProviderFileRepository(async_db).account_busy(account.generation_id, datetime.now(UTC))
+
+
+async def test_capacity_refusal_rolls_back_rate_limit(
+    files_setup: tuple[ProviderFileService, FileScope, FileAccount], async_db: AsyncSession
+) -> None:
+    from gateway.models.provider_files import ProviderFileRateWindow
+
+    service, scope, account = files_setup
+    service.max_files = 1
+    await service.prepare(scope, account, PrepareUpload(operation_id=uuid.uuid4(), size_bytes=20))
+    with pytest.raises(FilesError, match="capacity"):
+        await service.prepare(scope, account, PrepareUpload(operation_id=uuid.uuid4(), size_bytes=20))
+    row = await async_db.get(ProviderFileRateWindow, (scope.workspace_id, scope.user_id))
+    assert row is not None and row.count == 1
+    with pytest.raises(OutsideUnitOfWorkError):
+        await service.repo.account(account.generation_id)
 
 
 async def test_postgres_file_migration_round_trip(postgres_url: str) -> None:
@@ -265,4 +291,4 @@ async def test_postgres_file_migration_round_trip(postgres_url: str) -> None:
     try:
         command.downgrade(config, "d5f8b2a4c6e9")
     finally:
-        command.upgrade(config, "c3e5a7b9d1f4")
+        command.upgrade(config, "head")

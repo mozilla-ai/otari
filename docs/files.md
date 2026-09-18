@@ -126,13 +126,19 @@ Text/office/PDF extraction uses [markitdown](https://github.com/microsoft/markit
 libraries since Otari is a network service. OCR is optional; install the
 `ocr` extra (`pip install gateway[ocr]`) to enable it.
 
-## Hybrid Anthropic Files (opt-in)
+<a id="hybrid-anthropic-files-opt-in"></a>
 
-Hybrid gateways can forward the Anthropic GA Files API through any-llm while
-keeping bytes at Anthropic. Enable `files_provider_native_enabled` only after the
-control plane contributes the Files protocol. The gateway requires any-llm-sdk
-1.28.0 or later, which includes the Anthropic Files interface. The gateway returns
-a fixed 502 if the control-plane protocol is unavailable. The default remains disabled.
+## Hybrid provider-native Files (opt-in)
+
+Hybrid gateways support Anthropic and OpenAI Files through any-llm, keeping bytes
+at the selected provider. Enable `files_provider_native_enabled` only after the
+control plane contributes Files protocol version 2. The gateway requires
+any-llm-sdk 1.28.0 or later. A missing or older authority protocol returns a fixed
+502; the feature remains disabled by default.
+
+`X-Otari-Files-Provider` selects the provider and public API envelope. It defaults
+to `anthropic` for existing clients. The selector only narrows authorized
+credentials; it cannot supply an account, secret, or upstream endpoint.
 
 Use the official Anthropic SDK's GA `files` resource, not `beta.files`:
 
@@ -180,6 +186,61 @@ generation. File-bearing requests have no account or provider fallback. Chat
 Completions and Responses reject provider file references; use Messages.
 Managed credentials still reject caller-selected container reuse.
 
+### OpenAI Files
+
+Use the official OpenAI SDK with an explicit provider header:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="YOUR_OTARI_WORKSPACE_API_KEY",
+    base_url="https://gateway.example/api/v1/",
+    default_headers={"X-Otari-Files-Provider": "openai"},
+)
+with open("input.csv", "rb") as source:
+    uploaded = client.files.create(file=source, purpose="user_data")
+metadata = client.files.retrieve(uploaded.id)
+page = client.files.list(purpose="user_data", limit=20)
+content = client.files.content(uploaded.id)
+client.files.delete(uploaded.id)
+```
+
+OpenAI uploads require `purpose`; optional `expires_after` must use the
+`created_at` anchor, stay within OpenAI's 1-hour to 30-day range, and are capped
+by the authority's retention policy. Without a caller expiry, OpenAI uploads use
+the smaller of that policy and 30 days. Lists support `after`, `before`, `order`, `limit`, and `purpose`. They read local owned
+bindings, never an account-wide provider listing. Always use the same provider
+header for subsequent operations. An ID shared by providers does not cross the
+provider boundary; ambiguous IDs within one provider fail closed.
+
+These operations do not enable OpenAI file references in Chat Completions or
+Responses. Hybrid Chat Completions and Responses also reject native
+`code_interpreter`, `file_search`, and `shell` tools, stored item/compaction
+references, conversation reuse, and file references in native tool options:
+those can read or create account-scoped files without passing this ownership
+protocol. Standalone behavior is unchanged.
+Inference binding currently supports Anthropic Messages only.
+Gemini Files is unsupported in any-llm 1.28.0 and remains disabled here.
+
+### Extension boundary
+
+any-llm owns provider SDK calls, option translation, normalized metadata, and
+operation capabilities. Otari owns credentials, tenant isolation, quotas,
+retention policy, cleanup, and public API envelopes. The shared lifecycle keeps
+unknown metadata fields unknown, including download permission and size. An
+unknown upload size retains its full reservation; an unknown generated size
+charges the per-file maximum. Explicit `downloadable: false` denies downloads.
+When permission is unknown, an owned file can reach a supported download
+operation, whose upstream response decides whether access is permitted.
+
+A new upstream provider does not automatically enable a public gateway API.
+Register its API-format adapter, authorize its credentials, and verify SDK
+capabilities and lifecycle semantics. Provider-specific HTTP clients do not
+belong here. Anthropic message parsing and stream buffering are isolated from
+shared output registration so another inference envelope need not duplicate
+ownership or cleanup logic.
+
 ### Limits and cleanup
 
 | Setting | Default / requirement |
@@ -188,7 +249,7 @@ Managed credentials still reject caller-selected container reuse.
 | `files_transfer_timeout_seconds` | 300 seconds, covering receipt and upload |
 | `files_idle_timeout_seconds` | 30 seconds |
 | `files_rate_limit_rpm` | 60 operations per uploader/workspace, enforced in the control plane |
-| `files_retention_hours` | Hybrid default 168; provider range 1–2160 hours |
+| `files_retention_hours` | Hybrid default 168; gateway policy range 1–2160 hours, also subject to provider limits |
 | `files_max_count`, `files_max_outstanding_bytes` | Explicit positive control-plane quotas required |
 | `files_temporary_capacity_bytes` | 2 GiB shared admission ceiling across local workers |
 | `files_operation_timeout_seconds` | 600 seconds |
@@ -201,7 +262,7 @@ system user. Use an ephemeral, quota-limited temporary volume; reservations are
 reclaimed after process termination, and rolled-over file buffers are unlinked
 temporary files. No durable gateway file store is used.
 
-Deletion revokes local access before contacting Anthropic. Failed deletions stay
+Deletion revokes local access before contacting the provider. Failed deletions stay
 in a durable cleanup queue. Gateways claim fenced, five-minute leases of up to
 20 files; failures back off from one minute to six hours. Replacing, removing,
 or restoring a retired credential waits for required cleanup. Workspace-key
@@ -216,9 +277,12 @@ Anthropic reports it; local expiry alone cannot delete an unknown upstream ID.
 ### Release verification
 
 The dependency floor is any-llm-sdk 1.28.0, and the lockfile selects that published
-release. The mandatory SDK contract test covers upload, scoped listing, metadata
-retrieval, download, and deletion through the official Anthropic client and Otari,
-using a mocked control plane and provider transport.
+release. Mandatory SDK contract tests cover upload, scoped listing, metadata
+retrieval, download, and deletion through the official Anthropic and OpenAI
+clients and Otari, using mocked control-plane and provider transports. Apply
+migration `c3e5a7b9d1f4` for provider-native file storage, purpose filtering, and
+provider-time ordering. Upgrade the authority
+and gateways together to Files protocol 2; older peers fail closed.
 Before hosted enablement, verify the composed hosted adapter, generated output
 expiry, and the Octonous workflow without managed container reuse.
 The canonical server contract is in [Hybrid mode protocol](hybrid-mode-protocol.md#provider-native-files).
