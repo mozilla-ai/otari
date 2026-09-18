@@ -393,6 +393,11 @@ Content-Type: application/json
 }
 ```
 
+On a fallback chain, `ttft_ms` is timed from the request's start, not from when the
+reported attempt began. The report is keyed by `correlation_id` = the winning
+attempt's id, so its `ttft_ms` includes time spent on any earlier attempts that
+failed before their first chunk, not just its own.
+
 A successful attempt that completes without provider usage data still sends a
 final report, but omits `usage` so the platform can record it as unavailable
 rather than as an explicit zero-token result.

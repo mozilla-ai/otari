@@ -4130,7 +4130,7 @@ async def run_streaming_with_fallback(
     rate_limit_info: RateLimitInfo | None,
     tool_ctx: ToolContext,
     session_label: str | None = None,
-    started_at: float | None = None,
+    started_at: float,
 ) -> StreamingResponse:
     """Multi-attempt streaming for hybrid-mode requests.
 

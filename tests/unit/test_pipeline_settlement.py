@@ -335,6 +335,7 @@ async def test_streaming_fallback_wires_forwarded_tools_into_final_timeout(
             config=config,
             remaining_user_tools=[{"name": "slack_send", "input_schema": {}}],
         ),
+        started_at=time.monotonic(),
     )
 
     assert response is marker

@@ -1063,6 +1063,14 @@ def test_hybrid_mode_streaming_falls_through_on_first_attempt_failure(
     assert len(error_reports) == 1
     assert error_reports[0]["correlation_id"] == "stream-att-anthropic"
 
+    # The winning openai attempt reports ttft_ms on the wire, not just through
+    # the payload builder in isolation.
+    success_reports = [r for r in usage_reports if r.get("status") == "success"]
+    assert len(success_reports) == 1
+    assert success_reports[0]["correlation_id"] == "stream-att-openai"
+    assert isinstance(success_reports[0]["ttft_ms"], int)
+    assert success_reports[0]["ttft_ms"] >= 0
+
 
 def test_hybrid_mode_streaming_returns_502_when_all_attempts_fail(
     platform_client: TestClient,
