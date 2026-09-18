@@ -16,8 +16,9 @@
  * dependency on somebody else's stylesheet.
  *
  * `globals.css` imports it right after `@heroui/styles`, which is
- * the only position CSS allows: an `@import` placed after any rule
- * is ignored, and nothing reports it. So everything here is emitted
+ * the only position CSS allows: an `@import` has to precede the
+ * first rule, and one placed after it is ignored with nothing
+ * reported. `architecture.test.ts` holds that. So everything here is emitted
  * ahead of the application's own rules, and that is the constraint
  * to respect when adding one. A feature rule of equal specificity in
  * `globals.css` now wins the tie, and a rule here that has to
