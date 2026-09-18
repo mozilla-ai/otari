@@ -332,9 +332,7 @@ function InviteMemberForm({
   const [email, setEmail] = useState("")
   const [role, setRole] = useState<MembershipRole>("member")
   const [workspaceIds, setWorkspaceIds] = useState<string[]>([])
-  const [result, setResult] = useState<InviteOrganizationMemberResult | null>(
-    null,
-  )
+  const [result, setResult] = useState<InviteOrganizationMemberResult>()
   const trimmed = email.trim()
 
   const rows = workspaces.data
@@ -856,9 +854,9 @@ export function OrganizationMembersPage() {
   // Which of the two ways in this deployment offers: see the header action.
   const { mail_ready } = useDeployment()
 
-  const [editingMember, setEditingMember] = useState<string | null>(null)
-  const [removing, setRemoving] = useState<OrganizationMember | null>(null)
-  const [revoking, setRevoking] = useState<OrganizationMember | null>(null)
+  const [editingMember, setEditingMember] = useState<string>()
+  const [removing, setRemoving] = useState<OrganizationMember>()
+  const [revoking, setRevoking] = useState<OrganizationMember>()
   const [joining, setJoining] = useState(false)
   const [joinCount, setJoinCount] = useState(0)
 
@@ -914,8 +912,7 @@ export function OrganizationMembersPage() {
   )
   const activeContext: OrganizationContext | undefined = context.data
   const manages = canManage(activeContext)
-  const editingRow =
-    rows.find((row) => memberRowKey(row) === editingMember) ?? null
+  const editingRow = rows.find((row) => memberRowKey(row) === editingMember)
 
   const columns = useMemo<DataTableColumn<OrganizationMember>[]>(() => {
     // Annotated here rather than inferred through the filter below, which would
@@ -1306,7 +1303,7 @@ export function OrganizationMembersPage() {
               ? (placementsByUser.get(editingRow.user_id) ?? [])
               : []
           }
-          onClose={() => setEditingMember(null)}
+          onClose={() => setEditingMember(undefined)}
         />
       ) : null}
 
@@ -1322,9 +1319,9 @@ export function OrganizationMembersPage() {
       </TableScrollFrame>
 
       <ConfirmDialog
-        isOpen={removing !== null}
+        isOpen={removing !== undefined}
         onOpenChange={(open) => {
-          if (!open) setRemoving(null)
+          if (!open) setRemoving(undefined)
         }}
         heading="Remove member"
         body={
@@ -1342,16 +1339,16 @@ export function OrganizationMembersPage() {
         onConfirm={() => {
           if (removing?.organization_member_id) {
             remove.mutate(removing.organization_member_id, {
-              onSuccess: () => setRemoving(null),
+              onSuccess: () => setRemoving(undefined),
             })
           }
         }}
       />
 
       <ConfirmDialog
-        isOpen={revoking !== null}
+        isOpen={revoking !== undefined}
         onOpenChange={(open) => {
-          if (!open) setRevoking(null)
+          if (!open) setRevoking(undefined)
         }}
         heading="Revoke invitation"
         body={
@@ -1368,7 +1365,7 @@ export function OrganizationMembersPage() {
         onConfirm={() => {
           if (revoking?.invitation_id) {
             revoke.mutate(revoking.invitation_id, {
-              onSuccess: () => setRevoking(null),
+              onSuccess: () => setRevoking(undefined),
             })
           }
         }}

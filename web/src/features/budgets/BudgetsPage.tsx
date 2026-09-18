@@ -583,10 +583,10 @@ function DeploymentBudgetsPage() {
     setAddOpenCount((n) => n + 1)
     setAddOpen(true)
   }
-  const [editing, setEditing] = useState<string | null>(null)
-  const [historyOpen, setHistoryOpen] = useState<string | null>(null)
+  const [editing, setEditing] = useState<string>()
+  const [historyOpen, setHistoryOpen] = useState<string>()
   const [pendingDelete, setPendingDelete] = useState<Budget>()
-  const [assignmentError, setAssignmentError] = useState<Error | null>(null)
+  const [assignmentError, setAssignmentError] = useState<Error>()
   const [pendingAssignments, setPendingAssignments] = useState<{
     budgetId: string
     userIds: string[]
@@ -635,8 +635,8 @@ function DeploymentBudgetsPage() {
     }
     return byBudget
   }, [workspaces.data, workspaceDefaults.data])
-  const editingBudget = rows.find((b) => b.budget_id === editing) ?? null
-  const historyBudget = rows.find((b) => b.budget_id === historyOpen) ?? null
+  const editingBudget = rows.find((b) => b.budget_id === editing)
+  const historyBudget = rows.find((b) => b.budget_id === historyOpen)
   // Not gated on the dialog being closed: react-aria returns focus to the
   // element that opened the dialog, and an empty-state CTA that unmounts on
   // open leaves it nothing to return to, so focus lands on body and Tab
@@ -756,7 +756,7 @@ function DeploymentBudgetsPage() {
               label={historyOpen === b.budget_id ? "Hide history" : "History"}
               onPress={() =>
                 setHistoryOpen((current) =>
-                  current === b.budget_id ? null : b.budget_id,
+                  current === b.budget_id ? undefined : b.budget_id,
                 )
               }
             />
@@ -800,7 +800,7 @@ function DeploymentBudgetsPage() {
       return true
     }
     setAssigningUsers(true)
-    setAssignmentError(null)
+    setAssignmentError(undefined)
     const targets = [
       ...added.map((id) => ({ id, budgetId: budgetId as string | null })),
       ...removed.map((id) => ({ id, budgetId: null })),
@@ -845,8 +845,8 @@ function DeploymentBudgetsPage() {
             // own copy of it: the dialog is over the page.
             variant="primary"
             onPress={() => {
-              setEditing(null)
-              setAssignmentError(null)
+              setEditing(undefined)
+              setAssignmentError(undefined)
               setPendingAssignments(null)
               openCreate()
             }}
@@ -883,8 +883,8 @@ function DeploymentBudgetsPage() {
           description="A budget caps how much a user may spend and, optionally, resets that spend on a schedule. Create one, then assign it to users to enforce a limit."
           actionLabel="Create your first budget"
           onAction={() => {
-            setEditing(null)
-            setAssignmentError(null)
+            setEditing(undefined)
+            setAssignmentError(undefined)
             setPendingAssignments(null)
             openCreate()
           }}
@@ -904,10 +904,10 @@ function DeploymentBudgetsPage() {
         pendingAssignments={pendingAssignments}
         returnFocusRef={createButtonRef}
         assignUsers={assignUsers}
-        onAssignmentReset={() => setAssignmentError(null)}
+        onAssignmentReset={() => setAssignmentError(undefined)}
         users={users.data ?? []}
         onClose={() => {
-          setAssignmentError(null)
+          setAssignmentError(undefined)
           setPendingAssignments(null)
           setAddOpen(false)
         }}
@@ -922,15 +922,15 @@ function DeploymentBudgetsPage() {
           rosterReady={rosterReady}
           assignUsers={assignUsers}
           onAssignmentReset={() => {
-            setAssignmentError(null)
+            setAssignmentError(undefined)
             setPendingAssignments(null)
           }}
           assignmentError={assignmentError}
           assigningUsers={assigningUsers}
           onClose={() => {
-            setAssignmentError(null)
+            setAssignmentError(undefined)
             setPendingAssignments(null)
-            setEditing(null)
+            setEditing(undefined)
           }}
         />
       ) : null}
@@ -982,7 +982,7 @@ function DeploymentBudgetsPage() {
             <Button
               size="sm"
               variant="ghost"
-              onPress={() => setHistoryOpen(null)}
+              onPress={() => setHistoryOpen(undefined)}
             >
               Close
             </Button>
@@ -1063,7 +1063,7 @@ function EditBudgetDialog({
     previousUserIds?: string[],
   ) => Promise<boolean>
   onAssignmentReset: () => void
-  assignmentError: Error | null
+  assignmentError: Error | undefined
   assigningUsers: boolean
   onClose: () => void
 }) {
@@ -1141,7 +1141,7 @@ function CreateBudgetDialog({
     previousUserIds?: string[],
   ) => Promise<boolean>
   onAssignmentReset: () => void
-  assignmentError: Error | null
+  assignmentError: Error | undefined
   assigningUsers: boolean
   pendingAssignments: { budgetId: string; userIds: string[] } | null
 }) {

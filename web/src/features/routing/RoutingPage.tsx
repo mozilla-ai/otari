@@ -229,17 +229,17 @@ export function RoutingPage() {
   const createButtonRef = useRef<HTMLButtonElement | null>(null)
   const [createCount, setCreateCount] = useState(0)
   const openCreate = () => {
-    setEditing(null)
+    setEditing(undefined)
     setCreateCount((n) => n + 1)
     setAdding(true)
   }
   const closeCreate = () => setAdding(false)
-  const [editing, setEditing] = useState<RoutingRow | null>(null)
+  const [editing, setEditing] = useState<RoutingRow>()
   const [pendingDelete, setPendingDelete] = useState<RoutingRow>()
   // Readiness opens inline under its own row (DataTable's accordion), because it
   // describes one policy and the operator clicked that policy. A card above the
   // table would put the panel nowhere near the control that opened it.
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<string>()
   // `adding` is seeded from ?target= before the membership context settles, so
   // the role is applied here rather than in the initializer: gating the
   // initializer would drop an operator's deep link, since `isOperator` is still
@@ -274,7 +274,7 @@ export function RoutingPage() {
         defaultTarget={defaultTargetOf(row.spec)}
         backend={routerBackendOf(row.spec) ?? KNN_BACKEND}
         scopedUserId={row.user_id ?? null}
-        onClose={() => setExpanded(null)}
+        onClose={() => setExpanded(undefined)}
       />
     ),
     [],
@@ -386,7 +386,7 @@ export function RoutingPage() {
             label={expanded === rowKeyOf(policy) ? "Hide examples" : "Examples"}
             onPress={() =>
               setExpanded((current) =>
-                current === rowKeyOf(policy) ? null : rowKeyOf(policy),
+                current === rowKeyOf(policy) ? undefined : rowKeyOf(policy),
               )
             }
           />
@@ -502,7 +502,7 @@ export function RoutingPage() {
         workspaceId={writeWorkspaceId}
         onClose={closeCreate}
       />
-      {editing !== null ? (
+      {editing !== undefined ? (
         <PolicyForm
           // Keyed on the row: the fields seed from `existing` once, through
           // mount-only state, so without this a second row's Edit would open
@@ -511,7 +511,7 @@ export function RoutingPage() {
           existing={editing}
           deploymentWide={isOperator}
           workspaceId={editing.workspace_id ?? writeWorkspaceId}
-          onClose={() => setEditing(null)}
+          onClose={() => setEditing(undefined)}
         />
       ) : null}
 

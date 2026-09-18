@@ -541,15 +541,15 @@ function EditWorkspaceForm({
   const providers = useProviders(operates)
   const [name, setName] = useState(workspace.name)
   const [description, setDescription] = useState(workspace.description ?? "")
-  const [budgetId, setBudgetId] = useState<string | null>(null)
-  // Null until the operator touches the picker, so a default that arrives after
-  // the form mounted is still what the picker shows.
+  const [budgetId, setBudgetId] = useState<string>()
+  // Unset until the operator touches the picker, so a default that arrives
+  // after the form mounted is still what the picker shows.
   const selectedBudget = budgetId ?? aggregate?.budget_id ?? NO_DEFAULT
   const savingDefault =
     createDefault.isPending ||
     updateDefault.isPending ||
     deleteDefault.isPending
-  // `budgetId` rather than `selectedBudget`: null is "the picker was never
+  // `budgetId` rather than `selectedBudget`: unset is "the picker was never
   // touched", so a default that resolves after mount is part of the seed rather
   // than a change the guard should arm on. The per-provider defaults and the
   // provider keys below write as they are changed rather than on save, so
@@ -708,8 +708,8 @@ export function WorkspacesPage() {
     setCreatingCount((n) => n + 1)
     setCreating(true)
   }
-  const [editing, setEditing] = useState<string | null>(null)
-  const [deleting, setDeleting] = useState<Workspace | null>(null)
+  const [editing, setEditing] = useState<string>()
+  const [deleting, setDeleting] = useState<Workspace>()
 
   const rows = workspaces.data ?? []
   const workspaceIds = useMemo(() => rows.map((row) => row.id), [rows])
@@ -768,7 +768,7 @@ export function WorkspacesPage() {
   const holdsProviderKeys = [...providerKeys.data.values()].some(
     (rows) => rows.length > 0,
   )
-  const editingWorkspace = rows.find((row) => row.id === editing) ?? null
+  const editingWorkspace = rows.find((row) => row.id === editing)
   // Not gated on `creating`: unmounting the empty state when the dialog opens
   // takes away the node react-aria restores focus to, so closing drops focus to
   // `<body>`. `PageIntro`'s action is ungated for the same reason.
@@ -899,7 +899,7 @@ export function WorkspacesPage() {
               ref={createButtonRef}
               variant="primary"
               onPress={() => {
-                setEditing(null)
+                setEditing(undefined)
                 openCreate()
               }}
             >
@@ -939,7 +939,7 @@ export function WorkspacesPage() {
         <EditWorkspaceForm
           key={editingWorkspace.id}
           workspace={editingWorkspace}
-          onClose={() => setEditing(null)}
+          onClose={() => setEditing(undefined)}
         />
       ) : null}
 
@@ -964,9 +964,9 @@ export function WorkspacesPage() {
       )}
 
       <ConfirmDialog
-        isOpen={deleting !== null}
+        isOpen={deleting !== undefined}
         onOpenChange={(open) => {
-          if (!open) setDeleting(null)
+          if (!open) setDeleting(undefined)
         }}
         heading="Delete workspace"
         body={
@@ -982,8 +982,8 @@ export function WorkspacesPage() {
           if (deleting) {
             remove.mutate(deleting.id, {
               onSuccess: () => {
-                if (editing === deleting.id) setEditing(null)
-                setDeleting(null)
+                if (editing === deleting.id) setEditing(undefined)
+                setDeleting(undefined)
               },
             })
           }

@@ -263,7 +263,7 @@ function UrlRow({
   const committed = typeof field.value === "string" ? field.value : ""
   const [typed, setTyped] = useState(committed)
   const [seen, setSeen] = useState(committed)
-  const [testedUrl, setTestedUrl] = useState<string | null>(null)
+  const [testedUrl, setTestedUrl] = useState<string>()
   const test = useTestService()
 
   // A refetch can re-seed the field with no keystroke, which the `onChange`

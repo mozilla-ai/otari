@@ -204,12 +204,12 @@ export function TrendChart({
   onSelectRange?: (startIndex: number, endIndex: number) => void
   window?: { startIndex: number; endIndex: number } | null
 }) {
-  const [drag, setDrag] = useState<{ start: number; end: number } | null>(null)
+  const [drag, setDrag] = useState<{ start: number; end: number }>()
   // Mirror for the commit handlers: mouseup can fire before the last
   // mousemove's setState has re-rendered, and committing from the stale closure
   // would snap to the previous bucket.
   const dragRef = useRef(drag)
-  const setDragBoth = (next: { start: number; end: number } | null) => {
+  const setDragBoth = (next?: { start: number; end: number }) => {
     dragRef.current = next
     setDrag(next)
   }
@@ -223,7 +223,7 @@ export function TrendChart({
 
   const commit = () => {
     const range = dragRef.current
-    setDragBoth(null)
+    setDragBoth(undefined)
     if (!range || !onSelectRange || range.start === range.end) return
     // Clamp like the window prop below: the indices were captured from a
     // previous render's tooltip state, and a background refetch landing

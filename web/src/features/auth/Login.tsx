@@ -250,7 +250,7 @@ export function Login() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState<unknown>(null)
-  const [errorField, setErrorField] = useState<CredentialField | null>(null)
+  const [errorField, setErrorField] = useState<CredentialField>()
   const [isSubmitting, setIsSubmitting] = useState(false)
   // Separate from `isSubmitting` because the two say different things while
   // they are true: the form's button reads "Signing in…", and this one has to
@@ -260,7 +260,7 @@ export function Login() {
   // Which provider button was pressed, so only that one reads "Redirecting…".
   // The navigation that follows leaves this page, so this is never cleared on
   // success; it clears on the refusal path, where the person stays here.
-  const [pendingProvider, setPendingProvider] = useState<string | null>(null)
+  const [pendingProvider, setPendingProvider] = useState<string>()
 
   // The unverified refusal tells the reader to request a new verification
   // email, so the request is offered beside it rather than left as a sentence
@@ -273,7 +273,7 @@ export function Login() {
   const clearError = () => {
     if (error) {
       setError(null)
-      setErrorField(null)
+      setErrorField(undefined)
     }
   }
 
@@ -376,7 +376,7 @@ export function Login() {
       return
     }
     setError(null)
-    setErrorField(null)
+    setErrorField(undefined)
     const credential = readCredential()
     if (!credential) {
       return
@@ -452,7 +452,7 @@ export function Login() {
       return
     }
     setError(null)
-    setErrorField(null)
+    setErrorField(undefined)
     setIsPasskeyPending(true)
     try {
       const result = await signInWithPasskey()
@@ -513,7 +513,7 @@ export function Login() {
       return
     }
     setError(null)
-    setErrorField(null)
+    setErrorField(undefined)
     setPendingProvider(provider)
     try {
       const started = await startOAuthSignIn(provider)
@@ -527,7 +527,7 @@ export function Login() {
           started.message ??
             `${oauthProviderLabel(provider)} sign-in is not available on this gateway.`,
         )
-        setPendingProvider(null)
+        setPendingProvider(undefined)
         return
       }
       rememberOAuthState(started.state)
@@ -540,7 +540,7 @@ export function Login() {
       })
       setErrorField(usesPassword ? "password" : "masterKey")
       setError(caught)
-      setPendingProvider(null)
+      setPendingProvider(undefined)
     }
   }
 
@@ -769,7 +769,7 @@ export function Login() {
               isSubmitting ||
               isSigningOut ||
               isPasskeyPending ||
-              pendingProvider !== null
+              pendingProvider !== undefined
             }
             className="h-11"
           >
@@ -813,7 +813,7 @@ export function Login() {
                   isSubmitting ||
                   isSigningOut ||
                   isPasskeyPending ||
-                  pendingProvider !== null
+                  pendingProvider !== undefined
                 }
                 onPress={() => {
                   setTypedCredential(usesPassword ? "masterKey" : "password")
@@ -821,7 +821,7 @@ export function Login() {
                   setPassword("")
                   setMasterKey("")
                   setError(null)
-                  setErrorField(null)
+                  setErrorField(undefined)
                 }}
                 className="h-11"
               >
@@ -836,7 +836,7 @@ export function Login() {
                 variant="ghost"
                 fullWidth
                 isDisabled={
-                  isSubmitting || isSigningOut || pendingProvider !== null
+                  isSubmitting || isSigningOut || pendingProvider !== undefined
                 }
                 onPress={() => void submitPasskey()}
                 className="h-11"
@@ -860,7 +860,7 @@ export function Login() {
                       isSubmitting ||
                       isSigningOut ||
                       isPasskeyPending ||
-                      pendingProvider !== null
+                      pendingProvider !== undefined
                     }
                     onPress={() => void submitOAuth(provider)}
                     aria-label={

@@ -1775,11 +1775,11 @@ export function ActivityPage() {
   // fields while the dialog is still animating away, and these values set
   // money.
   const [priceOpenCount, setPriceOpenCount] = useState(0)
-  // The model selector whose price is being set from a request detail, or null
-  // when that dialog is closed. Distinct from `priceOpen` above, which reprices
-  // already-logged imported rows rather than setting a model's price.
-  const [modelPriceKey, setModelPriceKey] = useState<string | null>(null)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
+  // The model selector whose price is being set from a request detail, and
+  // unset when that dialog is closed. Distinct from `priceOpen` above, which
+  // reprices already-logged imported rows rather than setting a model's price.
+  const [modelPriceKey, setModelPriceKey] = useState<string>()
+  const [expandedId, setExpandedId] = useState<string>()
 
   // Inline accordion panel under the clicked row (DataTable renderDetail).
   // Was a setter-only closure with empty dependencies, so the row cache held for
@@ -1793,7 +1793,11 @@ export function ActivityPage() {
       <div>
         <div className="flex items-center justify-between border-b border-border px-4 py-2">
           <span className="text-body">Request detail</span>
-          <Button size="sm" variant="ghost" onPress={() => setExpandedId(null)}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onPress={() => setExpandedId(undefined)}
+          >
             Close
           </Button>
         </div>
@@ -1878,7 +1882,7 @@ export function ActivityPage() {
         cache_write_price_per_million:
           rates.cache_write_price_per_million ?? null,
       },
-      { onSuccess: () => setModelPriceKey(null) },
+      { onSuccess: () => setModelPriceKey(undefined) },
     )
 
   const onSetPrice = (rates: ManualRates) =>
@@ -2249,7 +2253,7 @@ export function ActivityPage() {
           onSelectionChange={selection.onSelectionChange}
           disabledKeys={disabledKeys}
           onRowAction={(key) =>
-            setExpandedId((current) => (current === key ? null : key))
+            setExpandedId((current) => (current === key ? undefined : key))
           }
           rowClassName={activityRowClassName}
           detailKey={expandedId}
@@ -2308,9 +2312,9 @@ export function ActivityPage() {
 
       <SetPriceDialog
         key={`model-${priceOpenCount}`}
-        isOpen={modelPriceKey !== null}
+        isOpen={modelPriceKey !== undefined}
         onOpenChange={(open) =>
-          setModelPriceKey(open ? (modelPriceKey ?? "") : null)
+          setModelPriceKey(open ? (modelPriceKey ?? "") : undefined)
         }
         onSubmit={onSetModelPrice}
         submitLabel="Price this model"
