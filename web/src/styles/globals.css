@@ -870,11 +870,15 @@
  * sides so the next reader finds a rule rather than an accident.
  * ============================================================= */
 :root {
-  /* Size / line-height per step. Whole pixels throughout: a fractional size
-   * reflows every dense table for no legible gain, which was tested at 100%,
-   * 125% and 150% zoom before these landed. Tracking lives in the @theme
-   * registration above, positive on the small steps where tight setting goes
-   * muddy and negative on the large ones where it goes loose. */
+  /* Size / line-height per step, in rem so the scale follows the reader's own
+   * default rather than a number we picked (otari#1368). Each step is a whole
+   * pixel at the usual 16px root, which is what the earlier pixel scale was
+   * tuned for and tested at 100%, 125% and 150% zoom: a fractional size reflows
+   * every dense table for no legible gain. A reader who raises their default
+   * gets fractional sizes, and that is the trade, because the alternative is
+   * refusing them the setting. Tracking lives in the @theme registration above,
+   * positive on the small steps where tight setting goes muddy and negative on
+   * the large ones where it goes loose. */
   --text-xs: 0.75rem;
   --text-xs--line-height: 1.125rem;
   /* The seventh step, between 12 and 14, which Tailwind does not ship. Named
@@ -1237,7 +1241,11 @@
   font-family: var(--font-sans);
   line-height: 1.5;
   font-weight: 400;
-  font-size: 1rem;
+  /* No font-size here on purpose. The root resolves from the reader's own
+     default, which a device or a platform may set as well as a browser
+     preference, and naming a value replaces their choice with ours. Every
+     length in this file is rem, so the whole product follows whatever they
+     picked. otari#1368. */
   color-scheme: light dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
