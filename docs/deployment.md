@@ -19,6 +19,10 @@ A durable standalone deployment should:
 
 The default SQLite database is intended for evaluation and single-node local use.
 
+A `/metrics` scrape needs the `metrics` extra (`pip install gateway[metrics]`),
+which the Docker image installs. A source install that sets `enable_metrics`
+without it refuses to start rather than serving an empty scrape.
+
 ### Watch the connection pool
 
 On PostgreSQL the gateway serves requests from a fixed pool of database
