@@ -4,9 +4,8 @@
 Two modes:
 
 - ``control-plane`` (default): typed clients for the management endpoints only
-  (keys, users, budgets, pricing, usage). The inference surface stays a
-  hand-written wrapper around the official OpenAI SDK; batches are hand-written
-  (their responses are untyped in the spec).
+  (keys, users, budgets, pricing, usage). Inference and batch endpoints are
+  excluded from this mode.
 
 - ``full``: enriches the spec's inference surface with the real typed
   completion schemas (from ``any-llm``), then generates a typed core covering
@@ -48,10 +47,8 @@ DEFAULT_OUT_DIR = REPO_ROOT / "dist" / "sdk-codegen"
 # a marker is always written even outside a release build.
 DEFAULT_SPEC_VERSION = "0.0.0-dev"
 
-# Operations carrying one of these tags form the control plane we generate: the
-# management endpoints whose responses are fully typed in the spec. See the
-# module docstring for what is excluded and why (notably batches, whose
-# responses are untyped in the spec and already hand-written in every SDK).
+# Management tags included in control-plane mode. Full mode also types
+# inference and batch responses through enrich_spec.
 CONTROL_PLANE_TAGS: frozenset[str] = frozenset(
     {"keys", "users", "budgets", "pricing", "usage"}
 )
@@ -344,7 +341,7 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
             "custom_id": {"type": "string", "description": "Identifier supplied for this request in the batch."},
             "result": {
                 "description": "Serialized provider result, or null when the request failed.",
-                "anyOf": [{"type": "object", "additionalProperties": True}, {"type": "null"}],
+                "anyOf": [{"$ref": "#/components/schemas/ChatCompletion"}, {"type": "null"}],
             },
             "error": {
                 "anyOf": [

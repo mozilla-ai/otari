@@ -285,6 +285,8 @@ def test_enrich_types_batch_operations(path: str, method: str) -> None:
 
 def test_enriched_batch_schemas_match_serialized_responses() -> None:
     from any_llm.types.batch import Batch
+    from any_llm.types.completion import ChatCompletion
+    from fastapi.encoders import jsonable_encoder
     from jsonschema import Draft202012Validator
 
     spec = generate.enrich_spec(json.loads(generate.DEFAULT_SPEC.read_text()))
@@ -309,11 +311,35 @@ def test_enriched_batch_schemas_match_serialized_responses() -> None:
     assert not validator("BatchResponse").is_valid({**batch, "provider": 42})
 
     results = validator("BatchResultsResponse")
+    completion = ChatCompletion.model_validate(
+        {
+            "id": "chat_123",
+            "created": 1,
+            "model": "gpt-4o-mini",
+            "object": "chat.completion",
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": "42",
+                        "reasoning": {"content": "Computed the answer."},
+                    },
+                }
+            ],
+            "provider_extension": {"request_id": "req_123"},
+        }
+    )
+    # The batch route dumps in Python mode before FastAPI encodes the response.
+    serialized = jsonable_encoder(completion.model_dump())
+    assert serialized["choices"][0]["message"]["reasoning"] == "Computed the answer."
+    assert serialized["provider_extension"] == {"request_id": "req_123"}
     results.validate({"results": []})
     results.validate(
         {
             "results": [
-                {"custom_id": "ok", "result": {"id": "chat_123", "provider_extension": {}}, "error": None},
+                {"custom_id": "ok", "result": serialized, "error": None},
                 {
                     "custom_id": "failed",
                     "result": None,
@@ -324,6 +350,9 @@ def test_enriched_batch_schemas_match_serialized_responses() -> None:
     )
     assert not results.is_valid({"results": [{"custom_id": "failed", "result": None, "error": {"code": "invalid"}}]})
     assert not results.is_valid({"results": [{"custom_id": "bad", "result": "not an object", "error": None}]})
+    assert not results.is_valid({"results": [{"custom_id": "bad", "result": {"id": "chat_123"}, "error": None}]})
+    serialized["choices"][0]["message"]["reasoning"] = {"content": "Computed the answer."}
+    assert not results.is_valid({"results": [{"custom_id": "bad", "result": serialized, "error": None}]})
 
 
 def test_enrich_types_reasoning_as_string_matching_wire_format() -> None:
@@ -502,8 +531,7 @@ def test_control_plane_tags_are_typed_management_only() -> None:
     assert generate.CONTROL_PLANE_TAGS == frozenset(
         {"keys", "users", "budgets", "pricing", "usage"}
     )
-    # Excluded on purpose: proxy/inference surfaces and batches, all of which are
-    # untyped in the spec (so generation would regress them).
+    # Inference and batch endpoints belong to full mode.
     for excluded in ("chat", "responses", "embeddings", "batches"):
         assert excluded not in generate.CONTROL_PLANE_TAGS
 

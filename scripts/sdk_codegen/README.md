@@ -16,8 +16,8 @@ untyped dicts, several inference responses use `response_model=None`), so
 (which the gateway already depends on) before generation. The result: a chat
 method that accepts typed messages and returns a typed `ChatCompletion`,
 typed `messages` / `rerank` / `embeddings` responses, typed batch lifecycle
-and result responses, and the fully typed control-plane endpoints (keys, users,
-budgets, pricing, usage).
+and result responses (including `ChatCompletion` results), and the fully typed
+control-plane endpoints (keys, users, budgets, pricing, usage).
 
 Each SDK then **hand-writes a thin shell** over this generated core for the
 things OpenAPI Generator cannot emit:
