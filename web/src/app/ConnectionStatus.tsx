@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useCallback, useSyncExternalStore } from "react"
 import { FiAlertTriangle } from "react-icons/fi"
 
 import { ApiError } from "@/shared/api/client"
@@ -16,24 +16,43 @@ function isUnreachable(error: unknown): boolean {
 // watches the whole query cache rather than any one page, so the alert is the
 // same wherever the operator is standing, and it clears itself the moment a
 // request succeeds again.
+//
+// The cache is an external store and is read as one. Subscribing in an effect
+// and calling `setState` from the listener does not hold here: the cache emits
+// synchronously when an observer is created, and an observer is created when a
+// component calls `useQuery` during its render, so the listener runs inside
+// another component's render pass. React calls that a bad `setState` in render.
+// `useSyncExternalStore` is the primitive for this shape, and React owns the
+// timing, so the same notification arrives safely.
 function useGatewayUnreachable(): boolean {
   const queryClient = useQueryClient()
-  const [unreachable, setUnreachable] = useState(false)
 
-  useEffect(() => {
-    const cache = queryClient.getQueryCache()
-    const compute = () =>
-      cache
+  // `useSyncExternalStore` identity-checks `subscribe` and re-subscribes when it
+  // changes, so this is held stable rather than rebuilt every render. That is
+  // the "a reference something else identity-checks" case performance.md keeps,
+  // not memoization by reflex.
+  const subscribe = useCallback(
+    (onStoreChange: () => void) =>
+      queryClient.getQueryCache().subscribe(onStoreChange),
+    [queryClient],
+  )
+
+  // Runs on every notification and more than once per render, so it stays a
+  // scan that returns a boolean. React compares snapshots with `Object.is`, so
+  // returning anything carrying an identity of its own would loop.
+  const getSnapshot = useCallback(
+    () =>
+      queryClient
+        .getQueryCache()
         .getAll()
         .some(
           (query) =>
             query.state.status === "error" && isUnreachable(query.state.error),
-        )
-    setUnreachable(compute())
-    return cache.subscribe(() => setUnreachable(compute()))
-  }, [queryClient])
+        ),
+    [queryClient],
+  )
 
-  return unreachable
+  return useSyncExternalStore(subscribe, getSnapshot)
 }
 
 // A bottom-right toast that surfaces a lost backend connection at the app level,
