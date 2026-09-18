@@ -29,7 +29,6 @@ const SRC = join(process.cwd(), "src")
 const REPLACEMENT: Record<string, string> = {
   StatCard: "metrics/KpiStrip + metrics/KpiCell",
   RowActions: "actions/RowActionRow",
-  SettingsSection: "layout/SettingsGroup",
 }
 
 /**
@@ -38,10 +37,19 @@ const REPLACEMENT: Record<string, string> = {
  * own counts had drifted: DESIGN.md placed `StatCard` on "Overview, Usage" when
  * Usage had stopped using it, and buttons.md put `RowActions` on two call sites
  * when it was on one.
+ *
+ * Empty does not mean deletable, and this is the thing to read before acting on
+ * a zero here. This walk covers `web/src` and nothing else, while otari-ai's
+ * overlay is written against this tree (`frontend/tsconfig.json`: "overlay/otari
+ * is written against otari's tree (its `@` is otari/web/src)"), so its
+ * `@/shared/components/deprecated/...` imports resolve to these very files and
+ * are invisible from here. As of 2026-09-18 that overlay holds `StatCard` in
+ * one file and `RowActions` in two, so deleting either module would break the
+ * superset build, and break it in the other repository's separate
+ * `type-check:superset` leg rather than in this one. Confirm against that repo
+ * before removing a module, not against this map.
  */
-const KNOWN: Record<string, readonly string[]> = {
-  "features/account/PasskeysCard.tsx": ["RowActions"],
-}
+const KNOWN: Record<string, readonly string[]> = {}
 
 function* walk(dir: string): Generator<string> {
   for (const entry of readdirSync(dir)) {
@@ -99,15 +107,5 @@ describe("deprecated components", () => {
     // A module added here without a replacement leaves the next person with a
     // ban and no alternative, which is how a deprecation stalls.
     expect(Object.keys(REPLACEMENT).sort()).toEqual(modules)
-  })
-
-  it("records SettingsSection as reachable from nowhere", () => {
-    // Not a deprecation but dead code: it has no call site at all, and it
-    // shadowed `layout/SettingsGroup` (7 call sites) while diverging from this
-    // tree's `export function` convention. Kept here rather than deleted
-    // because removing a component is a call for the maintainers, not a side
-    // effect of moving files. Delete it and this test together.
-    const users = [...callers().values()].flat()
-    expect(users).not.toContain("SettingsSection")
   })
 })

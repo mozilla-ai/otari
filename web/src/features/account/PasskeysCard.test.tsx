@@ -169,6 +169,24 @@ describe("PasskeysCard", () => {
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
   })
 
+  it("gives each row action the lane's 44px target, not a small button's box", async () => {
+    // The layout exception in testing.md: jsdom computes no layout, so the
+    // reachable area of a 32px glyph is observable only as the classes that
+    // create it. `size-8` is the visual and `before:-inset-1.5` is the 6px each
+    // way that takes it to 44, which is what `design/actions.md` specifies for
+    // a row lane and what the deprecated cluster this replaced did not have.
+    mockApi({ [LIST]: () => jsonResponse({ data: [PASSKEY], count: 1 }) })
+    renderCard()
+
+    await screen.findByText("Work laptop")
+    for (const name of ["Rename", "Delete"]) {
+      expect(screen.getByRole("button", { name })).toHaveClass(
+        "size-8",
+        "before:-inset-1.5",
+      )
+    }
+  })
+
   it("says what to configure, and offers nothing, on a deployment with no relying party", async () => {
     // otari#648's rule: a surface with no fallback is absent rather than
     // offered and then refused. The reason is still named, because this is the

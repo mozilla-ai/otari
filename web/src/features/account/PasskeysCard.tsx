@@ -1,8 +1,9 @@
 import { Button, Description, Input, Label, TextField } from "@heroui/react"
 import { useState } from "react"
-import { FiKey, FiSmartphone } from "react-icons/fi"
+import { FiEdit2, FiKey, FiSmartphone, FiTrash2 } from "react-icons/fi"
 
 import type { Passkey } from "@/client"
+import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
@@ -13,7 +14,6 @@ import {
   useRegisterPasskey,
   useRenamePasskey,
 } from "@/shared/api/auth"
-import { RowActions } from "@/shared/components/deprecated/RowActions"
 import { formatDateTime } from "@/shared/helpers/format"
 import {
   MAX_PASSKEY_NAME_LENGTH,
@@ -82,24 +82,20 @@ function PasskeyRow({
           )}
         </div>
       </div>
-      <RowActions>
-        <Button
-          variant="ghost"
-          size="sm"
+      <RowActionRow>
+        <RowAction
+          icon={FiEdit2}
+          label="Rename"
           isDisabled={isBusy}
           onPress={onRename}
-        >
-          Rename
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
+        />
+        <RowAction
+          icon={FiTrash2}
+          label="Delete"
           isDisabled={isBusy}
           onPress={onDelete}
-        >
-          Delete
-        </Button>
-      </RowActions>
+        />
+      </RowActionRow>
     </li>
   )
 }
