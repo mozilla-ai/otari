@@ -39,6 +39,12 @@
         font-display: swap;
       }
       @font-face {
+        font-family: "Mozilla Text";
+        src: url("/fonts/MozillaText-Variable.woff2") format("woff2");
+        font-weight: 200 700;
+        font-display: swap;
+      }
+      @font-face {
         font-family: "Fira Code";
         src: url("/fonts/FiraCode-VariableFont_wght.woff2") format("woff2");
         font-weight: 300 700;
@@ -51,7 +57,7 @@
         margin: 0;
         color: var(--ink);
         background: var(--background);
-        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-family: "Mozilla Text", system-ui, -apple-system, "Segoe UI", sans-serif;
         line-height: 1.5;
         -webkit-font-smoothing: antialiased;
       }
@@ -264,7 +270,7 @@
         min-width: 2rem;
         min-height: 2rem;
         padding: .375rem;
-        font: 500 .75rem/1.125rem system-ui, sans-serif;
+        font: 500 .75rem/1.125rem "Mozilla Text", system-ui, sans-serif;
         color: var(--code-fg);
         background: transparent;
         border: 0;
@@ -552,7 +558,9 @@ print(response.choices[0].message.content)</code></pre>
             error.className = "copy-error";
             error.textContent = message;
             figure.appendChild(error);
-            status.textContent = message;
+            setTimeout(function () {
+              status.textContent = message;
+            }, 0);
           }
         });
       });

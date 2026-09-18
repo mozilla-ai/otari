@@ -46,7 +46,17 @@ for (const unavailable of [false, true]) {
       })
     }, unavailable)
     await page.goto("/welcome")
-    await page.getByRole("button", { name: "Copy key export command" }).click()
+    await page.clock.install()
+    await page.clock.pauseAt(new Date())
+    const copy = page.getByRole("button", { name: "Copy key export command" })
+    await copy.click()
+    await page.clock.runFor(1)
+    await expect(page.getByRole("status")).toHaveText(
+      "Could not copy. Select the code and copy it manually.",
+    )
+    await copy.click()
+    await expect(page.getByRole("status")).toHaveText("")
+    await page.clock.runFor(1)
     await expect(page.getByRole("status")).toHaveText(
       "Could not copy. Select the code and copy it manually.",
     )
