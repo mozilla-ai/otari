@@ -121,6 +121,17 @@ function copyFor(field: ToolSettingField): FieldCopy & {
 interface ManagedToolSpec {
   toolId: string
   pricingKey: string
+  /**
+   * Whether the service's backend URL is what this tool waits on. A tool gated
+   * on anything else must not be sent to that field, which would not turn it on.
+   */
+  urlBacked?: boolean
+  /** The unavailable status, when "no backend" is not the reason. */
+  unavailableSummary?: string
+  /** What turns the tool on, in the same case. */
+  unavailableHelp?: string
+  /** A heading in `docs/tools.md`, when the service's own is not the tool's. */
+  docsAnchor?: string
 }
 
 interface GroupSpec {
@@ -153,8 +164,23 @@ const SERVICES: ServiceSpec[] = [
       "Give models live Search and Fetch tools and decide which workspaces may use them. Changes apply immediately.",
     docsAnchor: "web-search",
     managedTools: [
-      { toolId: "otari_web_search", pricingKey: "otari:web_search" },
-      { toolId: "otari_web_fetch", pricingKey: "otari:web_fetch" },
+      {
+        toolId: "otari_web_search",
+        pricingKey: "otari:web_search",
+        urlBacked: true,
+      },
+      {
+        toolId: "otari_web_fetch",
+        pricingKey: "otari:web_fetch",
+        // Fetch has no backend of its own, so the default "no backend" reason
+        // would send an operator to a URL field that cannot turn it on. It is
+        // off unless the deployment says otherwise, and the switch is
+        // startup-only: not in SETTABLE_KEYS, so no screen here can flip it.
+        unavailableSummary: "Unavailable · not enabled",
+        unavailableHelp:
+          "Fetch is off on this gateway. Set OTARI_WEB_FETCH_ENABLED=true (or web_fetch_enabled in config.yml) and restart.",
+        docsAnchor: "web-fetch",
+      },
     ],
     groups: [
       {
@@ -190,7 +216,11 @@ const SERVICES: ServiceSpec[] = [
       "Give models a sandbox to run generated code in, and decide which workspaces may use it. Changes apply immediately.",
     docsAnchor: "code-execution",
     managedTools: [
-      { toolId: "otari_code_execution", pricingKey: "otari:code_execution" },
+      {
+        toolId: "otari_code_execution",
+        pricingKey: "otari:code_execution",
+        urlBacked: true,
+      },
     ],
     groups: [
       {
@@ -349,11 +379,11 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
       {query.isLoading ? <LoadingGroups /> : null}
 
       {shown.map((service) => {
-        const managed = (service.managedTools ?? []).flatMap(({ toolId }) => {
+        const managed = (service.managedTools ?? []).flatMap((spec) => {
           const tool = (tools.data?.data ?? []).find(
-            (candidate) => candidate.id === toolId,
+            (candidate) => candidate.id === spec.toolId,
           )
-          return tool ? [tool] : []
+          return tool ? [{ spec, tool }] : []
         })
         // Where the "no backend" case sends the operator. Found by type rather
         // than by position, so it survives a group's keys being reordered.
@@ -371,14 +401,14 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
           <Fragment key={service.key}>
             {/* The question an operator arrives with, above the settings that
                 answer it: can this deployment run the tool at all. */}
-            {managed.map((tool) => (
+            {managed.map(({ spec, tool }) => (
               <ToolStatusGroup
                 key={tool.id}
                 tool={tool}
-                docsHref={toolsDocs(service.docsAnchor)}
-                urlFieldKey={
-                  tool.id === "otari_web_search" ? urlField?.key : undefined
-                }
+                docsHref={toolsDocs(spec.docsAnchor ?? service.docsAnchor)}
+                urlFieldKey={spec.urlBacked ? urlField?.key : undefined}
+                unavailableSummary={spec.unavailableSummary}
+                unavailableHelp={spec.unavailableHelp}
               />
             ))}
 

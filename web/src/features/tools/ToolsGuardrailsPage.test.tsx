@@ -665,6 +665,51 @@ describe("ToolsGuardrailsPage tool status", () => {
     ).toBeInTheDocument()
   })
 
+  it("sends an unconfigured sandbox to its own backend field", async () => {
+    // The shortcut is the only thing on the page that moves an operator from
+    // "why is this off" to the field that turns it on, and it is keyed off the
+    // service's url-typed field, not off which tool is being rendered.
+    mockApi()
+    const user = userEvent.setup()
+    renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
+
+    await user.click(
+      await screen.findByRole("button", { name: /otari_code_execution/ }),
+    )
+
+    await user.click(screen.getByRole("button", { name: "Set backend URL ↓" }))
+    expect(screen.getByLabelText(SANDBOX_URL)).toHaveFocus()
+  })
+
+  it("says Fetch is disabled rather than sending it to a URL field", async () => {
+    // Fetch has no backend of its own: web_fetch_enabled is startup-only, so
+    // the default "set a backend URL" reason would name a field that cannot
+    // turn it on.
+    mockApi({
+      tools: {
+        object: "list",
+        data: TOOLS.data.map((tool) =>
+          tool.id === "otari_web_fetch" ? { ...tool, available: false } : tool,
+        ),
+      },
+    })
+    const user = userEvent.setup()
+    renderWithClient(<ToolsGuardrailsPage only="web_search" />)
+
+    const row = await screen.findByRole("button", {
+      name: /otari_web_fetch/,
+    })
+    expect(row).toHaveTextContent("Unavailable · not enabled")
+    await user.click(row)
+
+    expect(
+      screen.getByText(/Set OTARI_WEB_FETCH_ENABLED=true/),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Set backend URL ↓" }),
+    ).not.toBeInTheDocument()
+  })
+
   it("opens the Fetch declaration a client must send", async () => {
     mockApi()
     const user = userEvent.setup()
@@ -675,6 +720,10 @@ describe("ToolsGuardrailsPage tool status", () => {
     )
 
     expect(screen.getByText('"type": "otari_web_fetch"')).toBeInTheDocument()
+    // Fetch's own docs heading, not the Web search one its card sits under.
+    expect(
+      screen.getByRole("link", { name: /Developer docs/ }),
+    ).toHaveAttribute("href", expect.stringContaining("tools.md#web-fetch"))
   })
 
   it("renders and saves a separate Fetch per-call price", async () => {

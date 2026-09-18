@@ -46,11 +46,17 @@ export function ToolStatusGroup({
   tool,
   docsHref,
   urlFieldKey,
+  unavailableSummary = "Unavailable · no backend",
+  unavailableHelp = "No backend URL is set, so every call is rejected with 400.",
 }: {
   tool: ManagedTool
   docsHref: string
   /** The setting the "no backend" case sends the operator to, when there is one. */
   urlFieldKey?: string
+  /** The trailing status, for a tool that does not wait on a backend URL. */
+  unavailableSummary?: string
+  /** What turns that tool on, in place of setting a URL. */
+  unavailableHelp?: string
 }) {
   const [isOpen, setIsOpen] = useState(false)
   // The provider-named keywords interception adds. Absent when it is off, which
@@ -67,7 +73,7 @@ export function ToolStatusGroup({
         trailing={
           <span className="flex items-center gap-2.5 text-mono-overline text-subtle">
             <Dot className={tool.available ? "bg-success" : "bg-text-subtle"} />
-            {tool.available ? "Available" : "Unavailable · no backend"}
+            {tool.available ? "Available" : unavailableSummary}
           </span>
         }
       >
@@ -78,7 +84,7 @@ export function ToolStatusGroup({
             <SettingRow
               nested
               label="Why unavailable"
-              help="No backend URL is set, so every call is rejected with 400."
+              help={unavailableHelp}
               control={
                 urlFieldKey ? (
                   <button
