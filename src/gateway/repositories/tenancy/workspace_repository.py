@@ -51,6 +51,10 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
           and a membership created after that read rides the delete cascade
           while the ceiling keyed on it survives.
 
+        Gotcha: this serializes a deletion against membership creation only.
+        A ceiling created directly on a workspace or membership scope takes no
+        lock, so that path can still race a deletion.
+
         ``FOR UPDATE`` is a no-op on SQLite, which admits one writer at a time
         for the whole database anyway; PostgreSQL is where this is
         load-bearing.
