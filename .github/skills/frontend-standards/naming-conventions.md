@@ -30,6 +30,19 @@ const isSignedIn = session !== undefined
 const hasEnforcedBudget = budget?.limit_usd !== undefined
 ```
 
+**A single letter says less than any of those nouns**, so it is held to the same rule. A
+lambda binding a domain object names it: `(entry) => entry.latency_ms`, not
+`(e) => e.latency_ms`, which in a React file reads as an event to everyone who has written a
+handler. The same goes for `p` over a placement or a provider, `o` over an option, `w` over a
+workspace.
+
+Two idioms are exempt and stay:
+
+- `(a, b)` in a comparator. `rows.sort((a, b) => a.cost - b.cost)` is read the same way
+  everywhere and naming the pair adds nothing.
+- The parameter of a `setState` updater, which is the previous value of the thing already
+  named on the left: `setCount((n) => n + 1)`.
+
 ## Functions
 
 Start with a verb: `formatCost`, `parseSearch`, `revokeKey`, `describeSurface`. A function
@@ -95,6 +108,5 @@ keys**. The UI, the tests, and these docs use those names and no synonyms.
 
 ## Array work reads declaratively
 
-`map`, `filter`, `reduce`, `some`, `every`, `find`, `flatMap` over an index loop. The loop is
-not wrong, it is just more to read for the same result, and it invites an off-by-one nobody
-reviews closely.
+In [typescript-and-react.md](./typescript-and-react.md), with the rest of the language
+conventions: it governs how a transformation is written rather than what it is called.

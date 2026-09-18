@@ -90,12 +90,37 @@ Past a few hundred rows, paginate at the endpoint rather than rendering them. If
 genuinely needs thousands of rows on screen at once, virtualization is the answer, and it is a
 deliberate addition to discuss, not something to slip into a page.
 
+## Reading layout is a synchronous flush
+
+`getBoundingClientRect()`, `offsetWidth`, `scrollTop` and their siblings force the browser to
+resolve pending layout before they can answer. One read is nothing. A read in a handler that
+fires per pointer move, interleaved with a state write that dirties layout again, is a
+read-write cycle per event for the length of a drag.
+
+- **Measure once, outside the loop.** A value that cannot change during an interaction is read
+  where the interaction starts and carried in the ref that already tracks it.
+- **Batch reads, then write.** `LoginBackground.tsx:50` is the worked example: both
+  `getBoundingClientRect()` calls sit together in one `measure()`, everything else runs off
+  dirty flags, and a single `requestAnimationFrame` coalesces the lot. It is also the model for
+  respecting `document.hidden` and `prefers-reduced-motion` in a render loop.
+- **Prefer an observer to a listener.** `ResizeObserver` hands you `contentRect` without
+  forcing anything; a `resize` listener that measures does force it, on every event.
+- **`{ passive: true }` on `scroll`, `wheel` and `touchmove`**, unless the handler genuinely
+  calls `preventDefault`. Without it the browser waits for the handler before it can scroll.
+  `design-system/layout/TableScrollFrame.tsx:37` is the tree's only scroll listener and has it.
+
 ## Effects clean up after themselves
 
-Every listener, interval, subscription, and observer that an effect creates is removed in the
-function it returns. `AppShell` (the mobile media query) and `useTheme` (the
-`prefers-color-scheme` query) are the worked examples in this tree, including the Safari
-fallback for the deprecated listener API. A leak here is per-navigation, so it compounds in a
+Every listener, interval, subscription, observer **and timer** that an effect creates is
+removed in the function it returns, and that includes a timer started from an event handler or
+a mutation callback rather than from an effect. Two failures, not one: a timer outliving its
+component touches state or a DOM node that is gone, and a second trigger inside the window
+stacks a timer rather than replacing it, so the first one's expiry cuts the second one short.
+`design-system/actions/CopyField.tsx:215` names both and solves both with a ref that holds
+the handle, cleared on the next trigger and on unmount. `AppShell` (the mobile media query)
+and `useTheme` (the `prefers-color-scheme` query) are the worked examples in this tree,
+including the Safari fallback for the deprecated listener API. A leak here is per-navigation,
+so it compounds in a
 dashboard people leave open all day.
 
 ## Watch the bundle when you add a dependency

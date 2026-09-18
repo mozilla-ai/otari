@@ -140,7 +140,15 @@ rather than in a wrapper: it does not just style the component, it takes the cal
 to restyle it away.
 
 When you do write one, name in its comment which of the three rungs above does not reach the
-value, so a reader can tell a deliberate last resort from a shortcut.
+value, so a reader can tell a deliberate last resort from a shortcut. **The comment goes on the
+block of related selectors, not on every selector in it**: a table's column widths are one
+decision written as nine rules, and nine copies of the same sentence is not the point. One
+sentence heading the run is what the rule asks for.
+
+A per-table block paired with `TableScrollFrame` is the sanctioned shape rather than a last
+resort, so it owes the reader what the sizing is *for* rather than an argument for existing at
+all. `globals.css:3171`'s "Key lanes stay fixed while the name absorbs the available width" is
+the model.
 
 ## Check the shared primitives before hand-rolling
 

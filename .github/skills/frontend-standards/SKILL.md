@@ -121,9 +121,15 @@ can link Vite's esbuild binary at all.
 - New HeroUI **v2** patterns: granular imports, `HeroUIProvider`, `classNames={{ slot }}`,
   `onValueChange`, `color` on `Button`, or a `content1`/`content2` utility. v3 ignores some of
   these silently, which is why the full v2-to-v3 table is in [components.md](./components.md).
-- Inline `style={{}}` or `<style>` tags. Use Tailwind utilities or a token. (The pre-paint
-  block in `index.html` is the one exception, and [layout-stability.md](./layout-stability.md)
-  says why.)
+- Inline `style={{}}` or `<style>` tags for anything a class can express. Color, spacing,
+  type and radius come from a token or a utility. **A value computed at runtime that no class
+  can express is the exception**: a percentage width, a computed offset, a position that
+  follows the data. Tailwind emits only the utilities the source asks for, so `w-[${pct}%]`
+  compiles to nothing and the value has to reach the element as a property. `Meter.tsx:16` and
+  `SpendMeter.tsx:92` are the reference sites; `ShareCard.tsx` is a documented whole-file
+  exception for a different reason (it is rasterized through an `<img>`, where custom
+  properties do not resolve). The pre-paint block in `index.html` is the only `<style>` tag,
+  and [layout-stability.md](./layout-stability.md) says why.
 - A HeroUI `<Link href>` for an internal route: it is a full page reload. Use TanStack
   Router's `<Link to>`.
 - Manual polling with bare `setInterval`/`setTimeout`. Use TanStack Query's `refetchInterval`

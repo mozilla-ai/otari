@@ -57,6 +57,42 @@ TypeScript runs in `strict` mode; `pnpm --dir web run typecheck` must pass. Reac
   cannot verify. See [performance.md](./performance.md).
 - Keep a component per file, colocated with its test.
 
+## Array work reads declaratively
+
+A loop that produces a value is a transformation written the long way. `map`, `filter`,
+`reduce`, `some`, `every`, `find`, `findLastIndex`, `flatMap` say which transformation it is in
+the first word, where `for` says only that something repeats and makes the reader hold an
+accumulator to find out.
+
+That covers **`for...of`, `for...in` and the index loop alike**:
+
+```ts
+// for...of building a lookup
+const byWorkspace = new Map(placements.map((placement) => [placement.workspaceId, placement]))
+
+// for...in over an object
+const enabled = Object.entries(settings).filter(([, value]) => value.isEnabled)
+
+// an index scan keeping the last match
+const startIndex = timestamps.findLastIndex((value) => value <= target)
+```
+
+`for...in` has a second reason: it walks inherited enumerable keys and gives you strings, so
+`Object.keys`, `Object.values` and `Object.entries` are both clearer and narrower.
+
+**`forEach` is right when the body is genuinely only a side effect** and there is no value
+coming back: aborting each controller in a set, appending each id to a `URLSearchParams`.
+Reach for it there and a reader knows at the first word that nothing is being produced. What
+it must not be is a `map`, a `filter` or a `reduce` with the result pushed into a variable
+declared above it, which is the shape that hides the transformation from the reader and gives
+the accumulator a chance to escape.
+
+Two cases stay imperative, because each iteration decides whether there is a next one and no
+array method expresses that:
+
+- consuming a stream (`shared/api/playground.ts`'s SSE reader)
+- a bounded request walk (`shared/api/paging.ts`), where the loop ends on a short page
+
 ## Testing
 
 Vitest and Testing Library, colocated with the code they cover, mocking the transport rather

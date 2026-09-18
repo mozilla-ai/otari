@@ -43,7 +43,12 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    `className` re-skinning something the component already styles is a finding too; reserve
    `className` for layout/position. Space siblings with
    `gap-*` on the parent, not `m-*` on children, and write arbitrary values in `rem`
-   (`h-[20rem]`, not `h-[320px]`; a `1px` border is the exception).
+   (`h-[20rem]`, not `h-[320px]`; a `1px` border is the exception). A shared component never
+   bakes an outside margin into its own root: what sits between two things is the parent's
+   decision. An inline `style={{}}` is a finding for anything a class can express, and is
+   **correct** for a value computed at runtime that no class can (a percentage width, a
+   computed offset): Tailwind emits only the utilities the source names, so `w-[${pct}%]`
+   compiles to nothing.
 
 3. **Color and type come from the semantic tokens** in `web/src/styles/globals.css`. The
    tokens are the design system; HeroUI and Tailwind consume it, so a utility that does not
@@ -77,7 +82,19 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    refactor. `unknown` plus a guard where a type is genuinely unknown, not `any`; a discriminated
    union rather than a bag of optionals; named exports and named imports, no barrel files;
    correct effect dependency arrays with cleanup; derive from props/query data rather than
-   duplicating into state. The React Compiler is enabled, so hand-written
+   duplicating into state (copying a prop into `useState` and re-syncing it with an effect is
+   the finding; a `key` or an adjust-during-render is the fix). Cleanup covers **timers**, and
+   covers one started from an event handler or a mutation callback, not only from an effect:
+   an uncleared timer touches a gone component and stacks rather than replaces when its
+   trigger fires twice inside the window. Names say what a value is, and a single letter says
+   less than the generic nouns already banned, so `(entry) => entry.latency_ms` rather than
+   `(e) => …`; the exemptions are a comparator's `(a, b)` and a `setState` updater's previous
+   value. A loop that produces a value is a transformation written the long way, so `for...of`,
+   `for...in` and an index loop all read better as `map`/`filter`/`reduce`/`find`/`flatMap`
+   (`for...in` additionally walks inherited keys: use `Object.entries`). `forEach` is correct
+   where the body is genuinely only a side effect and wrong where it is a transformation with
+   the result pushed into an outer variable. Consuming a stream and a bounded request walk stay
+   imperative. The React Compiler is enabled, so hand-written
    `useMemo`/`useCallback`/`React.memo` needs a stated reason. See
    [typescript-and-react.md](../skills/frontend-standards/typescript-and-react.md) and
    [performance.md](../skills/frontend-standards/performance.md).
@@ -152,8 +169,33 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
 
 10. **Tests for changed behavior.** Colocated Vitest tests (`Foo.tsx` → `Foo.test.tsx`) that
     query the way a user would (`getByRole`/`getByLabelText`/`getByText`, not `getByTestId`),
-    render real providers, and mock only the network boundary (`apiFetch`), not the hooks. Each
+    render real providers, and mock only the network boundary, not the hooks. Two forms reach
+    that boundary and both are correct: `vi.spyOn(apiClient, "apiFetch")` for an authenticated
+    page test, and `vi.mock("@/shared/api/client", importOriginal)` where the subject reaches
+    the transport through several exports or before a spy lands, which is the public auth and
+    invitation flows. A class selector used to *find* an element is a finding; the one
+    exception is pinning a layout property jsdom cannot compute (a reserved height, a collapsed
+    edge), asserted with `toHaveClass` on one scoped element, preferring a class that names a
+    token, with the reason at the site. Where a state has an accessible expression, assert that
+    instead: `charts.tsx` switches `role="group"` / `role="img"` on drag selection, so the role
+    is the assertion and the cursor utility is not. Each
     file restores the globals it overrode and carries no per-assertion timeout override. A new
     page also needs a screenshot entry in `web/e2e/screenshots/`, which is what will cover it
     at three viewports in both themes; that suite runs on demand today rather than as a PR
     gate, so the entry is owed even though nothing fails without it. See [testing.md](../skills/frontend-standards/testing.md).
+
+11. **Rendering work is part of the review.** Animate `transform` and `opacity`; a property
+    that changes geometry (`width`, `height`, `top`, `max-height`, `grid-template-rows`) runs
+    layout every frame and needs its reason in the rule's comment, as `.otari-detail-reveal`
+    has. Every animation answers `prefers-reduced-motion`. `will-change` is applied for the
+    duration of an animation and removed after, never left on, because a permanent one is a
+    permanent layer. Reading layout (`getBoundingClientRect`, `offsetWidth`, `scrollTop`)
+    forces a synchronous flush, so it does not belong in a pointermove handler or an
+    unthrottled `resize` listener: measure once where the interaction starts, batch reads
+    before writes, prefer a `ResizeObserver`'s `contentRect`, and coalesce through one
+    `requestAnimationFrame` (`features/auth/background/LoginBackground.tsx` is the worked
+    example). `scroll`, `wheel` and `touchmove` listeners take `{ passive: true }` unless they
+    call `preventDefault`. Stacking has no token family yet, so reuse a sibling's `z-` value
+    and say what a new layer sits above rather than inventing a higher number. See
+    [performance.md](../skills/frontend-standards/performance.md) and
+    `web/design/motion-and-access.md`.

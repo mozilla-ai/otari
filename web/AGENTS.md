@@ -306,12 +306,21 @@ sized by its neighbor's wording was never sized. The rule that prevents it is
 `design/layout.md`, "Repeated rows": a trailing action takes `shrink-0` in any
 flex row.
 
-**Every data table here is `table-layout: auto` with 16px cell padding and no
-declared column widths anywhere**, so the browser re-solves every column from its
-content on each render. Any plan of the form "take the width from column X" is
-therefore a guess rather than a specification: the solver decides which column
-pays, and the stylesheet does not say. Measure a column change by injecting the
-new cell into the live table and reading the result back.
+**Read the table's own block in `globals.css` before measuring anything.** Ten of
+the sixteen per-table classes declare widths on some of their columns, keyed on
+`data-key`, and `.otari-keys-table` is `table-layout: fixed` outright
+(`globals.css:3172`, "Key lanes stay fixed while the name absorbs the available
+width"). So a width is often written down rather than solved, and measuring the
+live table to rediscover it is the slower route to a worse answer. Read both
+blocks before changing one: `.otari-breakdown`'s columns are specified in two
+places, as `min-width` at `globals.css:2720` and as `width` at `:3268`, 550 lines
+apart, and neither mentions the other.
+
+What is still true is the part that made the advice worth having. A table is
+`table-layout: auto` unless its block says otherwise, with 16px cell padding, so
+**the columns nothing specifies are re-solved from content on every render** and
+"take the width from column X" is a guess for those. Measure a change to one of
+them by injecting the new cell into the live table and reading the result back.
 
 - Give every part of an injected cell `flex: 0 0 auto`. Without it the parts
   shrink to fit and overflow their own element with no error, leaving column

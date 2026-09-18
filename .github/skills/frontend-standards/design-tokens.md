@@ -333,6 +333,13 @@ class name needs something that reads class names.
   the role is missing, not the shade.
 - **No numbered Tailwind palette classes.** `bg-emerald-50`, `text-gray-900`, `border-red-200`
   bypass the whole system and are invisible to the dark theme. A status color is a token.
+- **Stacking is not tokenized yet, and that is the known gap.** Twelve Tailwind `z-` utilities
+  across three values (`z-10`, `z-40`, `z-50`) in the whole tree, plus a bare `z-index: 1`
+  used thirteen times in `globals.css`, so "which of these is above which, and why" is
+  answered by reading all of them. Until there is a named family (`--z-sticky`,
+  `--z-overlay`, and so on), reuse a value an existing sibling already uses rather than
+  inventing a higher one, and say in a comment what the new layer sits above. A `z-[999]`
+  is the finding this is here to prevent.
 - **Keep it recognizable as `otari-ai/frontend/src/index.css`.** The control-plane pages land
   here at M5 and have to land on this palette without a reconciliation pass, so a divergence
   in a token's name, value, or reasoning comment costs more than it looks like it does.
