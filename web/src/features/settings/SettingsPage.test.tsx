@@ -618,6 +618,45 @@ describe("SettingsPage", () => {
     expect(save).not.toBeDisabled()
   })
 
+  it("shows a whitespace-only save as the unset value it stored", async () => {
+    // Whitespace clears the field, so the box goes back to its placeholder and
+    // Save disarms rather than offering to send the same null again.
+    const withValue = {
+      ...SETTINGS,
+      config: SETTINGS.config.map((field) =>
+        field.key === "vision_describe_model"
+          ? { ...field, value: "ollama/qwen2-vl" }
+          : field,
+      ),
+    }
+    const fetchMock = mockApi(withValue)
+    const user = userEvent.setup()
+
+    renderWithClient(<SettingsPage />)
+    await screen.findByText(/Version 1.2.3/)
+
+    const input = screen.getByRole("textbox", { name: "vision_describe_model" })
+    await user.clear(input)
+    await user.type(input, "   ")
+    await user.click(
+      screen.getByRole("button", { name: "Save vision_describe_model" }),
+    )
+
+    const call = fetchMock.mock.calls.find(
+      ([, init]) => (init?.method ?? "") === "PATCH",
+    )
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      vision_describe_model: null,
+    })
+
+    await waitFor(() => {
+      expect(input).toHaveValue("")
+    })
+    expect(
+      screen.getByRole("button", { name: "Save vision_describe_model" }),
+    ).toBeDisabled()
+  })
+
   it("keeps an unsaved numeric edit when another operator's value arrives", async () => {
     mockApiMovingTo(SETTINGS, MOVED_SETTINGS)
     const user = userEvent.setup()

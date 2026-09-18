@@ -146,7 +146,12 @@ function TextSetting({
   const committed = typeof field.value === "string" ? field.value : ""
   const [draft, setDraft] = useDraft(committed)
 
-  const changed = draft !== committed
+  // What a save would store, as text: a box holding only whitespace clears the
+  // value. Comparing and showing this rather than the raw text is what keeps
+  // Save armed for a real change only, and what leaves the box reading the
+  // value it just sent.
+  const saved = draft.trim() === "" ? "" : draft
+  const changed = saved !== committed
 
   return (
     <div className="flex items-center gap-2">
@@ -164,7 +169,10 @@ function TextSetting({
         variant="primary"
         aria-label={`Save ${field.key}`}
         isDisabled={disabled || !changed}
-        onPress={() => onSave(draft.trim() === "" ? null : draft)}
+        onPress={() => {
+          setDraft(saved)
+          onSave(saved === "" ? null : saved)
+        }}
       >
         Save
       </Button>
