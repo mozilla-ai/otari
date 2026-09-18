@@ -8,7 +8,7 @@
  */
 
 import { Link } from "@tanstack/react-router"
-import { type ReactNode, type RefObject, useMemo, useState } from "react"
+import { type RefObject, useMemo, useState } from "react"
 import { FiTrash2 } from "react-icons/fi"
 
 import type { PolicyGuardrail, PolicySpec, User } from "@/client"
@@ -18,15 +18,10 @@ import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { FieldAction } from "@/design-system/forms/FieldAction"
-import {
-  ControlField,
-  FieldMessages,
-} from "@/design-system/forms/FieldMessages"
+import { ControlField } from "@/design-system/forms/FieldMessages"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
-import { Tab, TabRow } from "@/design-system/navigation/TabRow"
-import { ModelComboBox, useModelCatalog } from "@/features/models/ModelComboBox"
+import { ModelComboBox } from "@/features/models/ModelComboBox"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
-import { UserMultiSelect } from "@/features/users/UserMultiSelect"
 import { userOptionText } from "@/features/users/userOptions"
 import {
   useCreateAlias,
@@ -37,17 +32,23 @@ import {
 import { useToolSettings } from "@/shared/api/tools"
 import { useUsers } from "@/shared/api/users"
 
+import { ModeToggle } from "./ModeToggle"
 import {
-  defaultTargetOf,
-  initialPool,
+  buildInitialPool,
+  computeShares,
+  describePartialScopeSave,
+  findBudgetConditions,
+  findFallthroughIndex,
+  findFallthroughTarget,
+  findRouterBackend,
+  findWeights,
   KNN_BACKEND,
   MAX_CANDIDATES,
   type RoutingRow,
-  routerBackendOf,
-  sharesOf,
   WEIGHTED_BACKEND,
-  weightsOf,
 } from "./policyModel"
+import { ScopePicker } from "./ScopePicker"
+import { SectionRow } from "./SectionRow"
 
 type RouterBackend = typeof KNN_BACKEND | typeof WEIGHTED_BACKEND
 
@@ -116,151 +117,6 @@ function SectionRemove({
   )
 }
 
-/**
- * One repeated row of a policy section, with the model catalog's hint under the
- * whole row rather than under the picker inside it.
- *
- * The hint is a sentence ("Could not list models for X. Check that provider's
- * credentials, ..."), and at this dialog's width it wraps. A wrapped message
- * makes its field taller than the siblings it shares an `items-end` row with,
- * which lifts that field's input line clear of theirs: measured at 40px on the
- * pool rows and 20px on the chain. `web/design/forms.md` ("Control rows") names
- * the break and this remedy. The picker keeps its empty caption line, so every
- * child of the row still reserves exactly one, and the hint is announced with
- * the input through `describedBy` because text outside a field never reaches
- * its description slot.
- */
-function SectionRow({
-  id,
-  modelValue,
-  children,
-}: {
-  id: string
-  modelValue: string
-  children: ReactNode
-}) {
-  const { hint } = useModelCatalog(modelValue)
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex flex-wrap items-end gap-3">{children}</div>
-      {hint ? (
-        <FieldMessages shouldReserve={false}>
-          <span id={id} className="text-muted">
-            {hint}
-          </span>
-        </FieldMessages>
-      ) : null}
-    </div>
-  )
-}
-
-/** Which entry of `initialPool` serves when the router declines. */
-function initialSafeIndex(spec: PolicySpec): number {
-  const index = initialPool(spec).indexOf(defaultTargetOf(spec))
-  return index === -1 ? 0 : index
-}
-
-/** The conditional entries, i.e. everything that is not the fallthrough. */
-function conditionsOf(
-  spec: PolicySpec,
-): { threshold: number; target: string }[] {
-  return spec.select
-    .filter(
-      (entry) =>
-        entry.when?.budget_used_pct?.gte !== undefined &&
-        entry.target !== undefined,
-    )
-    .map((entry) => ({
-      threshold: entry.when!.budget_used_pct!.gte!,
-      target: entry.target!,
-    }))
-}
-
-/** Who a policy applies to. Same control and wording as assigning a budget,
- *  because naming the people something applies to is the same decision.
- *
- *  Three states, not two. `null` is every caller, which is one policy with no
- *  scope. A list is the scoped case, and because a policy's key is its name
- *  plus its user, each person in it is a row of their own. An empty list is
- *  therefore scoped with nobody chosen yet, which is not "every caller" and is
- *  not something the form will submit.
- */
-function ScopePicker({
-  userIds,
-  users,
-  onChange,
-  isSettled,
-}: {
-  userIds: string[] | null
-  users: User[]
-  onChange: (userIds: string[] | null) => void
-  /**
-   * Whether a write under this name has already landed, which freezes the
-   * scope. See the branch below for why it cannot be changed after that.
-   */
-  isSettled: boolean
-}) {
-  const isScoped = userIds !== null
-
-  return (
-    <div className="flex flex-col gap-3">
-      <ControlField
-        label="Applies to"
-        description="A global policy resolves for every caller. A scoped one resolves only for the people named, and takes precedence over a global policy of the same name."
-      />
-      {isSettled ? (
-        // Withheld, not disabled: there is no write that takes a policy back,
-        // so a control offering to change who this applies to would be
-        // offering something this form cannot do. Taking a person out of the
-        // selection would leave the policy already written for them in place,
-        // and choosing every caller would leave it in place AND outranking the
-        // global one for exactly that person, which is the precedence rule
-        // stated above. Stated rather than greyed out, because a disabled
-        // control with no reason beside it teaches nothing.
-        <p className="text-caption">
-          Some policies under this name have already been created, and this form
-          cannot take one back, so who it applies to is fixed now. Create policy
-          writes the ones still missing. To remove one you did not mean to
-          create, close this and delete it from the list.
-        </p>
-      ) : (
-        <>
-          <TabRow>
-            {/* Each tab acts only on a change of state: pressing the one
-                already active would otherwise throw away the people chosen
-                under it. */}
-            <Tab
-              isActive={!isScoped}
-              onPress={() => {
-                if (isScoped) onChange(null)
-              }}
-            >
-              Every caller
-            </Tab>
-            <Tab
-              isActive={isScoped}
-              onPress={() => {
-                if (!isScoped) onChange([])
-              }}
-            >
-              Specific users
-            </Tab>
-          </TabRow>
-          {userIds === null ? null : (
-            <UserMultiSelect
-              label="Users"
-              value={userIds}
-              onChange={onChange}
-              users={users}
-              description="One policy is written per person, each resolving only for them."
-            />
-          )}
-        </>
-      )}
-    </div>
-  )
-}
-
 /** What to call a user id in prose, matching what the picker shows.
  *
  *  Through the same helper both pickers label their rows with, so somebody who
@@ -278,63 +134,6 @@ function useUserLabel(users: User[]): (userId: string) => string {
   }
 }
 
-/** The account of a save that wrote some of its scopes and not the others.
- *
- *  Both halves by name, because "it failed" over a part-written save leaves the
- *  operator to work out which rows exist by reading the table. The ones that
- *  landed are remembered, so the retry the last sentence promises is real
- *  rather than a second pass over everything.
- */
-function partialScopeReport(
-  written: string[],
-  failed: { userId: string; reason: string }[],
-  labelFor: (userId: string) => string,
-): string {
-  const created =
-    written.length > 0
-      ? `Created for ${written.map(labelFor).join(", ")}. `
-      : ""
-  const missing = failed
-    .map((entry) => `${labelFor(entry.userId)} (${entry.reason})`)
-    .join(", ")
-  return `${created}Not created for ${missing}. Submitting again retries only the ones still missing.`
-}
-
-const MODE_VALUES = ["block", "monitor"] as const
-
-/** A two-value mode switch. The codebase has no Select component and four
- *  hand-rolled `aria-pressed` groups, so this follows that pattern rather than
- *  introducing a fifth idiom. */
-function ModeToggle({
-  label,
-  hint,
-  value,
-  onChange,
-}: {
-  label: string
-  hint?: string
-  value: "block" | "monitor"
-  onChange: (value: "block" | "monitor") => void
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-body">{label}</span>
-      <TabRow>
-        {MODE_VALUES.map((mode) => (
-          <Tab
-            key={mode}
-            isActive={value === mode}
-            onPress={() => onChange(mode)}
-          >
-            {mode}
-          </Tab>
-        ))}
-      </TabRow>
-      {hint === undefined ? null : <span className="text-caption">{hint}</span>}
-    </div>
-  )
-}
-
 /** Create or edit a policy.
  *
  *  Reading order mirrors the schema so the form and the YAML teach the same
@@ -348,7 +147,7 @@ export function PolicyForm({
   initialTarget = "",
   isOpen = true,
   returnFocusRef,
-  deploymentWide,
+  isDeploymentWide,
   workspaceId,
   onClose,
 }: {
@@ -373,7 +172,7 @@ export function PolicyForm({
    * a user scope. Both mutation pairs are always created, as hooks must be, and
    * only the pair this names is ever mutated.
    */
-  deploymentWide: boolean
+  isDeploymentWide: boolean
   /**
    * The workspace the write lands in, on either surface.
    *
@@ -388,7 +187,7 @@ export function PolicyForm({
   const saveAlias = useCreateAlias()
   const saveOrgPolicy = useSetOrganizationRoutingPolicy()
   const saveOrgAlias = useCreateOrganizationAlias()
-  const tenantScoped = !deploymentWide
+  const isTenantScoped = !isDeploymentWide
   const isEditing = existing !== null
   // Editing an alias writes back through the alias API: it is still a row in
   // model_aliases, and silently rewriting it as a policy would leave the original
@@ -403,7 +202,7 @@ export function PolicyForm({
   // operator route, so asking for it as a tenant admin buys a 403 for a picker
   // this form does not offer them, and an edit cannot move a scope so it does
   // not offer one either.
-  const canScope = !isEditing && !tenantScoped
+  const canScope = !isEditing && !isTenantScoped
   // Read here rather than inside the picker, because the account of a
   // part-written save names the same people the chips do and so needs the same
   // roster, and two reads on one key would be two gates that have to agree.
@@ -442,11 +241,11 @@ export function PolicyForm({
   )
   const [isWritingScopes, setIsWritingScopes] = useState(false)
   const [target, setTarget] = useState(
-    existing ? defaultTargetOf(existing.spec) : initialTarget,
+    existing ? findFallthroughTarget(existing.spec) : initialTarget,
   )
   const [chain, setChain] = useState<string[]>(existing?.spec.on_failure ?? [])
   const [conditions, setConditions] = useState(
-    existing ? conditionsOf(existing.spec) : [],
+    existing ? findBudgetConditions(existing.spec) : [],
   )
   const [guardrails, setGuardrails] = useState<PolicyGuardrail[]>(
     existing?.spec.guardrails ?? [],
@@ -458,16 +257,16 @@ export function PolicyForm({
   // disagree with themselves. This mirrors what the gateway does with the spec,
   // where the default target joins the pool if it was left out.
   const [candidates, setCandidates] = useState<string[]>(
-    existing ? initialPool(existing.spec) : [],
+    existing ? buildInitialPool(existing.spec) : [],
   )
   const [safeIndex, setSafeIndex] = useState<number>(
-    existing ? initialSafeIndex(existing.spec) : 0,
+    existing ? findFallthroughIndex(existing.spec) : 0,
   )
   // Which backend orders the pool. The two share the pool control, because both are
   // "these models, one of them per request"; they differ in what decides and in
   // whether a share sits next to each entry.
   const [backend, setBackend] = useState<RouterBackend>(
-    existing && routerBackendOf(existing.spec) === WEIGHTED_BACKEND
+    existing && findRouterBackend(existing.spec) === WEIGHTED_BACKEND
       ? WEIGHTED_BACKEND
       : KNN_BACKEND,
   )
@@ -477,8 +276,8 @@ export function PolicyForm({
   // as "7") and turns a cleared field into a silent 0. Parsed once, below.
   const [weights, setWeights] = useState<string[]>(() => {
     if (existing === null) return []
-    const declared = weightsOf(existing.spec)
-    return initialPool(existing.spec).map((selector) =>
+    const declared = findWeights(existing.spec)
+    return buildInitialPool(existing.spec).map((selector) =>
       String(declared[selector] ?? 0),
     )
   })
@@ -493,7 +292,7 @@ export function PolicyForm({
   const weightsWellFormed = weightValues.every(
     (value) => Number.isFinite(value) && value >= 0,
   )
-  const shares = sharesOf(
+  const shares = computeShares(
     weightValues.map((value) =>
       Number.isFinite(value) ? Math.max(0, value) : 0,
     ),
@@ -690,7 +489,9 @@ export function PolicyForm({
       onClose()
       return
     }
-    setPartialFailure(new Error(partialScopeReport(done, failed, labelForUser)))
+    setPartialFailure(
+      new Error(describePartialScopeSave(done, failed, labelForUser)),
+    )
   }
 
   const submit = () => {
@@ -701,7 +502,7 @@ export function PolicyForm({
     setPartialFailure(undefined)
     const scope = userIds === null ? null : (userIds[0] ?? null)
     if (editingAlias) {
-      if (tenantScoped && workspaceId !== null) {
+      if (isTenantScoped && workspaceId !== null) {
         saveOrgAlias.mutate(
           {
             name: name.trim(),
@@ -723,7 +524,7 @@ export function PolicyForm({
       )
       return
     }
-    if (tenantScoped && workspaceId !== null) {
+    if (isTenantScoped && workspaceId !== null) {
       saveOrgPolicy.mutate(
         {
           name: name.trim(),
@@ -892,7 +693,7 @@ export function PolicyForm({
           Who this applies to is the other half of the key. It cannot be changed
           here: delete and recreate to move it between scopes.
         </p>
-      ) : tenantScoped ? (
+      ) : isTenantScoped ? (
         // Withheld rather than disabled: a user id is a deployment-wide
         // identifier, so the tenant-scoped writer refuses one outright and
         // an organization's entries are workspace-wide. Offering the picker

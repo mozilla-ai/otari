@@ -27,12 +27,12 @@ export const WEIGHTED_BACKEND = "weighted"
 export const MAX_CANDIDATES = 5
 
 /** The fallthrough target of a spec, which every valid spec has exactly one of. */
-export function defaultTargetOf(spec: PolicySpec): string {
+export function findFallthroughTarget(spec: PolicySpec): string {
   return spec.select.find((entry) => entry.default !== undefined)?.default ?? ""
 }
 
 /** The router's candidate pool, or an empty list for a policy with no router. */
-export function candidatesOf(spec: PolicySpec): string[] {
+export function findCandidates(spec: PolicySpec): string[] {
   return (
     spec.select.find((entry) => entry.router !== undefined)?.candidates ?? []
   )
@@ -45,10 +45,10 @@ export function candidatesOf(spec: PolicySpec): string[] {
  *  shows the models that will actually be dispatched, in the order they were
  *  written, rather than a pool that is missing its own fallback.
  */
-export function initialPool(spec: PolicySpec): string[] {
-  const candidates = candidatesOf(spec)
+export function buildInitialPool(spec: PolicySpec): string[] {
+  const candidates = findCandidates(spec)
   if (candidates.length === 0) return []
-  const fallthrough = defaultTargetOf(spec)
+  const fallthrough = findFallthroughTarget(spec)
   return candidates.includes(fallthrough)
     ? candidates
     : [...candidates, fallthrough]
@@ -60,21 +60,19 @@ export function initialPool(spec: PolicySpec): string[] {
  *  router. Comparing the raw string here would show a policy the gateway routes
  *  perfectly well as an unrecognized backend, read-only and mislabelled.
  */
-export function normalizedBackend(
-  name: string | undefined,
-): string | undefined {
+export function normalizeBackend(name: string | undefined): string | undefined {
   return name?.trim().toLowerCase()
 }
 
 /** The router backend a policy names, or undefined for a policy with no router. */
-export function routerBackendOf(spec: PolicySpec): string | undefined {
-  return normalizedBackend(
+export function findRouterBackend(spec: PolicySpec): string | undefined {
+  return normalizeBackend(
     spec.select.find((entry) => entry.router !== undefined)?.router,
   )
 }
 
 /** The declared traffic split, empty unless the policy is weighted. */
-export function weightsOf(spec: PolicySpec): Record<string, number> {
+export function findWeights(spec: PolicySpec): Record<string, number> {
   return spec.select.find((entry) => entry.router !== undefined)?.weights ?? {}
 }
 
@@ -84,8 +82,52 @@ export function weightsOf(spec: PolicySpec): Record<string, number> {
  *  read as 70% and 30%. A candidate with no weight takes none of the traffic and
  *  stays in the plan as a failover target, which is how a provider is drained.
  */
-export function sharesOf(weights: number[]): number[] {
+export function computeShares(weights: number[]): number[] {
   const total = weights.reduce((sum, weight) => sum + Math.max(0, weight), 0)
   if (total <= 0) return weights.map(() => 0)
   return weights.map((weight) => (Math.max(0, weight) * 100) / total)
+}
+
+/** Which entry of `initialPool` serves when the router declines. */
+export function findFallthroughIndex(spec: PolicySpec): number {
+  const index = buildInitialPool(spec).indexOf(findFallthroughTarget(spec))
+  return index === -1 ? 0 : index
+}
+
+/** The conditional entries, i.e. everything that is not the fallthrough. */
+export function findBudgetConditions(
+  spec: PolicySpec,
+): { threshold: number; target: string }[] {
+  return spec.select
+    .filter(
+      (entry) =>
+        entry.when?.budget_used_pct?.gte !== undefined &&
+        entry.target !== undefined,
+    )
+    .map((entry) => ({
+      threshold: entry.when!.budget_used_pct!.gte!,
+      target: entry.target!,
+    }))
+}
+
+/** The account of a save that wrote some of its scopes and not the others.
+ *
+ *  Both halves by name, because "it failed" over a part-written save leaves the
+ *  operator to work out which rows exist by reading the table. The ones that
+ *  landed are remembered, so the retry the last sentence promises is real
+ *  rather than a second pass over everything.
+ */
+export function describePartialScopeSave(
+  written: string[],
+  failed: { userId: string; reason: string }[],
+  labelFor: (userId: string) => string,
+): string {
+  const created =
+    written.length > 0
+      ? `Created for ${written.map(labelFor).join(", ")}. `
+      : ""
+  const missing = failed
+    .map((entry) => `${labelFor(entry.userId)} (${entry.reason})`)
+    .join(", ")
+  return `${created}Not created for ${missing}. Submitting again retries only the ones still missing.`
 }

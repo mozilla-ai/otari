@@ -109,7 +109,9 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    trigger fires twice inside the window. Names say what a value is, and a single letter says
    less than the generic nouns already banned, so `(entry) => entry.latency_ms` rather than
    `(e) => …`; the exemptions are a comparator's `(a, b)` and a `setState` updater's previous
-   value. A loop that produces a value is a transformation written the long way, so `for...of`,
+   value. A function name starts with a verb (`formatCost`, `findFallthroughTarget`,
+   `describePartialScopeSave`), because one named for its return value (`cost()`, `weightsOf()`)
+   reads like a variable at the call site. A loop that produces a value is a transformation written the long way, so `for...of`,
    `for...in` and an index loop all read better as `map`/`filter`/`reduce`/`find`/`flatMap`
    (`for...in` additionally walks inherited keys: use `Object.entries`). `forEach` is correct
    where the body is genuinely only a side effect, and takes a block body: Biome's

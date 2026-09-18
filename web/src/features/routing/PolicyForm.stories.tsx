@@ -91,7 +91,7 @@ const meta = {
   args: {
     existing: null,
     // The operator's surface, which is what the user-scope picker below needs.
-    deploymentWide: true,
+    isDeploymentWide: true,
     workspaceId: null,
     onClose: () => {},
   },

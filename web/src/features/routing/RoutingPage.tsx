@@ -28,15 +28,15 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 import { PolicyForm } from "./PolicyForm"
 import {
-  candidatesOf,
-  defaultTargetOf,
+  computeShares,
+  findCandidates,
+  findFallthroughTarget,
+  findRouterBackend,
+  findWeights,
   KNN_BACKEND,
-  normalizedBackend,
+  normalizeBackend,
   type RoutingRow,
-  routerBackendOf,
-  sharesOf,
   WEIGHTED_BACKEND,
-  weightsOf,
 } from "./policyModel"
 
 /** Present an alias as the one-target policy it is. */
@@ -99,7 +99,7 @@ function isEditableInForm(spec: PolicySpec): boolean {
     // controls would silently rewrite it as a backend the operator did not choose.
     if (entry.router !== undefined) {
       if ((entry.candidates?.length ?? 0) === 0) return false
-      const backend = normalizedBackend(entry.router)
+      const backend = normalizeBackend(entry.router)
       if (backend === KNN_BACKEND) return true
       // A weighted entry without weights cannot be saved back (the API refuses it),
       // so the form would have to invent a split. Read-only says so instead.
@@ -127,7 +127,7 @@ function isEditableInForm(spec: PolicySpec): boolean {
  *  a guess about a backend added after this line was written.
  */
 function routerLabelOf(spec: PolicySpec): string {
-  const backend = routerBackendOf(spec)
+  const backend = findRouterBackend(spec)
   if (backend === WEIGHTED_BACKEND) return "Weighted"
   if (backend === KNN_BACKEND) return "Learned"
   return "Routed"
@@ -136,27 +136,27 @@ function routerLabelOf(spec: PolicySpec): string {
 /** One line summarising what a policy serves, for the table. */
 function servesSummary(policy: RoutingPolicyResponse): string {
   const chain = policy.spec.on_failure ?? []
-  const pool = candidatesOf(policy.spec)
-  if (pool.length > 0 && routerBackendOf(policy.spec) === WEIGHTED_BACKEND) {
+  const pool = findCandidates(policy.spec)
+  if (pool.length > 0 && findRouterBackend(policy.spec) === WEIGHTED_BACKEND) {
     // The split shape, not the model names: two provider:model strings do not fit a
     // table cell, and the shares are what distinguishes one weighted policy from
     // another. The pool is spelled out in the editor and in explain.
-    const declared = weightsOf(policy.spec)
-    const target = defaultTargetOf(policy.spec)
+    const declared = findWeights(policy.spec)
+    const target = findFallthroughTarget(policy.spec)
     const full = pool.includes(target) ? pool : [...pool, target]
-    const split = sharesOf(full.map((selector) => declared[selector] ?? 0))
+    const split = computeShares(full.map((selector) => declared[selector] ?? 0))
       .map((share) => `${Math.round(share)}%`)
       .join(" / ")
     return `Weighted · ${split} across ${full.length} models`
   }
   if (pool.length > 0) {
-    return `${routerLabelOf(policy.spec)} · ${pool.length} candidates, ${defaultTargetOf(policy.spec)} by default`
+    return `${routerLabelOf(policy.spec)} · ${pool.length} candidates, ${findFallthroughTarget(policy.spec)} by default`
   }
   if (policy.is_dynamic) {
     const total = 1 + chain.length
     return `Chosen per request · ${total} candidate${total === 1 ? "" : "s"}`
   }
-  const target = defaultTargetOf(policy.spec)
+  const target = findFallthroughTarget(policy.spec)
   return chain.length > 0 ? `${target}  +${chain.length} on failure` : target
 }
 
@@ -270,9 +270,9 @@ export function RoutingPage() {
     (row: RoutingRow) => (
       <RouterReadiness
         policyName={row.name}
-        candidates={candidatesOf(row.spec)}
-        defaultTarget={defaultTargetOf(row.spec)}
-        backend={routerBackendOf(row.spec) ?? KNN_BACKEND}
+        candidates={findCandidates(row.spec)}
+        defaultTarget={findFallthroughTarget(row.spec)}
+        backend={findRouterBackend(row.spec) ?? KNN_BACKEND}
         scopedUserId={row.user_id ?? null}
         onClose={() => setExpanded(undefined)}
       />
@@ -301,7 +301,7 @@ export function RoutingPage() {
             {/* The kind of routing, as an affirmative mark: a fallback chain or
                 a learned router is a decision somebody made about this policy,
                 where a plain single-target policy is just the default shape. */}
-            {candidatesOf(policy.spec).length > 0 ? (
+            {findCandidates(policy.spec).length > 0 ? (
               <KindMark label={routerLabelOf(policy.spec)} />
             ) : policy.is_dynamic ? (
               <KindMark label="Dynamic" />
@@ -377,8 +377,9 @@ export function RoutingPage() {
         // empty cell, since a fallback chain has nothing to learn and that
         // absence is worth stating and is not the same as zero examples. Then
         // the control, for a backend that learns.
-        const readiness = !isOperator ? null : routerBackendOf(policy.spec) !==
-          KNN_BACKEND ? (
+        const readiness = !isOperator ? null : findRouterBackend(
+            policy.spec,
+          ) !== KNN_BACKEND ? (
           <span className="text-muted">—</span>
         ) : (
           <RowAction
@@ -498,7 +499,7 @@ export function RoutingPage() {
         // the frame's own restore has nothing to land on. The heading's action
         // survives.
         returnFocusRef={createButtonRef}
-        deploymentWide={isOperator}
+        isDeploymentWide={isOperator}
         workspaceId={writeWorkspaceId}
         onClose={closeCreate}
       />
@@ -509,7 +510,7 @@ export function RoutingPage() {
           // with the first row's draft and save it under the second one's name.
           key={rowKeyOf(editing)}
           existing={editing}
-          deploymentWide={isOperator}
+          isDeploymentWide={isOperator}
           workspaceId={editing.workspace_id ?? writeWorkspaceId}
           onClose={() => setEditing(undefined)}
         />
