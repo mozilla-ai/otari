@@ -24,7 +24,7 @@ from __future__ import annotations
 import base64
 import binascii
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from any_llm.types.completion import CompletionUsage
@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.file_extractors import extract_text_from_file, ocr_image, rasterize_pdf
-from gateway.services.file_service import StagedFile, fetch_file, read_file_bytes
+from gateway.services.file_service import StagedFile, fetch_file, read_file_bytes, sandbox_path_for
 from gateway.services.file_store import FileStore
 from gateway.services.model_capabilities import Capabilities
 from gateway.services.vision import describe_image
@@ -67,9 +67,20 @@ class NormalizationStats:
     # order and without repeats. Only filled when the caller said a sandbox runs.
     sandbox_inputs: list[StagedFile] = field(default_factory=list)
 
-    def stage(self, staged: StagedFile) -> None:
-        if all(existing.file_id != staged.file_id for existing in self.sandbox_inputs):
-            self.sandbox_inputs.append(staged)
+    def stage(self, staged: StagedFile) -> StagedFile:
+        """Record ``staged`` for the sandbox and return it under its session name.
+
+        A file referenced twice is staged once and keeps the name it got first;
+        the name itself is ``sandbox_path_for``'s, so two uploads named alike do
+        not overwrite each other in the working directory.
+        """
+        for existing in self.sandbox_inputs:
+            if existing.file_id == staged.file_id:
+                return existing
+        taken = {existing.filename for existing in self.sandbox_inputs}
+        named = replace(staged, filename=sandbox_path_for(staged.filename, taken))
+        self.sandbox_inputs.append(named)
+        return named
 
     @property
     def touched(self) -> bool:
@@ -382,12 +393,11 @@ async def _normalize_block(
     if src is None:
         return block
 
-    if sandbox_requested and src.staged is not None:
-        stats.stage(src.staged)
+    staged = stats.stage(src.staged) if sandbox_requested and src.staged is not None else None
     if src.kind == _CONTAINER:
-        if sandbox_requested and src.staged is not None:
+        if staged is not None:
             # The sandbox gets the bytes; the model gets told where they are.
-            return _text_block(fmt, f"[File available in the code execution sandbox: {src.staged.filename}]")
+            return _text_block(fmt, f"[File available in the code execution sandbox: {staged.filename}]")
         src.kind = _DOCUMENT
 
     native = caps.image if src.kind == _IMAGE else caps.pdf

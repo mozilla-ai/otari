@@ -178,40 +178,70 @@ def _split_codex_input_metadata(value: Any) -> tuple[Any, bool]:
 # ``response.output`` to the next ``input``, and the gateway has no
 # ``previous_response_id`` support to do that server-side, so an echoed turn would
 # otherwise ship a ``web_search_call`` to a provider that never declared a
-# web-search tool. A ``code_interpreter_call`` is stripped only when its id carries
-# the gateway's own prefix, because OpenAI's own items are legitimately echoed to
-# OpenAI and must survive.
+# web-search tool. A ``code_interpreter_call`` is recognized only when its id
+# carries the gateway's own prefix, because OpenAI's own items are legitimately
+# echoed to OpenAI and must survive.
 _GATEWAY_MINTED_ITEM_TYPES = frozenset({"web_search_call"})
 
 
 def _is_gateway_minted_item(item: Any) -> bool:
-    if not isinstance(item, dict):
+    return isinstance(item, dict) and item.get("type") in _GATEWAY_MINTED_ITEM_TYPES
+
+
+def _is_gateway_minted_code_interpreter_call(item: Any) -> bool:
+    if not isinstance(item, dict) or item.get("type") != "code_interpreter_call":
         return False
-    item_type = item.get("type")
-    if item_type in _GATEWAY_MINTED_ITEM_TYPES:
-        return True
-    return item_type == "code_interpreter_call" and str(item.get("id") or "").startswith(
-        CODE_INTERPRETER_CALL_ID_PREFIX
+    return str(item.get("id") or "").startswith(CODE_INTERPRETER_CALL_ID_PREFIX)
+
+
+def _code_interpreter_call_as_message(item: dict[str, Any]) -> dict[str, Any]:
+    """Fold a gateway-minted ``code_interpreter_call`` into an assistant message item.
+
+    Unlike a search, whose results are already in the transcript, an execution's
+    logs exist nowhere else, so dropping the item would make the model forget
+    what its code printed on the previous turn. The Messages route folds its pair
+    the same way (``messages._code_execution_pair_as_text``).
+    """
+    code = str(item.get("code") or "")
+    parts = [f"[code executed]\n```\n{code}\n```"] if code else ["[code executed]"]
+    parts.extend(
+        f"logs:\n{output['logs']}"
+        for output in item.get("outputs") or []
+        if isinstance(output, dict) and output.get("type") == "logs" and output.get("logs")
     )
+    if item.get("status") == "failed":
+        parts.append("status: failed")
+    return {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "\n".join(parts)}]}
 
 
 def _strip_gateway_minted_items(input_data: Any) -> Any:
-    """Drop gateway-minted server-tool items from an inbound ``input``.
+    """Take gateway-minted server-tool items back off an inbound ``input``.
 
-    Only touches a list input, and only removes the items the gateway itself
-    emits. A caller who genuinely used a provider-native web search still had that
-    run upstream, so its items arrive on a response the gateway passed through
-    untouched; those are indistinguishable here and are dropped too. That is the
-    conservative direction: dropping a descriptive item loses nothing the model
-    needs (the search results themselves are in the transcript), while forwarding
-    one risks a 400 from the provider. A gateway-run interpreter call is told
-    apart by its id prefix, so a provider's own survives.
+    Only touches a list input, and only the items the gateway itself emits. A
+    ``web_search_call`` is dropped: a caller who genuinely used a provider-native
+    web search still had that run upstream, so its items arrive on a response the
+    gateway passed through untouched; those are indistinguishable here and are
+    dropped too. That is the conservative direction: dropping a descriptive item
+    loses nothing the model needs (the search results themselves are in the
+    transcript), while forwarding one risks a 400 from the provider. A gateway-run
+    interpreter call is told apart by its id prefix, so a provider's own survives,
+    and is folded into a message rather than dropped
+    (:func:`_code_interpreter_call_as_message`).
     """
     if not isinstance(input_data, list):
         return input_data
-    kept = [item for item in input_data if not _is_gateway_minted_item(item)]
-    if len(kept) != len(input_data):
-        logger.debug("Stripped %d gateway-minted output item(s) from the inbound input", len(input_data) - len(kept))
+    kept: list[Any] = []
+    touched = 0
+    for item in input_data:
+        if _is_gateway_minted_code_interpreter_call(item):
+            kept.append(_code_interpreter_call_as_message(item))
+            touched += 1
+        elif _is_gateway_minted_item(item):
+            touched += 1
+        else:
+            kept.append(item)
+    if touched:
+        logger.debug("Rewrote %d gateway-minted output item(s) on the inbound input", touched)
     return kept
 
 

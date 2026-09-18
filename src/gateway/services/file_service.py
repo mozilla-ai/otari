@@ -12,8 +12,10 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import PurePosixPath
 
 from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -102,9 +104,36 @@ class StagedFile:
     """
 
     file_id: str
+    # The name the file has inside the session's working directory, which is
+    # also what the model is told; see ``sandbox_path_for``.
     filename: str
     mime_type: str
     storage_ref: str
+
+
+def sandbox_path_for(filename: str, taken: Collection[str]) -> str:
+    """The name a staged upload gets inside the session's working directory.
+
+    The upload's own name reduced to its last path segment, so a name carrying
+    separators neither nests nor escapes, and suffixed ``-2``, ``-3``, ... when
+    an earlier attachment already took it, so two uploads named alike are both
+    there rather than one overwriting the other. A name with no usable segment
+    becomes ``file``.
+    """
+    base = PurePosixPath(filename.replace("\\", "/")).name
+    if base in ("", ".", ".."):
+        base = "file"
+    if base not in taken:
+        return base
+    stem, dot, ext = base.rpartition(".")
+    if not dot or not stem:
+        stem, ext = base, ""
+    else:
+        ext = f".{ext}"
+    n = 2
+    while f"{stem}-{n}{ext}" in taken:
+        n += 1
+    return f"{stem}-{n}{ext}"
 
 
 class SandboxFileBridge:
@@ -133,9 +162,6 @@ class SandboxFileBridge:
         self._user_id = user_id
         self._workspace_id = workspace_id
         self.inputs = inputs
-        # Everything stored through this bridge, so the route can report what a
-        # request produced after the tool loop has finished.
-        self.outputs: list[FileObject] = []
 
     @property
     def max_output_bytes(self) -> int:
@@ -172,7 +198,6 @@ class SandboxFileBridge:
         except SQLAlchemyError:
             await self._file_store.delete(storage_ref)
             raise
-        self.outputs.append(record)
         return file_id
 
 

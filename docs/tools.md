@@ -168,8 +168,8 @@ still refused, because one request cannot address two sandboxes.
 A gateway-run execution is described back in the caller's vocabulary with ids
 Otari reserves (`otari_srvtoolu_…`, `otari_ci_…`, `otari_cntr_…`). When a client
 echoes such a turn on its next request, a Messages pair is folded into a text
-block so the model keeps the code and its output, and a Responses item is
-dropped; a provider's own items carry the provider's ids and pass through
+block, and a Responses item into an assistant message, so the model keeps the
+code and its output; a provider's own items carry the provider's ids and pass through
 untouched. Uploaded files the request references are seeded into the sandbox and
 files the code produces come back as stored files, announced in Anthropic's
 `code_execution_output` entries by their `file_id` (see

@@ -380,3 +380,61 @@ async def test_bare_responses_input_file_item_inlined_for_native(monkeypatch: py
     # Stays a bare item, now carrying inline data the provider can read.
     assert out[0]["type"] == "input_file"
     assert out[0]["file_data"].startswith("data:application/pdf;base64,")
+
+
+@pytest.mark.parametrize(
+    ("filename", "taken", "expected"),
+    [
+        ("data.csv", set(), "data.csv"),
+        ("reports/q3/data.csv", set(), "data.csv"),
+        ("..\\..\\etc\\passwd", set(), "passwd"),
+        ("../", set(), "file"),
+        ("data.csv", {"data.csv"}, "data-2.csv"),
+        ("data.csv", {"data.csv", "data-2.csv"}, "data-3.csv"),
+        ("Makefile", {"Makefile"}, "Makefile-2"),
+        (".env", {".env"}, ".env-2"),
+    ],
+)
+def test_sandbox_path_for(filename: str, taken: set[str], expected: str) -> None:
+    from gateway.services.file_service import sandbox_path_for
+
+    assert sandbox_path_for(filename, taken) == expected
+
+
+@pytest.mark.asyncio
+async def test_two_uploads_named_alike_are_both_staged_and_the_model_learns_both_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _stored("file-a", "data.csv")
+    second = _stored("file-b", "data.csv")
+
+    async def fake_fetch(db, file_id, user_id, *, workspace_id=None):  # type: ignore[no-untyped-def]
+        return {"file-a": first, "file-b": second}.get(file_id)
+
+    monkeypatch.setattr(cn, "fetch_file", fake_fetch)
+    msgs = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "container_upload", "file_id": "file-a"},
+                {"type": "container_upload", "file_id": "file-b"},
+                # The same file again is staged once, under the name it already has.
+                {"type": "container_upload", "file_id": "file-a"},
+            ],
+        }
+    ]
+    out, stats = await normalize_messages(
+        msgs,
+        config=GatewayConfig(),
+        caps=_TEXT_ONLY,
+        fmt="anthropic",
+        db=cast(Any, object()),
+        file_store=cast(Any, object()),
+        user_id="u",
+        sandbox_requested=True,
+    )
+    assert [(s.file_id, s.filename) for s in stats.sandbox_inputs] == [("file-a", "data.csv"), ("file-b", "data-2.csv")]
+    markers = [block["text"] for block in out[0]["content"]]
+    assert "data.csv" in markers[0]
+    assert "data-2.csv" in markers[1]
+    assert "data.csv" in markers[2] and "data-2" not in markers[2]

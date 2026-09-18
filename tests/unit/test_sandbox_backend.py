@@ -1154,3 +1154,76 @@ async def test_an_execution_carries_the_stored_ids_of_the_files_it_produced(monk
         execution = backend.take_executions()[0]
 
     assert execution.file_ids == {"chart.png": "file-1"}
+
+
+def _result_block_naming(filename: str) -> dict[str, Any]:
+    return {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {
+            "type": "code_execution_result",
+            "stdout": "",
+            "stderr": "",
+            "return_code": 0,
+            "content": [{"type": "code_execution_output", "file_id": "sbx-1", "filename": filename}],
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_output_declared_over_the_cap_is_refused_before_it_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _CountingStream(httpx.AsyncByteStream):
+        reads = 0
+
+        async def __aiter__(self) -> Any:
+            _CountingStream.reads += 1
+            yield b"x" * 64
+
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": _result_block_naming("big.bin")}),
+            ("GET", "/sessions/s1/files"): httpx.Response(
+                200, headers={"content-length": "64"}, stream=_CountingStream()
+            ),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([], max_output_bytes=16)
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+
+    assert files.stored == []
+    assert _CountingStream.reads == 0
+    assert "files: big.bin" in result
+
+
+@pytest.mark.asyncio
+async def test_an_output_that_grows_past_the_cap_is_abandoned_mid_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _EndlessStream(httpx.AsyncByteStream):
+        chunks = 0
+
+        async def __aiter__(self) -> Any:
+            while True:
+                _EndlessStream.chunks += 1
+                yield b"x" * 8
+
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": _result_block_naming("big.bin")}),
+            # No Content-Length: the cap has to hold on the bytes as they arrive.
+            ("GET", "/sessions/s1/files"): httpx.Response(200, stream=_EndlessStream()),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([], max_output_bytes=32)
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+
+    assert files.stored == []
+    # Read just past the cap and no further: 32 bytes is four chunks, the fifth trips it.
+    assert _EndlessStream.chunks == 5
+    assert "file_id" not in result

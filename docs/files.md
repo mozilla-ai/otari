@@ -87,8 +87,10 @@ When a request's code runs on Otari's sandbox, because it declared the
 `otari_code_execution` tool or because the
 [executor](tools.md#code-execution-executor) brought a provider's own
 declaration here, every uploaded file it references is also seeded into the
-sandbox session's working directory under its own filename, so the code the
-model writes can open it. An Anthropic
+sandbox session's working directory, so the code the model writes can open it.
+The file keeps its own filename, reduced to its last path segment; a second
+upload with the same name is suffixed (`data.csv`, then `data-2.csv`), and the
+marker the model is given carries the name the file actually has. An Anthropic
 `container_upload` block (`{"type": "container_upload", "file_id": "..."}`) is
 for the sandbox only: the model is told the file is there and never sees its
 contents. A `document`, `file`, or `input_file` block with a `file_id` is both

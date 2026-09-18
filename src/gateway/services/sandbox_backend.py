@@ -345,23 +345,45 @@ class SandboxBackend:
             if not ref.filename:
                 continue
             try:
-                response = await self._client.get(
-                    f"{self._sandbox_url}/sessions/{self._session_id}/files",
-                    params={"path": ref.filename},
-                )
-                response.raise_for_status()
+                data = await self._fetch_output(ref.filename)
             except httpx.HTTPError as exc:
                 logger.warning("sandbox output %r could not be fetched: %s", ref.filename, exc)
                 continue
-            data = response.content
-            if not data or len(data) > self._files.max_output_bytes:
-                logger.warning("sandbox output %r skipped: %d bytes", ref.filename, len(data))
+            if data is None:
                 continue
             try:
                 ids[ref.filename] = await self._files.store_output(ref.filename, data)
             except Exception as exc:  # noqa: BLE001 — a storage failure must not fail the run
                 logger.warning("sandbox output %r could not be stored: %s", ref.filename, exc)
         return ids
+
+    async def _fetch_output(self, filename: str) -> bytes | None:
+        """The produced file's bytes, or ``None`` when it is empty or over the cap.
+
+        Streamed rather than buffered: what a run writes is untrusted, so a file
+        far over the cap must be refused without the gateway ever holding it. A
+        declared ``Content-Length`` over the cap is refused before a byte is read.
+        """
+        assert self._client is not None and self._session_id is not None and self._files is not None
+        cap = self._files.max_output_bytes
+        async with self._client.stream(
+            "GET", f"{self._sandbox_url}/sessions/{self._session_id}/files", params={"path": filename}
+        ) as response:
+            response.raise_for_status()
+            declared = response.headers.get("content-length", "")
+            if declared.isdigit() and int(declared) > cap:
+                logger.warning("sandbox output %r skipped: %s bytes declared, cap is %d", filename, declared, cap)
+                return None
+            data = bytearray()
+            async for chunk in response.aiter_bytes():
+                data.extend(chunk)
+                if len(data) > cap:
+                    logger.warning("sandbox output %r skipped: over the %d byte cap", filename, cap)
+                    return None
+        if not data:
+            logger.warning("sandbox output %r skipped: empty", filename)
+            return None
+        return bytes(data)
 
     async def __aexit__(
         self,
