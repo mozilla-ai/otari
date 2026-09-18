@@ -17,7 +17,7 @@ plan's audit of the old POC calls out).
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,10 +27,11 @@ from gateway.agent_runtime.domain.evaluators import (
     evaluate_changed_path,
     evaluate_command_if_changed,
     evaluate_command_match,
+    evaluate_judge,
     tokenize_commands,
     tokenize_phrases,
 )
-from gateway.agent_runtime.domain.policy import MAX_POLICY_BYTES, PolicyError, parse_policy
+from gateway.agent_runtime.domain.policy import MAX_GATE_ID_LENGTH, MAX_POLICY_BYTES, PolicyError, parse_policy
 from gateway.agent_runtime.domain.types import (
     ChangedPathEvidence,
     ChangedPathGate,
@@ -40,6 +41,9 @@ from gateway.agent_runtime.domain.types import (
     EvidenceScope,
     GateResult,
     GateSpec,
+    JudgeEvidence,
+    JudgeGate,
+    JudgeVerdict,
 )
 from gateway.api.deps import get_config, get_db_if_needed, verify_api_key_or_master_key
 from gateway.api.routes._platform import _extract_platform_user_token
@@ -166,6 +170,29 @@ _MAX_COMMAND_COMPARISONS = 500_000
 # 2,000,000 characters measured ~0.17s; chosen with margin under that.
 _MAX_TOTAL_COMMAND_CHARS = 2_000_000
 
+# A judge verdict is a small, fixed-shape record (see JudgeVerdictRequest), not
+# a pattern this route matches against other input, so its bound is a plain
+# list-length/field-length cap rather than the work-estimate formula the
+# path/command evidence kinds need: looking a verdict up by gate_id is O(n) in
+# the number of judge gates in the policy, not a cross product.
+_MAX_JUDGE_RESULTS = 1_000
+_MAX_REASONING_LENGTH = 4_096
+
+
+class JudgeVerdictRequest(BaseModel):
+    """One judge gate's verdict, as the caller's own model call produced it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Shares domain.policy's own MAX_GATE_ID_LENGTH, not a separately chosen
+    # 200: a verdict echoes back the gate id the policy itself named, and
+    # policy.py's own parser rejects a longer one at parse time (422) for
+    # exactly this reason, so every id this build accepts here can always
+    # round-trip.
+    gate_id: str = Field(min_length=1, max_length=MAX_GATE_ID_LENGTH)
+    outcome: Literal["pass", "fail", "error"]
+    reasoning: str = Field(default="", max_length=_MAX_REASONING_LENGTH)
+
 
 class PolicyCheckRequest(BaseModel):
     """A policy body plus the evidence to check it against, both caller-supplied."""
@@ -213,6 +240,22 @@ class PolicyCheckRequest(BaseModel):
             "`session` for every command the session has run so far."
         ),
     )
+    # A tri-state, like changed_paths/commands above, but for a different
+    # reason: a verdict already names the one gate it judged, so there is no
+    # "collected, and there is none for this gate" case an empty list needs
+    # to express that a missing gate id doesn't already cover. What None
+    # (omitted, or an explicit `null`) means instead is "this caller's event
+    # type never runs judge gates at all" (otari hook on PreToolUse, which
+    # has neither a finished diff nor a transcript to judge yet): resolving
+    # that the same `unknown` a caller that does run judge gates but is
+    # missing one gets would warn on every single PreToolUse edit to a
+    # when_changed-matched path, regardless of how well-behaved the session
+    # was (see JudgeEvidence's and evaluate_judge's own docstrings).
+    judge_results: list[JudgeVerdictRequest] | None = Field(
+        default=None,
+        max_length=_MAX_JUDGE_RESULTS,
+        description="Model verdicts the caller collected for this request's judge gates.",
+    )
 
     @property
     def changed_path_evidence(self) -> ChangedPathEvidence | None:
@@ -229,6 +272,17 @@ class PolicyCheckRequest(BaseModel):
         if self.commands is None:
             return None
         return CommandEvidence(commands=tuple(dict.fromkeys(self.commands)), scope=self.command_scope)
+
+    @property
+    def judge_evidence(self) -> JudgeEvidence | None:
+        if self.judge_results is None:
+            return None
+        return JudgeEvidence(
+            verdicts=tuple(
+                JudgeVerdict(gate_id=verdict.gate_id, outcome=verdict.outcome, reasoning=verdict.reasoning)
+                for verdict in self.judge_results
+            )
+        )
 
 
 class GateResultResponse(BaseModel):
@@ -251,6 +305,7 @@ def _evaluate_gate(
     gate: GateSpec,
     changed_path_evidence: ChangedPathEvidence | None,
     command_evidence: CommandEvidence | None,
+    judge_evidence: JudgeEvidence | None,
     segment_cache: dict[str, list[list[str]]] | None,
     phrase_cache: dict[str, list[str]] | None,
 ) -> GateResult:
@@ -259,6 +314,8 @@ def _evaluate_gate(
         return evaluate_changed_path(gate, changed_path_evidence)
     if isinstance(gate, CommandMatchGate):
         return evaluate_command_match(gate, command_evidence, segment_cache=segment_cache, phrase_cache=phrase_cache)
+    if isinstance(gate, JudgeGate):
+        return evaluate_judge(gate, changed_path_evidence, judge_evidence)
     return evaluate_command_if_changed(
         gate, changed_path_evidence, command_evidence, segment_cache=segment_cache, phrase_cache=phrase_cache
     )
@@ -289,19 +346,24 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     changed_path_gates = [gate for gate in spec.gates if isinstance(gate, ChangedPathGate)]
     command_match_gates = [gate for gate in spec.gates if isinstance(gate, CommandMatchGate)]
     command_if_changed_gates = [gate for gate in spec.gates if isinstance(gate, CommandIfChangedGate)]
+    judge_gates = [gate for gate in spec.gates if isinstance(gate, JudgeGate)]
 
     # Built once and reused below: gate.forbidden/when_changed/require are
     # already deduplicated at parse time (domain.policy), and
     # changed_path_evidence/command_evidence deduplicate their evidence lists
     # the same way, so each estimate and its matching evaluation below always
-    # agree on the same, cheaper counts. command_if_changed's when_changed
-    # globs are path-matching work exactly like changed_path's forbidden
-    # globs, so they share the same budget rather than needing a third one.
+    # agree on the same, cheaper counts. command_if_changed's and judge's own
+    # when_changed globs are path-matching work exactly like changed_path's
+    # forbidden globs (evaluate_judge calls the same matched_changed_paths),
+    # so all three share the same budget rather than needing a third or
+    # fourth one.
     changed_path_evidence = request.changed_path_evidence
     changed_paths = changed_path_evidence.changed_paths if changed_path_evidence is not None else ()
-    path_globs = [glob for gate in changed_path_gates for glob in gate.forbidden] + [
-        glob for gate in command_if_changed_gates for glob in gate.when_changed
-    ]
+    path_globs = (
+        [glob for gate in changed_path_gates for glob in gate.forbidden]
+        + [glob for gate in command_if_changed_gates for glob in gate.when_changed]
+        + [glob for gate in judge_gates for glob in gate.when_changed]
+    )
     pattern_count = len(path_globs)
     total_pattern_length = sum(len(glob) for glob in path_globs)
     path_count = len(changed_paths)
@@ -397,8 +459,9 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
 
     # Evaluated in declaration order (not grouped by type) so a caller reading
     # `results` positionally sees the same order as the policy it submitted.
+    judge_evidence = request.judge_evidence
     results = [
-        _evaluate_gate(gate, changed_path_evidence, command_evidence, segment_cache, phrase_cache)
+        _evaluate_gate(gate, changed_path_evidence, command_evidence, judge_evidence, segment_cache, phrase_cache)
         for gate in spec.gates
     ]
     blocked = any(result.enforcement == "required" and result.outcome.is_blocking for result in results)

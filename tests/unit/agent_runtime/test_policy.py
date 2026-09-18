@@ -1,7 +1,7 @@
 import pytest
 
-from gateway.agent_runtime.domain.policy import PolicyError, parse_policy
-from gateway.agent_runtime.domain.types import ChangedPathGate, CommandIfChangedGate, CommandMatchGate
+from gateway.agent_runtime.domain.policy import MAX_GATE_ID_LENGTH, PolicyError, parse_policy
+from gateway.agent_runtime.domain.types import ChangedPathGate, CommandIfChangedGate, CommandMatchGate, JudgeGate
 
 VALID_POLICY = """\
 schema_version: "1.0"
@@ -153,6 +153,39 @@ def test_rejects_oversized_policy() -> None:
         parse_policy(huge, source="test.yml")
 
 
+def test_accepts_a_gate_id_at_the_length_limit() -> None:
+    """MAX_GATE_ID_LENGTH is shared with JudgeVerdictRequest.gate_id (routes/hooks.py):
+
+    every id this build accepts must be one a verdict can round-trip, so the
+    boundary itself (not just one past it) needs its own coverage.
+    """
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        f"  - id: {'g' * MAX_GATE_ID_LENGTH}\n    type: judge\n"
+        "    enforcement: advisory\n    rubric: r\n    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    assert len(spec.gates[0].id) == MAX_GATE_ID_LENGTH
+
+
+def test_rejects_a_gate_id_over_the_length_limit() -> None:
+    """Without this, a policy accepted at parse time could name a judge gate whose
+
+    id `otari hook` can never actually submit a verdict for
+    (`JudgeVerdictRequest.gate_id` caps at the same `MAX_GATE_ID_LENGTH`):
+    the whole `/hooks/check` request would 422 on that one field, fail-open,
+    taking every other gate in the same policy, mechanical and required
+    ones included, down with it.
+    """
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        f"  - id: {'g' * (MAX_GATE_ID_LENGTH + 1)}\n    type: judge\n"
+        "    enforcement: advisory\n    rubric: r\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="longer than"):
+        parse_policy(policy, source="test.yml")
+
+
 def test_duplicate_forbidden_globs_collapse_to_one() -> None:
     """A repeated glob matches nothing a single copy wouldn't, and multiplies
 
@@ -221,6 +254,94 @@ def test_duplicate_when_changed_globs_and_require_phrases_collapse_to_one() -> N
     assert isinstance(gate, CommandIfChangedGate)
     assert gate.when_changed == ("a", "b")
     assert gate.require == ("c",)
+
+
+def test_parses_a_valid_judge_policy() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: follows-error-handling-pattern\n    type: judge\n    enforcement: advisory\n"
+        "    rubric: Does this change follow the repository's error-handling conventions?\n"
+        "    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    assert len(spec.gates) == 1
+    gate = spec.gates[0]
+    assert isinstance(gate, JudgeGate)
+    assert gate.enforcement == "advisory"
+    assert gate.rubric == "Does this change follow the repository's error-handling conventions?"
+
+
+def test_judge_gate_rejects_required_enforcement() -> None:
+    """A model's verdict is never reproducible enough to block a required gate.
+
+    Rejected at parse time so a mistaken `enforcement: required` is a 422
+    when the policy is loaded, not a gate that silently blocks on a model's
+    say-so the first time it happens to fail.
+    """
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: required\n    rubric: r\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="judge"):
+        parse_policy(policy, source="test.yml")
+
+
+def test_judge_gate_requires_a_non_empty_rubric() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: '   '\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="rubric"):
+        parse_policy(policy, source="test.yml")
+
+
+def test_judge_gate_rejects_an_oversized_rubric() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        f"  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: {'x' * 20_000}\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="rubric"):
+        parse_policy(policy, source="test.yml")
+
+
+def test_judge_gate_when_changed_defaults_to_always_applying() -> None:
+    """A judge gate that never mentions `when_changed` keeps its pre-field behavior."""
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: r\n    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    gate = spec.gates[0]
+    assert isinstance(gate, JudgeGate)
+    assert gate.when_changed == ()
+
+
+def test_judge_gate_parses_when_changed_globs() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: r\n"
+        "    when_changed: [src/**]\n    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    gate = spec.gates[0]
+    assert isinstance(gate, JudgeGate)
+    assert gate.when_changed == ("src/**",)
+
+
+def test_judge_gate_rejects_an_explicitly_empty_when_changed() -> None:
+    """Unlike an omitted `when_changed`, an explicit empty list is a 422, not "always applies".
+
+    An author who writes `when_changed: []` almost certainly meant
+    something; guessing which is worse than refusing it, the same rule
+    `command_if_changed`'s own `when_changed` already follows.
+    """
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: r\n"
+        "    when_changed: []\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="when_changed"):
+        parse_policy(policy, source="test.yml")
 
 
 def test_unhashable_yaml_mapping_key_is_rejected_not_a_500() -> None:

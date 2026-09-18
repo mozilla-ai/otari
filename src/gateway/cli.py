@@ -6,12 +6,17 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
 import uvicorn
 from uvicorn.config import logger
 
+from gateway.agent_runtime.domain.evaluators import matched_changed_paths
+from gateway.agent_runtime.domain.policy import PolicyError, parse_policy
+from gateway.agent_runtime.domain.types import JudgeGate
 from gateway.core.config import API_KEY_HEADER, API_ROOT, load_config
 from gateway.log_config import setup_logger
 
@@ -323,15 +328,19 @@ def _hook_collect_changed_paths(repo_root: Path) -> list[str] | None:
     ever named. Specific to changed_path: a future gate type collects its
     own evidence in its own way, not through this function.
     """
-    result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
-        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",  # not the platform locale default, which is not always UTF-8
-        timeout=10,
-        check=False,
-    )
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
+            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",  # not the platform locale default, which is not always UTF-8
+            errors="replace",  # a pathologically-named file's bytes need not be valid UTF-8 either
+            timeout=10,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
     if result.returncode != 0:
         return None
     # -z: NUL-delimited and never quotes or octal-escapes a path (unlike the
@@ -457,6 +466,539 @@ def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None
     return [command for tool_use_id, command in requested if tool_use_id is None or tool_use_id not in denied_ids]
 
 
+# A judge gate's prompt is rubric + diff + transcript excerpt, each bounded
+# independently so one huge file or one long session can't build an unbounded
+# `claude -p` argv. Sized against a real measurement, not the "~4 chars/token"
+# English-prose estimate `_hook_estimate_tokens` uses for its dry-run label:
+# a real `claude -p` call against a 501,517-char prompt (diff + this transcript
+# format) came back "Prompt is too long · the request is ~290,782 tokens
+# (limit 200000)" — a ratio of ~1.7 chars/token, not ~4, because a session
+# transcript is JSONL (escaped strings, tool payloads), not prose. A second
+# real call at 100,505 chars consumed ~73,383 tokens total and succeeded with
+# comfortable headroom under the 200K limit. These two bounds keep the worst
+# case (diff + transcript, before the rubric/template's own much smaller
+# overhead) near that validated-safe combined size rather than the model's
+# own much larger context window, leaving margin for `claude -p`'s own fixed
+# per-invocation overhead (system prompt, tool definitions) on top.
+_HOOK_JUDGE_MAX_DIFF_CHARS = 60_000
+_HOOK_JUDGE_MAX_TRANSCRIPT_CHARS = 40_000
+# A judge call's own bound, deliberately separate from the 10s git status/diff
+# calls above: those are local filesystem operations with nothing to wait on
+# but disk, while this one is a full model invocation. 120s measured too tight
+# in practice: a trivial `claude -p` call with no otari involvement at all
+# measured over 2 minutes of wall-clock invocation overhead in one real run,
+# unrelated to prompt size. Chosen with real headroom over that.
+_HOOK_JUDGE_TIMEOUT_SECONDS = 300
+
+# Each judge gate costs one sequential model invocation, unlike the other gate
+# types (near-instant pattern matching), so an unbounded gate count means
+# unbounded wall-clock on a single Stop event: N gates at the timeout above
+# would be N * 300s in the worst case. Capped, with a visible truncation
+# message, the same "never let something scale unbounded and silently" rule
+# _bound_commands_for_submission and the Hook Server's own work-estimate
+# budgets (routes/hooks.py) already follow. Evaluated in declaration order, so
+# the same gates run first every time rather than an arbitrary subset.
+_HOOK_JUDGE_MAX_GATES_PER_RUN = 5
+
+# A per-call cap does not bound the total: 5 gates at up to 300s each, each
+# with its own possible retry (_HOOK_JUDGE_PROMPT_TOO_LONG_MARKER), is up to
+# 3,000s of judge calls alone. Claude Code's own command-hook timeout
+# defaults to 600s, after which it kills the hook and discards its output
+# entirely (see the hooks reference) -- meaning the Hook Server never gets
+# contacted at all, and every gate in the policy, mechanical and required
+# ones included, goes unevaluated for that Stop event, not just the slow
+# judge gates. This is a *total* elapsed-time budget shared across every
+# judge gate and retry in one run (_hook_collect_judge_verdicts computes one
+# deadline before its gate loop, not one budget per gate), leaving real
+# margin under the 600s default for the git evidence collection and the
+# /hooks/check request that still have to happen afterward. A gate whose
+# turn comes up after the deadline has passed reports "error" without
+# attempting the call at all, the same fail-open contract a missing `claude`
+# binary already has.
+_HOOK_JUDGE_TOTAL_BUDGET_SECONDS = 480
+
+# Haiku, not the session's own (often larger) default model: a judge call is a
+# small, structured pass/fail classification over bounded text, not the kind
+# of task that needs a frontier model, and every judge gate in a policy costs
+# one full invocation against the caller's own subscription (see
+# _hook_run_judge). Overridable per-invocation with --judge-model /
+# OTARI_HOOK_JUDGE_MODEL for a rubric that genuinely needs more capability.
+_HOOK_JUDGE_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+
+_HOOK_JUDGE_PROMPT_TEMPLATE = """\
+You are reviewing a code change against exactly one rule. Reply with exactly \
+one JSON object and nothing else, no other prose, no markdown fence: \
+{{"outcome": "pass" or "fail", "reasoning": "one or two sentences"}}.
+
+Rule to judge:
+{rubric}
+
+Diff of the changes made this session:
+{diff}
+
+Transcript of the session that made this change:
+{transcript}
+"""
+
+
+def _hook_extract_judge_transcript(transcript_path: Path) -> str:
+    """The assistant's own text replies from the session transcript, for a judge gate's prompt.
+
+    A raw transcript is mostly `tool_use`/`tool_result` payloads (a Bash
+    call's own stdout, a Read's file contents, ...): bytes that dominate the
+    file's size but carry no "why was this change made" signal a judge rubric
+    can use, and the reason `_HOOK_JUDGE_MAX_TRANSCRIPT_CHARS` needed a real
+    ratio measurement rather than the char-per-token heuristic (see that
+    constant's own comment). Keeping only each assistant record's own `text`
+    content blocks is both smaller and more relevant than a raw byte slice of
+    the file. `isSidechain` records (a subagent's own turn) are excluded, the
+    same as `_hook_collect_transcript_commands`: not reasoning this session's
+    own agent produced about the change under judgment. `thinking` blocks are
+    excluded too: usually the more verbose, less-final restatement of the
+    same `text` reply that follows it.
+
+    Returns "" when the transcript cannot be read at all (missing,
+    permissions) or carries no assistant text, the same as an empty
+    transcript otherwise would: a judge gate degrades to diff-only evidence
+    rather than treating this as a collection failure.
+    """
+    try:
+        lines = transcript_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+
+    texts: list[str] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict) or record.get("isSidechain") or record.get("type") != "assistant":
+            continue
+        message = record.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        texts.extend(
+            block["text"]
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+        )
+    return "\n".join(texts)
+
+
+def _hook_collect_diff(repo_root: Path) -> str | None:
+    """The working tree's own diff against HEAD, for a judge gate's prompt.
+
+    Tracked changes only (`git diff HEAD`): a new, untracked file's content is
+    a known gap in this first iteration, not a silent one, since
+    `_hook_collect_changed_paths` already reports its path in `changed_paths`
+    even though this diff carries none of its content. Returns None only when
+    Git itself could not answer (no HEAD yet, not a repository, a timeout, or
+    `git` itself missing), mirroring `_hook_collect_changed_paths`'s own
+    fail-open sentinel: a diff collection failure must degrade this one
+    judge gate's own evidence, never crash `otari hook` and take every other
+    gate in the policy, mechanical and required ones included, down with it
+    before the request ever reaches the Hook Server (confirmed: an uncaught
+    `subprocess.run` exception here does exactly that, exiting nonzero
+    without ever calling `httpx.post`).
+
+    `errors="replace"`: `git diff` emits a tracked file's own content bytes,
+    which are not necessarily valid UTF-8 (a Latin-1-encoded tracked file, a
+    binary blob committed by mistake, ...); `encoding="utf-8"` alone decodes
+    strictly and raises `UnicodeDecodeError` from inside `subprocess.run`
+    itself on the first non-UTF-8 byte (confirmed against a real repo with
+    such a file), which is not one of the exceptions below and would
+    otherwise still crash this command outright.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
+            ["git", "diff", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    diff = result.stdout
+    if len(diff) > _HOOK_JUDGE_MAX_DIFF_CHARS:
+        click.echo(
+            f"otari hook: diff is {len(diff):,} characters, over the {_HOOK_JUDGE_MAX_DIFF_CHARS:,} limit; "
+            "judge gates will see only the first that many.",
+            err=True,
+        )
+        diff = diff[:_HOOK_JUDGE_MAX_DIFF_CHARS] + "\n... (diff truncated)"
+    return diff
+
+
+def _hook_build_judge_prompt(rubric: str, diff: str, transcript: str) -> str:
+    return _HOOK_JUDGE_PROMPT_TEMPLATE.format(
+        rubric=rubric,
+        diff=diff or "(no diff collected)",
+        transcript=transcript or "(no transcript collected)",
+    )
+
+
+# ~4 characters per token is the usual rule of thumb for English prose (the
+# same order of magnitude Anthropic's own docs use for rate-limit planning).
+# Not a real tokenizer count: getting an exact one would mean either bundling
+# a tokenizer or a network call to a counting endpoint, and this estimate is
+# only ever surfaced in the dry-run audit trail, never used for anything that
+# needs to be exact.
+_HOOK_JUDGE_CHARS_PER_TOKEN_ESTIMATE = 4
+
+
+def _hook_estimate_tokens(text: str) -> int:
+    return len(text) // _HOOK_JUDGE_CHARS_PER_TOKEN_ESTIMATE
+
+
+def _hook_judge_log_path() -> Path:
+    """Where every real judge-gate model call is locally, append-only logged.
+
+    Under the user's home directory, not the repo: a `claude -p` invocation
+    is billed against the machine's own subscription regardless of which
+    repo triggered it, so the audit trail belongs somewhere that survives a
+    `git clean` and is never accidentally committed.
+    """
+    return Path.home() / ".otari" / "judge-calls.log"
+
+
+def _hook_judge_workdir() -> Path:
+    """Where the judge gate's own `claude -p` call runs, instead of the caller's repo.
+
+    That call's prompt is fully self-contained text (rubric, diff, transcript
+    excerpt), so it never needs to run from the repo it is judging. Running it
+    there anyway is how a real early version of this recursed into itself: the
+    repo's own `.claude/settings.local.json` registers `otari hook` for
+    `Stop`, and Claude Code resolves that file by directory, not by "is this
+    the top-level session", so an unguarded call whose own `Stop` hook is this
+    same command triggered it again, and again.
+
+    A plain isolated directory, not a "disable hooks" flag (`--safe-mode` or
+    `--bare`; the latter also breaks OAuth/keychain auth) for one deliberate
+    reason: `--safe-mode`/`--bare` foreclose ever attaching a hook to this
+    specific call on purpose, which is very nearly the point of a `judge`
+    gate calling out to a model at all. A dedicated directory under
+    `~/.otari/` (not the shared system temp root, and not the repo being
+    judged) is a stable, otari-owned place a future judge-specific hook or
+    its own `.otari-gates.yml` could live, the same reasoning
+    `_hook_judge_log_path` already applies to the audit log. Today it holds
+    nothing, so nothing resolves from it: no hooks, since Claude Code walks
+    up from `cwd` looking for a `.claude/settings.local.json` and finds none
+    there, narrower than `--safe-mode`'s guarantee (project-scoped only, not
+    a hypothetical user- or enterprise-level hook), which does not matter
+    here because `otari hook setup` only ever writes to a repo's own
+    project-scoped settings, never to the user's.
+    """
+    workdir = Path.home() / ".otari" / "judge-workdir"
+    workdir.mkdir(parents=True, exist_ok=True)
+    return workdir
+
+
+def _hook_log_judge_call(repo_root: Path, gate_id: str, outcome: str, *, detail: str | None = None) -> None:
+    """Append one line for a judge-gate model call this process actually attempted (or, in
+    `--judge-dry-run`, would have attempted).
+
+    Best-effort: a failure to write this log (a read-only home directory, a
+    full disk) must never turn into a failed hook, so any OSError here is
+    swallowed rather than propagated. Records only enough to answer "how
+    many real model calls has this run, for which gate, and when", plus, for
+    a dry-run line, the estimated prompt size: never the rubric, diff,
+    transcript, or the model's own output, none of which belongs in a
+    plaintext file kept indefinitely.
+    """
+    try:
+        log_path = _hook_judge_log_path()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        line = f"{datetime.now(UTC).isoformat()} repo={repo_root} gate={gate_id!r} outcome={outcome}"
+        if detail:
+            line += f" detail={detail!r}"
+        with log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(line + "\n")
+    except OSError:
+        pass
+
+
+# The prompt tells the model to reply with exactly one JSON object, no
+# markdown fence, but a model wrapping it in one anyway (```json ... ```)
+# is common enough in practice (confirmed against a real `claude -p` call)
+# that treating it as a parse failure would report "error" on an answer
+# that was, in substance, a real and well-formed verdict.
+_HOOK_JUDGE_CODE_FENCE = re.compile(r"^```(?:json)?\s*\n(.*)\n```\s*$", re.DOTALL)
+
+
+def _hook_strip_judge_code_fence(raw: str) -> str:
+    stripped = raw.strip()
+    fence_match = _HOOK_JUDGE_CODE_FENCE.match(stripped)
+    return fence_match.group(1).strip() if fence_match else stripped
+
+
+# The exact wording of `claude -p`'s own "prompt is too long" rejection,
+# confirmed against a real call, on stdout rather than stderr and with a
+# zero-token usage report (the request was rejected before any tokenization
+# was billed). Matched case-insensitively as a substring, not parsed further:
+# this is a signal to retry smaller, not a value this command needs to carry.
+_HOOK_JUDGE_PROMPT_TOO_LONG_MARKER = "prompt is too long"
+
+# Mirrors the Hook Server's own JudgeVerdictRequest.reasoning cap
+# (routes/hooks.py, _MAX_REASONING_LENGTH): the prompt asks for "one or two
+# sentences" but nothing enforces that on the model's side, and an oversize
+# reasoning otherwise 422s the *whole* /hooks/check request, which this
+# command's own fail-open handling for a rejected request (not blocking)
+# would then silently skip every other gate in the same policy along with
+# it, mechanical and required ones included.
+_HOOK_MAX_JUDGE_REASONING_LENGTH = 4_096
+
+
+def _hook_call_claude_p(claude_path: str, model: str, prompt: str, *, deadline: float) -> tuple[str, str]:
+    """One `claude -p --model <model>` invocation; return (outcome, reasoning).
+
+    outcome is always one of "pass"/"fail"/"error": a nonzero exit, a
+    timeout, or output that is not the single JSON object the prompt demands
+    are all "error", carrying the failure detail as reasoning rather than
+    raising. `claude -p`'s own "prompt is too long" rejection exits nonzero
+    with the message on stdout, not stderr (confirmed against a real call),
+    so the error detail falls back to stdout when stderr is empty.
+
+    Runs with `cwd` set to `_hook_judge_workdir()`, never the repo being
+    judged: see that function's own docstring for why (a real recursive
+    incident) and why that is an isolated directory rather than a
+    hooks-disabling flag.
+
+    `--tools ""` and `--strict-mcp-config`: this call's own prompt embeds the
+    diff and transcript verbatim, both attacker-influenceable (a crafted diff
+    or transcript could talk the model into more than a verdict; see the
+    `judge` gate type's own docstring on this), and it never needs a tool to
+    do its one job (read a prompt, emit one JSON object). `--tools ""`
+    disables every built-in tool; `--strict-mcp-config` with no `--mcp-config`
+    means no MCP server loads either, including one configured for the
+    repo being judged. Confirmed this still produces a normal verdict (and,
+    since it skips loading tool/MCP definitions into the system prompt,
+    measured cheaper than the same call without these flags).
+
+    `deadline` (a `time.monotonic()` timestamp, see
+    `_HOOK_JUDGE_TOTAL_BUDGET_SECONDS`) is shared across every gate and retry
+    in one run, not a fresh budget per call: already past it, this returns
+    "error" without ever touching `subprocess`; still short of it, the
+    subprocess timeout is capped to whatever is left, never more than
+    `_HOOK_JUDGE_TIMEOUT_SECONDS`.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return "error", "judge time budget exhausted before this call could start"
+
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, resolved executable path
+            [claude_path, "--model", model, "--tools", "", "--strict-mcp-config", "-p"],
+            input=prompt,
+            cwd=_hook_judge_workdir(),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=min(_HOOK_JUDGE_TIMEOUT_SECONDS, remaining),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return "error", f"claude -p did not respond within {min(_HOOK_JUDGE_TIMEOUT_SECONDS, remaining):.0f}s"
+    except (OSError, ValueError) as exc:
+        # OSError: `_hook_judge_workdir()`'s own `mkdir` (permissions, disk
+        # full) or the subprocess launch itself (`claude` disappearing
+        # between `shutil.which` and this call). ValueError: an embedded NUL
+        # byte, which a diff or transcript can carry (confirmed: `subprocess`
+        # raises "embedded null byte" for one in an argv element, the reason
+        # the prompt goes over stdin above rather than as a trailing
+        # argument). Both used to propagate uncaught, exiting `otari hook`
+        # before it ever reached `httpx.post` and skipping every other gate
+        # in the policy, mechanical and required ones included.
+        return "error", f"could not run claude -p ({exc})"
+
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        return "error", f"claude -p exited {result.returncode}: {detail[:500]}"
+
+    try:
+        verdict = json.loads(_hook_strip_judge_code_fence(result.stdout))
+    except ValueError:
+        return "error", f"claude -p did not return valid JSON: {result.stdout[:500]!r}"
+
+    outcome = verdict.get("outcome") if isinstance(verdict, dict) else None
+    reasoning = verdict.get("reasoning") if isinstance(verdict, dict) else None
+    if outcome not in ("pass", "fail") or not isinstance(reasoning, str):
+        return "error", f"claude -p returned an unrecognized verdict shape: {result.stdout[:500]!r}"
+
+    return outcome, reasoning[:_HOOK_MAX_JUDGE_REASONING_LENGTH]
+
+
+def _hook_run_judge(
+    rubric: str, diff: str, transcript: str, *, model: str, deadline: float, dry_run: bool = False
+) -> tuple[str, str]:
+    """Invoke `claude -p --model <model>` for one judge gate's rubric; return (outcome, reasoning).
+
+    Otari itself never calls a model (see JudgeGate's own docstring); this is
+    that call, made locally against the caller's own Claude Code
+    subscription, not billed through Otari.
+
+    `dry_run` skips the real call entirely, before ever touching `shutil.which`
+    or `subprocess`: the wire contract has no fourth outcome to spell "this
+    was never really run", so it reports the same `"error"` a real failed
+    call would, with a `reasoning` that says so explicitly and estimates the
+    prompt's size, never `"pass"`/`"fail"`, which would misrepresent a
+    verdict nothing actually produced. `deadline` (see
+    `_HOOK_JUDGE_TOTAL_BUDGET_SECONDS`) is passed through to both attempts
+    below unchanged either way, since it is one shared budget across the
+    whole run, not a fresh one per call.
+
+    A "prompt is too long" rejection retries once with `transcript` dropped
+    entirely: the transcript is supplementary "why" context for a judge
+    rubric, the diff is the primary evidence, so a diff-only retry is a
+    strictly better fallback than reporting no verdict at all. Only for that
+    specific rejection, and only once: any other failure, or a rejection that
+    persists with no transcript left to drop, reports "error" as it always
+    has.
+    """
+    if dry_run:
+        prompt = _hook_build_judge_prompt(rubric, diff, transcript)
+        estimated_tokens = _hook_estimate_tokens(prompt)
+        return (
+            "error",
+            f"--judge-dry-run: real claude -p call skipped; prompt would have been "
+            f"{len(prompt):,} chars (~{estimated_tokens:,} tokens estimated at "
+            f"~{_HOOK_JUDGE_CHARS_PER_TOKEN_ESTIMATE} chars/token).",
+        )
+
+    claude_path = shutil.which("claude")
+    if not claude_path:
+        return "error", "the `claude` CLI was not found on PATH"
+
+    outcome, reasoning = _hook_call_claude_p(
+        claude_path, model, _hook_build_judge_prompt(rubric, diff, transcript), deadline=deadline
+    )
+    if outcome == "error" and transcript and _HOOK_JUDGE_PROMPT_TOO_LONG_MARKER in reasoning.lower():
+        outcome, reasoning = _hook_call_claude_p(
+            claude_path, model, _hook_build_judge_prompt(rubric, diff, ""), deadline=deadline
+        )
+    return outcome, reasoning
+
+
+def _hook_collect_judge_verdicts(
+    policy_yaml: str,
+    gates_file: Path,
+    repo_root: Path,
+    transcript_path: str | None,
+    changed_paths: list[str],
+    *,
+    judge_model: str,
+    judge_dry_run: bool = False,
+) -> list[dict[str, str]]:
+    """Run every applicable judge gate in the local policy, one `claude -p` call each.
+
+    Parses the policy locally with the same pure `domain.policy.parse_policy`
+    the Hook Server itself uses, purely to find which gates are judge gates
+    and read their `rubric`/`when_changed`; the Hook Server still re-parses
+    and validates the submitted `policy_yaml` on its own, so a mismatch here
+    only means judge evidence for a gate the server would reject anyway. A
+    local parse failure collects no verdicts rather than raising: the
+    existing fail-open request below still submits the policy text for the
+    server to report the same error on.
+
+    A judge gate with `when_changed` is skipped locally, before ever reading
+    the diff/transcript or shelling out to `claude -p`, when none of
+    `changed_paths` matches its globs (`domain.evaluators.matched_changed_paths`,
+    the same grammar `evaluate_judge`'s own applicability check uses
+    server-side). This is a local optimization only: submitting no verdict
+    for a skipped gate resolves `not_applicable` there independently, the
+    same as it would if this function ran the model call and got `pass`
+    anyway. A gate with no `when_changed` at all keeps its unconditional,
+    every-Stop-event behavior.
+
+    `judge_dry_run` (see `hook`'s own `--judge-dry-run`) still runs this whole
+    applicability check, still reads the diff and transcript, and still
+    writes the same `_hook_log_judge_call` audit lines; only `_hook_run_judge`
+    itself skips the real `claude -p` call. This is what makes the resulting
+    log a real count of how often the model would have been invoked, not a
+    guess: everything up to the call itself runs exactly as it would for real.
+    """
+    try:
+        spec = parse_policy(policy_yaml, source=str(gates_file))
+    except PolicyError:
+        return []
+
+    changed_paths_tuple = tuple(changed_paths)
+    judge_gates = [
+        gate
+        for gate in spec.gates
+        if isinstance(gate, JudgeGate)
+        and (not gate.when_changed or matched_changed_paths(gate.when_changed, changed_paths_tuple))
+    ]
+    if not judge_gates:
+        return []
+    if len(judge_gates) > _HOOK_JUDGE_MAX_GATES_PER_RUN:
+        skipped = [gate.id for gate in judge_gates[_HOOK_JUDGE_MAX_GATES_PER_RUN:]]
+        click.echo(
+            f"otari hook: {len(judge_gates):,} judge gates in this policy, over the "
+            f"{_HOOK_JUDGE_MAX_GATES_PER_RUN:,} limit; skipping: {', '.join(skipped)}.",
+            err=True,
+        )
+        judge_gates = judge_gates[:_HOOK_JUDGE_MAX_GATES_PER_RUN]
+
+    # None (collection genuinely failed: no HEAD, git missing, a timeout) is
+    # kept distinct from "" (collected, and there is none) until the loop
+    # below: collapsing them here, as `_hook_collect_diff(repo_root) or ""`
+    # used to, sends the model a diff-less prompt indistinguishable from a
+    # real empty one, and a model asked to judge a change it cannot see can
+    # (and, verified against a real call, does) still say "pass".
+    diff = _hook_collect_diff(repo_root)
+    diff_collection_failed = diff is None
+    diff = diff or ""
+    transcript = _hook_extract_judge_transcript(Path(transcript_path)) if transcript_path else ""
+    if len(transcript) > _HOOK_JUDGE_MAX_TRANSCRIPT_CHARS:
+        click.echo(
+            f"otari hook: transcript is {len(transcript):,} characters, over the "
+            f"{_HOOK_JUDGE_MAX_TRANSCRIPT_CHARS:,} limit; judge gates will see only the most recent that many.",
+            err=True,
+        )
+        # Tail, not head: the most recent turns are the ones that produced
+        # the change under judgment, the same "keep what's still relevant"
+        # tradeoff _bound_commands_for_submission makes by dropping the
+        # oldest commands first.
+        transcript = transcript[-_HOOK_JUDGE_MAX_TRANSCRIPT_CHARS:]
+
+    # One deadline for the whole run, computed once, not a fresh budget per
+    # gate: see _HOOK_JUDGE_TOTAL_BUDGET_SECONDS for why a per-call cap alone
+    # does not bound the total, and why that total must stay under Claude
+    # Code's own outer hook timeout.
+    deadline = time.monotonic() + _HOOK_JUDGE_TOTAL_BUDGET_SECONDS
+
+    results = []
+    for gate in judge_gates:
+        # Logged before the call, not after: a hung or killed `claude -p`
+        # invocation must still show up in the audit trail rather than
+        # silently vanishing along with the process that would have logged
+        # its outcome.
+        _hook_log_judge_call(repo_root, gate.id, "invoking")
+        if diff_collection_failed:
+            # No model call at all: a diff this gate cannot see is not
+            # evidence to judge against, and every other pre-flight failure
+            # here (a missing `claude` binary, an exhausted time budget)
+            # already reports "error" without one either.
+            outcome, reasoning = "error", "could not collect the working tree diff"
+        else:
+            outcome, reasoning = _hook_run_judge(
+                gate.rubric, diff, transcript, model=judge_model, deadline=deadline, dry_run=judge_dry_run
+            )
+        _hook_log_judge_call(repo_root, gate.id, outcome, detail=reasoning if judge_dry_run else None)
+        results.append({"gate_id": gate.id, "outcome": outcome, "reasoning": reasoning})
+    return results
+
+
 @cli.group(name="hook", invoke_without_command=True)
 @click.option(
     "--harness",
@@ -474,8 +1016,34 @@ def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None
 )
 @click.option("--url", envvar="OTARI_URL", default=None, help="Base URL of the Otari gateway.")
 @click.option("--api-key", envvar="OTARI_API_KEY", default=None, help="Credential for the Hook Server.")
+@click.option(
+    "--judge-model",
+    envvar="OTARI_HOOK_JUDGE_MODEL",
+    default=_HOOK_JUDGE_DEFAULT_MODEL,
+    show_default=True,
+    help="Model `claude -p` uses for a judge gate's model call.",
+)
+@click.option(
+    "--judge-dry-run",
+    envvar="OTARI_HOOK_JUDGE_DRY_RUN",
+    is_flag=True,
+    default=False,
+    help=(
+        "Run every applicable judge gate's own logic (policy parse, when_changed filtering, "
+        "diff/transcript collection) but skip the real `claude -p` call, logging what would have "
+        "run instead. For measuring how often a judge gate would fire before spending real model calls."
+    ),
+)
 @click.pass_context
-def hook(ctx: click.Context, harness: str, config: str | None, url: str | None, api_key: str | None) -> None:
+def hook(
+    ctx: click.Context,
+    harness: str,
+    config: str | None,
+    url: str | None,
+    api_key: str | None,
+    judge_model: str,
+    judge_dry_run: bool,
+) -> None:
     """Native callback entry point for a supported agent's hook protocol.
 
     Reads one JSON hook payload on stdin, collects the evidence that payload
@@ -513,6 +1081,16 @@ def hook(ctx: click.Context, harness: str, config: str | None, url: str | None, 
     gates_file = root / ".otari-gates.yml"
     if not gates_file.is_file():
         return
+    try:
+        policy_yaml = gates_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        # Same fail-open contract as every other evidence-collection failure
+        # in this command: `is_file()` above does not guarantee a following
+        # read succeeds (a race, a permissions change, a non-UTF-8 file), and
+        # an uncaught exception here would exit nonzero before ever reaching
+        # httpx.post, skipping every gate in the policy for this event.
+        click.echo(f"otari hook: could not read {gates_file} ({exc}), not blocking.", err=True)
+        return
 
     changed_paths: list[str] = []
     # `[]`, not None, by default: PreToolUse's edit-tool branch below leaves
@@ -526,6 +1104,15 @@ def hook(ctx: click.Context, harness: str, config: str | None, url: str | None, 
     # session: this is what tells the server which command-evidence gates can
     # resolve at all, rather than leaving each to guess from an empty list.
     command_scope = "call"
+    # None, not [], by default: a PreToolUse call has neither a full diff nor
+    # a finished transcript to judge against yet, and never runs
+    # _hook_collect_judge_verdicts at all, so submitting None (rather than an
+    # empty list, which would mean "ran judge gates, found none applicable")
+    # is what resolves every judge gate not_applicable on PreToolUse instead
+    # of unknown (see PolicyCheckRequest.judge_results, evaluate_judge). Only
+    # the Stop branch below ever reassigns this, to a real (possibly empty)
+    # list.
+    judge_results: list[dict[str, str]] | None = None
     if event == "PreToolUse":
         tool_name = payload.get("tool_name", "")
         tool_input = payload.get("tool_input") or {}
@@ -601,6 +1188,16 @@ def hook(ctx: click.Context, harness: str, config: str | None, url: str | None, 
                 )
                 commands = [command[:_HOOK_MAX_COMMAND_LENGTH] for command in commands]
             commands = _bound_commands_for_submission(commands)
+
+        judge_results = _hook_collect_judge_verdicts(
+            policy_yaml,
+            gates_file,
+            root,
+            transcript_path,
+            changed_paths,
+            judge_model=judge_model,
+            judge_dry_run=judge_dry_run,
+        )
     else:
         return  # An event this harness integration does not check yet.
 
@@ -626,10 +1223,11 @@ def hook(ctx: click.Context, harness: str, config: str | None, url: str | None, 
         response = httpx.post(
             f"{resolved_url.rstrip('/')}{API_ROOT}/hooks/check",
             json={
-                "policy_yaml": gates_file.read_text(encoding="utf-8"),
+                "policy_yaml": policy_yaml,
                 "changed_paths": changed_paths,
                 "commands": commands,
                 "command_scope": command_scope,
+                "judge_results": judge_results,
             },
             headers={API_KEY_HEADER: resolved_key},
             timeout=15.0,
@@ -673,9 +1271,19 @@ def hook(ctx: click.Context, harness: str, config: str | None, url: str | None, 
     # 'message' (an older or otherwise mismatched otari serve behind --url)
     # must not raise KeyError here, outside that protection, and surface as a
     # traceback in place of the fail-open message this command promises.
+    # detail carries the specific "why" behind message's generic, fixed
+    # policy text (a judge gate's own model reasoning, a changed_path gate's
+    # matched paths, ...); without it, every gate of the same id shows the
+    # exact same static line no matter what a judge model actually found
+    # (confirmed: a real verdict naming "src/module.py:42" surfaced only the
+    # configured message, never that). Bounded the same way the error
+    # details elsewhere in this command are, at 500 characters: `reasoning`
+    # itself can run up to _HOOK_MAX_JUDGE_REASONING_LENGTH (4,096), too long
+    # for one stderr line.
     summary = "\n".join(
         f"  [{'x' if gate.get('enforcement') == 'required' else '!'}] "
         f"{gate.get('gate_id', '?')}: {gate.get('message', '(no message)')}"
+        + (f" ({str(gate['detail'])[:500]})" if gate.get("detail") else "")
         for gate in failing
     )
     if blocked:
