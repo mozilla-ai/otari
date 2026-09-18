@@ -583,11 +583,17 @@ function AddProviderForm({
       : undefined
   useEffect(() => {
     if (!knownSelected || apiBaseSeededFor === knownSelected.id) return
+    // Mark the provider seeded either way, so a base cleared later is not taken
+    // as an invitation to fill it in again.
     setApiBaseSeededFor(knownSelected.id)
-    setKnownDraft((current) => ({
-      ...current,
-      apiBase: knownSelected.default_api_base ?? "",
-    }))
+    setKnownDraft((current) =>
+      // Only fill a base nobody has typed. Choosing the provider is what blanks
+      // it, so anything here by the time its detail lands was typed during the
+      // request and outranks the built-in default.
+      current.apiBase === ""
+        ? { ...current, apiBase: knownSelected.default_api_base ?? "" }
+        : current,
+    )
   }, [knownSelected, apiBaseSeededFor])
 
   // One snapshot over both drafts, held here rather than in either tab

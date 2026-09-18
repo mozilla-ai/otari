@@ -135,6 +135,10 @@ interface MockOpts {
   // When set, the create POST blocks on this promise, so a test can hold a
   // create in flight and read the submit's state while it runs.
   createGate?: Promise<unknown>
+  // When set, the per-provider detail GET blocks on this promise, so a test can
+  // use the form during the window between choosing a provider and its hints
+  // landing.
+  detailGate?: Promise<unknown>
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -265,6 +269,7 @@ function mockApi(opts: MockOpts = {}) {
         const id = decodeURIComponent(
           url.split(`${API_ROOT}/providers/catalog/`)[1].split("?")[0],
         )
+        if (opts.detailGate) await opts.detailGate
         const detail = catalog.find((p) => p.id === id)
         return detail
           ? jsonResponse(detail)
@@ -859,6 +864,55 @@ describe("ProvidersPage", () => {
 
     expect(await screen.findByLabelText("API base")).toHaveValue(
       "https://api.openai.com/v1",
+    )
+  })
+
+  it("keeps an API base typed before the provider's hints land", async () => {
+    // The seeding effect fires when the detail arrives, which can be after the
+    // operator has already opened Advanced and typed. Choosing the provider is
+    // what blanks the base, so anything in the field by then was typed here and
+    // outranks the built-in default.
+    let landHints = () => {}
+    const detailGate = new Promise<void>((resolve) => {
+      landHints = resolve
+    })
+    mockApi({
+      stored: [],
+      detailGate,
+      catalog: [
+        {
+          id: "openai",
+          name: "OpenAI",
+          env_key: "OPENAI_API_KEY",
+          default_api_base: "https://api.openai.com/v1",
+          requires_api_key: true,
+          env_key_present: false,
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<ProvidersPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider" }),
+    )
+    await user.type(screen.getByPlaceholderText("Search providers…"), "Open")
+    await user.click(await screen.findByRole("option", { name: "OpenAI" }))
+
+    // The disclosure does not wait on the detail, so Advanced opens and takes a
+    // value while the request is still in flight.
+    await user.click(screen.getByRole("button", { name: /^Advanced/ }))
+    await user.type(
+      screen.getByLabelText("API base"),
+      "https://proxy.internal/v1",
+    )
+
+    landHints()
+    // The hints land and drive the rest of the form, which is how the test knows
+    // the seeding effect has had its chance to run.
+    expect(await screen.findByText(/just add your key/)).toBeInTheDocument()
+    expect(screen.getByLabelText("API base")).toHaveValue(
+      "https://proxy.internal/v1",
     )
   })
 
