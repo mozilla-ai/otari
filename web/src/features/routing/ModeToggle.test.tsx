@@ -27,13 +27,14 @@ describe("ModeToggle", () => {
     expect(onChange).toHaveBeenCalledWith("block")
   })
 
-  it("reports the mode already selected, so the caller decides", () => {
+  it("reports the mode already selected, so the caller decides", async () => {
     // Unlike ScopePicker's tabs, which guard against a press that would discard
     // a selection, this one has nothing to lose and stays a plain report.
+    const user = userEvent.setup()
     const onChange = vi.fn()
     render(<ModeToggle label="On failure" value="block" onChange={onChange} />)
-    expect(screen.getByRole("button", { name: "block" })).toBeInTheDocument()
-    expect(onChange).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "block" }))
+    expect(onChange).toHaveBeenCalledWith("block")
   })
 
   it("renders the hint only when there is one", () => {

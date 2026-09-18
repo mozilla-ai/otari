@@ -20,7 +20,7 @@ function mockCatalog({ isHealthy }: { isHealthy: boolean }) {
           {
             provider: "openai",
             ok: isHealthy,
-            models: isHealthy ? [{ id: "gpt-4o" }] : [],
+            models: isHealthy ? [{ key: "openai/gpt-4o" }] : [],
           },
         ],
       }),
