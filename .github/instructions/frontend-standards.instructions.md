@@ -96,7 +96,11 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    `useIterableCallbackReturn` rejects a concise arrow there whatever the call returns; it is
    wrong where it is a transformation with the result pushed into an outer variable.
    Consuming a stream and a bounded request walk stay imperative. The React Compiler is
-   enabled, so hand-written `useMemo`/`useCallback`/`React.memo` needs a stated reason. See
+   enabled, so the plain expression is the default and reflexive memoization is the finding.
+   Hand-written `useMemo`/`useCallback`/`React.memo` is correct where it earns its place (an
+   expensive computation, a reference something else identity-checks, a component the compiler
+   could not optimize because it could not verify the rules of hooks), so do not flag one that
+   does: the rule is judgment, not a ban and not a requirement. See
    [typescript-and-react.md](../skills/frontend-standards/typescript-and-react.md) and
    [performance.md](../skills/frontend-standards/performance.md).
 

@@ -51,8 +51,10 @@ TypeScript runs in `strict` mode; `pnpm --dir web run typecheck` must pass. Reac
   not in component state (see [data-fetching.md](./data-fetching.md)).
 - **Stable `key`s** for lists, a stable id, not the array index.
 - **The React Compiler is enabled** (`babel-plugin-react-compiler`, wired up in
-  `vite.config.ts`), so memoization is the build's job. Do not add `useMemo`, `useCallback`, or
-  `React.memo` without a measurement or a specific reference the compiler cannot prove stable.
+  `vite.config.ts`), so memoization is the build's job by default and the plain expression is
+  what to write. Reach for `useMemo`, `useCallback` or `React.memo` where it earns its place
+  rather than by reflex or never: an expensive computation, a reference something else
+  identity-checks, or a component the compiler could not optimize.
   It also means the rules of hooks are load-bearing: the compiler silently skips a component it
   cannot verify. See [performance.md](./performance.md).
 - Keep a component per file, colocated with its test.

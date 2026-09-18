@@ -13,17 +13,29 @@ which compiler decides what to memoize; the config says so at the site.
 
 What follows from that:
 
-- **Do not add `useMemo`, `useCallback`, or `React.memo` by reflex.** The compiler already
-  does the ordinary cases, and hand-memoization it cannot see through is how a stale value
-  survives a prop change.
-- Reach for them when you can point at the reason: a profiler measurement, or a reference the
-  compiler cannot prove stable that you are passing into a memoized third-party component.
+- **Memoize where it earns its place: not by reflex, and not never.** The compiler handles the
+  ordinary cases, so the default is to write the plain expression and let it decide. That is a
+  default, not a ban, and a `useMemo` with a reason behind it is correct code rather than a
+  finding.
+- **What "earns its place" looks like.** A computation expensive enough that you can see it, a
+  reference crossing into something that runs its own identity check (a memoized third-party
+  component, a dependency array that cannot be flattened), or a component the compiler could
+  not optimize, which is the case below. When the reason is not obvious from the call site,
+  a short comment saves the next reader from deleting it to find out.
+- **What it costs, so the judgment is an informed one.** A dependency array allocated and
+  compared on every render, a hook slot per instance, and one more array that can go stale.
+  For a cheap expression that is a net loss: `useMemo(() => a + b, [a, b])` does strictly more
+  work than `a + b`. The compiler must also preserve the semantics of whatever you wrote, so a
+  boundary drawn badly by hand stays drawn badly; it cannot reason through one and fix it.
 - **Correct dependency arrays still matter**, because `useEffect` is not memoization. The
   compiler does not fix an effect that re-subscribes on every render or one that misses a
   dependency it reads.
 - Rules of hooks still apply, and now they are load-bearing: the compiler bails out of a
   component it cannot prove follows them, silently, so a conditional hook costs optimization
-  as well as correctness.
+  as well as correctness. **That silence is also the third case for memoizing by hand**: in a
+  component the compiler skipped there is no build-time memoization to defer to, and nothing
+  reports which components those are. A component with a conditional hook, or one the compiler
+  otherwise could not verify, is on its own.
 
 ## Code splitting
 

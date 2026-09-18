@@ -140,8 +140,11 @@ can link Vite's esbuild binary at all.
   [data-fetching.md](./data-fetching.md) says why.
 - Client-side filtering/sorting/pagination of large server datasets when the endpoint can do
   it. (Small, already-loaded lists rendered in a `Table` are fine.)
-- Memoization by reflex. The React Compiler is enabled; add `useMemo`/`useCallback`/`memo`
-  only with a measurement behind it. See [performance.md](./performance.md).
+- Memoization by reflex. The React Compiler is enabled, so the default is the plain
+  expression. Not a ban: memoize where it earns its place (an expensive computation, a
+  reference something else identity-checks, a component the compiler could not optimize), and
+  weigh it against what it costs, which is a dependency array compared every render and one
+  more thing that can go stale. See [performance.md](./performance.md).
 - A second export from a route file. It defeats `autoCodeSplitting` and lands the page in the
   entry chunk. See [component-architecture.md](./component-architecture.md).
 - Barrel files, default exports, or namespace imports. See
