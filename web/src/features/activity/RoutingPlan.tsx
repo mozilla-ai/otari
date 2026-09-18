@@ -1,4 +1,5 @@
 import type { UsageEntry } from "@/client"
+import { useRequestGroups } from "@/shared/api/usage"
 import {
   describeAttemptOutcome,
   describeSelectionReason,
@@ -6,8 +7,7 @@ import {
   formatLatencyCell,
   formatUSD,
   sortPlanRows,
-} from "@/features/activity/activityModel"
-import { useRequestGroups } from "@/shared/api/usage"
+} from "./activityModel"
 
 // The whole plan behind one routed request: every candidate that ran, in order,
 // with the one that served marked. This is the answer to "a fallback fired, so

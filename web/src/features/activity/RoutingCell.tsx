@@ -1,8 +1,5 @@
 import type { UsageEntry } from "@/client"
-import {
-  describeAttempt,
-  type GroupOutcome,
-} from "@/features/activity/activityModel"
+import { describeAttempt, type GroupOutcome } from "./activityModel"
 
 // The Routing column: the policy the caller named, then where this row sits in its
 // plan and how that turned out.

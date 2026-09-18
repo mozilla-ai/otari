@@ -25,27 +25,6 @@ import {
 } from "@/design-system/navigation/FilterChips"
 import { FilterMultiComboBox } from "@/design-system/navigation/FilterMultiComboBox"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
-import { ActivityTimeline } from "@/features/activity/ActivityTimeline"
-import {
-  describeSource,
-  formatLatencyCell,
-  formatToolUsage,
-  formatUSD,
-  getActivityRowClassName,
-  getActivityRowKey,
-  indexGroupOutcomes,
-  listToolUsage,
-  PRICED_OPTIONS,
-  resolveExtentWindow,
-  resolveWindow,
-  STATUS_OPTIONS,
-  TOOL_OPTIONS,
-} from "@/features/activity/activityModel"
-import { InFlightControl } from "@/features/activity/InFlightControl"
-import { RequestDetail } from "@/features/activity/RequestDetail"
-import { RoutingCell } from "@/features/activity/RoutingCell"
-import { StatusMark } from "@/features/activity/StatusMark"
-import { TokenBar } from "@/features/activity/TokenBar"
 import {
   type ManualRates,
   SetPriceDialog,
@@ -83,6 +62,27 @@ import {
 } from "@/shared/helpers/timeRange"
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { ActivityTimeline } from "./ActivityTimeline"
+import {
+  describeSource,
+  formatLatencyCell,
+  formatToolUsage,
+  formatUSD,
+  getActivityRowClassName,
+  getActivityRowKey,
+  indexGroupOutcomes,
+  listToolUsage,
+  PRICED_OPTIONS,
+  resolveExtentWindow,
+  resolveWindow,
+  STATUS_OPTIONS,
+  TOOL_OPTIONS,
+} from "./activityModel"
+import { InFlightControl } from "./InFlightControl"
+import { RequestDetail } from "./RequestDetail"
+import { RoutingCell } from "./RoutingCell"
+import { StatusMark } from "./StatusMark"
+import { TokenBar } from "./TokenBar"
 
 // The only breakdown this page asks the summary for: whether the window contains
 // gateway-run tool calls, which decides if the Tool filter is worth offering.

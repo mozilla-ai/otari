@@ -21,10 +21,10 @@ import { Button, Popover } from "@heroui/react"
 import { useState } from "react"
 
 import type { InFlightResponse } from "@/client"
-import { InFlightWait } from "@/features/activity/InFlightWait"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { userDisplay } from "@/features/users/userDisplay"
 import { formatNumber } from "@/shared/helpers/format"
+import { InFlightWait } from "./InFlightWait"
 
 // The live count, and the list behind it. Reports the gateway as a whole and says
 // so: the endpoint takes no filters, so scoping the label to the current view

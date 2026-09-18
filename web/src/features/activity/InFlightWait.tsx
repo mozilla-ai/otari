@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 
-import { formatElapsed } from "@/features/activity/activityModel"
+import { formatElapsed } from "./activityModel"
 
 // The wait, ticking between the 2s polls: on an entry whose whole point is that it
 // has not finished, a number that only moved when a response landed would read as

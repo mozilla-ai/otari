@@ -1,10 +1,10 @@
 import type { UsageEntry } from "@/client"
+import { formatNumber } from "@/shared/helpers/format"
 import {
   buildTokenComposition,
   formatTokenCount,
   TOKEN_SEGMENTS,
-} from "@/features/activity/activityModel"
-import { formatNumber } from "@/shared/helpers/format"
+} from "./activityModel"
 
 // The total plus a thin stacked bar of its composition. Widths are SVG rect
 // attributes in a 100-unit viewBox (a dynamic Tailwind `w-[n%]` would not survive

@@ -1,5 +1,5 @@
 import { Dot } from "@/design-system/indicators/Dot"
-import { describeStatus } from "@/features/activity/activityModel"
+import { describeStatus } from "./activityModel"
 
 /**
  * Status as a square dot and a word, failure-forward.

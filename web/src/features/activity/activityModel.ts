@@ -176,7 +176,7 @@ export function resolveExtentWindow(
 // written in, and uppercase emphasis would fall equally on the
 // successes, which is the last thing a column built to surface exceptions
 // wants to draw the eye to. Unknown values still render their slug.
-export const STATUS_LABELS: Record<string, string> = {
+const STATUS_LABELS: Record<string, string> = {
   error: "Error",
   absorbed: "Absorbed",
   success: "Success",
@@ -187,7 +187,7 @@ export function describeStatus(status: string): string {
 }
 
 // Friendly labels for known provenance sources; unknown sources render their slug.
-export const SOURCE_LABELS: Record<string, string> = {
+const SOURCE_LABELS: Record<string, string> = {
   gateway: "Gateway",
   claude_code: "Claude Code",
   codex: "Codex",

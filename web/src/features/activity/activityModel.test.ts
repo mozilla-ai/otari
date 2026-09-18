@@ -14,6 +14,7 @@ import {
   getActivityRowClassName,
   indexGroupOutcomes,
   listToolUsage,
+  readPositive,
   resolveExtentWindow,
   resolveWindow,
   sortChargeLines,
@@ -93,6 +94,29 @@ describe("resolveExtentWindow", () => {
     expect(resolveExtentWindow("custom", NOW)).toEqual({
       start: "2025-01-15T12:00:00.000Z",
     })
+  })
+})
+
+describe("readPositive", () => {
+  it("passes a positive number through", () => {
+    expect(readPositive(42)).toBe(42)
+  })
+
+  it("floors anything a meter could carry that is not one", () => {
+    // Meters arrive as unknown JSON, so a string, a negative, a NaN or an
+    // Infinity all have to read as no usage rather than reaching the arithmetic.
+    for (const value of [
+      0,
+      -1,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      "5",
+      null,
+      undefined,
+      {},
+    ]) {
+      expect(readPositive(value)).toBe(0)
+    }
   })
 })
 

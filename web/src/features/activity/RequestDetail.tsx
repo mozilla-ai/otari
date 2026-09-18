@@ -2,6 +2,10 @@ import { Button } from "@heroui/react"
 
 import type { UsageEntry } from "@/client"
 import { isTokenChargeLine, isUnitChargeLine } from "@/client"
+import { useMemberAttributionLabels } from "@/features/organization/attribution"
+import { userDisplay } from "@/features/users/userDisplay"
+import { formatUnitRate } from "@/shared/helpers/format"
+import { providerDisplayName } from "@/shared/helpers/providers"
 import {
   buildTokenComposition,
   computeToolCost,
@@ -13,13 +17,9 @@ import {
   formatUSD,
   listToolUsage,
   sortChargeLines,
-} from "@/features/activity/activityModel"
-import { DetailField } from "@/features/activity/DetailField"
-import { RoutingPlan } from "@/features/activity/RoutingPlan"
-import { useMemberAttributionLabels } from "@/features/organization/attribution"
-import { userDisplay } from "@/features/users/userDisplay"
-import { formatUnitRate } from "@/shared/helpers/format"
-import { providerDisplayName } from "@/shared/helpers/providers"
+} from "./activityModel"
+import { DetailField } from "./DetailField"
+import { RoutingPlan } from "./RoutingPlan"
 
 // The detail panel for one request: the failure diagnostic plus the metadata
 // that does not fit the row. The dashboard is master-key admin-only, so the
