@@ -129,3 +129,29 @@ gates:
       committed, with a CI drift check over it. Run
       `pnpm --dir web run client:generate` rather than editing it by hand
       (see web/AGENTS.md, "Data and generated files").
+
+  - id: no-narrative-comments
+    type: judge
+    enforcement: advisory
+    # A judge gate costs one real model call per applicable Stop event, so
+    # this is scoped to source, not every path in the repo: a session that
+    # only touches docs, config, or generated files pays nothing.
+    when_changed: ["src/gateway/**", "web/src/**"]
+    rubric: >-
+      Check whether this diff adds or rewrites a comment or docstring that
+      restates what the code already says, narrates the change being made
+      (e.g. "added X", "now does Y", "changed from Z"), or records what the
+      code used to do or why it differs from a prior version. The rule
+      (AGENTS.md, "Repository Conventions"): add a comment only where the
+      logic is not obvious; keep a docstring concise and meaningful;
+      narration, repeated rationale, and implementation history belong in
+      the commit message, not left in the code. Fail only on a comment or
+      docstring this diff adds or rewrites that violates this. Do not fail
+      on a comment that explains a genuinely non-obvious invariant,
+      constraint, or workaround (exactly what this rule still wants kept),
+      and do not fail when this diff adds or changes no comments at all.
+    message: >-
+      This diff may add a comment that restates the code, narrates the
+      change, or records prior behavior instead of explaining a non-obvious
+      WHY (see AGENTS.md, "Repository Conventions"): that belongs in the
+      commit message, not left in the code.

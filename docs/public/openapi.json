@@ -6252,6 +6252,39 @@
         "title": "InviteOrganizationMemberResultPublic",
         "type": "object"
       },
+      "JudgeVerdictRequest": {
+        "additionalProperties": false,
+        "description": "One judge gate's verdict, as the caller's own model call produced it.",
+        "properties": {
+          "gate_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Gate Id",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "pass",
+              "fail",
+              "error"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reasoning": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Reasoning",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gate_id",
+          "outcome"
+        ],
+        "title": "JudgeVerdictRequest",
+        "type": "object"
+      },
       "KeyInfo": {
         "description": "Response model for key information.",
         "properties": {
@@ -10350,6 +10383,15 @@
             ],
             "description": "Shell commands the caller observed run or is about to run.",
             "title": "Commands"
+          },
+          "judge_results": {
+            "description": "Model verdicts the caller collected for this request's judge gates.",
+            "items": {
+              "$ref": "#/components/schemas/JudgeVerdictRequest"
+            },
+            "maxItems": 1000,
+            "title": "Judge Results",
+            "type": "array"
           },
           "policy_yaml": {
             "maxLength": 262144,

@@ -32,6 +32,12 @@ class _FakeResponse:
         return self._payload
 
 
+@pytest.fixture(autouse=True)
+def _judge_log_in_tmp_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Redirect the judge-call audit log away from the real ~/.otari/, for every test in this module."""
+    monkeypatch.setattr(gateway_cli, "_hook_judge_log_path", lambda: tmp_path / "judge-calls.log")
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
@@ -866,6 +872,509 @@ def test_falls_back_to_configured_master_key_and_localhost(
     # tolerates the prefix for back-compat, but a header named for the key
     # carries the raw token.
     assert captured["headers"]["Otari-Key"] == "test-master-key"
+
+
+def test_strip_judge_code_fence_recovers_json_wrapped_in_a_json_fence() -> None:
+    fenced = '```json\n{"outcome": "pass", "reasoning": "fine"}\n```'
+    assert gateway_cli._hook_strip_judge_code_fence(fenced) == '{"outcome": "pass", "reasoning": "fine"}'
+
+
+def test_strip_judge_code_fence_recovers_json_wrapped_in_a_bare_fence() -> None:
+    fenced = '```\n{"outcome": "pass", "reasoning": "fine"}\n```'
+    assert gateway_cli._hook_strip_judge_code_fence(fenced) == '{"outcome": "pass", "reasoning": "fine"}'
+
+
+def test_strip_judge_code_fence_leaves_unfenced_json_unchanged() -> None:
+    unfenced = '{"outcome": "pass", "reasoning": "fine"}'
+    assert gateway_cli._hook_strip_judge_code_fence(unfenced) == unfenced
+
+
+_JUDGE_GATES_YAML = (
+    "schema_version: '1.0'\n"
+    "policy:\n  id: test\n"
+    "gates:\n"
+    "  - id: follows-pattern\n"
+    "    type: judge\n"
+    "    enforcement: advisory\n"
+    "    rubric: Does this change follow the repository's error-handling conventions?\n"
+    "    message: Does not follow the pattern.\n"
+)
+
+
+@pytest.fixture
+def judge_repo(tmp_path: Path) -> Path:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".otari-gates.yml").write_text(_JUDGE_GATES_YAML, encoding="utf-8")
+    return tmp_path
+
+
+def _git_status_and_diff_run(git_status_stdout: str = "", git_diff_stdout: str = "") -> Any:
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=git_status_stdout, stderr="")
+        if cmd[:2] == ["git", "diff"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=git_diff_stdout, stderr="")
+        raise AssertionError(f"unexpected subprocess.run call before claude -p: {cmd}")
+
+    return fake_run
+
+
+def test_stop_event_submits_a_judge_verdict_from_claude_p(
+    monkeypatch: pytest.MonkeyPatch, judge_repo: Path, tmp_path: Path
+) -> None:
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "diff"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="+ changed line\n", stderr="")
+        if cmd[0] == "/usr/bin/claude":
+            assert cmd[1:3] == ["--model", gateway_cli._HOOK_JUDGE_DEFAULT_MODEL], (
+                "a judge call defaults to the cheaper model, not the session's own"
+            )
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout=json.dumps({"outcome": "fail", "reasoning": "does not match"}),
+                stderr="",
+            )
+        raise AssertionError(f"unexpected subprocess.run call: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(_transcript_line(text="did some work") + "\n", encoding="utf-8")
+
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse(
+            {
+                "blocked": False,
+                "results": [
+                    {
+                        "gate_id": "follows-pattern",
+                        "enforcement": "advisory",
+                        "outcome": "fail",
+                        "message": "Does not follow the pattern.",
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(judge_repo), "transcript_path": str(transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["judge_results"] == [
+        {"gate_id": "follows-pattern", "outcome": "fail", "reasoning": "does not match"}
+    ]
+
+
+def test_judge_model_is_overridable_via_flag(monkeypatch: pytest.MonkeyPatch, judge_repo: Path) -> None:
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "diff"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[0] == "/usr/bin/claude":
+            assert cmd[1:3] == ["--model", "claude-sonnet-5"]
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
+            )
+        raise AssertionError(f"unexpected subprocess.run call: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _FakeResponse({"blocked": False, "results": []}))
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)}, judge_model="claude-sonnet-5")
+    assert result.exit_code == 0, result.output
+
+
+def test_judge_dry_run_never_calls_claude_but_still_counts_and_logs(
+    monkeypatch: pytest.MonkeyPatch, judge_repo: Path
+) -> None:
+    """--judge-dry-run runs the whole applicability/diff/transcript pipeline for real,
+
+    but skips the actual `claude -p` call: `shutil.which("claude")` and
+    `subprocess.run` for `claude` must never be reached, yet the submitted
+    verdict still carries a reasoning that estimates the prompt size, and the
+    audit log still gets both the "invoking" and the completed line (so
+    counting log lines tells you how many real calls this would have made).
+    """
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "diff"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="+ changed line\n", stderr="")
+        raise AssertionError(f"claude must never be invoked in a dry run: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    def fake_which(name: str) -> str | None:
+        raise AssertionError("shutil.which('claude') must never be called in a dry run")
+
+    monkeypatch.setattr(gateway_cli.shutil, "which", fake_which)
+
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    args = ["--api-key", "test-key", "--judge-dry-run"]
+    result = CliRunner().invoke(
+        gateway_cli.hook, args, input=json.dumps({"hook_event_name": "Stop", "cwd": str(judge_repo)})
+    )
+    assert result.exit_code == 0, result.output
+
+    [judge_result] = captured["json"]["judge_results"]
+    assert judge_result["gate_id"] == "follows-pattern"
+    assert judge_result["outcome"] == "error"
+    assert "--judge-dry-run" in judge_result["reasoning"]
+    assert "tokens estimated" in judge_result["reasoning"]
+
+    log_lines = gateway_cli._hook_judge_log_path().read_text(encoding="utf-8").splitlines()
+    assert sum(1 for line in log_lines if "outcome=invoking" in line) == 1
+    assert sum(1 for line in log_lines if "detail=" in line) == 1
+
+
+def test_stop_event_parses_a_verdict_wrapped_in_a_markdown_code_fence(
+    monkeypatch: pytest.MonkeyPatch, judge_repo: Path
+) -> None:
+    """A real `claude -p --model claude-haiku-4-5-20251001` call, prompted with this exact
+
+    "no markdown fence" instruction, still wrapped its JSON verdict in a
+    ```json fence (confirmed manually against the real CLI). Parsing this
+    as a failure would report "error" on what was, in substance, a
+    perfectly good verdict, so `_hook_strip_judge_code_fence` must recover it.
+    """
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "diff"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[0] == "/usr/bin/claude":
+            fenced = (
+                '```json\n{"outcome": "fail", "reasoning": "The comment narrates the change '
+                'itself rather than explaining non-obvious logic."}\n```\n'
+            )
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=fenced, stderr="")
+        raise AssertionError(f"unexpected subprocess.run call: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)})
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["judge_results"] == [
+        {
+            "gate_id": "follows-pattern",
+            "outcome": "fail",
+            "reasoning": "The comment narrates the change itself rather than explaining non-obvious logic.",
+        }
+    ]
+
+
+def test_stop_event_reports_error_when_claude_is_not_on_path(
+    monkeypatch: pytest.MonkeyPatch, judge_repo: Path
+) -> None:
+    monkeypatch.setattr(subprocess, "run", _git_status_and_diff_run())
+    monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: None)
+
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)})
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["judge_results"] == [
+        {"gate_id": "follows-pattern", "outcome": "error", "reasoning": "the `claude` CLI was not found on PATH"}
+    ]
+
+
+def test_stop_event_reports_error_when_claude_p_output_is_not_valid_json(
+    monkeypatch: pytest.MonkeyPatch, judge_repo: Path
+) -> None:
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "diff"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[0] == "/usr/bin/claude":
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="Sure, I'll check that.", stderr="")
+        raise AssertionError(f"unexpected subprocess.run call: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)})
+    assert result.exit_code == 0, result.output
+    [judge_result] = captured["json"]["judge_results"]
+    assert judge_result["gate_id"] == "follows-pattern"
+    assert judge_result["outcome"] == "error"
+    assert "not return valid JSON" in judge_result["reasoning"]
+
+
+def test_stop_event_warns_when_the_diff_is_truncated(monkeypatch: pytest.MonkeyPatch, judge_repo: Path) -> None:
+    oversize_diff = "x" * (gateway_cli._HOOK_JUDGE_MAX_DIFF_CHARS + 1)
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "diff"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=oversize_diff, stderr="")
+        if cmd[0] == "/usr/bin/claude":
+            prompt = cmd[-1]
+            assert "... (diff truncated)" in prompt
+            assert oversize_diff not in prompt, "the prompt must not carry the whole oversize diff"
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
+            )
+        raise AssertionError(f"unexpected subprocess.run call: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _FakeResponse({"blocked": False, "results": []}))
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)})
+    assert result.exit_code == 0, result.output
+    assert "diff is" in result.output
+    assert "over the" in result.output
+
+
+def test_stop_event_warns_when_the_transcript_is_truncated(
+    monkeypatch: pytest.MonkeyPatch, judge_repo: Path, tmp_path: Path
+) -> None:
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("x" * (gateway_cli._HOOK_JUDGE_MAX_TRANSCRIPT_CHARS + 1), encoding="utf-8")
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "diff"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[0] == "/usr/bin/claude":
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
+            )
+        raise AssertionError(f"unexpected subprocess.run call: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _FakeResponse({"blocked": False, "results": []}))
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo), "transcript_path": str(transcript)})
+    assert result.exit_code == 0, result.output
+    assert "transcript is" in result.output
+    assert "over the" in result.output
+
+
+def test_a_policy_with_no_judge_gates_submits_no_judge_results(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """`repo`'s policy (`_GATES_YAML`) declares no gates at all, so no `claude`
+    call should ever be attempted.
+    """
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected subprocess.run call: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    def fake_which(name: str) -> str | None:
+        raise AssertionError("shutil.which('claude') must not be called when there are no judge gates")
+
+    monkeypatch.setattr(gateway_cli.shutil, "which", fake_which)
+
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)})
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["judge_results"] == []
+
+
+def test_stop_event_caps_the_number_of_judge_gates_evaluated(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Each judge gate costs one sequential model call, unlike the other gate
+
+    types' near-instant pattern matching, so an unbounded gate count would mean
+    unbounded wall-clock on a single Stop event. Only the first
+    _HOOK_JUDGE_MAX_GATES_PER_RUN gates (declaration order) get a `claude -p`
+    call; the rest are skipped with a stderr message naming which.
+    """
+    (tmp_path / ".git").mkdir()
+    gate_count = gateway_cli._HOOK_JUDGE_MAX_GATES_PER_RUN + 2
+    gates_yaml = "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n" + "".join(
+        f"  - id: judge-{i}\n    type: judge\n    enforcement: advisory\n"
+        f"    rubric: r{i}\n    message: m{i}\n"
+        for i in range(gate_count)
+    )
+    (tmp_path / ".otari-gates.yml").write_text(gates_yaml, encoding="utf-8")
+
+    claude_call_count = 0
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal claude_call_count
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "diff"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[0] == "/usr/bin/claude":
+            claude_call_count += 1
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
+            )
+        raise AssertionError(f"unexpected subprocess.run call: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
+    assert result.exit_code == 0, result.output
+
+    submitted_ids = [entry["gate_id"] for entry in captured["json"]["judge_results"]]
+    assert submitted_ids == [f"judge-{i}" for i in range(gateway_cli._HOOK_JUDGE_MAX_GATES_PER_RUN)]
+    assert claude_call_count == gateway_cli._HOOK_JUDGE_MAX_GATES_PER_RUN
+    assert "over the" in result.output
+    for skipped_id in (f"judge-{i}" for i in range(gateway_cli._HOOK_JUDGE_MAX_GATES_PER_RUN, gate_count)):
+        assert skipped_id in result.output
+
+
+def test_stop_event_skips_a_when_changed_judge_gate_that_does_not_apply(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A judge gate scoped by `when_changed` costs nothing when it does not apply.
+
+    No diff/transcript read and no `claude -p` call, since none of that work
+    is needed to know the gate resolves `not_applicable`; only `git status`
+    runs. Mirrors `test_a_policy_with_no_judge_gates_submits_no_judge_results`,
+    but for a gate that exists and is simply out of scope for this session.
+    """
+    (tmp_path / ".git").mkdir()
+    gates_yaml = (
+        "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n"
+        "  - id: judge-src-only\n    type: judge\n    enforcement: advisory\n"
+        "    rubric: r\n    when_changed: [src/**]\n    message: m\n"
+    )
+    (tmp_path / ".otari-gates.yml").write_text(gates_yaml, encoding="utf-8")
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=" M docs/README.md\0", stderr="")
+        raise AssertionError(f"unexpected subprocess.run call: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    def fake_which(name: str) -> str | None:
+        raise AssertionError("shutil.which('claude') must not be called for an out-of-scope judge gate")
+
+    monkeypatch.setattr(gateway_cli.shutil, "which", fake_which)
+
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["judge_results"] == []
+
+
+def test_stop_event_runs_a_when_changed_judge_gate_that_applies(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    gates_yaml = (
+        "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n"
+        "  - id: judge-src-only\n    type: judge\n    enforcement: advisory\n"
+        "    rubric: r\n    when_changed: [src/**]\n    message: m\n"
+    )
+    (tmp_path / ".otari-gates.yml").write_text(gates_yaml, encoding="utf-8")
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=" M src/module.py\0", stderr="")
+        if cmd[:2] == ["git", "diff"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[0] == "/usr/bin/claude":
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
+            )
+        raise AssertionError(f"unexpected subprocess.run call: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["judge_results"] == [{"gate_id": "judge-src-only", "outcome": "pass", "reasoning": "ok"}]
+
+
+def test_pretooluse_submits_no_judge_results(monkeypatch: pytest.MonkeyPatch, judge_repo: Path) -> None:
+    """Only a Stop event has a real diff and finished transcript to judge against."""
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(judge_repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(judge_repo / "README.md")},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["judge_results"] == []
 
 
 def test_advisory_only_failure_warns_without_blocking(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:

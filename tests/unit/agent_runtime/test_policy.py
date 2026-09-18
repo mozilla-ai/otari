@@ -1,7 +1,7 @@
 import pytest
 
 from gateway.agent_runtime.domain.policy import PolicyError, parse_policy
-from gateway.agent_runtime.domain.types import ChangedPathGate, CommandIfChangedGate, CommandMatchGate
+from gateway.agent_runtime.domain.types import ChangedPathGate, CommandIfChangedGate, CommandMatchGate, JudgeGate
 
 VALID_POLICY = """\
 schema_version: "1.0"
@@ -221,6 +221,94 @@ def test_duplicate_when_changed_globs_and_require_phrases_collapse_to_one() -> N
     assert isinstance(gate, CommandIfChangedGate)
     assert gate.when_changed == ("a", "b")
     assert gate.require == ("c",)
+
+
+def test_parses_a_valid_judge_policy() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: follows-error-handling-pattern\n    type: judge\n    enforcement: advisory\n"
+        "    rubric: Does this change follow the repository's error-handling conventions?\n"
+        "    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    assert len(spec.gates) == 1
+    gate = spec.gates[0]
+    assert isinstance(gate, JudgeGate)
+    assert gate.enforcement == "advisory"
+    assert gate.rubric == "Does this change follow the repository's error-handling conventions?"
+
+
+def test_judge_gate_rejects_required_enforcement() -> None:
+    """A model's verdict is never reproducible enough to block a required gate.
+
+    Rejected at parse time so a mistaken `enforcement: required` is a 422
+    when the policy is loaded, not a gate that silently blocks on a model's
+    say-so the first time it happens to fail.
+    """
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: required\n    rubric: r\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="judge"):
+        parse_policy(policy, source="test.yml")
+
+
+def test_judge_gate_requires_a_non_empty_rubric() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: '   '\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="rubric"):
+        parse_policy(policy, source="test.yml")
+
+
+def test_judge_gate_rejects_an_oversized_rubric() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        f"  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: {'x' * 20_000}\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="rubric"):
+        parse_policy(policy, source="test.yml")
+
+
+def test_judge_gate_when_changed_defaults_to_always_applying() -> None:
+    """A judge gate that never mentions `when_changed` keeps its pre-field behavior."""
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: r\n    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    gate = spec.gates[0]
+    assert isinstance(gate, JudgeGate)
+    assert gate.when_changed == ()
+
+
+def test_judge_gate_parses_when_changed_globs() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: r\n"
+        "    when_changed: [src/**]\n    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    gate = spec.gates[0]
+    assert isinstance(gate, JudgeGate)
+    assert gate.when_changed == ("src/**",)
+
+
+def test_judge_gate_rejects_an_explicitly_empty_when_changed() -> None:
+    """Unlike an omitted `when_changed`, an explicit empty list is a 422, not "always applies".
+
+    An author who writes `when_changed: []` almost certainly meant
+    something; guessing which is worse than refusing it, the same rule
+    `command_if_changed`'s own `when_changed` already follows.
+    """
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: r\n"
+        "    when_changed: []\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="when_changed"):
+        parse_policy(policy, source="test.yml")
 
 
 def test_unhashable_yaml_mapping_key_is_rejected_not_a_500() -> None:

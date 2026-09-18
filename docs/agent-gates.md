@@ -16,14 +16,15 @@ diffs.
 
 This is the first slice. It ships:
 
-- Three gate types: `changed_path`, `command_match`, and `command_if_changed`.
+- Four gate types: `changed_path`, `command_match`, `command_if_changed`, and
+  `judge`.
 - `POST /api/v1/hooks/check`, evaluated against evidence the caller submits.
 - `otari hook --harness claude-code`, a real installed command that reads a
   Claude Code hook payload and calls the endpoint above.
 - `otari hook setup`, which registers it: writes a `PreToolUse` and a `Stop`
   hook entry into Claude Code's own settings and, if this repo has no
-  `.otari-gates.yml` yet, offers to scaffold a starter one. No judge gate or
-  reusable packs yet, and no harness other than Claude Code.
+  `.otari-gates.yml` yet, offers to scaffold a starter one. No reusable packs
+  yet, and no harness other than Claude Code.
 
 This is a hook protocol, not a local filesystem reader: Otari never opens a
 caller's repository itself. The caller (an agent hook today; a native
@@ -176,13 +177,100 @@ collects no command evidence here" is what `command_scope` exists for.
 Without it both arrive as an empty list, and the gate has to read an honest
 failure as non-applicable.
 
+### `judge` (available now)
+
+A rubric evaluated by a model instead of a mechanical match: `rubric` is free
+text describing what to check (e.g. "Does this change follow the
+repository's error-handling conventions?"). `enforcement` must be `advisory`;
+`required` is rejected at policy-parse time (`422`), for two independent
+reasons. A model's verdict is not reproducible the way a glob or phrase match
+is. And the diff and transcript a verdict is judged from are attacker-
+influenceable content, no different from the untrusted input this codebase
+already guards against in the MCP tool loop and outbound URL checks: a
+crafted diff or transcript could talk a model into a `pass` it should not
+give, and nothing in this gate type can rule that out. Advisory enforcement
+is what keeps that from ever mattering: at worst, a compromised verdict
+suppresses a warning, never a block.
+
+```yaml
+  - id: follows-error-handling-pattern
+    type: judge
+    enforcement: advisory
+    rubric: Does this change follow the repository's error-handling conventions?
+    message: This change may not follow the error-handling conventions; take a look.
+```
+
+`when_changed` is optional, the same repo-relative POSIX glob grammar
+`command_if_changed`'s own field of that name uses. Omitted (the default),
+the gate always applies, the only behavior a judge gate had before this
+field existed. Given, it scopes the gate to a session that actually touched
+a matching path, resolving `not_applicable` on a `Stop` event that changed
+nothing the gate cares about, without ever spending a model call to find
+that out: `otari hook` checks this locally, before reading the diff or
+transcript or shelling out to `claude -p`, against the same `git status`
+evidence it already collected for `changed_path` gates.
+
+```yaml
+  - id: follows-error-handling-pattern
+    type: judge
+    enforcement: advisory
+    rubric: Does this change follow the repository's error-handling conventions?
+    when_changed: ["src/**"]
+    message: This change may not follow the error-handling conventions; take a look.
+```
+
+Otari never calls a model itself, the same way it never reads a caller's
+repository for any other gate: the caller reads `rubric` from the parsed
+policy, builds its own prompt from it plus its own diff and transcript, runs
+its own model call, and submits the resulting verdict as `judge_results` (see
+the field table below). This route only relays that verdict into a
+`GateResult`.
+
+`otari hook` is the reference caller. On a `Stop` event only (a `PreToolUse`
+call has neither a finished diff nor a full transcript to judge against yet),
+for every `judge` gate in the local policy it shells out to
+`claude -p --model <model>` with a prompt built from the gate's `rubric`,
+`git diff HEAD`, and the session's own transcript, and requires exactly one
+JSON object back: `{"outcome": "pass" or "fail", "reasoning": "..."}`. This
+runs against the machine's own Claude Code subscription, not billed through
+Otari. `<model>` defaults to Haiku, not the session's own (often larger)
+default model: a judge call is a small, structured pass/fail classification
+over bounded text, so it does not need a frontier model, and every applicable
+judge gate costs one full invocation. Override it with `--judge-model` or
+`OTARI_HOOK_JUDGE_MODEL` for a rubric that genuinely needs more capability. A
+missing `claude` binary, a timeout, a nonzero exit, or output that is not
+that one JSON object all submit `outcome: "error"` rather than raising,
+carrying the failure detail as `reasoning`; since the gate is always
+advisory, an `error` verdict can only ever warn, never block.
+
+`--judge-dry-run` (or `OTARI_HOOK_JUDGE_DRY_RUN`) runs everything up to the
+model call for real, policy parsing, `when_changed` filtering, diff and
+transcript collection, but skips `claude -p` itself, submitting `outcome:
+"error"` with a `reasoning` that estimates the prompt's size (`~4` chars per
+token, a rough estimate, not a real tokenizer count) instead. Paired with the
+audit log below, this answers "how often would this actually fire, and
+roughly how large would each call be" without spending a single real model
+call: useful before turning a new or newly-scoped judge gate loose on a live
+session.
+
+Every real `claude -p` attempt, dry-run or not, is appended to
+`~/.otari/judge-calls.log` (one line per gate, before the call as `outcome:
+invoking` and again once it resolves), regardless of Otari's own database:
+this is a local, otari-hook-only audit trail, never the rubric, diff,
+transcript, or model output, so counting matching lines is the source of
+truth for "how many times has this repo's judge gate actually run."
+
+Each `judge` gate costs one sequential model invocation, not a near-instant
+pattern match like the other three gate types, so `otari hook` evaluates at
+most 5 per `Stop` event (declaration order; the rest are skipped with a
+stderr message naming which) rather than letting one event's wall-clock grow
+without bound as a policy gains judge gates.
+
 ### Not built yet
 
 - `check_passed`: a named verifier command passed on the current inputs.
   Needs a bounded verifier runner (argv execution, deadlines, output caps,
   input fingerprints).
-- `judge`: a rubric evaluated by a model, advisory by default, never
-  overriding a mechanical failure.
 
 ## Calling the Hook Server
 
@@ -249,7 +337,8 @@ required gate rather than passing it. Request/response fields:
 | `changed_paths` | Repo-relative paths the caller observed changed. Send `[]` if evidence was collected and there is none (a `changed_path` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects path evidence at all (a required `changed_path` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
 | `commands` | Shell commands the caller observed run or is about to run. Send `[]` if evidence was collected and there is none right now (a `command_match` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects command evidence at all (a required `command_match` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
 | `command_scope` | What `commands` covers: `call` (the default) for the single tool call about to run, `session` for every command the session has run so far. This decides which gates can resolve at all: `command_match` judges only `call` scope, `command_if_changed` only `session` scope. A caller that omits it keeps the `call` semantics it was written against. |
-| `blocked` | `true` when a `required` gate's outcome is not `pass`/`not_applicable`. An unresolved gate never counts as a pass. |
+| `judge_results` | Model verdicts the caller collected for this request's `judge` gates: a list of `{gate_id, outcome, reasoning}`, one entry per gate it judged. Unlike `changed_paths`/`commands`, there is no separate omitted-vs-empty case: a verdict already names the one gate it judged, so a `judge` gate with no matching entry here resolves `unknown` whether the list was omitted or simply did not include it. `outcome` is one of `pass`, `fail`, or `error` (the caller's own model call failed or returned something it could not parse as a verdict). |
+| `blocked` | `true` when a `required` gate's outcome is not `pass`/`not_applicable`. An unresolved gate never counts as a pass. A `judge` gate can never set this: its `enforcement` is always `advisory`. |
 | `results[].outcome` | `pass`, `fail`, `unknown`, `error`, `not_applicable`, or `not_run`. |
 
 HTTP status codes:
@@ -328,7 +417,20 @@ remaining attempts go into fixing the gate or telling the user why it cannot
 be fixed, rather than into blind retries that end with the gate silently
 overridden.
 
-**`claude -p` does not appear to enforce the `Stop` hook.** Verified: a
+A `judge` gate only ever runs on `Stop`, for the same reason
+`command_if_changed` is meaningful mainly there: it needs the same
+`transcript_path` this section already reads, plus `git diff HEAD`, both of
+which only mean something once there is a finished change to judge, not a
+`PreToolUse` call about to make one. `otari hook` parses the local policy
+itself to find each `judge` gate's `rubric`, then makes one local `claude -p`
+call per gate (not through `otari serve`; see the `judge` gate type above)
+and submits the resulting verdicts as `judge_results`.
+
+**`claude -p` does not appear to enforce the `Stop` hook.** This is about the
+*outer* session running headless (`claude -p "do the task"`), a different
+thing from the judge gate's own inner `claude -p` call described just above:
+that one is a plain one-shot model invocation `otari hook` makes for you, not
+a hook-carrying session of its own, so nothing here applies to it. Verified: a
 zero-tool-use `claude -p` prompt run against a policy violation showed no
 trace of a `Stop` hook anywhere in that invocation's own transcript (no
 `hookEventName`, no `stop_hook_active`), and the process exited cleanly
@@ -471,4 +573,4 @@ yet: uninstall itself, probe whether it is correctly registered
 
 `otari status`, to probe whether a hook is correctly registered without
 re-running setup; a harness other than Claude Code; and the `check_passed`
-and `judge` gate types described above as not built yet.
+gate type described above as not built yet.

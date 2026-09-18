@@ -9,7 +9,7 @@ into a validated :class:`PolicySpec`.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import yaml
 
@@ -20,6 +20,7 @@ from gateway.agent_runtime.domain.types import (
     CommandMatchGate,
     Enforcement,
     GateSpec,
+    JudgeGate,
     PolicySpec,
 )
 
@@ -32,8 +33,15 @@ from gateway.agent_runtime.domain.types import (
 MAX_POLICY_BYTES = 256 * 1024
 
 _SUPPORTED_SCHEMA_VERSIONS = {"1.0"}
-_SUPPORTED_GATE_TYPES = {"changed_path", "command_match", "command_if_changed"}
+_SUPPORTED_GATE_TYPES = {"changed_path", "command_match", "command_if_changed", "judge"}
 _SUPPORTED_ENFORCEMENTS = {"required", "advisory"}
+
+# A model's verdict is not reproducible the way a glob or phrase match is, so
+# a judge gate may never be the thing that blocks a required gate; see
+# JudgeGate's own docstring. Checked here, not left to the caller's own
+# discipline, so a mistaken `enforcement: required` is a 422 at policy-load
+# time rather than a gate that silently blocks on a model's say-so.
+_JUDGE_ENFORCEMENTS = {"advisory"}
 
 # A `**` in a forbidden glob crosses path segments by recursing over every
 # split point in the submitted path (domain/evaluators.py's _segments_match).
@@ -55,7 +63,13 @@ _GATE_FIELDS_BY_TYPE = {
     "changed_path": _COMMON_GATE_FIELDS | {"forbidden"},
     "command_match": _COMMON_GATE_FIELDS | {"forbidden"},
     "command_if_changed": _COMMON_GATE_FIELDS | {"when_changed", "require"},
+    "judge": _COMMON_GATE_FIELDS | {"rubric", "when_changed"},
 }
+
+# A rubric is prompt text, not a glob or phrase; bounded generously since it
+# feeds a model prompt the caller builds, not a matcher whose cost this
+# module has to estimate the way it does for _MAX_DOUBLE_STAR_PER_GLOB.
+_MAX_RUBRIC_BYTES = 16 * 1024
 
 
 class PolicyError(Exception):
@@ -192,6 +206,11 @@ def _parse_gate(raw: Any) -> GateSpec:
             f"Gate {gate_id!r} has invalid enforcement {enforcement!r}. "
             f"Must be one of: {', '.join(sorted(_SUPPORTED_ENFORCEMENTS))}."
         )
+    if gate_type == "judge" and enforcement not in _JUDGE_ENFORCEMENTS:
+        raise PolicyError(
+            f"Gate {gate_id!r} (type 'judge') must use enforcement: "
+            f"{', '.join(sorted(_JUDGE_ENFORCEMENTS))}. A model verdict can never block a required gate."
+        )
     # The isinstance+membership check above is the runtime proof a plain str
     # type can't carry; cast documents that this narrowing is deliberate.
     enforcement_value = cast(Enforcement, enforcement)
@@ -218,19 +237,50 @@ def _parse_gate(raw: Any) -> GateSpec:
             message=message,
         )
 
-    # command_if_changed: when_changed is the same glob grammar changed_path's
-    # forbidden uses; require is the same shell-phrase grammar command_match's
-    # forbidden uses, just under different field names because both evidence
-    # kinds apply to the same gate at once.
-    when_changed = _parse_glob_list(
-        gate_id, "when_changed", _require_string_list(raw, "when_changed", gate_id, gate_type)
-    )
-    require = _parse_phrase_list(gate_id, "require", _require_string_list(raw, "require", gate_id, gate_type))
-    return CommandIfChangedGate(
+    if gate_type == "command_if_changed":
+        # when_changed is the same glob grammar changed_path's forbidden
+        # uses; require is the same shell-phrase grammar command_match's
+        # forbidden uses, just under different field names because both
+        # evidence kinds apply to the same gate at once.
+        when_changed = _parse_glob_list(
+            gate_id, "when_changed", _require_string_list(raw, "when_changed", gate_id, gate_type)
+        )
+        require = _parse_phrase_list(gate_id, "require", _require_string_list(raw, "require", gate_id, gate_type))
+        return CommandIfChangedGate(
+            id=gate_id,
+            enforcement=enforcement_value,
+            when_changed=tuple(when_changed),
+            require=tuple(require),
+            message=message,
+        )
+
+    # judge: the only gate type _SUPPORTED_GATE_TYPES admits left once every
+    # other branch above has returned.
+    rubric = raw.get("rubric")
+    if not isinstance(rubric, str) or not rubric.strip():
+        raise PolicyError(f"Gate {gate_id!r} (type 'judge') needs a non-empty 'rubric'.")
+    if len(rubric.encode("utf-8")) > _MAX_RUBRIC_BYTES:
+        raise PolicyError(f"Gate {gate_id!r}: rubric is larger than {_MAX_RUBRIC_BYTES} bytes.")
+    # Unlike command_if_changed's when_changed, this one is optional: its
+    # absence means "always applies", the only behavior a judge gate had
+    # before this field existed. A submitted but empty list is still
+    # rejected by _require_string_list, the same as every other gate type's
+    # glob/phrase list, rather than silently treated as "always applies" too:
+    # an author who writes `when_changed: []` almost certainly meant
+    # something, and guessing which is worse than a 422.
+    when_changed: list[str] = []
+    if "when_changed" in raw:
+        when_changed = _parse_glob_list(
+            gate_id, "when_changed", _require_string_list(raw, "when_changed", gate_id, gate_type)
+        )
+    # enforcement_value is already proven "advisory" by the _JUDGE_ENFORCEMENTS
+    # check above; cast documents that narrowing the same way the plain
+    # Enforcement cast above documents its own.
+    return JudgeGate(
         id=gate_id,
-        enforcement=enforcement_value,
+        enforcement=cast(Literal["advisory"], enforcement_value),
+        rubric=rubric,
         when_changed=tuple(when_changed),
-        require=tuple(require),
         message=message,
     )
 
