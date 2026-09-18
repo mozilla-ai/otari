@@ -148,51 +148,70 @@ function ConnectionTestResult({ test }: { test: ConnectionTestState }) {
   )
 }
 
+// Everything the operator can change on each tab, as one value per tab. The
+// drafts outlive the components that render them (only the active tab mounts),
+// so they are held in `AddProviderForm` and passed down whole: a field added
+// here reaches the form, the guard and the reset together, rather than in the
+// three separate edits whose drift `useDirtySnapshot` exists to stop.
+interface KnownProviderDraft {
+  providerId: string
+  apiKey: string
+  apiBase: string
+  name: string
+  clientArgsText: string
+  credentials: CredentialFieldValues
+}
+
+interface CustomProviderDraft {
+  name: string
+  providerType: string
+  apiBase: string
+  apiKey: string
+  clientArgsText: string
+}
+
+const EMPTY_KNOWN_DRAFT: KnownProviderDraft = {
+  providerId: "",
+  apiKey: "",
+  apiBase: "",
+  name: "",
+  clientArgsText: "",
+  credentials: {},
+}
+
+const EMPTY_CUSTOM_DRAFT: CustomProviderDraft = {
+  name: "",
+  providerType: "openai-compatible",
+  apiBase: "",
+  apiKey: "",
+  clientArgsText: "",
+}
+
 // Add a hosted provider whose endpoint is built into the SDK: pick it, paste a
 // key. Name and api_base are only exposed under Advanced.
 function KnownProviderForm({
   isOpen,
   onClose,
   tabs,
-  providerId,
-  setProviderId,
-  apiKey,
-  setApiKey,
+  draft,
+  onChange,
   isAdvancedShown,
   setIsAdvancedShown,
-  apiBase,
-  setApiBase,
-  name,
-  setName,
-  clientArgsText,
-  setClientArgsText,
-  credentials,
-  setCredentials,
   isDirty,
-  apiBaseSeededFor,
-  setApiBaseSeededFor,
 }: {
   isOpen: boolean
   onClose: () => void
   tabs: ReactNode
-  providerId: string
-  setProviderId: Dispatch<SetStateAction<string>>
-  apiKey: string
-  setApiKey: Dispatch<SetStateAction<string>>
+  draft: KnownProviderDraft
+  // A patch rather than a whole draft, so a field's handler names only the
+  // field it owns.
+  onChange: (patch: Partial<KnownProviderDraft>) => void
   isAdvancedShown: boolean
   setIsAdvancedShown: Dispatch<SetStateAction<boolean>>
-  apiBase: string
-  setApiBase: Dispatch<SetStateAction<string>>
-  name: string
-  setName: Dispatch<SetStateAction<string>>
-  clientArgsText: string
-  setClientArgsText: Dispatch<SetStateAction<string>>
-  credentials: CredentialFieldValues
-  setCredentials: Dispatch<SetStateAction<CredentialFieldValues>>
   isDirty: boolean
-  apiBaseSeededFor: string | null
-  setApiBaseSeededFor: Dispatch<SetStateAction<string | null>>
 }) {
+  const { providerId, apiKey, apiBase, name, clientArgsText, credentials } =
+    draft
   const create = useCreateStoredProvider()
   const test = useTestProviderCredentials()
   const clientArgs = parseClientArgs(clientArgsText)
@@ -207,18 +226,6 @@ function KnownProviderForm({
   // picker itself never imports every provider SDK (issue #365).
   const detail = useProviderDetail(providerId)
   const selected = detail.data?.id === providerId ? detail.data : undefined
-  // Prefill the (editable) API base with the provider's built-in default once
-  // its detail loads, so Advanced shows what will be used. Keyed on the provider
-  // already seeded, held above this component, rather than on mount: the draft
-  // now outlives a tab switch while this component does not, so `selected` is
-  // truthy on the first render after a switch (TanStack Query answers from
-  // cache) and a mount-keyed effect overwrote a hand-edited base every time.
-  useEffect(() => {
-    if (selected && apiBaseSeededFor !== selected.id) {
-      setApiBaseSeededFor(selected.id)
-      setApiBase(selected.default_api_base ?? "")
-    }
-  }, [selected, apiBaseSeededFor, setApiBaseSeededFor, setApiBase])
   const envKeyPresent = selected?.env_key_present ?? false
   // The key is only mandatory when the provider needs one and its env var is not
   // already set on the server; any-llm falls back to that env var otherwise.
@@ -294,24 +301,17 @@ function KnownProviderForm({
         label="Provider"
         value={providerId}
         onChange={(id) => {
-          setProviderId(id)
-          setName("")
-          // Clear the API base and the marker together; the effect above refills
-          // it from the provider's built-in default once this provider's detail
-          // loads. Clearing the picker is also a change to `id` (to ""), so a
-          // marker left behind would skip the reseed on picking the same
-          // provider again and leave the base blank.
-          setApiBase("")
-          setApiBaseSeededFor(null)
-          // The typed fields belong to the provider, so a change to it drops
-          // values that no longer have a field to sit in.
-          setCredentials({})
+          // The name, the base and the typed fields all belong to the provider,
+          // so a change to it drops values that no longer have a field to sit
+          // in. AddProviderForm refills the base from the new provider's
+          // built-in default once its detail loads.
+          onChange({ providerId: id, name: "", apiBase: "", credentials: {} })
         }}
         description="Its endpoint is built in."
       />
       <SecretField
         value={apiKey}
-        onChange={setApiKey}
+        onChange={(v) => onChange({ apiKey: v })}
         // The registry names the credential where the provider does not call it
         // an API key; the optional suffix still tracks whether one is needed.
         label={
@@ -338,7 +338,7 @@ function KnownProviderForm({
       <ProviderCredentialFields
         provider={providerId}
         values={credentials}
-        onChange={setCredentials}
+        onChange={(v) => onChange({ credentials: v })}
         errors={credentialErrors}
       />
       <button
@@ -356,14 +356,14 @@ function KnownProviderForm({
             <Field
               label="API base"
               value={apiBase}
-              onChange={setApiBase}
+              onChange={(v) => onChange({ apiBase: v })}
               placeholder={selected?.default_api_base ?? "https://…/v1"}
               description="Only if you route through a proxy. Blank uses the built-in default."
             />
             <Field
               label="Name"
               value={name}
-              onChange={setName}
+              onChange={(v) => onChange({ name: v })}
               placeholder={providerId || "instance name"}
               description={
                 nameHasDelimiter ? (
@@ -378,7 +378,7 @@ function KnownProviderForm({
           </div>
           <ClientArgsField
             value={clientArgsText}
-            onChange={setClientArgsText}
+            onChange={(v) => onChange({ clientArgsText: v })}
             error={clientArgs.ok ? null : clientArgs.error}
           />
         </div>
@@ -394,33 +394,18 @@ function CustomProviderForm({
   isOpen,
   onClose,
   tabs,
-  name,
-  setName,
-  providerType,
-  setProviderType,
-  apiBase,
-  setApiBase,
-  apiKey,
-  setApiKey,
-  clientArgsText,
-  setClientArgsText,
+  draft,
+  onChange,
   isDirty,
 }: {
   isOpen: boolean
   onClose: () => void
   tabs: ReactNode
-  name: string
-  setName: Dispatch<SetStateAction<string>>
-  providerType: string
-  setProviderType: Dispatch<SetStateAction<string>>
-  apiBase: string
-  setApiBase: Dispatch<SetStateAction<string>>
-  apiKey: string
-  setApiKey: Dispatch<SetStateAction<string>>
-  clientArgsText: string
-  setClientArgsText: Dispatch<SetStateAction<string>>
+  draft: CustomProviderDraft
+  onChange: (patch: Partial<CustomProviderDraft>) => void
   isDirty: boolean
 }) {
+  const { name, providerType, apiBase, apiKey, clientArgsText } = draft
   const create = useCreateStoredProvider()
   const test = useTestProviderCredentials()
   const clientArgs = parseClientArgs(clientArgsText)
@@ -484,7 +469,7 @@ function CustomProviderForm({
         <Field
           label="Name"
           value={name}
-          onChange={setName}
+          onChange={(v) => onChange({ name: v })}
           placeholder="my-local-llm"
           isRequired
           autoFocus
@@ -501,7 +486,7 @@ function CustomProviderForm({
         <ProviderComboBox
           label="Compatible with"
           value={providerType}
-          onChange={setProviderType}
+          onChange={(v) => onChange({ providerType: v })}
           includeCatalog={false}
           description="The API this endpoint speaks."
           extra={[
@@ -513,20 +498,20 @@ function CustomProviderForm({
       <Field
         label="API base"
         value={apiBase}
-        onChange={setApiBase}
+        onChange={(v) => onChange({ apiBase: v })}
         placeholder="http://localhost:8000/v1"
         isRequired
         description="The endpoint URL of your server."
       />
       <SecretField
         value={apiKey}
-        onChange={setApiKey}
+        onChange={(v) => onChange({ apiKey: v })}
         label="API key (optional)"
         description="Many local backends need none. Stored encrypted."
       />
       <ClientArgsField
         value={clientArgsText}
-        onChange={setClientArgsText}
+        onChange={(v) => onChange({ clientArgsText: v })}
         error={clientArgs.ok ? null : clientArgs.error}
       />
       <ConnectionTestResult test={test} />
@@ -560,28 +545,50 @@ function AddProviderForm({
 }) {
   const [tab, setTab] = useState<ProviderTab>("known")
 
-  // Known-tab field values: lifted so they survive when the tab is inactive.
-  const [knownProviderId, setKnownProviderId] = useState("")
-  const [knownApiKey, setKnownApiKey] = useState("")
+  // Both drafts are held here: only the active tab mounts, so a draft kept in
+  // the tab component went with it on a switch.
+  const [knownDraft, setKnownDraft] = useState(EMPTY_KNOWN_DRAFT)
+  const [customDraft, setCustomDraft] = useState(EMPTY_CUSTOM_DRAFT)
+  // Advanced is the tab's own disclosure rather than a field, so it is not part
+  // of the draft the guard reads; it is lifted for the same reason.
   const [knownIsAdvancedShown, setKnownIsAdvancedShown] = useState(false)
-  const [knownApiBase, setKnownApiBase] = useState("")
-  const [knownName, setKnownName] = useState("")
-  const [knownClientArgsText, setKnownClientArgsText] = useState("")
-  const [knownCredentials, setKnownCredentials] =
-    useState<CredentialFieldValues>({})
-  // Which provider the known tab's API base was seeded from. Lifted with the
-  // draft it guards, so a tab switch cannot reseed over a hand-edited value.
-  const [knownApiBaseSeededFor, setKnownApiBaseSeededFor] = useState<
-    string | null
-  >(null)
+  // Which provider the known draft's API base was seeded from, so a base the
+  // operator typed is never overwritten by a later render. Empty means not yet
+  // seeded, the same way `providerId` spells no provider chosen; no catalog
+  // entry has an empty id, so it cannot collide with a real one.
+  const [apiBaseSeededFor, setApiBaseSeededFor] = useState("")
 
-  // Custom-tab field values: lifted for the same reason.
-  const [customName, setCustomName] = useState("")
-  const [customProviderType, setCustomProviderType] =
-    useState("openai-compatible")
-  const [customApiBase, setCustomApiBase] = useState("")
-  const [customApiKey, setCustomApiKey] = useState("")
-  const [customClientArgsText, setCustomClientArgsText] = useState("")
+  // Choosing a provider invalidates the seed, and so does clearing the picker:
+  // both arrive here as a change to `providerId`. Reset in the one place that
+  // owns both halves, rather than leaving each caller to remember.
+  const changeKnownDraft = (patch: Partial<KnownProviderDraft>) => {
+    setKnownDraft((current) => ({ ...current, ...patch }))
+    if (patch.providerId !== undefined) setApiBaseSeededFor("")
+  }
+  const changeCustomDraft = (patch: Partial<CustomProviderDraft>) => {
+    setCustomDraft((current) => ({ ...current, ...patch }))
+  }
+
+  // Prefill the (editable) API base with the provider's built-in default once
+  // its detail loads, so Advanced shows what will be used. It sits beside the
+  // state it writes rather than in the tab: that component remounts on every
+  // switch while the draft does not, so a mount-keyed effect there answered
+  // from cache on the first render back and overwrote a hand-edited base. The
+  // query is the same one the tab reads, so this observer shares its cache
+  // rather than issuing a second request.
+  const knownDetail = useProviderDetail(knownDraft.providerId)
+  const knownSelected =
+    knownDetail.data?.id === knownDraft.providerId
+      ? knownDetail.data
+      : undefined
+  useEffect(() => {
+    if (!knownSelected || apiBaseSeededFor === knownSelected.id) return
+    setApiBaseSeededFor(knownSelected.id)
+    setKnownDraft((current) => ({
+      ...current,
+      apiBase: knownSelected.default_api_base ?? "",
+    }))
+  }, [knownSelected, apiBaseSeededFor])
 
   // One snapshot over both drafts, held here rather than in either tab
   // component. The drafts outlive a tab switch but the components do not, and
@@ -589,19 +596,7 @@ function AddProviderForm({
   // against already-filled values and read clean: Escape then closed with the
   // pasted key and nothing asked. Held here it also covers the inactive tab,
   // which a per-tab snapshot could not see at all. See feedback.md.
-  const { isDirty } = useDirtySnapshot({
-    knownProviderId,
-    knownApiKey,
-    knownApiBase,
-    knownName,
-    knownClientArgsText,
-    knownCredentials,
-    customName,
-    customProviderType,
-    customApiBase,
-    customApiKey,
-    customClientArgsText,
-  })
+  const { isDirty } = useDirtySnapshot({ knownDraft, customDraft })
 
   const tabs = (
     <TabRow>
@@ -625,23 +620,11 @@ function AddProviderForm({
           isOpen={isOpen}
           onClose={onClose}
           tabs={tabs}
-          providerId={knownProviderId}
-          setProviderId={setKnownProviderId}
-          apiKey={knownApiKey}
-          setApiKey={setKnownApiKey}
+          draft={knownDraft}
+          onChange={changeKnownDraft}
           isAdvancedShown={knownIsAdvancedShown}
           setIsAdvancedShown={setKnownIsAdvancedShown}
-          apiBase={knownApiBase}
-          setApiBase={setKnownApiBase}
-          name={knownName}
-          setName={setKnownName}
-          clientArgsText={knownClientArgsText}
-          setClientArgsText={setKnownClientArgsText}
-          credentials={knownCredentials}
-          setCredentials={setKnownCredentials}
           isDirty={isDirty}
-          apiBaseSeededFor={knownApiBaseSeededFor}
-          setApiBaseSeededFor={setKnownApiBaseSeededFor}
         />
       )}
       {tab === "custom" && (
@@ -649,16 +632,8 @@ function AddProviderForm({
           isOpen={isOpen}
           onClose={onClose}
           tabs={tabs}
-          name={customName}
-          setName={setCustomName}
-          providerType={customProviderType}
-          setProviderType={setCustomProviderType}
-          apiBase={customApiBase}
-          setApiBase={setCustomApiBase}
-          apiKey={customApiKey}
-          setApiKey={setCustomApiKey}
-          clientArgsText={customClientArgsText}
-          setClientArgsText={setCustomClientArgsText}
+          draft={customDraft}
+          onChange={changeCustomDraft}
           isDirty={isDirty}
         />
       )}
