@@ -894,3 +894,183 @@ def test_command_match_does_not_judge_session_scoped_evidence(
 
     assert outcome_for("session") == "not_applicable"
     assert outcome_for("call") == "fail"
+
+
+_JUDGE_POLICY = """\
+schema_version: "1.0"
+policy:
+  id: test/judge
+gates:
+  - id: follows-error-handling-pattern
+    type: judge
+    enforcement: advisory
+    rubric: Does this change follow the repository's error-handling conventions?
+    message: This change does not follow the error-handling conventions.
+"""
+
+
+def test_judge_gate_relays_a_passing_verdict(client: TestClient, master_key_header: dict[str, str]) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _JUDGE_POLICY,
+            "judge_results": [
+                {"gate_id": "follows-error-handling-pattern", "outcome": "pass", "reasoning": "looks fine"}
+            ],
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "pass"
+    assert body["results"][0]["detail"] == "looks fine"
+
+
+def test_judge_gate_relays_a_failing_verdict_without_blocking(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A judge gate is always advisory (rejected as required at parse time), so a
+    failing model verdict warns without ever setting `blocked`.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _JUDGE_POLICY,
+            "judge_results": [
+                {"gate_id": "follows-error-handling-pattern", "outcome": "fail", "reasoning": "swallows exceptions"}
+            ],
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "fail"
+    assert body["results"][0]["message"] == "This change does not follow the error-handling conventions."
+    assert body["results"][0]["detail"] == "swallows exceptions"
+
+
+def test_judge_gate_is_unknown_when_no_verdict_was_submitted(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _JUDGE_POLICY},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False, "unknown never blocks: the gate is always advisory"
+    assert body["results"][0]["outcome"] == "unknown"
+
+
+def test_judge_gate_reports_a_callers_model_error_without_blocking(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _JUDGE_POLICY,
+            "judge_results": [
+                {
+                    "gate_id": "follows-error-handling-pattern",
+                    "outcome": "error",
+                    "reasoning": "the `claude` CLI was not found on PATH",
+                }
+            ],
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "error"
+
+
+_WHEN_CHANGED_JUDGE_POLICY = """\
+schema_version: "1.0"
+policy:
+  id: test/judge-when-changed
+gates:
+  - id: follows-error-handling-pattern
+    type: judge
+    enforcement: advisory
+    rubric: Does this change follow the repository's error-handling conventions?
+    when_changed: ["src/**"]
+    message: This change does not follow the error-handling conventions.
+"""
+
+
+def test_judge_gate_with_when_changed_is_not_applicable_when_nothing_matches(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _WHEN_CHANGED_JUDGE_POLICY,
+            "changed_paths": ["docs/README.md"],
+            "judge_results": [
+                {"gate_id": "follows-error-handling-pattern", "outcome": "fail", "reasoning": "should not matter"}
+            ],
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "not_applicable"
+
+
+def test_judge_gate_with_when_changed_is_unknown_when_change_evidence_was_not_submitted(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _WHEN_CHANGED_JUDGE_POLICY,
+            "judge_results": [
+                {"gate_id": "follows-error-handling-pattern", "outcome": "pass", "reasoning": "fine"}
+            ],
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "unknown"
+
+
+def test_judge_gate_with_when_changed_still_resolves_the_verdict_once_a_matching_path_changed(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _WHEN_CHANGED_JUDGE_POLICY,
+            "changed_paths": ["src/module.py"],
+            "judge_results": [
+                {"gate_id": "follows-error-handling-pattern", "outcome": "fail", "reasoning": "swallows exceptions"}
+            ],
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "fail"
+    assert body["results"][0]["detail"] == "swallows exceptions"
+
+
+def test_judge_gate_rejects_required_enforcement(client: TestClient, master_key_header: dict[str, str]) -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: required\n    rubric: r\n    message: m\n"
+    )
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": policy},
+        headers=master_key_header,
+    )
+    assert response.status_code == 422, response.text
+    assert "judge" in response.json()["detail"]

@@ -19,6 +19,8 @@ from gateway.agent_runtime.domain.types import (
     CommandIfChangedGate,
     CommandMatchGate,
     GateResult,
+    JudgeEvidence,
+    JudgeGate,
     Outcome,
 )
 
@@ -149,6 +151,18 @@ def _matches_any(path: str, patterns: tuple[str, ...]) -> str | None:
         if _segments_match(pattern.split("/"), path_segments):
             return pattern
     return None
+
+
+def matched_changed_paths(patterns: tuple[str, ...], changed_paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Every one of `changed_paths` that matches any of `patterns`, sorted.
+
+    `patterns` is the same repo-relative POSIX glob grammar `ChangedPathGate.forbidden`/
+    `CommandIfChangedGate.when_changed` use. Shared, rather than reimplemented, by
+    `evaluate_judge`'s own `when_changed` applicability check and by `cli.py`'s local
+    judge-gate filtering (skipping a `claude -p` call for a gate that plainly does not
+    apply yet), so a path is judged against the same grammar wherever it's checked.
+    """
+    return tuple(sorted(path for path in changed_paths if _matches_any(path, patterns) is not None))
 
 
 def _strip_shell_comment(command: str) -> str:
@@ -771,4 +785,83 @@ def evaluate_changed_path(gate: ChangedPathGate, evidence: ChangedPathEvidence |
         enforcement=gate.enforcement,
         outcome=Outcome.PASS,
         message="No forbidden paths changed.",
+    )
+
+
+def evaluate_judge(
+    gate: JudgeGate, changed_path_evidence: ChangedPathEvidence | None, evidence: JudgeEvidence | None
+) -> GateResult:
+    """Relay the caller's own model verdict for this gate; Otari never calls a model itself.
+
+    ``gate.when_changed`` narrows applicability the same way
+    ``CommandIfChangedGate.when_changed`` narrows its own gate, checked
+    first, before ever looking for a verdict. Empty (the default) means this
+    gate always applies. Non-empty needs ``changed_path_evidence`` to resolve
+    at all (``unknown`` if it was never submitted, mirroring
+    ``evaluate_command_if_changed``'s own applicability check) and resolves
+    ``not_applicable`` when nothing the gate cares about changed, the same
+    non-blocking "there was nothing to judge" this gate type otherwise has
+    no way to express.
+
+    ``evidence`` carries one verdict per judge gate the caller evaluated
+    (see :class:`JudgeEvidence`); a gate whose id has no matching verdict
+    resolves ``unknown`` the same as evidence that was never submitted at
+    all, so ``None`` and a submitted list missing this gate's id are handled
+    identically rather than as two separate cases.
+
+    The caller's own ``"error"`` outcome (its model call failed or returned
+    something unparsable) maps to :class:`Outcome.ERROR`: this is
+    ``is_blocking`` like any other unresolved check, but ``gate.enforcement``
+    is always ``"advisory"`` (enforced at parse time), so it can only ever
+    warn, never block a required gate.
+    """
+    if gate.when_changed:
+        if changed_path_evidence is None:
+            return GateResult(
+                gate_id=gate.id,
+                enforcement=gate.enforcement,
+                outcome=Outcome.UNKNOWN,
+                message="Change evidence was not submitted.",
+            )
+        if not matched_changed_paths(gate.when_changed, changed_path_evidence.changed_paths):
+            return GateResult(
+                gate_id=gate.id,
+                enforcement=gate.enforcement,
+                outcome=Outcome.NOT_APPLICABLE,
+                message="No changed path matched this gate's when_changed globs.",
+            )
+
+    verdict = next((v for v in (evidence.verdicts if evidence is not None else ()) if v.gate_id == gate.id), None)
+    if verdict is None:
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.UNKNOWN,
+            message="No model verdict was submitted for this gate.",
+        )
+
+    if verdict.outcome == "error":
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.ERROR,
+            message="The model verdict could not be produced.",
+            detail=verdict.reasoning or None,
+        )
+
+    if verdict.outcome == "fail":
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.FAIL,
+            message=gate.message,
+            detail=verdict.reasoning or None,
+        )
+
+    return GateResult(
+        gate_id=gate.id,
+        enforcement=gate.enforcement,
+        outcome=Outcome.PASS,
+        message="The model verdict judged this gate's rubric satisfied.",
+        detail=verdict.reasoning or None,
     )

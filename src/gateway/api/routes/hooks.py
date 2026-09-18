@@ -17,7 +17,7 @@ plan's audit of the old POC calls out).
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,6 +27,7 @@ from gateway.agent_runtime.domain.evaluators import (
     evaluate_changed_path,
     evaluate_command_if_changed,
     evaluate_command_match,
+    evaluate_judge,
     tokenize_commands,
     tokenize_phrases,
 )
@@ -40,6 +41,9 @@ from gateway.agent_runtime.domain.types import (
     EvidenceScope,
     GateResult,
     GateSpec,
+    JudgeEvidence,
+    JudgeGate,
+    JudgeVerdict,
 )
 from gateway.api.deps import get_config, get_db_if_needed, verify_api_key_or_master_key
 from gateway.api.routes._platform import _extract_platform_user_token
@@ -166,6 +170,24 @@ _MAX_COMMAND_COMPARISONS = 500_000
 # 2,000,000 characters measured ~0.17s; chosen with margin under that.
 _MAX_TOTAL_COMMAND_CHARS = 2_000_000
 
+# A judge verdict is a small, fixed-shape record (see JudgeVerdictRequest), not
+# a pattern this route matches against other input, so its bound is a plain
+# list-length/field-length cap rather than the work-estimate formula the
+# path/command evidence kinds need: looking a verdict up by gate_id is O(n) in
+# the number of judge gates in the policy, not a cross product.
+_MAX_JUDGE_RESULTS = 1_000
+_MAX_REASONING_LENGTH = 4_096
+
+
+class JudgeVerdictRequest(BaseModel):
+    """One judge gate's verdict, as the caller's own model call produced it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    gate_id: str = Field(min_length=1, max_length=200)
+    outcome: Literal["pass", "fail", "error"]
+    reasoning: str = Field(default="", max_length=_MAX_REASONING_LENGTH)
+
 
 class PolicyCheckRequest(BaseModel):
     """A policy body plus the evidence to check it against, both caller-supplied."""
@@ -213,6 +235,17 @@ class PolicyCheckRequest(BaseModel):
             "`session` for every command the session has run so far."
         ),
     )
+    # No tri-state here unlike changed_paths/commands above: a verdict already
+    # names the one gate it judged (JudgeEvidence's own docstring), so an
+    # omitted field and a submitted empty list both mean "no verdict for any
+    # judge gate in this policy" and resolve identically, gate by gate, in
+    # evaluate_judge. Defaulting to `[]` loses no information a `None` default
+    # would have preserved.
+    judge_results: list[JudgeVerdictRequest] = Field(
+        default_factory=list,
+        max_length=_MAX_JUDGE_RESULTS,
+        description="Model verdicts the caller collected for this request's judge gates.",
+    )
 
     @property
     def changed_path_evidence(self) -> ChangedPathEvidence | None:
@@ -229,6 +262,15 @@ class PolicyCheckRequest(BaseModel):
         if self.commands is None:
             return None
         return CommandEvidence(commands=tuple(dict.fromkeys(self.commands)), scope=self.command_scope)
+
+    @property
+    def judge_evidence(self) -> JudgeEvidence:
+        return JudgeEvidence(
+            verdicts=tuple(
+                JudgeVerdict(gate_id=verdict.gate_id, outcome=verdict.outcome, reasoning=verdict.reasoning)
+                for verdict in self.judge_results
+            )
+        )
 
 
 class GateResultResponse(BaseModel):
@@ -251,6 +293,7 @@ def _evaluate_gate(
     gate: GateSpec,
     changed_path_evidence: ChangedPathEvidence | None,
     command_evidence: CommandEvidence | None,
+    judge_evidence: JudgeEvidence,
     segment_cache: dict[str, list[list[str]]] | None,
     phrase_cache: dict[str, list[str]] | None,
 ) -> GateResult:
@@ -259,6 +302,8 @@ def _evaluate_gate(
         return evaluate_changed_path(gate, changed_path_evidence)
     if isinstance(gate, CommandMatchGate):
         return evaluate_command_match(gate, command_evidence, segment_cache=segment_cache, phrase_cache=phrase_cache)
+    if isinstance(gate, JudgeGate):
+        return evaluate_judge(gate, changed_path_evidence, judge_evidence)
     return evaluate_command_if_changed(
         gate, changed_path_evidence, command_evidence, segment_cache=segment_cache, phrase_cache=phrase_cache
     )
@@ -397,8 +442,9 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
 
     # Evaluated in declaration order (not grouped by type) so a caller reading
     # `results` positionally sees the same order as the policy it submitted.
+    judge_evidence = request.judge_evidence
     results = [
-        _evaluate_gate(gate, changed_path_evidence, command_evidence, segment_cache, phrase_cache)
+        _evaluate_gate(gate, changed_path_evidence, command_evidence, judge_evidence, segment_cache, phrase_cache)
         for gate in spec.gates
     ]
     blocked = any(result.enforcement == "required" and result.outcome.is_blocking for result in results)

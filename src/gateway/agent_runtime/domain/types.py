@@ -121,10 +121,52 @@ class CommandIfChangedGate:
     type: Literal["command_if_changed"] = "command_if_changed"
 
 
-# Extend this alias as check_passed and judge land; do not let a new gate
-# type skip it, or the policy loader's dispatch on ``type`` silently stops
-# covering it.
-GateSpec = ChangedPathGate | CommandMatchGate | CommandIfChangedGate
+@dataclass(frozen=True, slots=True)
+class JudgeGate:
+    """A gate whose verdict comes from a model, not a mechanical match.
+
+    ``rubric`` is free text describing what the model should check (e.g.
+    "Does this change follow the repository's error-handling conventions?").
+    Otari itself never calls a model: the caller (``otari hook``) reads
+    ``rubric``, builds a prompt from it plus its own diff and transcript, runs
+    its own model call, and submits the resulting verdict as
+    :class:`JudgeEvidence`. This route only relays that verdict.
+
+    ``enforcement`` is always ``"advisory"``; ``domain/policy.py`` rejects
+    ``required`` at parse time, for two independent reasons, either alone
+    sufficient. A model's verdict is not reproducible the way a glob or
+    phrase match is. And the diff and transcript text a verdict is judged
+    from are the same untrusted, attacker-influenceable content a
+    prompt-injection attack already targets elsewhere in this codebase (see
+    ``services/url_safety.py`` and the MCP tool loop): a crafted diff or
+    transcript could talk a model into a ``pass`` it should not give, and
+    nothing here can rule that out, since the caller's own prompt
+    construction is outside what Otari can see or verify. Advisory
+    enforcement is what keeps that from ever mattering: at worst, a
+    compromised verdict suppresses a warning, never a block. See
+    docs/agent-gates.md.
+
+    ``when_changed`` is optional and, like ``CommandIfChangedGate``'s own
+    field of the same name, the same repo-relative POSIX glob grammar
+    ``ChangedPathGate.forbidden`` uses. Empty (the default) means this gate
+    always applies, the only behavior a judge gate had before this field
+    existed. Non-empty scopes the model call to a session that actually
+    touched a matching path, so a rubric about, say, error-handling
+    conventions is not re-judged, at real model-call cost, on a session that
+    never touched application code.
+    """
+
+    id: str
+    enforcement: Literal["advisory"]
+    rubric: str
+    message: str
+    when_changed: tuple[str, ...] = ()
+    type: Literal["judge"] = "judge"
+
+
+# Extend this alias as check_passed lands; do not let a new gate type skip
+# it, or the policy loader's dispatch on ``type`` silently stops covering it.
+GateSpec = ChangedPathGate | CommandMatchGate | CommandIfChangedGate | JudgeGate
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +206,39 @@ class CommandEvidence:
 
     commands: tuple[str, ...]
     scope: EvidenceScope = "call"
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeVerdict:
+    """One judge gate's model-produced verdict, as the caller observed it.
+
+    ``outcome`` is the caller's own report, not a value Otari computed:
+    ``"error"`` means the caller's model call itself failed or returned
+    something it could not parse as a verdict (no `claude` on PATH, a
+    timeout, malformed JSON), distinct from ``"fail"``, which means the model
+    call succeeded and judged the rubric unmet. Otari does not verify either.
+    """
+
+    gate_id: str
+    outcome: Literal["pass", "fail", "error"]
+    reasoning: str
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeEvidence:
+    """Verdicts the caller collected for this request's judge gates.
+
+    Unlike :class:`ChangedPathEvidence`/:class:`CommandEvidence`, a verdict is
+    already keyed to the one gate it judged (each judge gate carries its own
+    rubric, so the caller's model call is necessarily one call per gate, not
+    one shared fact every gate matches independently). A judge gate whose id
+    has no entry here resolves ``unknown`` the same way a gate resolves
+    ``unknown`` against an entirely absent evidence kind: omitting this field
+    and submitting it empty are therefore equivalent, and neither is treated
+    as its own tri-state, unlike the other two evidence kinds.
+    """
+
+    verdicts: tuple[JudgeVerdict, ...]
 
 
 @dataclass(frozen=True, slots=True)
