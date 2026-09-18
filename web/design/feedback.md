@@ -126,7 +126,7 @@ about what the frame does. `FormDialog` is a place to work and owns a submit;
 neither: a header, a scrolling body, an optional footer, and a body that is
 whatever is being presented.
 
-It shares `FormDialog`'s geometry class family in `globals.css`, so both sit at
+It shares `FormDialog`'s geometry class family in `design-system.css`, so both sit at
 the same height, cap at the same viewport budget and become the same full-screen
 sheet below 640px in either dimension, and it takes the same three widths.
 
@@ -261,7 +261,7 @@ tabs or six fields and up, and `xl` 928 for the one shape the others cannot
 hold: a body that is two columns side by side, where `lg` leaves the second one
 too narrow for its own controls. `ShareDialog` is the only one. Below a 640px
 viewport every size is a full-screen sheet. None of those widths can be spelled
-at a call site: `globals.css` pins `.modal__dialog` unlayered, which outranks
+at a call site: `design-system.css` pins `.modal__dialog` unlayered, which outranks
 `@layer utilities` and puts a 448px floor under it, so the four sizes are
 modifier classes declared beside the rule they have to beat, and a `w-[…]` on a
 dialog compiles, lints, ships and loses. `Dialog` shares the family.
@@ -277,7 +277,7 @@ it. Measured, a bare field in a dialog is 83px against the 60px it should be.
 The first field takes `autoFocus`.
 
 **Fields fill the dialog.** `Field` and `SecretField` cap themselves at 448px,
-which is right on a page and wrong in a 640px dialog; `globals.css` lifts the cap
+which is right on a page and wrong in a 640px dialog; `design-system.css` lifts the cap
 for this place, so no call site sets a width.
 
 **The footer's height never changes, and the primary keeps its width.** The

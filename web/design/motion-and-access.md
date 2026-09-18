@@ -89,8 +89,8 @@ is a permanent layer, and enough of them are slower than none. There are none in
 today, which is the right number until something is measured.
 
 **Every animation answers `prefers-reduced-motion`.** Not customary here, required: the three
-rules above all have an entry in the reduce block at the end of `globals.css`, and the scan
-arc's entry is the model for stopping motion without removing meaning.
+rules above all have an entry in the reduce block at the end of `design-system.css`, and the
+scan arc's entry is the model for stopping motion without removing meaning.
 
 ## Touch
 
