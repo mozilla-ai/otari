@@ -101,13 +101,13 @@ describe("copyToClipboard", () => {
   })
 
   it("removes the scratch textarea even when select() throws (#1149)", async () => {
+    // The textarea holds the plaintext, often a one-time API key, so a throw
+    // between the append and the removal leaves a credential in the DOM.
     vi.spyOn(HTMLTextAreaElement.prototype, "select").mockImplementation(() => {
       throw new Error("detached document")
     })
 
-    await expect(copyToClipboard("provider secret", undefined)).rejects.toThrow(
-      "detached document",
-    )
+    expect(await copyToClipboard("provider secret", undefined)).toBe(false)
     expect(document.querySelectorAll("textarea")).toHaveLength(0)
   })
 })

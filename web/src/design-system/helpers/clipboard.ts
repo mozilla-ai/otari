@@ -35,26 +35,25 @@ function legacyCopy(text: string): boolean {
   source.style.opacity = "0"
   document.body.appendChild(source)
 
-  let copied = false
-  let selection: Selection | null = null
-  let previous: Range | null = null
-  let previousFocus: HTMLElement | null = null
-  try {
-    selection = document.getSelection()
-    previous =
-      selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
-    previousFocus =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null
-    source.select()
+  const selection = document.getSelection()
+  const previous =
+    selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
+  const previousFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
 
-    try {
-      copied = document.execCommand("copy")
-    } catch {
-      copied = false
-    }
+  let copied = false
+  try {
+    source.select()
+    copied = document.execCommand("copy")
+  } catch {
+    // Covers select() too, not just execCommand: a throw there is still a copy
+    // that did not happen, and the caller reads the return value to say so.
+    copied = false
   } finally {
+    // In a finally: the textarea holds the plaintext, so it must not outlive a
+    // throw above it (#1149).
     source.remove()
     if (selection && previous) {
       selection.removeAllRanges()
