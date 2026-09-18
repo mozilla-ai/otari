@@ -252,10 +252,12 @@ def _native_code_execution_blocks(execution: CodeExecution) -> list[Any]:
             stdout=result.stdout,
             stderr=result.stderr,
             return_code=result.return_code if result.return_code is not None else 0,
+            # The ids are the ones ``/v1/files`` serves, not the sandbox's own: a
+            # produced file that was not stored has no id the caller could use.
             content=[
-                CodeExecutionOutputBlock(type="code_execution_output", file_id=ref.file_id)
+                CodeExecutionOutputBlock(type="code_execution_output", file_id=execution.file_ids[ref.filename])
                 for ref in result.content
-                if ref.file_id
+                if ref.filename in execution.file_ids
             ],
         )
     return [

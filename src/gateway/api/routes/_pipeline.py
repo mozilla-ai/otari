@@ -147,6 +147,7 @@ from gateway.services.budget_service import (
     refund_reservation,
     reserve_budget,
 )
+from gateway.services.file_service import SandboxFileBridge
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
@@ -2196,10 +2197,14 @@ class ToolContext:
         use_web_fetch: bool = False,
         web_fetch_tool_entry: dict[str, Any] | None = None,
         web_fetch_policy: DomainPolicy | None = None,
+        sandbox_files: SandboxFileBridge | None = None,
     ) -> None:
         self.config = config
         self.mcp_server_configs = mcp_server_configs
         self.use_sandbox = use_sandbox
+        # The uploads a sandbox session is seeded with and the store its outputs
+        # land in. None in hybrid mode and when files are disabled.
+        self.sandbox_files = sandbox_files
         self.sandbox_tool_entry = sandbox_tool_entry
         self.sandbox_url = sandbox_url
         self.sandbox_auth_token = sandbox_auth_token
@@ -2259,6 +2264,7 @@ class ToolContext:
             image=self.sandbox_session_image,
             allowed_tools=self.sandbox_allowed_tools,
             tally=self.tally,
+            files=self.sandbox_files,
         )
 
     @property
@@ -2715,6 +2721,7 @@ async def prepare_gateway_tools(
     max_tool_iterations: int | None,
     tools_header: str | None,
     code_execution_header: str | None = None,
+    sandbox_files: SandboxFileBridge | None = None,
 ) -> ToolContext:
     """Guardrails, MCP server-id resolution, and gateway-tool extraction.
 
@@ -3139,6 +3146,7 @@ async def prepare_gateway_tools(
             sandbox_max_iterations or MAX_TOOL_ITERATIONS_CAP,
         ),
         tools_header=tools_header,
+        sandbox_files=sandbox_files if use_sandbox else None,
     )
 
 

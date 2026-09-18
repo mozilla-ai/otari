@@ -1101,12 +1101,17 @@ export interface paths {
          *
          *     ``workspace_id`` narrows a master-key listing to one workspace; a keyed
          *     request is already confined to its key's own and cannot widen or move it.
+         *
+         *     Pages are cursor-based: ``after`` (OpenAI) or ``after_id`` (Anthropic) names
+         *     the last file of the previous page, and ``has_more`` says whether to ask
+         *     again. A cursor the caller cannot see (another user's file, a deleted one)
+         *     is a 404, the same answer a direct read of it gets.
          */
         get: operations["files-list_files"];
         put?: never;
         /**
          * Create File
-         * @description OpenAI-compatible file upload endpoint.
+         * @description Upload a file. Answers in the OpenAI or Anthropic file shape, following the caller's headers.
          */
         post: operations["files-create_file"];
         delete?: never;
@@ -14374,6 +14379,10 @@ export interface operations {
                 user?: string | null;
                 purpose?: string | null;
                 workspace_id?: string | null;
+                limit?: number;
+                after?: string | null;
+                after_id?: string | null;
+                order?: "asc" | "desc";
             };
             header?: never;
             path?: never;

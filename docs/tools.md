@@ -170,9 +170,12 @@ Otari reserves (`otari_srvtoolu_…`, `otari_ci_…`, `otari_cntr_…`). When a 
 echoes such a turn on its next request, a Messages pair is folded into a text
 block so the model keeps the code and its output, and a Responses item is
 dropped; a provider's own items carry the provider's ids and pass through
-untouched. Files an execution produces are not yet announced natively, and a
-sandbox session still lives for one request, so a `container` id from a previous
-turn addresses the provider's container, not the sandbox.
+untouched. Uploaded files the request references are seeded into the sandbox and
+files the code produces come back as stored files, announced in Anthropic's
+`code_execution_output` entries by their `file_id` (see
+[Files and code execution](files.md#files-and-code-execution)). A sandbox
+session still lives for one request, so a `container` id from a previous turn
+addresses the provider's container, not the sandbox.
 
 In hybrid mode the control plane's policy is consulted only once the decision
 already points at the sandbox, so a declaration the provider serves natively is

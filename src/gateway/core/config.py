@@ -880,7 +880,10 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
     )
     files_backend: Annotated[str, Shown(SettingsGroup.FILES)] = Field(
         default="local",
-        description="Blob backend for uploaded file bytes: 'local' (filesystem) or 's3'. Future: 'gcs'.",
+        description=(
+            "Blob backend for uploaded file bytes: 'local' (a directory), 's3' (boto3), or 'fsspec' "
+            "(any filesystem fsspec has an implementation for, named by files_url)."
+        ),
     )
     files_local_dir: Annotated[str, Shown(SettingsGroup.FILES)] = Field(
         default="./otari-files",
@@ -905,6 +908,25 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
             "'us-east-1' when unset."
         ),
     )
+    files_url: Annotated[str | None, Shown(SettingsGroup.FILES)] = Field(
+        default=None,
+        description=(
+            "Root URL for the 'fsspec' files backend, e.g. 'gcs://bucket/otari-files', "
+            "'abfs://container/prefix', 's3://bucket/prefix', 'sftp://host/path' or "
+            "'file:///var/lib/otari/files'. The protocol picks the fsspec implementation, which "
+            "must be installed (gcsfs, adlfs, s3fs, paramiko, ...). Required when files_backend "
+            "is 'fsspec'."
+        ),
+    )
+    files_storage_options: Annotated[dict[str, Any], SECRET] = Field(
+        default_factory=dict,
+        description=(
+            "Keyword arguments for the fsspec implementation behind files_url: credentials, "
+            "endpoint URLs, regions, project ids. Passed through untouched and never logged; "
+            "most implementations also read their standard environment variables, so this "
+            "can usually stay empty."
+        ),
+    )
     files_max_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
         default=512 * 1024 * 1024,
         ge=1,
@@ -915,8 +937,16 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         ge=1,
         description=(
             "Stop serving files older than this many hours: expired files become inaccessible "
-            "(404) and can no longer be referenced. Their stored bytes are not yet reclaimed "
-            "automatically, so periodic cleanup is an operator task. None keeps files indefinitely."
+            "(404) and can no longer be referenced, and the file sweep then reclaims their bytes "
+            "and rows. None keeps files indefinitely."
+        ),
+    )
+    files_sweep_interval_sec: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=3600,
+        ge=0,
+        description=(
+            "How often the background file sweep reclaims the bytes and rows of expired and "
+            "deleted files. 0 disables the sweep, leaving cleanup to the operator."
         ),
     )
     file_understanding_enabled: Annotated[bool, Shown(SettingsGroup.VISION)] = Field(

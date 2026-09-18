@@ -10,7 +10,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from any_llm import LLMProvider
 
+from gateway.api.routes._normalize import sandbox_requested
 from gateway.api.routes._tools import (
     CODE_EXECUTION_HEADER,
     _extract_code_execution_tool,
@@ -251,3 +253,54 @@ def test_declaration_forms_include_the_provider_keywords_unless_the_provider_own
     assert code_execution_declaration_forms(GatewayConfig(code_execution_executor="provider")) == [
         "otari_code_execution"
     ]
+
+
+# --- staging attachments follows the executor ---------------------------------------------
+
+
+def _requested(
+    tools: list[dict[str, Any]],
+    *,
+    provider: str | None,
+    dialect: str = "messages",
+    header: str | None = None,
+    **config: Any,
+) -> bool:
+    return sandbox_requested(
+        tools,
+        config=GatewayConfig(sandbox_url="http://sandbox:8080", **config),
+        provider=LLMProvider(provider) if provider else None,
+        dialect=dialect,
+        code_execution_header=header,
+    )
+
+
+def test_the_explicit_type_always_stages() -> None:
+    assert _requested([{"type": "otari_code_execution"}], provider="anthropic") is True
+
+
+def test_a_natively_served_declaration_does_not_stage() -> None:
+    assert _requested([ANTHROPIC_DATED], provider="anthropic") is False
+
+
+def test_a_declaration_the_provider_cannot_run_stages() -> None:
+    assert _requested([ANTHROPIC_DATED], provider="mistral") is True
+    assert _requested([BARE], provider="anthropic") is True
+
+
+def test_the_deployment_default_decides_staging_too() -> None:
+    assert _requested([ANTHROPIC_DATED], provider="anthropic", code_execution_executor="otari") is True
+    assert _requested([BARE], provider="mistral", code_execution_executor="provider") is False
+
+
+def test_no_sandbox_means_nothing_is_staged() -> None:
+    assert (
+        sandbox_requested(
+            [BARE],
+            config=GatewayConfig(),
+            provider=LLMProvider("mistral"),
+            dialect="messages",
+            code_execution_header=None,
+        )
+        is False
+    )

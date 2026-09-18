@@ -11,18 +11,20 @@ normalizer, that need the whole blob in memory regardless). ``put_stream`` /
 instead of buffering an entire file, which is what actually bounds memory use
 for concurrent large uploads (see issue #156).
 
-Only a local-filesystem backend ships today; ``S3FileStore`` / ``GCSFileStore``
-can implement the same :class:`FileStore` protocol without touching callers.
+Three backends implement the :class:`FileStore` protocol: a local directory,
+S3 through boto3, and :class:`FsspecFileStore`, which reaches any filesystem
+`fsspec <https://filesystem-spec.readthedocs.io>`_ has an implementation for
+(GCS, Azure, SFTP, HDFS, WebDAV, and S3 again) from one ``files_url``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import tempfile
-from collections.abc import AsyncGenerator, AsyncIterator, Iterator
+from collections.abc import AsyncGenerator, AsyncIterator, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Protocol, runtime_checkable
+from typing import IO, TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -367,6 +369,159 @@ class S3FileStore:
             await asyncio.to_thread(self._client.delete_object, Bucket=self._bucket, Key=storage_ref)
 
 
+@contextmanager
+def _translate_fsspec_errors(storage_ref: str) -> Iterator[None]:
+    """Re-raise whatever an fsspec implementation threw as the ``OSError`` family.
+
+    fsspec's own filesystems raise ``FileNotFoundError`` and ``PermissionError``
+    for the common cases, but a third-party implementation may surface its
+    client's exception class instead (a botocore or google-api error), and the
+    route and sweep callers only know ``OSError``, exactly as they do for the S3
+    backend. A missing object stays ``FileNotFoundError`` so callers can tell
+    "already gone" from "broken".
+    """
+    try:
+        yield
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        msg = f"fsspec operation failed for {storage_ref!r}: {exc}"
+        raise OSError(msg) from exc
+    except Exception as exc:  # noqa: BLE001 — a backend's own client error
+        msg = f"fsspec operation failed for {storage_ref!r}: {exc}"
+        raise OSError(msg) from exc
+
+
+class FsspecFileStore:
+    """A :class:`FileStore` over any `fsspec <https://filesystem-spec.readthedocs.io>`_ filesystem.
+
+    ``url`` names the root the store writes under, ``s3://bucket/otari-files``,
+    ``gcs://bucket/prefix``, ``abfs://container/prefix``, ``file:///var/otari``,
+    ``memory://`` and so on; whatever protocol fsspec can resolve with the
+    implementation packages installed (``s3fs``, ``gcsfs``, ``adlfs``, ...).
+    ``storage_options`` go to that implementation as its constructor keyword
+    arguments, which is where credentials, endpoints and regions live, so they
+    are never logged here.
+
+    Every call goes through fsspec's synchronous API on a worker thread, the way
+    the S3 backend drives boto3: the async implementations exist only for a few
+    protocols, and the sync API is the one every implementation has.
+    """
+
+    def __init__(self, url: str, storage_options: Mapping[str, Any] | None = None) -> None:
+        try:
+            from fsspec.core import url_to_fs
+        except ImportError as exc:  # pragma: no cover - fsspec is a declared dependency
+            msg = "FsspecFileStore requires fsspec"
+            raise ImportError(msg) from exc
+
+        fs, root = url_to_fs(url, **dict(storage_options or {}))
+        self._fs = fs
+        self._root = root.rstrip("/")
+
+    def _resolve(self, storage_ref: str) -> str:
+        """Join ``storage_ref`` under the root, rejecting anything that could leave it.
+
+        A server-generated ref has no ``..`` in it; this is defense-in-depth for
+        the day one comes from elsewhere, matching the local backend.
+        """
+        parts = storage_ref.split("/")
+        if not storage_ref or storage_ref.startswith("/") or any(part in ("", ".", "..") for part in parts):
+            msg = f"Invalid storage_ref escapes the file store root: {storage_ref!r}"
+            raise ValueError(msg)
+        return f"{self._root}/{storage_ref}" if self._root else storage_ref
+
+    def _mkparent(self, path: str) -> None:
+        # Object stores have no directories and treat this as a no-op; a
+        # filesystem-like backend needs it before the first write into a shard.
+        self._fs.makedirs(path.rsplit("/", 1)[0], exist_ok=True)
+
+    async def put(self, file_id: str, data: bytes) -> str:
+        ref = _shard_key(file_id)
+        path = self._resolve(ref)
+
+        def _write() -> None:
+            self._mkparent(path)
+            self._fs.pipe_file(path, data)
+
+        with _translate_fsspec_errors(ref):
+            await asyncio.to_thread(_write)
+        return ref
+
+    async def get(self, storage_ref: str) -> bytes:
+        path = self._resolve(storage_ref)
+        with _translate_fsspec_errors(storage_ref):
+            data: bytes = await asyncio.to_thread(self._fs.cat_file, path)
+        return data
+
+    async def put_stream(self, file_id: str, chunks: AsyncIterator[bytes]) -> tuple[str, int]:
+        ref = _shard_key(file_id)
+        path = self._resolve(ref)
+        total = 0
+
+        def _open() -> IO[bytes]:
+            self._mkparent(path)
+            handle: IO[bytes] = self._fs.open(path, "wb")
+            return handle
+
+        def _discard_partial() -> None:
+            try:
+                self._fs.rm(path)
+            except FileNotFoundError:
+                pass
+
+        with _translate_fsspec_errors(ref):
+            handle = await asyncio.to_thread(_open)
+        try:
+            try:
+                async for chunk in chunks:
+                    total += len(chunk)
+                    with _translate_fsspec_errors(ref):
+                        await asyncio.to_thread(handle.write, chunk)
+            finally:
+                # Object-store handles upload on close, so the close is part of
+                # the write and its failure is a write failure. Shielded like the
+                # local backend's: this also runs while a cancellation unwinds.
+                with _translate_fsspec_errors(ref):
+                    await asyncio.shield(asyncio.to_thread(handle.close))
+        except BaseException:
+            try:
+                await asyncio.shield(asyncio.to_thread(_discard_partial))
+            except Exception as cleanup_exc:  # noqa: BLE001
+                logger.warning("put_stream: failed to remove partial blob %s: %s", ref, cleanup_exc)
+            raise
+        return ref, total
+
+    async def get_stream(self, storage_ref: str) -> AsyncGenerator[bytes, None]:
+        path = self._resolve(storage_ref)
+        with _translate_fsspec_errors(storage_ref):
+            handle: IO[bytes] = await asyncio.to_thread(self._fs.open, path, "rb")
+        try:
+            while True:
+                with _translate_fsspec_errors(storage_ref):
+                    chunk = await asyncio.to_thread(handle.read, _STREAM_CHUNK_BYTES)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            try:
+                await asyncio.shield(asyncio.to_thread(handle.close))
+            except Exception as close_exc:  # noqa: BLE001
+                logger.warning("get_stream: failed to close handle for %s: %s", storage_ref, close_exc)
+
+    async def delete(self, storage_ref: str) -> None:
+        path = self._resolve(storage_ref)
+
+        def _rm() -> None:
+            try:
+                self._fs.rm(path)
+            except FileNotFoundError:
+                logger.debug("file_store delete: %s already absent", storage_ref)
+
+        with _translate_fsspec_errors(storage_ref):
+            await asyncio.to_thread(_rm)
+
+
 def build_file_store(config: GatewayConfig) -> FileStore:
     """Construct the configured :class:`FileStore` backend."""
     backend = config.files_backend.strip().lower()
@@ -377,5 +532,10 @@ def build_file_store(config: GatewayConfig) -> FileStore:
             msg = "files_s3_bucket is required when files_backend is 's3'"
             raise ValueError(msg)
         return S3FileStore(config.files_s3_bucket, config.files_s3_endpoint_url, config.files_s3_region)
-    msg = f"Unsupported files_backend: {config.files_backend!r} (supported: 'local', 's3')"
+    if backend == "fsspec":
+        if not config.files_url:
+            msg = "files_url is required when files_backend is 'fsspec'"
+            raise ValueError(msg)
+        return FsspecFileStore(config.files_url, config.files_storage_options)
+    msg = f"Unsupported files_backend: {config.files_backend!r} (supported: 'local', 's3', 'fsspec')"
     raise ValueError(msg)

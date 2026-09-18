@@ -200,7 +200,8 @@ const SERVICES: ServiceSpec[] = [
     groups: [
       {
         title: "Backend",
-        blurb: "The sandbox that runs generated code for otari_code_execution.",
+        blurb:
+          "The sandbox that runs generated code. Uploaded files a request references are seeded into it, and files the code writes come back through the files API.",
         docsAnchor: "code-execution",
         keys: ["sandbox_url", "sandbox_session_image"],
         priced: true,

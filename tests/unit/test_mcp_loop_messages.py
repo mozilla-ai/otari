@@ -2141,7 +2141,9 @@ class _FakeSandboxPool(_FakePool):
         if self._fail:
             self._executions.append(CodeExecution(code=code, result=None))
             raise RuntimeError("sandbox down")
-        self._executions.append(CodeExecution(code=code, result=self._result))
+        self._executions.append(
+            CodeExecution(code=code, result=self._result, file_ids={"chart.png": "file-stored-1"})
+        )
         return self._results["code_execution"]
 
     def take_executions(self) -> list[CodeExecution]:
@@ -2177,7 +2179,8 @@ async def test_native_code_execution_pair_is_prepended_to_the_final_content(monk
     assert tool_result.content.type == "code_execution_result"
     assert tool_result.content.stdout == "42\n"
     assert tool_result.content.return_code == 0
-    assert [ref.file_id for ref in tool_result.content.content] == ["file_1"]
+    # The stored id a caller can download, not the sandbox-internal ``file_1``.
+    assert [ref.file_id for ref in tool_result.content.content] == ["file-stored-1"]
 
 
 @pytest.mark.asyncio

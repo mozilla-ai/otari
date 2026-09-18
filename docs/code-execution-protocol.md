@@ -52,7 +52,10 @@ below is unchanged either way, which is what lets the same backend serve both.
 
 Six operations, of which the first three are the whole execution path. A
 backend MUST implement those three; the file operations are OPTIONAL and are
-used only by clients that move files in or out of a session.
+used only by clients that move files in or out of a session. Otari is such a
+client when a request attaches uploaded files: it seeds them with `PutFile`
+before the first call and fetches what the result block's file references name
+with `GetFile` (see `docs/files.md`, "Files and code execution").
 
 | Operation | Purpose | Request | Response |
 |---|---|---|---|
