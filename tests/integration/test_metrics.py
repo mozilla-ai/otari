@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway.auth.models import API_KEY_PREFIX, MIN_API_KEY_LENGTH
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.metrics import REGISTRY
 
@@ -266,8 +267,8 @@ def test_auth_failure_metric_missing_credentials(metrics_client: TestClient) -> 
 
 
 def test_auth_failure_metric_invalid_key(metrics_client: TestClient) -> None:
-    # Use a valid-format key (tk- prefix, 50+ chars) that doesn't exist in the DB
-    fake_key = "tk-" + "a" * 48
+    # Use a valid-format key that doesn't exist in the DB
+    fake_key = API_KEY_PREFIX + "a" * MIN_API_KEY_LENGTH
     labels = {"reason": "invalid_key"}
     before = _sample("gateway_auth_failures_total", labels)
 

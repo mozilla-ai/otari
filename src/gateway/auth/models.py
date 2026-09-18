@@ -2,10 +2,24 @@ import hashlib
 import re
 import secrets
 
+# Prefix stamped on every key this gateway mints. ``gw_`` is the other credential,
+# the gateway's own token to the platform, so a user key must not share it.
+API_KEY_PREFIX = "tk-"
+
+# Prefixes accepted at mint time: the minted one plus the underscore form otari.ai
+# issues, so a key from either product passes the same format check.
+API_KEY_PREFIXES: tuple[str, ...] = (API_KEY_PREFIX, "tk_")
+
+# Minimum length of a minted key; ``token_urlsafe(48)`` yields 64 characters.
+MIN_API_KEY_LENGTH = 50
+
+_API_KEY_CHARSET = "[A-Za-z0-9_-]+"
+_API_KEY_PATTERN = re.compile(f"^(?:{'|'.join(re.escape(p) for p in API_KEY_PREFIXES)}){_API_KEY_CHARSET}$")
+
 # Number of leading plaintext characters kept as a display-only fingerprint
-# (``tk-`` plus 7 random chars). The key is ``tk-`` + token_urlsafe(48) = 67 chars,
-# so exposing 10 leaves ~57 secret chars; the prefix never gates auth and cannot be
-# recovered from the stored SHA-256 hash.
+# (``API_KEY_PREFIX`` plus 7 random chars). A minted key is the prefix plus
+# token_urlsafe(48), 67 chars, so exposing 10 leaves ~57 secret chars; the prefix
+# never gates auth and cannot be recovered from the stored SHA-256 hash.
 KEY_PREFIX_LENGTH = 10
 
 # Number of trailing plaintext characters kept alongside the prefix, so a key can be
@@ -19,13 +33,13 @@ def generate_api_key() -> str:
     """Generate a new API key with prefix.
 
     Returns:
-        A new API key with format 'tk-' followed by 48 random characters
+        A new API key: ``API_KEY_PREFIX`` followed by 64 URL-safe random characters
 
     Raises:
         RuntimeError: If generated key doesn't match expected format (should never happen)
 
     """
-    api_key = f"tk-{secrets.token_urlsafe(48)}"
+    api_key = f"{API_KEY_PREFIX}{secrets.token_urlsafe(48)}"
 
     try:
         validate_api_key_format(api_key)
@@ -70,16 +84,17 @@ def validate_api_key_format(api_key: str) -> None:
         msg = f"API key must be a string, got {type(api_key).__name__}"
         raise ValueError(msg)
 
-    if not (api_key.startswith("tk-") or api_key.startswith("tk_")):
-        msg = "API key must start with 'tk-' or 'tk_' prefix"
+    if not api_key.startswith(API_KEY_PREFIXES):
+        accepted = " or ".join(f"'{p}'" for p in API_KEY_PREFIXES)
+        msg = f"API key must start with {accepted} prefix"
         raise ValueError(msg)
 
-    if len(api_key) < 50:
-        msg = f"API key is too short. Expected at least 50 characters, got {len(api_key)}"
+    if len(api_key) < MIN_API_KEY_LENGTH:
+        msg = f"API key is too short. Expected at least {MIN_API_KEY_LENGTH} characters, got {len(api_key)}"
         raise ValueError(msg)
 
-    if not re.match(r"^tk[-_][A-Za-z0-9_-]+$", api_key):
-        msg = "API key contains invalid characters. Must match pattern: tk[-_][A-Za-z0-9_-]+"
+    if not _API_KEY_PATTERN.match(api_key):
+        msg = f"API key contains invalid characters. Must match pattern: {_API_KEY_PATTERN.pattern}"
         raise ValueError(msg)
 
 

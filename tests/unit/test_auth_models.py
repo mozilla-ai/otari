@@ -4,8 +4,11 @@ from unittest.mock import patch
 import pytest
 
 from gateway.auth.models import (
+    API_KEY_PREFIX,
+    API_KEY_PREFIXES,
     KEY_PREFIX_LENGTH,
     KEY_SUFFIX_LENGTH,
+    MIN_API_KEY_LENGTH,
     generate_api_key,
     hash_key,
     key_prefix,
@@ -13,25 +16,21 @@ from gateway.auth.models import (
     validate_api_key_format,
 )
 
+BODY = "a" * MIN_API_KEY_LENGTH
 
-@pytest.mark.parametrize(
-    "api_key",
-    [
-        "tk-" + "a" * 48,
-        "tk_" + "a" * 48,
-    ],
-)
-def test_validate_api_key_format_accepts_supported_prefixes(api_key: str) -> None:
-    validate_api_key_format(api_key)
+
+@pytest.mark.parametrize("prefix", API_KEY_PREFIXES)
+def test_validate_api_key_format_accepts_supported_prefixes(prefix: str) -> None:
+    validate_api_key_format(prefix + BODY)
 
 
 @pytest.mark.parametrize(
     "api_key",
     [
-        "tk" + "a" * 49,
-        "tx-" + "a" * 48,
-        "tk." + "a" * 48,
-        "gw-" + "a" * 48,
+        API_KEY_PREFIX[:-1] + BODY,
+        "tx-" + BODY,
+        API_KEY_PREFIX[:-1] + "." + BODY,
+        "gw-" + BODY,
     ],
 )
 def test_validate_api_key_format_rejects_invalid_prefixes(api_key: str) -> None:
@@ -40,7 +39,7 @@ def test_validate_api_key_format_rejects_invalid_prefixes(api_key: str) -> None:
 
 
 def test_hash_key_accepts_gw_underscore_prefix() -> None:
-    digest = hash_key("gw_" + "a" * 48)
+    digest = hash_key("gw_" + BODY)
 
     assert len(digest) == 64
 
@@ -52,14 +51,17 @@ def test_hash_key_hashes_a_key_that_is_not_gw_shaped() -> None:
     the same unsalted SHA-256 digest as any other string, so a migrated row's
     hash still matches on the verify path.
     """
-    api_key = "tk_" + "b" * 48
+    api_key = "tk_" + "b" * MIN_API_KEY_LENGTH
 
     assert hash_key(api_key) == hashlib.sha256(api_key.encode()).hexdigest()
 
 
 def test_generate_api_key_mints_a_user_key_not_a_gateway_token() -> None:
-    """User keys are ``tk-``; ``gw_`` is the gateway's own credential to the platform."""
-    assert generate_api_key().startswith("tk-")
+    """User keys carry the minted prefix; ``gw_`` is the gateway's own credential to the platform."""
+    api_key = generate_api_key()
+
+    assert api_key.startswith(API_KEY_PREFIX)
+    assert not api_key.startswith("gw")
 
 
 def test_generate_api_key_still_validates_at_mint_time() -> None:

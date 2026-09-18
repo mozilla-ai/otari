@@ -17,8 +17,8 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.models.api_keys import APIKey
 
-# The shape otari-ai mints: the dot fails the ``tk[-_][A-Za-z0-9_-]+`` charset check
-# the old verify-path validator applied, and would have failed the ``gw-`` prefix too.
+# The shape otari-ai mints: the dot fails the charset check the old verify-path
+# validator applied, and the prefix failed it outright when the gateway minted ``gw-``.
 MIGRATED_KEY = "tk_live.migrated-platform-key-0123456789abcdefghij"
 
 
