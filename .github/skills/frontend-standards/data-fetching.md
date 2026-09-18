@@ -71,8 +71,9 @@ const [models, pricing] = await Promise.all([fetchModels(), fetchPricing()])
 ```
 
 Inside a component this is usually not a question, because two `useQuery` calls already run in
-parallel. It comes up in a `queryFn` that assembles from more than one endpoint, and in the
-bounded walks below.
+parallel. Where it comes up is a `queryFn` reading more than one endpoint, and that is worth a
+second look before it is worth a `Promise.all`: assembling a view out of several responses is
+the work [performance.md](./performance.md) asks the endpoint to do.
 
 ## Mutations invalidate what they change
 
