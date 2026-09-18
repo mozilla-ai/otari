@@ -92,9 +92,12 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    value. A loop that produces a value is a transformation written the long way, so `for...of`,
    `for...in` and an index loop all read better as `map`/`filter`/`reduce`/`find`/`flatMap`
    (`for...in` additionally walks inherited keys: use `Object.entries`). `forEach` is correct
-   where the body is genuinely only a side effect, and takes a block body because Biome's
-   `useIterableCallbackReturn` rejects a concise arrow there whatever the call returns; it is
-   wrong where it is a transformation with the result pushed into an outer variable.
+   where the body is genuinely only a side effect, and takes a block body: Biome's
+   `useIterableCallbackReturn` rejects a concise arrow whose body is a call, reading the shape
+   rather than the type, so a call returning `void` is flagged too. (`(id) => void fn(id)`
+   passes lint and is therefore not a finding, but no code here is written that way.)
+   `forEach` is wrong where it is a transformation with the result pushed into an outer
+   variable.
    Consuming a stream and a bounded request walk stay imperative. The React Compiler is
    enabled, so the plain expression is the default and reflexive memoization is the finding.
    Hand-written `useMemo`/`useCallback`/`React.memo` is correct where it earns its place (an

@@ -500,12 +500,20 @@ describe("the design system's stylesheet dependency", () => {
     return { literals, prefixes }
   }
 
-  /** Both declaration forms: a selector, and a Tailwind `@utility`. */
-  function declared(): Set<string> {
-    const css = readFileSync(GLOBALS, "utf8")
+  /**
+   * Both declaration forms: a selector, and a Tailwind `@utility`.
+   *
+   * Comments come out of the stylesheet for the same reason they come out of the
+   * source, and the case is not hypothetical: `.otari-markdown` is named twice
+   * in `globals.css` explaining why the rules that used to carry it are gone,
+   * and reading the file raw counts it as declared. A primitive wearing a class
+   * that survives only in prose is exactly what this is meant to catch.
+   */
+  function declared(css = readFileSync(GLOBALS, "utf8")): Set<string> {
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, "")
     return new Set([
-      ...[...css.matchAll(/\.(otari-[A-Za-z0-9_-]+)/g)].map((m) => m[1]),
-      ...[...css.matchAll(/@utility\s+(otari-[A-Za-z0-9_-]+)/g)].map(
+      ...[...rules.matchAll(/\.(otari-[A-Za-z0-9_-]+)/g)].map((m) => m[1]),
+      ...[...rules.matchAll(/@utility\s+(otari-[A-Za-z0-9_-]+)/g)].map(
         (m) => m[1],
       ),
     ])
@@ -516,6 +524,18 @@ describe("the design system's stylesheet dependency", () => {
     // and pass. Same shape as deprecated.test.ts's.
     expect(sourceFiles(DESIGN_SYSTEM).length).toBeGreaterThan(50)
     expect(worn().literals.size).toBeGreaterThan(10)
+  })
+
+  it("counts a declaration and not a mention of one", () => {
+    // The fixture rather than the tree, so this keeps proving the stripping
+    // after somebody deletes the `.otari-markdown` comments that motivated it.
+    const css = [
+      "/* .otari-ghost is gone; see .otari-real for what replaced it. */",
+      ".otari-real { color: red; }",
+      "@utility otari-util { color: blue; }",
+      "/* @utility otari-phantom is not a declaration either. */",
+    ].join("\n")
+    expect([...declared(css)].sort()).toEqual(["otari-real", "otari-util"])
   })
 
   it("declares every class a primitive wears", () => {

@@ -90,8 +90,8 @@ declared above it, which is the shape that hides the transformation from the rea
 the accumulator a chance to escape.
 
 **Give that `forEach` a block body.** Biome's `suspicious/useIterableCallbackReturn` rejects a
-concise arrow here, and it does so whatever the call returns, because the arrow syntactically
-returns the expression:
+concise arrow whose body is a call, because the arrow syntactically returns that call's value.
+It reads the shape rather than the type, so a call returning `void` is flagged too:
 
 ```ts
 ids.forEach((id) => params.append("request_group_id", id))    // lint error
@@ -100,8 +100,11 @@ ids.forEach((id) => {
 })                                                            // correct
 ```
 
-The rule is reading the shape, not the type, and it is right to: a concise arrow in a
-`forEach` is one keystroke from being a `map` whose result nobody took.
+The rule is right to read the shape: a concise arrow in a `forEach` is one keystroke from
+being a `map` whose result nobody took. (`(id) => void params.append(...)` is the rule's own
+escape hatch and does pass lint, so it is not a review finding, but nothing here is written
+that way and new code should not start. The `void` this codebase does use is the other one,
+discarding a floating promise: `void queryClient.invalidateQueries(...)`.)
 
 Two cases stay imperative, because each iteration decides whether there is a next one and no
 array method expresses that:
