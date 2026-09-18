@@ -1123,7 +1123,7 @@ export function ProvidersPage() {
 
   const [addOpen, setAddOpen] = useState(false)
   const [addOpenCount, setAddOpenCount] = useState(0)
-  const [editing, setEditing] = useState<string | null>(null)
+  const [editing, setEditing] = useState<string>()
   const [pendingDelete, setPendingDelete] = useState<string>()
   const [tests, setTests] = useState<Record<string, TestState>>({})
   // `addOpenCount` above is bumped on each open, and the add form is keyed on
@@ -1133,7 +1133,7 @@ export function ProvidersPage() {
   // operator. See feedback.md, "A draft is fresh on every open and untouched
   // through the exit". Both openers on this page go through here.
   const openAdd = () => {
-    setEditing(null)
+    setEditing(undefined)
     setAddOpenCount((n) => n + 1)
     setAddOpen(true)
   }
@@ -1143,8 +1143,7 @@ export function ProvidersPage() {
     (health.data?.providers ?? []).map((item) => [item.instance, item]),
   )
   const loading = meta.isLoading || stored.isLoading
-  const editingProvider =
-    stored.data?.find((p) => p.instance === editing) ?? null
+  const editingProvider = stored.data?.find((p) => p.instance === editing)
   const needsPricing =
     settings.data?.require_pricing === true &&
     settings.data.default_pricing === false
@@ -1438,7 +1437,7 @@ export function ProvidersPage() {
           // which a save would then write onto this one.
           key={editingProvider.instance}
           provider={editingProvider}
-          onClose={() => setEditing(null)}
+          onClose={() => setEditing(undefined)}
           onSaved={clearTest}
         />
       ) : null}

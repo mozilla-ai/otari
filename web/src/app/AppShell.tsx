@@ -593,9 +593,7 @@ function AppShellChrome() {
   // navigated and the drawer closed over the result, so the rail it opened was
   // never a thing you got to read. Here the row opens that rail in place, and
   // choosing a destination in it is what dismisses the drawer.
-  const [mobileRailLevel, setMobileRailLevel] = useState<MobileLevel | null>(
-    null,
-  )
+  const [mobileRailLevel, setMobileRailLevel] = useState<MobileLevel>()
   // Set alongside the state rather than derived from it: the effect that
   // restores focus runs after the level has already been cleared, so the state
   // can no longer say which level it was.
@@ -610,7 +608,7 @@ function AppShellChrome() {
   // back on the organization rows the last tap left showing.
   const closeMobileNav = useCallback(() => {
     setMobileNavOpen(false)
-    setMobileRailLevel(null)
+    setMobileRailLevel(undefined)
   }, [])
 
   // Which of the two rails is drawn. The route decides it, except on mobile,
@@ -623,7 +621,7 @@ function AppShellChrome() {
   // that can silently stay two-way, which is how a rail ends up rendering for a
   // page it does not own.
   const railContext: NavContext =
-    (isMobile ? mobileRailLevel : null) ?? navContext
+    (isMobile ? mobileRailLevel : undefined) ?? navContext
   const showOrganizationRail = railContext === "organization"
   const showDeploymentRail = railContext === "deployment"
   // Whether the footer holds a row above its closing band. The organization row
@@ -681,7 +679,7 @@ function AppShellChrome() {
     if (!mobileNavOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
-      if (mobileRailLevel) setMobileRailLevel(null)
+      if (mobileRailLevel) setMobileRailLevel(undefined)
       else setMobileNavOpen(false)
     }
     window.addEventListener("keydown", onKeyDown)
@@ -920,7 +918,7 @@ function AppShellChrome() {
                   <button
                     type="button"
                     ref={railBackRef}
-                    onClick={() => setMobileRailLevel(null)}
+                    onClick={() => setMobileRailLevel(undefined)}
                     className={`${navRowClass({ band: true })} cursor-pointer`}
                   >
                     <FiArrowLeft

@@ -27,7 +27,7 @@ export function CreateOrganizationForm({
   // organization it returned is held here and the submit becomes that call.
   // Pressing the button again otherwise creates a second organization, which
   // is the one failure of this pair an operator cannot undo from the menu.
-  const [created, setCreated] = useState<Organization | null>(null)
+  const [created, setCreated] = useState<Organization>()
   const trimmed = name.trim()
   return (
     <FormDialog
@@ -58,10 +58,10 @@ export function CreateOrganizationForm({
         )
       }}
       isPending={create.isPending || switchTo.isPending}
-      isSubmitDisabled={created === null && trimmed === ""}
+      isSubmitDisabled={created === undefined && trimmed === ""}
       // Closing after the create succeeded discards nothing: the organization
       // exists, and the menu it was started from lists it.
-      isDirty={created === null && trimmed !== ""}
+      isDirty={created === undefined && trimmed !== ""}
       error={create.error ?? switchTo.error}
     >
       {created ? (

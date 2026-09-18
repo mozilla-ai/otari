@@ -413,8 +413,8 @@ function CreateKeyDialog({
     null,
   )
   const [scopeValid, setScopeValid] = useState(true)
-  // The secret, once there is one. Its presence is the step: null is the form.
-  const [created, setCreated] = useState<CreateKeyResponse | null>(null)
+  // The secret, once there is one. Its presence is the step: unset is the form.
+  const [created, setCreated] = useState<CreateKeyResponse>()
   const secretRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
@@ -543,7 +543,7 @@ function CreateKeyDialog({
           <Button
             variant="ghost"
             onPress={() => {
-              setCreated(null)
+              setCreated(undefined)
               resetForm()
             }}
           >
@@ -947,15 +947,15 @@ export function KeysPage() {
   // exactly one control named "Create key" and it is the dialog's own submit.
   const [openCount, setOpenCount] = useState(0)
   const openCreate = () => {
-    setEditing(null)
+    setEditing(undefined)
     setOpenCount((n) => n + 1)
     setAddOpen(true)
   }
-  const [editing, setEditing] = useState<string | null>(null)
+  const [editing, setEditing] = useState<string>()
   const [regenerated, setRegenerated] = useState<{
     title: string
     result: CreateKeyResponse
-  } | null>(null)
+  }>()
   // Where focus lands when a dialog opened from a consumed confirm closes.
   // `FormDialog` returns focus to whatever had it, and a regenerate's trigger is
   // a row action that has already disarmed itself, so the page's own primary
@@ -967,7 +967,7 @@ export function KeysPage() {
   // which affordances it draws, are both undecided until the organization
   // context answers, and a disabled query reports `isLoading` false.
   const loading = !scope.isReady || keys.isLoading
-  const editingKey = rows.find((k) => k.id === editing) ?? null
+  const editingKey = rows.find((k) => k.id === editing)
   const showOnboarding = !loading && rows.length === 0
   const selection = useTableSelection()
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
@@ -1330,7 +1330,7 @@ export function KeysPage() {
           result={regenerated.result}
           memberLabels={memberLabels}
           onClose={() => {
-            setRegenerated(null)
+            setRegenerated(undefined)
             // Drop the one-time secret from mutation state so a later
             // regenerate never flashes the previous key.
             rotateKey.reset()
@@ -1364,7 +1364,7 @@ export function KeysPage() {
           key={editingKey.id}
           isDeploymentWide={isDeploymentWide}
           apiKey={editingKey}
-          onClose={() => setEditing(null)}
+          onClose={() => setEditing(undefined)}
         />
       ) : null}
 

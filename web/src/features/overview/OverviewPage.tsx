@@ -1018,12 +1018,12 @@ function SpendChart({
   series: { bucket_start: string; cost: number }[]
   ready: boolean
 }) {
-  const [hovered, setHovered] = useState<number | null>(null)
+  const [hovered, setHovered] = useState<number>()
   if (!ready || series.length < 2) {
     return null
   }
   const peak = Math.max(...series.map((p) => p.cost), 0)
-  const hoveredPoint = hovered === null ? null : (series[hovered] ?? null)
+  const hoveredPoint = hovered === undefined ? undefined : series[hovered]
   // A rounded ceiling rather than the peak itself, so the top label is a number
   // somebody would say out loud and the steps between are even.
   const top = niceCeiling(peak)
@@ -1058,7 +1058,7 @@ function SpendChart({
             role="img"
             aria-label={`Daily spend over the last 30 days, peaking at ${formatUsd(peak)}`}
             className="relative flex h-[180px] items-end gap-[3px] border-b border-border"
-            onPointerLeave={() => setHovered(null)}
+            onPointerLeave={() => setHovered(undefined)}
           >
             {series.map((point, i) => (
               // The hit area is the whole column, not the drawn bar: a day with
@@ -1071,7 +1071,7 @@ function SpendChart({
                 className="group flex min-w-px flex-1 items-end self-stretch"
                 onPointerEnter={() => setHovered(i)}
                 onFocus={() => setHovered(i)}
-                onBlur={() => setHovered(null)}
+                onBlur={() => setHovered(undefined)}
               >
                 <span
                   className="w-full bg-accent group-hover:bg-accent-hover"

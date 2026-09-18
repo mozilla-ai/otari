@@ -304,7 +304,7 @@ export function OrganizationProviderKeysPage() {
 
   const [adding, setAdding] = useState(false)
   const [addOpenCount, setAddOpenCount] = useState(0)
-  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string>()
   const [showArchived, setShowArchived] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<OrgProviderKey>()
 
@@ -316,12 +316,12 @@ export function OrganizationProviderKeysPage() {
   // it. See feedback.md, "A draft is fresh on every open and untouched through
   // the exit".
   const openAdd = () => {
-    setEditingId(null)
+    setEditingId(undefined)
     setAddOpenCount((n) => n + 1)
     setAdding(true)
   }
 
-  const editing = keys.data?.find((key) => key.id === editingId) ?? null
+  const editing = keys.data?.find((key) => key.id === editingId)
   const archivedCount = (keys.data ?? []).filter((key) =>
     Boolean(key.archived_at),
   ).length
@@ -457,7 +457,7 @@ export function OrganizationProviderKeysPage() {
                 onConfirm={() =>
                   archive.mutate(row.id, {
                     onSuccess: () => {
-                      if (editingId === row.id) setEditingId(null)
+                      if (editingId === row.id) setEditingId(undefined)
                     },
                   })
                 }
@@ -555,7 +555,7 @@ export function OrganizationProviderKeysPage() {
           key={editing.id}
           isOpen
           editing={editing}
-          onClose={() => setEditingId(null)}
+          onClose={() => setEditingId(undefined)}
         />
       ) : null}
 

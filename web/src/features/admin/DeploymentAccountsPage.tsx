@@ -65,7 +65,7 @@ export function DeploymentAccountsPage() {
   const granted = access.data === true
   const accounts = useDeploymentUsers(granted)
   const update = useUpdateDeploymentUser()
-  const [deactivating, setDeactivating] = useState<DeploymentUser | null>(null)
+  const [deactivating, setDeactivating] = useState<DeploymentUser>()
 
   const rows = accounts.data ?? []
 
@@ -270,9 +270,9 @@ export function DeploymentAccountsPage() {
       </TableScrollFrame>
 
       <ConfirmDialog
-        isOpen={deactivating !== null}
+        isOpen={deactivating !== undefined}
         onOpenChange={(open) => {
-          if (!open) setDeactivating(null)
+          if (!open) setDeactivating(undefined)
         }}
         heading="Deactivate account"
         body={
@@ -293,7 +293,7 @@ export function DeploymentAccountsPage() {
           if (deactivating) {
             update.mutate(
               { id: deactivating.id, body: { is_active: false } },
-              { onSuccess: () => setDeactivating(null) },
+              { onSuccess: () => setDeactivating(undefined) },
             )
           }
         }}

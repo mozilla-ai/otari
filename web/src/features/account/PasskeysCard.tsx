@@ -145,9 +145,9 @@ export function PasskeysCard() {
   const offerPasskeySignIn = useOfferPasskeySignIn()
 
   const [newName, setNewName] = useState("")
-  const [renaming, setRenaming] = useState<Passkey | null>(null)
+  const [renaming, setRenaming] = useState<Passkey>()
   const [renamedTo, setRenamedTo] = useState("")
-  const [deleting, setDeleting] = useState<Passkey | null>(null)
+  const [deleting, setDeleting] = useState<Passkey>()
 
   const rows = passkeys.data?.data ?? []
   const isBusy = register.isPending || rename.isPending || remove.isPending
@@ -186,7 +186,7 @@ export function PasskeysCard() {
     }
     rename.mutate(
       { id: renaming.id, name },
-      { onSuccess: () => setRenaming(null) },
+      { onSuccess: () => setRenaming(undefined) },
     )
   }
 
@@ -216,7 +216,7 @@ export function PasskeysCard() {
         if (usableLeft === 0) {
           offerPasskeySignIn(false)
         }
-        setDeleting(null)
+        setDeleting(undefined)
       },
     })
   }
@@ -329,10 +329,10 @@ export function PasskeysCard() {
       </Section>
 
       <ConfirmDialog
-        isOpen={renaming !== null}
+        isOpen={renaming !== undefined}
         onOpenChange={(open) => {
           if (!open) {
-            setRenaming(null)
+            setRenaming(undefined)
           }
         }}
         heading="Rename this passkey"
@@ -355,10 +355,10 @@ export function PasskeysCard() {
       />
 
       <ConfirmDialog
-        isOpen={deleting !== null}
+        isOpen={deleting !== undefined}
         onOpenChange={(open) => {
           if (!open) {
-            setDeleting(null)
+            setDeleting(undefined)
           }
         }}
         heading="Delete this passkey?"

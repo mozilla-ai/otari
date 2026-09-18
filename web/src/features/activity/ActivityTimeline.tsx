@@ -135,12 +135,12 @@ export function ActivityTimeline({
   const [panSel, setPanSel] = useState<{
     startIndex: number
     endIndex: number
-  } | null>(null)
+  }>()
   // Ref mirror for the pointer handlers: pointerup can fire before the last
   // pointermove's setState has re-rendered, and committing from the stale
   // closure would pan to the previous position.
   const panSelRef = useRef(panSel)
-  const setPan = (next: { startIndex: number; endIndex: number } | null) => {
+  const setPan = (next?: { startIndex: number; endIndex: number }) => {
     panSelRef.current = next
     setPanSel(next)
   }
@@ -257,7 +257,7 @@ export function ActivityTimeline({
     }
     panStart.current = null
     const committed = panSelRef.current
-    setPan(null)
+    setPan(undefined)
     if (committed && committed.startIndex !== windowIdx.startIndex) {
       commit(committed.startIndex, committed.endIndex)
     }
@@ -361,7 +361,7 @@ export function ActivityTimeline({
               showYAxis
               yTickCount={3}
               onSelectRange={commit}
-              window={zoomed || panSel ? sel : null}
+              window={zoomed || panSel ? sel : undefined}
             />
             {/* Pan rail: a minimap-style scrollbar for the zoomed window. Only
                 rendered while zoomed (at the full extent there is nothing to

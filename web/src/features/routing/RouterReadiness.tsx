@@ -79,9 +79,11 @@ export function RouterReadiness({
   onClose: () => void
 }) {
   const users = useUsers()
-  const [userId, setUserId] = useState<string | null>(scopedUserId)
+  // Empty rather than absent: the picker reports an empty string when it is
+  // cleared, so "nobody chosen" already has a value of its own here.
+  const [userId, setUserId] = useState(scopedUserId ?? "")
   const status = useRouterStatus(userId)
-  const chosen = userId !== null && userId !== ""
+  const chosen = userId !== ""
 
   return (
     <div>
@@ -113,7 +115,7 @@ export function RouterReadiness({
           {scopedUserId === null ? (
             <UserComboBox
               label="Whose memory"
-              value={userId ?? ""}
+              value={userId}
               onChange={setUserId}
               users={users.data ?? []}
               placeholder="Pick a user…"

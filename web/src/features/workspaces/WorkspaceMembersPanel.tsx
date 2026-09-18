@@ -164,7 +164,7 @@ export function WorkspaceMembersPanel({
   const members = useWorkspaceMembers(workspaceId)
   const updateRole = useUpdateWorkspaceMemberRole()
   const removeMember = useRemoveWorkspaceMember()
-  const [removing, setRemoving] = useState<WorkspaceMember | null>(null)
+  const [removing, setRemoving] = useState<WorkspaceMember>()
 
   const rows = members.data ?? []
   const nameByUserId = useMemo(
@@ -236,9 +236,9 @@ export function WorkspaceMembersPanel({
       )}
 
       <ConfirmDialog
-        isOpen={removing !== null}
+        isOpen={removing !== undefined}
         onOpenChange={(open) => {
-          if (!open) setRemoving(null)
+          if (!open) setRemoving(undefined)
         }}
         heading="Remove workspace member"
         body={
@@ -260,7 +260,7 @@ export function WorkspaceMembersPanel({
           if (removing) {
             removeMember.mutate(
               { workspaceId: workspaceId, userId: removing.user_id },
-              { onSuccess: () => setRemoving(null) },
+              { onSuccess: () => setRemoving(undefined) },
             )
           }
         }}

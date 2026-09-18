@@ -119,7 +119,7 @@ export const TrendWithRangeSelection: Story = {
     const [range, setRange] = useState<{
       startIndex: number
       endIndex: number
-    } | null>({ startIndex: 3, endIndex: 8 })
+    }>({ startIndex: 3, endIndex: 8 })
     return (
       <div className="flex w-[48rem] flex-col gap-2">
         <TrendChart
