@@ -57,11 +57,12 @@ export function ProviderInstanceComboBox({
   const catalog = useModels()
 
   const query = value.trim().toLowerCase()
-  const instances = new Set<string>()
-  for (const model of catalog.data?.data ?? []) {
-    const instance = providerInstanceOf(model.id)
-    if (instance) instances.add(instance)
-  }
+  const instances = new Set(
+    (catalog.data?.data ?? []).flatMap((model) => {
+      const instance = providerInstanceOf(model.id)
+      return instance ? [instance] : []
+    }),
+  )
   // Sorted on its own rather than inheriting the catalog's order, which is by
   // model key: that clusters instances but leaves one trailing far down the
   // list whenever a model of another instance sorts between two of its own.

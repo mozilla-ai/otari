@@ -20,13 +20,13 @@ import { memberLabel } from "./roles"
 export function memberLabelsByAttributionId(
   members: OrganizationMember[] | undefined,
 ): ReadonlyMap<string, string> {
-  const labels = new Map<string, string>()
-  for (const member of members ?? []) {
-    if (member.attribution_user_id) {
-      labels.set(member.attribution_user_id, memberLabel(member))
-    }
-  }
-  return labels
+  return new Map(
+    (members ?? []).flatMap((member): [string, string][] =>
+      member.attribution_user_id
+        ? [[member.attribution_user_id, memberLabel(member)]]
+        : [],
+    ),
+  )
 }
 
 /**

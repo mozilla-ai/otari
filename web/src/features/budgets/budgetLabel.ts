@@ -87,12 +87,11 @@ export function budgetLabel(budget: LabelableBudget): string {
 export function budgetLabeler(
   budgets: readonly LabelableBudget[],
 ): (budget: LabelableBudget) => string {
-  const derivedCounts = new Map<string, number>()
-  for (const budget of budgets) {
-    if (hasBudgetName(budget)) continue
+  const derivedCounts = budgets.reduce((counts, budget) => {
+    if (hasBudgetName(budget)) return counts
     const derived = unnamedBudgetLabel(budget)
-    derivedCounts.set(derived, (derivedCounts.get(derived) ?? 0) + 1)
-  }
+    return counts.set(derived, (counts.get(derived) ?? 0) + 1)
+  }, new Map<string, number>())
   return (budget) => {
     if (hasBudgetName(budget)) return budgetLabel(budget)
     const derived = unnamedBudgetLabel(budget)

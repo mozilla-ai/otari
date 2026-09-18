@@ -130,14 +130,15 @@ export function seedParameters(
   stored: Record<string, unknown> | null | undefined,
 ): SeededParameters {
   const kwargs = stored ?? {}
-  const values: ParameterValues = {}
-  const known = new Set<string>()
-  for (const spec of specs) {
-    known.add(spec.name)
-    values[spec.name] = Object.hasOwn(kwargs, spec.name)
-      ? asFieldValue(spec, kwargs[spec.name])
-      : defaultFieldValue(spec)
-  }
+  const known = new Set(specs.map((spec) => spec.name))
+  const values: ParameterValues = Object.fromEntries(
+    specs.map((spec) => [
+      spec.name,
+      Object.hasOwn(kwargs, spec.name)
+        ? asFieldValue(spec, kwargs[spec.name])
+        : defaultFieldValue(spec),
+    ]),
+  )
   const extra = Object.fromEntries(
     Object.entries(kwargs).filter(([key]) => !known.has(key)),
   )
@@ -186,36 +187,42 @@ export function parameterErrors(
   specs: GuardrailParameterSpec[],
   values: ParameterValues,
 ): ParameterErrors {
-  const errors: ParameterErrors = {}
-  for (const spec of specs) {
-    const value = values[spec.name]
-    if (spec.type === "boolean") continue
-    // The mask stands in for a value nobody here has seen, so there is nothing
-    // to check: a secret parameter the schema types as a number or JSON would
-    // otherwise fail on the literal `***` and refuse a save of the rest of the
-    // entry.
-    if (value === REDACTED_SECRET) continue
-    if (isBlank(value)) {
-      if (spec.required)
-        errors[spec.name] = "This guardrail needs a value here."
-      continue
-    }
-    const text = String(value)
-    if (spec.type === "integer" && !Number.isInteger(Number(text))) {
-      errors[spec.name] = "Enter a whole number."
-    } else if (spec.type === "number" && !Number.isFinite(Number(text))) {
-      errors[spec.name] = "Enter a number."
-    } else if (
-      spec.type === "enum" &&
-      spec.choices &&
-      !spec.choices.includes(text)
-    ) {
-      errors[spec.name] = "Choose one of the listed values."
-    } else if (spec.type === "json" && parseJsonValue(text).error) {
-      errors[spec.name] = "Not valid JSON."
-    }
+  return Object.fromEntries(
+    specs.flatMap((spec) => {
+      const message = parameterError(spec, values[spec.name])
+      return message ? [[spec.name, message]] : []
+    }),
+  )
+}
+
+/** What one parameter's current value cannot be submitted as, or undefined. */
+function parameterError(
+  spec: GuardrailParameterSpec,
+  value: ParameterValue | undefined,
+): string | undefined {
+  if (spec.type === "boolean") return undefined
+  // The mask stands in for a value nobody here has seen, so there is nothing
+  // to check: a secret parameter the schema types as a number or JSON would
+  // otherwise fail on the literal `***` and refuse a save of the rest of the
+  // entry.
+  if (value === REDACTED_SECRET) return undefined
+  if (isBlank(value)) {
+    return spec.required ? "This guardrail needs a value here." : undefined
   }
-  return errors
+  const text = String(value)
+  if (spec.type === "integer" && !Number.isInteger(Number(text))) {
+    return "Enter a whole number."
+  }
+  if (spec.type === "number" && !Number.isFinite(Number(text))) {
+    return "Enter a number."
+  }
+  if (spec.type === "enum" && spec.choices && !spec.choices.includes(text)) {
+    return "Choose one of the listed values."
+  }
+  if (spec.type === "json" && parseJsonValue(text).error) {
+    return "Not valid JSON."
+  }
+  return undefined
 }
 
 function coerce(
@@ -253,15 +260,15 @@ export function buildValidateKwargs(
 ): Record<string, unknown> | null {
   const kwargs: Record<string, unknown> = {
     ...(parseExtraJson(extraJson).value ?? {}),
-  }
-  for (const spec of specs) {
-    const value = values[spec.name]
     // Blank is "no opinion" for every type, a boolean included: an optional box
     // nobody has touched leaves the profile's own default in force, while one
     // the operator turned off sends `false` and keeps it off. A required
     // parameter has no such state, so its blank still sends.
-    if (isBlank(value) && !spec.required) continue
-    kwargs[spec.name] = coerce(spec, value)
+    ...Object.fromEntries(
+      specs
+        .filter((spec) => spec.required || !isBlank(values[spec.name]))
+        .map((spec) => [spec.name, coerce(spec, values[spec.name])]),
+    ),
   }
   return Object.keys(kwargs).length > 0 ? kwargs : null
 }

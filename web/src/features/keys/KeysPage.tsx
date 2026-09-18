@@ -91,11 +91,10 @@ function relative(iso: string | null): string | null {
     ["hour", 3_600],
     ["minute", 60],
   ]
-  for (const [unit, sec] of units) {
-    if (abs >= sec)
-      return expiryRelative.format(Math.round(diffSec / sec), unit)
-  }
-  return expiryRelative.format(diffSec, "second")
+  const coarsest = units.find(([, sec]) => abs >= sec)
+  if (!coarsest) return expiryRelative.format(diffSec, "second")
+  const [unit, sec] = coarsest
+  return expiryRelative.format(Math.round(diffSec / sec), unit)
 }
 
 type Layout = "wide" | "compact" | "mobile"

@@ -15,23 +15,26 @@ export function parseSearch(searchStr: string): DashboardSearch {
   // Built through a Map so a `?__proto__=x` param lands as an ordinary key:
   // Object.fromEntries defines own properties, where `object[key] = value`
   // would hit the prototype setter instead.
-  const entries = new Map<string, string | string[]>()
-  for (const key of params.keys()) {
-    if (entries.has(key)) continue
-    const values = params.getAll(key)
-    entries.set(key, values.length > 1 ? values : values[0])
-  }
+  const entries = new Map<string, string | string[]>(
+    [...new Set(params.keys())].map((key) => {
+      const values = params.getAll(key)
+      return [key, values.length > 1 ? values : values[0]]
+    }),
+  )
   return Object.fromEntries(entries)
 }
 
 export function stringifySearch(search: DashboardSearch): string {
-  const params = new URLSearchParams()
-  for (const [key, value] of Object.entries(search)) {
-    if (value === undefined) continue
-    for (const one of Array.isArray(value) ? value : [value]) {
-      params.append(key, String(one))
-    }
-  }
+  const params = new URLSearchParams(
+    Object.entries(search).flatMap(([key, value]): [string, string][] =>
+      value === undefined
+        ? []
+        : (Array.isArray(value) ? value : [value]).map((one) => [
+            key,
+            String(one),
+          ]),
+    ),
+  )
   const query = params.toString()
   return query ? `?${query}` : ""
 }

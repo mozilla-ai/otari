@@ -268,15 +268,19 @@ export function WorkspaceProviderKeys({
   // `provider:model`, which is how the catalog names an entry and how a model
   // restriction does not. Grouped once rather than per key, since an
   // organization's keys share few providers.
-  const catalogByProvider = new Map<string, string[]>()
-  for (const model of catalog.data?.data ?? []) {
-    const separator = model.id.indexOf(":")
-    if (separator === -1) continue
-    const provider = model.id.slice(0, separator)
-    const entries = catalogByProvider.get(provider)
-    if (entries) entries.push(model.id.slice(separator + 1))
-    else catalogByProvider.set(provider, [model.id.slice(separator + 1)])
-  }
+  const catalogByProvider = (catalog.data?.data ?? []).reduce(
+    (groups, model) => {
+      const separator = model.id.indexOf(":")
+      if (separator === -1) return groups
+      const provider = model.id.slice(0, separator)
+      const name = model.id.slice(separator + 1)
+      const entries = groups.get(provider)
+      if (entries) entries.push(name)
+      else groups.set(provider, [name])
+      return groups
+    },
+    new Map<string, string[]>(),
+  )
 
   // Every provider this deployment names, from the catalog and from the
   // organization's own keys, which is what tells a pasted `openai:` prefix from

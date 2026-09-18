@@ -683,16 +683,25 @@ interface GroupOutcome {
 function indexGroupOutcomes(
   rows: readonly UsageEntry[],
 ): Map<string, GroupOutcome> {
-  const index = new Map<string, GroupOutcome>()
-  for (const row of rows) {
-    if (!row.request_group_id || row.status === "absorbed") continue
-    index.set(row.request_group_id, {
-      servedBy: row.status === "success" ? pricingSelectorOf(row) : null,
-      servedPosition:
-        row.status === "success" ? (row.attempt_position ?? null) : null,
-    })
-  }
-  return index
+  return new Map(
+    rows.flatMap((row): [string, GroupOutcome][] =>
+      row.request_group_id && row.status !== "absorbed"
+        ? [
+            [
+              row.request_group_id,
+              {
+                servedBy:
+                  row.status === "success" ? pricingSelectorOf(row) : null,
+                servedPosition:
+                  row.status === "success"
+                    ? (row.attempt_position ?? null)
+                    : null,
+              },
+            ],
+          ]
+        : [],
+    ),
+  )
 }
 
 // One line of prose for a row's place in its plan, replacing the "attempt 1/2 ·
@@ -1524,16 +1533,15 @@ export function ActivityPage() {
   // outcome row by construction, which is precisely when the answer is wanted.
   const { pageOutcomes, unresolvedGroupIds } = useMemo(() => {
     const known = indexGroupOutcomes(rows)
-    const missing = new Set<string>()
-    for (const row of rows) {
-      if (
+    const missing = new Set(
+      rows.flatMap((row) =>
         row.status === "absorbed" &&
         row.request_group_id &&
         !known.has(row.request_group_id)
-      ) {
-        missing.add(row.request_group_id)
-      }
-    }
+          ? [row.request_group_id]
+          : [],
+      ),
+    )
     return { pageOutcomes: known, unresolvedGroupIds: [...missing] }
   }, [rows])
   const unresolvedGroups = useRequestGroups(unresolvedGroupIds)

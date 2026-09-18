@@ -73,13 +73,17 @@ export function usePlaygroundStream(params: {
   useEffect(() => {
     const inFlight = inFlightRef.current
     return () => {
-      for (const controller of inFlight) controller.abort()
+      inFlight.forEach((controller) => {
+        controller.abort()
+      })
       inFlight.clear()
     }
   }, [])
 
   const stop = useCallback(() => {
-    for (const controller of inFlightRef.current) controller.abort()
+    inFlightRef.current.forEach((controller) => {
+      controller.abort()
+    })
     inFlightRef.current.clear()
   }, [])
 

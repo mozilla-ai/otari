@@ -51,9 +51,9 @@ export function userDisplay(
 export function aliasesByUserId(
   users: User[] | undefined,
 ): ReadonlyMap<string, string> {
-  const aliases = new Map<string, string>()
-  for (const user of users ?? []) {
-    if (user.alias) aliases.set(user.user_id, user.alias)
-  }
-  return aliases
+  return new Map(
+    (users ?? []).flatMap((user): [string, string][] =>
+      user.alias ? [[user.user_id, user.alias]] : [],
+    ),
+  )
 }

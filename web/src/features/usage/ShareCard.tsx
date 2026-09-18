@@ -43,31 +43,25 @@ const FLOOR_PX = 28
  * error is slack, size a clipping box from it and the error costs content.
  */
 export function emWidth(text: string): number {
-  let em = 0
-  for (const char of text) {
-    if (
-      char === "," ||
-      char === "." ||
-      char === " " ||
-      char === "'" ||
-      char === "|"
-    ) {
-      em += 0.28
-    } else if (char === "-" || char === "*") {
-      em += 0.35
-    } else if (char === "$") {
-      em += 0.58
-    } else if (char >= "0" && char <= "9") {
-      em += 0.6
-    } else if (char >= "A" && char <= "Z") {
-      em += 0.65
-    } else if (char >= "a" && char <= "z") {
-      em += 0.52
-    } else {
-      em += 0.6
-    }
+  return [...text].reduce((em, char) => em + charEmWidth(char), 0)
+}
+
+function charEmWidth(char: string): number {
+  if (
+    char === "," ||
+    char === "." ||
+    char === " " ||
+    char === "'" ||
+    char === "|"
+  ) {
+    return 0.28
   }
-  return em
+  if (char === "-" || char === "*") return 0.35
+  if (char === "$") return 0.58
+  if (char >= "0" && char <= "9") return 0.6
+  if (char >= "A" && char <= "Z") return 0.65
+  if (char >= "a" && char <= "z") return 0.52
+  return 0.6
 }
 
 /**

@@ -81,13 +81,10 @@ export interface RememberedLocation {
  * link is followed.
  */
 function destinationAt(pathname: string): NavPath | undefined {
-  for (const item of NAV_ITEMS) {
-    if (item.to === pathname) return item.to
-    for (const child of item.children ?? []) {
-      if (child.to === pathname) return child.to
-    }
-  }
-  return undefined
+  return NAV_ITEMS.flatMap((item) => [
+    item.to,
+    ...(item.children ?? []).map((child) => child.to),
+  ]).find((to) => to === pathname)
 }
 
 /**

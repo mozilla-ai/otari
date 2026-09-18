@@ -67,11 +67,9 @@ export function base64UrlToBuffer(value: string): ArrayBuffer {
 
 /** Encode bytes as base64url, which is what every field the gateway reads uses. */
 export function bufferToBase64Url(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer)
-  let binary = ""
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte)
-  }
+  const binary = Array.from(new Uint8Array(buffer), (byte) =>
+    String.fromCharCode(byte),
+  ).join("")
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 }
 

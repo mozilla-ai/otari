@@ -65,8 +65,10 @@ function editableTiers(tiers: PricingTier[]): EditablePricingTier[] {
 }
 
 function validTiers(tiers: EditablePricingTier[]): boolean {
+  // The thresholds seen so far, which is what makes a repeat detectable: `every`
+  // walks in order and stops at the first tier that fails.
   const thresholds = new Set<number>()
-  for (const tier of tiers) {
+  return tiers.every((tier) => {
     const threshold = Number(tier.minInputTokens)
     if (
       !Number.isInteger(threshold) ||
@@ -83,10 +85,11 @@ function validTiers(tiers: EditablePricingTier[]): boolean {
       tier.cacheWrite,
       tier.cacheWrite1h,
     ]
-    if (!rates.every(isValidOptionalPrice)) return false
-    if (rates.every((rate) => rate.trim() === "")) return false
-  }
-  return true
+    return (
+      rates.every(isValidOptionalPrice) &&
+      !rates.every((rate) => rate.trim() === "")
+    )
+  })
 }
 
 function pricingTiers(tiers: EditablePricingTier[]): PricingTier[] {

@@ -622,18 +622,19 @@ function DeploymentBudgetsPage() {
         workspace.name,
       ]),
     )
-    const byBudget = new Map<string, string[]>()
-    for (const { workspaceId, default: row } of workspaceDefaults.data) {
-      const name = names.get(workspaceId) ?? workspaceId.slice(0, 8)
-      const label = row.provider_key_id
-        ? `${name} (${row.provider_key_id})`
-        : name
-      byBudget.set(row.budget_id, [
-        ...(byBudget.get(row.budget_id) ?? []),
-        label,
-      ])
-    }
-    return byBudget
+    return workspaceDefaults.data.reduce(
+      (byBudget, { workspaceId, default: row }) => {
+        const name = names.get(workspaceId) ?? workspaceId.slice(0, 8)
+        const label = row.provider_key_id
+          ? `${name} (${row.provider_key_id})`
+          : name
+        const labels = byBudget.get(row.budget_id)
+        if (labels) labels.push(label)
+        else byBudget.set(row.budget_id, [label])
+        return byBudget
+      },
+      new Map<string, string[]>(),
+    )
   }, [workspaces.data, workspaceDefaults.data])
   const editingBudget = rows.find((b) => b.budget_id === editing)
   const historyBudget = rows.find((b) => b.budget_id === historyOpen)

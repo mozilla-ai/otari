@@ -23,10 +23,9 @@ export function organizationUsers(
   memberLabels: ReadonlyMap<string, string>,
   organizationKeys: readonly Pick<ApiKey, "user_id">[],
 ): User[] {
-  const owners = new Set<string>()
-  for (const key of organizationKeys) {
-    if (key.user_id) owners.add(key.user_id)
-  }
+  const owners = new Set(
+    organizationKeys.flatMap((key) => (key.user_id ? [key.user_id] : [])),
+  )
   return users.filter(
     (user) => memberLabels.has(user.user_id) || owners.has(user.user_id),
   )

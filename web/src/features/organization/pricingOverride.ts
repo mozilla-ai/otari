@@ -61,19 +61,19 @@ export function isValidModelKey(value: string): boolean {
 export function deploymentManagedPrefixes(
   models: readonly ModelObject[] | undefined,
 ): ReadonlySet<string> {
-  const prefixes = new Set<string>()
-  for (const model of models ?? []) {
-    if (!model.deployment_managed) continue
-    // Split on either delimiter, because the catalog lists a pricing-only model
-    // under the key it is stored as (`_get_pricing_map` in `api/routes/models.py`
-    // does not normalize), so a row predating key normalization arrives as
-    // `instance/model`. Splitting on ":" alone would file that whole id as a
-    // prefix and leave the real one out of the set, which reads as "not
-    // deployment supplied" and offers a control the gateway refuses.
-    const [prefix] = model.id.split(/[:/]/, 1)
-    if (prefix) prefixes.add(prefix)
-  }
-  return prefixes
+  return new Set(
+    (models ?? []).flatMap((model) => {
+      if (!model.deployment_managed) return []
+      // Split on either delimiter, because the catalog lists a pricing-only model
+      // under the key it is stored as (`_get_pricing_map` in `api/routes/models.py`
+      // does not normalize), so a row predating key normalization arrives as
+      // `instance/model`. Splitting on ":" alone would file that whole id as a
+      // prefix and leave the real one out of the set, which reads as "not
+      // deployment supplied" and offers a control the gateway refuses.
+      const [prefix] = model.id.split(/[:/]/, 1)
+      return prefix ? [prefix] : []
+    }),
+  )
 }
 
 /**
