@@ -108,7 +108,7 @@ export const Bounded: Story = {
   render: () => (
     <div className="flex max-w-2xl flex-col gap-6">
       <SettingsGroup
-        bounded
+        isBounded
         title="Web search"
         description="Which backend answers a search tool call."
       >
@@ -142,7 +142,7 @@ export const Bounded: Story = {
 export const WithDocsLink: Story = {
   render: () => (
     <SettingsGroup
-      bounded
+      isBounded
       title="Code execution"
       description="Whether a request may run code, and where."
       docsHref="https://example.com/docs/tools#code-execution"
@@ -166,7 +166,7 @@ export const WithDocsLink: Story = {
 export const WithAction: Story = {
   render: () => (
     <SettingsGroup
-      bounded
+      isBounded
       title="Search tools"
       description="Named tools behind the direct endpoint."
       action={<Button variant="primary">Add search tool</Button>}

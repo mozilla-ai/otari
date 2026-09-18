@@ -102,7 +102,7 @@ function DefaultBudgetPicker({
       // this could ever hold. `FieldMessages` reserves the line by default, and
       // `FilterSelect` reserved nothing, so the swap to `Select` brought ~23px
       // of empty back with it.
-      reserveMessage={false}
+      shouldReserveMessage={false}
       options={[
         { value: NO_DEFAULT, label: "No default" },
         ...budgetChoices(budgets),
@@ -141,7 +141,7 @@ function NarrowedDefaults({
 
   const taken = new Set(narrowed.map((row) => row.provider_key_id))
   const available = providers.filter((instance) => !taken.has(instance))
-  const pending =
+  const isPending =
     createDefault.isPending ||
     updateDefault.isPending ||
     deleteDefault.isPending
@@ -173,7 +173,7 @@ function NarrowedDefaults({
                   })
                 }
                 options={budgetChoices(budgets)}
-                disabled={pending}
+                disabled={isPending}
               />
               <Button
                 size="sm"
@@ -181,7 +181,7 @@ function NarrowedDefaults({
                 // Named per row, as the picker beside it is: this is a list of
                 // providers, not a table with a row header to lean on.
                 aria-label={`Remove default for ${row.provider_key_id}`}
-                isDisabled={pending}
+                isDisabled={isPending}
                 onPress={() => setPendingDelete(row)}
               >
                 Remove
@@ -216,7 +216,7 @@ function NarrowedDefaults({
           <Button
             size="sm"
             variant="ghost"
-            isDisabled={pending || provider === "" || budgetId === ""}
+            isDisabled={isPending || provider === "" || budgetId === ""}
             onPress={() =>
               createDefault.mutate(
                 {
@@ -371,7 +371,7 @@ export function CreateWorkspaceForm({
   // button said "and open" while nothing opened would be the worse bug of the
   // two this fixes.
   const entersWorkspace = onCreated !== undefined
-  const pending = create.isPending || createDefault.isPending || holding
+  const isPending = create.isPending || createDefault.isPending || holding
   // Only a refusal *about the name* belongs on the name. These three are the
   // ones this endpoint answers with when the input is the problem: taken (409),
   // malformed (400), or rejected by the schema (422). A 403, a 500 or a dropped
@@ -445,7 +445,7 @@ export function CreateWorkspaceForm({
       title="New workspace"
       submitLabel={entersWorkspace ? "Create and open" : "Create workspace"}
       onSubmit={submit}
-      isPending={pending}
+      isPending={isPending}
       isSubmitDisabled={trimmed === ""}
       isDirty={isDirty}
       returnFocusRef={returnFocusRef}
@@ -490,7 +490,7 @@ export function CreateWorkspaceForm({
         onChange={setDescription}
         // No description under it, so no line held open for one. See forms.md:
         // the reserve exists for an error to replace a description in.
-        reserveMessage={false}
+        shouldReserveMessage={false}
       />
       {/* Withheld from a caller who does not operate the deployment: the
           picker's options come from the operator-gated `/budgets` read, so
@@ -634,13 +634,13 @@ function EditWorkspaceForm({
         onChange={setName}
         isRequired
         autoFocus
-        reserveMessage={false}
+        shouldReserveMessage={false}
       />
       <Field
         label="Description"
         value={description}
         onChange={setDescription}
-        reserveMessage={false}
+        shouldReserveMessage={false}
       />
       {/* Withheld from a caller who does not operate the deployment: the
           picker's options come from the operator-gated `/budgets` read, so

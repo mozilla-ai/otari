@@ -124,8 +124,8 @@ export function WorkspaceCodeExecutionPolicyCard({
   // Disabled until the read has succeeded. Without that the rows sit at
   // "Deployment default" over a workspace that may well have a stored policy,
   // and one change issues the write that drops it.
-  const unreadable = query.isLoading || query.isError || !policy
-  const narrowingDisabled = unreadable || stance === "default"
+  const isUnreadable = query.isLoading || query.isError || !policy
+  const narrowingDisabled = isUnreadable || stance === "default"
 
   const allowedImages = policy?.allowed_images ?? []
   const availableTools = policy?.available_tools ?? []
@@ -183,7 +183,7 @@ export function WorkspaceCodeExecutionPolicyCard({
 
   return (
     <SettingsGroup
-      bounded
+      isBounded
       title="This workspace"
       description={`Narrows what the deployment allows for requests billed to ${selected.name}. Never widens it, and grants no sandbox the deployment has not configured.`}
       docsHref={docsHref}
@@ -226,7 +226,7 @@ export function WorkspaceCodeExecutionPolicyCard({
               { value: "allowed", label: "Allowed" },
               { value: "blocked", label: "Blocked" },
             ]}
-            disabled={unreadable || stanceSave.isSaving}
+            disabled={isUnreadable || stanceSave.isSaving}
           />
         }
       />
@@ -246,7 +246,7 @@ export function WorkspaceCodeExecutionPolicyCard({
         label="Max tool-loop iterations"
         help="Lowers the number of model-to-tool rounds. It never raises one."
         placeholder="10"
-        numeric
+        isNumeric
         committed={
           policy?.max_iterations == null ? "" : String(policy.max_iterations)
         }
@@ -259,7 +259,7 @@ export function WorkspaceCodeExecutionPolicyCard({
         label="Execution timeout"
         help="Lowers how long one execution may run, in seconds. It never raises it."
         placeholder="30"
-        numeric
+        isNumeric
         committed={
           policy?.exec_timeout_s == null ? "" : String(policy.exec_timeout_s)
         }

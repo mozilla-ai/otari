@@ -48,7 +48,7 @@ export const WithValue: Story = {
         value={value}
         onChange={setValue}
         description="Stored encrypted. It is never shown again after saving."
-        reserveMessage
+        shouldReserveMessage
       />
     )
   },
@@ -74,7 +74,7 @@ export const Invalid: Story = {
         description="Stored encrypted. It is never shown again after saving."
         isInvalid={!value.startsWith("sk-")}
         errorMessage="An OpenAI key starts with sk-."
-        reserveMessage
+        shouldReserveMessage
       />
     )
   },

@@ -207,7 +207,7 @@ export const WithRowDetail: Story = {
 
 /** Draggable column resize handles. */
 export const Resizable: Story = {
-  args: { resizable: true },
+  args: { isResizable: true },
 }
 
 /** `rowClassName` tints a row from the row's own data. */

@@ -94,7 +94,7 @@ export type SignInCredential =
 // "Invalid master key." over any of the last two, as this did before there was
 // a second credential, tells the operator to retry the thing that cannot work.
 export interface SignInResult {
-  ok: boolean
+  isOk: boolean
   message?: string
   /**
    * The refusal's status, on a refusal. Present so a caller can tell the two
@@ -107,7 +107,7 @@ export interface SignInResult {
 // Exchange a credential for a server-issued session: the gateway verifies it and
 // answers with an HttpOnly cookie holding an opaque session token, so the
 // credential itself never needs to be stored (or even kept in memory)
-// afterwards. Refusals come back as `ok: false` with the gateway's message:
+// afterwards. Refusals come back as `isOk: false` with the gateway's message:
 // 401 and 403 always, and 503 when the gateway wrote the body (maintenance
 // mode) rather than an intermediary answering for it. Network faults, an
 // unreachable gateway, and other failures throw ApiError so the UI can explain
@@ -138,7 +138,7 @@ export async function createSession(
   }
   if (response.status === 401 || response.status === 403) {
     return {
-      ok: false,
+      isOk: false,
       message: await extractErrorMessage(response),
       status: response.status,
     }
@@ -159,14 +159,14 @@ export async function createSession(
   if (response.status === 503) {
     const refusal = await readRefusal(response)
     if (refusal.detail !== null) {
-      return { ok: false, message: refusal.detail, status: response.status }
+      return { isOk: false, message: refusal.detail, status: response.status }
     }
     throw new ApiError(response.status, refusal.message)
   }
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response))
   }
-  return { ok: true }
+  return { isOk: true }
 }
 
 // Sign in with a passkey: two calls with a browser ceremony between them.
@@ -174,14 +174,14 @@ export async function createSession(
 // Hand-written here beside `createSession`, and for the same reason: `apiFetch`
 // treats a 401 as an expired session and bounces to the sign-in screen, which
 // is exactly wrong on the screen somebody is signing in *from*. A refused
-// passkey comes back as `ok: false` carrying the gateway's own message.
+// passkey comes back as `isOk: false` carrying the gateway's own message.
 //
 // A dismissed prompt is not a refusal and is not reported as one: the ceremony
 // throws `PasskeyCancelledError`, which the caller distinguishes.
 export async function signInWithPasskey(): Promise<SignInResult> {
   const options = await publicPost("/auth/webauthn/authenticate/options")
-  if (!options.ok) {
-    return { ok: false, message: options.message, status: options.status }
+  if (!options.isOk) {
+    return { isOk: false, message: options.message, status: options.status }
   }
   const assertion = await getPasskeyAssertion(
     options.body as Parameters<typeof getPasskeyAssertion>[0],
@@ -189,22 +189,22 @@ export async function signInWithPasskey(): Promise<SignInResult> {
   const verified = await publicPost("/auth/webauthn/authenticate", {
     credential: assertion,
   })
-  return verified.ok
-    ? { ok: true }
-    : { ok: false, message: verified.message, status: verified.status }
+  return verified.isOk
+    ? { isOk: true }
+    : { isOk: false, message: verified.message, status: verified.status }
 }
 
 // Where to send the browser, or why the gateway would not say.
 //
 // A discriminated union on a *literal* `ok`, deliberately not
-// `{ok: true, ...} | SignInResult`: `SignInResult.ok` is a plain `boolean`, so
-// that shape does not discriminate and `if (!result.ok) return` narrows
+// `{isOk: true, ...} | SignInResult`: `SignInResult.isOk` is a plain `boolean`,
+// so that shape does not discriminate and `if (!result.isOk) return` narrows
 // nothing, leaving the success fields unreachable to a caller. The failure arm
 // therefore restates the two fields it shares with `SignInResult` rather than
 // reusing the type.
 export type OAuthStartResult =
-  | { ok: true; authorizationUrl: string; state: string }
-  | { ok: false; message?: string; status?: number }
+  | { isOk: true; authorizationUrl: string; state: string }
+  | { isOk: false; message?: string; status?: number }
 
 // Start an OAuth sign-in: ask the gateway where to send the browser.
 //
@@ -222,8 +222,8 @@ export async function startOAuthSignIn(
   const started = await publicGet(
     `/auth/oauth/${encodeURIComponent(provider)}/authorize`,
   )
-  if (!started.ok) {
-    return { ok: false, message: started.message, status: started.status }
+  if (!started.isOk) {
+    return { isOk: false, message: started.message, status: started.status }
   }
   // Typed from the spec, but still checked at runtime: the type says what the
   // gateway promises, and this call is unauthenticated and reached before the
@@ -237,7 +237,7 @@ export async function startOAuthSignIn(
     throw new ApiError(0, "The gateway did not return an authorization URL.")
   }
   return {
-    ok: true,
+    isOk: true,
     authorizationUrl: body.authorization_url,
     state: body.state,
   }
@@ -259,15 +259,15 @@ export async function completeOAuthSignIn(
     `/auth/oauth/${encodeURIComponent(provider)}/callback`,
     payload,
   )
-  return finished.ok
-    ? { ok: true }
-    : { ok: false, message: finished.message, status: finished.status }
+  return finished.isOk
+    ? { isOk: true }
+    : { isOk: false, message: finished.message, status: finished.status }
 }
 
 // One unauthenticated GET, with the same error handling `publicPost` gives its
 // own: a refusal the gateway wrote is an answer rather than an exception.
 async function publicGet(path: string): Promise<{
-  ok: boolean
+  isOk: boolean
   message?: string
   status?: number
   body?: unknown
@@ -294,7 +294,7 @@ async function publicGet(path: string): Promise<{
     // this route it is the gateway saying the provider is not configured, and
     // the message names the settings an operator has to add.
     return {
-      ok: false,
+      isOk: false,
       message: await extractErrorMessage(response),
       status: response.status,
     }
@@ -302,7 +302,10 @@ async function publicGet(path: string): Promise<{
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response))
   }
-  return { ok: true, body: await readJson<unknown>(response, TIMEOUT_MESSAGE) }
+  return {
+    isOk: true,
+    body: await readJson<unknown>(response, TIMEOUT_MESSAGE),
+  }
 }
 
 // One unauthenticated POST, with the sign-in screen's error handling: a 401 or
@@ -312,7 +315,7 @@ async function publicPost(
   path: string,
   body?: unknown,
 ): Promise<{
-  ok: boolean
+  isOk: boolean
   message?: string
   status?: number
   body?: unknown
@@ -339,7 +342,7 @@ async function publicPost(
     // documents: the caller records which refusal happened without touching the
     // message, which is the gateway's wording and the one part that must not be.
     return {
-      ok: false,
+      isOk: false,
       message: await extractErrorMessage(response),
       status: response.status,
     }
@@ -347,7 +350,10 @@ async function publicPost(
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response))
   }
-  return { ok: true, body: await readJson<unknown>(response, TIMEOUT_MESSAGE) }
+  return {
+    isOk: true,
+    body: await readJson<unknown>(response, TIMEOUT_MESSAGE),
+  }
 }
 
 // Best-effort server-side sign-out: revokes the cookie's session and expires

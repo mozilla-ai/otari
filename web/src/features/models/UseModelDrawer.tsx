@@ -208,7 +208,7 @@ export function UseModelDrawer({
                           ? buildCurlSnippet(input)
                           : buildPythonSnippet(input)
                       }
-                      multiline
+                      isMultiline
                     />
                   </>
                 )}

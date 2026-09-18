@@ -230,7 +230,7 @@ export function SpendCeilingDialog({
             value={target}
             onChange={setTarget}
             options={targetOptions}
-            reserveMessage={false}
+            shouldReserveMessage={false}
           />
           <ProviderInstanceComboBox
             label="Provider instance"
@@ -250,7 +250,7 @@ export function SpendCeilingDialog({
         isInvalid={budgetReason !== undefined}
         errorMessage={budgetReason}
         // Reserved, so announcing a refusal here does not move the footer.
-        reserveMessage
+        shouldReserveMessage
       />
       <Field
         label="Name"

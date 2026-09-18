@@ -133,14 +133,14 @@ export function AddWorkspaceMemberDialog({
               value: member.user_id ?? "",
               label: memberLabel(member),
             }))}
-            reserveMessage={false}
+            shouldReserveMessage={false}
           />
           <Select
             label="Role"
             value={role}
             onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
             options={ROLE_OPTIONS}
-            reserveMessage={false}
+            shouldReserveMessage={false}
           />
         </>
       )}

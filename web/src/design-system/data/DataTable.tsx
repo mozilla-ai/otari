@@ -86,7 +86,7 @@ export interface DataTableProps<Row> {
   onRowAction?: (key: string) => void
   rowClassName?: (row: Row) => string | undefined
   /** Enables draggable column resize handles. */
-  resizable?: boolean
+  isResizable?: boolean
   /**
    * Inline detail: when `detailKey` matches a row's key, `renderDetail(row)`
    * renders as a full-width row directly under that row (accordion style), so
@@ -153,12 +153,14 @@ export function DataTable<Row extends object>({
   onSortChange,
   onRowAction,
   rowClassName,
-  resizable = false,
+  isResizable = false,
   detailKey = null,
   renderDetail,
 }: DataTableProps<Row>) {
   const showSelection = selectionMode === "multiple"
-  const Container = resizable ? Table.ResizableContainer : Table.ScrollContainer
+  const Container = isResizable
+    ? Table.ResizableContainer
+    : Table.ScrollContainer
   const columnCount = columns.length + (showSelection ? 1 : 0)
 
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -469,7 +471,7 @@ export function DataTable<Row extends object>({
                     ) : (
                       <span>{col.header}</span>
                     )}
-                    {resizable ? (
+                    {isResizable ? (
                       <Table.ColumnResizer className="ml-auto cursor-col-resize px-1" />
                     ) : null}
                   </div>

@@ -237,7 +237,7 @@ export function TrendChart({
     onSelectRange(lo, hi)
   }
 
-  const selectable = Boolean(onSelectRange) && data.length > 1
+  const isSelectable = Boolean(onSelectRange) && data.length > 1
   const dimmed =
     windowRange && data.length > 0
       ? {
@@ -255,16 +255,16 @@ export function TrendChart({
     // (presets, zoom buttons, the Activity pan rail).
     // biome-ignore lint/a11y/useAriaPropsSupportedByRole: both roles this switches between support aria-label; the rule cannot evaluate the condition
     <div
-      role={selectable ? "group" : "img"}
+      role={isSelectable ? "group" : "img"}
       aria-label={ariaLabel}
-      className={`w-full touch-pan-y select-none ${selectable ? "cursor-crosshair" : ""}`}
+      className={`w-full touch-pan-y select-none ${isSelectable ? "cursor-crosshair" : ""}`}
     >
       <ResponsiveContainer width="100%" height={height}>
         <BarChart
           data={data}
           margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
           onMouseDown={(state) => {
-            if (!selectable) return
+            if (!isSelectable) return
             const index = toIndex(state)
             if (index !== null) setDragBoth({ start: index, end: index })
           }}
@@ -276,7 +276,7 @@ export function TrendChart({
           onMouseUp={commit}
           onMouseLeave={commit}
           onTouchStart={(state) => {
-            if (!selectable) return
+            if (!isSelectable) return
             const index = toIndex(state)
             if (index !== null) setDragBoth({ start: index, end: index })
           }}

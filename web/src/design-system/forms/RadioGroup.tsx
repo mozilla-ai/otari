@@ -98,7 +98,7 @@ export function RadioGroup({
           </Radio>
         ))}
       </div>
-      <FieldMessages reserve={false}>
+      <FieldMessages shouldReserve={false}>
         {isInvalid && errorMessage ? (
           <span className="text-danger">{errorMessage}</span>
         ) : null}

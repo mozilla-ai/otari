@@ -62,7 +62,7 @@ export function PasswordCard() {
   // cannot be read off the shape afterwards, since claiming is what changes it.
   const [outcome, setOutcome] = useState<{
     email: string
-    claimed: boolean
+    isClaimed: boolean
   }>()
 
   const shape = caller ? passwordFormShape(caller) : undefined
@@ -107,7 +107,7 @@ export function PasswordCard() {
               aria-live="polite"
               className="max-w-3xl text-sm text-success"
             >
-              {outcome.claimed
+              {outcome.isClaimed
                 ? `Saved. Sign in as ${outcome.email} from now on: the master key no longer signs in to this dashboard, and it stays the credential for the management API.`
                 : `Saved. Your other sessions have ended; sign in as ${outcome.email} next time.`}
             </p>

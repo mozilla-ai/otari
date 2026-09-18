@@ -32,7 +32,7 @@ export function TextArea({
   isDisabled,
   isInvalid,
   errorMessage,
-  reserveMessage,
+  shouldReserveMessage,
   className = "",
 }: {
   label: string
@@ -46,7 +46,7 @@ export function TextArea({
   isDisabled?: boolean
   isInvalid?: boolean
   errorMessage?: string
-  reserveMessage?: boolean
+  shouldReserveMessage?: boolean
   className?: string
 }) {
   return (
@@ -60,7 +60,7 @@ export function TextArea({
     >
       <Label className="text-body">{label}</Label>
       <HeroTextArea rows={rows} placeholder={placeholder} />
-      <FieldMessages reserve={reserveMessage}>
+      <FieldMessages shouldReserve={shouldReserveMessage}>
         {description ? (
           <Description className="text-muted">{description}</Description>
         ) : null}

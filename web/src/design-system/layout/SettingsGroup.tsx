@@ -24,7 +24,7 @@ export function SettingsGroup({
   action,
   description,
   docsHref,
-  bounded = false,
+  isBounded = false,
   children,
 }: {
   /**
@@ -52,7 +52,7 @@ export function SettingsGroup({
   /** Trails the description, for the page of the manual this group is about. */
   docsHref?: string
   /** Frame the rows instead of bleeding them. See the note above. */
-  bounded?: boolean
+  isBounded?: boolean
   children: ReactNode
 }) {
   const heading =
@@ -91,7 +91,7 @@ export function SettingsGroup({
       </div>
     )
 
-  if (bounded) {
+  if (isBounded) {
     return (
       <section className="flex flex-col gap-3">
         {headingRow}

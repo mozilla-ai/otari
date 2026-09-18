@@ -21,10 +21,10 @@ import type { ReactNode } from "react"
  */
 export function FieldMessages({
   children,
-  reserve = true,
+  shouldReserve = true,
 }: {
   children: ReactNode
-  reserve?: boolean
+  shouldReserve?: boolean
 }) {
   // The role goes on the wrapper, and that is not a style preference. HeroUI
   // merges a component's className through tailwind-merge, which cannot tell a
@@ -41,7 +41,7 @@ export function FieldMessages({
   // offender list with nothing visibly wrong in it.
   return (
     <div
-      className={`text-caption ${reserve ? "min-h-[var(--text-caption-step--line-height)]" : ""}`}
+      className={`text-caption ${shouldReserve ? "min-h-[var(--text-caption-step--line-height)]" : ""}`}
     >
       {children}
     </div>
@@ -72,19 +72,19 @@ export function FieldMessages({
 export function ControlField({
   label,
   description,
-  reserve,
+  shouldReserve,
   children,
 }: {
   label: ReactNode
   description?: ReactNode
-  reserve?: boolean
+  shouldReserve?: boolean
   children?: ReactNode
 }) {
   return (
     <div className="flex flex-col gap-1">
       <span className="text-body">{label}</span>
       {description ? (
-        <FieldMessages reserve={reserve}>
+        <FieldMessages shouldReserve={shouldReserve}>
           <p className="text-muted">{description}</p>
         </FieldMessages>
       ) : null}

@@ -142,8 +142,8 @@ export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
   // Disabled until the read has succeeded. Without that a failed GET leaves the
   // rows sitting at "Deployment default" over a workspace that may well have a
   // stored row, and one blur issues the write that drops it.
-  const unreadable = query.isLoading || query.isError || !config
-  const narrowingDisabled = unreadable || stance === "default"
+  const isUnreadable = query.isLoading || query.isError || !config
+  const narrowingDisabled = isUnreadable || stance === "default"
 
   // `enabled` is the one field a patch always restates: the stance select is
   // the only control that changes it, and every other row must not flip it.
@@ -159,7 +159,7 @@ export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
 
   return (
     <SettingsGroup
-      bounded
+      isBounded
       title="This workspace"
       description={`Narrows what the deployment allows for requests billed to ${selected.name}. Never widens it, and holds no credential.`}
       docsHref={docsHref}
@@ -202,7 +202,7 @@ export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
                 label: "Blocked (tools and /api/v1/search)",
               },
             ]}
-            disabled={unreadable || stanceSave.isSaving}
+            disabled={isUnreadable || stanceSave.isSaving}
           />
         }
       />
@@ -212,7 +212,7 @@ export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
         label="Max results"
         help="Search only. Lowers how many results one search returns; it never raises the number."
         placeholder="10"
-        numeric
+        isNumeric
         committed={
           config?.max_results == null ? "" : String(config.max_results)
         }
@@ -235,7 +235,7 @@ export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
         label="Allowed domains"
         help="Filters Search results and constrains initial and redirected Fetch destinations. A request list can only narrow this policy."
         placeholder="mozilla.org, wikipedia.org"
-        machine
+        isMachineReadable
         committed={(config?.allowed_domains ?? []).join(", ")}
         parse={parseDomains}
         commit={(allowed_domains) => commitField({ allowed_domains })}
@@ -246,7 +246,7 @@ export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
         label="Blocked domains"
         help="Filters Search results and blocks initial and redirected Fetch destinations, whatever a request asks for."
         placeholder="reddit.com, pinterest.com"
-        machine
+        isMachineReadable
         committed={(config?.blocked_domains ?? []).join(", ")}
         parse={parseDomains}
         commit={(blocked_domains) => commitField({ blocked_domains })}

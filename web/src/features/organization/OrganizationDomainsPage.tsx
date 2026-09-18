@@ -124,7 +124,7 @@ function ClaimForm({
         value={role}
         onChange={setRole}
         options={AUTO_JOIN_ROLE_OPTIONS}
-        reserveMessage={false}
+        shouldReserveMessage={false}
       />
       <p className="text-caption">
         Nothing happens until you publish the DNS record this creates and verify
@@ -137,7 +137,7 @@ function ClaimForm({
 /** The record to publish, shown while a claim has no proof it can act on. */
 function PendingProof({ row }: { row: OrganizationDomain }) {
   const verify = useVerifyOrganizationDomain()
-  const expired = proofExpired(row)
+  const isExpired = proofExpired(row)
   return (
     <Section
       className="border-y border-border py-5"
@@ -145,10 +145,10 @@ function PendingProof({ row }: { row: OrganizationDomain }) {
     >
       <div className="flex flex-col gap-1">
         <h2 className="text-title">
-          {expired ? `Re-verify ${row.domain}` : `Verify ${row.domain}`}
+          {isExpired ? `Re-verify ${row.domain}` : `Verify ${row.domain}`}
         </h2>
         <p className="text-caption">
-          {expired ? (
+          {isExpired ? (
             <>
               This domain's proof has expired, so the claim has stopped
               admitting anyone. Domains change hands, so a proof is good for a
@@ -180,7 +180,7 @@ function PendingProof({ row }: { row: OrganizationDomain }) {
             isPending={verify.isPending}
             onPress={() => verify.mutate(row.id)}
           >
-            {expired ? "Re-verify domain" : "Verify domain"}
+            {isExpired ? "Re-verify domain" : "Verify domain"}
           </Button>
         }
       />

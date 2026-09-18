@@ -11,7 +11,7 @@ function track(label: string): HTMLElement {
 describe("KpiStrip", () => {
   it("lays five tracks by default", () => {
     render(
-      <KpiStrip empty={false}>
+      <KpiStrip isEmpty={false}>
         <span>cell</span>
       </KpiStrip>,
     )
@@ -24,7 +24,7 @@ describe("KpiStrip", () => {
     // the end of the row, which is what the tenant Overview would get where it
     // withholds the budget cell from a member.
     render(
-      <KpiStrip empty={false} columns={4}>
+      <KpiStrip isEmpty={false} columns={4}>
         <span>cell</span>
       </KpiStrip>,
     )

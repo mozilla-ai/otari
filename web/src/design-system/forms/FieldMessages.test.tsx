@@ -60,7 +60,7 @@ describe("FieldMessages", () => {
     // `reserve={false}` is for a field in a table row or a toolbar. Reserving
     // there would put a band of empty space through every row of a table.
     const { container } = render(
-      <FieldMessages reserve={false}>
+      <FieldMessages shouldReserve={false}>
         <p className="text-muted">Something to say</p>
       </FieldMessages>,
     )
@@ -126,7 +126,7 @@ describe("ControlField", () => {
       <ControlField
         label="Model access"
         description="Narrow, never widen"
-        reserve={false}
+        shouldReserve={false}
       />,
     )
     const line = screen.getByText("Narrow, never widen")

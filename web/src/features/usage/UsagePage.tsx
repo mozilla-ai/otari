@@ -1277,7 +1277,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
           {/* KPI tiles. Cache tells one story (hit rate + volumes) instead of
               three raw counters; tokens are the billed total, matching the
               chart's composition and the Activity page. */}
-          <KpiStrip empty={false}>
+          <KpiStrip isEmpty={false}>
             <KpiCell
               label="Tracked cost"
               value={totals ? formatUsd(totals.cost) : "—"}

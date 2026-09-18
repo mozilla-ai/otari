@@ -58,7 +58,7 @@ export const Field: Story = {
 export const MultilineField: Story = {
   args: {
     label: "Try it with curl",
-    multiline: true,
+    isMultiline: true,
     value: `curl https://gateway.example.com/api/v1/chat/completions \\
   -H "Authorization: Bearer otari_sk_…" \\
   -H "Content-Type: application/json" \\
@@ -162,7 +162,7 @@ export const Concealed: Story = {
       />
       <CopyField
         label="Example request"
-        multiline
+        isMultiline
         value={`curl https://gateway.example.com/api/v1/chat/completions \\\n  -H "Authorization: Bearer sk-otari-4f8a2c9e1b7d3a6f5e0c8b2d"`}
         concealed={`curl https://gateway.example.com/api/v1/chat/completions \\\n  -H "Authorization: Bearer ${CONCEALED_SECRET}"`}
       />
@@ -210,7 +210,7 @@ export const CoupledReveal: Story = {
         />
         <CopyField
           label="Example request"
-          multiline
+          isMultiline
           value={request(key)}
           concealed={request(fingerprint)}
           isRevealed={isRevealed}

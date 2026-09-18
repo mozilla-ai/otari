@@ -44,7 +44,7 @@ export const WhatItFixes: Story = {
             value="https://sandbox.internal"
             onChange={() => {}}
             description="Reachable from the gateway."
-            reserveMessage
+            shouldReserveMessage
           />
           <Button>Test</Button>
         </div>
@@ -57,7 +57,7 @@ export const WhatItFixes: Story = {
             value="https://sandbox.internal"
             onChange={() => {}}
             description="Reachable from the gateway."
-            reserveMessage
+            shouldReserveMessage
           />
           <FieldAction>
             <Button>Test</Button>
@@ -85,7 +85,7 @@ export const WhereItStopsWorking: Story = {
         value="https://sandbox.internal"
         onChange={() => {}}
         description="A hint long enough to wrap onto a second line makes this field taller than the reserve, which drops the action back out of line."
-        reserveMessage
+        shouldReserveMessage
       />
       <FieldAction>
         <Button>Test</Button>

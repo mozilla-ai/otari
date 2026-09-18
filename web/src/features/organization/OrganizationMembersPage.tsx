@@ -279,7 +279,7 @@ function AddMemberForm({
           value={role}
           onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
           options={ROLE_OPTIONS}
-          reserveMessage={false}
+          shouldReserveMessage={false}
         />
       </div>
       {workspaces.data && workspaces.data.length > 0 ? (
@@ -454,7 +454,7 @@ function InviteMemberForm({
           value={role}
           onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
           options={ROLE_OPTIONS}
-          reserveMessage={false}
+          shouldReserveMessage={false}
         />
       </div>
       {workspaces.data && workspaces.data.length > 0 ? (

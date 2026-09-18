@@ -20,7 +20,7 @@ interface FieldProps {
   errorMessage?: string
   /** Holds a caption line open under the field so a message does not move the
       form. Off for a field in a table row or a toolbar, which never speaks. */
-  reserveMessage?: boolean
+  shouldReserveMessage?: boolean
 }
 
 // A labeled single-line text input built from HeroUI's TextField primitives.
@@ -36,7 +36,7 @@ export function Field({
   autoFocus,
   isInvalid,
   errorMessage,
-  reserveMessage,
+  shouldReserveMessage,
 }: FieldProps) {
   return (
     <TextField
@@ -51,7 +51,7 @@ export function Field({
           ([data-required=true] > .label::after), so adding one renders two. */}
       <Label className="text-body">{label}</Label>
       <Input type={type} placeholder={placeholder} autoFocus={autoFocus} />
-      <FieldMessages reserve={reserveMessage}>
+      <FieldMessages shouldReserve={shouldReserveMessage}>
         {description ? (
           // HeroUI's Description renders through the TextField's "description"
           // slot, so it is wired to the input via aria-describedby (a raw span

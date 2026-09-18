@@ -95,7 +95,7 @@ function WorkspaceScope({
   // per row plus one in the add form and the workspace names repeat in all of
   // them. Without it every checkbox on the card is labelled "Alpha".
   scopeName,
-  everywhere,
+  appliesEverywhere,
   selected,
   workspaces,
   disabled,
@@ -105,7 +105,7 @@ function WorkspaceScope({
 }: {
   /** Names the workspace group, so a box reads as "Beta" inside "prompt-injection". */
   scopeName: string
-  everywhere: boolean
+  appliesEverywhere: boolean
   selected: readonly string[]
   workspaces: readonly Workspace[]
   disabled?: boolean
@@ -127,17 +127,17 @@ function WorkspaceScope({
       {variant === "form" ? (
         <Select
           label="Runs in"
-          value={everywhere ? "all" : "chosen"}
+          value={appliesEverywhere ? "all" : "chosen"}
           onChange={(next) => onEverywhere(next === "all")}
           options={scopeOptions}
           isDisabled={disabled}
-          reserveMessage={false}
+          shouldReserveMessage={false}
         />
       ) : (
         <div className={SELECT_SLOT}>
           <FilterSelect
             label="Runs in"
-            value={everywhere ? "all" : "chosen"}
+            value={appliesEverywhere ? "all" : "chosen"}
             onChange={(next) => onEverywhere(next === "all")}
             options={scopeOptions}
             disabled={disabled}
@@ -145,7 +145,7 @@ function WorkspaceScope({
           />
         </div>
       )}
-      {everywhere ? null : (
+      {appliesEverywhere ? null : (
         // A named group rather than a per-box aria-label. Each box is labelled
         // by the workspace name a reader can see, and the group says which
         // guardrail those names belong to; an aria-label on the box would have
@@ -312,7 +312,7 @@ function GuardrailRow({
     storedScope,
   ])
 
-  const busy = update.isPending || remove.isPending
+  const isBusy = update.isPending || remove.isPending
 
   const save = () => {
     setError("")
@@ -382,7 +382,7 @@ function GuardrailRow({
             value={mode}
             onChange={(next) => setMode(next as Mode)}
             options={MODE_OPTIONS}
-            disabled={busy}
+            disabled={isBusy}
             fullWidth
           />
         </div>
@@ -392,7 +392,7 @@ function GuardrailRow({
             value={onUnavailable}
             onChange={(next) => setOnUnavailable(next as Mode)}
             options={UNAVAILABLE_OPTIONS}
-            disabled={busy}
+            disabled={isBusy}
             fullWidth
           />
         </div>
@@ -405,7 +405,7 @@ function GuardrailRow({
               { value: "on", label: "Active" },
               { value: "off", label: "Paused" },
             ]}
-            disabled={busy}
+            disabled={isBusy}
             fullWidth
           />
         </div>
@@ -414,7 +414,7 @@ function GuardrailRow({
           inputMode="url"
           aria-label={`Endpoint for ${guardrail.profile}`}
           value={url}
-          disabled={busy}
+          disabled={isBusy}
           placeholder="blank uses the URL above"
           onChange={(event) => setUrl(event.target.value)}
           className={`w-full sm:w-72 ${INPUT_CLASS}`}
@@ -424,7 +424,7 @@ function GuardrailRow({
           autoComplete="new-password"
           aria-label={`New credential for ${guardrail.profile}`}
           value={credential}
-          disabled={busy}
+          disabled={isBusy}
           placeholder={
             guardrail.has_credential ? "replace credential" : "add credential"
           }
@@ -434,10 +434,10 @@ function GuardrailRow({
       </div>
       <WorkspaceScope
         scopeName={guardrail.profile}
-        everywhere={everywhere}
+        appliesEverywhere={everywhere}
         selected={scope}
         workspaces={workspaces}
-        disabled={busy}
+        disabled={isBusy}
         onEverywhere={setEverywhere}
         onToggle={(workspaceId) =>
           setScope((current) =>
@@ -459,8 +459,8 @@ function GuardrailRow({
         errors={parameters.issues}
         extraJson={parameters.extraJson}
         extraJsonError={parameters.rawError}
-        described={describedProfile}
-        disabled={busy}
+        isDescribed={describedProfile}
+        disabled={isBusy}
         onChange={parameters.setValue}
         onExtraJsonChange={parameters.setExtraJson}
       />
@@ -469,7 +469,7 @@ function GuardrailRow({
           size="sm"
           variant="primary"
           aria-label={`Save ${guardrail.profile}`}
-          isDisabled={busy}
+          isDisabled={isBusy}
           onPress={save}
         >
           {update.isPending ? "Saving…" : "Save"}
@@ -480,7 +480,7 @@ function GuardrailRow({
           // Named per row, as the Save beside it is: the card is a list of
           // profiles, so a bare "Remove guardrail" is the same name N times.
           aria-label={`Remove ${guardrail.profile}`}
-          isDisabled={busy}
+          isDisabled={isBusy}
           onPress={() => setDeleteOpen(true)}
         >
           Remove guardrail
@@ -615,7 +615,7 @@ function AddGuardrailDialog({
     >
       <GuardrailProfileField
         catalog={catalog}
-        pending={catalogPending}
+        isPending={catalogPending}
         value={profile}
         onChange={setProfile}
       />
@@ -631,7 +631,7 @@ function AddGuardrailDialog({
         value={url}
         onChange={setUrl}
         placeholder="blank uses the guardrails URL above"
-        reserveMessage={false}
+        shouldReserveMessage={false}
       />
       <SecretField
         label="Credential"
@@ -642,7 +642,7 @@ function AddGuardrailDialog({
       <WorkspaceScope
         scopeName={profile || "New guardrail"}
         variant="form"
-        everywhere={everywhere}
+        appliesEverywhere={everywhere}
         selected={scope}
         workspaces={workspaces}
         onEverywhere={setEverywhere}
@@ -665,7 +665,7 @@ function AddGuardrailDialog({
         errors={parameters.issues}
         extraJson={parameters.extraJson}
         extraJsonError={parameters.rawError}
-        described={describedProfile}
+        isDescribed={describedProfile}
         onChange={parameters.setValue}
         onExtraJsonChange={parameters.setExtraJson}
       />
@@ -722,7 +722,7 @@ export function OrganizationGuardrailsCard({
         />
       ) : null}
       <SettingsGroup
-        bounded
+        isBounded
         title="Organization guardrails"
         description="Guardrails that run on every request from the workspaces below, whether the caller asked for them or not. They compose with the deployment settings above rather than replacing them: an entry with no endpoint of its own is sent to the guardrails URL set there, and an organization that mandates nothing leaves every request checked exactly as it is today."
         action={

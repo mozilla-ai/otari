@@ -54,7 +54,7 @@ export function MailDeliveryCard() {
   const [to, setTo] = useState("")
 
   const data = mail.data
-  const ready = data?.ready ?? false
+  const isReady = data?.ready ?? false
   const result = sendTest.data
   // Nothing is claimed about mail until the server has answered. Falling back
   // to "unavailable" while the request is in flight would state the very thing
@@ -85,7 +85,7 @@ export function MailDeliveryCard() {
                 {data.public_base_url ?? "Not set"}
               </dd>
             </dl>
-            {ready ? null : <MissingSettings missing={data.missing} />}
+            {isReady ? null : <MissingSettings missing={data.missing} />}
           </>
         ) : null}
       </div>
@@ -96,7 +96,7 @@ export function MailDeliveryCard() {
           <p className="mt-1 max-w-3xl text-caption">
             {loading
               ? "Checking whether this deployment can send mail…"
-              : ready
+              : isReady
                 ? "Sends a short message through the configured transport, so you can confirm delivery before anyone is invited."
                 : "Unavailable until a transport and a public base URL are configured."}
           </p>
@@ -111,7 +111,7 @@ export function MailDeliveryCard() {
           <Button
             size="sm"
             variant="ghost"
-            isDisabled={!ready || to.trim() === "" || sendTest.isPending}
+            isDisabled={!isReady || to.trim() === "" || sendTest.isPending}
             onPress={() => sendTest.mutate({ to: to.trim() })}
           >
             {sendTest.isPending ? "Sending…" : "Send test email"}

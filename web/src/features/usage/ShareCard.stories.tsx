@@ -25,7 +25,7 @@ const HERO: CardStat = { id: "requests", label: "Requests", value: "18,402" }
 
 const STATS: CardStat[] = [
   { id: "tokens", label: "Tokens", value: "4.1M" },
-  { id: "cost", label: "Spend", value: "$412.90", caveated: true },
+  { id: "cost", label: "Spend", value: "$412.90", isCaveated: true },
   { id: "latency", label: "p50 latency", value: "740ms" },
 ]
 
@@ -147,7 +147,7 @@ export const LandscapeLight: Story = {
  */
 export const NoUnpricedCaveat: Story = {
   args: {
-    stats: STATS.filter((stat) => !stat.caveated),
+    stats: STATS.filter((stat) => !stat.isCaveated),
     unpricedRequests: 0,
   },
   render: (args) => (

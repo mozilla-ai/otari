@@ -114,7 +114,7 @@ type CopyFieldProps = {
   fieldRef?: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>
 } & (
   | {
-      multiline?: boolean
+      isMultiline?: boolean
       /**
        * What the field shows until the operator asks for the value, for a value
        * that carries a credential: the plaintext reaches the DOM only once it
@@ -161,7 +161,7 @@ type CopyFieldProps = {
       action?: never
     }
   | {
-      multiline?: false
+      isMultiline?: false
       /** Nothing hands out a credential beside a domain-verification action. */
       concealed?: never
       isRevealed?: never
@@ -183,7 +183,7 @@ type CopyFieldProps = {
 export function CopyField({
   label,
   value,
-  multiline = false,
+  isMultiline = false,
   fieldRef,
   action,
   concealed,
@@ -209,7 +209,7 @@ export function CopyField({
   const [selectHintFor, setSelectHintFor] = useState<string | undefined>(
     undefined,
   )
-  const revealed = isRevealed ?? revealedValue === value
+  const isValueRevealed = isRevealed ?? revealedValue === value
   const setRevealed = (next: boolean) => {
     onRevealChange?.(next)
     if (isRevealed === undefined) setRevealedValue(next ? value : undefined)
@@ -251,12 +251,12 @@ export function CopyField({
     // Only once the reveal has landed on the value the copy was for. Another
     // credential arriving in the meantime is concealed, and selecting its
     // stand-in is exactly what this is here to avoid.
-    if (!revealed || value !== wanted) return
+    if (!isValueRevealed || value !== wanted) return
     ref.current?.focus()
     ref.current?.select()
-  }, [revealed, value, ref])
+  }, [isValueRevealed, value, ref])
 
-  const isConcealed = concealed !== undefined && !revealed
+  const isConcealed = concealed !== undefined && !isValueRevealed
   const shown = isConcealed ? concealed : value
 
   const acknowledgeCopy = () => {
@@ -387,10 +387,10 @@ export function CopyField({
       // `size` alone is 32px, under the 44px touch floor. Grow the box below
       // `md` and let it settle back to the button's own size on a pointer.
       className={ICON_CONTROL_BOX}
-      aria-label={`${revealed ? "Hide" : "Show"} ${label}`}
-      onPress={() => setRevealed(!revealed)}
+      aria-label={`${isValueRevealed ? "Hide" : "Show"} ${label}`}
+      onPress={() => setRevealed(!isValueRevealed)}
     >
-      {revealed ? (
+      {isValueRevealed ? (
         <FiEyeOff aria-hidden="true" className="h-3.5 w-3.5" />
       ) : (
         <FiEye aria-hidden="true" className="h-3.5 w-3.5" />
@@ -398,7 +398,7 @@ export function CopyField({
     </Button>
   )
 
-  const inlineControls = concealed !== undefined && !multiline
+  const inlineControls = concealed !== undefined && !isMultiline
   const copyButton = (
     <Button
       size="sm"
@@ -422,7 +422,7 @@ export function CopyField({
     </Button>
   )
 
-  const field = multiline ? (
+  const field = isMultiline ? (
     <textarea
       id={fieldId}
       ref={ref as React.RefObject<HTMLTextAreaElement>}
@@ -464,11 +464,11 @@ export function CopyField({
           {/* A snippet's toggle sits in the label row rather than in the field,
               for the reason `action` is barred from the multiline variant at
               all: right padding on a textarea indents every line of it. */}
-          {concealed !== undefined && multiline ? revealToggle : null}
+          {concealed !== undefined && isMultiline ? revealToggle : null}
           {!inlineControls ? copyButton : null}
         </div>
       </div>
-      {concealed !== undefined && !multiline ? (
+      {concealed !== undefined && !isMultiline ? (
         <div className="relative">
           {field}
           <span className="absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-1">

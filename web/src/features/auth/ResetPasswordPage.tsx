@@ -32,8 +32,8 @@ export function ResetPasswordPage({ hash }: { hash: string }) {
   const [confirmPassword, setConfirmPassword] = useState("")
 
   const problem = newPasswordProblem(password, confirmPassword)
-  const complete = password !== "" && confirmPassword !== ""
-  const canSubmit = token !== null && complete && problem === null
+  const isComplete = password !== "" && confirmPassword !== ""
+  const canSubmit = token !== null && isComplete && problem === null
 
   // A refusal describes a call that is no longer the one being made, so typing
   // clears it. Never while one is in flight: `reset()` returns the observer to

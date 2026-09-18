@@ -74,7 +74,7 @@ export const WithDescription: Story = {
   args: {
     value: "openai:gpt-4o",
     description: "Requests naming this model are routed to it directly.",
-    reserveMessage: true,
+    shouldReserveMessage: true,
   },
 }
 
@@ -114,7 +114,7 @@ export const Invalid: Story = {
     isRequired: true,
     isInvalid: true,
     errorMessage: "Name a model before saving.",
-    reserveMessage: true,
+    shouldReserveMessage: true,
   },
 }
 

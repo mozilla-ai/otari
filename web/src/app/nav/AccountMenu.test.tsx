@@ -69,7 +69,7 @@ async function renderMenu({
     <AppProviders>
       <DeploymentProvider value={bootstrap(overrides)}>
         <AccountMenu
-          collapsed={false}
+          isCollapsed={false}
           deploymentLanding={deploymentLanding as never}
           onOpenDeploymentLevel={onOpenDeploymentLevel}
         />

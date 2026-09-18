@@ -125,7 +125,7 @@ export const Invalid: Story = {
       {...args}
       isInvalid
       errorMessage="Pick at least one person, or leave the budget unassigned."
-      reserveMessage
+      shouldReserveMessage
     />
   ),
 }

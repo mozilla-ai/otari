@@ -64,7 +64,7 @@ export function ToolStatusGroup({
   const alsoAccepted = tool.accepted_types.filter((type) => type !== tool.id)
 
   return (
-    <SettingsGroup bounded>
+    <SettingsGroup isBounded>
       <DisclosureRow
         label={<code className="text-mono-caption">{tool.id}</code>}
         help={tool.description}
@@ -82,7 +82,7 @@ export function ToolStatusGroup({
               reason to give. */}
           {tool.available ? null : (
             <SettingRow
-              nested
+              isNested
               label="Why unavailable"
               help={unavailableHelp}
               control={
@@ -114,7 +114,7 @@ export function ToolStatusGroup({
             />
           )}
           <SettingRow
-            nested
+            isNested
             label="Declare in a request"
             help={
               <>

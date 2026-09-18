@@ -27,7 +27,7 @@ describe("Section", () => {
 
   it("stays inside its container when nested", () => {
     const { container } = render(
-      <Section bleed={false} className="py-5" contentClassName="flex">
+      <Section shouldBleed={false} className="py-5" contentClassName="flex">
         rows
       </Section>,
     )

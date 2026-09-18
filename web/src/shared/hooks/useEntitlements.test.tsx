@@ -32,7 +32,7 @@ describe("useEntitlements without a provider", () => {
 
   it("denies a capability the base build does not ship", () => {
     const { result } = renderHook(() => useEntitlement("billing"))
-    expect(result.current.entitled).toBe(false)
+    expect(result.current.isEntitled).toBe(false)
   })
 })
 
@@ -43,7 +43,7 @@ describe("useEntitlements with a provider", () => {
     const { result } = renderHook(() => useEntitlement("billing"), {
       wrapper: withProvider(["billing"]),
     })
-    expect(result.current.entitled).toBe(true)
+    expect(result.current.isEntitled).toBe(true)
   })
 
   it("does not add the base constant to what the provider grants", () => {

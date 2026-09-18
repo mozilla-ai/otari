@@ -135,7 +135,7 @@ export function SetPriceDialog({
 
   const keyInvalid = collectModelKey && !isValidModelKey(modelKey)
 
-  const invalid =
+  const isInvalid =
     keyInvalid ||
     inputRate === null ||
     Number.isNaN(inputRate) ||
@@ -150,7 +150,7 @@ export function SetPriceDialog({
   const [failure, setFailure] = useState<unknown>(undefined)
 
   const submit = () => {
-    if (invalid || inputRate === null || outputRate === null) return
+    if (isInvalid || inputRate === null || outputRate === null) return
     if (isSaving) return
     setFailure(undefined)
     setIsSaving(true)
@@ -181,7 +181,7 @@ export function SetPriceDialog({
       submitLabel={submitLabel}
       onSubmit={submit}
       isPending={isSaving}
-      isSubmitDisabled={invalid}
+      isSubmitDisabled={isInvalid}
       isDirty={isDirty}
       error={failure}
     >

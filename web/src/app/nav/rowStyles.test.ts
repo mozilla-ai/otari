@@ -69,8 +69,8 @@ describe("navRowClass", () => {
   })
 
   it("keeps a nested row's indent when it is the selected one", () => {
-    const nested = navRowClass({ nested: true })
-    const nestedSelected = navRowClass({ nested: true, isActive: true })
+    const nested = navRowClass({ isNested: true })
+    const nestedSelected = navRowClass({ isNested: true, isActive: true })
     for (const row of [nested, nestedSelected]) {
       expect(row).toContain("pl-[3.125rem]")
     }
@@ -82,7 +82,7 @@ describe("navRowClass", () => {
   })
 
   it("gives the group holding the selected row ink and nothing else", () => {
-    const ancestor = navRowClass({ ancestor: true })
+    const ancestor = navRowClass({ isAncestor: true })
     expect(ancestor).toContain("text-foreground")
     // Neither of the two channels that say "this is the row you are on". The
     // measured bug: an expanded group and its selected child were byte-identical
@@ -142,7 +142,7 @@ describe("navRowClass", () => {
       // The collapsed icon column outranks the request: a monogram or icon sits
       // in the same lane as every other collapsed row.
       const collapsed = navRowClass({
-        collapsed: true,
+        isCollapsed: true,
         expandedJustify: "start",
       })
       expect(collapsed).toContain("justify-center")
@@ -151,7 +151,7 @@ describe("navRowClass", () => {
 
     it("adds no justification when it is left unset", () => {
       expect(navRowClass()).not.toContain("justify-")
-      expect(navRowClass({ band: true })).not.toContain("justify-")
+      expect(navRowClass({ isBand: true })).not.toContain("justify-")
     })
   })
 
@@ -159,8 +159,8 @@ describe("navRowClass", () => {
     for (const row of [
       resting,
       selected,
-      navRowClass({ nested: true }),
-      navRowClass({ collapsed: true }),
+      navRowClass({ isNested: true }),
+      navRowClass({ isCollapsed: true }),
     ]) {
       expect(row).toContain("min-h-11")
       expect(row).toContain("rounded-lg")

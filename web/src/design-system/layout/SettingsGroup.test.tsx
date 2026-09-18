@@ -80,7 +80,7 @@ describe("SettingsGroup", () => {
     for (const bounded of [false, true]) {
       const { unmount } = render(
         <SettingsGroup
-          bounded={bounded}
+          isBounded={bounded}
           title="Search tools"
           action={<button type="button">Add search tool</button>}
         >

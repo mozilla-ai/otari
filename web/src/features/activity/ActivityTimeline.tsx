@@ -147,7 +147,7 @@ export function ActivityTimeline({
   const sel = panSel ?? windowIdx
   const span = sel.endIndex - sel.startIndex + 1
   const atFullExtent = sel.startIndex === 0 && sel.endIndex >= n - 1
-  const zoomed = n > 0 && !atFullExtent
+  const isZoomed = n > 0 && !atFullExtent
 
   // Commit an inclusive bucket range: the full extent falls back to the rolling
   // preset window; anything narrower resolves to absolute instants.
@@ -324,7 +324,7 @@ export function ActivityTimeline({
             >
               <FiMinus aria-hidden="true" className="h-4 w-4" />
             </IconButton>
-            {zoomed ? (
+            {isZoomed ? (
               <Button
                 size="sm"
                 variant="ghost"
@@ -361,12 +361,12 @@ export function ActivityTimeline({
               showYAxis
               yTickCount={3}
               onSelectRange={commit}
-              window={zoomed || panSel ? sel : undefined}
+              window={isZoomed || panSel ? sel : undefined}
             />
             {/* Pan rail: a minimap-style scrollbar for the zoomed window. Only
                 rendered while zoomed (at the full extent there is nothing to
                 pan), so it never takes space or a tab stop otherwise. */}
-            {zoomed || panSel ? (
+            {isZoomed || panSel ? (
               // The row is 44px so the handle inside it is a real touch target;
               // the track and the handle keep the 10px they read best at, drawn
               // as children so the grab area is the whole height rather than

@@ -162,12 +162,12 @@ function UsageKpiCells({
   today,
   period,
   previous,
-  empty,
+  isEmpty,
 }: {
   today: ReturnType<typeof useUsageSummary>
   period: ReturnType<typeof useUsageSummary>
   previous: ReturnType<typeof useUsageSummary>
-  empty: boolean
+  isEmpty: boolean
 }) {
   const todayTotals = today.data?.totals
   const periodTotals = period.data?.totals
@@ -209,10 +209,14 @@ function UsageKpiCells({
         // the caller's *local* midnight, deliberately and with a comment saying
         // so, so a UTC string would be false for everyone not on it.
         subline={
-          empty ? "no prior spend" : todayTotals ? "since midnight" : "no data"
+          isEmpty
+            ? "no prior spend"
+            : todayTotals
+              ? "since midnight"
+              : "no data"
         }
         graphic={
-          !empty && hasHourlyTrend ? (
+          !isEmpty && hasHourlyTrend ? (
             <Sparkline
               values={todaySeries.map((point) => point.cost)}
               ariaLabel="Spend by hour today"
@@ -225,7 +229,7 @@ function UsageKpiCells({
         label="Spend, last 30 days"
         value={periodTotals ? formatUsd(periodTotals.cost) : "—"}
         subline={
-          empty ? "no prior spend" : periodTotals ? undefined : "no data"
+          isEmpty ? "no prior spend" : periodTotals ? undefined : "no data"
         }
         // Spend falling is the improvement, so a rise paints danger while the
         // arrow keeps telling the truth about which way it went.
@@ -239,7 +243,7 @@ function UsageKpiCells({
           ) : undefined
         }
         graphic={
-          !empty && hasTrend ? (
+          !isEmpty && hasTrend ? (
             <Sparkline
               values={periodSeries.map((point) => point.cost)}
               ariaLabel="Spend trend over the last 30 days"
@@ -252,7 +256,7 @@ function UsageKpiCells({
         label="Requests, last 30 days"
         value={periodTotals ? formatNumber(periodTotals.request_count) : "—"}
         subline={
-          empty ? "no prior traffic" : periodTotals ? undefined : "no data"
+          isEmpty ? "no prior traffic" : periodTotals ? undefined : "no data"
         }
         // Volume, so no polarity: more traffic through the gateway is neither
         // a win nor a regression on its own, and the error rate beside it is
@@ -263,7 +267,7 @@ function UsageKpiCells({
           ) : undefined
         }
         graphic={
-          !empty && hasTrend ? (
+          !isEmpty && hasTrend ? (
             <Sparkline
               values={periodSeries.map((point) => point.requests)}
               ariaLabel="Request volume trend over the last 30 days"
@@ -285,7 +289,7 @@ function UsageKpiCells({
         }
         subline={
           err.rate === null
-            ? empty
+            ? isEmpty
               ? "NO REQUESTS YET"
               : "no requests in range"
             : undefined
@@ -301,7 +305,7 @@ function UsageKpiCells({
           ) : undefined
         }
         graphic={
-          !empty && periodTotals ? (
+          !isEmpty && periodTotals ? (
             <span className="text-xs text-muted">
               {`${formatNumber(periodTotals.error_count)} of ${formatNumber(periodTotals.request_count)} requests`}
             </span>
@@ -474,12 +478,12 @@ function OrganizationOverview() {
 
       <ErrorBanner error={loadError} />
 
-      <KpiStrip empty={false} columns={managesSpend ? 5 : 4}>
+      <KpiStrip isEmpty={false} columns={managesSpend ? 5 : 4}>
         <UsageKpiCells
           today={today}
           period={period}
           previous={previous}
-          empty={false}
+          isEmpty={false}
         />
         {managesSpend ? (
           <KpiCell
@@ -526,7 +530,7 @@ function OrganizationOverview() {
         ) : null}
       </KpiStrip>
 
-      <SpendChart series={periodSeries} ready={period.isSuccess} />
+      <SpendChart series={periodSeries} isReady={period.isSuccess} />
 
       <ActivitySplit
         recent={recent}
@@ -708,16 +712,16 @@ export function OverviewPage({
         errRate={err.rate}
         // The strip evaluates health, budgets, and error rate only after all
         // three load successfully, avoiding transient or false alerts.
-        ready={health.isSuccess && budgets.isSuccess && period.isSuccess}
-        failed={health.isError || budgets.isError || period.isError}
+        isReady={health.isSuccess && budgets.isSuccess && period.isSuccess}
+        hasFailed={health.isError || budgets.isError || period.isError}
       />
 
-      <KpiStrip empty={isEmpty}>
+      <KpiStrip isEmpty={isEmpty}>
         <UsageKpiCells
           today={today}
           period={period}
           previous={previous}
-          empty={isEmpty}
+          isEmpty={isEmpty}
         />
         <KpiCell
           label="Budget health"
@@ -762,7 +766,7 @@ export function OverviewPage({
           the answer and the shape of the month is the context. Absent entirely
           in the empty state, where there is no shape to show. */}
       {isEmpty ? null : (
-        <SpendChart series={periodSeries} ready={period.isSuccess} />
+        <SpendChart series={periodSeries} isReady={period.isSuccess} />
       )}
 
       <ActivitySplit
@@ -885,8 +889,8 @@ function AttentionStrip({
   budget,
   errStatus,
   errRate,
-  ready,
-  failed,
+  isReady,
+  hasFailed,
 }: {
   providerHealth: "ok" | "warn" | "alert" | "neutral"
   healthy: number
@@ -895,8 +899,8 @@ function AttentionStrip({
   budget: ReturnType<typeof budgetHealth>
   errStatus: "ok" | "warn" | "alert" | "neutral"
   errRate: number | null
-  ready: boolean
-  failed: boolean
+  isReady: boolean
+  hasFailed: boolean
 }) {
   // Provider health is about `config.providers`, which a hosted deployment
   // serves no page for, so those two entries state the problem without offering
@@ -906,10 +910,10 @@ function AttentionStrip({
   const providerProblemsAreReachable = useSurfaces()("providers")
   // A failed source deserves a visible status message; while loading, wait for
   // actionable information instead of reserving space for a transient banner.
-  if (failed) {
+  if (hasFailed) {
     return <NeutralStrip text="Some status data could not be loaded." />
   }
-  if (!ready) {
+  if (!isReady) {
     return null
   }
 
@@ -1017,13 +1021,13 @@ function AttentionStrip({
  */
 function SpendChart({
   series,
-  ready,
+  isReady,
 }: {
   series: { bucket_start: string; cost: number }[]
-  ready: boolean
+  isReady: boolean
 }) {
   const [hovered, setHovered] = useState<number>()
-  if (!ready || series.length < 2) {
+  if (!isReady || series.length < 2) {
     return null
   }
   const peak = Math.max(...series.map((point) => point.cost), 0)

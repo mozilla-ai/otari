@@ -173,7 +173,7 @@ export function ShareDialog(props: ShareDialogProps) {
   // would leave the PNG showing the previous card.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the dependency is the rendered card, which the rule cannot see
   useEffect(() => {
-    let cancelled = false
+    let isCancelled = false
     let url: string | undefined
     const timer = setTimeout(() => {
       const node = cardRef.current
@@ -183,7 +183,7 @@ export function ShareDialog(props: ShareDialogProps) {
       const { width, height } = CARD_SIZES[presentation.ratio]
       rasterize(node, { width, height })
         .then((blob) => {
-          if (cancelled) {
+          if (isCancelled) {
             return
           }
           url = URL.createObjectURL(blob)
@@ -196,7 +196,7 @@ export function ShareDialog(props: ShareDialogProps) {
           setError(undefined)
         })
         .catch((cause: unknown) => {
-          if (!cancelled) {
+          if (!isCancelled) {
             setError(
               cause instanceof Error
                 ? cause
@@ -206,7 +206,7 @@ export function ShareDialog(props: ShareDialogProps) {
         })
     }, 300)
     return () => {
-      cancelled = true
+      isCancelled = true
       clearTimeout(timer)
     }
   }, [presentation, hero, secondary, shown, scope])
@@ -224,8 +224,8 @@ export function ShareDialog(props: ShareDialogProps) {
     [],
   )
 
-  const copyable = canCopyImages()
-  const blocked = isStale || hero === null
+  const isCopyable = canCopyImages()
+  const isBlocked = isStale || hero === null
 
   async function withBlob(
     action: (blob: Blob) => Promise<void> | void,
@@ -270,8 +270,8 @@ export function ShareDialog(props: ShareDialogProps) {
         actions={
           <>
             <Button
-              variant={copyable ? "ghost" : "primary"}
-              isDisabled={busy || blocked}
+              variant={isCopyable ? "ghost" : "primary"}
+              isDisabled={busy || isBlocked}
               onPress={() =>
                 withBlob(
                   (blob) => downloadBlob(blob, shareFilename(startIso, endIso)),
@@ -281,10 +281,10 @@ export function ShareDialog(props: ShareDialogProps) {
             >
               Download PNG
             </Button>
-            {copyable ? (
+            {isCopyable ? (
               <Button
                 variant="primary"
-                isDisabled={busy || blocked}
+                isDisabled={busy || isBlocked}
                 onPress={() =>
                   withBlob(async (blob) => {
                     if (!(await copyBlobAsImage(blob))) {

@@ -45,7 +45,7 @@ export function SettingRow({
   control,
   controlId,
   note,
-  nested = false,
+  isNested = false,
   error,
   errorId,
 }: {
@@ -75,7 +75,7 @@ export function SettingRow({
    * rather than being its sibling. Used by a disclosure's panel, whose rows are
    * children of the row that opened them.
    */
-  nested?: boolean
+  isNested?: boolean
   /** A rejected save, kept beside the value that caused it. */
   error?: string
   /** Ties the message to the control through `aria-describedby`. */
@@ -84,7 +84,7 @@ export function SettingRow({
   return (
     <div
       className={`flex min-h-11 flex-col gap-2.5 py-3 pr-4 md:flex-row md:items-center md:gap-6 ${
-        nested ? "pl-8" : "pl-4"
+        isNested ? "pl-8" : "pl-4"
       }`}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">

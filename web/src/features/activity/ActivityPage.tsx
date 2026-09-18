@@ -808,13 +808,13 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
   // pre-`request_group_id` row, which has no siblings to find), so the section
   // never flashes empty and never claims a one-attempt plan it did not read.
   const attempts = planOrder(siblings.length ? siblings : [entry])
-  const complete = siblings.length > 0
+  const isComplete = siblings.length > 0
   const served = attempts.find((attempt) => attempt.status === "success")
   const total = entry.attempt_count ?? attempts.length
 
   // "Loading" only while a lookup is actually outstanding: a failed lookup, or a row
   // that carries no group to look up, would otherwise sit on that line forever.
-  const summary = !complete
+  const summary = !isComplete
     ? group.isError
       ? "Could not load this request's other attempts."
       : entry.request_group_id
@@ -983,7 +983,7 @@ function RequestDetail({
   // selector was, which a provider without model discovery would never have put
   // in the catalog. A $0 cost is a real price, so it is deliberately not
   // treated as uncosted.
-  const uncosted = entry.cost === null
+  const isUncosted = entry.cost === null
   const pricingKey = pricingSelectorOf(entry)
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
@@ -1080,7 +1080,7 @@ function RequestDetail({
           {entry.id}
         </DetailField>
       </div>
-      {uncosted ? (
+      {isUncosted ? (
         <div className="flex flex-wrap items-center gap-3">
           {onPriceModel ? (
             <Button

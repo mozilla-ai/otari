@@ -44,7 +44,7 @@ export const Default: Story = {
 export const WithDescription: Story = {
   args: {
     description: "Sent ahead of every request routed through this workspace.",
-    reserveMessage: true,
+    shouldReserveMessage: true,
     className: "w-96",
   },
 }
@@ -64,7 +64,7 @@ export const Invalid: Story = {
     value: "x",
     isInvalid: true,
     errorMessage: "A prompt needs at least 20 characters to be useful.",
-    reserveMessage: true,
+    shouldReserveMessage: true,
     className: "w-96",
   },
 }

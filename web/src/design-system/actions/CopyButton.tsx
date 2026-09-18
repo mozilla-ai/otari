@@ -42,20 +42,20 @@ export function CopyButton({
   useEffect(() => () => clearTimeout(resetTimer.current), [])
 
   const copy = async () => {
-    const copied = await copyToClipboard(value)
-    if (!copied) {
+    const isCopied = await copyToClipboard(value)
+    if (!isCopied) {
       // After the attempt, never before it: `copyToClipboard`'s legacy path
       // restores the selection and focus it found on the way out, so a
       // selection made first is undone by the very fallback this exists for.
       selectOnFailure?.current?.focus()
       selectOnFailure?.current?.select()
     }
-    setState(copied ? "copied" : "failed")
+    setState(isCopied ? "copied" : "failed")
     clearTimeout(resetTimer.current)
     // A failure has something to read and act on, so it lingers longer.
     resetTimer.current = setTimeout(
       () => setState("idle"),
-      copied ? 1_500 : 5_000,
+      isCopied ? 1_500 : 5_000,
     )
   }
 

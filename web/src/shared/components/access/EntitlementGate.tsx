@@ -39,10 +39,10 @@ export function EntitlementGate({
   fallback,
   loading,
 }: EntitlementGateProps) {
-  const { entitled, isLoading } = useEntitlement(capability)
+  const { isEntitled, isLoading } = useEntitlement(capability)
 
   if (isLoading) {
     return <>{loading ?? fallback}</>
   }
-  return <>{entitled ? children : fallback}</>
+  return <>{isEntitled ? children : fallback}</>
 }

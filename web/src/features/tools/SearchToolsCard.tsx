@@ -101,7 +101,7 @@ function StoredToolLine({
   })
 
   const inherited = inheritedBase(providers, tool.provider)
-  const busy = remove.isPending
+  const isBusy = remove.isPending
 
   return (
     <div className="flex flex-col gap-2 px-4 py-3">
@@ -114,7 +114,7 @@ function StoredToolLine({
           aria-label={`Backend URL for ${tool.name}`}
           aria-invalid={urlSave.error ? true : undefined}
           value={apiBase}
-          disabled={busy || urlSave.isSaving}
+          disabled={isBusy || urlSave.isSaving}
           placeholder={inherited ? `inherits ${inherited}` : "backend URL"}
           onChange={(event) => setApiBase(event.target.value)}
           onKeyDown={commitOnEnter}
@@ -133,7 +133,7 @@ function StoredToolLine({
           aria-label={`New API key for ${tool.name}`}
           aria-invalid={keySave.error ? true : undefined}
           value={apiKey}
-          disabled={busy || keySave.isSaving}
+          disabled={isBusy || keySave.isSaving}
           placeholder={tool.last4 ? `replace key ····${tool.last4}` : "add key"}
           onChange={(event) => setApiKey(event.target.value)}
           onKeyDown={commitOnEnter}
@@ -153,7 +153,7 @@ function StoredToolLine({
           // Named per row, as this row's fields are: the card is a list of
           // tools, so a bare "Remove" is the same name on every one of them.
           aria-label={`Remove ${tool.name}`}
-          isDisabled={busy}
+          isDisabled={isBusy}
           onPress={() => setDeleteOpen(true)}
         >
           Remove
@@ -255,7 +255,7 @@ function AddToolDialog({
   // with no question asked.
   const { isDirty } = useDirtySnapshot({ name, provider, apiBase, apiKey })
 
-  const ready =
+  const isReady =
     name.trim() !== "" &&
     (!baseRequired || apiBase.trim() !== "") &&
     (!keyRequired || apiKey !== "")
@@ -282,7 +282,7 @@ function AddToolDialog({
       submitLabel="Add search tool"
       onSubmit={submit}
       isPending={create.isPending}
-      isSubmitDisabled={!ready}
+      isSubmitDisabled={!isReady}
       isDirty={isDirty}
       error={create.error}
     >
@@ -303,7 +303,7 @@ function AddToolDialog({
           value: entry.id,
           label: entry.id,
         }))}
-        reserveMessage={false}
+        shouldReserveMessage={false}
       />
       <Field
         label="Backend URL"
@@ -356,8 +356,8 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
   // Nothing is known until the read answers, and "0 tools · refuses every
   // request" is a claim, not a placeholder. A failed read is not an empty
   // deployment either: `isLoading` goes false with no data behind it.
-  const failed = Boolean(tools.error)
-  const answered = !tools.isLoading && !failed
+  const hasFailed = Boolean(tools.error)
+  const hasAnswered = !tools.isLoading && !hasFailed
 
   return (
     <>
@@ -380,7 +380,7 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
         providers={known}
       />
       <SettingsGroup
-        bounded
+        isBounded
         title="Search tools"
         description="Named tools behind the direct endpoint, POST /api/v1/search. A searxng tool with no URL of its own reuses the backend above."
         docsHref={docsHref}
@@ -408,9 +408,9 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
         <DisclosureRow
           label="Configure search tools"
           help={
-            failed
+            hasFailed
               ? "Could not read the tools this deployment serves."
-              : !answered
+              : !hasAnswered
                 ? "Reading the tools this deployment serves."
                 : count === 0
                   ? "None configured, so POST /api/v1/search refuses every request."
@@ -420,7 +420,7 @@ export function SearchToolsCard({ docsHref }: { docsHref: string }) {
           onToggle={() => setIsOpen((open) => !open)}
           trailing={
             <span className="text-caption text-subtle tabular-nums">
-              {answered ? toolCount(count) : ""}
+              {hasAnswered ? toolCount(count) : ""}
             </span>
           }
         >

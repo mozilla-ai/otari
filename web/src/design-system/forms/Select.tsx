@@ -44,7 +44,7 @@ export function Select({
   isDisabled,
   isInvalid,
   errorMessage,
-  reserveMessage,
+  shouldReserveMessage,
   className = "",
 }: {
   label: string
@@ -62,7 +62,7 @@ export function Select({
   isInvalid?: boolean
   /** Shown under the field and announced with it. Needs `isInvalid` to appear. */
   errorMessage?: string
-  reserveMessage?: boolean
+  shouldReserveMessage?: boolean
   /** Layout and width at the call site. Not for restyling the trigger. */
   className?: string
 }) {
@@ -126,7 +126,7 @@ export function Select({
           )}
         </ListBox>
       </HeroSelect.Popover>
-      <FieldMessages reserve={reserveMessage}>
+      <FieldMessages shouldReserve={shouldReserveMessage}>
         {description ? (
           <Description className="text-muted">{description}</Description>
         ) : null}

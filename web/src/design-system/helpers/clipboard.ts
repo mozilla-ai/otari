@@ -43,14 +43,14 @@ function legacyCopy(text: string): boolean {
       ? document.activeElement
       : null
 
-  let copied = false
+  let isCopied = false
   try {
     source.select()
-    copied = document.execCommand("copy")
+    isCopied = document.execCommand("copy")
   } catch {
     // Covers select() too, not just execCommand: a throw there is still a copy
     // that did not happen, and the caller reads the return value to say so.
-    copied = false
+    isCopied = false
   } finally {
     // In a finally: the textarea holds the plaintext, so it must not outlive a
     // throw above it (#1149).
@@ -61,5 +61,5 @@ function legacyCopy(text: string): boolean {
     }
     previousFocus?.focus()
   }
-  return copied
+  return isCopied
 }

@@ -49,7 +49,7 @@ export const Default: Story = {
   render: () => {
     const [on, setOn] = useState(true)
     return (
-      <SettingsGroup bounded title="Model discovery">
+      <SettingsGroup isBounded title="Model discovery">
         <SettingRow
           label="Require a price before routing"
           help="A request to a model with no price is refused rather than served at an unknown cost."
@@ -76,7 +76,7 @@ export const Default: Story = {
  */
 export const WithConfigKey: Story = {
   render: () => (
-    <SettingsGroup bounded title="Web search">
+    <SettingsGroup isBounded title="Web search">
       <SettingRow
         label="Backend URL"
         labelId="web-search-url"
@@ -103,7 +103,7 @@ export const WithConfigKey: Story = {
  */
 export const NoteAndError: Story = {
   render: () => (
-    <SettingsGroup bounded title="Web search">
+    <SettingsGroup isBounded title="Web search">
       <SettingRow
         label="Backend URL"
         help="Reachable from the gateway, not from the browser."
@@ -138,7 +138,7 @@ export const Nested: Story = {
   render: () => {
     const [on, setOn] = useState(true)
     return (
-      <SettingsGroup bounded title="Code execution">
+      <SettingsGroup isBounded title="Code execution">
         <SettingRow
           label="Allow code execution"
           help="Requests may run code in a sandbox."
@@ -151,7 +151,7 @@ export const Nested: Story = {
           }
         />
         <SettingRow
-          nested
+          isNested
           label="Allow network access"
           help="The sandbox may reach the internet."
           control={
@@ -163,7 +163,7 @@ export const Nested: Story = {
           }
         />
         <SettingRow
-          nested
+          isNested
           label="Allow image output"
           control={
             <Toggle
@@ -194,7 +194,7 @@ export const SharedLane: Story = {
     const [on, setOn] = useState(true)
     const [mode, setMode] = useState("default")
     return (
-      <SettingsGroup bounded title="Web search">
+      <SettingsGroup isBounded title="Web search">
         <SettingRow
           label="Backend URL"
           configKey="web_search_url"

@@ -54,7 +54,7 @@ export interface FieldCopy {
   /** A representative value, never the word "default": blank already means that. */
   placeholder: string
   /** Mono, for a value a machine reads. Off for a sentence a model reads. */
-  machine?: boolean
+  isMachineReadable?: boolean
 }
 
 function useDraft(committed: string) {
@@ -126,7 +126,7 @@ function TextRow({
               if (next === committed) return
               void save.run(() => commit(field.key, next === "" ? null : next))
             }}
-            className={`${copy.machine ? MACHINE_INPUT : TEXT_INPUT}`}
+            className={`${copy.isMachineReadable ? MACHINE_INPUT : TEXT_INPUT}`}
           />
           {trailing}
         </div>
@@ -157,8 +157,9 @@ function NumberRow({
   // Digits only. `Number` would read "0x10" as 16 and "1e1" as 10, and the
   // server's floor is 1, so both are refused here rather than sent.
   const parsed = /^\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN
-  const valid = trimmed === "" || (Number.isSafeInteger(parsed) && parsed >= 1)
-  const message = save.error || (valid ? "" : "A whole number, 1 or more.")
+  const isValid =
+    trimmed === "" || (Number.isSafeInteger(parsed) && parsed >= 1)
+  const message = save.error || (isValid ? "" : "A whole number, 1 or more.")
 
   return (
     <SettingRow
@@ -183,7 +184,7 @@ function NumberRow({
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={commitOnEnter}
           onBlur={() => {
-            if (!valid || trimmed === committed) return
+            if (!isValid || trimmed === committed) return
             void save.run(() =>
               commit(field.key, trimmed === "" ? null : parsed),
             )
@@ -277,7 +278,7 @@ function UrlRow({
   const trimmed = typed.trim()
   // A result belongs to the URL it was asked about, so a late answer never
   // lands beside a different one.
-  const settled = testedUrl === trimmed && !test.isPending
+  const isSettled = testedUrl === trimmed && !test.isPending
 
   return (
     <TextRow
@@ -298,7 +299,7 @@ function UrlRow({
           aria-live="polite"
           className={`text-caption ${test.data?.ok ? "text-success" : "text-danger"}`}
         >
-          {settled &&
+          {isSettled &&
             (test.error ? errorMessage(test.error) : test.data?.reason)}
         </p>
       }

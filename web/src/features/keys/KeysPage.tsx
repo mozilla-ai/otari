@@ -220,7 +220,7 @@ function KeySecretStep({
               concealed={snippets.concealedCurl}
               isRevealed={isSecretRevealed}
               onRevealChange={setIsSecretRevealed}
-              multiline
+              isMultiline
             />
             <CopyField
               label="Python (Otari SDK)"
@@ -228,7 +228,7 @@ function KeySecretStep({
               concealed={snippets.concealedPython}
               isRevealed={isSecretRevealed}
               onRevealChange={setIsSecretRevealed}
-              multiline
+              isMultiline
             />
           </>
         ) : null}
@@ -440,7 +440,7 @@ function CreateKeyDialog({
   // caller belongs to that default, which is the answer this form surfaces
   // rather than pre-empting.
   const workspaceUnresolved = workspaceLoading
-  const blocked = !scopeValid || ownerMissing || workspaceUnresolved
+  const isBlocked = !scopeValid || ownerMissing || workspaceUnresolved
 
   // What the form owns, handed to the guard whole rather than compared field by
   // field: the two drifted apart once already, with the guard armed for three
@@ -489,7 +489,7 @@ function CreateKeyDialog({
   }
 
   const submit = () => {
-    if (create.isPending || blocked) return
+    if (create.isPending || isBlocked) return
     const shared = {
       key_name: keyName.trim() || null,
       // The workspace the shell is on. A key belongs to exactly one, and it is
@@ -570,7 +570,7 @@ function CreateKeyDialog({
       submitLabel="Create key"
       onSubmit={submit}
       isPending={create.isPending}
-      isSubmitDisabled={blocked}
+      isSubmitDisabled={isBlocked}
       error={create.error}
       isDirty={isDirty}
     >
@@ -581,7 +581,7 @@ function CreateKeyDialog({
         placeholder="ci-bot"
         autoFocus
         description="A label to recognize this key later."
-        reserveMessage
+        shouldReserveMessage
       />
       <Field
         label="Expires (optional)"
@@ -597,7 +597,7 @@ function CreateKeyDialog({
             "Leave blank for a key that never expires."
           )
         }
-        reserveMessage
+        shouldReserveMessage
       />
       {isDeploymentWide ? (
         <UserComboBox
@@ -634,9 +634,9 @@ function CreateKeyDialog({
               isDeploymentWide ? "Inherit owner access" : "Inherit your access"
             }
             initial={null}
-            onChange={(value, valid) => {
+            onChange={(value, isValid) => {
               setAllowedModels(value)
-              setScopeValid(valid)
+              setScopeValid(isValid)
             }}
           />
           {/* Exempting a key from a budget is the deployment operator's call,
@@ -774,7 +774,7 @@ function EditKeyForm({
         onChange={setKeyName}
         placeholder="ci-bot"
         autoFocus
-        reserveMessage={false}
+        shouldReserveMessage={false}
       />
       <Field
         label="Expires"
@@ -782,7 +782,7 @@ function EditKeyForm({
         onChange={setExpiresAt}
         type="datetime-local"
         description="Blank clears the expiry."
-        reserveMessage
+        shouldReserveMessage
       />
       {isDeploymentWide && apiKey.user_id ? (
         <OwnerAccessNote userId={apiKey.user_id} users={users.data ?? []} />
@@ -798,9 +798,9 @@ function EditKeyForm({
           isDeploymentWide ? "Inherit owner access" : "Inherit your access"
         }
         initial={apiKey.allowed_models}
-        onChange={(value, valid) => {
+        onChange={(value, isValid) => {
           setAllowedModels(value)
-          setScopeValid(valid)
+          setScopeValid(isValid)
         }}
       />
       {/* Operator-only, as on the create form: a member editing their own key

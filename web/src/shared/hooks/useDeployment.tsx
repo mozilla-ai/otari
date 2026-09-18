@@ -79,13 +79,13 @@ export function DeploymentProvider({
     }
     const typed = masterKeyRetired ? PASSWORD_ONLY : value.sign_in_methods
     const withoutPasskey = typed.filter((method) => method !== PASSKEY)
-    const offered =
+    const isOffered =
       passkeysOffered === null
         ? value.sign_in_methods.includes(PASSKEY)
         : passkeysOffered
     return {
       ...value,
-      sign_in_methods: offered
+      sign_in_methods: isOffered
         ? [...withoutPasskey, PASSKEY].sort()
         : withoutPasskey,
     }

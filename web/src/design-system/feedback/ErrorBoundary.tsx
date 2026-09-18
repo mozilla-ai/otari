@@ -32,7 +32,7 @@ interface Props {
 }
 
 interface State {
-  caught: boolean
+  hasCaught: boolean
   error: unknown
   /** The key the current caught state belongs to, to compare the next one against. */
   seenKey: string | undefined
@@ -44,21 +44,21 @@ interface State {
 // flag is what decides. Showing such a value is `PageError`'s end.
 
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { caught: false, error: undefined, seenKey: undefined }
+  state: State = { hasCaught: false, error: undefined, seenKey: undefined }
 
   static getDerivedStateFromError(error: unknown): Partial<State> {
-    return { caught: true, error }
+    return { hasCaught: true, error }
   }
 
   static getDerivedStateFromProps(props: Props, state: State): State | null {
     if (props.resetKey === state.seenKey) {
       return null
     }
-    return { caught: false, error: undefined, seenKey: props.resetKey }
+    return { hasCaught: false, error: undefined, seenKey: props.resetKey }
   }
 
   render() {
-    if (!this.state.caught) {
+    if (!this.state.hasCaught) {
       return this.props.children
     }
     return (

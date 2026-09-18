@@ -141,7 +141,7 @@ export function OAuthCallbackPage({
     void (async () => {
       try {
         const result = await completeOAuthSignIn(provider, code, state)
-        if (result.ok) {
+        if (result.isOk) {
           recordEvent(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
             authentication_method: provider,
           })

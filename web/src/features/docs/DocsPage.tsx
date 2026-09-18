@@ -93,11 +93,11 @@ export const markdownComponents: Components = {
     const resolved = resolveDocHref(href)
     // Every rewritten link is now an absolute GitHub URL (external), so it opens
     // in a new tab and the operator does not lose the dashboard.
-    const external = isExternal(resolved)
+    const isLinkExternal = isExternal(resolved)
     return (
       <a
         href={resolved}
-        {...(external ? { target: "_blank", rel: "noreferrer" } : {})}
+        {...(isLinkExternal ? { target: "_blank", rel: "noreferrer" } : {})}
         {...props}
       >
         {children}

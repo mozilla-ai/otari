@@ -34,7 +34,7 @@ describe("CopyField", () => {
   })
 
   it("renders the multiline variant as a textarea", () => {
-    render(<CopyField label="curl" value={"line one\nline two"} multiline />)
+    render(<CopyField label="curl" value={"line one\nline two"} isMultiline />)
 
     const field = screen.getByLabelText("curl")
     expect(field.tagName).toBe("TEXTAREA")
@@ -252,7 +252,7 @@ describe("CopyField", () => {
       <CopyField
         label="curl"
         value="one"
-        multiline
+        isMultiline
         action={<button type="button">Verify domain</button>}
       />,
     )
@@ -402,7 +402,7 @@ describe("CopyField, concealed", () => {
         label="curl"
         value={snippet}
         concealed={snippet.replace("gw-real-secret", CONCEALED_SECRET)}
-        multiline
+        isMultiline
       />,
     )
 

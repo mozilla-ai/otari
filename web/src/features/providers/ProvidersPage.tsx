@@ -230,7 +230,7 @@ function KnownProviderForm({
   // The key is only mandatory when the provider needs one and its env var is not
   // already set on the server; any-llm falls back to that env var otherwise.
   const needsKey = (selected?.requires_api_key ?? true) && !envKeyPresent
-  const renamed = name.trim() !== "" && name.trim() !== providerId
+  const isRenamed = name.trim() !== "" && name.trim() !== providerId
   const nameHasDelimiter = /[:/]/.test(name)
   // `isDirty` arrives as a prop rather than being computed here: this component
   // remounts on every tab switch, and useDirtySnapshot seeds on mount, so a
@@ -259,10 +259,10 @@ function KnownProviderForm({
     Object.keys(credentialErrors).length > 0
       ? null
       : {
-          instance: renamed ? name.trim() : providerId,
+          instance: isRenamed ? name.trim() : providerId,
           // A renamed instance is no longer named after its provider, so record
           // the provider it is so routing still resolves.
-          provider_type: renamed ? providerId : null,
+          provider_type: isRenamed ? providerId : null,
           api_base: apiBase.trim() || null,
           api_key: apiKey.trim() || null,
           client_args: mergeCredentialFields(credentials, clientArgs.value),
@@ -700,10 +700,10 @@ function EditProviderForm({
     clientArgsText,
     credentials,
   })
-  const blocked = !clientArgs.ok || Object.keys(credentialErrors).length > 0
+  const isBlocked = !clientArgs.ok || Object.keys(credentialErrors).length > 0
 
   const submit = () => {
-    if (update.isPending || blocked) return
+    if (update.isPending || isBlocked) return
     const body: UpdateStoredProviderRequest = {
       provider_type: providerType.trim() || null,
       api_base: apiBase.trim() || null,
@@ -744,7 +744,7 @@ function EditProviderForm({
       submitLabel="Save"
       onSubmit={submit}
       isPending={update.isPending}
-      isSubmitDisabled={blocked}
+      isSubmitDisabled={isBlocked}
       isDirty={isDirty}
       error={update.error}
     >
@@ -755,14 +755,14 @@ function EditProviderForm({
           onChange={setProviderType}
           placeholder="openai"
           autoFocus
-          reserveMessage={false}
+          shouldReserveMessage={false}
         />
         <Field
           label="API base"
           value={apiBase}
           onChange={setApiBase}
           placeholder="https://api.openai.com/v1"
-          reserveMessage={false}
+          shouldReserveMessage={false}
         />
       </div>
       <div className="flex flex-col gap-2">
@@ -918,19 +918,19 @@ function HealthPill({ health }: { health: ProviderHealth | undefined }) {
   if (!health) {
     return <span className="text-caption">—</span>
   }
-  const degraded = !health.ok && health.discovery_unsupported
+  const isDegraded = !health.ok && health.discovery_unsupported
   // Only a real failure colors its text. Degraded is a provider that answers
   // requests but lists no models, which is a fact about discovery rather than an
   // outage, so it reads on the muted rung with the danger dot that says "worth
   // noticing" without the ink that says "broken".
-  const styles = health.ok || degraded ? "text-muted" : "text-danger"
+  const styles = health.ok || isDegraded ? "text-muted" : "text-danger"
   const dot = health.ok ? "bg-success" : "bg-danger"
   // The last-checked time lives in the top summary banner; the row just shows the
   // status. The error (and time) stay available on hover as the pill's tooltip.
   const checked = health.checked_at
     ? `Last checked ${formatRelative(health.checked_at)}`
     : "Not checked yet"
-  const reason = degraded
+  const reason = isDegraded
     ? `${health.error ?? "This provider does not list models."} Requests to it may still work.`
     : (health.error ?? "Unreachable")
   const title = health.ok ? checked : `${reason} · ${checked}`
@@ -940,7 +940,11 @@ function HealthPill({ health }: { health: ProviderHealth | undefined }) {
       className={`flex items-center gap-2 text-mono-caption ${styles}`}
     >
       <Dot className={dot} />
-      {HEALTH_LABELS[health.ok ? "ok" : degraded ? "degraded" : "unreachable"]}
+      {
+        HEALTH_LABELS[
+          health.ok ? "ok" : isDegraded ? "degraded" : "unreachable"
+        ]
+      }
     </span>
   )
 }
@@ -1029,13 +1033,13 @@ function OnboardingPanel({
   onAddProvider,
   needsPricing,
   onEnablePricing,
-  enabling,
+  isEnabling,
   secretKeyConfigured,
 }: {
   onAddProvider: () => void
   needsPricing: boolean
   onEnablePricing: () => void
-  enabling: boolean
+  isEnabling: boolean
   secretKeyConfigured: boolean
 }) {
   return (
@@ -1090,7 +1094,7 @@ function OnboardingPanel({
           <button
             type="button"
             className="font-medium text-link hover:text-link-hover disabled:opacity-(--disabled-opacity)"
-            disabled={enabling}
+            disabled={isEnabling}
             onClick={onEnablePricing}
           >
             Enable default pricing
@@ -1419,7 +1423,7 @@ export function ProvidersPage() {
           onEnablePricing={() =>
             updateSettings.mutate({ default_pricing: true })
           }
-          enabling={updateSettings.isPending}
+          isEnabling={updateSettings.isPending}
           secretKeyConfigured={secretKeyConfigured}
         />
       ) : null}

@@ -250,7 +250,7 @@ export function PricingOverrideDialog({
             ? `This period overlaps an override already stored for ${clash.model_key}. Change the period, or edit that one instead.`
             : undefined))
 
-  const invalid =
+  const isInvalid =
     keyInvalid ||
     ratesInvalid ||
     startRequired ||
@@ -258,7 +258,7 @@ export function PricingOverrideDialog({
     blockedReason !== undefined
 
   const submit = () => {
-    if (invalid || inputRate === undefined || outputRate === undefined) return
+    if (isInvalid || inputRate === undefined || outputRate === undefined) return
     save({
       model_key: modelKey.trim(),
       input_price_per_million: inputRate,
@@ -287,7 +287,7 @@ export function PricingOverrideDialog({
       submitLabel={editing ? "Save override" : "Add override"}
       onSubmit={submit}
       isPending={create.isPending || replace.isPending}
-      isSubmitDisabled={invalid}
+      isSubmitDisabled={isInvalid}
       isDirty={isDirty}
       error={editing ? replace.error : create.error}
     >

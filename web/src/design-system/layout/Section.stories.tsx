@@ -18,7 +18,7 @@ import { Section } from "./Section"
 const meta = {
   title: "Design system/Layout/Section",
   component: Section,
-  args: { bleed: false, children: null },
+  args: { shouldBleed: false, children: null },
   parameters: { layout: "padded" },
 } satisfies Meta<typeof Section>
 
@@ -28,7 +28,7 @@ type Story = StoryObj<typeof meta>
 
 export const Default: Story = {
   render: () => (
-    <Section bleed={false} className="border-y border-border py-4">
+    <Section shouldBleed={false} className="border-y border-border py-4">
       <p className="text-body">
         A band's content, in the column the band restores.
       </p>
@@ -46,7 +46,7 @@ export const Stacked: Story = {
       {["Totals", "Breakdown", "Recent activity"].map((title) => (
         <Section
           key={title}
-          bleed={false}
+          shouldBleed={false}
           className="border-t border-border py-4"
         >
           <span className="text-heading">{title}</span>
@@ -66,13 +66,13 @@ export const BandVersusContent: Story = {
   render: () => (
     <div className="flex flex-col gap-6">
       <Section
-        bleed={false}
+        shouldBleed={false}
         className="border-y border-border bg-surface-alt py-4"
       >
         <span className="text-caption">className: the fill spans the band</span>
       </Section>
       <Section
-        bleed={false}
+        shouldBleed={false}
         className="border-y border-border py-4"
         contentClassName="bg-surface-alt p-3"
       >

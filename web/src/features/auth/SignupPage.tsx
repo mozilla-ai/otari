@@ -74,12 +74,12 @@ export function SignupPage({ hash }: { hash: string }) {
   const [isTermsAccepted, setIsTermsAccepted] = useState(false)
 
   const problem = newPasswordProblem(password, confirmPassword)
-  const complete =
+  const isComplete =
     email.trim() !== "" &&
     password !== "" &&
     confirmPassword !== "" &&
     (terms_url === null || isTermsAccepted)
-  const canSubmit = complete && problem === null
+  const canSubmit = isComplete && problem === null
 
   // A refusal describes a call that is no longer the one being made, so typing
   // clears it. Never while one is in flight: `reset()` returns the observer to

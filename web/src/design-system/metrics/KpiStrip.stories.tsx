@@ -20,7 +20,7 @@ import { TrendChip } from "./TrendChip"
 const meta = {
   title: "Design system/Metrics/KpiStrip",
   component: KpiStrip,
-  args: { empty: false, children: null },
+  args: { isEmpty: false, children: null },
   parameters: { layout: "padded" },
 } satisfies Meta<typeof KpiStrip>
 
@@ -30,7 +30,7 @@ type Story = StoryObj<typeof meta>
 
 export const Default: Story = {
   render: () => (
-    <KpiStrip empty={false} columns={4}>
+    <KpiStrip isEmpty={false} columns={4}>
       <KpiCell label="Spend" value="$412.08" subline="This month" />
       <KpiCell label="Requests" value="1,284,901" subline="This month" />
       <KpiCell label="Tokens" value="94.2M" subline="This month" />
@@ -46,7 +46,7 @@ export const Default: Story = {
  */
 export const WithDeltaAndGraphic: Story = {
   render: () => (
-    <KpiStrip empty={false} columns={4}>
+    <KpiStrip isEmpty={false} columns={4}>
       <KpiCell
         label="Spend"
         value="$412.08"
@@ -81,7 +81,7 @@ export const WithDeltaAndGraphic: Story = {
  */
 export const WithSeverity: Story = {
   render: () => (
-    <KpiStrip empty={false} columns={4}>
+    <KpiStrip isEmpty={false} columns={4}>
       <KpiCell
         label="Budget"
         value="$1,041.20"
@@ -112,7 +112,7 @@ export const WithSeverity: Story = {
  */
 export const Empty: Story = {
   render: () => (
-    <KpiStrip empty columns={4}>
+    <KpiStrip isEmpty columns={4}>
       <KpiCell label="Spend" value="—" subline="No requests yet" />
       <KpiCell label="Requests" value="—" subline="No requests yet" />
       <KpiCell label="Tokens" value="—" subline="No requests yet" />
@@ -129,7 +129,7 @@ export const Empty: Story = {
  */
 export const FiveColumns: Story = {
   render: () => (
-    <KpiStrip empty={false} columns={5}>
+    <KpiStrip isEmpty={false} columns={5}>
       <KpiCell label="Spend" value="$412.08" subline="This month" />
       <KpiCell label="Requests" value="1,284,901" subline="This month" />
       <KpiCell label="Tokens" value="94.2M" subline="This month" />

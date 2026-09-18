@@ -84,7 +84,7 @@ export function CreateOrganizationForm({
           isRequired
           autoFocus
           description="You become its owner, and it starts with a default workspace. Names do not have to be unique."
-          reserveMessage
+          shouldReserveMessage
         />
       )}
     </FormDialog>

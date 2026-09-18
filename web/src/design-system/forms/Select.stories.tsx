@@ -53,7 +53,7 @@ export const Default: Story = {
 export const WithDescription: Story = {
   args: {
     description: "Applies to every model in this workspace.",
-    reserveMessage: true,
+    shouldReserveMessage: true,
     className: "w-72",
   },
 }
@@ -69,7 +69,7 @@ export const Invalid: Story = {
     description: "Applies to every model in this workspace.",
     isInvalid: true,
     errorMessage: "Pick a strategy before saving.",
-    reserveMessage: true,
+    shouldReserveMessage: true,
     className: "w-72",
   },
 }

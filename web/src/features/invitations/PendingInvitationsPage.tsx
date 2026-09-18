@@ -51,7 +51,7 @@ export function PendingInvitationsPage() {
   // settled. A failed read settles too, and reading `isFetched` alone would
   // put "nothing is waiting" on screen next to the error banner saying the
   // list could not be read, which is a claim this page has no basis for.
-  const answered = invitations.data !== undefined
+  const hasAnswered = invitations.data !== undefined
 
   return (
     <div className="flex flex-col">
@@ -70,7 +70,7 @@ export function PendingInvitationsPage() {
         <PageLoading label="Loading invitations…" />
       ) : null}
 
-      {answered && waiting.length === 0 ? (
+      {hasAnswered && waiting.length === 0 ? (
         <EmptyState
           title="No invitations waiting"
           description="When an organization invites you, it appears here as well as in the email it sends, so a link you never received is not the only way in."

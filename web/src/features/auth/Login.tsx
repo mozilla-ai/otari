@@ -384,7 +384,7 @@ export function Login() {
     setIsSubmitting(true)
     try {
       const result = await createSession(credential)
-      if (result.ok) {
+      if (result.isOk) {
         recordEvent(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
           authentication_method: authenticationMethod(credential),
         })
@@ -456,7 +456,7 @@ export function Login() {
     setIsPasskeyPending(true)
     try {
       const result = await signInWithPasskey()
-      if (result.ok) {
+      if (result.isOk) {
         recordEvent(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
           authentication_method: PASSKEY_METHOD,
         })
@@ -517,7 +517,7 @@ export function Login() {
     setPendingProvider(provider)
     try {
       const started = await startOAuthSignIn(provider)
-      if (!started.ok) {
+      if (!started.isOk) {
         recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
           authentication_method: provider,
           error_code: analyticsStatusCode(started.status),

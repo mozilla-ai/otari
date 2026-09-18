@@ -85,7 +85,7 @@ export function ComboBoxField({
   isDisabled,
   isInvalid,
   errorMessage,
-  reserveMessage,
+  shouldReserveMessage,
   className = "",
   allowsCustomValue,
   autoFocus,
@@ -117,7 +117,7 @@ export function ComboBoxField({
   isInvalid?: boolean
   /** Shown under the field and announced with it. Needs `isInvalid` to appear. */
   errorMessage?: string
-  reserveMessage?: boolean
+  shouldReserveMessage?: boolean
   /**
    * The id of text elsewhere on the page that describes this field.
    *
@@ -284,7 +284,7 @@ export function ComboBoxField({
           beside it in a row. The description goes through HeroUI's own slot,
           which is what wires it to the input via aria-describedby; a bare node
           there leaves the combo box reporting no description at all. */}
-      <FieldMessages reserve={reserveMessage}>
+      <FieldMessages shouldReserve={shouldReserveMessage}>
         {description ? (
           <Description className="text-muted">{description}</Description>
         ) : null}

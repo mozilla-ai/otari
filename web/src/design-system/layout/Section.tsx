@@ -19,23 +19,23 @@ import type { HTMLAttributes, ReactNode } from "react"
 export function Section({
   className = "",
   contentClassName = "",
-  bleed = true,
+  shouldBleed = true,
   children,
   ...rest
 }: {
   className?: string
   contentClassName?: string
-  bleed?: boolean
+  shouldBleed?: boolean
   children: ReactNode
 } & Omit<HTMLAttributes<HTMLElement>, "className" | "children">) {
   return (
     <section
-      className={bleed ? `otari-bleed ${className}` : className}
+      className={shouldBleed ? `otari-bleed ${className}` : className}
       {...rest}
     >
       <div
         className={
-          bleed
+          shouldBleed
             ? `mx-auto w-full max-w-[112.5rem] px-4 md:px-6 ${contentClassName}`
             : `w-full ${contentClassName}`
         }

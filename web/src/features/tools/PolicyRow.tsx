@@ -26,8 +26,8 @@ export function PolicyRow<T>({
   parse,
   commit,
   disabled,
-  machine = false,
-  numeric = false,
+  isMachineReadable = false,
+  isNumeric = false,
 }: {
   label: string
   help: string
@@ -38,9 +38,9 @@ export function PolicyRow<T>({
   commit: (value: T) => Promise<unknown>
   disabled: boolean
   /** Mono, for a value a machine reads. Off for a sentence a model reads. */
-  machine?: boolean
+  isMachineReadable?: boolean
   /** Right-aligned digits, for a number rather than a list or a phrase. */
-  numeric?: boolean
+  isNumeric?: boolean
 }) {
   const [draft, setDraft] = useState(committed)
   const [synced, setSynced] = useState(committed)
@@ -70,7 +70,7 @@ export function PolicyRow<T>({
         <input
           id={controlId}
           type="text"
-          inputMode={numeric ? "numeric" : undefined}
+          inputMode={isNumeric ? "numeric" : undefined}
           aria-label={label}
           aria-invalid={message ? true : undefined}
           aria-describedby={message ? errorId : undefined}
@@ -83,8 +83,8 @@ export function PolicyRow<T>({
             if (parsed.error || draft.trim() === committed) return
             void save.run(() => commit(parsed.value))
           }}
-          className={`w-full ${machine || numeric ? "otari-machine-field" : ""} ${
-            numeric ? "text-right tabular-nums" : ""
+          className={`w-full ${isMachineReadable || isNumeric ? "otari-machine-field" : ""} ${
+            isNumeric ? "text-right tabular-nums" : ""
           } ${INPUT_CLASS}`}
         />
       }

@@ -43,7 +43,7 @@ function KeyFields() {
         placeholder="checkout-service"
         description="Lowercase, hyphens, no spaces."
         autoFocus
-        reserveMessage
+        shouldReserveMessage
       />
       <Select
         label="Scope"
@@ -53,7 +53,7 @@ function KeyFields() {
           { value: "workspace", label: "This workspace" },
           { value: "organization", label: "Whole organization" },
         ]}
-        reserveMessage={false}
+        shouldReserveMessage={false}
       />
     </>
   )
@@ -95,7 +95,7 @@ function DomainField() {
       onChange={setDomain}
       description="You will verify it with a DNS record next."
       autoFocus
-      reserveMessage
+      shouldReserveMessage
     />
   )
 }
@@ -138,7 +138,7 @@ function ProviderForm(args: React.ComponentProps<typeof FormDialog>) {
         value={secret}
         onChange={setSecret}
         description="Stored encrypted. Autofill is off for this field."
-        reserveMessage
+        shouldReserveMessage
       />
       <Checkbox isSelected={isDefault} onChange={setIsDefault}>
         Make this the default route for Anthropic models
@@ -260,7 +260,7 @@ function ManyFields() {
           // forwards the prop undefined, so a field that says nothing reserves
           // a line anyway. Measured, omitting it leaves the row at 83px where
           // this brings it to 60.
-          reserveMessage={false}
+          shouldReserveMessage={false}
         />
       ))}
     </>
@@ -335,7 +335,7 @@ export const SubmitBlocked: Story = {
         description="Required. Lowercase, hyphens, no spaces."
         isInvalid
         errorMessage="Give the key a name."
-        reserveMessage
+        shouldReserveMessage
       />
     </FormDialog>
   ),

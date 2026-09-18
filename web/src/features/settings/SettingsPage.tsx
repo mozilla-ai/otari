@@ -103,8 +103,8 @@ function NumberSetting({
       : ge !== undefined
         ? parsed >= ge
         : parsed >= 0
-  const valid = wellFormed && withinBounds
-  const changed = valid && parsed !== committed
+  const isValid = wellFormed && withinBounds
+  const hasChanged = isValid && parsed !== committed
 
   return (
     <div className="flex items-center gap-2">
@@ -123,7 +123,7 @@ function NumberSetting({
         size="sm"
         variant="primary"
         aria-label={`Save ${field.key}`}
-        isDisabled={disabled || !changed}
+        isDisabled={disabled || !hasChanged}
         onPress={() => onSave(parsed)}
       >
         Save
@@ -151,7 +151,7 @@ function TextSetting({
   // Save armed for a real change only, and what leaves the box reading the
   // value it just sent.
   const saved = draft.trim() === "" ? "" : draft
-  const changed = saved !== committed
+  const hasChanged = saved !== committed
 
   return (
     <div className="flex items-center gap-2">
@@ -168,7 +168,7 @@ function TextSetting({
         size="sm"
         variant="primary"
         aria-label={`Save ${field.key}`}
-        isDisabled={disabled || !changed}
+        isDisabled={disabled || !hasChanged}
         onPress={() => {
           setDraft(saved)
           onSave(saved === "" ? null : saved)
@@ -573,7 +573,7 @@ export function SettingsPage() {
   const updateSettings = useUpdateSettings()
 
   const data = settings.data
-  const pending = updateSettings.isPending
+  const isPending = updateSettings.isPending
 
   const [search, setSearch] = useState("")
   const [settableOnly, setSettableOnly] = useState(false)
@@ -658,7 +658,7 @@ export function SettingsPage() {
               key={field.key}
               field={field}
               patch={patch}
-              disabled={!data || pending}
+              disabled={!data || isPending}
             />
           ))}
         </SettingsGroup>

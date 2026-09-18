@@ -300,12 +300,12 @@ function AppearanceControl() {
 }
 
 export function AccountMenu({
-  collapsed,
+  isCollapsed,
   deploymentLanding,
   triggerRef,
   onOpenDeploymentLevel,
 }: {
-  collapsed: boolean
+  isCollapsed: boolean
   /**
    * Where the Deployment row goes, or nothing when that rail has no rows for
    * this caller. Resolved by the shell rather than here, because it is the
@@ -347,13 +347,13 @@ export function AccountMenu({
         // a HeroUI `Button`, which arrives centered, and the collapsed rail
         // wants the monogram in the icon column instead.
         className={navRowClass({
-          collapsed,
-          band: true,
+          isCollapsed,
+          isBand: true,
           expandedJustify: "start",
         })}
       >
         <Avatar initials={identity.initials} />
-        {collapsed ? null : (
+        {isCollapsed ? null : (
           <>
             <span className="min-w-0 flex-1 truncate text-left text-foreground">
               {identity.name}

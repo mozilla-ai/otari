@@ -15,11 +15,11 @@ import { useUsers } from "@/shared/api/users"
 function Warmth({
   records,
   seed,
-  warm,
+  isWarm,
 }: {
   records: number
   seed: number
-  warm: boolean
+  isWarm: boolean
 }) {
   const pct =
     seed === 0 ? 100 : Math.min(100, Math.round((records / seed) * 100))
@@ -39,11 +39,11 @@ function Warmth({
       </span>
       <span
         className={`flex items-center gap-2 text-mono-caption ${
-          warm ? "text-foreground" : "text-subtle"
+          isWarm ? "text-foreground" : "text-subtle"
         }`}
       >
-        <Dot className={warm ? "bg-accent" : "bg-text-subtle"} />
-        {warm ? "ROUTING" : "WARMING UP"}
+        <Dot className={isWarm ? "bg-accent" : "bg-text-subtle"} />
+        {isWarm ? "ROUTING" : "WARMING UP"}
       </span>
     </div>
   )
@@ -83,7 +83,7 @@ export function RouterReadiness({
   // cleared, so "nobody chosen" already has a value of its own here.
   const [userId, setUserId] = useState(scopedUserId ?? "")
   const status = useRouterStatus(userId)
-  const chosen = userId !== ""
+  const isChosen = userId !== ""
 
   return (
     <div>
@@ -135,7 +135,7 @@ export function RouterReadiness({
 
           <ErrorBanner error={status.error} />
 
-          {!chosen ? (
+          {!isChosen ? (
             <span className="text-sm text-muted">
               Pick a user to see how warm this policy&apos;s memory is.
             </span>
@@ -148,7 +148,7 @@ export function RouterReadiness({
                 <Warmth
                   records={status.data.default_pool.records}
                   seed={status.data.seed_count}
-                  warm={status.data.default_pool.warm}
+                  isWarm={status.data.default_pool.warm}
                 />
               </div>
               {status.data.tasks.map((pool) => (
@@ -160,7 +160,7 @@ export function RouterReadiness({
                   <Warmth
                     records={pool.records}
                     seed={status.data.seed_count}
-                    warm={pool.warm}
+                    isWarm={pool.warm}
                   />
                 </div>
               ))}

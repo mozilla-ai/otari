@@ -47,7 +47,7 @@ export const Default: Story = {
   render: () => {
     const [open, setOpen] = useState(false)
     return (
-      <SettingsGroup bounded title="Code execution">
+      <SettingsGroup isBounded title="Code execution">
         <DisclosureRow
           label="Per-workspace overrides"
           help="Workspaces that do not follow the deployment default."
@@ -56,7 +56,7 @@ export const Default: Story = {
           onToggle={() => setOpen(!open)}
         >
           <SettingRow
-            nested
+            isNested
             label="checkout-service"
             help="Network access allowed."
             control={
@@ -64,7 +64,7 @@ export const Default: Story = {
             }
           />
           <SettingRow
-            nested
+            isNested
             label="batch-ingest"
             help="Code execution refused."
             control={
@@ -84,7 +84,7 @@ export const Default: Story = {
 /** Open, so the panel and its nested rows are visible without a press. */
 export const Open: Story = {
   render: () => (
-    <SettingsGroup bounded title="Code execution">
+    <SettingsGroup isBounded title="Code execution">
       <DisclosureRow
         label="Per-workspace overrides"
         help="Workspaces that do not follow the deployment default."
@@ -93,7 +93,7 @@ export const Open: Story = {
         onToggle={() => {}}
       >
         <SettingRow
-          nested
+          isNested
           label="checkout-service"
           help="Network access allowed."
           control={
@@ -110,14 +110,14 @@ export const LabelOnly: Story = {
   render: () => {
     const [open, setOpen] = useState(false)
     return (
-      <SettingsGroup bounded title="Advanced">
+      <SettingsGroup isBounded title="Advanced">
         <DisclosureRow
           label="Request headers"
           isOpen={open}
           onToggle={() => setOpen(!open)}
         >
           <SettingRow
-            nested
+            isNested
             label="Forward the caller's user agent"
             control={
               <Toggle

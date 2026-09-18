@@ -19,7 +19,7 @@ import { findProfile } from "@/features/tools/guardrailParameters"
 
 export function GuardrailProfileField({
   catalog,
-  pending,
+  isPending,
   value,
   disabled,
   onChange,
@@ -30,17 +30,17 @@ export function GuardrailProfileField({
    * so the control does not start as a text box and turn into a picker under
    * the operator's cursor a moment later.
    */
-  pending: boolean
+  isPending: boolean
   value: string
   disabled?: boolean
   onChange: (next: string) => void
 }) {
   const profiles = catalog?.profiles ?? []
-  const listed = catalog?.available === true && profiles.length > 0
+  const isListed = catalog?.available === true && profiles.length > 0
   const [byHand, setByHand] = useState(false)
   const chosen = findProfile(catalog, value)
 
-  if (pending) {
+  if (isPending) {
     return (
       <Select
         label="Guardrail profile"
@@ -57,7 +57,7 @@ export function GuardrailProfileField({
     )
   }
 
-  if (!listed || byHand) {
+  if (!isListed || byHand) {
     return (
       <div className="flex flex-col gap-1">
         <Field
@@ -68,14 +68,14 @@ export function GuardrailProfileField({
           isDisabled={disabled}
           placeholder="prompt-injection"
           description={
-            listed
+            isListed
               ? "A profile on whichever guardrails service this entry is sent to."
               : (catalog?.reason ??
                 "The profile has to exist on the guardrails service.")
           }
-          reserveMessage
+          shouldReserveMessage
         />
-        {listed ? (
+        {isListed ? (
           <Button
             size="sm"
             variant="ghost"

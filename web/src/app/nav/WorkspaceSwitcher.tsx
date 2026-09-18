@@ -66,10 +66,10 @@ function MailMark() {
 // policies. Provider credentials are process-wide config rather than a
 // workspace row.
 export function WorkspaceSwitcher({
-  collapsed,
+  isCollapsed,
   createHold,
 }: {
-  collapsed: boolean
+  isCollapsed: boolean
   // Forwarded to the create form's own hold, and only ever set by tests:
   // supplying the beat as a gate is what lets a test enter and leave the
   // dismissal window on purpose, instead of sleeping past a duration it cannot
@@ -114,7 +114,7 @@ export function WorkspaceSwitcher({
   // exactly that), and a single row is stated rather than offered as a control:
   // a menu item whose only effect is to close the menu reads as broken.
   const organizationRows = organizations.data ?? []
-  const switchable = organizationRows.length > 1
+  const isSwitchable = organizationRows.length > 1
   // Absent rather than shown empty: a permanent row reading "0 invitations"
   // would be chrome for something that is almost always nothing. A failed or
   // unserved read (an older gateway, a hybrid one) lands here as "nothing
@@ -162,8 +162,8 @@ export function WorkspaceSwitcher({
           // fill stops at, which is why the height comes from `h-full` rather
           // than from a floor of its own.
           className={
-            collapsed
-              ? `items-center justify-center hover:bg-surface-alt ${navBandRowClass({ collapsed })} ${NAV_TRANSITION}`
+            isCollapsed
+              ? `items-center justify-center hover:bg-surface-alt ${navBandRowClass({ isCollapsed })} ${NAV_TRANSITION}`
               : `items-center justify-start gap-2.5 py-2 text-left hover:bg-surface-alt ${navBandRowClass()} ${NAV_TRANSITION}`
           }
         >
@@ -182,7 +182,7 @@ export function WorkspaceSwitcher({
                 the image is told to fill. */}
             <ProductMark className="h-auto w-7 text-accent" />
           </span>
-          {collapsed ? null : (
+          {isCollapsed ? null : (
             <>
               <span className="flex min-w-0 flex-1 flex-col gap-px">
                 <span className="truncate text-sm leading-[1.125rem] font-semibold tracking-[-0.01em] text-foreground">
@@ -212,7 +212,7 @@ export function WorkspaceSwitcher({
               every other page is looking at, so its failure is reported here
               rather than by closing the menu on a scope that did not move. */}
             <ErrorBanner error={switchOrganization.error} />
-            {switchable ? (
+            {isSwitchable ? (
               <ul className="flex flex-col">
                 {organizationRows.map((membership) => (
                   <li key={membership.organization.id}>

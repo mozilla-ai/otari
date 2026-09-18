@@ -19,11 +19,11 @@ const COLUMNS = {
  */
 export function KpiStrip({
   children,
-  empty,
+  isEmpty,
   columns = 5,
 }: {
   children: ReactNode
-  empty: boolean
+  isEmpty: boolean
   columns?: keyof typeof COLUMNS
 }) {
   return (
@@ -36,7 +36,7 @@ export function KpiStrip({
       contentClassName={COLUMNS[columns]}
       // The graphic row is dropped uniformly in the empty state, so the strip
       // gets shorter without any cell changing shape relative to its neighbors.
-      data-empty={empty ? "true" : undefined}
+      data-empty={isEmpty ? "true" : undefined}
     >
       {children}
     </Section>

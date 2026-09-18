@@ -93,9 +93,9 @@ export function useEntitlements(): Entitlements {
 
 /** Whether this deployment is entitled to a capability. */
 export function useEntitlement(capability: string): {
-  entitled: boolean
+  isEntitled: boolean
   isLoading: boolean
 } {
   const { capabilities, isLoading } = useEntitlements()
-  return { entitled: capabilities.includes(capability), isLoading }
+  return { isEntitled: capabilities.includes(capability), isLoading }
 }

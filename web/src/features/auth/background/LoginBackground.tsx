@@ -72,13 +72,13 @@ export function LoginBackground({
       // repaint in this same frame. Deferring to the interval below leaves the
       // background blank for up to a paint, which is the flash that showed on
       // every keystroke that changed the card's height (otari-ai#2146).
-      const resized = canvas.width !== width || canvas.height !== height
-      if (resized) {
+      const isResized = canvas.width !== width || canvas.height !== height
+      if (isResized) {
         canvas.width = width
         canvas.height = height
       }
       ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
-      return resized
+      return isResized
     }
     const readPalette = () => {
       const style = getComputedStyle(canvas)
@@ -93,24 +93,24 @@ export function LoginBackground({
         lastFrame = 0
         return
       }
-      const invalidated = geometryDirty || paletteDirty
-      const cleared = geometryDirty ? measure() : false
+      const isInvalidated = geometryDirty || paletteDirty
+      const isCleared = geometryDirty ? measure() : false
       if (paletteDirty) readPalette()
       geometryDirty = false
       paletteDirty = false
-      const moving = canAnimate()
-      if (moving && lastFrame)
+      const isMoving = canAnimate()
+      if (isMoving && lastFrame)
         time += Math.min((now - lastFrame) / 1000, 0.1) * speed
-      lastFrame = moving ? now : 0
+      lastFrame = isMoving ? now : 0
       if (
-        cleared ||
-        (invalidated && !moving) ||
+        isCleared ||
+        (isInvalidated && !isMoving) ||
         now - lastPaint >= paintInterval
       ) {
         paint()
         lastPaint = now
       }
-      if (moving) frame = requestAnimationFrame(animate)
+      if (isMoving) frame = requestAnimationFrame(animate)
     }
     const schedule = () => {
       if (!frame && !document.hidden) frame = requestAnimationFrame(animate)

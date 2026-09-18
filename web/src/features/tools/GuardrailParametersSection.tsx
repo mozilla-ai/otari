@@ -29,7 +29,7 @@ export function GuardrailParametersSection({
   errors,
   extraJson,
   extraJsonError,
-  described,
+  isDescribed,
   disabled,
   onChange,
   onExtraJsonChange,
@@ -48,7 +48,7 @@ export function GuardrailParametersSection({
    * profile with an entry and no parameters is still described: it genuinely
    * takes none.
    */
-  described: boolean
+  isDescribed: boolean
   disabled?: boolean
   onChange: (name: string, next: ParameterValues[string]) => void
   onExtraJsonChange: (next: string) => void
@@ -57,7 +57,7 @@ export function GuardrailParametersSection({
   // configuration could go. A raw value the operator cannot find is worse than
   // one more expanded panel; a profile that is described and takes nothing has
   // an empty panel worth collapsing.
-  const [open, setOpen] = useState(extraJson !== "" || !described)
+  const [open, setOpen] = useState(extraJson !== "" || !isDescribed)
 
   return (
     <div className="flex flex-col gap-3">

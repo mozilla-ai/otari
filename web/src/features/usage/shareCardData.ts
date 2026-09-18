@@ -71,7 +71,7 @@ export interface CardStat {
   label: string
   value: string
   /** True when the value carries a caveat the card must show (currently only unpriced cost). */
-  caveated?: boolean
+  isCaveated?: boolean
 }
 
 export interface StatInputs {
@@ -104,7 +104,7 @@ export function availableStats(inputs: StatInputs): CardStat[] {
       id: "cost",
       label: "Spend",
       value: formatUsdHeadline(totals.cost),
-      caveated: costNeedsCaveat(totals),
+      isCaveated: costNeedsCaveat(totals),
     })
   }
   if (totals.request_count > 0) {

@@ -120,7 +120,7 @@ function ModelAllowList({
   const add = useAddWorkspaceProviderKeyModel()
   const remove = useRemoveWorkspaceProviderKeyModel()
   const [draft, setDraft] = useState("")
-  const pending = add.isPending || remove.isPending
+  const isPending = add.isPending || remove.isPending
   const trimmed = draft.trim()
 
   // The catalog spells a model `provider:model` and the allow-list stores the
@@ -218,7 +218,7 @@ function ModelAllowList({
           placeholder={suggestions[0] ?? "model name"}
           isInvalid={invalidReason !== undefined}
           errorMessage={invalidReason}
-          reserveMessage={false}
+          shouldReserveMessage={false}
           isSourceEmpty={available.length === 0}
           emptyMessage={emptyMessage}
           noMatchesMessage="No catalog entry matches. Type the model id to allow it anyway."
@@ -229,7 +229,9 @@ function ModelAllowList({
           // Named per key, as the picker above it is: the form holds one of
           // these per key, and "Allow" alone names all of them the same.
           aria-label={`Allow a model on ${keyName}`}
-          isDisabled={pending || trimmed === "" || invalidReason !== undefined}
+          isDisabled={
+            isPending || trimmed === "" || invalidReason !== undefined
+          }
           onPress={() =>
             add.mutate(
               { workspaceId, keyId, model: trimmed },
@@ -263,7 +265,7 @@ export function WorkspaceProviderKeys({
       : "ready"
 
   const byId = new Map((orgKeys.data ?? []).map((key) => [key.id, key]))
-  const pending = setOverride.isPending || resetOverride.isPending
+  const isPending = setOverride.isPending || resetOverride.isPending
 
   // `provider:model`, which is how the catalog names an entry and how a model
   // restriction does not. Grouped once rather than per key, since an
@@ -388,7 +390,7 @@ export function WorkspaceProviderKeys({
                     if (chosen) choose(keyId, chosen)
                   }}
                   options={DEPARTURE_OPTIONS}
-                  disabled={pending}
+                  disabled={isPending}
                 />
                 {departure === "disabled" ? (
                   // Not a control: the gateway refuses an allow-list write on a

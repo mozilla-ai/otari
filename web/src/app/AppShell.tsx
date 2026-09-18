@@ -213,16 +213,16 @@ function NavRowLink({
   label,
   icon: Icon,
   isActive,
-  collapsed,
-  nested,
+  isCollapsed,
+  isNested,
   onNavigate,
 }: {
   to: NavPath
   label: string
   icon?: IconType
   isActive: boolean
-  collapsed?: boolean
-  nested?: boolean
+  isCollapsed?: boolean
+  isNested?: boolean
   onNavigate: () => void
 }) {
   const recordNavigation = useRecordNavigation()
@@ -237,18 +237,18 @@ function NavRowLink({
         recordNavigation(to, isActive)
         onNavigate()
       }}
-      className={navRowClass({ isActive, collapsed, nested })}
-      aria-label={collapsed ? label : undefined}
-      title={collapsed ? label : undefined}
+      className={navRowClass({ isActive, isCollapsed, isNested })}
+      aria-label={isCollapsed ? label : undefined}
+      title={isCollapsed ? label : undefined}
     >
       {/* A nested row draws no glyph: the indent is what marks it as one, and
           repeating the parent's lane would undo that. The flyout a collapsed
           group opens is the exception, and it is not nested: those rows hang in
           a menu with no indent to read. */}
-      {Icon && !nested ? (
+      {Icon && !isNested ? (
         <Icon className={NAV_ICON_CLASS} aria-hidden="true" />
       ) : null}
-      {collapsed ? null : (
+      {isCollapsed ? null : (
         <span className="min-w-0 flex-1 truncate">{label}</span>
       )}
     </Link>
@@ -282,13 +282,13 @@ function NavGroup({
   currentPath,
   onNavigate,
   isVisible,
-  collapsed,
+  isCollapsed,
 }: {
   item: NavItem
   currentPath: string
   onNavigate: () => void
   isVisible: (item: NavItem) => boolean
-  collapsed: boolean
+  isCollapsed: boolean
 }) {
   // A child declaring its own surface is gated on it. Without this the field
   // was decoration: Guardrails is grouped under Routing but served by the tools
@@ -316,13 +316,13 @@ function NavGroup({
         label={item.label}
         icon={item.icon}
         isActive={currentPath === only.to}
-        collapsed={collapsed}
+        isCollapsed={isCollapsed}
         onNavigate={onNavigate}
       />
     )
   }
 
-  if (collapsed) {
+  if (isCollapsed) {
     return (
       <Popover isOpen={flyoutOpen} onOpenChange={setFlyoutOpen}>
         {/* HeroUI's Button, not a plain one: the popover wires its trigger
@@ -330,7 +330,7 @@ function NavGroup({
         <Button
           variant="ghost"
           aria-label={item.label}
-          className={`${navRowClass({ isActive: holdsCurrent, collapsed: true })} w-auto!`}
+          className={`${navRowClass({ isActive: holdsCurrent, isCollapsed: true })} w-auto!`}
         >
           <item.icon className={NAV_ICON_CLASS} aria-hidden="true" />
         </Button>
@@ -391,7 +391,9 @@ function NavGroup({
               which is visible whenever this trigger is expanded. The collapsed
               rail's trigger a few lines up keeps the full selected marker,
               because there no child is on screen to carry it. */}
-        <Disclosure.Trigger className={navRowClass({ ancestor: holdsCurrent })}>
+        <Disclosure.Trigger
+          className={navRowClass({ isAncestor: holdsCurrent })}
+        >
           <item.icon className={NAV_ICON_CLASS} aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate text-left">
             {item.label}
@@ -427,7 +429,7 @@ function NavGroup({
             label={child.label}
             icon={child.icon}
             isActive={currentPath === child.to}
-            nested
+            isNested
             onNavigate={onNavigate}
           />
         ))}
@@ -890,8 +892,8 @@ function AppShellChrome() {
                       closeMobileNav()
                     }}
                     className={navRowClass({
-                      collapsed: effectiveCollapsed,
-                      band: true,
+                      isCollapsed: effectiveCollapsed,
+                      isBand: true,
                     })}
                     aria-label={effectiveCollapsed ? backLabel : undefined}
                     title={effectiveCollapsed ? backLabel : undefined}
@@ -919,7 +921,7 @@ function AppShellChrome() {
                     type="button"
                     ref={railBackRef}
                     onClick={() => setMobileRailLevel(undefined)}
-                    className={`${navRowClass({ band: true })} cursor-pointer`}
+                    className={`${navRowClass({ isBand: true })} cursor-pointer`}
                   >
                     <FiArrowLeft
                       aria-hidden="true"
@@ -932,7 +934,7 @@ function AppShellChrome() {
                 )}
               </div>
             ) : (
-              <WorkspaceSwitcher collapsed={effectiveCollapsed} />
+              <WorkspaceSwitcher isCollapsed={effectiveCollapsed} />
             )}
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-4 p-3">
@@ -975,7 +977,7 @@ function AppShellChrome() {
                             currentPath={pathname}
                             onNavigate={closeMobileNav}
                             isVisible={isVisible}
-                            collapsed={effectiveCollapsed}
+                            isCollapsed={effectiveCollapsed}
                           />
                         ) : (
                           // Highlighted from the registry's own answer rather than
@@ -991,7 +993,7 @@ function AppShellChrome() {
                             label={item.label}
                             icon={item.icon}
                             isActive={currentItem?.to === item.to}
-                            collapsed={effectiveCollapsed}
+                            isCollapsed={effectiveCollapsed}
                             // Tapping a destination dismisses the mobile drawer so
                             // the page it landed on is visible, not behind it.
                             onNavigate={closeMobileNav}
@@ -1067,7 +1069,7 @@ function AppShellChrome() {
                         organizationLanding?.to ?? "/organization/members"
                       recordNavigation(to, pathname === to)
                     }}
-                    className={navRowClass({ collapsed: effectiveCollapsed })}
+                    className={navRowClass({ isCollapsed: effectiveCollapsed })}
                     aria-label={effectiveCollapsed ? "Organization" : undefined}
                     title={
                       effectiveCollapsed
@@ -1101,7 +1103,7 @@ function AppShellChrome() {
                 so the rail ended differently depending on who was looking. */}
               <div className="-mx-3 flex h-14 shrink-0 items-center border-t border-border">
                 <AccountMenu
-                  collapsed={effectiveCollapsed}
+                  isCollapsed={effectiveCollapsed}
                   triggerRef={accountTriggerRef}
                   // Below `md` the Deployment row opens a level inside the
                   // drawer instead of navigating: the popover it lives in is

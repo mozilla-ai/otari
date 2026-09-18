@@ -67,7 +67,7 @@ export function RenameOrganizationDialog({
         isRequired
         autoFocus
         description="What this deployment's tenant is called across the dashboard. The slug does not follow a rename."
-        reserveMessage
+        shouldReserveMessage
       />
     </FormDialog>
   )

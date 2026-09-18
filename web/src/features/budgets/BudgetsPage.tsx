@@ -99,12 +99,12 @@ const CUSTOM_PERIOD = "custom"
 
 // A non-negative dollar amount, empty for "unlimited". Parsed leniently; the
 // caller decides what an empty or invalid value means.
-function parseLimit(raw: string): { value: number | null; valid: boolean } {
+function parseLimit(raw: string): { value: number | null; isValid: boolean } {
   const trimmed = raw.trim()
-  if (trimmed === "") return { value: null, valid: true }
+  if (trimmed === "") return { value: null, isValid: true }
   const n = Number(trimmed)
-  if (!Number.isFinite(n) || n < 0) return { value: null, valid: false }
-  return { value: n, valid: true }
+  if (!Number.isFinite(n) || n < 0) return { value: null, isValid: false }
+  return { value: n, isValid: true }
 }
 
 // Whole-day string for a duration, or "" when it is not a whole number of days,
@@ -286,8 +286,8 @@ function BudgetForm({
   // the form cannot be sent, and `submit` refuses while that OR a save is in
   // flight. Pending is not part of `blocked` because a request in flight is not
   // a reason to paint the button as refused.
-  const blocked = !parsed.valid || periodInvalid
-  const canSubmit = !isPending && !blocked
+  const isBlocked = !parsed.isValid || periodInvalid
+  const canSubmit = !isPending && !isBlocked
   // Everything the operator can change, in one snapshot. The people are sorted
   // into it because the picker appends in click order, and a guard that read
   // two orderings of one selection as a change would arm on the way back to
@@ -304,7 +304,7 @@ function BudgetForm({
   // description rather than as the placeholder, which design/forms.md reserves
   // for an example of what to type.
   const unnamedLabel = unnamedBudgetLabel({
-    max_budget: parsed.valid ? parsed.value : null,
+    max_budget: parsed.isValid ? parsed.value : null,
     token_limit: uneditedLimits?.token_limit ?? null,
     request_limit: uneditedLimits?.request_limit ?? null,
     reset_alignment: null,
@@ -336,7 +336,7 @@ function BudgetForm({
       submitLabel={submitLabel}
       onSubmit={submit}
       isPending={isPending}
-      isSubmitDisabled={blocked}
+      isSubmitDisabled={isBlocked}
       isDirty={isDirty}
       returnFocusRef={returnFocusRef}
       error={error}
@@ -355,7 +355,7 @@ function BudgetForm({
         onChange={setLimit}
         placeholder="100.00"
         description={
-          parsed.valid ? (
+          parsed.isValid ? (
             "The most a single user on this budget may spend per period. Leave blank for no limit."
           ) : (
             <span className="text-danger">

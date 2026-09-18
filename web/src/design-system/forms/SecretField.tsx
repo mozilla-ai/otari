@@ -20,7 +20,7 @@ export function SecretField({
   description,
   isInvalid,
   errorMessage,
-  reserveMessage,
+  shouldReserveMessage,
   isDisabled,
   isRequired,
 }: {
@@ -35,7 +35,7 @@ export function SecretField({
   errorMessage?: string
   /** See `Field`: holds one caption line open so a message does not move the
       form. Off for a field in a table row or a toolbar. */
-  reserveMessage?: boolean
+  shouldReserveMessage?: boolean
   /** Renders the input read-only and dimmed, as `Field`'s own does. */
   isDisabled?: boolean
   /** Marks the field required, so the label carries the same marker `Field` shows. */
@@ -61,7 +61,7 @@ export function SecretField({
         data-1p-ignore
         data-lpignore="true"
       />
-      <FieldMessages reserve={reserveMessage}>
+      <FieldMessages shouldReserve={shouldReserveMessage}>
         {description ? (
           <Description className="text-muted">{description}</Description>
         ) : null}

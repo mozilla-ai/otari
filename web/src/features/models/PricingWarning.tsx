@@ -49,7 +49,7 @@ export function PricingWarning() {
     isOperator &&
     settings.data?.require_pricing === true &&
     settings.data.default_pricing === false
-  const showing = needsPricing && !dismissed
+  const isShowing = needsPricing && !dismissed
 
   // Every failure class the gateway served is counted (402 no pricing, 403 budget
   // or model access, 502 provider), not only the pricing rejections: the operator's
@@ -57,10 +57,10 @@ export function PricingWarning() {
   // failure is safer than a banner reading "0" while requests are being dropped.
   // Imported usage is excluded, so the link's filtered view matches this count.
   // Only polled while the alarm is up.
-  const failures = useFailureCount(HOUR_S, showing)
+  const failures = useFailureCount(HOUR_S, isShowing)
   const failureCount = failures.data?.total ?? 0
 
-  if (!showing) {
+  if (!isShowing) {
     return null
   }
 

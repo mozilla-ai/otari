@@ -120,7 +120,7 @@ describe("availableStats", () => {
       series,
       hideDollars: false,
     })
-    expect(stats.find((s) => s.id === "cost")?.caveated).toBe(true)
+    expect(stats.find((s) => s.id === "cost")?.isCaveated).toBe(true)
   })
 
   it("does not caveat cost when the gateway reports zero unpriced requests", () => {
@@ -129,7 +129,7 @@ describe("availableStats", () => {
       series,
       hideDollars: false,
     })
-    expect(stats.find((s) => s.id === "cost")?.caveated).toBe(false)
+    expect(stats.find((s) => s.id === "cost")?.isCaveated).toBe(false)
   })
 
   it("drops cost entirely when dollars are hidden", () => {

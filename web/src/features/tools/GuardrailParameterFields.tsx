@@ -77,7 +77,7 @@ function ParameterControl({
         isDisabled={disabled}
         isInvalid={Boolean(error)}
         errorMessage={error}
-        reserveMessage
+        shouldReserveMessage
       />
     )
   }
@@ -98,7 +98,7 @@ function ParameterControl({
             ...spec.choices.map((choice) => ({ value: choice, label: choice })),
           ]}
         />
-        <FieldMessages reserve>
+        <FieldMessages shouldReserve>
           {error ? (
             <span className="text-caption text-danger">{error}</span>
           ) : description ? (
@@ -125,7 +125,7 @@ function ParameterControl({
           placeholder={placeholderFor(spec) ?? "[]"}
           className="font-mono text-xs"
         />
-        <FieldMessages reserve>
+        <FieldMessages shouldReserve>
           <Description
             className={error ? "text-caption text-danger" : "text-caption"}
           >
@@ -146,7 +146,7 @@ function ParameterControl({
       errorMessage={error}
       placeholder={placeholderFor(spec)}
       description={description}
-      reserveMessage
+      shouldReserveMessage
     />
   )
 }

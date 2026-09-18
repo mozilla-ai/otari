@@ -113,7 +113,7 @@ export function McpServerDialog({
     typedToken || (!clearToken && Boolean(editing?.has_token))
 
   const urlReason = urlProblem(url, willHaveToken)
-  const invalid =
+  const isInvalid =
     name.trim() === "" || url.trim() === "" || urlReason !== undefined
   // One predicate naming every field the operator can change, so "is there
   // anything to lose" cannot drift from what the form actually holds.
@@ -128,7 +128,7 @@ export function McpServerDialog({
   })
 
   const submit = () => {
-    if (invalid) return
+    if (isInvalid) return
     onSubmit({
       name: name.trim(),
       url: url.trim(),
@@ -160,7 +160,7 @@ export function McpServerDialog({
       submitLabel={editing ? "Save server" : "Add MCP server"}
       onSubmit={submit}
       isPending={isPending}
-      isSubmitDisabled={invalid}
+      isSubmitDisabled={isInvalid}
       isDirty={isDirty}
       error={error}
     >

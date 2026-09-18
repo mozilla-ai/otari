@@ -10,7 +10,7 @@ import { type RefObject, useEffect, useRef } from "react"
  * controls on the page, so the arm step has to hand focus to Confirm and the
  * cancel step has to hand it back.
  */
-export function useConfirmationFocus(armed: boolean): {
+export function useConfirmationFocus(isArmed: boolean): {
   triggerRef: RefObject<HTMLButtonElement | null>
   confirmRef: RefObject<HTMLButtonElement | null>
 } {
@@ -21,13 +21,13 @@ export function useConfirmationFocus(armed: boolean): {
   const wasArmed = useRef(false)
 
   useEffect(() => {
-    if (armed) {
+    if (isArmed) {
       wasArmed.current = true
       confirmRef.current?.focus()
     } else if (wasArmed.current) {
       triggerRef.current?.focus()
     }
-  }, [armed])
+  }, [isArmed])
 
   return { triggerRef, confirmRef }
 }

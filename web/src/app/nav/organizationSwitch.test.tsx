@@ -183,7 +183,7 @@ function renderShellOverPage() {
     <QueryClientProvider client={client}>
       <DeploymentProvider value={bootstrap()}>
         <SelectedWorkspaceProvider>
-          <WorkspaceSwitcher collapsed={false} />
+          <WorkspaceSwitcher isCollapsed={false} />
           <OverviewIndex />
         </SelectedWorkspaceProvider>
       </DeploymentProvider>

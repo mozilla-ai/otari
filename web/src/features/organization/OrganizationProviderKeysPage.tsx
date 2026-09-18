@@ -145,7 +145,7 @@ function KeyForm({
     draft.redacted,
   )
   const spec = credentialSpecFor(draft.provider)
-  const pending = create.isPending || update.isPending
+  const isPending = create.isPending || update.isPending
   // The whole draft against what the form was seeded with, so a guard cannot
   // miss a field the form grows later.
   const { isDirty } = useDirtySnapshot(draft)
@@ -200,7 +200,7 @@ function KeyForm({
       description={editing ? editing.name : undefined}
       submitLabel={editing ? "Save" : "Add provider key"}
       onSubmit={submit}
-      isPending={pending}
+      isPending={isPending}
       isSubmitDisabled={!canSubmit}
       isDirty={isDirty}
       error={create.error ?? update.error}

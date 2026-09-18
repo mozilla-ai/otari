@@ -61,7 +61,7 @@ export const TheReserve: Story = {
             onChange={setWith}
             isInvalid={with_.length > 0 && with_.length < 3}
             errorMessage="At least 3 characters."
-            reserveMessage
+            shouldReserveMessage
           />
           <div className="border-t border-border pt-2 text-caption">
             This line does not.
@@ -114,7 +114,7 @@ export const WithoutReserve: Story = {
             {["staging", "sandbox"].map((row) => (
               <div key={row} className="px-3 py-2">
                 <span className="text-body">{row}</span>
-                <FieldMessages reserve={reserve}>{null}</FieldMessages>
+                <FieldMessages shouldReserve={reserve}>{null}</FieldMessages>
               </div>
             ))}
           </div>

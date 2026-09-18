@@ -62,8 +62,8 @@ export function DeploymentAccountsPage() {
   // Withheld until the gate answers: fetching the list first would put a 404 in
   // the console on every non-operator load to learn what `access` is about to
   // say, and the query would be discarded either way.
-  const granted = access.data === true
-  const accounts = useDeploymentUsers(granted)
+  const isGranted = access.data === true
+  const accounts = useDeploymentUsers(isGranted)
   const update = useUpdateDeploymentUser()
   const [deactivating, setDeactivating] = useState<DeploymentUser>()
 
@@ -230,7 +230,7 @@ export function DeploymentAccountsPage() {
   // not one lands here rather than being signed out. The sidebar drops the row
   // on the same answer, which makes this the state of somebody who arrived by
   // URL or whose access was taken away while the page was open.
-  if (!granted) {
+  if (!isGranted) {
     return (
       <div className="flex flex-col">
         <PageIntro title="Accounts" />

@@ -81,7 +81,7 @@ export function PasswordDialog({
   onOpenChange: (open: boolean) => void
   shape: PasswordFormShape
   /** Called with what landed, so the card can report it once this closes. */
-  onSaved: (outcome: { email: string; claimed: boolean }) => void
+  onSaved: (outcome: { email: string; isClaimed: boolean }) => void
 }) {
   const retireMasterKeySignIn = useRetireMasterKeySignIn()
   const setPassword = useSetPassword()
@@ -92,16 +92,16 @@ export function PasswordDialog({
 
   const { needsEmail, needsCurrentPassword, claimsDeployment } = shape
   const problem = newPasswordProblem(newPassword, confirmPassword)
-  const unchanged =
+  const isUnchanged =
     needsCurrentPassword &&
     newPassword !== "" &&
     newPassword === currentPassword
-  const complete =
+  const isComplete =
     newPassword !== "" &&
     confirmPassword !== "" &&
     (!needsEmail || email.trim() !== "") &&
     (!needsCurrentPassword || currentPassword !== "")
-  const canSubmit = complete && problem === null && !unchanged
+  const canSubmit = isComplete && problem === null && !isUnchanged
 
   // A refusal describes a call that is no longer the one being made, so typing
   // clears it. Never while one is in flight: `reset()` returns the observer to
@@ -126,7 +126,7 @@ export function PasswordDialog({
       },
       {
         onSuccess: (result) => {
-          onSaved({ email: result.email, claimed: claimsDeployment })
+          onSaved({ email: result.email, isClaimed: claimsDeployment })
           // The server's own assertion, not an inference from which form was
           // submitted: it answers this on a change as well, and it is the fact
           // the rest of the tab has to act on.
@@ -222,7 +222,7 @@ export function PasswordDialog({
           {problem}
         </p>
       ) : null}
-      {unchanged ? (
+      {isUnchanged ? (
         <p role="alert" className="text-caption text-danger">
           The new password cannot be the one you already use.
         </p>

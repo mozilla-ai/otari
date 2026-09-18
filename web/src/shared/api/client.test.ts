@@ -272,7 +272,7 @@ describe("createSession", () => {
       // a refusal that must not be recorded anywhere. A deployment frozen for
       // maintenance and a wrong credential are not the same funnel step.
       await expect(createSession({ masterKey: "test-key" })).resolves.toEqual({
-        ok: false,
+        isOk: false,
         message: "refused, and here is why",
         status,
       })
@@ -291,7 +291,7 @@ describe("createSession credentials", () => {
       password: "a-real-password",
     })
 
-    expect(result).toEqual({ ok: true })
+    expect(result).toEqual({ isOk: true })
     expect(fetchMock.mock.calls[0][1]?.body).toBe(
       JSON.stringify({
         email: "operator@example.com",
@@ -318,7 +318,7 @@ describe("createSession credentials", () => {
       // refusals apart without re-reading the wording, which is the one part of
       // a refusal that must not be recorded anywhere.
       await expect(createSession({ masterKey: "k" })).resolves.toEqual({
-        ok: false,
+        isOk: false,
         message: detail,
         status,
       })

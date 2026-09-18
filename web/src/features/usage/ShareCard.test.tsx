@@ -42,7 +42,7 @@ describe("ShareCard", () => {
         id: "cost",
         label: "Spend",
         value: "$412.00",
-        caveated: true,
+        isCaveated: true,
       } satisfies CardStat,
     })
     expect(screen.getByText("Spend*")).toBeInTheDocument()
@@ -50,7 +50,7 @@ describe("ShareCard", () => {
 
   it("prints a legend for the caveat asterisk, which travels with the file", () => {
     renderCard({
-      hero: { id: "cost", label: "Spend", value: "$412.00", caveated: true },
+      hero: { id: "cost", label: "Spend", value: "$412.00", isCaveated: true },
       unpricedRequests: 63,
     })
     expect(screen.getByText(/63 requests unpriced/)).toBeInTheDocument()

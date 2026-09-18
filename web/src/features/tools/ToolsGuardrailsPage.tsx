@@ -50,13 +50,13 @@ const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
     label: "Backend URL",
     help: "While unset, otari_web_search requests are rejected with 400.",
     placeholder: "http://searxng:8080",
-    machine: true,
+    isMachineReadable: true,
   },
   web_search_engines: {
     label: "Engines",
     help: "Comma-separated SearXNG engines. Blank uses the backend's defaults.",
     placeholder: "google,bing,duckduckgo",
-    machine: true,
+    isMachineReadable: true,
   },
   web_search_max_results: {
     label: "Max results",
@@ -84,13 +84,13 @@ const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
     label: "Backend URL",
     help: "While unset, otari_code_execution requests are rejected with 400.",
     placeholder: "http://sandbox:8080",
-    machine: true,
+    isMachineReadable: true,
   },
   sandbox_session_image: {
     label: "Session image",
     help: "The image a leased session runs. Blank lets the backend choose.",
     placeholder: "mzdotai/otari-sandbox-container:latest",
-    machine: true,
+    isMachineReadable: true,
   },
   sandbox_purpose_hint: {
     label: "Purpose hint",
@@ -101,7 +101,7 @@ const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
     label: "Backend URL",
     help: "Used when a request does not pass a guardrail URL of its own.",
     placeholder: "http://guardrails:8000",
-    machine: true,
+    isMachineReadable: true,
   },
 }
 
@@ -113,7 +113,7 @@ function copyFor(field: ToolSettingField): FieldCopy & {
       label: field.key,
       help: field.description ?? "",
       placeholder: "",
-      machine: true,
+      isMachineReadable: true,
     }
   )
 }
@@ -141,7 +141,7 @@ interface GroupSpec {
   docsAnchor: string
   keys: string[]
   /** The group the tool's own per-call price belongs in. */
-  priced?: boolean
+  isPriced?: boolean
   /** Where a key the backend added but this page has not been told about goes. */
   catchAll?: boolean
 }
@@ -193,7 +193,7 @@ const SERVICES: ServiceSpec[] = [
           "web_search_engines",
           "web_search_max_results",
         ],
-        priced: true,
+        isPriced: true,
       },
       {
         title: "Behavior",
@@ -228,7 +228,7 @@ const SERVICES: ServiceSpec[] = [
         blurb: "The sandbox that runs generated code for otari_code_execution.",
         docsAnchor: "code-execution",
         keys: ["sandbox_url", "sandbox_session_image"],
-        priced: true,
+        isPriced: true,
       },
       {
         title: "Behavior",
@@ -296,7 +296,7 @@ function LoadingGroups() {
   return (
     <>
       {[0, 1].map((group) => (
-        <SettingsGroup bounded key={group}>
+        <SettingsGroup isBounded key={group}>
           {[0, 1, 2].map((row) => (
             <div
               key={row}
@@ -425,11 +425,11 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
               // a member would get an editable "unpriced" row that can only
               // fail on save.
               const pricedTools =
-                group.priced && isOperator ? (service.managedTools ?? []) : []
+                group.isPriced && isOperator ? (service.managedTools ?? []) : []
               if (fields.length === 0 && pricedTools.length === 0) return null
               return (
                 <SettingsGroup
-                  bounded
+                  isBounded
                   key={group.title}
                   // On the combined page the service is not otherwise named,
                   // and three groups called "Backend" say nothing about which

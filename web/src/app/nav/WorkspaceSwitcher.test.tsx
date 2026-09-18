@@ -134,7 +134,7 @@ function renderSwitcher() {
   return renderWithRouter(
     <Provider>
       <SelectedWorkspaceProvider>
-        <WorkspaceSwitcher collapsed={false} />
+        <WorkspaceSwitcher isCollapsed={false} />
       </SelectedWorkspaceProvider>
     </Provider>,
   )
@@ -416,7 +416,7 @@ function renderSwitcherOnAPage(
   const shell = (
     <Provider>
       <SelectedWorkspaceProvider>
-        <WorkspaceSwitcher collapsed={false} createHold={options.hold} />
+        <WorkspaceSwitcher isCollapsed={false} createHold={options.hold} />
         <Outlet />
       </SelectedWorkspaceProvider>
     </Provider>

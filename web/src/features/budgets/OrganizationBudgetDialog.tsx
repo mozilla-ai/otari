@@ -175,7 +175,7 @@ export function OrganizationBudgetDialog({
           value: option.value,
           label: option.label,
         }))}
-        reserveMessage={false}
+        shouldReserveMessage={false}
       />
       {editing && editing.ceiling_count > 0 ? (
         <p className="text-sm text-muted">

@@ -46,7 +46,7 @@ export function MultiSelect({
   onChange,
   isInvalid,
   errorMessage,
-  reserveMessage,
+  shouldReserveMessage,
   searchPlaceholder = "Search…",
   emptyMessage = "Nothing to choose from.",
   noMatchesMessage = "Nothing matches what you typed.",
@@ -61,7 +61,7 @@ export function MultiSelect({
   onChange: (next: string[]) => void
   isInvalid?: boolean
   errorMessage?: ReactNode
-  reserveMessage?: boolean
+  shouldReserveMessage?: boolean
   /** The closed field's text while nothing is picked. */
   searchPlaceholder?: string
   /** Shown in the popover when there is nothing to offer at all. */
@@ -132,7 +132,7 @@ export function MultiSelect({
   // Capped after the filter, never before: the query has to see every option,
   // and only the rendering is bounded.
   const matches = reached.slice(0, maxVisible)
-  const capped = reached.length > matches.length
+  const isCapped = reached.length > matches.length
   const selectedMatches = matches.filter((option) =>
     value.includes(option.id),
   ).length
@@ -380,7 +380,7 @@ export function MultiSelect({
               {/* Two facts, two clauses. Nested, they read as one garbled
                   sentence: "0 of 3 matches selected of 8". */}
               <span>
-                {capped
+                {isCapped
                   ? `Showing ${matches.length} of ${reached.length} · `
                   : ""}
                 {selectedMatches} of {matches.length} selected here ·{" "}
@@ -421,7 +421,7 @@ export function MultiSelect({
           rather than above the field, because that is where a `Field` puts it
           and a dialog full of `Field`s should not have one control speaking
           from somewhere else. */}
-      <FieldMessages reserve={reserveMessage}>
+      <FieldMessages shouldReserve={shouldReserveMessage}>
         {isInvalid && errorMessage ? (
           <span id={errorId} className="text-danger">
             {errorMessage}

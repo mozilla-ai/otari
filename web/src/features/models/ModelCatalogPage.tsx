@@ -131,8 +131,8 @@ function FilterGroup({
   )
 }
 
-function toggle(list: string[], value: string, on: boolean): string[] {
-  return on
+function toggle(list: string[], value: string, isOn: boolean): string[] {
+  return isOn
     ? [...new Set([...list, value])]
     : list.filter((entry) => entry !== value)
 }
@@ -184,10 +184,10 @@ function FilterRail({
           <Checkbox
             key={modality}
             isSelected={filters.inputModalities.includes(modality)}
-            onChange={(on) =>
+            onChange={(isOn) =>
               set(
                 "inputModalities",
-                toggle(filters.inputModalities, modality, on),
+                toggle(filters.inputModalities, modality, isOn),
               )
             }
           >
@@ -203,10 +203,10 @@ function FilterRail({
           <Checkbox
             key={modality}
             isSelected={filters.outputModalities.includes(modality)}
-            onChange={(on) =>
+            onChange={(isOn) =>
               set(
                 "outputModalities",
-                toggle(filters.outputModalities, modality, on),
+                toggle(filters.outputModalities, modality, isOn),
               )
             }
           >
@@ -238,8 +238,8 @@ function FilterRail({
           <Checkbox
             key={option.value}
             isSelected={filters.providers.includes(option.value)}
-            onChange={(on) =>
-              set("providers", toggle(filters.providers, option.value, on))
+            onChange={(isOn) =>
+              set("providers", toggle(filters.providers, option.value, isOn))
             }
           >
             {option.label}
@@ -251,8 +251,8 @@ function FilterRail({
           <Checkbox
             key={option.value || "unknown"}
             isSelected={filters.vendors.includes(option.value)}
-            onChange={(on) =>
-              set("vendors", toggle(filters.vendors, option.value, on))
+            onChange={(isOn) =>
+              set("vendors", toggle(filters.vendors, option.value, isOn))
             }
           >
             {option.label}
@@ -264,8 +264,11 @@ function FilterRail({
           <Checkbox
             key={entry.value}
             isSelected={filters.capabilities.includes(entry.value)}
-            onChange={(on) =>
-              set("capabilities", toggle(filters.capabilities, entry.value, on))
+            onChange={(isOn) =>
+              set(
+                "capabilities",
+                toggle(filters.capabilities, entry.value, isOn),
+              )
             }
           >
             {entry.label}

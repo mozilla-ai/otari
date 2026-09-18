@@ -42,8 +42,8 @@ function useGatewayUnreachable(): boolean {
 // dismissible: it is tied to live state and disappears on its own once the
 // gateway responds.
 export function ConnectionStatus() {
-  const unreachable = useGatewayUnreachable()
-  if (!unreachable) {
+  const isUnreachable = useGatewayUnreachable()
+  if (!isUnreachable) {
     return null
   }
 
