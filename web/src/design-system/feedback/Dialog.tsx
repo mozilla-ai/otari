@@ -117,7 +117,7 @@ export interface DialogProps {
  * Controlled only, like every dialog here, and it mounts its body only while
  * open so one opening's state cannot survive into the next.
  *
- * It shares `FormDialog`'s geometry class family in `globals.css`, which is why
+ * It shares `FormDialog`'s geometry class family in `design-system.css`, which is why
  * both sit at the same height, cap at the same viewport budget and become the
  * same full-screen sheet on a phone. A second set of numbers under a second
  * prefix would be one edit away from two dialogs that no longer match.

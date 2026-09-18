@@ -445,21 +445,30 @@ describe("the layout", () => {
 
 // The extraction contract has a second half the import probes above cannot see.
 // `design-system/` compiles with the rest of `src/` deleted, which is what they
-// prove; it does not *look* like itself, because the classes its primitives wear
-// are declared in `src/styles/globals.css`, one directory over. Nothing failed
-// when that drifted, so a deleted rule reached a reviewer as a component
-// rendering unstyled rather than as a red test.
+// prove; whether it still *looks* like itself is a question about CSS, and
+// nothing failed when that drifted, so a deleted rule reached a reviewer as a
+// component rendering unstyled rather than as a red test.
 //
-// What this proves and what it does not: it catches a rule deleted or renamed out
+// The file read below is the design system's own stylesheet, not the
+// application's, which is what makes the folder move real: a class a primitive
+// wears has to be declared inside the directory that would ship. A rule put back
+// in `globals.css` fails here, which is the point.
+//
+// What this proves and what it does not. It catches a rule deleted or renamed out
 // from under a primitive, and a size added to a dialog's union with no rule to
-// match. It does not make the directory extractable, because the declarations are
-// still in the application's stylesheet. Moving them is the other half of #1346;
-// this is what stops the dependency rotting while that waits.
+// match. It does not catch a *second* rule for one of these classes added to
+// `globals.css`, because several legitimately live there: the ghost-border
+// family names `.otari-toolbar`, `.otari-table` and `.otari-bulk-bar` beside the
+// feature places it also covers, and splitting that decision across two files
+// would cost more than the check is worth.
 describe("the design system's stylesheet dependency", () => {
   const DESIGN_SYSTEM = join(WEB, "src", "design-system")
-  const GLOBALS = join(WEB, "src", "styles", "globals.css")
+  const STYLESHEET = join(DESIGN_SYSTEM, "design-system.css")
 
-  /** Every `.tsx` under `design-system/` that ships, so no story and no test. */
+  /**
+   * Every `.tsx` under `design-system/` that ships, so no story and no test.
+   * A `.css` beside them is not a source file either.
+   */
   function sourceFiles(dir: string): string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
       const full = join(dir, entry.name)
@@ -506,10 +515,10 @@ describe("the design system's stylesheet dependency", () => {
    * Comments come out of the stylesheet for the same reason they come out of the
    * source, and the case is not hypothetical: `.otari-markdown` is named twice
    * in `globals.css` explaining why the rules that used to carry it are gone,
-   * and reading the file raw counts it as declared. A primitive wearing a class
-   * that survives only in prose is exactly what this is meant to catch.
+   * and reading a file raw counts a class like that as declared. A primitive
+   * wearing a class that survives only in prose is what this is meant to catch.
    */
-  function declared(css = readFileSync(GLOBALS, "utf8")): Set<string> {
+  function declared(css = readFileSync(STYLESHEET, "utf8")): Set<string> {
     const rules = css.replace(/\/\*[\s\S]*?\*\//g, "")
     return new Set([
       ...[...rules.matchAll(/\.(otari-[A-Za-z0-9_-]+)/g)].map((m) => m[1]),
@@ -524,6 +533,29 @@ describe("the design system's stylesheet dependency", () => {
     // and pass. Same shape as deprecated.test.ts's.
     expect(sourceFiles(DESIGN_SYSTEM).length).toBeGreaterThan(50)
     expect(worn().literals.size).toBeGreaterThan(10)
+    // And a guard on the file. A path typo throws on the read, but a file
+    // emptied by a bad merge does not, and would read as every rule at once
+    // having been deleted somewhere else.
+    expect(declared().size).toBeGreaterThan(10)
+  })
+
+  it("is reached from the stylesheet the application loads", () => {
+    // The rules land only because `globals.css` imports them, and CSS drops an
+    // `@import` that follows any other rule, silently, so the line's position is
+    // as load-bearing as the line itself.
+    const IMPORT = '@import "../design-system/design-system.css";'
+    const globals = readFileSync(
+      join(WEB, "src", "styles", "globals.css"),
+      "utf8",
+    )
+    expect(globals).toContain(IMPORT)
+    const above = globals
+      .slice(0, globals.indexOf(IMPORT))
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .filter((line) => line.trim() !== "" && !line.startsWith("@import "))
+    // Named rather than counted, so a failure says which rule got in the way.
+    expect(above).toEqual([])
   })
 
   it("counts a declaration and not a mention of one", () => {

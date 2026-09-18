@@ -77,7 +77,8 @@ export const NAV_TRANSITION =
  * The keyboard ring, on every row whatever else it is wearing, which is why it
  * lives in the base and not in one of the state constants below.
  *
- * The ring itself is `focus-ring`, defined once in globals.css. Its values are
+ * The ring itself is `otari-focus-ring`, defined once in the design system's
+ * own stylesheet. Its values are
  * not spelled here and must not be: call sites that spell their own disagree
  * about which token a ring comes from. What is spelled here is why this row
  * cannot use the base rule instead.

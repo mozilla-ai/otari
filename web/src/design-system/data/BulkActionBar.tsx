@@ -7,7 +7,8 @@ import { formatNumber } from "@/design-system/helpers/format"
 // is selected and more rows match the filter, a "Select all N matching this
 // filter" affordance so a bulk op can target the full filtered set.
 //
-// `left` and `width` are not spelled here: `.otari-bulk-bar` in `globals.css`
+// `left` and `width` are not spelled here: `.otari-bulk-bar` in
+// `design-system.css`
 // sets both from the rail's published footprint, and an unlayered rule beats a
 // Tailwind utility, so a `left-*` or `w-*` class at this call site would be
 // inert and editing it would change nothing with no error to say so. `max-w-3xl`

@@ -5,7 +5,7 @@ import type { HTMLAttributes, ReactNode } from "react"
  * the content inside them still in the centered column.
  *
  * It takes two elements, because one element cannot be both full-width and
- * centered. `.otari-bleed` escapes `<main>` (see globals.css for why it is
+ * centered. `.otari-bleed` escapes `<main>` (see design-system.css for why it is
  * container units and not `100vw`); the inner element restores the column.
  *
  * `className` styles the band: its rules, its vertical padding, its own layout

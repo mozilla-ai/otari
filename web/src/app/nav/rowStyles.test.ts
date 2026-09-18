@@ -119,7 +119,7 @@ describe("navRowClass", () => {
 
   it("rings every row on keyboard focus, whatever else it is wearing", () => {
     for (const row of [resting, selected]) {
-      // The ring's values are globals.css's, not this module's, so what is
+      // The ring's values are the design system's, not this module's, so what is
       // asserted here is that a row asks for one at utility strength. Spelling
       // the width, offset and color back would recreate the disagreement that
       // moving them into one place resolved.

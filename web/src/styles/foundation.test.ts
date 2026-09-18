@@ -37,16 +37,28 @@ function walk(root: string): string[] {
     }
   }
 }
-const CSS = readFileSync(join(WEB, "src", "styles", "globals.css"), "utf8")
+/**
+ * The foundation as the application loads it, which is two files: `globals.css`
+ * and the design system's own stylesheet, which `globals.css` imports first.
+ * Concatenated in that order so a block present in both resolves the way the
+ * first-match lookup below always has. Which file a rule belongs in is the
+ * subject of `architecture.test.ts`, not of this one.
+ */
+const CSS = [
+  readFileSync(join(WEB, "src", "styles", "globals.css"), "utf8"),
+  readFileSync(join(WEB, "src", "design-system", "design-system.css"), "utf8"),
+].join("\n")
 
 /**
  * The text of one top-level block, from `selector {` to the `}` that closes it
- * in the first column. Every block in globals.css is written that way, so a
+ * in the first column. Every block in either file is written that way, so a
  * brace counter would only add ways to be subtly wrong about a nested at-rule.
  */
 function block(selector: string): string {
   const start = CSS.indexOf(`${selector} {`)
-  expect(start, `no \`${selector} {\` block in globals.css`).toBeGreaterThan(-1)
+  expect(start, `no \`${selector} {\` block in the foundation`).toBeGreaterThan(
+    -1,
+  )
   const end = CSS.indexOf("\n}\n", start)
   expect(end, `\`${selector}\` block is never closed`).toBeGreaterThan(start)
   return CSS.slice(start, end)

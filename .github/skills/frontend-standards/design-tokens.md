@@ -174,7 +174,7 @@ not adapt and nothing downstream can make them.
 
 The ones we have not aliased are a gap rather than a decision **where
 `@heroui/styles` still declares and reads them**, and the gap decides how much work a
-visual fix is. Not every unaliased name is one: `globals.css:361` records that upstream's
+visual fix is. Not every unaliased name is one: `globals.css:384` records that upstream's
 `--content1` through `--content4` are deliberately left out because HeroUI v3 neither
 declares nor reads them, so aliasing those would restore four inert lines. Check that a
 variable is live upstream before treating its absence here as a gap. A value
@@ -372,9 +372,27 @@ declared again. If you find yourself wanting one, the role is missing from the f
 add the role.
 
 The `otari-` prefix that survives on a handful of **class** names (`.otari-table`,
-`.otari-markdown`, `.otari-detail-row`, `.otari-bulk-bar`) is unrelated: it is the app's
+`.otari-detail-row`, `.otari-bulk-bar`) is unrelated: it is the app's
 namespace for a hook that has to reach inside a HeroUI component's DOM, and those rules
 consume `--color-*` like everything else.
+
+**Those names are BEM, and the shape is not optional.** A block is `otari-<block>`, an
+element inside it is `otari-<block>__<element>`, and a variant of either is
+`otari-<block>--<modifier>`: `.otari-dialog`, `.otari-dialog__footer`,
+`.otari-dialog--lg`. The reason is that a stylesheet imported from a component is still
+global (nothing in React scopes one), so the namespace and the structure together are the
+whole collision story: the prefix keeps the block out of HeroUI's and Tailwind's way, and
+the two separators keep a part of one block from reading as a block of its own. The part
+with teeth is that `src/architecture.test.ts` parses this shape. Its class pattern matches
+an optional `__element`, and its modifier pattern matches the `--` prefix a dialog builds
+at render (`` `otari-dialog--${size}` ``), so a class that departs from the convention is
+invisible to the probe rather than merely inconsistent, and the primitive wearing it goes
+unchecked.
+
+A primitive's rules live in `web/src/design-system/design-system.css`, which
+`globals.css` imports ahead of everything else, and the probe reads that file rather
+than the application's. A per-table block and a rule whose consumers are feature pages
+stay in `globals.css`. That file's header has the split and the cascade consequence of it.
 
 The namespace existing is not the same as the approach being recommended. HeroUI supports a
 rule against its own classes, so the reason this one is last of the four ways to change how

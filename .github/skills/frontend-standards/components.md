@@ -147,7 +147,7 @@ sentence heading the run is what the rule asks for.
 
 A per-table block paired with `TableScrollFrame` is the sanctioned shape rather than a last
 resort, so it owes the reader what the sizing is *for* rather than an argument for existing at
-all. `globals.css:3171`'s "Key lanes stay fixed while the name absorbs the available width" is
+all. `globals.css:2731`'s "Key lanes stay fixed while the name absorbs the available width" is
 the model.
 
 ## Check the shared primitives before hand-rolling

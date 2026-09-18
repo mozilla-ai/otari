@@ -17,6 +17,12 @@
  */
 @import "tailwindcss";
 @import "@heroui/styles";
+/* The design system's own rules, so `src/design-system/` ships styled and the
+   extraction contract in `web/design/DESIGN.md` covers CSS as well as imports.
+   It has to sit here: CSS requires every `@import` to precede the first rule,
+   and one placed further down is dropped without a word from the build. Read
+   that file's header before adding a rule to either side. */
+@import "../design-system/design-system.css";
 
 /* Both spellings of the dark theme, so the `dark:` variant tracks the same
    selector the theme block below is keyed on. The element itself has to match
@@ -1318,8 +1324,9 @@ body {
  *
  * It loses to `@layer utilities`, so `outline-none` at a call site still
  * suppresses it. That is deliberate for the two places that need it and is the
- * reason `@utility otari-focus-ring` exists below; anywhere else, `outline-none`
- * silently removes the ring and should not be written. */
+ * reason `@utility otari-focus-ring` exists in the design system's own
+ * stylesheet; anywhere else, `outline-none` silently removes the ring and
+ * should not be written. */
 /* =============================================================
  * Field height, in two named sizes and no others.
  *
@@ -1352,8 +1359,10 @@ body {
    toolbar had no way to ask. A custom property inherits instead of winning, so
    the place still sets the density for everything inside it and any subtree can
    reset both variables. `Toolbar`, `TablePagination`, and bounded
-   `SettingsGroup` declare these places.
-   
+   `SettingsGroup` declare these places, and the three declarations are in
+   `design-system/design-system.css` with them: the metrics below are the app's
+   patch on HeroUI's fields, and naming a place is the library's half.
+
    Textarea keeps the floor and no height, since it is the one field that should
    grow. Note that `textarea.input` has no call site: HeroUI's own TextArea
    renders `.textarea`, which this stylesheet does not touch, so the rule below
@@ -1383,51 +1392,16 @@ textarea.input {
   min-height: var(--field-height);
   padding-block: var(--field-padding-block);
 }
-/* The three dense places. A toolbar and a pagination strip are dense because
-   their controls share compact rows above or below a table; a settings row is dense
-   because its control sits in a lane beside the label it explains, and at the
-   form height every row comes out taller than its own sentence, so a column of
-   them reads as a stack of boxes.
 
-   `input[type="search"]` needs its own rule because it is a native element
-   carrying none of HeroUI's classes, and it stays scoped to the toolbar: the
-   only two in the tree are toolbar search boxes, and pulling a bare search
-   input into the family would restyle a control nothing here renders. */
-.otari-toolbar,
-.otari-pagination,
-.otari-settings {
-  --field-height: 2rem;
-  --field-padding-block: 0.25rem;
-}
-.otari-toolbar input[type="search"] {
-  min-height: var(--field-height);
-  height: var(--field-height);
-  padding-block: var(--field-padding-block);
-}
-
-/* =============================================================
- * Full-bleed sections inside a centered column.
+/* The container a full-bleed section measures itself against.
  *
- * `<main>`'s content sits in a centered `max-width` column, which is right for
- * the reading measure and wrong for the rules: a section divider that stops at
- * the column's edge reads as a card's border rather than as a division of the
- * page, which is the whole distinction this redesign is built on. So a section
- * spans the scroll area edge to edge while the content inside it stays in the
- * column.
- *
- * Container query units rather than `100vw`, and this is the reason: `<main>`
- * sits beside the rail, so a viewport-width section would run underneath the
- * sidebar. `100cqw` is the width of `<main>` itself, which is the region a
- * section belongs to. `container-type: inline-size` on `<main>` is what makes
- * that unit resolve; it constrains inline size only, so the scroll container
- * still scrolls.
- * ============================================================= */
+ * `.otari-bleed` spans `100cqw` rather than `100vw`, because `<main>` sits
+ * beside the rail and a viewport-width band would run underneath the sidebar.
+ * This is what makes that unit resolve to the width of `<main>` itself. It
+ * constrains inline size only, so the scroll container still scrolls.
+ * `design-system/design-system.css` has the band. */
 main {
   container-type: inline-size;
-}
-.otari-bleed {
-  width: 100cqw;
-  margin-inline: calc((100cqw - 100%) / -2);
 }
 
 /* =============================================================
@@ -1462,25 +1436,6 @@ main {
     outline: 2px solid var(--focus-ring-ink, var(--color-focus));
     outline-offset: 2px;
   }
-}
-
-/* The same ring, at utility strength, for the two places that draw a ring on an
- * element HeroUI has already styled. Both reach into vendor DOM, which is the
- * whole reason they cannot use the base rule: `.button` carries `outline-none`
- * in the components layer, and a checkbox's visual box is a sibling of the
- * element that actually takes focus. Applied as
- * `focus-visible:otari-focus-ring` or through a `group-data-` variant, so the
- * values still live in one place.
- *
- * The `otari-` namespace is load-bearing here rather than decorative.
- * `@heroui/styles` already defines `@utility focus-ring`, and an identically
- * named one lands in the same layer: ours would win on `outline` by coming
- * second while HeroUI's `--tw-ring-shadow` kept applying, so every consumer
- * would draw an outline and a box-shadow ring at once. Compiled and read before
- * this was renamed; the collision emits cleanly and reports nothing. */
-@utility otari-focus-ring {
-  outline: 2px solid var(--focus-ring-ink, var(--color-focus));
-  outline-offset: 2px;
 }
 
 /* Ring ink, chosen by the GROUND being ringed rather than by a list of
@@ -1630,31 +1585,6 @@ main {
   font-size: var(--text-caption-step);
   line-height: var(--text-caption-step--line-height);
   letter-spacing: var(--text-caption-step--letter-spacing);
-}
-
-/* The checkbox's touch target, which is four times the area of the box it
- * draws. 16px drawn, 40px targeted, 44px on a coarse pointer, carried by a
- * pseudo-element so the box does not grow and no row changes height.
- *
- * The rule an invisible bleed follows: it may never exceed the pitch of the
- * thing it repeats within, or two neighbors overlap and a press lands on the
- * wrong one. Measured before applying: a table row's pitch here is 58px, so a
- * 40px target clears it with room, and 44 still does. The size the target is
- * built from is the TARGET, not the drawing: the box is 16px and the native
- * input inside it is 13, and a rule phrased against either number would have
- * left the table's checkboxes at their drawn size. */
-.otari-checkbox-box {
-  position: relative;
-}
-.otari-checkbox-box::before {
-  content: "";
-  position: absolute;
-  inset: -0.75rem;
-}
-@media (pointer: coarse) {
-  .otari-checkbox-box::before {
-    inset: -0.875rem;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2046,21 +1976,11 @@ main {
   margin-top: 0.125rem;
 }
 
-/* The pagination strip is the third named place, and the last: 32px controls at
-   8px inline padding. It earns one because it is chrome UNDER a table rather
-   than a control surface inside one, and 32 is what its buttons already are, so
-   naming the place moves the one control that disagreed instead of reopening
-   the two that agreed.
-
-   TWO SIZES NOW, not three: dense is 32 everywhere, so the pagination strip
-   stopped being a place of its own and became an ordinary instance of the
-   dense one. It keeps only its tighter inline padding, which is about a strip
-   of small controls sitting shoulder to shoulder rather than about height. */
-/* The pager's fields come from the place above; `.table__cell` stays an explicit
-   selector, because a cell is HeroUI's own DOM rather than a place of ours, and
-   a select is the only control that renders in one. Making it a place would put
-   the dense height on any `.input` a future cell holds, which is a decision
-   about a control that does not exist yet. */
+/* The pager's fields come from a place of its own; `.table__cell` stays an
+   explicit selector, because a cell is HeroUI's own DOM rather than a place of
+   ours, and a select is the only control that renders in one. Making it a place
+   would put the dense height on any `.input` a future cell holds, which is a
+   decision about a control that does not exist yet. */
 .table__cell .select__trigger {
   /* `height` alongside the floor, because HeroUI's block padding and line box
      make 38 on their own and a floor alone leaves that untouched. */
@@ -2068,56 +1988,7 @@ main {
   min-height: 2rem;
   padding-block: 0.25rem;
 }
-.otari-pagination .input,
-.otari-pagination .select__trigger {
-  padding-inline: 0.5rem;
-}
-/* The same relationship at the dense leading padding: 8 - 2.06 rounds to 6. */
-.otari-pagination .select__trigger {
-  padding-inline-end: 0.375rem;
-}
 
-/* The pager, on a coarse pointer.
- *
- * The desktop cluster is deliberately tight: 32px controls already clear the
- * 24px floor, the four arrows read as one control because they sit together,
- * and adjacent arrows do OPPOSITE things, so an overlap is the worst kind of
- * mis-hit there is here. A press that lands wrong pages the wrong way rather
- * than doing nothing. So no invisible bleed on this cluster at any size: the
- * gaps are 3 to 4px and the pitch 33 to 35px, and a 40px target would overlap
- * its neighbour by 7px. Measured before ruling it out.
- *
- * A finger is a different instrument, so it gets a different place rather than
- * a bleed: real controls at 44px with 8px between them, which is the size the
- * touch floor asks for with the separation that makes it safe. Visible
- * geometry, so what is pressable is what is drawn. */
-@media (pointer: coarse) {
-  .otari-pagination .button {
-    height: 2.75rem;
-    min-width: 2.75rem;
-  }
-  /* The strip's fields come up with its buttons. They are not
-     `[data-slot="button"]`, so neither the floor further down nor the rule
-     above reaches them, and a 44px arrow beside a 32px page-size select is the
-     ragged half-conversion this place exists to avoid. Safe where the arrows
-     are not: a select and a number field are one control each, not a cluster
-     of neighbors doing opposite things. */
-  .otari-pagination {
-    --field-height: 2.75rem;
-  }
-  .otari-pagination__pager {
-    gap: 0.5rem;
-  }
-}
-/* A settings row's phone size, the one part of it that is not a height: 16px,
-   because iOS zooms the page when a field under 16px takes focus and a
-   full-width field is the one shape where that zoom has nowhere to go. The
-   height is declared on the place above; its phone override is below. */
-@media (max-width: 767px) {
-  .otari-settings .input {
-    font-size: var(--text-base);
-  }
-}
 /* A refused value, marked on the field itself.
    Keyed on `aria-invalid` rather than on a class, for two reasons: it is the
    attribute assistive tech already reads, so the border cannot drift from what
@@ -2148,30 +2019,7 @@ main {
   font-size: var(--text-xs);
 }
 
-/* The dense height is a desktop size, so the phone viewport takes it back off.
-   The toolbar and settings fields reach the 44px touch floor here. They have
-   room to grow without overlapping adjacent targets, so keeping them dense
-   would not meet the exception criteria in `design/motion-and-access.md`.
-   The pager reaches 44px in the coarse-pointer query above, independently of
-   viewport width.
-
-   The `[data-slot="button"]` floor further down cannot reach these: a native
-   `input[type="search"]` and a HeroUI select trigger are not buttons, so
-   without this a toolbar or a settings row is the one place on the phone
-   layout still handing a finger a 32px target. Same 767px boundary as that
-   floor, so a place's fields and its buttons come up together. */
 @media (max-width: 767px) {
-  .otari-toolbar,
-  .otari-settings {
-    --field-height: 2.75rem;
-  }
-  /* A settings row's field also gains block padding, where a toolbar's keeps
-     the dense 4px: the row's control stops sharing the row and stacks full
-     width under its label here, so it is a form field again rather than one of
-     a strip of small ones. */
-  .otari-settings {
-    --field-padding-block: 0.375rem;
-  }
   /* A select inside a table cell is the third place the dense height outlives
      the floor. Not the same as #927: a row's Edit and Delete cannot reach 44
      without widening the lane, while a cell's select is one control with the
@@ -2208,178 +2056,6 @@ main {
   [data-slot="button"] {
     min-height: 2.75rem;
     min-width: 2.75rem;
-  }
-}
-
-/* Modal sizing: v3's default container is sm:w-fit which under-sizes
- * wider modals. Allow growth to content, with a sensible min/max. */
-@media (min-width: 640px) {
-  .modal__container {
-    width: auto;
-  }
-}
-.modal__dialog {
-  min-width: min(28rem, calc(100vw - 2rem));
-  width: fit-content;
-  max-width: min(42rem, calc(100vw - 2rem));
-}
-.modal__body {
-  overflow: visible;
-}
-
-/* The shared dialog geometry, which cannot live at a call site.
- *
- * Two components wear it. `FormDialog` is the create/edit surface, and `Dialog`
- * is the plain frame with no form in it, so the rules below name both: the
- * sizing, the viewport budget and the phone sheet are the dialog's, not the
- * form's, and a second copy of them under a second prefix would be one edit away
- * from two dialogs sitting at different heights.
- *
- * The `.modal__dialog` rule above is unlayered, so it outranks
- * `@layer utilities` and a `w-[32.5rem]` on the dialog compiles, lints, ships
- * and loses; its `min-width` would beat that class even where the width landed,
- * which is what makes the 440px size unreachable rather than merely fragile.
- * Both were read out of the emitted stylesheet.
- *
- * `--visual-viewport-height` is HeroUI's own, already on the container, so the
- * height budget follows a phone's keyboard rather than the layout viewport.
- * 15rem is the 120px offset the dialog sits at, twice: the gap above and below
- * is symmetric by design, and what is left is where the body starts scrolling
- * while the header and footer stay put. */
-.otari-form-dialog,
-.otari-dialog {
-  min-width: 0;
-  max-width: calc(100vw - 2rem);
-  max-height: calc(var(--visual-viewport-height, 100dvh) - 15rem);
-}
-
-/* The four sizes, as modifiers rather than a value the component sets inline:
- * what the unlayered rule above beats is a `width`, and nothing declares these,
- * so a class here has nothing to lose to. The phone block below is later still,
- * which is what lets a sheet ignore all four. */
-.otari-form-dialog--sm,
-.otari-dialog--sm {
-  width: 27.5rem;
-}
-.otari-form-dialog--md,
-.otari-dialog--md {
-  width: 32.5rem;
-}
-.otari-form-dialog--lg,
-.otari-dialog--lg {
-  width: 40rem;
-}
-/* The one size that is about the body's shape rather than its length: a frame
- * whose content is two columns side by side, where `lg` leaves the second one
- * too narrow to hold its own controls. `ShareDialog` is the case, and it is the
- * reason this exists rather than a call site widening itself: a width spelled
- * on the dialog loses to the unlayered `.modal__dialog` rule above, so the only
- * class that can win is one in this family. */
-.otari-form-dialog--xl,
-.otari-dialog--xl {
-  width: 58rem;
-}
-
-/* A field fills this dialog. `Field` and `SecretField` cap themselves at
- * `max-w-md`, which is right on a page (a 448px measure under a 620px column
- * keeps a name field from reading as a paragraph) and wrong here: it left a
- * 448px input in the 638px body of an `lg` dialog, with 190px of nothing beside
- * it. The dialog is a named place the way a toolbar is, so the override belongs
- * to the place rather than to every call site inside it, and it is keyed on
- * HeroUI's own `data-slot` because that is the element carrying the cap. */
-.otari-form-dialog [data-slot="textfield"] {
-  max-width: none;
-}
-
-/* A full-screen sheet below 640px in EITHER dimension. The 120px gap above and
- * below is a desktop luxury, and a viewport that cannot afford it in either axis
- * gets the sheet rather than a third layout: at a landscape phone (844x390 is
- * the common one) the width query alone left the dialog a 150px height budget,
- * of which the header and footer are about 137px.
- *
- * The container's own `sm:` paddings still apply at that width, so they are
- * overridden here too; without that the sheet would sit inside a 240px vertical
- * inset and none of this would help.
- *
- * The footer's bottom padding is a plain 1rem and not a safe-area inset:
- * `env(safe-area-inset-bottom)` is 0 without `viewport-fit=cover`, which
- * `index.html` leaves off deliberately (the shell has no insets to sit out of
- * the way), so adding it would read as clearing the home indicator while
- * changing nothing. */
-@media (width <= 639px), (height <= 639px) {
-  .otari-form-dialog__container,
-  .otari-dialog__container {
-    padding: 0;
-  }
-  .otari-form-dialog,
-  .otari-dialog {
-    width: 100%;
-    max-width: none;
-    height: var(--visual-viewport-height, 100dvh);
-    max-height: none;
-    border: 0;
-  }
-}
-/* The footer stacks, and on the narrow axis only. Two 36px buttons and a caption
- * sharing one row fit a desktop and not a 390px sheet: the routing dialog's
- * caption wrapped to three lines beside them. Each control takes the sheet's
- * full width at the 44px touch floor, in DOM order, so Cancel sits above the
- * primary.
- *
- * Width alone, unlike the geometry above: `(height <= 639px)` also matches an
- * unmaximized 1280x600 desktop window, and stacking two full-width buttons
- * across 1280px is not a sheet, it is a broken footer. A landscape phone
- * (844x390) keeps the sheet from the block above and gets a row footer, which
- * its 844px affords.
- *
- * Nothing reorders them, and that is the point: an earlier version moved Cancel
- * with `order`, which left the visual order and the focus order disagreeing on
- * a phone. DOM, visual and focus order now agree at both widths. It also puts
- * the primary lowest, which is the control nearest the thumb on a sheet. */
-@media (width <= 639px) {
-  .otari-form-dialog__footer,
-  .otari-dialog__footer {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.5rem;
-    padding: 0.75rem 1rem 1rem;
-  }
-  .otari-form-dialog__actions,
-  .otari-dialog__actions {
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-  /* `width`, not the footer's `align-items: stretch`: `.button` is
-   * `width: fit-content`, so its cross size is never `auto` and stretch cannot
-   * reach it. Measured, the two buttons stayed 110px and 83px in a 373px
-   * column. HeroUI's `fullWidth` prop is the other way to get here and it is a
-   * prop, so it would take the desktop with it.
-   *
-   * The wrapped case is spelled out rather than reached with a descendant: the
-   * first-run sheet wraps Skip to name a place (see actions.md) and would
-   * otherwise lose the width and the suppression below, but a plain descendant
-   * would also claim an icon-only button a future slot groups beside a labeled
-   * one, at full width with no press and nothing to fail. The `w-full` utility
-   * that looks like the obvious replacement is keyed on the class rather than
-   * the computed width, so it takes the desktop's press with it. */
-  .otari-form-dialog__actions > button,
-  .otari-dialog__actions > button,
-  .otari-dialog__actions > .otari-setup-actions > button {
-    width: 100%;
-  }
-  /* Full width earns the same press suppression `.button` already gives
-   * `.w-full` and HeroUI's `fullWidth` class: the transform displaces a wide
-   * button by 7.07px, and this one spans the sheet. */
-  .otari-form-dialog__actions > button:is(:active, [data-pressed="true"]),
-  .otari-dialog__actions > button:is(:active, [data-pressed="true"]),
-  .otari-dialog__actions
-    > .otari-setup-actions
-    > button:is(:active, [data-pressed="true"]) {
-    transform: none;
-  }
-  .otari-form-dialog__footer button,
-  .otari-dialog__footer button {
-    min-height: 2.75rem;
   }
 }
 
@@ -2518,141 +2194,14 @@ main {
  * leftover: it keeps an app-owned hook from colliding with a
  * HeroUI or Tailwind class. It has nothing to do with the
  * retired `--otari-*` palette.
+ *
+ * The same paragraph governs `design-system/design-system.css`,
+ * which holds the rules whose subject is a primitive's own DOM and
+ * is imported at the top of this file. What is left below is the
+ * application's: a per-table block belongs to the page that renders
+ * the table. Source order across the two files is therefore a real
+ * tiebreak, since a rule here is emitted after every rule there.
  * ============================================================= */
-
-/* Shared DataTable styling (HeroUI's Table).
-
-   HeroUI's Table.Root ships as a card: its default `primary` variant gives the
-   root its own gray surface, a 32px border-radius, and 4px inner padding. This
-   rule neutralizes all three. A table is not a box on the page; it is a region
-   of the one surface, bounded by the section rules around it and by its own
-   header and row hairlines. That is why there is no outer border here and no
-   radius: the border and the 12px corner both existed to make the root and its
-   header share one card corner, and there is no card corner left to share.
-
-   `overflow: hidden` stays. It no longer clips a corner, but it is what keeps a
-   wide table from painting outside the region it was given.
-
-   Column selectors are replicated with the `.otari-table` prefix so they outrank
-   HeroUI's own first/last-column radius rules (which are more specific than a
-   bare `.table__column`). */
-.otari-table.table-root {
-  /* Transparent, not a surface. The rule above says "a table is not a box on
-     the page; it is a region of the one surface" and this used to paint
-     `--color-surface` anyway, so all sixteen per-table classes carried a
-     `background-color: transparent` to undo it. The default is now what the
-     paragraph describes, and those sixteen copies are gone. */
-  background-color: transparent;
-  border-radius: 0;
-  padding: 0;
-  overflow: hidden;
-}
-.otari-table .table__header {
-  /* Told from the rows by a rule and by weight, not by a fill. This was
-     `--color-primary-subtle`, a teal tint, which is the accent spent as
-     decoration: colors.md gives it five jobs and a table header is none of
-     them. Every converted table already overrode it back to transparent; the
-     three cards that render a bare DataTable (OrganizationBudgetsCard,
-     SpendCeilingsCard, OrganizationRosterCard) are the ones that were still
-     showing the tint, and this is what converts them. */
-  background-color: transparent;
-  border-bottom: 1px solid var(--color-border);
-}
-.otari-table .table__column,
-.otari-table
-  [role="row"]
-  > [role="presentation"]:first-of-type
-  > .table__column,
-.otari-table
-  [role="row"]
-  > [role="presentation"]:last-of-type
-  > .table__column {
-  background-color: transparent;
-  /* The single overline spec, matching `@utility text-overline`, because a
-     column header is a label above a group and that is exactly the role. It
-     replaces a hardcoded `font-weight: 600` that no token could reach: with the
-     rest of the scale down at 400/550 that literal had become the heaviest text
-     in the product, so the header row out-weighted every cell it labeled. A
-     header is now a point smaller, 50 units lighter, muted, and letterspaced,
-     which is what stops it competing with its own rows. Kept as a rule here
-     rather than a class at the call site because these three selectors reach
-     into HeroUI's table DOM, which no call site can. */
-  /* `@apply` rather than a second copy of the six declarations: the role is the
-     single definition, so retuning it moves the header row with it. What cannot
-     be a class at the call site is the selector, which reaches into HeroUI's
-     table DOM, and that is the only reason this rule exists. */
-  @apply text-overline;
-  border-radius: 0;
-}
-.otari-table .table__column::after {
-  content: none;
-}
-/* The faint tier, because rows inside one group are divided rather than fenced.
-   This said `--color-border` and all sixteen per-table classes overrode it to
-   `--color-border-subtle`, so the base was simply the wrong value: sixteen
-   consumers and no exceptions is not a default worth keeping. Moved here, and
-   the copies are gone. Must stay in step with the row rule below. */
-.otari-table .table__row .table__cell {
-  border-color: var(--color-border-subtle);
-}
-
-/* Aliasing `--separator` is not enough for the row. HeroUI draws a bottom
-   border on the row as well as on its cells, and halves it on the way through:
-   `color-mix(in oklab, var(--separator) 50%, transparent)`. Measured on the
-   built stylesheet, that renders the row edge at alpha 0.029 against the cell's
-   0.06, so the same line is drawn at two strengths. Setting the color here
-   restores one. */
-.otari-table .table__row {
-  border-color: var(--color-border-subtle);
-}
-
-.otari-table .table__row:hover .table__cell {
-  background-color: var(--color-surface-muted);
-}
-
-/* Let the text in a row be highlighted with the mouse (issue #478). Two things
-   block it out of the box: the row carries `user-select: none` (HeroUI's styling
-   for a selectable row), and react-aria's usePress sets the same inline on the row
-   for the duration of a press, since useSelectableItem never passes
-   `allowTextSelectionOnPress`. Because `user-select: auto` on a cell resolves to
-   its parent's behavior, the value inside inherits "not selectable" and a drag
-   across an id selects nothing at all. `!important` is what outranks the inline
-   style, so it is deliberate here. Scoped to the body rows and their cells, so the
-   header (its sort buttons and resize handles) is untouched. The selection cell is
-   matched too, but a checkbox has no text to select.
-
-   CSS alone is not enough: the press also toggles the row's selection on pointer
-   down, and that re-render discards the browser's nascent selection. See
-   CopyableValue (which keeps the press off the value) and DataTable (which owns
-   pointer events on data cells where rows have a drill-in action). */
-.otari-table .table__row,
-.otari-table .table__row .table__cell {
-  /* biome-ignore lint/complexity/noImportantStyles: HeroUI sets user-select on the row; this has to win */
-  user-select: text !important;
-  /* biome-ignore lint/complexity/noImportantStyles: same, for the WebKit prefix */
-  -webkit-user-select: text !important;
-}
-
-/* Inline row detail (DataTable detailKey/renderDetail). The host <tr> lives
-   outside react-aria's collection (see DataTable.tsx), so it is styled here
-   rather than through the table variant. The reveal animates the CSS grid
-   0fr -> 1fr track so the panel slides open from under its row instead of
-   popping in and shoving the rows below. */
-.otari-table .otari-detail-row > td {
-  padding: 0;
-  border-bottom: 1px solid var(--color-border);
-  background-color: var(--color-surface-muted);
-}
-/* Same-frame acknowledgment of a row click while react-aria's interaction
-   render (linear in page size) catches up and the panel slides in.
-
-   `.table__row` is in the selector to outweigh the `:hover` rule above, which is
-   otherwise more specific and wins for the whole of the acknowledgment: the class
-   is set by a click, and a click leaves the pointer on the row, so the mouse case
-   is exactly the one that lost. */
-.otari-table .table__row.otari-detail-opening .table__cell {
-  background-color: var(--color-primary-subtle);
-}
 
 /* =============================================================
  * Wide tables: what happens when the lanes do not fit.
@@ -3307,26 +2856,7 @@ main {
   height: 2.8125rem;
   padding-block: 0;
 }
-.otari-detail-reveal {
-  display: grid;
-  grid-template-rows: 0fr;
-  animation: otari-detail-open 180ms ease-out forwards;
-}
-.otari-detail-reveal > div {
-  overflow: hidden;
-}
-@keyframes otari-detail-open {
-  from {
-    grid-template-rows: 0fr;
-    opacity: 0.5;
-  }
-  to {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-}
-/* The floating bulk bar slides up from the viewport edge; fixed positioning
-   means it never reflows the table it acts on. */
+
 /* The rail's footprint, published by the shell (`data-rail`) so a fixed overlay
  * can center on the content beside the rail instead of on the viewport. Zero by
  * default, which is what every surface without the shell gets and what the
@@ -3345,108 +2875,6 @@ main {
   }
   [data-rail="collapsed"] {
     --rail-width: 4.5rem;
-  }
-}
-
-.otari-bulk-bar {
-  animation: otari-bulk-bar-in 160ms ease-out;
-  /* Centered on the content, not the viewport: `left-1/2` alone put the bar
-     132px left of the table it belongs to and over the last visible rows.
-     The width goes with it, because a fixed element's `100%` is the viewport
-     too: centered but still viewport-wide, the bar reached back over the rail
-     on a narrow desktop (at 768px with the rail expanded it is 736px wide in a
-     504px pane). The call site's `max-w-3xl` still caps it. */
-  left: calc(50% + var(--rail-width, 0px) / 2);
-  width: calc(100% - var(--rail-width, 0px) - 2rem);
-}
-/* Animates `translate`, not `transform`: the bar centers itself with Tailwind's
- * `-translate-x-1/2`, which under Tailwind v4 sets the `translate` property, and
- * a `transform` here would compose with it into a -100% offset for the length of
- * the animation, so the bar slid in from half its width to the left. */
-@keyframes otari-bulk-bar-in {
-  from {
-    opacity: 0;
-    translate: -50% 0.5rem;
-  }
-  to {
-    opacity: 1;
-    translate: -50% 0;
-  }
-}
-
-/* The scanning border, for a panel that is waiting on something to arrive.
- *
- * A conic gradient whose angle is animated, clipped to the element's own 1px
- * edge, so a bright arc travels the perimeter over a resting hairline. The
- * `@property` declaration is what makes that animate at all: an untyped custom
- * property interpolates as a string, so the angle would jump between keyframes
- * rather than sweep.
- *
- * Two mask layers, composited by `mask-composite`: one clipped to the content
- * box (inset by the 1px padding) and one not, so what survives is the ring
- * between them. That is the standard way to paint a gradient border without a
- * second element.
- *
- * Painted over whatever edge the element already has rather than in place of
- * it: `Dialog` sets this on a frame that carries its own 1px border, so the
- * frame still reads as a bordered frame when the arc is not running. An element
- * with no edge of its own gets the arc and nothing between sweeps.
- *
- * `--scan-ink` is the traveling arc's color and defaults to the accent; a
- * caller overriding it is how the failed state turns the sweep red without this
- * rule knowing what a failure is. Both variables are spelled without the
- * `otari-` prefix the class names carry, because `foundation.test.ts` retires
- * that namespace for custom properties and neither of these is a palette token:
- * one is an angle and the other takes its value from `--color-*`.
- *
- * Not a dependency: the equivalent npm component is 156KB for a rotating
- * conic gradient, and at radius 0 there is not even a corner to get right. */
-@property --scan-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-.otari-scan-border::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  padding: 1px;
-  background: conic-gradient(
-    from var(--scan-angle),
-    transparent 0deg,
-    transparent 250deg,
-    var(--scan-ink, var(--color-primary)) 320deg,
-    transparent 360deg
-  );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  animation: otari-scan 2.6s linear infinite;
-}
-@keyframes otari-scan {
-  to {
-    --scan-angle: 360deg;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .otari-detail-reveal {
-    animation: none;
-    grid-template-rows: 1fr;
-  }
-  .otari-bulk-bar {
-    animation: none;
-  }
-  /* The arc stops where it stands rather than the ring disappearing: the panel
-     still reads as the one thing on the sheet that is watching. */
-  .otari-scan-border::after {
-    animation: none;
   }
 }
 

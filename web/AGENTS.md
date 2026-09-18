@@ -309,11 +309,11 @@ flex row.
 **Read the table's own block in `globals.css` before measuring anything.** Ten of
 the sixteen per-table classes declare widths on some of their columns, keyed on
 `data-key`, and `.otari-keys-table` is `table-layout: fixed` outright
-(`globals.css:3172`, "Key lanes stay fixed while the name absorbs the available
+(`globals.css:2731`, "Key lanes stay fixed while the name absorbs the available
 width"). So a width is often written down rather than solved, and measuring the
 live table to rediscover it is the slower route to a worse answer. Read both
 blocks before changing one: `.otari-breakdown`'s columns are specified in two
-places, as `min-width` at `globals.css:2720` and as `width` at `:3268`, 550 lines
+places, as `min-width` at `globals.css:2279` and as `width` at `:2827`, 550 lines
 apart, and neither mentions the other.
 
 What is still true is the part that made the advice worth having. A table is

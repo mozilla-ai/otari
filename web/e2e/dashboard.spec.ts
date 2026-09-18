@@ -458,16 +458,13 @@ test.describe("dashboard core flows", () => {
     })
     await expect(dialog).toBeVisible()
 
-    // The width, not the class. `globals.css` pins `.modal__dialog` unlayered at
-    // a 42rem cap, which is what a `w-[…]` at a call site loses to, so the only
-    // proof that this frame is the wide one is a number read after layout. It
-    // holds the preview and its controls side by side; at the cap they stack.
-    // The computed width, not the bounding box: the frame animates in on a
-    // scale transform, so a box read here is the tail of that animation and
-    // comes back a few percent large. And the width is the claim, not the
-    // class, because `globals.css` pins `.modal__dialog` unlayered at a 42rem
-    // cap, which is what a `w-[…]` at a call site loses to. This frame holds
-    // the preview and its controls side by side; at the cap they stack.
+    // The width, not the class. `design-system.css` pins `.modal__dialog`
+    // unlayered at a 42rem cap, which is what a `w-[…]` at a call site loses to,
+    // so the only proof that this frame is the wide one is a number read after
+    // layout. It holds the preview and its controls side by side; at the cap
+    // they stack. The computed width, not the bounding box: the frame animates
+    // in on a scale transform, so a box read here is the tail of that animation
+    // and comes back a few percent large.
     expect(await dialog.evaluate((el) => getComputedStyle(el).width)).toBe(
       "928px",
     )

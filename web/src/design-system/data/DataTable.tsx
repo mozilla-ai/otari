@@ -123,10 +123,10 @@ function hasTextSelectionIn(root: HTMLElement | null): boolean {
   return selection.anchorNode !== null && root.contains(selection.anchorNode)
 }
 
-// HeroUI's Table.Root is itself a card, so `.otari-table` in globals.css is what
-// neutralizes it: no fill, no radius, no padding, no column separators. A table
-// is a region of the one surface, bounded by the section rules around it and by
-// its own header and row hairlines.
+// HeroUI's Table.Root is itself a card, so `.otari-table` in design-system.css is
+// what neutralizes it: no fill, no radius, no padding, no column separators. A
+// table is a region of the one surface, bounded by the section rules around it
+// and by its own header and row hairlines.
 //
 // Those are the DEFAULTS, which is newer than it looks. The base used to paint a
 // surface fill and a brand-tint header, and each of the sixteen per-table
@@ -370,7 +370,7 @@ export function DataTable<Row extends object>({
     (row: Row) => {
       const key = getRowKey(row)
       // A row with a drill-in action takes the pointer cursor. The base rule in
-      // globals.css cannot reach it: nothing in the markup tells a row that
+      // `globals.css` cannot reach it: nothing in the markup tells a row that
       // opens something from one that is inert.
       const className =
         [hasRowAction ? "cursor-pointer" : null, rowClassName?.(row)]
@@ -417,7 +417,7 @@ export function DataTable<Row extends object>({
           // Swallowed either way, so react-aria's row press never fires a second
           // action. A click that ended a text drag inside the table is a
           // selection, not an activation: cells are selectable by design (see
-          // globals.css), and drilling in mid-highlight both loses the selection
+          // design-system.css), and drilling in mid-highlight both loses the selection
           // and moves the page under the operator, so the action is skipped for
           // that click only. Deliberately scoped to the click path: the same
           // check in fireRowAction would also swallow Enter on a focused row,

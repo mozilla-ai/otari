@@ -100,8 +100,9 @@ export function TablePagination({
     // `.otari-pagination` is a place, in the sense Toolbar's docstring explains:
     // it declares `--field-height` and `--field-padding-block` for the controls
     // inside it (32px, and 44px on a coarse pointer) rather than restyling them
-    // by descendant selector. It also drops a ghost button's edge. Both live in
-    // globals.css, keyed on this class.
+    // by descendant selector. It also drops a ghost button's edge: the first in
+    // `design-system.css`, the second in `globals.css` with the rest of the
+    // ghost-border family, both keyed on this class.
     <div className="otari-pagination flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-2">
         <label htmlFor={sizeSelectId} className="text-sm text-muted">
