@@ -546,6 +546,7 @@ async def run_chat_completion(
                     rate_limit_info=ctx.rate_limit_info,
                     tool_ctx=tool_ctx,
                     session_label=request.session_label,
+                    started_at=ctx.started_at,
                 )
             except HTTPException:
                 raise

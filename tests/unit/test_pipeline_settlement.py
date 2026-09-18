@@ -342,6 +342,65 @@ async def test_streaming_fallback_wires_forwarded_tools_into_final_timeout(
     assert captured["final_attempt_extra_seconds"] == 34.0
 
 
+@pytest.mark.asyncio
+async def test_streaming_fallback_forwards_started_at_to_build_streaming_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``started_at`` must reach ``build_streaming_response`` through the
+    fallback wrapper, not just be accepted and dropped.
+
+    ``_ttft_ms`` needs a real ``started_at`` to report anything but ``None``,
+    and the hybrid streaming routes only have a value to offer once this
+    plumbing exists; a call site test alone cannot prove the value actually
+    arrives at the callback that reports it upstream.
+    """
+    config = GatewayConfig()
+    route = ResolvedRoute(
+        request_id="request-1",
+        fallback_enabled=False,
+        attempts=[
+            ResolvedAttempt(
+                attempt_id="attempt-1",
+                position=1,
+                provider="openai",
+                model="gpt-test",
+                api_key="test-key",
+                managed=True,
+            )
+        ],
+    )
+
+    async def fake_iterate_streaming_attempts(**kwargs: Any) -> tuple[Any, AsyncIterator[Any]]:
+        async def stream() -> AsyncIterator[Any]:
+            yield object()
+
+        return route.attempts[0], stream()
+
+    captured: dict[str, Any] = {}
+    marker = Response()
+
+    def fake_build_streaming_response(**kwargs: Any) -> Response:
+        captured.update(kwargs)
+        return marker
+
+    monkeypatch.setattr(pipeline, "iterate_streaming_attempts", fake_iterate_streaming_attempts)
+    monkeypatch.setattr(pipeline, "build_streaming_response", fake_build_streaming_response)
+
+    response = await pipeline.run_streaming_with_fallback(
+        adapter=chat._ADAPTER,
+        route=route,
+        base_request_fields={},
+        config=config,
+        background_tasks=BackgroundTasks(),
+        rate_limit_info=None,
+        tool_ctx=_tool_ctx(config=config),
+        started_at=123.456,
+    )
+
+    assert response is marker
+    assert captured["started_at"] == 123.456
+
+
 # ---------------------------------------------------------------------------
 # Settlement behavior (shared callback bodies, exercised via the chat format)
 # ---------------------------------------------------------------------------

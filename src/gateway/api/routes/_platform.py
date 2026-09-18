@@ -1060,8 +1060,8 @@ async def _report_platform_usage(
     usage: CompletionUsage | None,
     error_class: str | None = None,
     session_label: str | None = None,
-    ttft_ms: int | None = None,
     *,
+    ttft_ms: int | None = None,
     is_final_attempt: bool,
 ) -> SettledCost | None:
     """POST a usage record back to the platform with bounded retries.

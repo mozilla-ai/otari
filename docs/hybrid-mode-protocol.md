@@ -384,8 +384,12 @@ Content-Type: application/json
   "error_class": "http_401",           // optional on error; omitted when the
                                        // Otari can't classify the failure
                                        // (e.g. mid-stream errors). See below.
-  "session_label": "my-run-personas"   // optional; the caller's cost-attribution
+  "session_label": "my-run-personas",  // optional; the caller's cost-attribution
                                        // label (see below). Omitted when absent.
+  "ttft_ms": 340                       // optional; milliseconds from request start
+                                       // to the first streamed chunk. Streaming only;
+                                       // omitted when no chunk arrived or no start
+                                       // time was captured. Sent on error reports too.
 }
 ```
 
