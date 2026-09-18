@@ -716,6 +716,21 @@ def test_no_policy_file_is_a_no_op(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
 
 
+def test_a_non_utf8_policy_file_does_not_block(tmp_path: Path) -> None:
+    """`gates_file.is_file()` does not guarantee the read right after it succeeds
+
+    (a race, a permissions change, a non-UTF-8 file): an uncaught
+    `UnicodeDecodeError` there used to exit `otari hook` nonzero before it
+    ever reached `httpx.post`, breaking the fail-open contract every other
+    evidence-collection failure in this command already has.
+    """
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".otari-gates.yml").write_bytes(b'schema_version: "1.0"\npolicy:\n  id: x\n# caf\xe9\ngates: []\n')
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
+    assert result.exit_code == 0, result.output
+    assert "could not read" in result.output
+
+
 def test_outside_a_git_repo_is_a_no_op(tmp_path: Path) -> None:
     result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
     assert result.exit_code == 0, result.output

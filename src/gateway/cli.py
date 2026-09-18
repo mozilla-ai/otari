@@ -1081,7 +1081,16 @@ def hook(
     gates_file = root / ".otari-gates.yml"
     if not gates_file.is_file():
         return
-    policy_yaml = gates_file.read_text(encoding="utf-8")
+    try:
+        policy_yaml = gates_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        # Same fail-open contract as every other evidence-collection failure
+        # in this command: `is_file()` above does not guarantee a following
+        # read succeeds (a race, a permissions change, a non-UTF-8 file), and
+        # an uncaught exception here would exit nonzero before ever reaching
+        # httpx.post, skipping every gate in the policy for this event.
+        click.echo(f"otari hook: could not read {gates_file} ({exc}), not blocking.", err=True)
+        return
 
     changed_paths: list[str] = []
     # `[]`, not None, by default: PreToolUse's edit-tool branch below leaves
