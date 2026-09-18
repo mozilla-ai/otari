@@ -10061,7 +10061,7 @@ export interface components {
              * Judge Results
              * @description Model verdicts the caller collected for this request's judge gates.
              */
-            judge_results?: components["schemas"]["JudgeVerdictRequest"][];
+            judge_results?: components["schemas"]["JudgeVerdictRequest"][] | null;
             /** Policy Yaml */
             policy_yaml: string;
         };

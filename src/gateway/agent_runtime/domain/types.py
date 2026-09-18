@@ -231,11 +231,19 @@ class JudgeEvidence:
     Unlike :class:`ChangedPathEvidence`/:class:`CommandEvidence`, a verdict is
     already keyed to the one gate it judged (each judge gate carries its own
     rubric, so the caller's model call is necessarily one call per gate, not
-    one shared fact every gate matches independently). A judge gate whose id
-    has no entry here resolves ``unknown`` the same way a gate resolves
-    ``unknown`` against an entirely absent evidence kind: omitting this field
-    and submitting it empty are therefore equivalent, and neither is treated
-    as its own tri-state, unlike the other two evidence kinds.
+    one shared fact every gate matches independently), so there is no
+    "collected, and there is none for this gate" case distinct from "this
+    gate's id is simply missing" the way an empty ``changed_paths``/
+    ``commands`` list differs from one that names something. Both resolve
+    ``unknown`` identically.
+
+    What *is* a tri-state, the same as the other two evidence kinds, is
+    ``evaluate_judge``'s own ``evidence`` parameter being ``None`` at all: a
+    caller whose event type never runs judge gates (``otari hook`` on
+    `PreToolUse`, which has neither a finished diff nor a transcript to judge
+    yet) submits no ``JudgeEvidence`` rather than an empty one, and resolves
+    ``not_applicable`` rather than the ``unknown`` a caller that does run
+    judge gates but is genuinely missing a verdict for this one gets.
     """
 
     verdicts: tuple[JudgeVerdict, ...]

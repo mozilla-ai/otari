@@ -31,7 +31,7 @@ from gateway.agent_runtime.domain.evaluators import (
     tokenize_commands,
     tokenize_phrases,
 )
-from gateway.agent_runtime.domain.policy import MAX_POLICY_BYTES, PolicyError, parse_policy
+from gateway.agent_runtime.domain.policy import MAX_GATE_ID_LENGTH, MAX_POLICY_BYTES, PolicyError, parse_policy
 from gateway.agent_runtime.domain.types import (
     ChangedPathEvidence,
     ChangedPathGate,
@@ -184,7 +184,12 @@ class JudgeVerdictRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    gate_id: str = Field(min_length=1, max_length=200)
+    # Shares domain.policy's own MAX_GATE_ID_LENGTH, not a separately chosen
+    # 200: a verdict echoes back the gate id the policy itself named, and
+    # policy.py's own parser rejects a longer one at parse time (422) for
+    # exactly this reason, so every id this build accepts here can always
+    # round-trip.
+    gate_id: str = Field(min_length=1, max_length=MAX_GATE_ID_LENGTH)
     outcome: Literal["pass", "fail", "error"]
     reasoning: str = Field(default="", max_length=_MAX_REASONING_LENGTH)
 
@@ -235,14 +240,19 @@ class PolicyCheckRequest(BaseModel):
             "`session` for every command the session has run so far."
         ),
     )
-    # No tri-state here unlike changed_paths/commands above: a verdict already
-    # names the one gate it judged (JudgeEvidence's own docstring), so an
-    # omitted field and a submitted empty list both mean "no verdict for any
-    # judge gate in this policy" and resolve identically, gate by gate, in
-    # evaluate_judge. Defaulting to `[]` loses no information a `None` default
-    # would have preserved.
-    judge_results: list[JudgeVerdictRequest] = Field(
-        default_factory=list,
+    # A tri-state, like changed_paths/commands above, but for a different
+    # reason: a verdict already names the one gate it judged, so there is no
+    # "collected, and there is none for this gate" case an empty list needs
+    # to express that a missing gate id doesn't already cover. What None
+    # (omitted, or an explicit `null`) means instead is "this caller's event
+    # type never runs judge gates at all" (otari hook on PreToolUse, which
+    # has neither a finished diff nor a transcript to judge yet): resolving
+    # that the same `unknown` a caller that does run judge gates but is
+    # missing one gets would warn on every single PreToolUse edit to a
+    # when_changed-matched path, regardless of how well-behaved the session
+    # was (see JudgeEvidence's and evaluate_judge's own docstrings).
+    judge_results: list[JudgeVerdictRequest] | None = Field(
+        default=None,
         max_length=_MAX_JUDGE_RESULTS,
         description="Model verdicts the caller collected for this request's judge gates.",
     )
@@ -264,7 +274,9 @@ class PolicyCheckRequest(BaseModel):
         return CommandEvidence(commands=tuple(dict.fromkeys(self.commands)), scope=self.command_scope)
 
     @property
-    def judge_evidence(self) -> JudgeEvidence:
+    def judge_evidence(self) -> JudgeEvidence | None:
+        if self.judge_results is None:
+            return None
         return JudgeEvidence(
             verdicts=tuple(
                 JudgeVerdict(gate_id=verdict.gate_id, outcome=verdict.outcome, reasoning=verdict.reasoning)
@@ -293,7 +305,7 @@ def _evaluate_gate(
     gate: GateSpec,
     changed_path_evidence: ChangedPathEvidence | None,
     command_evidence: CommandEvidence | None,
-    judge_evidence: JudgeEvidence,
+    judge_evidence: JudgeEvidence | None,
     segment_cache: dict[str, list[list[str]]] | None,
     phrase_cache: dict[str, list[str]] | None,
 ) -> GateResult:

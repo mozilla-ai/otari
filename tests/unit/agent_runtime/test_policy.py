@@ -1,6 +1,6 @@
 import pytest
 
-from gateway.agent_runtime.domain.policy import PolicyError, parse_policy
+from gateway.agent_runtime.domain.policy import MAX_GATE_ID_LENGTH, PolicyError, parse_policy
 from gateway.agent_runtime.domain.types import ChangedPathGate, CommandIfChangedGate, CommandMatchGate, JudgeGate
 
 VALID_POLICY = """\
@@ -151,6 +151,39 @@ def test_rejects_oversized_policy() -> None:
     huge = VALID_POLICY + ("# padding\n" * 200_000)
     with pytest.raises(PolicyError):
         parse_policy(huge, source="test.yml")
+
+
+def test_accepts_a_gate_id_at_the_length_limit() -> None:
+    """MAX_GATE_ID_LENGTH is shared with JudgeVerdictRequest.gate_id (routes/hooks.py):
+
+    every id this build accepts must be one a verdict can round-trip, so the
+    boundary itself (not just one past it) needs its own coverage.
+    """
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        f"  - id: {'g' * MAX_GATE_ID_LENGTH}\n    type: judge\n"
+        "    enforcement: advisory\n    rubric: r\n    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    assert len(spec.gates[0].id) == MAX_GATE_ID_LENGTH
+
+
+def test_rejects_a_gate_id_over_the_length_limit() -> None:
+    """Without this, a policy accepted at parse time could name a judge gate whose
+
+    id `otari hook` can never actually submit a verdict for
+    (`JudgeVerdictRequest.gate_id` caps at the same `MAX_GATE_ID_LENGTH`):
+    the whole `/hooks/check` request would 422 on that one field, fail-open,
+    taking every other gate in the same policy, mechanical and required
+    ones included, down with it.
+    """
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        f"  - id: {'g' * (MAX_GATE_ID_LENGTH + 1)}\n    type: judge\n"
+        "    enforcement: advisory\n    rubric: r\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="longer than"):
+        parse_policy(policy, source="test.yml")
 
 
 def test_duplicate_forbidden_globs_collapse_to_one() -> None:

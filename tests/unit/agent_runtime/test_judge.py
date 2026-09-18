@@ -13,10 +13,29 @@ def _gate(**overrides: object) -> JudgeGate:
     return JudgeGate(**defaults)  # type: ignore[arg-type]
 
 
-def test_unknown_when_no_evidence_was_submitted_at_all() -> None:
+def test_not_applicable_when_evidence_is_omitted_entirely() -> None:
+    """`evidence=None` means this caller's event type never runs judge gates at all
+
+    (otari hook on PreToolUse), distinct from a caller that does and is
+    missing a verdict for this one (`evidence=JudgeEvidence(verdicts=())`,
+    see test_unknown_when_evidence_has_no_verdict_for_this_gate): the former
+    must never warn on every single matching PreToolUse edit.
+    """
     result = evaluate_judge(_gate(), None, None)
+    assert result.outcome is Outcome.NOT_APPLICABLE
+    assert not result.outcome.is_blocking
+
+
+def test_unknown_when_evidence_is_submitted_but_empty() -> None:
+    """A caller that does run judge gates for this event (`JudgeEvidence(verdicts=())`,
+
+    not `None`) but is genuinely missing this one's verdict still resolves
+    `unknown`, not `not_applicable`: `None` is the only signal that means
+    "this event never judges", never an empty-but-present evidence object.
+    """
+    result = evaluate_judge(_gate(), None, JudgeEvidence(verdicts=()))
     assert result.outcome is Outcome.UNKNOWN
-    assert result.outcome.is_blocking, "unknown must block, never pass silently"
+    assert result.outcome.is_blocking
 
 
 def test_unknown_when_evidence_has_no_verdict_for_this_gate() -> None:
