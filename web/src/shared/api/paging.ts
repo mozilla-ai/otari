@@ -1,40 +1,63 @@
 /**
- * The bounded "fetch everything" walk.
+ * The bounded "fetch everything" walk, in one place.
  *
- * Shared because more than one tenancy read needs it; the page caps are what
- * stop a backend or proxy that ignores `skip` from turning a walk into an
- * unbounded request loop.
+ * Two shapes reach it because the gateway answers two. The tenancy routes wrap
+ * their rows in a `{ data, count }` envelope; `/keys`, `/users`, `/budgets`,
+ * `/scoped-budgets` and `/pricing` answer a bare array. That is the only thing
+ * that differs, so it is the only thing the two exports below decide.
+ *
+ * The caps are what the walk is for. A backend or proxy that ignores `skip`
+ * returns a full page every time, which turns "read everything" into a request
+ * loop with no end. A hundred pages of a thousand rows is 100k, past any real
+ * key list, roster or price history, so reaching the cap means something is
+ * wrong rather than something is large.
  */
 
 import { apiFetch } from "@/shared/api/client"
 
-const TENANCY_PAGE_SIZE = 1000
-const TENANCY_MAX_PAGES = 100
+/** Matches the server-side `limit` cap; asking for more returns this anyway. */
+const PAGE_SIZE = 1000
+const MAX_PAGES = 100
 
 interface Paged<T> {
   data: T[]
   count: number
 }
 
-export async function fetchAllPaged<T>(
+async function walk<Page, T>(
   path: string,
+  params: Record<string, string> | undefined,
+  rowsOf: (page: Page) => T[],
+): Promise<T[]> {
   // Appended after the paging pair rather than merged with it, so every
   // existing caller's URL is unchanged.
-  params?: Record<string, string>,
-): Promise<T[]> {
   const extra = params ? `&${new URLSearchParams(params)}` : ""
   const all: T[] = []
-  for (let page = 0; page < TENANCY_MAX_PAGES; page += 1) {
-    const body = await apiFetch<Paged<T>>(
-      `${path}?skip=${page * TENANCY_PAGE_SIZE}&limit=${TENANCY_PAGE_SIZE}${extra}`,
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const body = await apiFetch<Page>(
+      `${path}?skip=${page * PAGE_SIZE}&limit=${PAGE_SIZE}${extra}`,
     )
-    all.push(...body.data)
-    if (body.data.length < TENANCY_PAGE_SIZE) break
+    const rows = rowsOf(body)
+    all.push(...rows)
+    // A short page is the last page. Equality would loop forever against a
+    // backend that answers a full page past the end.
+    if (rows.length < PAGE_SIZE) break
   }
   return all
 }
 
-// The organization the caller's identity is pointed at, and their standing in
-// it. Every tenancy page reads it first: it names the tenant on screen and
-// decides whether the management controls are offered at all. Read often and
-// changed rarely, so it is cached for a minute like the other management lists.
+/** Every row behind a route that answers the `{ data, count }` envelope. */
+export function fetchAllPaged<T>(
+  path: string,
+  params?: Record<string, string>,
+): Promise<T[]> {
+  return walk<Paged<T>, T>(path, params, (body) => body.data)
+}
+
+/** Every row behind a route that answers a bare array. */
+export function fetchAllRows<T>(
+  path: string,
+  params?: Record<string, string>,
+): Promise<T[]> {
+  return walk<T[], T>(path, params, (rows) => rows)
+}

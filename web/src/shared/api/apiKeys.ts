@@ -9,10 +9,8 @@ import type {
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import { useOrganizationContext } from "@/shared/api/organizations"
+import { fetchAllRows } from "@/shared/api/paging"
 import { KEYS } from "@/shared/api/queryKeys"
-
-const KEYS_PAGE_SIZE = 1000
-const KEYS_MAX_PAGES = 100
 
 // Which of the two key surfaces this caller may act on.
 //
@@ -37,22 +35,11 @@ export function useKeysScope(): {
   }
 }
 
-async function fetchAllKeys(
-  base: string,
-  workspaceId?: string,
-): Promise<ApiKey[]> {
-  const all: ApiKey[] = []
-  const scope = workspaceId ? `&workspace_id=${workspaceId}` : ""
-  for (let page = 0; page < KEYS_MAX_PAGES; page += 1) {
-    const rows = await apiFetch<ApiKey[]>(
-      `${base}?skip=${page * KEYS_PAGE_SIZE}&limit=${KEYS_PAGE_SIZE}${scope}`,
-    )
-    all.push(...rows)
-    if (rows.length < KEYS_PAGE_SIZE) {
-      break
-    }
-  }
-  return all
+function fetchAllKeys(base: string, workspaceId?: string): Promise<ApiKey[]> {
+  return fetchAllRows<ApiKey>(
+    base,
+    workspaceId ? { workspace_id: workspaceId } : undefined,
+  )
 }
 
 // The workspace is part of the key, not just the request: switching workspaces

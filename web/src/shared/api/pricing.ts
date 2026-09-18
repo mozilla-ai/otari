@@ -10,7 +10,7 @@ import type {
   UpdateOrganizationPricingOverride,
 } from "@/client"
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
-import { fetchAllPaged } from "@/shared/api/paging"
+import { fetchAllPaged, fetchAllRows } from "@/shared/api/paging"
 import {
   CATALOG,
   MODELS,
@@ -65,26 +65,7 @@ export function usePricingDrift(enabled = true) {
   })
 }
 
-const PRICING_PAGE_SIZE = 1000
-
-// Cap the walk so a backend or proxy that ignores `skip` (returning a full page
-// every time) can't spin this into an unbounded request loop. 100 pages is 100k
-// rows, far beyond any realistic price history.
-const PRICING_MAX_PAGES = 100
-
-async function fetchAllPricing(): Promise<PricingResponse[]> {
-  const all: PricingResponse[] = []
-  for (let page = 0; page < PRICING_MAX_PAGES; page += 1) {
-    const rows = await apiFetch<PricingResponse[]>(
-      `/pricing?skip=${page * PRICING_PAGE_SIZE}&limit=${PRICING_PAGE_SIZE}`,
-    )
-    all.push(...rows)
-    if (rows.length < PRICING_PAGE_SIZE) {
-      break
-    }
-  }
-  return all
-}
+const fetchAllPricing = () => fetchAllRows<PricingResponse>("/pricing")
 
 export function usePricing(enabled = true) {
   return useQuery({

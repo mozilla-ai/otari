@@ -41,6 +41,11 @@ import {
 /** The context key as React Query addresses it, for a filter that excludes it. */
 const ORGANIZATION_CONTEXT_HASH = hashKey(ORGANIZATION_CONTEXT)
 
+// The organization the caller's identity is pointed at, and their standing in
+// it. Every tenancy page reads it first: it names the tenant on screen and
+// decides whether the management controls are offered at all. Read often and
+// changed rarely, so it is cached for a minute like the other management lists.
+//
 // `enabled` is for the one page that renders ahead of a session: the public
 // catalog has no organization to ask about, and asking would 401 into the
 // sign-out handler.

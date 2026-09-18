@@ -17,7 +17,7 @@ import type {
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import { useOrganizationContext } from "@/shared/api/organizations"
-import { fetchAllPaged } from "@/shared/api/paging"
+import { fetchAllPaged, fetchAllRows } from "@/shared/api/paging"
 import {
   BUDGETS,
   ORGANIZATION_BUDGETS,
@@ -26,22 +26,7 @@ import {
   SCOPED_BUDGETS,
 } from "@/shared/api/queryKeys"
 
-const BUDGETS_PAGE_SIZE = 1000
-const BUDGETS_MAX_PAGES = 100
-
-async function fetchAllBudgets(): Promise<Budget[]> {
-  const all: Budget[] = []
-  for (let page = 0; page < BUDGETS_MAX_PAGES; page += 1) {
-    const rows = await apiFetch<Budget[]>(
-      `/budgets?skip=${page * BUDGETS_PAGE_SIZE}&limit=${BUDGETS_PAGE_SIZE}`,
-    )
-    all.push(...rows)
-    if (rows.length < BUDGETS_PAGE_SIZE) {
-      break
-    }
-  }
-  return all
-}
+const fetchAllBudgets = () => fetchAllRows<Budget>("/budgets")
 
 // `enabled` is for a page that composes this deployment-wide read into a
 // tenant-scoped one: since #821 it answers 403 to anyone who does not operate
@@ -112,25 +97,8 @@ export function useDeleteBudget() {
 // above rather than a view over them: each row carries its own counters, so one
 // row is a pooled cap over whatever its scope names. See `client/index.ts`.
 //
-// The list route returns a bare array (not the `Paged` envelope the tenancy
-// routes use) and caps `limit` at 1000 server-side, so it pages like budgets and
-// keys do, with the same guard against a backend that ignores `skip`.
-const SCOPED_BUDGETS_PAGE_SIZE = 1000
-const SCOPED_BUDGETS_MAX_PAGES = 100
-
-async function fetchAllScopedBudgets(): Promise<ScopedBudget[]> {
-  const all: ScopedBudget[] = []
-  for (let page = 0; page < SCOPED_BUDGETS_MAX_PAGES; page += 1) {
-    const rows = await apiFetch<ScopedBudget[]>(
-      `/scoped-budgets?skip=${page * SCOPED_BUDGETS_PAGE_SIZE}&limit=${SCOPED_BUDGETS_PAGE_SIZE}`,
-    )
-    all.push(...rows)
-    if (rows.length < SCOPED_BUDGETS_PAGE_SIZE) {
-      break
-    }
-  }
-  return all
-}
+const fetchAllScopedBudgets = () =>
+  fetchAllRows<ScopedBudget>("/scoped-budgets")
 
 // Gated for the same reason as `useBudgets` above.
 export function useScopedBudgets(enabled = true) {
