@@ -19,10 +19,82 @@ from any_llm import LLMProvider
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.api.routes._tools import (
+    _extract_code_execution_tool,
+    decide_code_executor,
+    first_provider_code_execution_tool,
+    parse_code_execution_header,
+    provider_runs_code_natively,
+    resolve_code_executor_preference,
+)
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.content_normalizer import NormalizationStats, WireFormat, normalize_messages
+from gateway.services.file_service import SandboxFileBridge, StagedFile
 from gateway.services.model_capabilities import resolve_capabilities
+from gateway.types.code_execution import CodeExecutor
+
+
+def sandbox_requested(
+    tools: list[dict[str, Any]] | None,
+    *,
+    config: GatewayConfig,
+    provider: LLMProvider | None,
+    dialect: str,
+    code_execution_header: str | None,
+) -> bool:
+    """Whether this request's code will run on the gateway's sandbox.
+
+    True for the explicit ``otari_code_execution`` type, and for a provider's own
+    declaration the executor would bring here (see ``_tools.decide_code_executor``):
+    a file the request attaches is then staged for the sandbox rather than only
+    shown to the model. Decided from the deployment default, the header and the
+    dispatched provider, which is everything known at normalization time; a
+    workspace pin is read later, at admission, so a pin that pulls a natively
+    served declaration here runs without staged attachments, and one that pushes
+    a declaration back to the provider leaves a ``container_upload`` replaced by
+    its marker. A header outside the vocabulary answers false here and is
+    refused at admission.
+    """
+    explicit, remaining = _extract_code_execution_tool(tools)
+    if explicit is not None:
+        return True
+    keyword = first_provider_code_execution_tool(remaining)
+    if keyword is None or not config.sandbox_configured():
+        return False
+    try:
+        requested = parse_code_execution_header(code_execution_header)
+    except ValueError:
+        return False
+    preference, _ = resolve_code_executor_preference(
+        requested=requested, workspace=None, deployment=config.effective_code_executor()
+    )
+    native = provider_runs_code_natively(
+        keyword, provider=provider.value if provider is not None else None, dialect=dialect
+    )
+    return decide_code_executor(preference, sandbox_configured=True, native_available=native) is CodeExecutor.OTARI
+
+
+def build_sandbox_file_bridge(
+    *,
+    config: GatewayConfig,
+    raw_request: Request,
+    hybrid_mode: bool,
+    user_id: str | None,
+    workspace_id: uuid.UUID | None,
+    inputs: list[StagedFile],
+) -> SandboxFileBridge | None:
+    """The file bridge a sandbox session gets, or ``None`` where files are unavailable.
+
+    Hybrid mode has no local file store or database to hold what a run produces,
+    so its sandbox runs without one, exactly as before.
+    """
+    file_store = getattr(raw_request.app.state, "file_store", None)
+    if hybrid_mode or not config.files_enabled or file_store is None or user_id is None or workspace_id is None:
+        return None
+    return SandboxFileBridge(
+        file_store=file_store, config=config, user_id=user_id, workspace_id=workspace_id, inputs=inputs
+    )
 
 
 async def normalize_request_messages(
@@ -37,8 +109,13 @@ async def normalize_request_messages(
     user_id: str | None,
     instance: str | None = None,
     workspace_id: uuid.UUID | None = None,
+    sandbox_requested: bool = False,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Normalize ``messages`` for the resolved ``provider/model``.
+
+    ``sandbox_requested`` is whether the request declared the gateway's
+    code-execution tool; the normalizer then records referenced uploads on the
+    stats for the sandbox backend to seed (see ``NormalizationStats.sandbox_inputs``).
 
     No-ops (returns the input untouched) when file understanding is disabled or
     the provider couldn't be parsed — the downstream provider call surfaces an
@@ -63,6 +140,7 @@ async def normalize_request_messages(
             file_store=file_store,
             user_id=user_id,
             workspace_id=workspace_id,
+            sandbox_requested=sandbox_requested,
         )
     except Exception as exc:  # noqa: BLE001 — never fail the request / leak the reservation
         logger.warning("content normalization failed; forwarding messages unchanged: %s", exc)

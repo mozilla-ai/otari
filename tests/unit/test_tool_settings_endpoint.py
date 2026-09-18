@@ -340,3 +340,22 @@ def test_guardrail_catalog_is_an_operator_read(tmp_path: Path) -> None:
     assert catalog in operator
     assert catalog not in reader
     assert profiles in reader
+
+
+def test_the_executor_is_an_operator_setting_with_a_closed_vocabulary(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        before = _fields(client.get(f"{API_ROOT}/tool-settings", headers=AUTH).json())
+        assert before["code_execution_executor"]["service"] == "sandbox"
+        assert before["code_execution_executor"]["choices"] == ["auto", "otari", "provider"]
+        assert before["code_execution_executor"]["value"] is None
+        assert before["sandbox_url"]["choices"] is None
+
+        patched = client.patch(f"{API_ROOT}/tool-settings", json={"code_execution_executor": "Otari"}, headers=AUTH)
+        assert patched.status_code == 200, patched.text
+        refused = client.patch(
+            f"{API_ROOT}/tool-settings", json={"code_execution_executor": "anthropic"}, headers=AUTH
+        )
+        assert refused.status_code == 422
+        after = _fields(client.get(f"{API_ROOT}/tool-settings", headers=AUTH).json())
+
+    assert after["code_execution_executor"]["value"] == "otari"

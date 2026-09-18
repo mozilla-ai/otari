@@ -1101,12 +1101,17 @@ export interface paths {
          *
          *     ``workspace_id`` narrows a master-key listing to one workspace; a keyed
          *     request is already confined to its key's own and cannot widen or move it.
+         *
+         *     Pages are cursor-based: ``after`` (OpenAI) or ``after_id`` (Anthropic) names
+         *     the last file of the previous page, and ``has_more`` says whether to ask
+         *     again. A cursor the caller cannot see (another user's file, a deleted one)
+         *     is a 404, the same answer a direct read of it gets.
          */
         get: operations["files-list_files"];
         put?: never;
         /**
          * Create File
-         * @description OpenAI-compatible file upload endpoint.
+         * @description Upload a file. Answers in the OpenAI or Anthropic file shape, following the caller's headers.
          */
         post: operations["files-create_file"];
         delete?: never;
@@ -6535,6 +6540,16 @@ export interface components {
             user?: string | null;
         };
         /**
+         * CodeExecutor
+         * @description Who runs the code a request's code-execution tool asks for.
+         *
+         *     The one vocabulary shared by the deployment setting, the workspace policy,
+         *     the per-request header and the platform's resolve payload, so a value read
+         *     from any of them means the same thing at admission.
+         * @enum {string}
+         */
+        CodeExecutor: "auto" | "otari" | "provider";
+        /**
          * ConfigField
          * @description One effective config value surfaced to the dashboard's config viewer.
          */
@@ -8077,7 +8092,7 @@ export interface components {
         ManagedTool: {
             /**
              * Accepted Types
-             * @description Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled.
+             * @description Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled, and for code execution the provider-named keywords unless the deployment's executor is `provider`.
              */
             accepted_types: string[];
             /**
@@ -11316,6 +11331,8 @@ export interface components {
          * @description One editable tool/guardrail field surfaced to the dashboard.
          */
         ToolSettingField: {
+            /** Choices */
+            choices?: string[] | null;
             /** Description */
             description?: string | null;
             /** Key */
@@ -11599,6 +11616,8 @@ export interface components {
          *     }
          */
         UpdateToolSettingsRequest: {
+            /** Code Execution Executor */
+            code_execution_executor?: string | null;
             /** Guardrails Url */
             guardrails_url?: string | null;
             /** Sandbox Purpose Hint */
@@ -12384,6 +12403,7 @@ export interface components {
             enabled: boolean;
             /** Exec Timeout S */
             exec_timeout_s: number | null;
+            executor: components["schemas"]["CodeExecutor"] | null;
             /** Image */
             image: string | null;
             /** Max Iterations */
@@ -12424,6 +12444,8 @@ export interface components {
              * @description Ceiling on one execution's runtime in seconds; only ever lowers the effective limit, so at most 60
              */
             exec_timeout_s?: number | null;
+            /** @description Who runs a provider-native code-execution declaration for this workspace: 'auto' (the provider when it runs the tool natively for the model, else this gateway's sandbox), 'otari' or 'provider'. Pins over the deployment default and over the request's X-Otari-Code-Execution header; null leaves both in charge */
+            executor?: components["schemas"]["CodeExecutor"] | null;
             /**
              * Image
              * @description Sandbox image this workspace's code runs in. Must be one the operator curated into sandbox_allowed_session_images (or the deployment's own sandbox_session_image); null uses the deployment's
@@ -14357,6 +14379,10 @@ export interface operations {
                 user?: string | null;
                 purpose?: string | null;
                 workspace_id?: string | null;
+                limit?: number;
+                after?: string | null;
+                after_id?: string | null;
+                order?: "asc" | "desc";
             };
             header?: never;
             path?: never;

@@ -22,6 +22,13 @@ Composition follows the rule in ``src/gateway/AGENTS.md`` (#655, settled in
   (plus the deployment's own ``sandbox_session_image``). A workspace-settable image is a
   supply-chain surface rather than a string, so the allow-list is the whole
   point of the column: without one, a workspace pins nothing;
+* ``executor`` pins who runs a provider-named code-execution declaration for
+  this workspace (``auto``, ``otari`` or ``provider``), over the deployment's
+  default and over the request's own header. The one field here that is a
+  choice rather than a narrowing, because both directions are a workspace
+  owner's call: bringing code to Otari's sandbox is a data decision, leaving it
+  with the provider a billing one. It still grants no sandbox the deployment
+  has not configured;
 * and **no row means no narrowing**, which is what makes a deployment that
   configures nothing behave exactly as it did.
 
@@ -63,6 +70,7 @@ from gateway.services.sandbox_backend import (
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.errors import SandboxImageNotAllowedError, SandboxToolsUnrunnableError
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.types.code_execution import CodeExecutor
 
 # The two ceilings a workspace value is floored against, which are also the
 # largest values worth storing: a policy may only narrow, so a number above the
@@ -136,6 +144,15 @@ class WorkspaceCodeExecutionPolicyUpdate(BaseModel):
             "null exposes whatever it serves"
         ),
     )
+    executor: CodeExecutor | None = Field(
+        default=None,
+        description=(
+            "Who runs a provider-native code-execution declaration for this workspace: 'auto' (the "
+            "provider when it runs the tool natively for the model, else this gateway's sandbox), "
+            "'otari' or 'provider'. Pins over the deployment default and over the request's "
+            "X-Otari-Code-Execution header; null leaves both in charge"
+        ),
+    )
 
     @field_validator("tools")
     @classmethod
@@ -199,6 +216,7 @@ class WorkspaceCodeExecutionPolicyPublic(BaseModel):
     exec_timeout_s: int | None
     image: str | None
     tools: list[str] | None
+    executor: CodeExecutor | None
     created_at: str | None
     updated_at: str | None
 
@@ -222,6 +240,7 @@ class WorkspaceCodeExecutionPolicyPublic(BaseModel):
             exec_timeout_s=None,
             image=None,
             tools=None,
+            executor=None,
             created_at=None,
             updated_at=None,
         )
@@ -246,6 +265,7 @@ class WorkspaceCodeExecutionPolicyPublic(BaseModel):
             exec_timeout_s=policy.exec_timeout_s,
             image=policy.image,
             tools=list(policy.tools) if policy.tools is not None else None,
+            executor=CodeExecutor.parse(policy.executor),
             created_at=policy.created_at.isoformat(),
             updated_at=policy.updated_at.isoformat(),
         )
@@ -269,6 +289,11 @@ class ResolvedCodeExecutionPolicy:
     # ever asks whether a tool kind is in it, and an immutable one cannot be
     # edited by a backend it is handed to.
     tools: frozenset[str] | None
+    # The workspace's pin on who runs code, or ``None`` for "the deployment and
+    # the request decide". Parsed on the way out, so a stored value outside the
+    # vocabulary (which the write refuses) reads as no pin rather than failing
+    # every request.
+    executor: CodeExecutor | None = None
 
 
 async def resolve_workspace_code_execution_policy(
@@ -291,6 +316,7 @@ async def resolve_workspace_code_execution_policy(
         exec_timeout_s=policy.exec_timeout_s,
         image=policy.image,
         tools=frozenset(policy.tools) if policy.tools is not None else None,
+        executor=CodeExecutor.parse(policy.executor),
     )
 
 
@@ -422,6 +448,7 @@ class WorkspaceCodeExecutionPolicyService:
         policy.exec_timeout_s = request.exec_timeout_s
         policy.image = _blank_to_none(request.image)
         policy.tools = request.tools
+        policy.executor = request.executor.value if request.executor is not None else None
 
     async def clear_policy(self, *, user: User, workspace_id: uuid.UUID) -> WorkspaceCodeExecutionPolicyPublic:
         """Drop the workspace's policy, returning it to the deployment's behavior.

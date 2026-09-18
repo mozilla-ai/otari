@@ -123,6 +123,28 @@ class FileObject(Base):
             "purpose": self.purpose,
         }
 
+    def to_anthropic_dict(self) -> dict[str, Any]:
+        """Convert to the Anthropic Files API ``FileMetadata`` shape.
+
+        Anthropic's SDK reads ``size_bytes`` and ``mime_type`` where OpenAI's
+        reads ``bytes`` and nothing, and takes ``created_at`` as an RFC 3339
+        string rather than an epoch. ``downloadable`` is always true here: the
+        gateway serves every stored file's bytes back, unlike Anthropic, which
+        withholds user uploads.
+        """
+        created_at = self.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        return {
+            "id": self.id,
+            "type": "file",
+            "filename": self.filename,
+            "mime_type": self.mime_type,
+            "size_bytes": self.bytes,
+            "created_at": created_at.isoformat().replace("+00:00", "Z"),
+            "downloadable": True,
+        }
+
 
 class WorkspaceMcpServer(Base):
     """One MCP server a workspace has configured, referenced by id from a request.
@@ -252,6 +274,12 @@ class WorkspaceCodeExecutionPolicy(Base):
     # ``WorkspaceWebSearchConfig`` stores its domain lists that way: short, read
     # whole, and nothing queries into it.
     tools: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    # NULL means "no workspace pin": the deployment's ``code_execution_executor``
+    # (and, where it leaves room, the request's header) decides who runs a
+    # provider-named code-execution declaration. A stored value is a pin the
+    # request cannot argue with. One of ``CodeExecutor``'s values; the service
+    # refuses anything else, and the column is sized for that vocabulary.
+    executor: Mapped[str | None] = mapped_column(String(16), default=None)
     # ``UtcDateTime`` for the same reason ``WorkspaceBudgetDefault`` uses it:
     # these are serialized with ``.isoformat()`` for the dashboard, and a plain
     # ``DateTime(timezone=True)`` round-trips naive on SQLite.
