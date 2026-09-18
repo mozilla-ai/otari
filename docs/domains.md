@@ -72,7 +72,7 @@ SQLAlchemy or SQLModel) and calls `execute`, `exec`, `scalar`, `scalars` or
 | Service packages per domain | 1: `services/tools/`, which holds the built-in tool registry and no service yet. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
 | Repository packages per domain | None. `repositories/tenancy/` is an older subpackage |
 | Modules in `schemas/` | None; the package does not exist |
-| Modules in `exceptions/` | 2: the shared error bases in `__init__.py`, and `budget_exceptions.py`. `services/tenancy/errors.py` holds the rest of the tenancy errors in 1,145 lines |
+| Modules in `exceptions/` | The shared error bases in `_base.py`, which the package root re-exports, and one domain module so far, `budget_exceptions.py`. `services/tenancy/errors.py` holds the rest of the tenancy errors in 1,145 lines |
 
 ## The domains
 

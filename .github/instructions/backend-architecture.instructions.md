@@ -88,8 +88,9 @@ only gate for them.
 
 A domain error carries its own `status_code`, and one registered handler
 renders its family. One family exists: `TenancyError` and the status bases
-under it, in `exceptions/__init__.py`, rendered by `_tenancy_error_handler` in
-`gateway.main`. A domain's own error module subclasses those bases.
+under it, defined in `exceptions/_base.py`, imported from `gateway.exceptions`
+and rendered by `_tenancy_error_handler` in `gateway.main`. A domain's own
+error module subclasses those bases.
 
 - Flag a route that catches a tenancy error to turn it into an
   `HTTPException`.
