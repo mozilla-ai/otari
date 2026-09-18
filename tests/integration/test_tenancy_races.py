@@ -9,7 +9,7 @@ with separate sessions rather than asserting the branch in isolation.
 
 import asyncio
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -83,10 +83,13 @@ KEY_FORMAT = DefaultApiKeyFormatAdapter(None)
 
 _RACERS = 4
 
-# How long the delete waits for the join before giving up on it. Generous,
-# because the join blocks on the workspace lock once the delete holds it, and
-# that wait is paid in full on every passing run.
-_JOIN_WINDOW = 1.0
+# How long the delete waits for a join that has reached the workspace lock.
+# Paid in full on every passing run, because the join blocks there until the delete commits.
+# It only has to cover the join's insert and commit when nothing holds the lock, which is fast.
+_JOIN_WINDOW = 0.25
+
+# Bounds a join that never reaches the lock. A healthy run never waits this long.
+_CHECKPOINT_TIMEOUT = 5.0
 
 
 async def _seed_owner(db: AsyncSession) -> tuple[Organization, User]:
@@ -434,15 +437,9 @@ class _PausingListener:
     snapshot and the row delete, so that interleaving is pinned rather than raced for.
     """
 
-    def __init__(
-        self,
-        inner: WorkspaceBudgetDefaultService,
-        joining: asyncio.Task[object],
-        swept: asyncio.Event,
-    ) -> None:
+    def __init__(self, inner: WorkspaceBudgetDefaultService, let_the_join_run: Callable[[], Awaitable[None]]) -> None:
         self._inner = inner
-        self._joining = joining
-        self._swept = swept
+        self._let_the_join_run = let_the_join_run
 
     async def member_joined(self, member: WorkspaceMember) -> None:
         await self._inner.member_joined(member)
@@ -452,13 +449,13 @@ class _PausingListener:
 
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         await self._inner.workspace_deleted(workspace_id, member_ids)
-        self._swept.set()
-        await asyncio.wait({self._joining}, timeout=_JOIN_WINDOW)
+        await self._let_the_join_run()
 
 
 async def test_a_join_during_a_workspace_delete_leaves_no_orphaned_ceiling(
     async_db: AsyncSession,
     sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A ceiling must not outlive the membership it caps.
 
@@ -485,6 +482,7 @@ async def test_a_join_during_a_workspace_delete_leaves_no_orphaned_ceiling(
     assert len(materialized) == 1, "the default must have given the owner a ceiling before the delete"
 
     swept = asyncio.Event()
+    at_lock = asyncio.Event()
 
     async def join() -> object:
         await swept.wait()
@@ -492,18 +490,32 @@ async def test_a_join_during_a_workspace_delete_leaves_no_orphaned_ceiling(
             actor = await UserRepository(session).get(owner.id)
             assert actor is not None
             adder = WorkspaceService(session, membership_listener=WorkspaceBudgetDefaultService(session))
+            take_lock = adder.workspaces.lock
+
+            async def signal_then_lock(workspace_id: uuid.UUID) -> None:
+                at_lock.set()
+                await take_lock(workspace_id)
+
+            monkeypatch.setattr(adder.workspaces, "lock", signal_then_lock)
             try:
                 return await adder.add_member(user=actor, workspace_id=target.id, user_id=joiner.id)
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
                 return exc
 
     joining = asyncio.create_task(join())
+
+    async def let_the_join_run() -> None:
+        swept.set()
+        # The window opens only once the join is at the lock, so its setup time cannot use it up.
+        await asyncio.wait_for(at_lock.wait(), timeout=_CHECKPOINT_TIMEOUT)
+        await asyncio.wait({joining}, timeout=_JOIN_WINDOW)
+
     async with sessions() as session:
         actor = await UserRepository(session).get(owner.id)
         assert actor is not None
         deleter = WorkspaceService(
             session,
-            membership_listener=_PausingListener(WorkspaceBudgetDefaultService(session), joining, swept),
+            membership_listener=_PausingListener(WorkspaceBudgetDefaultService(session), let_the_join_run),
         )
         await deleter.delete_workspace(user=actor, workspace_id=target.id)
     await joining
