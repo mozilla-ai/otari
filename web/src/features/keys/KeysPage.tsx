@@ -126,6 +126,14 @@ const label = (apiKey: ApiKey): string => apiKey.key_name ?? apiKey.id
 // Stable row-key getter so DataTable's per-row cache holds across re-renders.
 const getKeyRowKey = (apiKey: ApiKey): string => apiKey.id
 
+function renderFingerprint(apiKey: ApiKey) {
+  return (
+    <code className="whitespace-nowrap text-mono-caption text-muted">
+      {keyFingerprint(apiKey) ?? "—"}
+    </code>
+  )
+}
+
 // ---------- the one-time secret ----------
 
 /** One-time key handoff with copyable request examples. */
@@ -1097,15 +1105,6 @@ export function KeysPage() {
       setActive,
     ],
   )
-  const renderPrefix = useCallback(
-    (apiKey: ApiKey) => (
-      <code className="whitespace-nowrap text-mono-caption text-muted">
-        {keyFingerprint(apiKey) ?? "—"}
-      </code>
-    ),
-    [],
-  )
-
   // Memoized on what the cells read, so DataTable's per-row cache holds across
   // selection clicks; see its docstring.
   const columns = useMemo<DataTableColumn<ApiKey>[]>(
@@ -1192,7 +1191,7 @@ export function KeysPage() {
       {
         id: "key",
         header: "Key",
-        cell: renderPrefix,
+        cell: renderFingerprint,
       },
       {
         id: "created",
@@ -1235,14 +1234,7 @@ export function KeysPage() {
         cell: renderActions,
       },
     ],
-    [
-      layout,
-      isDeploymentWide,
-      memberLabels,
-      ownerLabel,
-      renderPrefix,
-      renderActions,
-    ],
+    [layout, isDeploymentWide, memberLabels, ownerLabel, renderActions],
   )
   const visibleColumns = useMemo(
     () =>
@@ -1476,7 +1468,7 @@ export function KeysPage() {
                   <span className="truncate text-base text-foreground">
                     {apiKey.key_name ?? "(unnamed)"}
                   </span>
-                  {renderPrefix(apiKey)}
+                  {renderFingerprint(apiKey)}
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="shrink-0">
                       <StatusMark apiKey={apiKey} />
