@@ -71,8 +71,12 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    `placeholderData: (prev) => prev`, or the page blanks on every filter change. Don't call
    `fetch()` directly for authenticated management requests; `apiFetch` uses the HttpOnly
    session cookie and signs out on 401, while public sign-in helpers stay outside that path.
-   Never mirror server state into `useState`, and never swallow a mutation error. **A list hook
-   asks for the page on screen**, taking `skip` and `limit` from the URL state with
+   Never mirror server state into `useState`, and never swallow a mutation error. **The
+   dashboard is a thin rendering layer**: it does not filter, search, sort, join or aggregate
+   server data, and it does not assemble one view out of several responses and join them by id
+   in the browser. If the endpoint the page needs does not exist, creating it is the change to
+   make, and the gateway is in this repository. **A list hook asks for the page on
+   screen**, taking `skip` and `limit` from the URL state with
    `placeholderData: (prev) => prev`; every gateway list route accepts both and rejects a
    `limit` above 1000 rather than clamping. Reading a whole collection is the finding, and a
    cap on the walk does not answer it: the cap stops the walk looping, it does not paginate the
