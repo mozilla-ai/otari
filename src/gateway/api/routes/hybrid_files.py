@@ -226,11 +226,13 @@ async def _compensate_upload(
         except FilesError:
             pass
 
-    task = asyncio.create_task(compensate())
-    try:
-        await asyncio.shield(asyncio.wait_for(task, timeout=20))
-    except (TimeoutError, asyncio.CancelledError):
-        task.cancel()
+    async def bounded_compensate() -> None:
+        try:
+            await asyncio.wait_for(compensate(), timeout=20)
+        except TimeoutError:
+            pass
+
+    await asyncio.shield(asyncio.create_task(bounded_compensate()))
 
 
 @router.get("/files", response_model=AnthropicFilePage | OpenAIFilePage, response_model_exclude_unset=True)
