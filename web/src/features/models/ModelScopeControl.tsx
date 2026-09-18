@@ -64,16 +64,16 @@ export function ModelScopeControl({
   // stored entry is a real, canonical selector the backend will accept.
   const catalog = useMemo<CatalogOption[]>(() => {
     const candidates: CatalogOption[] = [
-      ...(providers.data?.providers ?? []).map((p) => ({
-        id: `${p.instance}:*`,
-        label: `${p.instance}:*  ·  all ${p.instance} models`,
+      ...(providers.data?.providers ?? []).map((provider) => ({
+        id: `${provider.instance}:*`,
+        label: `${provider.instance}:*  ·  all ${provider.instance} models`,
       })),
       ...(discoverable.data?.providers ?? []).flatMap((prov) =>
-        prov.models.map((m) => ({ id: m.key, label: m.key })),
+        prov.models.map((model) => ({ id: model.key, label: model.key })),
       ),
-      ...(aliases.data ?? []).map((a) => ({
-        id: a.target,
-        label: `${a.name}  ·  alias`,
+      ...(aliases.data ?? []).map((alias) => ({
+        id: alias.target,
+        label: `${alias.name}  ·  alias`,
       })),
     ]
     // First label wins, so a discoverable model keeps its own name over the
@@ -89,12 +89,12 @@ export function ModelScopeControl({
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
     return catalog
-      .filter((o) => !entries.includes(o.id))
+      .filter((option) => !entries.includes(option.id))
       .filter(
-        (o) =>
+        (option) =>
           !q ||
-          o.id.toLowerCase().includes(q) ||
-          o.label.toLowerCase().includes(q),
+          option.id.toLowerCase().includes(q) ||
+          option.label.toLowerCase().includes(q),
       )
       .slice(0, MAX_VISIBLE)
   }, [catalog, entries, query])
@@ -118,7 +118,7 @@ export function ModelScopeControl({
   }
 
   const removeEntry = (id: string) => {
-    const next = entries.filter((e) => e !== id)
+    const next = entries.filter((entry) => entry !== id)
     setEntries(next)
     emit("only", next)
   }
@@ -214,8 +214,8 @@ export function ModelScopeControl({
                   className="max-h-72 overflow-auto"
                   renderEmptyState={() => (
                     <ComboBoxEmpty
-                      isSourceEmpty={catalog.every((o) =>
-                        entries.includes(o.id),
+                      isSourceEmpty={catalog.every((option) =>
+                        entries.includes(option.id),
                       )}
                       emptyMessage={
                         catalog.length === 0

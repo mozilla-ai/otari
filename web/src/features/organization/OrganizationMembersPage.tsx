@@ -535,7 +535,9 @@ function MemberEditor({
   const deleteCeiling = useDeleteScopedBudget()
 
   const initial = useMemo(() => {
-    const byWorkspace = new Map(placements.map((p) => [p.workspaceId, p]))
+    const byWorkspace = new Map(
+      placements.map((placement) => [placement.workspaceId, placement]),
+    )
     return new Map(
       workspaces.map((workspace) => {
         const placement = byWorkspace.get(workspace.id)
@@ -621,10 +623,17 @@ function MemberEditor({
       // success. That is the ordinary path through this page: the member is
       // already in the workspace and is being given a budget for the first time.
       const membershipIds = new Map<string, string | null>(
-        placements.map((p) => [p.workspaceId, p.membershipId]),
+        placements.map((placement) => [
+          placement.workspaceId,
+          placement.membershipId,
+        ]),
       )
-      const wasMember = new Set(placements.map((p) => p.workspaceId))
-      const roleWas = new Map(placements.map((p) => [p.workspaceId, p.role]))
+      const wasMember = new Set(
+        placements.map((placement) => placement.workspaceId),
+      )
+      const roleWas = new Map(
+        placements.map((placement) => [placement.workspaceId, placement.role]),
+      )
       for (const [workspaceId, row] of rows) {
         if (row.member && !wasMember.has(workspaceId)) {
           const created = await addMember.mutateAsync({
@@ -844,7 +853,7 @@ export function OrganizationMembersPage() {
   const updateUser = useUpdateUser()
   const workspaces = useWorkspaces()
   const workspaceIds = useMemo(
-    () => (workspaces.data ?? []).map((w) => w.id),
+    () => (workspaces.data ?? []).map((workspace) => workspace.id),
     [workspaces.data],
   )
   const workspaceMembers = useAllWorkspaceMembers(workspaceIds)
@@ -880,7 +889,12 @@ export function OrganizationMembersPage() {
     [scopedBudgets.data],
   )
   const placementsByUser = useMemo(() => {
-    const names = new Map((workspaces.data ?? []).map((w) => [w.id, w.name]))
+    const names = new Map(
+      (workspaces.data ?? []).map((workspace) => [
+        workspace.id,
+        workspace.name,
+      ]),
+    )
     return workspaceMembers.data.reduce((byUser, { workspaceId, member }) => {
       const placement: WorkspacePlacement = {
         workspaceId,

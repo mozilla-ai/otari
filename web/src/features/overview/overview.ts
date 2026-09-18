@@ -136,11 +136,11 @@ export function budgetHealth(budgets: Budget[]): BudgetHealth {
   }
   const nameBudget = budgetLabeler(budgets)
   const capped = budgets
-    .filter((b) => b.max_budget !== null && b.user_count > 0)
-    .map((b) => ({
-      name: nameBudget(b),
-      spent: b.total_spend,
-      allocated: (b.max_budget as number) * b.user_count,
+    .filter((budget) => budget.max_budget !== null && budget.user_count > 0)
+    .map((budget) => ({
+      name: nameBudget(budget),
+      spent: budget.total_spend,
+      allocated: (budget.max_budget as number) * budget.user_count,
     }))
   if (capped.length === 0) {
     return noneToJudge("No capped budgets")
@@ -172,11 +172,11 @@ export function spendCeilingHealth(
     return noneToJudge("No spend ceilings configured")
   }
   const capped = ceilings
-    .filter((c) => c.max_budget !== null)
-    .map((c) => ({
-      name: nameOf(c),
-      spent: c.current_spend + c.reserved_spend,
-      allocated: c.max_budget as number,
+    .filter((budget) => budget.max_budget !== null)
+    .map((budget) => ({
+      name: nameOf(budget),
+      spent: budget.current_spend + budget.reserved_spend,
+      allocated: budget.max_budget as number,
     }))
   if (capped.length === 0) {
     return noneToJudge("No ceiling caps spend")

@@ -138,8 +138,8 @@ export function MultiSelect({
   ).length
   const labelOf = (id: string) =>
     options.find((option) => option.id === id)?.label ?? id
-  const counted = (n: number) =>
-    `${n} ${n === 1 ? countNoun.one : countNoun.other}`
+  const counted = (count: number) =>
+    `${count} ${count === 1 ? countNoun.one : countNoun.other}`
 
   // The query survives a pick. Clearing it would refill the list under the
   // pointer, which is the same movement the chips were moved to avoid.

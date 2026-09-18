@@ -138,10 +138,13 @@ export function ChartLegend({ series }: { series: SeriesDef[] }) {
   if (series.length < 2) return null
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      {series.map((s) => (
-        <span key={s.key} className="flex items-center gap-1.5 text-caption">
-          <SeriesMarker color={s.color} />
-          {s.label}
+      {series.map((seriesDef) => (
+        <span
+          key={seriesDef.key}
+          className="flex items-center gap-1.5 text-caption"
+        >
+          <SeriesMarker color={seriesDef.color} />
+          {seriesDef.label}
         </span>
       ))}
     </div>
@@ -314,13 +317,13 @@ export function TrendChart({
               />
             }
           />
-          {series.map((s) => (
+          {series.map((seriesDef) => (
             <Bar
-              key={s.key}
-              dataKey={s.key}
-              name={s.label}
+              key={seriesDef.key}
+              dataKey={seriesDef.key}
+              name={seriesDef.label}
               stackId="stack"
-              fill={s.color}
+              fill={seriesDef.color}
               stroke="var(--color-surface)"
               strokeWidth={series.length > 1 ? 1 : 0}
               // Square, always. Rounding the data end of a single-series bar

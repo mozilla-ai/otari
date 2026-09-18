@@ -311,7 +311,7 @@ function KnownProviderForm({
       />
       <SecretField
         value={apiKey}
-        onChange={(v) => onChange({ apiKey: v })}
+        onChange={(value) => onChange({ apiKey: value })}
         // The registry names the credential where the provider does not call it
         // an API key; the optional suffix still tracks whether one is needed.
         label={
@@ -338,7 +338,7 @@ function KnownProviderForm({
       <ProviderCredentialFields
         provider={providerId}
         values={credentials}
-        onChange={(v) => onChange({ credentials: v })}
+        onChange={(values) => onChange({ credentials: values })}
         errors={credentialErrors}
       />
       <button
@@ -356,14 +356,14 @@ function KnownProviderForm({
             <Field
               label="API base"
               value={apiBase}
-              onChange={(v) => onChange({ apiBase: v })}
+              onChange={(value) => onChange({ apiBase: value })}
               placeholder={selected?.default_api_base ?? "https://…/v1"}
               description="Only if you route through a proxy. Blank uses the built-in default."
             />
             <Field
               label="Name"
               value={name}
-              onChange={(v) => onChange({ name: v })}
+              onChange={(value) => onChange({ name: value })}
               placeholder={providerId || "instance name"}
               description={
                 nameHasDelimiter ? (
@@ -378,7 +378,7 @@ function KnownProviderForm({
           </div>
           <ClientArgsField
             value={clientArgsText}
-            onChange={(v) => onChange({ clientArgsText: v })}
+            onChange={(value) => onChange({ clientArgsText: value })}
             error={clientArgs.ok ? null : clientArgs.error}
           />
         </div>
@@ -469,7 +469,7 @@ function CustomProviderForm({
         <Field
           label="Name"
           value={name}
-          onChange={(v) => onChange({ name: v })}
+          onChange={(value) => onChange({ name: value })}
           placeholder="my-local-llm"
           isRequired
           autoFocus
@@ -486,7 +486,7 @@ function CustomProviderForm({
         <ProviderComboBox
           label="Compatible with"
           value={providerType}
-          onChange={(v) => onChange({ providerType: v })}
+          onChange={(value) => onChange({ providerType: value })}
           includeCatalog={false}
           description="The API this endpoint speaks."
           extra={[
@@ -498,20 +498,20 @@ function CustomProviderForm({
       <Field
         label="API base"
         value={apiBase}
-        onChange={(v) => onChange({ apiBase: v })}
+        onChange={(value) => onChange({ apiBase: value })}
         placeholder="http://localhost:8000/v1"
         isRequired
         description="The endpoint URL of your server."
       />
       <SecretField
         value={apiKey}
-        onChange={(v) => onChange({ apiKey: v })}
+        onChange={(value) => onChange({ apiKey: value })}
         label="API key (optional)"
         description="Many local backends need none. Stored encrypted."
       />
       <ClientArgsField
         value={clientArgsText}
-        onChange={(v) => onChange({ clientArgsText: v })}
+        onChange={(value) => onChange({ clientArgsText: value })}
         error={clientArgs.ok ? null : clientArgs.error}
       />
       <ConnectionTestResult test={test} />
@@ -830,8 +830,12 @@ function buildRows(
   meta: ProviderInfo[] | undefined,
   stored: StoredProvider[] | undefined,
 ): ProviderRow[] {
-  const storedByInstance = new Map((stored ?? []).map((p) => [p.instance, p]))
-  const metaByInstance = new Map((meta ?? []).map((p) => [p.instance, p]))
+  const storedByInstance = new Map(
+    (stored ?? []).map((provider) => [provider.instance, provider]),
+  )
+  const metaByInstance = new Map(
+    (meta ?? []).map((provider) => [provider.instance, provider]),
+  )
   const instances = new Set<string>([
     ...storedByInstance.keys(),
     ...metaByInstance.keys(),
@@ -1143,7 +1147,9 @@ export function ProvidersPage() {
     (health.data?.providers ?? []).map((item) => [item.instance, item]),
   )
   const loading = meta.isLoading || stored.isLoading
-  const editingProvider = stored.data?.find((p) => p.instance === editing)
+  const editingProvider = stored.data?.find(
+    (provider) => provider.instance === editing,
+  )
   const needsPricing =
     settings.data?.require_pricing === true &&
     settings.data.default_pricing === false

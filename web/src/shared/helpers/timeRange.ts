@@ -70,7 +70,7 @@ export function findPreset(
   presets: RangePreset[],
   key: string,
 ): RangePreset | undefined {
-  return presets.find((p) => p.key === key)
+  return presets.find((preset) => preset.key === key)
 }
 
 export function isoAgo(seconds: number, now: number = Date.now()): string {
@@ -127,7 +127,7 @@ export function bucketIndexRange(
 ): { startIndex: number; endIndex: number } {
   const n = starts.length
   if (n === 0) return { startIndex: 0, endIndex: 0 }
-  const ms = starts.map((s) => new Date(s).getTime())
+  const ms = starts.map((stamp) => new Date(stamp).getTime())
   // No bucket matching means the window opens before the series does, which is
   // the first bucket, so an absent match clamps to 0 rather than to -1.
   const startMs = startIso ? new Date(startIso).getTime() : undefined

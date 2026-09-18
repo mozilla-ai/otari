@@ -83,7 +83,7 @@ const PERIOD_PRESETS: { label: string; seconds: number | null }[] = [
 
 function formatDuration(seconds: number | null): string {
   if (seconds === null) return "No reset"
-  const preset = PERIOD_PRESETS.find((p) => p.seconds === seconds)
+  const preset = PERIOD_PRESETS.find((preset) => preset.seconds === seconds)
   if (preset) return preset.label
   if (seconds % DAY === 0) return `Every ${seconds / DAY} days`
   if (seconds % HOUR === 0) return `Every ${seconds / HOUR} hours`
@@ -125,7 +125,7 @@ function PeriodPicker({
   // clear the committed period on save).
   onInvalidChange?: (invalid: boolean) => void
 }) {
-  const isPreset = PERIOD_PRESETS.some((p) => p.seconds === value)
+  const isPreset = PERIOD_PRESETS.some((preset) => preset.seconds === value)
   const [custom, setCustom] = useState(!isPreset)
   // The custom field's own draft, so an in-progress, not-yet-valid entry (e.g.
   // "1.5") stays on screen to be flagged rather than being coerced. It is seeded
@@ -532,7 +532,7 @@ function ResetHistory({
 // ---------- page ----------
 
 // Stable row-key getter so DataTable's per-row cache holds across re-renders.
-const getBudgetRowKey = (b: Budget): string => b.budget_id
+const getBudgetRowKey = (budget: Budget): string => budget.budget_id
 
 // Whose budget a row is: a tenant's carries an organization, the deployment's own
 // carries none. `/users` refuses to cap a gateway user at a tenant's
@@ -636,14 +636,14 @@ function DeploymentBudgetsPage() {
       new Map<string, string[]>(),
     )
   }, [workspaces.data, workspaceDefaults.data])
-  const editingBudget = rows.find((b) => b.budget_id === editing)
-  const historyBudget = rows.find((b) => b.budget_id === historyOpen)
+  const editingBudget = rows.find((budget) => budget.budget_id === editing)
+  const historyBudget = rows.find((budget) => budget.budget_id === historyOpen)
   // Not gated on the dialog being closed: react-aria returns focus to the
   // element that opened the dialog, and an empty-state CTA that unmounts on
   // open leaves it nothing to return to, so focus lands on body and Tab
   // restarts at the top of the document.
   const showOnboarding = !loading && rows.length === 0
-  const selectableKeys = rows.map((b) => b.budget_id)
+  const selectableKeys = rows.map((budget) => budget.budget_id)
   const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys)
 
   const onBulkDelete = async () => {
@@ -672,12 +672,12 @@ function DeploymentBudgetsPage() {
         id: "budget",
         header: "Budget",
         isRowHeader: true,
-        cell: (b) => (
+        cell: (budget) => (
           <div className="flex flex-col gap-0.5">
             <span className="font-medium text-foreground">
-              {b.name ?? <span className="text-muted">(unnamed)</span>}
+              {budget.name ?? <span className="text-muted">(unnamed)</span>}
             </span>
-            {isOrganizationOwned(b) ? (
+            {isOrganizationOwned(budget) ? (
               // Not a warning: the budget is a real one this page may still
               // relabel and refigure, it is simply not one a gateway user can be
               // held to. The mirror of the tenant page's "Set at the deployment
@@ -688,9 +688,9 @@ function DeploymentBudgetsPage() {
             ) : null}
             {/* Only a prefix is rendered, so the id an API call needs is not on the
               page in full; the copy hands over the whole thing. */}
-            <CopyableValue value={b.budget_id} label="budget id">
-              <code className="text-mono-micro" title={b.budget_id}>
-                {shortBudgetId(b.budget_id)}
+            <CopyableValue value={budget.budget_id} label="budget id">
+              <code className="text-mono-micro" title={budget.budget_id}>
+                {shortBudgetId(budget.budget_id)}
               </code>
             </CopyableValue>
           </div>
@@ -699,31 +699,33 @@ function DeploymentBudgetsPage() {
       {
         id: "limit",
         header: "Limit (per user)",
-        cell: (b) => (
-          <span className={hasNoLimit(b) ? "text-muted" : undefined}>
-            {limitLabel(b)}
+        cell: (budget) => (
+          <span className={hasNoLimit(budget) ? "text-muted" : undefined}>
+            {limitLabel(budget)}
           </span>
         ),
       },
       {
         id: "reset",
         header: "Reset",
-        cell: (b) => (
+        cell: (budget) => (
           <span className="text-muted">
-            {formatDuration(b.budget_duration_sec)}
+            {formatDuration(budget.budget_duration_sec)}
           </span>
         ),
       },
       {
         id: "users",
         header: "People",
-        cell: (b) => <span className="text-muted">{b.user_count}</span>,
+        cell: (budget) => (
+          <span className="text-muted">{budget.user_count}</span>
+        ),
       },
       {
         id: "default-for",
         header: "Default for",
-        cell: (b) => {
-          const holders = defaultFor.get(b.budget_id)
+        cell: (budget) => {
+          const holders = defaultFor.get(budget.budget_id)
           if (!holders || holders.length === 0) {
             return <span className="text-caption">&mdash;</span>
           }
@@ -745,19 +747,25 @@ function DeploymentBudgetsPage() {
           )
         },
       },
-      { id: "usage", header: "Usage", cell: (b) => <UsageCell budget={b} /> },
+      {
+        id: "usage",
+        header: "Usage",
+        cell: (budget) => <UsageCell budget={budget} />,
+      },
       {
         id: "actions",
         header: "Actions",
         align: "end",
-        cell: (b) => (
+        cell: (budget) => (
           <RowActionRow>
             <RowAction
               icon={FiClock}
-              label={historyOpen === b.budget_id ? "Hide history" : "History"}
+              label={
+                historyOpen === budget.budget_id ? "Hide history" : "History"
+              }
               onPress={() =>
                 setHistoryOpen((current) =>
-                  current === b.budget_id ? undefined : b.budget_id,
+                  current === budget.budget_id ? undefined : budget.budget_id,
                 )
               }
             />
@@ -766,13 +774,13 @@ function DeploymentBudgetsPage() {
               label="Edit"
               onPress={() => {
                 setAddOpen(false)
-                setEditing(b.budget_id)
+                setEditing(budget.budget_id)
               }}
             />
             <RowAction
               icon={FiTrash2}
               label="Delete"
-              onPress={() => setPendingDelete(b)}
+              onPress={() => setPendingDelete(budget)}
             />
           </RowActionRow>
         ),

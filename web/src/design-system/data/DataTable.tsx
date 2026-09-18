@@ -168,7 +168,7 @@ export function DataTable<Row extends object>({
   const detailRow = useMemo(
     () =>
       detailKey != null && renderDetail
-        ? (rows.find((r) => getRowKey(r) === detailKey) ?? null)
+        ? (rows.find((row) => getRowKey(row) === detailKey) ?? null)
         : null,
     [detailKey, renderDetail, rows, getRowKey],
   )
@@ -315,9 +315,9 @@ export function DataTable<Row extends object>({
   // belongs to something else: checkboxes, buttons, links, inputs, and the detail
   // panel pass through untouched. Only meaningful for tables with a row action.
   const dataCellRowKey = useCallback(
-    (e: { target: EventTarget | null }): string | null => {
+    (event: { target: EventTarget | null }): string | null => {
       if (!onRowAction) return null
-      const target = e.target instanceof Element ? e.target : null
+      const target = event.target instanceof Element ? event.target : null
       if (!target) return null
       if (
         target.closest(
@@ -401,16 +401,16 @@ export function DataTable<Row extends object>({
     <Table.Root ref={rootRef} className="otari-table">
       <Container
         className="overflow-x-auto"
-        onPointerDownCapture={(e: ReactPointerEvent) => {
-          if (dataCellRowKey(e) != null) e.stopPropagation()
+        onPointerDownCapture={(event: ReactPointerEvent) => {
+          if (dataCellRowKey(event) != null) event.stopPropagation()
         }}
-        onMouseDownCapture={(e: ReactMouseEvent) => {
+        onMouseDownCapture={(event: ReactMouseEvent) => {
           // react-aria falls back to mouse events where PointerEvent is
           // unavailable; the press (and its selection toggle) starts here.
-          if (dataCellRowKey(e) != null) e.stopPropagation()
+          if (dataCellRowKey(event) != null) event.stopPropagation()
         }}
-        onClickCapture={(e: ReactMouseEvent) => {
-          const key = dataCellRowKey(e)
+        onClickCapture={(event: ReactMouseEvent) => {
+          const key = dataCellRowKey(event)
           if (key == null) return
           // Swallowed either way, so react-aria's row press never fires a second
           // action. A click that ended a text drag inside the table is a
@@ -420,7 +420,7 @@ export function DataTable<Row extends object>({
           // that click only. Deliberately scoped to the click path: the same
           // check in fireRowAction would also swallow Enter on a focused row,
           // which is a deliberate activation even with an id still highlighted.
-          e.stopPropagation()
+          event.stopPropagation()
           if (!hasTextSelectionIn(rootRef.current)) fireRowAction(key)
         }}
       >

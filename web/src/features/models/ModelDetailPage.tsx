@@ -370,8 +370,8 @@ export function ModelDetailView({
   const quantizations = [
     ...new Set(
       model.offerings
-        .map((o) => o.quantization)
-        .filter((q): q is string => !!q),
+        .map((model) => model.quantization)
+        .filter((query): query is string => !!query),
     ),
   ]
   const rows: OfferingRow[] = model.offerings
@@ -386,26 +386,28 @@ export function ModelDetailView({
     }))
     .sort(compareOfferings(sort.column, sort.direction))
   const withUsage = !publicView && hasUsage(model.offerings)
-  const unpriced = model.offerings.filter((o) => o.pricing === null).length
+  const unpriced = model.offerings.filter(
+    (model) => model.pricing === null,
+  ).length
   const defaultPricing = model.default_pricing
   const capabilities = CAPABILITY_LABELS.filter(
     ({ key }) => model.capabilities[key],
   )
   const listPriceDiffers = model.offerings.some(
-    (o) =>
+    (model) =>
       listPriceNote(
-        o.pricing?.input_price_per_million,
-        o.metadata_input_price_per_million,
+        model.pricing?.input_price_per_million,
+        model.metadata_input_price_per_million,
       ) !== null ||
       listPriceNote(
-        o.pricing?.output_price_per_million,
-        o.metadata_output_price_per_million,
+        model.pricing?.output_price_per_million,
+        model.metadata_output_price_per_million,
       ) !== null,
   )
   const modalities = (list: string[]) =>
     list.length === 0
       ? "—"
-      : list.map((m) => MODALITY_LABELS[m] ?? m).join(", ")
+      : list.map((model) => MODALITY_LABELS[model] ?? model).join(", ")
   const title = model.vendor ? `${model.vendor}: ${model.name}` : model.name
   const sortDescriptor: SortDescriptor = {
     column: sort.column,
@@ -559,7 +561,10 @@ export function ModelDetailView({
                   onChange={setQuantization}
                   options={[
                     { value: "all", label: "Any quantization" },
-                    ...quantizations.map((q) => ({ value: q, label: q })),
+                    ...quantizations.map((query) => ({
+                      value: query,
+                      label: query,
+                    })),
                   ]}
                 />
               </div>

@@ -365,7 +365,7 @@ export async function streamPlaygroundChat({
       const events = buffer.split("\n\n")
       buffer = events.pop() ?? ""
       for (const event of events) {
-        const line = event.split("\n").find((l) => l.startsWith("data:"))
+        const line = event.split("\n").find((line) => line.startsWith("data:"))
         // A comment line (an SSE keep-alive) carries nothing to render.
         if (!line) continue
         const payload = line.slice("data:".length).trim()

@@ -214,7 +214,7 @@ function UsageKpiCells({
         graphic={
           !empty && hasHourlyTrend ? (
             <Sparkline
-              values={todaySeries.map((p) => p.cost)}
+              values={todaySeries.map((point) => point.cost)}
               ariaLabel="Spend by hour today"
               height={40}
             />
@@ -241,7 +241,7 @@ function UsageKpiCells({
         graphic={
           !empty && hasTrend ? (
             <Sparkline
-              values={periodSeries.map((p) => p.cost)}
+              values={periodSeries.map((point) => point.cost)}
               ariaLabel="Spend trend over the last 30 days"
               height={40}
             />
@@ -265,7 +265,7 @@ function UsageKpiCells({
         graphic={
           !empty && hasTrend ? (
             <Sparkline
-              values={periodSeries.map((p) => p.requests)}
+              values={periodSeries.map((point) => point.requests)}
               ariaLabel="Request volume trend over the last 30 days"
               height={40}
             />
@@ -415,7 +415,9 @@ function OrganizationOverview() {
       ? "no spend ceilings set"
       : "no ceiling caps spend"
 
-  const activeKeys = (keys.data ?? []).filter((k) => k.is_active).length
+  const activeKeys = (keys.data ?? []).filter(
+    (apiKey) => apiKey.is_active,
+  ).length
   const activeMembers = (members.data ?? []).filter(
     (member) => member.status === "active",
   ).length
@@ -617,7 +619,9 @@ export function OverviewPage({
   const budget = budgetHealth(budgets.data ?? [])
   const providerHealth = providerHealthStatus(health.data)
 
-  const activeKeys = (keys.data ?? []).filter((k) => k.is_active).length
+  const activeKeys = (keys.data ?? []).filter(
+    (apiKey) => apiKey.is_active,
+  ).length
   const activeMembers = (members.data ?? []).filter(
     (member) => member.status === "active",
   ).length
@@ -1022,13 +1026,13 @@ function SpendChart({
   if (!ready || series.length < 2) {
     return null
   }
-  const peak = Math.max(...series.map((p) => p.cost), 0)
+  const peak = Math.max(...series.map((point) => point.cost), 0)
   const hoveredPoint = hovered === undefined ? undefined : series[hovered]
   // A rounded ceiling rather than the peak itself, so the top label is a number
   // somebody would say out loud and the steps between are even.
   const top = niceCeiling(peak)
   // Top-down, which is the order they are drawn in.
-  const steps = [1, 0.75, 0.5, 0.25, 0].map((f) => top * f)
+  const steps = [1, 0.75, 0.5, 0.25, 0].map((fraction) => top * fraction)
   return (
     <Section className="border-b border-border py-5" contentClassName="">
       <div className="flex items-baseline justify-between">

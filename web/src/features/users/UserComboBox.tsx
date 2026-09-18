@@ -48,8 +48,11 @@ export function UserComboBox({
   // The id stays the value submitted whatever the row reads as, and rides along
   // as the hint so it is still what a search can match.
   const options: ComboBoxOption[] = users
-    .filter((u) => !u.user_id.startsWith("apikey-"))
-    .map((u) => ({ value: u.user_id, ...userOptionText(u, memberLabels) }))
+    .filter((user) => !user.user_id.startsWith("apikey-"))
+    .map((user) => ({
+      value: user.user_id,
+      ...userOptionText(user, memberLabels),
+    }))
     .sort((a, b) => {
       // A roster-named row is the one carrying a hint, and it sorts to the
       // front: a member is who someone means when issuing a key, where a
@@ -65,15 +68,15 @@ export function UserComboBox({
   const q = query.trim().toLowerCase()
   const visible = options
     .filter(
-      (o) =>
+      (option) =>
         !q ||
-        o.value.toLowerCase().includes(q) ||
-        o.label.toLowerCase().includes(q),
+        option.value.toLowerCase().includes(q) ||
+        option.label.toLowerCase().includes(q),
     )
     .slice(0, 50)
 
   const ownerId = value.trim()
-  const isKnownOwner = options.some((o) => o.value === ownerId)
+  const isKnownOwner = options.some((option) => option.value === ownerId)
   const creatingHint =
     ownerId !== "" && !isKnownOwner
       ? (unknownHint ?? (

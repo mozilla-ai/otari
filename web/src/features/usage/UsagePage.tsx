@@ -102,10 +102,10 @@ function formatBucketLabel(iso: string, bucket: UsageBucket): string {
 // Billed tokens for one series point. Pure, so it lives out here: defined inside
 // the component it was a new function every render, which is what made the memo
 // that calls it look like it was missing a dependency.
-const pointBilled = (p: UsageSeriesPoint) =>
-  p.input_tokens !== undefined
-    ? p.input_tokens + (p.output_tokens ?? 0)
-    : p.tokens
+const pointBilled = (point: UsageSeriesPoint) =>
+  point.input_tokens !== undefined
+    ? point.input_tokens + (point.output_tokens ?? 0)
+    : point.tokens
 
 const DEFAULT_PRESET = findPreset(
   USAGE_PRESETS,
@@ -663,9 +663,9 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
     scope,
   )
   const realGroups = (rows: UsageGroupRow[] | undefined) =>
-    (rows ?? []).filter((r) => !r.is_other && r.key !== null)
+    (rows ?? []).filter((group) => !group.is_other && group.key !== null)
   const modelOptions = realGroups(modelSuggest.data?.by_model).map(
-    (r) => r.key as string,
+    (group) => group.key as string,
   )
 
   const entitySuggestFilters: UsageFilters = useMemo(
@@ -682,31 +682,36 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
   // Name first, id in parentheses: the id is what the row submits, and two
   // people can share a name. Resolved the same way the breakdown table below
   // resolves it, so the same person reads the same in both.
-  const userOptions = realGroups(entitySuggest.data?.by_user).map((r) => {
-    const name = userRowName(r)
+  const userOptions = realGroups(entitySuggest.data?.by_user).map((group) => {
+    const name = userRowName(group)
     return {
-      value: r.key as string,
+      value: group.key as string,
       label: name.id ? `${name.label} (${name.id})` : name.label,
     }
   })
   // API key options label by name (falling back to a short id), value is the id.
-  const keyOptions = realGroups(entitySuggest.data?.by_api_key).map((r) => ({
-    value: r.key as string,
-    label: r.label ?? `${(r.key as string).slice(0, 8)}…`,
-  }))
+  const keyOptions = realGroups(entitySuggest.data?.by_api_key).map(
+    (group) => ({
+      value: group.key as string,
+      label: group.label ?? `${(group.key as string).slice(0, 8)}…`,
+    }),
+  )
   // Just the in-window models: a picked one needs no place in this list, because
   // the picker hides what is already selected and the chips carry the raw name.
-  const modelOptionList = modelOptions.map((m) => ({ value: m, label: m }))
+  const modelOptionList = modelOptions.map((model) => ({
+    value: model,
+    label: model,
+  }))
 
   // Every workspace in the organization, not just the caller's memberships,
   // which is what separates this filter from the sidebar switcher. Only fetched
   // on the organization page.
-  const workspaceOptions = (workspaces.data ?? []).map((w) => ({
-    value: w.id,
-    label: w.name,
+  const workspaceOptions = (workspaces.data ?? []).map((workspace) => ({
+    value: workspace.id,
+    label: workspace.name,
   }))
   const workspaceLabel = (id: string) =>
-    workspaceOptions.find((o) => o.value === id)?.label ?? id
+    workspaceOptions.find((option) => option.value === id)?.label ?? id
 
   // The default 30d window is the baseline (like the old "All" was), so it does
   // not count as a user-applied time filter: clearing returns to it, and an
@@ -751,7 +756,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
   const labelFor = (
     options: { value: string; label: string }[],
     value: string,
-  ) => options.find((o) => o.value === value)?.label ?? value
+  ) => options.find((option) => option.value === value)?.label ?? value
   const clearEntityFilters = () => {
     setModelFilters([])
     setUserFilters([])
@@ -772,7 +777,8 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
       // The value is part of the control's name: several chips share a dimension,
       // and "Remove User filter" three times over names none of them.
       clearLabel: `Remove ${label} filter ${display(value)}`,
-      onClear: () => setValues(values.filter((v) => v !== value)),
+      onClear: () =>
+        setValues(values.filter((optionValue) => optionValue !== value)),
     }))
   const filterChips: FilterChip[] = [
     // The workspace filter is single-valued (the endpoint takes one id), so its
@@ -792,15 +798,21 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
       "user",
       "User",
       userFilters,
-      (v) => labelFor(userOptions, v),
+      (value) => labelFor(userOptions, value),
       setUserFilters,
     ),
-    ...valueChips("model", "Model", modelFilters, (v) => v, setModelFilters),
+    ...valueChips(
+      "model",
+      "Model",
+      modelFilters,
+      (value) => value,
+      setModelFilters,
+    ),
     ...valueChips(
       "key",
       "API key",
       apiKeyFilters,
-      (v) => labelFor(keyOptions, v),
+      (value) => labelFor(keyOptions, value),
       setApiKeyFilters,
     ),
   ]
@@ -884,7 +896,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
   // traffic, and a single-option dimension is noise. Kept while it is the
   // active grouping so switching windows never strands the selection.
   const multiSource =
-    (data?.by_source ?? []).filter((r) => !r.is_other).length > 1
+    (data?.by_source ?? []).filter((group) => !group.is_other).length > 1
   const showSource = multiSource || groupBy === "source"
 
   // ---------- derived analytics ----------
@@ -926,13 +938,13 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
       ? deltaFraction(cacheHitRate, prevCacheHitRate)
       : null
 
-  const hasComposition = series.some((p) => (p.input_tokens ?? 0) > 0)
-  const hasErrors = series.some((p) => (p.errors ?? 0) > 0)
+  const hasComposition = series.some((point) => (point.input_tokens ?? 0) > 0)
+  const hasErrors = series.some((point) => (point.errors ?? 0) > 0)
 
   // The main chart's series + data for the current metric × group-by. All the
   // pivoting happens here so the chart component stays dumb.
   const chart = useMemo((): { series: SeriesDef[]; data: StackedPoint[] } => {
-    const buckets = series.map((p) => p.bucket_start)
+    const buckets = series.map((point) => point.bucket_start)
     if (effectiveGroupBy) {
       const g = grouped.data
       if (!g) return { series: [], data: [] }
@@ -958,9 +970,12 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
         ]),
       )
       const byBucket = new Map<string, StackedPoint>(
-        buckets.map((b) => [
-          b,
-          { x: b, ...Object.fromEntries(defs.map((d) => [d.key, 0])) },
+        buckets.map((bucket) => [
+          bucket,
+          {
+            x: bucket,
+            ...Object.fromEntries(defs.map((dimension) => [dimension.key, 0])),
+          },
         ]),
       )
       for (const point of g.points) {
@@ -979,16 +994,16 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
     if (metric === "tokens" && hasComposition) {
       return {
         series: COMPOSITION_SERIES,
-        data: series.map((p) => {
-          const input = p.input_tokens ?? 0
-          const read = p.cache_read_tokens ?? 0
-          const write = p.cache_write_tokens ?? 0
+        data: series.map((point) => {
+          const input = point.input_tokens ?? 0
+          const read = point.cache_read_tokens ?? 0
+          const write = point.cache_write_tokens ?? 0
           return {
-            x: p.bucket_start,
+            x: point.bucket_start,
             fresh: Math.max(0, input - read - write),
             cache_read: read,
             cache_write: write,
-            output: p.output_tokens ?? 0,
+            output: point.output_tokens ?? 0,
           }
         }),
       }
@@ -996,27 +1011,33 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
     if (metric === "requests" && hasErrors) {
       return {
         series: REQUEST_SERIES,
-        data: series.map((p) => {
-          const errors = Math.min(p.errors ?? 0, p.requests)
-          return { x: p.bucket_start, success: p.requests - errors, errors }
+        data: series.map((point) => {
+          const errors = Math.min(point.errors ?? 0, point.requests)
+          return {
+            x: point.bucket_start,
+            success: point.requests - errors,
+            errors,
+          }
         }),
       }
     }
     const single: SeriesDef = {
       key: metric,
-      label: METRIC_TABS.find((t) => t.key === metric)?.label ?? metric,
+      label:
+        METRIC_TABS.find((metricOption) => metricOption.key === metric)
+          ?.label ?? metric,
       color: "var(--color-primary)",
     }
     return {
       series: [single],
-      data: series.map((p) => ({
-        x: p.bucket_start,
+      data: series.map((point) => ({
+        x: point.bucket_start,
         [metric]:
           metric === "cost"
-            ? p.cost
+            ? point.cost
             : metric === "tokens"
-              ? pointBilled(p)
-              : p.requests,
+              ? pointBilled(point)
+              : point.requests,
       })),
     }
     // Group labels come from the server on `grouped.data` and from the roster
@@ -1050,7 +1071,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
 
   // Dragging across the chart zooms into the selected buckets (the same
   // interaction as the Activity strip and every mainstream metrics tool).
-  const chartBuckets = series.map((p) => p.bucket_start)
+  const chartBuckets = series.map((point) => point.bucket_start)
   const onChartSelect = (startIndex: number, endIndex: number) => {
     const range = rangeFromBuckets(chartBuckets, startIndex, endIndex, bucket)
     if (range) pickCustom(range.startIso, range.endIso)
@@ -1144,12 +1165,15 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
   const [secondaryDim, setSecondaryDim] =
     useState<SummaryDimension>("source_label")
   const activePrimary =
-    dimensions.find((d) => d.key === primaryDim) ?? dimensions[0]
+    dimensions.find((dimension) => dimension.key === primaryDim) ??
+    dimensions[0]
   const visibleSecondary = secondaryDimensions.filter(
-    (d) => d.key !== "source" || multiSource || secondaryDim === "source",
+    (dimension) =>
+      dimension.key !== "source" || multiSource || secondaryDim === "source",
   )
   const activeSecondary =
-    visibleSecondary.find((d) => d.key === secondaryDim) ?? visibleSecondary[0]
+    visibleSecondary.find((dimension) => dimension.key === secondaryDim) ??
+    visibleSecondary[0]
 
   return (
     <div className="flex flex-col">
@@ -1192,13 +1216,13 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
         onClearAll={clearEntityFilters}
         start={
           <TabRow>
-            {USAGE_PRESETS.map((p) => (
+            {USAGE_PRESETS.map((periodPreset) => (
               <Tab
-                key={p.key}
-                isActive={!customMode && preset.key === p.key}
-                onPress={() => pickPreset(p)}
+                key={periodPreset.key}
+                isActive={!customMode && preset.key === periodPreset.key}
+                onPress={() => pickPreset(periodPreset)}
               >
-                {p.label}
+                {periodPreset.label}
               </Tab>
             ))}
           </TabRow>
@@ -1276,7 +1300,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
               graphic={
                 hasTrend ? (
                   <Sparkline
-                    values={series.map((p) => p.cost)}
+                    values={series.map((point) => point.cost)}
                     ariaLabel="Spend trend over the selected window"
                     height={40}
                   />
@@ -1298,7 +1322,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
               graphic={
                 hasTrend ? (
                   <Sparkline
-                    values={series.map((p) => p.requests)}
+                    values={series.map((point) => point.requests)}
                     ariaLabel="Request volume trend over the selected window"
                     height={40}
                   />
@@ -1347,9 +1371,10 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
               graphic={
                 hasTrend && hasComposition ? (
                   <Sparkline
-                    values={series.map((p) =>
-                      (p.input_tokens ?? 0) > 0
-                        ? (p.cache_read_tokens ?? 0) / (p.input_tokens ?? 1)
+                    values={series.map((point) =>
+                      (point.input_tokens ?? 0) > 0
+                        ? (point.cache_read_tokens ?? 0) /
+                          (point.input_tokens ?? 1)
                         : 0,
                     )}
                     ariaLabel="Cache hit rate trend over the selected window"
@@ -1410,11 +1435,11 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                   value={groupBy}
                   onChange={(value) => setGroupBy(value as "" | UsageGroupBy)}
                   options={GROUP_OPTIONS.filter(
-                    (o) => o.value !== "source" || showSource,
-                  ).map((o) => ({
-                    value: o.value,
-                    label: o.value
-                      ? `By ${groupedLabel(o.label)}`
+                    (option) => option.value !== "source" || showSource,
+                  ).map((option) => ({
+                    value: option.value,
+                    label: option.value
+                      ? `By ${groupedLabel(option.label)}`
                       : "No grouping",
                   }))}
                 />
@@ -1509,13 +1534,13 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                   Spend by {activePrimary.label.toLowerCase()}
                 </h2>
                 <TabRow>
-                  {dimensions.map((d) => (
+                  {dimensions.map((dimension) => (
                     <Tab
-                      key={d.key}
-                      isActive={primaryDim === d.key}
-                      onPress={() => setPrimaryDim(d.key)}
+                      key={dimension.key}
+                      isActive={primaryDim === dimension.key}
+                      onPress={() => setPrimaryDim(dimension.key)}
                     >
-                      {d.label}
+                      {dimension.label}
                     </Tab>
                   ))}
                 </TabRow>
@@ -1541,13 +1566,13 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                   Spend by {activeSecondary.label.toLowerCase()}
                 </h2>
                 <TabRow>
-                  {visibleSecondary.map((d) => (
+                  {visibleSecondary.map((dimension) => (
                     <Tab
-                      key={d.key}
-                      isActive={secondaryDim === d.key}
-                      onPress={() => setSecondaryDim(d.key)}
+                      key={dimension.key}
+                      isActive={secondaryDim === dimension.key}
+                      onPress={() => setSecondaryDim(dimension.key)}
                     >
-                      {d.label}
+                      {dimension.label}
                     </Tab>
                   ))}
                 </TabRow>

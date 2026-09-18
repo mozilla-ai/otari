@@ -517,9 +517,14 @@ export function PolicyForm({
   // and quietly mean the opposite of what the tab says.
   const scopeReady = userIds === null || userIds.length > 0
   const conditionsReady = conditions.every(
-    (c) => c.target.trim() !== "" && c.threshold > 0 && c.threshold < 100,
+    (condition) =>
+      condition.target.trim() !== "" &&
+      condition.threshold > 0 &&
+      condition.threshold < 100,
   )
-  const guardrailsReady = guardrails.every((g) => g.profile.trim() !== "")
+  const guardrailsReady = guardrails.every(
+    (guardrail) => guardrail.profile.trim() !== "",
+  )
   // A model named twice is refused by the API, and on a weighted policy it would
   // also collapse in the weight map: two rows, one key, so the split submitted is
   // not the split the form showed. Checked over the named rows only, so a pair of

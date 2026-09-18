@@ -59,7 +59,10 @@ export function SelectedWorkspaceProvider({
 
   const selected = useMemo(() => {
     if (memberships.length === 0) return null
-    return memberships.find((m) => m.workspace_id === chosen) ?? memberships[0]
+    return (
+      memberships.find((membership) => membership.workspace_id === chosen) ??
+      memberships[0]
+    )
   }, [memberships, chosen])
 
   // Write the resolved id back, not the chosen one, so a stale stored id is

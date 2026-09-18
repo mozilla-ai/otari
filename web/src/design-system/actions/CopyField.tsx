@@ -335,7 +335,7 @@ export function CopyField({
               ref={ref as React.RefObject<HTMLInputElement>}
               readOnly
               value={value}
-              onFocus={(e) => e.currentTarget.select()}
+              onFocus={(event) => event.currentTarget.select()}
               // Right padding clears the control rather than the value running
               // under it, and the field grows below `md` so the 44px touch
               // floor fits between its borders. The value is never truncated:

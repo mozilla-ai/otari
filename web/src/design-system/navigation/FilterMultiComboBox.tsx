@@ -36,12 +36,12 @@ export function FilterMultiComboBox({
   const atLimit = values.length >= maxValues
   const query = text.trim().toLowerCase()
   const visible = options
-    .filter((o) => !values.includes(o.value))
+    .filter((option) => !values.includes(option.value))
     .filter(
-      (o) =>
+      (option) =>
         !query ||
-        o.value.toLowerCase().includes(query) ||
-        o.label.toLowerCase().includes(query),
+        option.value.toLowerCase().includes(query) ||
+        option.label.toLowerCase().includes(query),
     )
     .slice(0, maxVisible)
 
@@ -75,7 +75,7 @@ export function FilterMultiComboBox({
       selectedKey={null}
       // At the ceiling the remaining options are offered but inert, so the list
       // reads as "full" rather than silently swallowing a click.
-      disabledKeys={atLimit ? visible.map((o) => o.value) : []}
+      disabledKeys={atLimit ? visible.map((option) => option.value) : []}
       onSelectionChange={(key) => {
         if (key == null) return
         add(String(key))
@@ -104,7 +104,9 @@ export function FilterMultiComboBox({
           // though it never speaks a validation message.
           renderEmptyState={() => (
             <ComboBoxEmpty
-              isSourceEmpty={options.every((o) => values.includes(o.value))}
+              isSourceEmpty={options.every((option) =>
+                values.includes(option.value),
+              )}
               emptyMessage="Nothing left to filter by."
               // `!atLimit` because Enter is inert at the ceiling: `add` returns
               // without changing `values`, so offering the key would promise

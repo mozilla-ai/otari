@@ -38,27 +38,27 @@ export const CAPABILITY_FILTERS: {
   {
     value: "tool_call",
     label: "Tool calling",
-    test: (m) => m.capabilities.tool_call,
+    test: (model) => model.capabilities.tool_call,
   },
   {
     value: "reasoning",
     label: "Reasoning",
-    test: (m) => m.capabilities.reasoning,
+    test: (model) => model.capabilities.reasoning,
   },
   {
     value: "structured_output",
     label: "Structured output",
-    test: (m) => m.capabilities.structured_output,
+    test: (model) => model.capabilities.structured_output,
   },
   {
     value: "attachment",
     label: "Attachments",
-    test: (m) => m.capabilities.attachment,
+    test: (model) => model.capabilities.attachment,
   },
   {
     value: "open_weights",
     label: "Open weights",
-    test: (m) => m.open_weights,
+    test: (model) => model.open_weights,
   },
 ]
 

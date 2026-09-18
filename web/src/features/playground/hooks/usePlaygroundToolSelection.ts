@@ -88,7 +88,9 @@ export function usePlaygroundToolSelection(
       setCodeExecutionOn(false)
     }
     const attachable = new Set(
-      tools.mcp_servers.filter((server) => server.enabled).map((s) => s.id),
+      tools.mcp_servers
+        .filter((server) => server.enabled)
+        .map((tool) => tool.id),
     )
     setSelectedMcpIds((prev) => keepAttachableMcpIds(prev, attachable))
   }, [tools, isWebSearchOn, isCodeExecutionOn])

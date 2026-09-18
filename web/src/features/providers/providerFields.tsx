@@ -208,8 +208,8 @@ export function ProviderComboBox({
   const options = useMemo(() => {
     const catalogOptions = includeCatalog
       ? (catalog.data ?? [])
-          .filter((p) => !excludeIds?.includes(p.id))
-          .map((p) => ({ id: p.id, name: p.name }))
+          .filter((provider) => !excludeIds?.includes(provider.id))
+          .map((provider) => ({ id: provider.id, name: provider.name }))
       : []
     return [...extra, ...catalogOptions]
   }, [catalog.data, extra, includeCatalog, excludeIds])
@@ -219,20 +219,20 @@ export function ProviderComboBox({
   // `value` on every render would wipe out what the user is typing, since the
   // options array is recreated each render.
   const [text, setText] = useState(
-    () => options.find((o) => o.id === value)?.name ?? "",
+    () => options.find((option) => option.id === value)?.name ?? "",
   )
 
   // When the input merely shows the current selection, treat the query as empty
   // so opening the dropdown reveals every option, not just the selected one.
-  const selectedName = options.find((o) => o.id === value)?.name ?? ""
+  const selectedName = options.find((option) => option.id === value)?.name ?? ""
   const query =
     text.trim() === selectedName.trim() ? "" : text.trim().toLowerCase()
   const visible = options
     .filter(
-      (o) =>
+      (option) =>
         !query ||
-        o.name.toLowerCase().includes(query) ||
-        o.id.toLowerCase().includes(query),
+        option.name.toLowerCase().includes(query) ||
+        option.id.toLowerCase().includes(query),
     )
     .slice(0, 50)
 
@@ -265,7 +265,9 @@ export function ProviderComboBox({
       onSelectionChange={(key) => {
         if (key != null) {
           onChange(String(key))
-          setText(options.find((o) => o.id === String(key))?.name ?? "")
+          setText(
+            options.find((option) => option.id === String(key))?.name ?? "",
+          )
         } else {
           // Selection cleared: clear the parent value too, so the submitted
           // data cannot keep a stale provider after the field is emptied.

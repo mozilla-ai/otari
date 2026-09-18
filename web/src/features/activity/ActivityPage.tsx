@@ -259,16 +259,16 @@ function InFlightControl({
 // Stable row-key getter and row class so DataTable's per-row cache holds
 // across re-renders (see the DataTable docstring); an inline arrow here would
 // rebuild every row on each selection click.
-const getActivityRowKey = (e: UsageEntry): string => e.id
+const getActivityRowKey = (entry: UsageEntry): string => entry.id
 
 // An absorbed attempt is a failure a routing policy recovered from, so the
 // request it belongs to succeeded. Styling it like an error would make a working
 // fallback chain read as an outage, which is the same reason the server keeps it
 // out of error_count. Amber says "something happened here" without saying "this
 // request failed".
-const activityRowClassName = (e: UsageEntry): string | undefined => {
-  if (e.status === "error") return "bg-danger-subtle"
-  if (e.status === "absorbed") return "bg-warning-subtle"
+const activityRowClassName = (entry: UsageEntry): string | undefined => {
+  if (entry.status === "error") return "bg-danger-subtle"
+  if (entry.status === "absorbed") return "bg-warning-subtle"
   return undefined
 }
 
@@ -1366,9 +1366,9 @@ export function ActivityPage() {
     MODEL_AND_SOURCE_BREAKDOWNS,
   )
   const realGroups = (rows: UsageGroupRow[] | undefined) =>
-    (rows ?? []).filter((r) => !r.is_other && r.key !== null)
+    (rows ?? []).filter((group) => !group.is_other && group.key !== null)
   const modelOptions = realGroups(modelSummary.data?.by_model).map(
-    (r) => r.key as string,
+    (group) => group.key as string,
   )
 
   // The user and key pickers need their own window: each must keep offering the
@@ -1385,10 +1385,12 @@ export function ActivityPage() {
     "day",
     ENTITY_BREAKDOWNS,
   )
-  const keyOptions = realGroups(entitySummary.data?.by_api_key).map((r) => ({
-    value: r.key as string,
-    label: r.label ?? `${(r.key as string).slice(0, 8)}…`,
-  }))
+  const keyOptions = realGroups(entitySummary.data?.by_api_key).map(
+    (group) => ({
+      value: group.key as string,
+      label: group.label ?? `${(group.key as string).slice(0, 8)}…`,
+    }),
+  )
 
   // Source options: the sources with usage in the window. Like the model
   // suggestions, this must ignore the source filter itself, or picking Claude Code
@@ -1433,8 +1435,8 @@ export function ActivityPage() {
   // the select shows the filter that is actually applied.
   const sourceOptions = useMemo(() => {
     const seen = (sourceBreakdown ?? [])
-      .filter((r) => !r.is_other && r.key !== null)
-      .map((r) => r.key as string)
+      .filter((group) => !group.is_other && group.key !== null)
+      .map((group) => group.key as string)
     return sourceFilter && !seen.includes(sourceFilter)
       ? [sourceFilter, ...seen]
       : seen
@@ -1506,12 +1508,12 @@ export function ActivityPage() {
     extentBucket,
     TOOL_BREAKDOWN,
   )
-  const timelineSeries = (contextSummary.data?.series ?? []).map((p) => ({
-    bucketStart: p.bucket_start,
-    requests: p.requests,
+  const timelineSeries = (contextSummary.data?.series ?? []).map((point) => ({
+    bucketStart: point.bucket_start,
+    requests: point.requests,
     // Failed requests render as a red segment on the strip, so dropped traffic
     // shows up while browsing, not only after filtering to status=error.
-    errors: p.errors ?? 0,
+    errors: point.errors ?? 0,
   }))
 
   const rows = usage.data ?? []
@@ -1605,17 +1607,19 @@ export function ActivityPage() {
   const labelFrom = (
     options: { value: string; label: string }[],
     value: string,
-  ) => options.find((o) => o.value === value)?.label ?? value
+  ) => options.find((option) => option.value === value)?.label ?? value
   // Name first, id in parentheses: the id is what the filter submits, and two
   // people can share a name. Resolved the way the User column resolves it, so
   // the same person reads the same in the picker, the chip and the row.
-  const userOptionsList = realGroups(entitySummary.data?.by_user).map((r) => {
-    const name = userDisplay(r.key as string, r.label, memberLabels)
-    return {
-      value: r.key as string,
-      label: name.id ? `${name.label} (${name.id})` : name.label,
-    }
-  })
+  const userOptionsList = realGroups(entitySummary.data?.by_user).map(
+    (group) => {
+      const name = userDisplay(group.key as string, group.label, memberLabels)
+      return {
+        value: group.key as string,
+        label: name.id ? `${name.label} (${name.id})` : name.label,
+      }
+    },
+  )
   const clearEntityFilters = () =>
     url.patch({
       status: "",
@@ -1643,7 +1647,10 @@ export function ActivityPage() {
       value: display(value),
       // Several chips share a dimension, so the value has to be part of the name.
       clearLabel: `Remove ${label} filter ${display(value)}`,
-      onClear: () => url.patch({ [param]: values.filter((v) => v !== value) }),
+      onClear: () =>
+        url.patch({
+          [param]: values.filter((optionValue) => optionValue !== value),
+        }),
     }))
   const filterChips: FilterChip[] = [
     ...(statusFilter
@@ -1666,12 +1673,12 @@ export function ActivityPage() {
           },
         ]
       : []),
-    ...valueChips("user", "User", "user_id", userFilters, (v) =>
-      labelFrom(userOptionsList, v),
+    ...valueChips("user", "User", "user_id", userFilters, (value) =>
+      labelFrom(userOptionsList, value),
     ),
-    ...valueChips("model", "Model", "model", modelFilters, (v) => v),
-    ...valueChips("key", "API key", "api_key_id", apiKeyFilters, (v) =>
-      labelFrom(keyOptions, v),
+    ...valueChips("model", "Model", "model", modelFilters, (value) => value),
+    ...valueChips("key", "API key", "api_key_id", apiKeyFilters, (value) =>
+      labelFrom(keyOptions, value),
     ),
     ...(sourceFilter
       ? [
@@ -1731,11 +1738,11 @@ export function ActivityPage() {
   // `counts_toward_budget` alone offered a checkbox for budget-exempt gateway traffic
   // that the delete then silently skipped (#781).
   const selectableKeys = useMemo(
-    () => rows.filter((r) => r.bulk_editable).map((r) => r.id),
+    () => rows.filter((entry) => entry.bulk_editable).map((entry) => entry.id),
     [rows],
   )
   const disabledKeys = useMemo(
-    () => rows.filter((r) => !r.bulk_editable).map((r) => r.id),
+    () => rows.filter((entry) => !entry.bulk_editable).map((entry) => entry.id),
     [rows],
   )
   const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys)
@@ -1965,19 +1972,19 @@ export function ActivityPage() {
       {
         id: "time",
         header: "Time",
-        cell: (e) => (
-          <span title={formatDateTime(e.timestamp)} className="text-muted">
-            {formatRelative(e.timestamp)}
+        cell: (entry) => (
+          <span title={formatDateTime(entry.timestamp)} className="text-muted">
+            {formatRelative(entry.timestamp)}
           </span>
         ),
       },
       {
         id: "user",
         header: "User",
-        cell: (e) =>
-          e.user_id === null
+        cell: (entry) =>
+          entry.user_id === null
             ? "—"
-            : userDisplay(e.user_id, e.user_alias, memberLabels).label,
+            : userDisplay(entry.user_id, entry.user_alias, memberLabels).label,
       },
       {
         id: "model",
@@ -1987,14 +1994,14 @@ export function ActivityPage() {
         // column would compete with the token bar for the row's only graphic slot
         // and push the failure-forward Status pill off a narrow viewport. Text, not
         // color alone, so it survives the same accessibility bar as TokenBar.
-        cell: (e) => {
-          const usage = toolUsage(e)
-          if (!usage.length) return e.model
+        cell: (entry) => {
+          const usage = toolUsage(entry)
+          if (!usage.length) return entry.model
           const calls = usage.reduce((sum, u) => sum + u.billed + u.errors, 0)
           const detail = usage.map(formatToolUsage).join(" \u00b7 ")
           return (
             <span className="inline-flex items-center gap-1.5">
-              {e.model}
+              {entry.model}
               {/* A marker, not a badge: an accent dot and the count in mono
                   uppercase, on the same terms as every other marker in the
                   product. A generic span does not reliably expose aria-label,
@@ -2020,40 +2027,42 @@ export function ActivityPage() {
         // that turned out. The Model column keeps meaning the model that actually
         // ran (it is the join key for filters and for spend-by-model), so this is
         // additive: together they answer "what did I ask for, and what served it".
-        cell: (e) => (
+        cell: (entry) => (
           <RoutingCell
-            entry={e}
-            outcome={groupOutcomes.get(e.request_group_id ?? "") ?? null}
+            entry={entry}
+            outcome={groupOutcomes.get(entry.request_group_id ?? "") ?? null}
           />
         ),
       },
       {
         id: "api_key",
         header: "API key",
-        cell: (e) => <span className="text-muted">{apiKeyLabel(e)}</span>,
+        cell: (entry) => (
+          <span className="text-muted">{apiKeyLabel(entry)}</span>
+        ),
       },
       {
         id: "tokens",
         header: "Tokens",
         align: "end",
-        cell: (e) => <TokenBar entry={e} />,
+        cell: (entry) => <TokenBar entry={entry} />,
       },
       {
         id: "cost",
         header: "Cost",
         align: "end",
-        cell: (e) => formatUSD(e.cost),
+        cell: (entry) => formatUSD(entry.cost),
       },
       {
         id: "latency",
         header: "Total time",
         align: "end",
-        cell: (e) => latency(e.latency_ms),
+        cell: (entry) => latency(entry.latency_ms),
       },
       {
         id: "status",
         header: "Status",
-        cell: (e) => <StatusMark status={e.status} />,
+        cell: (entry) => <StatusMark status={entry.status} />,
       },
     ]
   }, [groupOutcomes, memberLabels])
@@ -2203,7 +2212,10 @@ export function ActivityPage() {
             onChange={(values) => url.patch({ model: values })}
             allowsCustom
             placeholder="Any model"
-            options={modelOptions.map((m) => ({ value: m, label: m }))}
+            options={modelOptions.map((model) => ({
+              value: model,
+              label: model,
+            }))}
           />
         </FilterChips>
       </div>

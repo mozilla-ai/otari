@@ -53,8 +53,10 @@ export function UseModelDrawer({
   )
   const [language, setLanguage] = useState("curl")
 
-  const cheapest = model.offerings.find((o) => o.selector === model.resolves_to)
-  const pinned = model.offerings.find((o) => o.selector === choice)
+  const cheapest = model.offerings.find(
+    (catalogModel) => catalogModel.selector === model.resolves_to,
+  )
+  const pinned = model.offerings.find((model) => model.selector === choice)
   const sendAs = pinned ? selectorFor(pinned) : (model.selector ?? "")
   const offeringOptions = model.offerings.map((offering) => ({
     value: offering.selector,

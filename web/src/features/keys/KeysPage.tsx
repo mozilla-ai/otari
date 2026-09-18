@@ -118,14 +118,14 @@ function toDatetimeLocal(iso: string | null): string {
   if (!iso) return ""
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ""
-  const pad = (n: number) => String(n).padStart(2, "0")
+  const pad = (value: number) => String(value).padStart(2, "0")
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-const label = (k: ApiKey): string => k.key_name ?? k.id
+const label = (apiKey: ApiKey): string => apiKey.key_name ?? apiKey.id
 
 // Stable row-key getter so DataTable's per-row cache holds across re-renders.
-const getKeyRowKey = (k: ApiKey): string => k.id
+const getKeyRowKey = (apiKey: ApiKey): string => apiKey.id
 
 // ---------- the one-time secret ----------
 
@@ -250,7 +250,7 @@ function OwnerAccessNote({ userId, users }: { userId: string; users: User[] }) {
       </p>
     )
   }
-  const owner = users.find((u) => u.user_id === id)
+  const owner = users.find((user) => user.user_id === id)
   if (!owner) {
     return (
       <p className="text-caption">
@@ -966,16 +966,16 @@ export function KeysPage() {
   // which affordances it draws, are both undecided until the organization
   // context answers, and a disabled query reports `isLoading` false.
   const loading = !scope.isReady || keys.isLoading
-  const editingKey = rows.find((k) => k.id === editing)
+  const editingKey = rows.find((apiKey) => apiKey.id === editing)
   const showOnboarding = !loading && rows.length === 0
   const selection = useTableSelection()
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [bulkError, setBulkError] = useState<unknown>(undefined)
   const [bulkPending, setBulkPending] = useState(false)
 
-  const selectableKeys = rows.map((k) => k.id)
+  const selectableKeys = rows.map((apiKey) => apiKey.id)
   const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys)
-  const selectedKeys = rows.filter((k) => selectedIds.includes(k.id))
+  const selectedKeys = rows.filter((apiKey) => selectedIds.includes(apiKey.id))
 
   // Stable handlers (mutate fns are referentially stable in TanStack Query) so
   // the memoized columns below survive unrelated re-renders.
@@ -986,11 +986,11 @@ export function KeysPage() {
   )
 
   const regenerate = useCallback(
-    (k: ApiKey) =>
-      rotateKey.mutate(k.id, {
+    (apiKey: ApiKey) =>
+      rotateKey.mutate(apiKey.id, {
         onSuccess: (result) => {
           setPendingRegenerate(undefined)
-          setRegenerated({ title: `New secret for ${label(k)}`, result })
+          setRegenerated({ title: `New secret for ${label(apiKey)}`, result })
         },
       }),
     [rotateKey.mutate],
@@ -1059,32 +1059,32 @@ export function KeysPage() {
   }, [])
 
   const ownerLabel = useCallback(
-    (k: ApiKey) =>
-      isVirtualUser(k.user_id)
+    (apiKey: ApiKey) =>
+      isVirtualUser(apiKey.user_id)
         ? "virtual"
-        : k.user_id
-          ? (memberLabels.get(k.user_id) ?? k.user_id)
+        : apiKey.user_id
+          ? (memberLabels.get(apiKey.user_id) ?? apiKey.user_id)
           : "—",
     [memberLabels],
   )
   const renderActions = useCallback(
-    (k: ApiKey) => (
+    (apiKey: ApiKey) => (
       <KeyActionsMenu
-        apiKey={k}
-        triggerRef={lastAction === k.id ? actionTriggerRef : undefined}
-        onAction={() => setLastAction(k.id)}
-        owner={isDeploymentWide ? ownerLabel(k) : undefined}
+        apiKey={apiKey}
+        triggerRef={lastAction === apiKey.id ? actionTriggerRef : undefined}
+        onAction={() => setLastAction(apiKey.id)}
+        owner={isDeploymentWide ? ownerLabel(apiKey) : undefined}
         // Those lanes are off the row below `wide`, so the menu is the only
         // place left that can show them whole.
         hasDetails={layout !== "wide"}
         isPending={updateKey.isPending || rotateKey.isPending}
-        onToggle={() => setActive(k, !k.is_active)}
+        onToggle={() => setActive(apiKey, !apiKey.is_active)}
         onEdit={() => {
           setAddOpen(false)
-          setEditing(k.id)
+          setEditing(apiKey.id)
         }}
-        onRegenerate={() => setPendingRegenerate(k)}
-        onDelete={() => setPendingDelete(k)}
+        onRegenerate={() => setPendingRegenerate(apiKey)}
+        onDelete={() => setPendingDelete(apiKey)}
       />
     ),
     [
@@ -1099,15 +1099,15 @@ export function KeysPage() {
     ],
   )
   const renderPrefix = useCallback(
-    (k: ApiKey) => (
+    (apiKey: ApiKey) => (
       <div className="flex items-center gap-1 whitespace-nowrap">
         <code className="text-mono-caption text-muted">
-          {keyFingerprint(k) ?? "—"}
+          {keyFingerprint(apiKey) ?? "—"}
         </code>
-        {k.key_prefix ? (
+        {apiKey.key_prefix ? (
           <CopyButton
-            value={k.key_prefix}
-            label={`key prefix for ${label(k)}`}
+            value={apiKey.key_prefix}
+            label={`key prefix for ${label(apiKey)}`}
           />
         ) : null}
       </div>
@@ -1123,10 +1123,10 @@ export function KeysPage() {
         id: "name",
         header: "Name",
         isRowHeader: true,
-        cell: (k) => (
+        cell: (apiKey) => (
           <div className="flex min-w-0 flex-col gap-1">
             <span className="truncate text-base text-foreground">
-              {k.key_name ?? <span className="text-muted">(unnamed)</span>}
+              {apiKey.key_name ?? <span className="text-muted">(unnamed)</span>}
             </span>
             {/* Folded, the line joins the owner and the last use to the meta
               facts, so it takes one face throughout rather than setting an
@@ -1134,16 +1134,16 @@ export function KeysPage() {
             <div className="truncate text-caption">
               {layout === "compact" && isDeploymentWide ? (
                 <>
-                  <span>{ownerLabel(k)}</span>
+                  <span>{ownerLabel(apiKey)}</span>
                   {" · "}
                 </>
               ) : null}
               <KeyMetaLine
-                apiKey={k}
+                apiKey={apiKey}
                 face={layout === "compact" ? "text-caption" : undefined}
               />
               {layout === "compact"
-                ? ` · used ${relative(k.last_used_at) ?? "never"}`
+                ? ` · used ${relative(apiKey.last_used_at) ?? "never"}`
                 : null}
             </div>
           </div>
@@ -1152,7 +1152,7 @@ export function KeysPage() {
       {
         id: "status",
         header: "Status",
-        cell: (k) => <StatusMark apiKey={k} />,
+        cell: (apiKey) => <StatusMark apiKey={apiKey} />,
       },
       // Every key on a member's page is their own, so an Owner column there
       // would repeat one name down the table.
@@ -1167,16 +1167,16 @@ export function KeysPage() {
               // apart, so neither needs a chip to say which it is. The id stays
               // in the title, so the value actually sent on a request is
               // recoverable from a truncated cell.
-              cell: (k: ApiKey) => {
+              cell: (apiKey: ApiKey) => {
                 const member =
-                  !isVirtualUser(k.user_id) && k.user_id
-                    ? memberLabels.get(k.user_id)
+                  !isVirtualUser(apiKey.user_id) && apiKey.user_id
+                    ? memberLabels.get(apiKey.user_id)
                     : undefined
                 if (member) {
                   return (
                     <span
                       className="block truncate text-sm text-foreground"
-                      title={k.user_id ?? ""}
+                      title={apiKey.user_id ?? ""}
                     >
                       {member}
                     </span>
@@ -1185,11 +1185,13 @@ export function KeysPage() {
                 return (
                   <span
                     className={`block truncate text-mono-caption ${
-                      isVirtualUser(k.user_id) ? "text-subtle" : "text-muted"
+                      isVirtualUser(apiKey.user_id)
+                        ? "text-subtle"
+                        : "text-muted"
                     }`}
-                    title={k.user_id ?? ""}
+                    title={apiKey.user_id ?? ""}
                   >
-                    {ownerLabel(k)}
+                    {ownerLabel(apiKey)}
                   </span>
                 )
               },
@@ -1204,32 +1206,34 @@ export function KeysPage() {
       {
         id: "created",
         header: "Created",
-        cell: (k) => (
+        cell: (apiKey) => (
           <span className="text-mono-caption text-muted">
-            {formatDate(k.created_at)}
+            {formatDate(apiKey.created_at)}
           </span>
         ),
       },
       {
         id: "last_used",
         header: "Last used",
-        cell: (k) => (
+        cell: (apiKey) => (
           <span className="text-mono-caption text-muted">
-            {relative(k.last_used_at) ?? "never"}
+            {relative(apiKey.last_used_at) ?? "never"}
           </span>
         ),
       },
       {
         id: "expires",
         header: "Expires",
-        cell: (k) => (
+        cell: (apiKey) => (
           <span
             className="text-muted"
             title={
-              k.expires_at ? new Date(k.expires_at).toLocaleString() : undefined
+              apiKey.expires_at
+                ? new Date(apiKey.expires_at).toLocaleString()
+                : undefined
             }
           >
-            {k.expires_at ? formatDate(k.expires_at) : "never"}
+            {apiKey.expires_at ? formatDate(apiKey.expires_at) : "never"}
           </span>
         ),
       },
@@ -1262,7 +1266,7 @@ export function KeysPage() {
 
   // Bulk delete targets only already-disabled keys, mirroring the per-row rule
   // that a live key must be disabled before it can be permanently deleted.
-  const deletableSelected = selectedKeys.filter((k) => !k.is_active)
+  const deletableSelected = selectedKeys.filter((apiKey) => !apiKey.is_active)
 
   return (
     <div ref={tableRegion} className="flex min-w-0 flex-col">
@@ -1381,8 +1385,11 @@ export function KeysPage() {
             variant="ghost"
             isDisabled={bulkPending}
             onPress={() =>
-              void runBulk(selectedKeys, (k) =>
-                updateKey.mutateAsync({ id: k.id, body: { is_active: false } }),
+              void runBulk(selectedKeys, (apiKey) =>
+                updateKey.mutateAsync({
+                  id: apiKey.id,
+                  body: { is_active: false },
+                }),
               )
             }
           >
@@ -1396,9 +1403,9 @@ export function KeysPage() {
               variant="ghost"
               isDisabled={bulkPending}
               onPress={() =>
-                void runBulk(selectedKeys, (k) =>
+                void runBulk(selectedKeys, (apiKey) =>
                   updateKey.mutateAsync({
-                    id: k.id,
+                    id: apiKey.id,
                     body: { exclude_from_budget: true },
                   }),
                 )
@@ -1454,47 +1461,47 @@ export function KeysPage() {
             </EmptyMessage>
           ) : null}
           <ul className="flex flex-col">
-            {rows.map((k) => (
+            {rows.map((apiKey) => (
               <li
-                key={k.id}
-                className={`flex items-start gap-2 border-b border-border-subtle py-3 ${selectedIds.includes(k.id) ? "bg-primary-subtle" : ""}`}
+                key={apiKey.id}
+                className={`flex items-start gap-2 border-b border-border-subtle py-3 ${selectedIds.includes(apiKey.id) ? "bg-primary-subtle" : ""}`}
               >
                 <div className="flex min-h-11 shrink-0 items-center">
                   <Checkbox
                     hasTouchTarget
-                    ariaLabel={`Select ${label(k)}`}
-                    isSelected={selectedIds.includes(k.id)}
+                    ariaLabel={`Select ${label(apiKey)}`}
+                    isSelected={selectedIds.includes(apiKey.id)}
                     onChange={(checked) => {
                       const next = new Set(selectedIds)
-                      if (checked) next.add(k.id)
-                      else next.delete(k.id)
+                      if (checked) next.add(apiKey.id)
+                      else next.delete(apiKey.id)
                       selection.onSelectionChange(next)
                     }}
                   >
-                    <span className="sr-only">Select {label(k)}</span>
+                    <span className="sr-only">Select {label(apiKey)}</span>
                   </Checkbox>
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-1 pt-2">
                   <span className="truncate text-base text-foreground">
-                    {k.key_name ?? "(unnamed)"}
+                    {apiKey.key_name ?? "(unnamed)"}
                   </span>
-                  {renderPrefix(k)}
+                  {renderPrefix(apiKey)}
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="shrink-0">
-                      <StatusMark apiKey={k} />
+                      <StatusMark apiKey={apiKey} />
                     </span>
                     {isDeploymentWide ? (
                       <span className="truncate text-caption">
-                        {ownerLabel(k)}
+                        {ownerLabel(apiKey)}
                       </span>
                     ) : null}
                   </div>
                   <div className="truncate text-caption">
-                    <KeyMetaLine apiKey={k} face="text-caption" /> · used{" "}
-                    {relative(k.last_used_at) ?? "never"}
+                    <KeyMetaLine apiKey={apiKey} face="text-caption" /> · used{" "}
+                    {relative(apiKey.last_used_at) ?? "never"}
                   </div>
                 </div>
-                {renderActions(k)}
+                {renderActions(apiKey)}
               </li>
             ))}
           </ul>
@@ -1583,7 +1590,7 @@ export function KeysPage() {
         onConfirm={() =>
           void runBulk(
             deletableSelected,
-            (k) => deleteKey.mutateAsync(k.id),
+            (apiKey) => deleteKey.mutateAsync(apiKey.id),
             () => setBulkDeleteOpen(false),
           )
         }
