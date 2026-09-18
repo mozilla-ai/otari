@@ -283,6 +283,30 @@ def test_an_unauthenticated_request_reaches_neither_platform_nor_server(
     assert session.calls == []
 
 
+def test_a_user_token_for_another_region_is_misdirected_without_the_host(
+    client: TestClient,
+    platform: _Platform,
+    session: _FakeSession,
+) -> None:
+    """The platform's 421 keeps its status and gets this contract's own code.
+
+    The host the platform's detail named is dropped with the detail (R-ERR-1);
+    a caller learns it from any endpoint outside this contract.
+    """
+    platform.status_code = 421
+
+    response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
+
+    assert response.status_code == 421, response.text
+    assert _error(response) == {
+        "detail": "This API key belongs to another deployment",
+        "code": "misdirected_request",
+        "execution_state": "not_started",
+    }
+    assert "refused" not in response.text
+    assert session.calls == []
+
+
 @pytest.mark.parametrize("allowed_tools", [[], ["read_issue"]])
 def test_a_tool_outside_the_stored_allowlist_is_refused_before_connecting(
     client: TestClient,

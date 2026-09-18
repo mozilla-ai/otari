@@ -151,8 +151,8 @@ function KeySecretStep({
   // The key and both snippets show one stand-in, so the credential on this
   // screen reads as one thing rather than three.
   const concealedSecret = concealedFingerprint(
-    result.key_prefix,
-    result.key_suffix,
+    result.key_prefix ?? undefined,
+    result.key_suffix ?? undefined,
   )
   // The snippets carry the same credential, so all three fields share visibility.
   const [isSecretRevealed, setIsSecretRevealed] = useState(false)

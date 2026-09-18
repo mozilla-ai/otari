@@ -234,6 +234,7 @@ exception text.
 |---|---:|---|---|
 | Invalid request body | 422 | `invalid_request` | `not_started` |
 | Authentication failure | 401 | `authentication_failed` | `not_started` |
+| API key belongs to another regional deployment | 421 | `misdirected_request` | `not_started` |
 | Payment required or insufficient funds | 402 | `payment_required` | `not_started` |
 | Platform authorization refused | 403 | `forbidden` | `not_started` |
 | Authenticated request rate exceeded | 429 | `rate_limit_exceeded` | `not_started` |

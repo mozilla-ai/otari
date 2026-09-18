@@ -71,6 +71,7 @@ from gateway.services.mcp_stateless import (
     CODE_DISCOVERY_LIMIT_EXCEEDED,
     CODE_FORBIDDEN,
     CODE_INVALID_REQUEST,
+    CODE_MISDIRECTED_REQUEST,
     CODE_OUTCOME_UNKNOWN,
     CODE_PAYMENT_REQUIRED,
     CODE_RATE_LIMIT_EXCEEDED,
@@ -118,6 +119,7 @@ TOOLS_LABEL = "mcp.list_tools"
 SAFE_DETAILS: dict[str, str] = {
     CODE_INVALID_REQUEST: "MCP request is invalid",
     CODE_AUTHENTICATION_FAILED: "Authentication failed",
+    CODE_MISDIRECTED_REQUEST: "This API key belongs to another deployment",
     CODE_PAYMENT_REQUIRED: "Payment required",
     CODE_FORBIDDEN: "Request forbidden",
     CODE_RATE_LIMIT_EXCEEDED: "Rate limit exceeded",
@@ -239,6 +241,11 @@ def _classify(exc: StarletteHTTPException) -> tuple[str, ExecutionState, int]:
         return CODE_FORBIDDEN, ExecutionState.NOT_STARTED, 403
     if exc.status_code == 404:
         return CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404
+    if exc.status_code == 421:
+        # The key names another regional deployment. The host it names travels
+        # in the detail, which this contract drops like every other detail, so a
+        # caller learns where to go from any endpoint outside this contract.
+        return CODE_MISDIRECTED_REQUEST, ExecutionState.NOT_STARTED, 421
     if exc.status_code == 429:
         return CODE_RATE_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 429
     if exc.status_code == 503:

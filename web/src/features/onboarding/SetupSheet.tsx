@@ -64,8 +64,8 @@ export function SetupSheet({
   /** The issued key's plaintext, or undefined while it is being minted. */
   apiKey?: string
   /** The fingerprint the server stored for the issued key, shown while it is concealed. */
-  keyPrefix?: string | null
-  keySuffix?: string | null
+  keyPrefix?: string
+  keySuffix?: string
   /** Where a request belongs, or undefined when the deployment names none. */
   baseUrl?: string
   /** The first model the gateway can serve, when it can serve one. */

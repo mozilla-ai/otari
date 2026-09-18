@@ -38,7 +38,7 @@ interface ApiOptions {
   models?: string[]
   apiKey?: string
   /** Whether the mint reports the fingerprint it stored; a row without one has nothing to show concealed. */
-  withFingerprint?: boolean
+  hasFingerprint?: boolean
 }
 
 /**
@@ -52,7 +52,7 @@ interface ApiOptions {
 function mockApi({
   activation = workspaceActivation(),
   apiKey = KEY,
-  withFingerprint = true,
+  hasFingerprint = true,
   models = ["openai:gpt-4o-mini"],
 }: ApiOptions = {}) {
   let current = activation
@@ -68,8 +68,8 @@ function mockApi({
         return Response.json({
           key,
           key_id: "88888888-8888-8888-8888-888888888888",
-          key_prefix: withFingerprint ? key.slice(0, 10) : null,
-          key_suffix: withFingerprint ? key.slice(-4) : null,
+          key_prefix: hasFingerprint ? key.slice(0, 10) : null,
+          key_suffix: hasFingerprint ? key.slice(-4) : null,
           key_name: "Setup guide",
         })
       }
@@ -326,7 +326,7 @@ describe("SetupGuide", () => {
 
   // Exercise the helper's no-fingerprint fallback through the sheet.
   it("fully conceals a key whose mint stored no fingerprint", async () => {
-    mockApi({ withFingerprint: false })
+    mockApi({ hasFingerprint: false })
     const user = userEvent.setup()
     await renderGuide()
 

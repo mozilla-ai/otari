@@ -679,11 +679,13 @@ describe("concealedFingerprint", () => {
   })
 
   it("shows the prefix alone when the row stored no suffix", () => {
-    expect(concealedFingerprint("tk-Older00", null)).toBe("tk-Older00••••••••")
+    expect(concealedFingerprint("tk-Older00", undefined)).toBe(
+      "tk-Older00••••••••",
+    )
   })
 
   it("falls back to the plain stand-in without a prefix", () => {
-    expect(concealedFingerprint(null, "0000")).toBe(CONCEALED_SECRET)
+    expect(concealedFingerprint(undefined, "0000")).toBe(CONCEALED_SECRET)
     expect(concealedFingerprint(undefined, undefined)).toBe(CONCEALED_SECRET)
     expect(concealedFingerprint("", "")).toBe(CONCEALED_SECRET)
   })

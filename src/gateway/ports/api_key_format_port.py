@@ -47,8 +47,9 @@ class Misdirected:
 class Malformed:
     """The key claims this adapter's format and fails it.
 
-    A bad checksum, an unknown region, or the wrong kind for the header it came
-    in. Answered as ``401`` before any lookup, since no row can match it.
+    A bad checksum, an unknown region, or a credential of another kind in the
+    product's format (a gateway token presented as an API key). Answered as
+    ``401`` before any lookup, since no API key row can match it.
     """
 
 
@@ -56,7 +57,11 @@ KeyRoute = Local | Misdirected | Malformed
 
 
 class ApiKeyFormatPort(Protocol):
-    """The format of the API keys this build mints and recognizes."""
+    """The format of the API keys this build mints and recognizes.
+
+    API keys only: the credential an end user presents. The gateway's own token
+    to the platform is a different credential with its own checker.
+    """
 
     def mint(self) -> str:
         """Return a new API key in this build's format.
@@ -76,7 +81,13 @@ class ApiKeyFormatPort(Protocol):
         ...
 
     def route(self, presented: str) -> KeyRoute:
-        """Say where a presented key is checked, without looking it up.
+        """Say where a presented API key is checked, without looking it up.
+
+        ``presented`` is always a credential offered as an API key (``Otari-Key``,
+        ``Authorization: Bearer`` or ``x-api-key``); this port sees no other
+        header and no other kind of credential. A gateway token is parsed by
+        whatever checks gateway tokens, never here, so one that arrives in the
+        product's format is ``Malformed`` rather than a kind to route.
 
         ``Local`` for a key checked here, including every key whose format this
         adapter does not recognize. ``Misdirected`` for a key that names another

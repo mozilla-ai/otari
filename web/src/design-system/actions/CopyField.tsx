@@ -78,8 +78,8 @@ export const CONCEALED_SECRET = "•••••••••••••••�
  * falls back to the plain stand-in.
  */
 export function concealedFingerprint(
-  keyPrefix: string | null | undefined,
-  keySuffix: string | null | undefined,
+  keyPrefix: string | undefined,
+  keySuffix: string | undefined,
 ): string {
   return keyPrefix ? `${keyPrefix}••••••••${keySuffix ?? ""}` : CONCEALED_SECRET
 }

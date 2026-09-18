@@ -217,7 +217,7 @@ its own tenant.
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
 | Network/timeout                    | Mapped to `502 Bad Gateway`. |
 
-A `421 Misdirected Request` means the user token belongs to another regional deployment. Its `detail` names the host that serves it, and Otari forwards both the status and the detail unchanged so the caller can send the request there. The region a token carries is a routing hint only: the platform still hashes the whole token and looks it up, and a token with a bad checksum, an unknown region, or the wrong kind for its header gets a `401` with no lookup (otari-ai#1665). The MCP and Web Access resolves below share this ladder, so a `421` from either is forwarded the same way.
+A `421 Misdirected Request` only ever refers to `X-User-Token`: the user token belongs to another regional deployment, and the `detail` names the host that serves it. Otari forwards both the status and the detail unchanged so the end user can send the request there. A gateway token from the wrong region is not a `421`: that is the operator's configuration, which the end user cannot act on, so the platform answers it the way it answers any other bad gateway token. The region a token carries is a routing hint only: the platform still hashes the whole token and looks it up, and a token with a bad checksum, an unknown region, or the wrong kind for its header gets a `401` with no lookup (otari-ai#1665). The Web Access resolve below shares this ladder and forwards a `421` the same way. The MCP endpoints publish their own error contract and do not forward the detail: a `421` there becomes `misdirected_request` with the fixed safe message and no host (see below).
 
 ## MCP server resolution
 
@@ -302,8 +302,9 @@ The caller-orchestrated endpoints publish their own error contract instead of
 forwarding any detail, because a platform `detail` may name a workspace, a plan,
 or a stored server. Statuses remain meaningful: `401` becomes
 `authentication_failed`, `402` becomes `payment_required`, `403` becomes
-`forbidden`, `404` becomes `mcp_server_not_found`, and `429` keeps its status and
-`Retry-After` as `rate_limit_exceeded`. Other platform resolution failures become
+`forbidden`, `404` becomes `mcp_server_not_found`, `421` becomes
+`misdirected_request` (without the host the platform's detail named), and `429`
+keeps its status and `Retry-After` as `rate_limit_exceeded`. Other platform resolution failures become
 `502 mcp_resolution_failed`. See [MCP](mcp.md#caller-orchestrated-mcp).
 
 ## Web Access resolution

@@ -203,8 +203,8 @@ function SetupFlow({
     <SetupSheet
       workspaceName={workspaceName}
       apiKey={issued?.key}
-      keyPrefix={issued?.key_prefix}
-      keySuffix={issued?.key_suffix}
+      keyPrefix={issued?.key_prefix ?? undefined}
+      keySuffix={issued?.key_suffix ?? undefined}
       baseUrl={baseUrl}
       // The first model the gateway can serve, so the examples are runnable as
       // pasted. With none the placeholder stands and the sheet says what to do.

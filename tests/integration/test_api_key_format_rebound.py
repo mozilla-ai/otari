@@ -142,3 +142,24 @@ def test_a_legacy_key_still_authenticates_by_hash(rebound_client: TestClient, db
     response = rebound_client.get(f"{API_ROOT}/models", headers={API_KEY_HEADER: LEGACY_KEY})
 
     assert response.status_code == status.HTTP_200_OK
+
+
+def test_the_mcp_contract_answers_a_misdirected_key_with_its_own_code(rebound_client: TestClient) -> None:
+    """MCP forwards no detail, so the 421 keeps its status and drops the host."""
+    response = rebound_client.post(
+        f"{API_ROOT}/mcp/execute",
+        headers={API_KEY_HEADER: "elsewhere-" + "x" * 60},
+        json={
+            "mcp_server_id": "2c948a61-dc96-4cd8-96bb-8e1434bf424e",
+            "tool_name": "create_issue",
+            "arguments": {},
+            "server_revision": "rev-1",
+            "client_execution_id": "11111111-1111-1111-1111-111111111111",
+        },
+    )
+
+    assert response.status_code == status.HTTP_421_MISDIRECTED_REQUEST, response.text
+    body = response.json()
+    assert body["code"] == "misdirected_request"
+    assert body["execution_state"] == "not_started"
+    assert EU_HOST not in response.text
