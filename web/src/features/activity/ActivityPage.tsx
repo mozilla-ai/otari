@@ -1,16 +1,12 @@
-import { Button, Popover } from "@heroui/react"
-import type { ReactNode } from "react"
+import { Button } from "@heroui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type {
-  InFlightResponse,
   SummaryDimension,
   UsageEntry,
   UsageFilters,
   UsageGroupRow,
   UsageMutationSelection,
 } from "@/client"
-import { type ChargeLine, isTokenChargeLine, isUnitChargeLine } from "@/client"
-import { CopyableValue } from "@/design-system/actions/CopyField"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { BulkActionBar } from "@/design-system/data/BulkActionBar"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
@@ -31,6 +27,26 @@ import { FilterMultiComboBox } from "@/design-system/navigation/FilterMultiCombo
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { ActivityTimeline } from "@/features/activity/ActivityTimeline"
 import {
+  describeSource,
+  formatLatencyCell,
+  formatToolUsage,
+  formatUSD,
+  getActivityRowClassName,
+  getActivityRowKey,
+  indexGroupOutcomes,
+  listToolUsage,
+  PRICED_OPTIONS,
+  resolveExtentWindow,
+  resolveWindow,
+  STATUS_OPTIONS,
+  TOOL_OPTIONS,
+} from "@/features/activity/activityModel"
+import { InFlightControl } from "@/features/activity/InFlightControl"
+import { RequestDetail } from "@/features/activity/RequestDetail"
+import { RoutingCell } from "@/features/activity/RoutingCell"
+import { StatusMark } from "@/features/activity/StatusMark"
+import { TokenBar } from "@/features/activity/TokenBar"
+import {
   type ManualRates,
   SetPriceDialog,
 } from "@/features/models/SetPriceDialog"
@@ -49,14 +65,10 @@ import {
   useUsageSummary,
 } from "@/shared/api/usage"
 import {
-  formatCost,
   formatDateTime,
-  formatLatency,
   formatNumber,
   formatRelative,
-  formatUnitRate,
 } from "@/shared/helpers/format"
-import { providerDisplayName } from "@/shared/helpers/providers"
 import {
   resolveSelectedIds,
   useTableSelection,
@@ -67,243 +79,10 @@ import {
   bucketForWindow,
   CUSTOM_KEY,
   findPreset,
-  isoAgo,
   type RangePreset,
-  YEAR_SPAN_S,
 } from "@/shared/helpers/timeRange"
 import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-
-// ---------- formatting ----------
-
-function formatUSD(value: number | null): string {
-  return value === null ? "—" : formatCost(value)
-}
-
-// The full grouped count rather than the compact `formatTokens`: a request log
-// is read for the exact number of tokens a call billed, where a tile is read
-// for scale.
-function formatTokenCount(value: number | null): string {
-  return value === null ? "—" : formatNumber(value)
-}
-
-// A charge line is discriminated by which rate it carries: token meters price per
-// million, gateway-run tool meters price per call.
-
-// Token lines first, tool lines after, each group keeping the order the writers
-// emitted. "Billed meters" otherwise reads as an unordered mix once a row has both.
-function sortedBreakdown(lines: readonly ChargeLine[]): ChargeLine[] {
-  return [...lines].sort(
-    (a, b) => Number(isUnitChargeLine(a)) - Number(isUnitChargeLine(b)),
-  )
-}
-
-// A row that recorded no latency (historical rows, batch jobs) renders as an em
-// dash so the column stays aligned, which is what the shared helper's
-// `undefined` leaves each surface to decide.
-function latency(ms: number | null): string {
-  return formatLatency(ms) ?? "—"
-}
-
-// Relative time reads better in a scan than a full timestamp; the absolute value
-// stays available as a tooltip.
-
-// ---------- requests in flight ----------
-//
-// A usage row is written when a request settles, so the log alone can only
-// describe the past: on a slow backend a 30-second call is invisible for its whole
-// duration. What is running right now is therefore reported beside the refresh
-// control, as a count that opens the list, rather than as rows pinned above the
-// log.
-//
-// In-flight requests stay out of the table for the same reason the log is
-// frozen (see `useUsageLogs`): rows re-derived on a 2s poll reorder the top of
-// the table continuously on a gateway with real traffic, and an operator cannot
-// read a row before it moves. Off to one side, the same information costs the
-// table nothing, and an operator who wants the live view opens it deliberately.
-//
-// The trade: a request does not resolve in place from live row into settled
-// row. It leaves the list when it lands and appears in the log at the next
-// refresh.
-
-// Coarser than the settled Total time column: this is a wall-clock wait an
-// operator is watching rather than a measurement, so sub-second precision is
-// noise. Minutes appear because a stuck local model is the case this exists for.
-function formatElapsed(ms: number): string {
-  const seconds = Math.floor(ms / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`
-}
-
-// The wait, ticking between the 2s polls: on an entry whose whole point is that it
-// has not finished, a number that only moved when a response landed would read as
-// stalled. Rendered only inside the open live list, so nothing ticks on a page
-// whose operator has not asked to watch one.
-function InFlightWait({ startedAtMs }: { startedAtMs: number }) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
-  // Never negative: a poll can resolve between the tick and the paint.
-  return (
-    <span className="tabular-nums">
-      {formatElapsed(Math.max(0, now - startedAtMs))}
-    </span>
-  )
-}
-
-// The live count, and the list behind it. Reports the gateway as a whole and says
-// so: the endpoint takes no filters, so scoping the label to the current view
-// would claim a narrowing that was never applied.
-//
-// The list is rendered only while the popover is open, so the per-entry 1s ticks
-// exist only for as long as someone is reading them; closed, this is one number
-// that changes every couple of seconds well away from the table.
-//
-// The Button is a direct child of the popover root rather than wrapped in
-// `Popover.Trigger`, which renders its own `role="button"` div and would nest one
-// control inside another. HeroUI's Button is a react-aria Button, so the root
-// wires it up through context.
-//
-// Open state is held here, and the whole control renders only while there is
-// something to report *or* the list is open. An idle gateway therefore shows no
-// control at all, but a list an operator has opened is not torn out from under
-// them when the request they were watching lands: it stays, reading "0 in flight",
-// until they close it. That is also why the count is controlled rather than left
-// to `DialogTrigger`'s own state, which unmounting would discard.
-function InFlightControl({
-  data,
-  updatedAt,
-}: {
-  data: InFlightResponse
-  updatedAt: number
-}) {
-  // An in-flight row carries no alias (the registry is in memory and never
-  // touches the users table), so the roster is the only name available here.
-  const memberLabels = useMemberAttributionLabels()
-  const [isOpen, setIsOpen] = useState(false)
-  const shown = data.requests
-  const hidden = Math.max(0, data.total - shown.length)
-  if (data.total === 0 && !isOpen) return null
-  return (
-    <Popover isOpen={isOpen} onOpenChange={setIsOpen}>
-      <Button size="sm" variant="ghost">
-        {/* Decorative: the count beside it carries the same meaning in text, so
-            nothing is encoded in motion alone. That is also why it can stop
-            outright under `prefers-reduced-motion`, being the one element on the
-            page that would otherwise animate indefinitely. Still at zero, where
-            a pulse would suggest activity that is not there. */}
-        <span
-          className={`mr-1.5 inline-block h-1.5 w-1.5 motion-reduce:animate-none ${
-            data.total > 0 ? "animate-pulse bg-accent" : "bg-muted"
-          }`}
-          aria-hidden="true"
-        />
-        {formatNumber(data.total)} in flight
-      </Button>
-      <Popover.Content placement="bottom end">
-        <Popover.Dialog>
-          <div className="flex w-80 flex-col gap-2">
-            <Popover.Heading className="text-title">In flight</Popover.Heading>
-            <p className="text-caption">
-              Running right now, across the whole gateway; longest-running
-              first. Not narrowed by the filters above.
-            </p>
-            {shown.length === 0 ? (
-              <p className="text-sm text-muted">
-                Nothing running right now. Newly settled requests join the log
-                at the next refresh.
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-1.5">
-                {shown.map((request) => (
-                  <li
-                    key={request.id}
-                    className="flex items-baseline justify-between gap-3 text-sm"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate">{request.model}</span>
-                      <span className="block truncate text-caption">
-                        {request.user_id === null
-                          ? "—"
-                          : userDisplay(request.user_id, null, memberLabels)
-                              .label}
-                        {request.policy_name ? ` · ${request.policy_name}` : ""}
-                      </span>
-                    </span>
-                    <InFlightWait
-                      startedAtMs={updatedAt - request.elapsed_ms}
-                    />
-                  </li>
-                ))}
-              </ul>
-            )}
-            {/* Only when the endpoint's cap actually bit, which takes more
-                concurrency than a live list can usefully show anyway. */}
-            {hidden > 0 ? (
-              <p className="text-caption">
-                {formatNumber(hidden)} further{" "}
-                {hidden === 1 ? "request is" : "requests are"} in flight beyond
-                the {formatNumber(shown.length)} listed.
-              </p>
-            ) : null}
-          </div>
-        </Popover.Dialog>
-      </Popover.Content>
-    </Popover>
-  )
-}
-
-// Stable row-key getter and row class so DataTable's per-row cache holds
-// across re-renders (see the DataTable docstring); an inline arrow here would
-// rebuild every row on each selection click.
-const getActivityRowKey = (entry: UsageEntry): string => entry.id
-
-// An absorbed attempt is a failure a routing policy recovered from, so the
-// request it belongs to succeeded. Styling it like an error would make a working
-// fallback chain read as an outage, which is the same reason the server keeps it
-// out of error_count. Amber says "something happened here" without saying "this
-// request failed".
-const activityRowClassName = (entry: UsageEntry): string | undefined => {
-  if (entry.status === "error") return "bg-danger-subtle"
-  if (entry.status === "absorbed") return "bg-warning-subtle"
-  return undefined
-}
-
-// ---------- filter option sets ----------
-//
-// The time presets and window math are shared with the Usage page via
-// `@/shared/helpers/timeRange` (see the ActivityTimeline selector). Activity keeps a
-// truthful "All": its raw list endpoint applies no default and no clamp, so an
-// omitted start really is all-time.
-
-const STATUS_OPTIONS: { label: string; value: string }[] = [
-  { label: "All", value: "" },
-  { label: "Success", value: "success" },
-  { label: "Error", value: "error" },
-  // An attempt a routing policy recovered from. Listed because the rows are
-  // rendered and styled distinctly, so an operator who spots one has to be able
-  // to filter to the rest of them.
-  { label: "Absorbed", value: "absorbed" },
-]
-
-const PRICED_OPTIONS: { label: string; value: string }[] = [
-  { label: "All", value: "" },
-  { label: "Priced", value: "true" },
-  { label: "Unpriced", value: "false" },
-]
-
-// Gateway-run tools an operator can filter on. "Any tool" also matches MCP tools,
-// whose names come from the caller's own server and so cannot be enumerated here.
-const TOOL_OPTIONS: { label: string; value: string }[] = [
-  { label: "All", value: "" },
-  { label: "Any tool", value: "any" },
-  { label: "Web search", value: "web_search" },
-  { label: "Web fetch", value: "web_fetch" },
-  { label: "Code execution", value: "code_execution" },
-]
 
 // The only breakdown this page asks the summary for: whether the window contains
 // gateway-run tool calls, which decides if the Tool filter is worth offering.
@@ -342,802 +121,6 @@ const URL_DEFAULTS = {
   page: "0",
   size: String(DEFAULT_PAGE_SIZE),
 } as const
-
-// Resolve the query window. Explicit start_date/end_date bounds (a custom range,
-// or a drill-down from the Usage page) take precedence; otherwise a preset anchors
-// `start` to "now minus N", and "all" (or an empty custom range) leaves it open.
-// `now` is a parameter, not a call inside, so a caller deriving more than one
-// window can hand both the same clock reading. Read independently they land
-// milliseconds apart, and `winOutsideExtent` below compares two of them for
-// strict inequality, so drift of a single millisecond changes what the page does.
-function resolveWindow(
-  range: string,
-  start: string,
-  end: string,
-  now: number = Date.now(),
-): { start?: string; end?: string } {
-  if (start || end) {
-    return { start: start || undefined, end: end || undefined }
-  }
-  if (range === CUSTOM_KEY) {
-    return {}
-  }
-  const preset =
-    findPreset(ACTIVITY_PRESETS, range) ??
-    findPreset(ACTIVITY_PRESETS, ACTIVITY_DEFAULT_KEY)
-  const seconds = preset?.seconds ?? null
-  return {
-    start: seconds == null ? undefined : isoAgo(seconds, now),
-    end: undefined,
-  }
-}
-
-// The histogram extent (what the bars span), which is *not* always the list
-// window. For bounded presets it matches `resolveWindow`. Any range with no
-// rolling start of its own (the unbounded "All", or the `custom` sentinel) gets an
-// explicit year-long start instead: the list genuinely omits its start there, but
-// the summary endpoint would then apply a hidden 30-day default, so the bars would
-// silently show a rolling month while the caption reads "All time". The explicit
-// start gives a deterministic, draggable span (the axis shows exactly what it
-// covers) while the list stays all-time.
-function resolveExtentWindow(
-  range: string,
-  now: number = Date.now(),
-): { start?: string; end?: string } {
-  const win = resolveWindow(range, "", "", now)
-  if (win.start) return win
-  const preset = findPreset(ACTIVITY_PRESETS, range)
-  if (preset?.seconds == null) return { start: isoAgo(YEAR_SPAN_S, now) }
-  return win
-}
-
-// ---------- small presentational pieces ----------
-
-/**
- * Status as a square dot and a word, failure-forward.
- *
- * `error` is the only one that colors its text, which is what keeps a failure
- * findable in a scan of fifty rows. `absorbed` is deliberately neutral rather
- * than caution: a routing policy recovered from it, so the request was served,
- * and painting it as a warning made a working gateway look like a failing one.
- * It reads as the third thing it is, on the subtle rung in both channels.
- */
-function StatusMark({ status }: { status: string }) {
-  const { dot, ink } =
-    status === "error"
-      ? { dot: "bg-danger", ink: "text-danger" }
-      : status === "absorbed"
-        ? { dot: "bg-text-subtle", ink: "text-subtle" }
-        : { dot: "bg-success", ink: "text-muted" }
-  return (
-    <span className={`flex items-center gap-2 text-mono-caption ${ink}`}>
-      <Dot className={dot} />
-      {statusLabel(status)}
-    </span>
-  )
-}
-
-// The column's words, in their own casing, rather than `status.toUpperCase()`
-// on the raw enum: a repeated column carries its labels in the case they are
-// written in, and uppercase emphasis would fall equally on the
-// successes, which is the last thing a column built to surface exceptions
-// wants to draw the eye to. Unknown values still render their slug.
-const STATUS_LABELS: Record<string, string> = {
-  error: "Error",
-  absorbed: "Absorbed",
-  success: "Success",
-}
-
-function statusLabel(status: string): string {
-  return STATUS_LABELS[status] ?? status
-}
-
-// Friendly labels for known provenance sources; unknown sources render their slug.
-const SOURCE_LABELS: Record<string, string> = {
-  gateway: "Gateway",
-  claude_code: "Claude Code",
-  codex: "Codex",
-}
-
-function sourceLabel(source: string): string {
-  return SOURCE_LABELS[source] ?? source
-}
-
-// ---------- token composition ----------
-//
-// One total is the least useful number on the row: on a cached agent workload it
-// is ~98% cache read, so every row shows a large, similar-looking figure. The
-// composition is what varies, so the column renders the split.
-
-interface TokenComposition {
-  // Input tokens billed at the full input rate (the prompt minus whatever was
-  // served from, or written to, the cache).
-  fresh: number
-  cacheRead: number
-  cacheWrite: number
-  output: number
-  total: number
-}
-
-function positive(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : 0
-}
-
-// Split a row's tokens into fresh input / cache read / cache write / output, or
-// null when the row carries no usage at all (an error before the provider replied).
-//
-// `billing_meters` is preferred because it is the *normalized* view: providers
-// disagree on whether cache reads and writes are counted inside `prompt_tokens`
-// (OpenAI: yes, Anthropic: no), and the row does not record which convention its
-// numbers follow, so the raw columns alone cannot be split reliably. The writers
-// resolve that when they price a row, so meters are present for any priced row.
-// Failing that, assume the subset convention and clamp, which is exact whenever
-// there is no cache usage to misattribute.
-function tokenComposition(entry: UsageEntry): TokenComposition | null {
-  // Per key, not per object: a row can carry meters for its gateway-run tool calls
-  // while its tokens were never metered (an unpriced model still owes for the
-  // searches it ran). Keying off the object's presence would then read every token
-  // as 0 and the bar would vanish from a row that has real tokens.
-  const meters = entry.billing_meters ?? null
-  const meter = (key: string, fallback: number | null): number =>
-    meters && typeof meters[key] === "number"
-      ? positive(meters[key])
-      : positive(fallback)
-  const totalInput = meter("total_input_tokens", entry.prompt_tokens)
-  const cacheRead = meter("cache_read_tokens", entry.cache_read_tokens)
-  const cacheWrite = meter("cache_write_tokens", entry.cache_write_tokens)
-  const output = meter("completion_tokens", entry.completion_tokens)
-  const fresh = Math.max(0, totalInput - cacheRead - cacheWrite)
-  const total = fresh + cacheRead + cacheWrite + output
-  return total > 0 ? { fresh, cacheRead, cacheWrite, output, total } : null
-}
-
-// A row's gateway-run tool calls, read out of the reserved `tools` meter namespace.
-// Nested under one key so a caller-named MCP tool can never collide with a token
-// meter (which the billed-token SQL and the bar above both read by name).
-type ToolUsage = {
-  tool: string
-  billed: number
-  errors: number
-  unitRate: number | null
-}
-
-function toolUsage(entry: UsageEntry): ToolUsage[] {
-  const nested = entry.billing_meters?.tools
-  if (!nested || typeof nested !== "object") return []
-  return Object.entries(nested as Record<string, unknown>)
-    .flatMap(([tool, counts]) => {
-      if (!counts || typeof counts !== "object") return []
-      const record = counts as Record<string, unknown>
-      const billed = positive(record.billed)
-      const errors = positive(record.errors)
-      if (!billed && !errors) return []
-      const rate = record.unit_rate
-      return [
-        {
-          tool,
-          billed,
-          errors,
-          unitRate: typeof rate === "number" ? rate : null,
-        },
-      ]
-    })
-    .sort((a, b) => b.billed - a.billed || a.tool.localeCompare(b.tool))
-}
-
-// "web search x3" / "web search x3, 1 failed". The tool name is de-underscored for
-// reading; failures are named rather than folded into the count, because a failed
-// call is not billed and an operator chasing a cost needs that distinction.
-function formatToolUsage(usage: ToolUsage): string {
-  const label = usage.tool.replaceAll("_", " ")
-  const parts = usage.billed ? [`${label} \u00d7${usage.billed}`] : [label]
-  if (usage.errors) parts.push(`${usage.errors} failed`)
-  return parts.join(", ")
-}
-
-// Cost attributable to gateway-run tools on this row, from the rate stored with the
-// row rather than the live price, so a historical row reads as it was billed.
-function toolCost(entry: UsageEntry): number | null {
-  const usages = toolUsage(entry).filter((usage) => usage.billed > 0)
-  if (usages.some((usage) => usage.unitRate === null)) return null
-  return usages.reduce(
-    (sum, usage) => sum + usage.billed * (usage.unitRate ?? 0),
-    0,
-  )
-}
-
-// Segment order runs input side first (fresh, then the two cache buckets), then
-// output. Shading is one hue at four lightnesses, assigned for legibility rather
-// than for price: every fill clears the track it sits on, adjacent fills differ
-// enough to show their boundary, and the bucket that is usually the bulk (cache
-// read) takes a mid tone instead of the palest step, so a cache-heavy row reads
-// as a filled bar and a fresh-input row as a dark one. Nothing is encoded by hue,
-// and the tooltip / accessible name carry every number, so the bar adds a shape
-// to scan and removes no information.
-const TOKEN_SEGMENTS: {
-  key: keyof Omit<TokenComposition, "total">
-  label: string
-  fill: string
-}[] = [
-  { key: "fresh", label: "Fresh input", fill: "var(--color-chart-ramp-1)" },
-  { key: "cacheRead", label: "Cache read", fill: "var(--color-chart-ramp-3)" },
-  {
-    key: "cacheWrite",
-    label: "Cache write",
-    fill: "var(--color-chart-ramp-4)",
-  },
-  { key: "output", label: "Output", fill: "var(--color-chart-ramp-2)" },
-]
-
-// The total plus a thin stacked bar of its composition. Widths are SVG rect
-// attributes in a 100-unit viewBox (a dynamic Tailwind `w-[n%]` would not survive
-// the JIT scanner, and inline styles are out). Proportions are exact, so a segment
-// under a percent or so lands sub-pixel; the tooltip carries the real numbers.
-//
-// The number shown is the sum of the segments, so the cell is internally
-// consistent and reads as "tokens billed". For an additive-convention row that is
-// higher than the raw `total_tokens` column (which excludes the cache buckets);
-// the raw fields stay visible, unchanged, in the detail panel.
-function TokenBar({ entry }: { entry: UsageEntry }) {
-  const composition = tokenComposition(entry)
-  if (composition === null) {
-    return (
-      <span className="tabular-nums">
-        {formatTokenCount(entry.total_tokens)}
-      </span>
-    )
-  }
-  const parts = TOKEN_SEGMENTS.map((segment) => ({
-    ...segment,
-    value: composition[segment.key],
-  }))
-  const summary = parts
-    .filter((part) => part.value > 0)
-    .map((part) => `${part.label} ${formatNumber(part.value)}`)
-    .join(", ")
-
-  let offset = 0
-  const rects = parts.map((part) => {
-    const width = (part.value / composition.total) * 100
-    const rect = { ...part, x: offset, width }
-    offset += width
-    return rect
-  })
-
-  return (
-    <span className="inline-flex flex-col items-end gap-1.5" title={summary}>
-      <span className="tabular-nums">{formatNumber(composition.total)}</span>
-      <svg
-        viewBox="0 0 100 4"
-        preserveAspectRatio="none"
-        role="img"
-        aria-label={`Token composition: ${summary}`}
-        className="h-1.5 w-20 overflow-hidden bg-primary-subtle"
-      >
-        {rects
-          .filter((rect) => rect.width > 0)
-          .map((rect) => (
-            <rect
-              key={rect.key}
-              x={rect.x}
-              y={0}
-              width={rect.width}
-              height={4}
-              fill={rect.fill}
-            />
-          ))}
-      </svg>
-    </span>
-  )
-}
-
-// ---------- routing ----------
-//
-// A routed request writes one usage row per attempt (all sharing a
-// `request_group_id`), so a single row answers only half of what an operator
-// wants: "attempt 1 of 2 failed" without saying what served the request. These
-// helpers turn the stored attribution into the sentence the Routing column shows,
-// and reassemble a plan from the rows of one group.
-
-// Plain English for a compiled attempt's `selection_reason`. The stored values are
-// the compiler's vocabulary (`static`, `default`, `on_failure`, `condition:<keys>`,
-// `router:<name>`): precise, and meaningless to a reader who has not read the
-// compiler. An unrecognized value is de-underscored rather than dropped, since the
-// set is open by construction (a condition or router name comes from config).
-function selectionReasonLabel(
-  reason: string | null | undefined,
-): string | null {
-  if (!reason) return null
-  if (reason === "static") return "the policy's only target"
-  if (reason === "default") return "the policy's default target"
-  if (reason === "on_failure") return "a fallback candidate"
-  if (reason.startsWith("condition:")) {
-    const keys = reason
-      .slice("condition:".length)
-      .split(",")
-      .filter(Boolean)
-      .join(", ")
-    return keys ? `matched on ${keys}` : "matched a condition"
-  }
-  if (reason.startsWith("router:")) {
-    const name = reason.slice("router:".length)
-    return name ? `chosen by router ${name}` : "chosen by a router"
-  }
-  return reason.replaceAll("_", " ")
-}
-
-// What a group's request ended up doing, read off its outcome row. Absorbed rows
-// are attempts the policy recovered from, so exactly one row per finished group is
-// the outcome: the attempt that served, or the terminal failure.
-interface GroupOutcome {
-  /** Qualified target of the attempt that served, or null when none did. */
-  servedBy: string | null
-  servedPosition: number | null
-}
-
-// Index the outcome of every group represented in `rows`. Built from rows the page
-// already holds first, then filled in from a batched lookup, so the common case
-// (a group's attempts are adjacent in a newest-first list) costs no extra request.
-function indexGroupOutcomes(
-  rows: readonly UsageEntry[],
-): Map<string, GroupOutcome> {
-  return new Map(
-    rows.flatMap((row): [string, GroupOutcome][] =>
-      row.request_group_id && row.status !== "absorbed"
-        ? [
-            [
-              row.request_group_id,
-              {
-                servedBy:
-                  row.status === "success" ? pricingSelectorOf(row) : null,
-                servedPosition:
-                  row.status === "success"
-                    ? (row.attempt_position ?? null)
-                    : null,
-              },
-            ],
-          ]
-        : [],
-    ),
-  )
-}
-
-// One line of prose for a row's place in its plan, replacing the "attempt 1/2 ·
-// default" shorthand: that read as a fraction of something unnamed, said nothing
-// about whether the attempt worked, and pointed at no other row. `outcome` is the
-// group's outcome when it is known, which is what lets an absorbed row name the
-// model that served in its place.
-function attemptSentence(
-  entry: UsageEntry,
-  outcome: GroupOutcome | null,
-): string | null {
-  const reason = selectionReasonLabel(entry.selection_reason)
-  const position = entry.attempt_position
-  const total = entry.attempt_count
-  // A policy with one candidate has no plan to place the row in, so the only thing
-  // worth saying is why that candidate was picked.
-  if (position == null || total == null || total <= 1) return reason
-  const attempt = `attempt ${position} of ${total}`
-  if (entry.status === "absorbed") {
-    if (outcome?.servedBy)
-      return `${attempt} failed, served by ${outcome.servedBy}`
-    // Not "and so did the rest": the group's outcome row is an error, but the walk
-    // may have stopped on it (a non-retryable status, a lock-in) with later
-    // candidates never called, which is what that row's own sentence says.
-    if (outcome) return `${attempt} failed, and the request ended in an error`
-    return `${attempt} failed, fell back`
-  }
-  if (entry.status === "error") {
-    // The walk stops early on a non-retryable failure, a lock-in, or a
-    // gateway-side refusal, so the later candidates were not necessarily tried.
-    return position < total
-      ? `${attempt} failed, no further candidate tried`
-      : `${attempt} failed, plan exhausted`
-  }
-  return reason ? `served on ${attempt} (${reason})` : `served on ${attempt}`
-}
-
-// The Routing column: the policy the caller named, then where this row sits in its
-// plan and how that turned out.
-function RoutingCell({
-  entry,
-  outcome,
-}: {
-  entry: UsageEntry
-  outcome: GroupOutcome | null
-}) {
-  // Blank, not an em-dash, when the request named a plain model. This column is
-  // sparse by nature (most rows are unrouted), and a placeholder on every one of
-  // them would add noise to every scan while saying nothing.
-  if (entry.policy_name == null) return null
-  const sentence = attemptSentence(entry, outcome)
-  return (
-    <span className="flex flex-col leading-tight">
-      <span className="text-foreground">{entry.policy_name}</span>
-      {/* Non-color signal: the outcome is spelled out, so the amber row tint is
-          never the only thing carrying the meaning. */}
-      {/* Wraps rather than truncates: the tail is the part that matters (it names
-          the model that served), and a qualified target is routinely longer than
-          the column. The Model column wraps for the same reason. */}
-      {sentence ? (
-        <span className="text-caption break-words">{sentence}</span>
-      ) : null}
-    </span>
-  )
-}
-
-// Per-attempt outcome for the plan table. Terser than the row sentence, which has
-// to stand alone; here the table's shape already says which attempt this is.
-function attemptOutcome(entry: UsageEntry): string {
-  if (entry.status === "absorbed")
-    return entry.status_code === null
-      ? "failed, fell back"
-      : `failed ${entry.status_code}, fell back`
-  if (entry.status === "error")
-    return entry.status_code === null ? "failed" : `failed ${entry.status_code}`
-  return "served the request"
-}
-
-// Attempts in plan order. `attempt_position` is authoritative; timestamp is the
-// tiebreaker for a row written before the column existed, or a group whose rows
-// share a position (which would be a writer bug, not something to hide).
-function planOrder(rows: readonly UsageEntry[]): UsageEntry[] {
-  return [...rows].sort(
-    (a, b) =>
-      (a.attempt_position ?? 0) - (b.attempt_position ?? 0) ||
-      a.timestamp.localeCompare(b.timestamp),
-  )
-}
-
-// The whole plan behind one routed request: every candidate that ran, in order,
-// with the one that served marked. This is the answer to "a fallback fired, so
-// what actually served me", which no single row can give.
-function RoutingPlan({ entry }: { entry: UsageEntry }) {
-  const groupId = entry.request_group_id
-  const groupIds = groupId ? [groupId] : []
-  const group = useRequestGroups(groupIds)
-  // Only rows of this row's own group are the plan. The lookup keeps previous data
-  // across a key change, so this is what stops another request's plan from ever
-  // being narrated as this one's, whatever the detail panel does with mounting.
-  const siblings = groupId
-    ? (group.data ?? []).filter((row) => row.request_group_id === groupId)
-    : []
-  // Falls back to the row itself while the lookup is in flight (and for a
-  // pre-`request_group_id` row, which has no siblings to find), so the section
-  // never flashes empty and never claims a one-attempt plan it did not read.
-  const attempts = planOrder(siblings.length ? siblings : [entry])
-  const isComplete = siblings.length > 0
-  const served = attempts.find((attempt) => attempt.status === "success")
-  const total = entry.attempt_count ?? attempts.length
-
-  // "Loading" only while a lookup is actually outstanding: a failed lookup, or a row
-  // that carries no group to look up, would otherwise sit on that line forever.
-  const summary = !isComplete
-    ? group.isError
-      ? "Could not load this request's other attempts."
-      : entry.request_group_id
-        ? "Loading the rest of this request's attempts…"
-        : "This row carries no request group, so its other attempts cannot be found."
-    : served
-      ? `Served by attempt ${served.attempt_position ?? "?"} of ${total}: ${pricingSelectorOf(served)}`
-      : attempts.some((attempt) => attempt.status === "error")
-        ? "No candidate served this request."
-        : "This request has no outcome row yet."
-
-  return (
-    <div className="flex flex-col gap-2">
-      <span className="text-overline">Routing plan · {entry.policy_name}</span>
-      <span className="text-sm text-foreground">{summary}</span>
-      <div className="overflow-x-auto border border-control-border">
-        <table
-          className="w-full text-xs"
-          aria-label={`Routing plan for policy ${entry.policy_name}`}
-        >
-          {/* No `text-muted` here: `text-overline` on each `<th>` sets the color
-              itself, so a second declaration on the parent is one more place to
-              keep in step for no effect. */}
-          <thead>
-            <tr className="border-b border-border">
-              <th scope="col" className="px-3 py-2 text-left text-overline">
-                #
-              </th>
-              <th scope="col" className="px-3 py-2 text-left text-overline">
-                Target
-              </th>
-              <th scope="col" className="px-3 py-2 text-left text-overline">
-                Selected as
-              </th>
-              <th scope="col" className="px-3 py-2 text-left text-overline">
-                Outcome
-              </th>
-              {/* Every attempt's `latency_ms` is measured from the start of the
-                  request, not from the start of that attempt, so this is the same
-                  "Total time" the row column shows, not a per-candidate duration. */}
-              <th scope="col" className="px-3 py-2 text-right text-overline">
-                Total time
-              </th>
-              <th scope="col" className="px-3 py-2 text-right text-overline">
-                Cost
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {attempts.map((attempt) => (
-              <tr
-                key={attempt.id}
-                className={`border-t border-border first:border-t-0 ${
-                  attempt.status === "success" ? "bg-primary-subtle" : ""
-                }`}
-              >
-                <td className="px-3 py-2 tabular-nums">
-                  {attempt.attempt_position ?? "?"}
-                </td>
-                <td className="px-3 py-2 break-all text-foreground">
-                  {pricingSelectorOf(attempt)}
-                  {attempt.id === entry.id ? (
-                    <span className="ml-2 border border-border px-1.5 py-0.5 text-xs text-subtle">
-                      this row
-                    </span>
-                  ) : null}
-                </td>
-                <td className="px-3 py-2">
-                  {selectionReasonLabel(attempt.selection_reason) ?? "—"}
-                </td>
-                <td
-                  className={`px-3 py-2 ${attempt.status === "success" ? "" : "text-warning"}`}
-                >
-                  {attemptOutcome(attempt)}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  {latency(attempt.latency_ms)}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  {formatUSD(attempt.cost)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <span className="text-caption">
-        Cost and tool charges settle on the attempt that served, so a failed
-        attempt carries its tokens and no charge.
-      </span>
-    </div>
-  )
-}
-
-// `copyValue` adds a copy control for the fields that hold an opaque identifier
-// (a request id, an api key id): they are what an operator pastes into a log
-// search or a support thread, and a mistyped character makes them useless.
-function DetailField({
-  label,
-  copyValue,
-  copyLabel,
-  children,
-}: {
-  label: string
-  copyValue?: string | null
-  /** Overrides the copy control's name where the column heading would misname the
-      value: "API key" holds a key id, never key material. */
-  copyLabel?: string
-  children: ReactNode
-}) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-overline">{label}</span>
-      {copyValue ? (
-        <CopyableValue
-          value={copyValue}
-          label={copyLabel ?? label.toLowerCase()}
-          className="text-body break-all"
-        >
-          {children}
-        </CopyableValue>
-      ) : (
-        <span className="text-body break-all">{children}</span>
-      )}
-    </div>
-  )
-}
-
-// The pricing key a usage row bills against. A row stores the instance and the
-// bare model separately (`log_usage` is called with `provider=resolved.instance,
-// model=resolved.model`, and a gateway rejection logs the same pair), while
-// pricing is looked up as `instance:model` (`find_model_pricing`), so the key has
-// to be rebuilt from both: `entry.model` alone is prefix-less and would store a
-// price nothing ever reads. A row whose selector never resolved carries no
-// provider and its model is the raw selector, so that is used as-is.
-function pricingSelectorOf(entry: UsageEntry): string {
-  if (!entry.provider) return entry.model
-  return entry.model.startsWith(`${entry.provider}:`)
-    ? entry.model
-    : `${entry.provider}:${entry.model}`
-}
-
-// The detail panel for one request: the failure diagnostic plus the metadata
-// that does not fit the row. The dashboard is master-key admin-only, so the
-// stored `error_message` is shown verbatim; it is source-neutral by nature,
-// carrying either a fixed gateway rejection string (e.g. a model with no pricing
-// under `require_pricing`) or the raw upstream provider error, so the heading
-// stays "Error" rather than blaming the provider for every failure.
-function RequestDetail({
-  entry,
-  onPriceModel,
-}: {
-  entry: UsageEntry
-  /**
-   * Null for a caller who does not operate the deployment. Pricing a model is a
-   * deployment-wide write (`/pricing`), so offering the button to a tenant
-   * would be offering a refusal; the sentence beside it is still theirs to read,
-   * because "this row cost nothing" is a fact about their own request.
-   */
-  onPriceModel: ((model: string) => void) | null
-}) {
-  const memberLabels = useMemberAttributionLabels()
-  // A row with no cost (cost IS NULL, the same test the "Priced?" filter uses)
-  // is either a model the gateway has no price for or a request refused before
-  // it could be billed. Both are the same fix, and the row holds what the
-  // selector was, which a provider without model discovery would never have put
-  // in the catalog. A $0 cost is a real price, so it is deliberately not
-  // treated as uncosted.
-  const isUncosted = entry.cost === null
-  const pricingKey = pricingSelectorOf(entry)
-  return (
-    <div className="flex flex-col gap-4 px-4 py-4">
-      {entry.error_message ? (
-        <div className="flex flex-col gap-1.5">
-          <span className="text-overline">
-            Error{entry.status_code !== null ? ` (${entry.status_code})` : ""}
-          </span>
-          <pre className="max-h-48 overflow-auto rounded-lg border border-danger bg-danger-subtle p-3 text-xs whitespace-pre-wrap break-all text-danger">
-            {entry.error_message}
-          </pre>
-        </div>
-      ) : null}
-      {/* Routed requests only. Placed above the metadata grid, and above the
-          per-row fields, because on a failed attempt it answers the first question
-          the failure raises: what served the request instead. */}
-      {entry.policy_name !== null && entry.policy_name !== undefined ? (
-        <RoutingPlan entry={entry} />
-      ) : null}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <DetailField label="Provider">
-          {entry.provider ? providerDisplayName(entry.provider) : "—"}
-        </DetailField>
-        <DetailField label="Endpoint">{entry.endpoint}</DetailField>
-        <DetailField label="Source">{sourceLabel(entry.source)}</DetailField>
-        {entry.source_label ? (
-          <DetailField label="Session">{entry.source_label}</DetailField>
-        ) : null}
-        {/* The name reads, the id stays copyable: this is the one place an
-            operator goes for the raw id, so naming the person here must not
-            take it away. */}
-        <DetailField label="User" copyValue={entry.user_id} copyLabel="user id">
-          {entry.user_id === null
-            ? "—"
-            : userDisplay(entry.user_id, entry.user_alias, memberLabels).label}
-        </DetailField>
-        <DetailField
-          label="API key"
-          copyValue={entry.api_key_id}
-          copyLabel="api key id"
-        >
-          {entry.api_key_id ?? "—"}
-        </DetailField>
-        <DetailField label="Prompt tokens">
-          {formatTokenCount(entry.prompt_tokens)}
-        </DetailField>
-        <DetailField label="Completion tokens">
-          {formatTokenCount(entry.completion_tokens)}
-        </DetailField>
-        <DetailField label="Total tokens">
-          {formatTokenCount(entry.total_tokens)}
-        </DetailField>
-        {/* The Tokens column's number, spelled out here because it can exceed the
-            provider-reported total above: the row's composition counts the cache
-            buckets, which an additive-convention provider reports outside the prompt. */}
-        <DetailField label="Billed tokens">
-          <span title="Fresh input, cache reads and writes, and output: the tokens this request was priced on, and the total the activity row's bar splits.">
-            {formatTokenCount(tokenComposition(entry)?.total ?? null)}
-          </span>
-        </DetailField>
-        <DetailField label="Cost">{formatUSD(entry.cost)}</DetailField>
-        {toolUsage(entry).length ? (
-          <>
-            <DetailField label="Tools">
-              {toolUsage(entry).map(formatToolUsage).join(" \u00b7 ")}
-            </DetailField>
-            <DetailField label="Tool cost">
-              {toolCost(entry) === null ? (
-                <span
-                  className="text-warning"
-                  title="No per-request price is configured for this tool, so its calls were recorded at zero cost. Set one on the Tools & Guardrails screen."
-                >
-                  unpriced
-                </span>
-              ) : (
-                formatUSD(toolCost(entry))
-              )}
-            </DetailField>
-          </>
-        ) : null}
-        <DetailField label="Cache read tokens">
-          {formatTokenCount(entry.cache_read_tokens)}
-        </DetailField>
-        <DetailField label="Cache write tokens">
-          {formatTokenCount(entry.cache_write_tokens)}
-        </DetailField>
-        <DetailField label="1h cache writes">
-          {formatTokenCount(entry.cache_write_1h_tokens ?? null)}
-        </DetailField>
-        <DetailField label="Total time">
-          {latency(entry.latency_ms)}
-        </DetailField>
-        <DetailField label="Request ID" copyValue={entry.id}>
-          {entry.id}
-        </DetailField>
-      </div>
-      {isUncosted ? (
-        <div className="flex flex-wrap items-center gap-3">
-          {onPriceModel ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onPress={() => onPriceModel(pricingKey)}
-            >
-              Price this model
-            </Button>
-          ) : null}
-          <span className="text-caption">
-            {onPriceModel ? (
-              <>
-                This request carries no cost. Set a price for{" "}
-                <code className="break-all">{pricingKey}</code> so later
-                requests are metered and count against budgets. Rows already
-                logged keep the cost they were served with.
-              </>
-            ) : (
-              <>
-                This request carries no cost, because no price is set for{" "}
-                <code className="break-all">{pricingKey}</code>. A deployment
-                operator sets one; rows already logged keep the cost they were
-                served with.
-              </>
-            )}
-          </span>
-        </div>
-      ) : null}
-      {entry.pricing_breakdown?.length ? (
-        <div className="flex flex-col gap-2">
-          <span className="text-overline">Billed meters</span>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {sortedBreakdown(entry.pricing_breakdown).map((line) => {
-              // A line of neither known shape was written by an older gateway.
-              // Its cost is still real, so it is shown as a charge with no rate
-              // rather than rendered through one of the two rate formats, which
-              // would print an undefined rate as "NaN / 1M".
-              const meter = String(line.meter ?? "")
-              return (
-                <DetailField key={meter} label={meter.replaceAll("_", " ")}>
-                  {isUnitChargeLine(line)
-                    ? `${formatTokenCount(line.units)} at ${formatUnitRate(line.unit_rate)} each, ${formatUSD(line.cost)}`
-                    : isTokenChargeLine(line)
-                      ? `${formatTokenCount(line.units)} at ${formatUSD(line.rate_per_million)} / 1M, ${formatUSD(line.cost)}`
-                      : formatUSD(Number(line.cost ?? 0))}
-                </DetailField>
-              )
-            })}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-// ---------- page ----------
 
 export function ActivityPage() {
   // Who the people behind the owner ids are. The log already carries the alias
@@ -1685,7 +668,7 @@ export function ActivityPage() {
           {
             key: "source",
             label: "Source",
-            value: sourceLabel(sourceFilter),
+            value: describeSource(sourceFilter),
             onClear: () => url.patch({ source: "" }),
           },
         ]
@@ -1972,6 +955,8 @@ export function ActivityPage() {
       {
         id: "time",
         header: "Time",
+        // Relative time reads better in a scan than a full timestamp; the
+        // absolute value stays available as a tooltip.
         cell: (entry) => (
           <span title={formatDateTime(entry.timestamp)} className="text-muted">
             {formatRelative(entry.timestamp)}
@@ -1995,10 +980,13 @@ export function ActivityPage() {
         // and push the failure-forward Status pill off a narrow viewport. Text, not
         // color alone, so it survives the same accessibility bar as TokenBar.
         cell: (entry) => {
-          const usage = toolUsage(entry)
-          if (!usage.length) return entry.model
-          const calls = usage.reduce((sum, u) => sum + u.billed + u.errors, 0)
-          const detail = usage.map(formatToolUsage).join(" \u00b7 ")
+          const tools = listToolUsage(entry)
+          if (!tools.length) return entry.model
+          const calls = tools.reduce(
+            (sum, tool) => sum + tool.billed + tool.errors,
+            0,
+          )
+          const detail = tools.map(formatToolUsage).join(" \u00b7 ")
           return (
             <span className="inline-flex items-center gap-1.5">
               {entry.model}
@@ -2057,7 +1045,7 @@ export function ActivityPage() {
         id: "latency",
         header: "Total time",
         align: "end",
-        cell: (entry) => latency(entry.latency_ms),
+        cell: (entry) => formatLatencyCell(entry.latency_ms),
       },
       {
         id: "status",
@@ -2180,7 +1168,7 @@ export function ActivityPage() {
                 { value: "", label: "All" },
                 ...sourceOptions.map((source) => ({
                   value: source,
-                  label: sourceLabel(source),
+                  label: describeSource(source),
                 })),
               ]}
             />
@@ -2275,7 +1263,7 @@ export function ActivityPage() {
           onRowAction={(key) =>
             setExpandedId((current) => (current === key ? undefined : key))
           }
-          rowClassName={activityRowClassName}
+          rowClassName={getActivityRowClassName}
           detailKey={expandedId}
           renderDetail={renderDetail}
         />
