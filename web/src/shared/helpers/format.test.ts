@@ -245,20 +245,27 @@ describe("formatters are locale-pinned", () => {
     expect(sourceFiles(SRC).length).toBeGreaterThan(100)
   })
 
-  it("passes an explicit locale to every Intl formatter", () => {
+  it("pins every Intl formatter to en-US", () => {
+    // `new` is optional because these are callable as factories, and the first
+    // argument is matched even when empty: `new Intl.NumberFormat()` takes the
+    // runtime locale exactly as `(undefined)` does, and the first version of
+    // this pattern required both and so waved each of them through.
     const offenders = sourceFiles(SRC).flatMap((file) => {
       const source = readFileSync(file, "utf8")
-      return [...source.matchAll(/new Intl\.\w+\(\s*([^,)\s]+)/g)]
-        .filter((match) => !match[1].startsWith('"'))
-        .map((match) => `${relative(file)}: new Intl.…(${match[1]}`)
+      return [...source.matchAll(/(?:new\s+)?Intl\.\w+\(\s*([^,)]*)/g)]
+        .filter((match) => match[1].trim() !== '"en-US"')
+        .map((match) => `${relative(file)}: Intl.…(${match[1].trim()})`)
     })
     expect(offenders).toEqual([])
   })
 
-  it("formats a number through the helper rather than through the browser", () => {
-    // `toLocaleString()` with no argument is the same bug in one call: it is
-    // the browser's locale, not ours. `formatNumber` is the replacement, and it
-    // lives in `design-system/helpers` so this layer can reach it too.
+  it("formats through the helper rather than through the browser", () => {
+    // A bare `toLocaleString()` is the same bug in one call: it is the
+    // browser's locale, not ours. `formatNumber` is the replacement for a
+    // number, and it lives in `design-system/helpers` so that layer can reach
+    // it too. The pattern cannot see what it was called on, so the files below
+    // are listed rather than matched: each one is a date, which this sweep
+    // deliberately does not decide.
     const offenders = sourceFiles(SRC).flatMap((file) => {
       const source = readFileSync(file, "utf8")
       return [...source.matchAll(/\.toLocaleString\(\s*\)/g)].map(() =>
