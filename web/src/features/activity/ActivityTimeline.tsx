@@ -4,6 +4,7 @@ import { useRef, useState } from "react"
 import { FiMinus, FiPlus } from "react-icons/fi"
 
 import type { UsageBucket } from "@/client"
+import { IconButton } from "@/design-system/actions/IconButton"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import {
   ChartLegend,
@@ -290,26 +291,30 @@ export function ActivityTimeline({
             <span className="hidden text-xs text-muted sm:inline">
               Drag to filter a range
             </span>
-            <Button
+            {/* `md:min-h-8 md:min-w-8` on both: 44px where a finger does the
+                zooming, back to the toolbar's own 32px density from `md` up. */}
+            <IconButton
               size="sm"
               variant="ghost"
               isIconOnly
-              aria-label="Zoom in"
+              className="md:min-h-8 md:min-w-8"
+              label="Zoom in"
               isDisabled={n === 0}
               onPress={zoomIn}
             >
               <FiPlus aria-hidden="true" className="h-4 w-4" />
-            </Button>
-            <Button
+            </IconButton>
+            <IconButton
               size="sm"
               variant="ghost"
               isIconOnly
-              aria-label="Zoom out"
+              className="md:min-h-8 md:min-w-8"
+              label="Zoom out"
               isDisabled={n === 0 || (atFullExtent && !largerPreset)}
               onPress={zoomOut}
             >
               <FiMinus aria-hidden="true" className="h-4 w-4" />
-            </Button>
+            </IconButton>
             {zoomed ? (
               <Button
                 size="sm"

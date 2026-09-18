@@ -41,3 +41,23 @@ it("cycles through light, dark, and system without an animation control", async 
     screen.getByRole("heading", { name: "Sign in" }),
   )
 })
+
+// The layout fact being pinned: the appearance toggle's box is 44x44 at every
+// width, with no `md:` step down, because the header it sits in is `min-h-14`
+// and has the room. jsdom performs no layout, so the classes that cause the box
+// are the only thing a unit test can see (#1336).
+it("keeps the appearance toggle at the 44px touch floor", () => {
+  localStorage.setItem(STORAGE_KEY, "system")
+  render(
+    <ThemeProvider>
+      <LoginPageShell>
+        <h1>Sign in</h1>
+      </LoginPageShell>
+    </ThemeProvider>,
+  )
+  const toggle = screen.getByRole("button", {
+    name: "Appearance: system. Switch to light.",
+  })
+  expect(toggle).toHaveClass("min-h-11", "min-w-11")
+  expect(toggle.className).not.toContain("md:min-h-")
+})

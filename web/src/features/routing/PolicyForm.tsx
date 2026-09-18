@@ -13,6 +13,7 @@ import { FiTrash2 } from "react-icons/fi"
 
 import type { PolicyGuardrail, PolicySpec, User } from "@/client"
 import { Button } from "@/design-system/actions/Button"
+import { IconButton } from "@/design-system/actions/IconButton"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
@@ -96,22 +97,22 @@ function SectionRemove({
   onRemove: () => void
 }) {
   return (
-    // `shrink-0`, because this is a flex item beside a `ControlField` whose
-    // description is a sentence: the row hands the text the width it asks for
-    // and squeezes the button, which keeps its 36px height and loses its width.
-    // Measured at 19px in one section and 21px in another, each following that
-    // section's own wording. A ghost button's hover is its own box, so what an
-    // operator sees is not a square lighting up but a tall narrow slab around
-    // the glyph, which reads as a clipped rectangle.
-    <Button
+    // `IconButton` for the 44px box, and `shrink-0` beside it because this is a
+    // flex item next to a `ControlField` whose description is a sentence: the
+    // row hands the text the width it asks for and squeezes whatever can give,
+    // which leaves a tall narrow slab lighting up on hover instead of a square.
+    // No `md:` step down: all four call sites are `items-start` rows whose
+    // other child is a heading over a sentence, so the taller box does not grow
+    // the row at any width.
+    <IconButton
       variant="ghost"
       isIconOnly
       className="shrink-0"
-      aria-label={label}
+      label={label}
       onPress={onRemove}
     >
       <FiTrash2 aria-hidden />
-    </Button>
+    </IconButton>
   )
 }
 

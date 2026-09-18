@@ -11,6 +11,7 @@ import type {
   UsageSeriesPoint,
   UsageSummary,
 } from "@/client"
+import { IconButton } from "@/design-system/actions/IconButton"
 import { RefreshButton } from "@/design-system/actions/RefreshButton"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
@@ -1457,16 +1458,19 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
                     {bucket === "hour" ? "hours" : "days"} (times in UTC) · drag
                     across the chart to zoom
                   </span>
-                  <Button
+                  {/* 44px where a finger does the pressing, back to the
+                      caption row's own 32px density from `md` up. */}
+                  <IconButton
                     size="sm"
                     variant="ghost"
                     isIconOnly
+                    className="md:min-h-8 md:min-w-8"
                     onPress={() => setShareOpen((open) => !open)}
-                    aria-label="Share usage as an image"
+                    label="Share usage as an image"
                     aria-expanded={shareOpen}
                   >
                     <FiShare aria-hidden="true" className="h-4 w-4" />
-                  </Button>
+                  </IconButton>
                 </figcaption>
               </figure>
             )}

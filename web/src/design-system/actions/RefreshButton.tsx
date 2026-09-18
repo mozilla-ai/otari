@@ -1,6 +1,6 @@
-import { Button } from "@heroui/react"
 import { useEffect, useState } from "react"
 import { FiRotateCw } from "react-icons/fi"
+import { IconButton } from "@/design-system/actions/IconButton"
 import { formatRelative } from "@/design-system/helpers/format"
 
 // A slowly ticking wall clock, only to keep a relative "updated Ns ago" label
@@ -61,19 +61,24 @@ export function RefreshButton({
       {freshness ? (
         <span className="text-caption">Updated {freshness}</span>
       ) : null}
-      <Button
+      <IconButton
+        label={label}
         variant="ghost"
         size="sm"
         isIconOnly
+        // `size="sm"` is 32px, under the 44px floor. The box grows below `md`
+        // and settles back to the button's own size where a pointer is doing
+        // the pressing, so the desktop density of the four toolbars this sits
+        // in is unchanged.
+        className="md:min-h-8 md:min-w-8"
         isDisabled={isFetching}
         onPress={onRefresh}
-        aria-label={label}
       >
         <FiRotateCw
           aria-hidden="true"
           className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`}
         />
-      </Button>
+      </IconButton>
     </span>
   )
 }

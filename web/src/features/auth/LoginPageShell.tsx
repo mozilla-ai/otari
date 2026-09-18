@@ -1,6 +1,6 @@
 import { type ReactNode, useRef } from "react"
 import { FiMonitor, FiMoon, FiSun } from "react-icons/fi"
-import { Button } from "@/design-system/actions/Button"
+import { IconButton } from "@/design-system/actions/IconButton"
 import { THEME_PREFERENCES, useTheme } from "@/shared/hooks/useTheme"
 import { LoginBackground } from "./background/LoginBackground"
 import savedBackground from "./background/login-background.json"
@@ -28,14 +28,16 @@ export function LoginPageShell({ children }: { children: ReactNode }) {
           />
           <span className="text-title">Otari</span>
         </div>
-        <Button
+        {/* No `md:` step down: the header is `min-h-14`, so a 44px target fits
+            inside it at every width without moving the row. */}
+        <IconButton
           variant="ghost"
           isIconOnly
-          aria-label={`Appearance: ${preference}. Switch to ${next}.`}
+          label={`Appearance: ${preference}. Switch to ${next}.`}
           onPress={() => setPreference(next)}
         >
           <ThemeIcon aria-hidden />
-        </Button>
+        </IconButton>
       </header>
       <main className="relative isolate flex flex-1 flex-col items-center justify-center px-4 py-4">
         <LoginBackground panelRef={panelRef} config={savedBackground} />
