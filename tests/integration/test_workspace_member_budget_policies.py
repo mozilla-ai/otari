@@ -18,6 +18,11 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from gateway.exceptions.budget_exceptions import (
+    WorkspaceBudgetDefaultAlreadyExistsError,
+    WorkspaceBudgetDefaultBudgetNotFoundError,
+    WorkspaceBudgetDefaultNotFoundError,
+)
 from gateway.models.budgets import Budget, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.money import as_float
 from gateway.models.tenancy import (
@@ -31,13 +36,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.tenancy import OrganizationService, WorkspaceService
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    WorkspaceBudgetDefaultAlreadyExistsError,
-    WorkspaceBudgetDefaultBudgetNotFoundError,
-    WorkspaceBudgetDefaultNotFoundError,
-    WorkspaceNotFoundError,
-)
+from gateway.services.tenancy.errors import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.services.tenancy.provisioning_service import (
     DEFAULT_ORGANIZATION_SLUG,
     DEFAULT_WORKSPACE_NAME,

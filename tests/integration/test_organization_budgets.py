@@ -29,6 +29,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT
+from gateway.exceptions.budget_exceptions import (
+    OrganizationBudgetHeldElsewhereError,
+    OrganizationBudgetInUseError,
+    OrganizationBudgetNotFoundError,
+    OrganizationScopedBudgetAlreadyExistsError,
+    OrganizationScopedBudgetNotFoundError,
+    OrganizationScopeNotFoundError,
+)
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
@@ -40,16 +48,7 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    OrganizationBudgetHeldElsewhereError,
-    OrganizationBudgetInUseError,
-    OrganizationBudgetNotFoundError,
-    OrganizationScopedBudgetAlreadyExistsError,
-    OrganizationScopedBudgetNotFoundError,
-    OrganizationScopeNotFoundError,
-    TenancyValidationError,
-)
+from gateway.services.tenancy.errors import NotAuthorizedError, TenancyValidationError
 from gateway.services.tenancy.organization_budget_service import (
     OrganizationBudgetCreate,
     OrganizationBudgetService,

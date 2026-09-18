@@ -72,7 +72,7 @@ SQLAlchemy or SQLModel) and calls `execute`, `exec`, `scalar`, `scalars` or
 | Service packages per domain | 1: `services/tools/`, which holds the built-in tool registry and no service yet. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
 | Repository packages per domain | None. `repositories/tenancy/` is an older subpackage |
 | Modules in `schemas/` | None; the package does not exist |
-| Modules in `exceptions/` | None; `services/tenancy/errors.py` holds every tenancy error in 1,297 lines |
+| Modules in `exceptions/` | The shared error bases in `_base.py`, which the package root re-exports, and one domain module so far, `budget_exceptions.py`. `services/tenancy/errors.py` holds the rest of the tenancy errors in 1,145 lines |
 
 ## The domains
 
@@ -141,6 +141,7 @@ Ceilings, reservations, reset periods and per-member policies.
   `budget_periods.py`, `budget_reservation_ledger.py`, `budget_retiming.py`,
   `tenancy/organization_budget_service.py`,
   `tenancy/workspace_budget_default_service.py`
+- Exceptions: `budget_exceptions.py`
 - Models: `budgets.py`
 
 ### pricing

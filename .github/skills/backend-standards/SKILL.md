@@ -86,11 +86,10 @@ remove a name when you move its code, and never add one.
   imports it.
 - **Exceptions.** Each error class carries its own `status_code`, and one registered handler
   renders its family as FastAPI's `{"detail": ...}` shape, so a route needs no `try`/`except`.
-  A 5xx member has its message logged and a generic detail returned. Today only tenancy errors
-  have such a family: `TenancyError` (`services/tenancy/errors.py`), rendered by
-  `_tenancy_error_handler` in `gateway.main`. Where the family base for other domains lives is
-  not decided. Until it is, an error class outside tenancy does not subclass `TenancyError`,
-  and keeps its current response contract.
+  A 5xx member has its message logged and a generic detail returned. One family exists:
+  `TenancyError` and the four status bases under it, defined in `exceptions/_base.py`, imported
+  from `gateway.exceptions` and rendered by `_tenancy_error_handler` in `gateway.main`. A
+  domain's own error module subclasses those bases, as `exceptions/budget_exceptions.py` does.
 
 Catch specific exceptions, not a broad `except Exception`.
 
