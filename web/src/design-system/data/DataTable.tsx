@@ -106,6 +106,11 @@ export interface DataTableProps<Row> {
 
 const SELECTION_COLUMN_WIDTH = 44
 
+// How long the optimistic row highlight survives with no panel. Long enough to
+// cover the interaction render it stands in for, short enough that a row action
+// which opens nothing does not leave a row lit indefinitely.
+const DETAIL_OPENING_BACKSTOP_MS = 1500
+
 // Whether the document's text selection is a real (non-empty) one anchored inside
 // `root`. Used to tell "the operator was highlighting an id" from "the operator
 // clicked the row": a plain click leaves a collapsed selection, and a selection
@@ -183,6 +188,27 @@ export function DataTable<Row extends object>({
   } | null>(null)
   // Stable identity: it only reads and writes a ref, so the effect below can
   // list it without re-running on every render.
+  // Which row currently wears the optimistic highlight, and the backstop that
+  // takes it off. The key rather than the element: a closure holding the <tr>
+  // keeps a detached node alive for the length of the window when the table
+  // filters or repaginates under it.
+  const opening = useRef<
+    { key: string; backstop: ReturnType<typeof setTimeout> } | undefined
+  >(undefined)
+
+  /** Take the highlight off whichever row has it, and cancel its backstop. */
+  const clearOpening = useCallback(() => {
+    const current = opening.current
+    if (!current) return
+    opening.current = undefined
+    clearTimeout(current.backstop)
+    rootRef.current
+      ?.querySelector(`tbody tr[data-key="${CSS.escape(current.key)}"]`)
+      ?.classList.remove("otari-detail-opening")
+  }, [])
+
+  useEffect(() => clearOpening, [clearOpening])
+
   const ensureHost = useCallback(() => {
     if (!hostRef.current) {
       const row = document.createElement("tr")
@@ -222,10 +248,8 @@ export function DataTable<Row extends object>({
         `tbody tr[data-key="${CSS.escape(detailKey)}"]`,
       )
       if (!target) return false
-      // The optimistic "opening" highlight has served its purpose once the
-      // panel actually lands.
-      for (const el of root.querySelectorAll(".otari-detail-opening"))
-        el.classList.remove("otari-detail-opening")
+      // The optimistic highlight has served its purpose once the panel lands.
+      clearOpening()
       // Only move it when it is not already there. Re-inserting an attached
       // node detaches and re-attaches its subtree, which cancels and restarts
       // the reveal animation running inside it.
@@ -245,21 +269,20 @@ export function DataTable<Row extends object>({
       observer.observe(root, { childList: true, subtree: true })
     }
     return () => observer?.disconnect()
-  }, [detailKey, detailRow, columnCount, rows, sortDescriptor, ensureHost])
+  }, [
+    detailKey,
+    detailRow,
+    columnCount,
+    rows,
+    sortDescriptor,
+    ensureHost,
+    clearOpening,
+  ])
 
   // Detach on unmount. Deliberately not part of the effect above, whose cleanup
   // runs on every dependency change: removing the host there is what made a
   // re-render remount the panel.
   useEffect(() => () => hostRef.current?.row.remove(), [])
-
-  // The optimistic highlight below clears itself on a timer, so the timer has
-  // to die with the component and be replaced rather than stacked when a second
-  // row is pressed inside its window. Same shape as `CopyField`'s
-  // acknowledgement, and the same two failures it names.
-  const openingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  )
-  useEffect(() => () => clearTimeout(openingTimer.current), [])
 
   // Row activation with instant acknowledgment: the detail panel can only land
   // after react-aria's O(rows) interaction render (~1.6 ms/row), so the clicked
@@ -269,26 +292,23 @@ export function DataTable<Row extends object>({
     (key: string) => {
       if (!onRowAction) return
       if (renderDetail && key !== detailKey) {
+        clearOpening()
         const target = rootRef.current?.querySelector(
           `tbody tr[data-key="${CSS.escape(key)}"]`,
         )
+        // Written to the DOM rather than held in state on purpose: a state
+        // update would be queued behind the same O(rows) render this is here to
+        // cover, so the acknowledgment would arrive with the panel it stands in
+        // for.
         target?.classList.add("otari-detail-opening")
-        clearTimeout(openingTimer.current)
-        // Sweeps by class rather than closing over `target`, which is the row
-        // element: a closure holding it keeps a detached node alive for the
-        // window when the table repaginates or filters under it, and clearing
-        // the previous timer would otherwise strand that row highlighted. This
-        // is the same sweep the insert effect runs when the panel lands.
-        openingTimer.current = setTimeout(() => {
-          for (const el of rootRef.current?.querySelectorAll(
-            ".otari-detail-opening",
-          ) ?? [])
-            el.classList.remove("otari-detail-opening")
-        }, 1500)
+        opening.current = {
+          key,
+          backstop: setTimeout(clearOpening, DETAIL_OPENING_BACKSTOP_MS),
+        }
       }
       onRowAction(key)
     },
-    [onRowAction, renderDetail, detailKey],
+    [onRowAction, renderDetail, detailKey, clearOpening],
   )
 
   // The row key for an event on an ordinary data cell, or null when the event
