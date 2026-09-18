@@ -379,11 +379,9 @@ describe("OverviewPage", () => {
     expect(screen.getAllByText("up")).toHaveLength(1)
   })
 
-  it("reserves no trend row for a cell with no comparable previous window", async () => {
+  it("renders no delta chip for a cell with no comparable previous window", async () => {
     // No previous window on the wire leaves every delta null, and TrendChip
-    // renders nothing for a null fraction. The chip has to be gated on the
-    // fraction rather than on the query: the *element* is truthy either way,
-    // and a cell handed one keeps a line for something that draws nothing.
+    // returns null for a null fraction, so no chip text reaches the strip.
     mockApi({
       today: { cost: 5 },
       period: { cost: 200, request_count: 2000, error_count: 40 },
@@ -399,15 +397,9 @@ describe("OverviewPage", () => {
     expect(
       screen.queryAllByText(/^(no change|up|down)(, (better|worse))?$/),
     ).toHaveLength(0)
-    // And the row itself is not reserved, which is the half the assertions
-    // above cannot see: TrendChip renders no text for a null fraction either
-    // way, so gating the chip on `periodTotals` instead of on the fraction
-    // leaves them green while the tile keeps 42px of dead space. Asserted on
-    // the utility for the reason ui.test.tsx does it: jsdom performs no layout,
-    // so the reservation is observable only as the class. Scoped to this tile,
-    // since Budget health reserves the row off its own hint.
-    const tile = screen.getByText("Spend, last 30 days").parentElement!
-    expect(tile.querySelector(".min-h-10\\.5")).toBeNull()
+    // No reserve to assert beside them: KpiCell holds its aside line open
+    // unconditionally, which is what keeps the five values on one baseline
+    // whether or not a cell has a delta to show.
   })
 
   it("renders spend and request-volume sparklines from the 30-day series", async () => {

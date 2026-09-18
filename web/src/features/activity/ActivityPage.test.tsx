@@ -2204,9 +2204,10 @@ describe("ActivityPage live traffic", () => {
 
       const row = (await screen.findByText("gpt-4o")).closest("tr")!
       await user.click(row)
-      const panel = screen
-        .getByText("Request detail")
-        .closest(".otari-detail-row")
+      // Reached through the detail's own heading rather than the host's class:
+      // the host is `role="presentation"` on purpose, but its content is in the
+      // tree, so the panel is addressable by what it says.
+      const panel = screen.getByText("Request detail").closest("tr")
       expect(panel).not.toBeNull()
 
       const polls = () =>
@@ -2216,11 +2217,10 @@ describe("ActivityPage live traffic", () => {
       await vi.advanceTimersByTimeAsync(5_000)
       await waitFor(() => expect(polls()).toBeGreaterThan(before + 1))
 
-      // Same node, still open: the panel was never torn down and rebuilt.
-      expect(
-        screen.getByText("Request detail").closest(".otari-detail-row"),
-      ).toBe(panel)
-      expect(document.querySelectorAll(".otari-detail-row")).toHaveLength(1)
+      // Same node, still open: the panel was never torn down and rebuilt. The
+      // singular query is also the "exactly one panel" half, since a rebuilt
+      // host that stranded the old one would match twice and throw.
+      expect(screen.getByText("Request detail").closest("tr")).toBe(panel)
     } finally {
       vi.useRealTimers()
     }

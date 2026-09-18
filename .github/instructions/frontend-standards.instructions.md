@@ -202,9 +202,16 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
     invitation flows. A class selector used to *find* an element is a finding; the one
     exception is pinning a layout property jsdom cannot compute (a reserved height, a collapsed
     edge), asserted with `toHaveClass` on one scoped element, preferring a class that names a
-    token, with the reason at the site. Where a state has an accessible expression, assert that
+    token, with the reason at the site. That exception covers the assertion and not the query,
+    so the element is still reached by role, text or a structural step from either, and an
+    absence is the element not being rendered rather than a class going unfound; a
+    `container.querySelector(".some-class")` feeding a layout assertion is a finding. Where a
+    state has an accessible expression, assert that
     instead: `charts.tsx` switches `role="group"` / `role="img"` on drag selection, so the role
-    is the assertion and the cursor utility is not. Each
+    is the assertion and the cursor utility is not. A node the accessibility tree hides on
+    purpose is not covered either: `DataTable`'s detail host is `role="presentation"`, so "a row
+    is expanded" is asserted on the detail's own content rather than by counting hosts, and the
+    only thing left on the host is that the same node is reused across a re-render. Each
     file restores the globals it overrode and carries no per-assertion timeout override. A new
     page also needs a screenshot entry in `web/e2e/screenshots/`, which is what will cover it
     at three viewports in both themes; that suite runs on demand today rather than as a PR

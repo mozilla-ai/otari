@@ -30,12 +30,23 @@ Four rules make that a pin rather than a loophole: assert with `toHaveClass` on 
 element (never `className` with `toContain`, see below), prefer a class naming a token over one
 naming a number (`min-h-[var(--text-caption-step--line-height)]`, not `min-h-10.5`), say at the
 site which layout fact is being pinned, and only for a fact no user-visible query can reach.
-`design-system/forms/FieldMessages.test.tsx:113` is the model.
+`design-system/forms/FieldMessages.test.tsx:119` is the model.
+
+**The exception covers the assertion, not the query.** Reach the element the way any other test
+would, by its role, its text, or a structural step from either, and assert the class on what you
+found: the description's own parent is the caption line, the value's next sibling is the tile's
+aside row. `container.querySelector(".text-caption")` is the exception reopening as the rule it
+was carved out of, and it fails the "one scoped element" clause anyway, since a subtree search
+is not a scope. An absence follows the same shape: "this tile reserves no row" is the row not
+being rendered, not a class going unfound.
 
 A node the accessibility tree hides on purpose is not covered by that exception. `DataTable`'s
-detail host is `role="presentation"` deliberately (`DataTable.tsx:193`), and its comment says
+detail host is `role="presentation"` deliberately (`DataTable.tsx:219`), and its comment says
 where to go instead: the content stays in the tree, so "a row is expanded" is asserted on the
-detail's own content rather than by counting hosts.
+detail's own content rather than by counting hosts. What stays on the host is its identity:
+`DataTable.test.tsx` pins that the same `<tr>` is reused rather than recreated across a
+re-render, which is what stops the panel remounting and has no user-visible form at all. That
+is the whole of it, and it says so at the site.
 
 **Mock the network boundary, nothing inside it.** The page tests spy on the transport and let
 the real hooks, query keys, formatters, and derivations run:

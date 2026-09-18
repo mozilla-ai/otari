@@ -80,23 +80,26 @@ describe("DocsPage", () => {
   })
 
   it("renders the guide as one band of the page, not beside an empty column", () => {
-    const { container } = renderDocs()
+    renderDocs()
 
     // The guide is a band of the page like any other: its rule runs the width
     // of the scroll area (`otari-bleed`) and the prose sits in the page column.
     // The missing `border-r` is half the point. A vertical rule here has
     // nothing on its far side, so a wide window reads it as a second column
-    // that failed to load, with the guide pinched into the first.
-    const band = container.querySelector("section.otari-bleed")
-    expect(band).not.toBeNull()
-    expect(band).toContainElement(
-      screen.getByText(/Otari serves its dashboard at the gateway root/),
+    // that failed to load, with the guide pinched into the first. Both are
+    // widths, so jsdom can only see them as the classes that cause them; the
+    // band is reached through the prose it frames.
+    const paragraph = screen.getByText(
+      /Otari serves its dashboard at the gateway root/,
     )
-    expect(container.querySelector(".border-r")).toBeNull()
+    const band = paragraph.closest("section") as HTMLElement
+    expect(band).not.toBeNull()
+    expect(band).toHaveClass("otari-bleed")
+    expect(band).not.toHaveClass("border-r")
     // And the prose runs the width of that column rather than stopping at a
     // measure of its own, which is what leaves the rest of a wide window empty.
-    const prose = band?.querySelector("div.text-base") as HTMLElement
-    expect(prose).not.toBeNull()
+    const prose = paragraph.parentElement as HTMLElement
+    expect(prose).toHaveClass("text-base")
     expect([...prose.classList].some((c) => c.startsWith("max-w-"))).toBe(false)
   })
 

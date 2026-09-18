@@ -77,12 +77,16 @@ describe("ActivityTimeline", () => {
   it("renders a brush-selectable chart (drag-to-zoom), not edge thumbs", () => {
     renderTimeline()
     // The old dual-thumb slider is gone; time selection is a drag across the
-    // plot (the crosshair cursor is its affordance), like every mainstream
-    // metrics tool.
+    // plot, like every mainstream metrics tool. A chart that owns that drag
+    // presents as a labeled group rather than an image.
     expect(
       screen.queryByRole("slider", { name: /^Window/ }),
     ).not.toBeInTheDocument()
-    expect(document.querySelector(".cursor-crosshair")).not.toBeNull()
+    expect(
+      screen.getByRole("group", {
+        name: "Request volume over the selected window",
+      }),
+    ).toBeInTheDocument()
   })
 
   it("legends the error split when the window has failures", () => {

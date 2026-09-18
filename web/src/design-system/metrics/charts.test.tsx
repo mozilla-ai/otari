@@ -131,7 +131,7 @@ describe("TrendChart", () => {
 
   it("is only brush-selectable when a handler and 2+ buckets exist", () => {
     const onSelect = vi.fn()
-    const { container, rerender } = render(
+    const { rerender } = render(
       <TrendChart
         data={[
           { x: "a", cost: 1 },
@@ -139,21 +139,27 @@ describe("TrendChart", () => {
         ]}
         series={COST_SERIES}
         formatValue={String}
-        ariaLabel="c"
+        ariaLabel="cost per day"
         onSelectRange={onSelect}
       />,
     )
-    expect(container.querySelector(".cursor-crosshair")).not.toBeNull()
+    // Selectability is published as the role: a chart that owns drag selection
+    // is a labeled group, a static one is an image.
+    expect(
+      screen.getByRole("group", { name: "cost per day" }),
+    ).toBeInTheDocument()
     rerender(
       <TrendChart
         data={[{ x: "a", cost: 1 }]}
         series={COST_SERIES}
         formatValue={String}
-        ariaLabel="c"
+        ariaLabel="cost per day"
         onSelectRange={onSelect}
       />,
     )
-    expect(container.querySelector(".cursor-crosshair")).toBeNull()
+    expect(
+      screen.getByRole("img", { name: "cost per day" }),
+    ).toBeInTheDocument()
   })
 })
 

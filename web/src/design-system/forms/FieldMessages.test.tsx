@@ -100,34 +100,40 @@ describe("ControlField", () => {
   it("reserves nothing when there is no description to reserve for", () => {
     // Not an opt-out from the reserve: a control with no description will never
     // say anything, so an empty line under it is space held for nothing.
-    const { container } = render(<ControlField label="Model access" />)
-    expect(container.querySelector(".text-caption")).toBeNull()
-    expect(container.innerHTML).not.toContain("min-h-")
+    render(<ControlField label="Model access" />)
+    // No line at all rather than an unreserved one: the label is the last thing
+    // the field renders.
+    expect(screen.getByText("Model access").nextElementSibling).toBeNull()
   })
 
   it("sends a description through the caption role and its reserve", () => {
-    const { container } = render(
+    render(
       <ControlField label="Model access" description="Narrow, never widen" />,
     )
-    const line = container.querySelector(".text-caption") as HTMLElement
-    expect(line).not.toBeNull()
-    expect(line).toHaveClass("min-h-[var(--text-caption-step--line-height)]")
-    // Same division as FieldMessages on its own: the role above, the ink below.
+    // Same division as FieldMessages on its own: the role above, the ink below,
+    // so the line is the message's own parent.
     const message = screen.getByText("Narrow, never widen")
+    const line = message.parentElement as HTMLElement
+    expect(line).toHaveClass("text-caption")
+    // The reserve jsdom cannot measure, pinned as the variable that carries it.
+    expect(line).toHaveClass("min-h-[var(--text-caption-step--line-height)]")
     expect(message).toHaveClass("text-muted")
     expect(message.className).not.toContain("text-caption")
   })
 
   it("passes the caller's reserve down rather than deciding for itself", () => {
-    const { container } = render(
+    render(
       <ControlField
         label="Model access"
         description="Narrow, never widen"
         reserve={false}
       />,
     )
-    const line = container.querySelector(".text-caption") as HTMLElement
-    expect(line).not.toBeNull()
+    const line = screen.getByText("Narrow, never widen")
+      .parentElement as HTMLElement
+    expect(line).toHaveClass("text-caption")
+    // The line is still there and holds nothing open, which is the whole of
+    // what `reserve={false}` changes and is again invisible without layout.
     expect(line.className).not.toContain("min-h-")
   })
 

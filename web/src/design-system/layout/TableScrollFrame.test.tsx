@@ -16,6 +16,11 @@ import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
  * The listener has to go on `.table__scroll-container`, which is HeroUI's
  * element and not something a call site can reach, so these tests stand in a
  * div with that class rather than mounting a real table.
+ *
+ * `fixture-frame` stands for whatever class a page hands down. It is local on
+ * purpose: a primitive's test borrowing a feature's class would read as a
+ * dependency the layer rules forbid, and would go looking for a rename that has
+ * nothing to do with it.
  */
 describe("TableScrollFrame", () => {
   const frame = (container: HTMLElement) =>
@@ -38,7 +43,7 @@ describe("TableScrollFrame", () => {
     // scroll event, and a CSS rule keyed on `false` would not match a table
     // nobody has touched yet.
     const { container } = render(
-      <TableScrollFrame className="otari-keys-table">
+      <TableScrollFrame className="fixture-frame">
         <Scroller />
       </TableScrollFrame>,
     )
@@ -49,7 +54,7 @@ describe("TableScrollFrame", () => {
     // Restored filters and deep links both land on a table whose scroller has a
     // non-zero offset before anybody has scrolled it in this session.
     const { container } = render(
-      <TableScrollFrame className="otari-keys-table">
+      <TableScrollFrame className="fixture-frame">
         <Scroller scrollLeft={120} />
       </TableScrollFrame>,
     )
@@ -58,7 +63,7 @@ describe("TableScrollFrame", () => {
 
   it("follows the table across the left edge and back", () => {
     const { container } = render(
-      <TableScrollFrame className="otari-keys-table">
+      <TableScrollFrame className="fixture-frame">
         <Scroller />
       </TableScrollFrame>,
     )
@@ -75,11 +80,11 @@ describe("TableScrollFrame", () => {
 
   it("keeps its own class, because that is what the page's CSS selects on", () => {
     const { container } = render(
-      <TableScrollFrame className="otari-keys-table">
+      <TableScrollFrame className="fixture-frame">
         <Scroller />
       </TableScrollFrame>,
     )
-    expect(frame(container).className).toBe("otari-keys-table")
+    expect(frame(container).className).toBe("fixture-frame")
   })
 
   it("keeps working across a re-render", () => {
@@ -93,7 +98,7 @@ describe("TableScrollFrame", () => {
           <button type="button" onClick={() => setN(n + 1)}>
             rerender {n}
           </button>
-          <TableScrollFrame className="otari-keys-table">
+          <TableScrollFrame className="fixture-frame">
             <Scroller />
           </TableScrollFrame>
         </>
@@ -109,7 +114,7 @@ describe("TableScrollFrame", () => {
     scroller.scrollLeft = 120
     fireEvent.scroll(scroller)
     expect(
-      (container.querySelector(".otari-keys-table") as HTMLElement).dataset
+      (container.querySelector(".fixture-frame") as HTMLElement).dataset
         .scrolled,
     ).toBe("true")
   })
@@ -127,7 +132,7 @@ describe("TableScrollFrame", () => {
           <button type="button" onClick={() => setN(n + 1)}>
             rerender {n}
           </button>
-          <TableScrollFrame className="otari-keys-table">
+          <TableScrollFrame className="fixture-frame">
             <div
               className="table__scroll-container"
               ref={(el) => {
@@ -164,7 +169,7 @@ describe("TableScrollFrame", () => {
     // Some callers render an empty state instead of a table, and HeroUI's
     // element is simply not there. The frame still has to mount.
     const { container } = render(
-      <TableScrollFrame className="otari-keys-table">
+      <TableScrollFrame className="fixture-frame">
         <p>No keys yet.</p>
       </TableScrollFrame>,
     )

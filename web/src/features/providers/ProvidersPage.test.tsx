@@ -963,7 +963,11 @@ describe("ProvidersPage", () => {
     await user.click(screen.getByRole("button", { name: "Test connection" }))
 
     const outcome = await screen.findByText(/does not list models/)
-    const footer = document.querySelector(".otari-form-dialog__footer")
+    // Which side of the dialog the outcome landed on is a position, so jsdom
+    // can only see it as the footer element; scoped to this dialog.
+    const footer = screen
+      .getByRole("dialog")
+      .querySelector(".otari-form-dialog__footer")
     expect(footer).not.toBeNull()
     expect(footer?.contains(outcome)).toBe(false)
     // The button that ran it stays in the footer.

@@ -359,7 +359,9 @@ describe("DataTable", () => {
     await waitFor(() =>
       expect(detailFor("Bravo")).toContain("detail for Bravo"),
     )
-    expect(document.querySelectorAll(".otari-detail-row")).toHaveLength(1)
+    // `getByText` is the "not duplicated" half: a stranded second host renders
+    // the panel twice and the singular query throws on the multiple match.
+    expect(screen.getByText("detail for Bravo")).toBeInTheDocument()
 
     // Target filtered out: panel is removed, nothing stranded.
     rerender(
@@ -368,16 +370,15 @@ describe("DataTable", () => {
       />,
     )
     await waitFor(() =>
-      expect(document.querySelectorAll(".otari-detail-row")).toHaveLength(0),
+      expect(screen.queryByText("detail for Bravo")).not.toBeInTheDocument(),
     )
-    expect(screen.queryByText("detail for Bravo")).not.toBeInTheDocument()
 
     // Target returns (filter cleared): panel re-attaches with correct content.
     rerender(<DataTable {...base({ detailKey: "b", renderDetail })} />)
     await waitFor(() =>
       expect(detailFor("Bravo")).toContain("detail for Bravo"),
     )
-    expect(document.querySelectorAll(".otari-detail-row")).toHaveLength(1)
+    expect(screen.getByText("detail for Bravo")).toBeInTheDocument()
   })
 
   it("keeps the open detail panel mounted when the rows array is rebuilt unchanged", async () => {
@@ -401,6 +402,10 @@ describe("DataTable", () => {
     await waitFor(() =>
       expect(screen.getByText("detail for Bravo")).toBeInTheDocument(),
     )
+    // The host node itself, not its content: what this pins is that the same
+    // <tr> is reused rather than recreated, which is an implementation contract
+    // with no user-visible form (the panel remounting is what it prevents). It
+    // is the one thing here a content query cannot say, so the class stays.
     const host = document.querySelector(".otari-detail-row")
     expect(mounts).toBe(1)
 
@@ -449,11 +454,15 @@ describe("DataTable", () => {
       screen.getByText("detail for Charlie, seeded from Charlie"),
     ).toBeInTheDocument()
     expect(mounts).toBe(2)
-    // Still one host, now sitting under the row it belongs to.
-    expect(document.querySelectorAll(".otari-detail-row")).toHaveLength(1)
-    expect(document.querySelector('tbody tr[data-key="c"]')?.nextSibling).toBe(
-      document.querySelector(".otari-detail-row"),
-    )
+    // One panel, now sitting under the row it belongs to. Bravo's row has
+    // nothing under it any more, which is what "moved" rather than "copied"
+    // means here.
+    expect(
+      screen.getByRole("row", { name: /Charlie/ }).nextElementSibling,
+    ).toHaveTextContent("detail for Charlie")
+    expect(
+      screen.getByRole("row", { name: /Bravo/ }).nextElementSibling,
+    ).not.toHaveTextContent("detail for")
   })
 
   it("still fires onRowAction on a row click while a selection is active", async () => {
