@@ -15,7 +15,11 @@
 
 import { apiFetch } from "@/shared/api/client"
 
-/** Matches the server-side `limit` cap; asking for more returns this anyway. */
+/**
+ * The largest `limit` every route walked here accepts (`le=1000` on each). Above
+ * it they answer 422 rather than clamping, so raising this alone turns every one
+ * of these reads into a validation error: the gateway has to move first.
+ */
 const PAGE_SIZE = 1000
 const MAX_PAGES = 100
 
