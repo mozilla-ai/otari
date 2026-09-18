@@ -13,7 +13,7 @@ Claude Code appends `/v1/messages` itself, so `ANTHROPIC_BASE_URL` ends in
 
 ```bash
 export ANTHROPIC_BASE_URL="https://api.otari.ai/api"
-export ANTHROPIC_AUTH_TOKEN="tk-your_otari_token"
+export ANTHROPIC_AUTH_TOKEN="tk_your_otari_token"
 export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```

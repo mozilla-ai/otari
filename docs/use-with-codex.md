@@ -41,7 +41,7 @@ env_key = "OTARI_API_KEY"
 ```
 
 ```bash
-export OTARI_API_KEY="tk-your_otari_token"
+export OTARI_API_KEY="tk_your_otari_token"
 codex
 ```
 
