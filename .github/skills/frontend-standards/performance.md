@@ -87,13 +87,16 @@ its listeners, and its queries exist while it is closed.
 
 ## The server does the shaping
 
-**The dashboard is a thin rendering layer. It does not filter, search, sort, join or aggregate
-server data.** Those belong to the endpoint, and filtering in the browser fails in one of three
-ways depending on what was fetched. Filter the page on screen and every match on another page
-is missed. Walk the collection first and the answer is right, paid for with a full scan, and
-there is still no server-side count to put under it. Walk a collection past the hundred-page cap
-and the tail is gone with nothing said, so the answer is wrong and looks right. A small list
-already in memory, rendered in a table, is fine.
+**The endpoint returns what the page needs and the dashboard renders it.** Filtering,
+searching, sorting, joining and aggregating server data belong to the endpoint, not to the
+browser.
+
+Doing any of them here fails in one of three ways, depending on what was fetched. Filter the
+page on screen and every match on another page is missed. Walk the collection first and the
+answer is right, paid for with a full scan, and there is still no server-side count to put
+under it. Walk a collection past the hundred-page cap and the tail is gone with nothing said,
+so the answer is wrong and looks right. A small list already in memory, rendered in a table,
+is fine.
 
 **Nor does it assemble a view out of several responses.** Reading members, users, budgets and
 ceilings to join them by id in the browser is four round trips and four whole tables to render

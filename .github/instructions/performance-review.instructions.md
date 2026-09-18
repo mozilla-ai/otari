@@ -47,6 +47,24 @@ Use sets or dictionaries for repeated membership checks. Avoid repeated sorting,
 serialization, model validation, and parsing inside hot loops. A candidate set
 is currently small only when a validator enforces that limit.
 
+## Endpoints the dashboard reads
+
+**A list endpoint owes the page its shape**, because everything the dashboard
+cannot get from one request it does badly: a walk that reads the whole table, a
+filter over a subset, or a join across responses it has less information to make
+than the database does.
+
+- Take `skip` and `limit`, with a hard maximum. Every list route here does.
+- Take the filter the page offers. A page that filters on a field the endpoint
+  ignores can only filter what it already fetched.
+- Take a search term where the dashboard offers a picker over the collection.
+  Without one the picker fetches everything, and past the client's page cap it
+  offers a subset while saying nothing.
+- Carry the labels a row is rendered with. A response that returns a `user_id`
+  and no name makes the client read the whole user table to resolve one page.
+- Answer a composite where a page is built from several of these. The joins are
+  the database's work, and it has the indexes.
+
 ## Dashboard
 
 - TanStack Query owns server state. Do not mirror it in component state.
@@ -61,7 +79,8 @@ is currently small only when a validator enforces that limit.
   `useCallback`, or `React.memo` only for a measured or semantic need.
 - Use query polling rather than hand-written intervals, and remove listeners,
   observers, and subscriptions on unmount.
-- Bound any client loop that walks paginated endpoints.
+- A client loop that walks a paginated endpoint is the finding, not an
+  unbounded one. Bounding it stops it looping; it does not paginate the read.
 
 The frontend standards skill owns component and data-fetching patterns. This
 file only identifies performance regressions.
