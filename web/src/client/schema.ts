@@ -1101,12 +1101,16 @@ export interface paths {
          *
          *     ``workspace_id`` narrows a master-key listing to one workspace; a keyed
          *     request is already confined to its key's own and cannot widen or move it.
+         *
+         *     Hybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.
          */
         get: operations["files-list_files"];
         put?: never;
         /**
          * Create File
          * @description OpenAI-compatible file upload endpoint.
+         *
+         *     Hybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.
          */
         post: operations["files-create_file"];
         delete?: never;
@@ -1125,6 +1129,8 @@ export interface paths {
         /**
          * Get File
          * @description Retrieve metadata for a single file.
+         *
+         *     Hybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.
          */
         get: operations["files-get_file"];
         put?: never;
@@ -1132,6 +1138,8 @@ export interface paths {
         /**
          * Delete File
          * @description Soft-delete a file's metadata and remove its bytes from the backend.
+         *
+         *     Hybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.
          */
         delete: operations["files-delete_file"];
         options?: never;
@@ -1149,10 +1157,250 @@ export interface paths {
         /**
          * Get File Content
          * @description Download the raw bytes of a file, streamed rather than buffered whole.
+         *
+         *     Hybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.
          */
         get: operations["files-get_file_content"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/cleanup/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Claim */
+        post: operations["provider-files-claim"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/cleanup/{lease_id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete Lease */
+        post: operations["provider-files-complete_lease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** List Files */
+        post: operations["provider-files-list_files"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/outputs/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare Output */
+        post: operations["provider-files-prepare_output"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/outputs/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register Output */
+        post: operations["provider-files-register_output"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/outputs/{operation_id}/abandon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Abandon Output */
+        post: operations["provider-files-abandon_output"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/outputs/{operation_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete Output */
+        post: operations["provider-files-complete_output"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/references/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** References */
+        post: operations["provider-files-references"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Backlog */
+        get: operations["provider-files-backlog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/uploads/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare */
+        post: operations["provider-files-prepare"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/uploads/{binding_id}/abandon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Abandon */
+        post: operations["provider-files-abandon"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/uploads/{binding_id}/finalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Finalize */
+        post: operations["provider-files-finalize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/{binding_id}/cleanup-result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cleanup Result */
+        post: operations["provider-files-cleanup_result"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gateway/files/{file_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve */
+        post: operations["provider-files-resolve"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5040,6 +5288,27 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AbandonUpload */
+        AbandonUpload: {
+            /**
+             * Cleanup Token
+             * Format: password
+             */
+            cleanup_token: string;
+            /**
+             * Deleted
+             * @default false
+             */
+            deleted: boolean;
+            /** File Id */
+            file_id?: string | null;
+            metadata?: components["schemas"]["FileMetadata"] | null;
+            /**
+             * Outcome Unknown
+             * @default false
+             */
+            outcome_unknown: boolean;
+        };
         /** AcceptInvitationRequest */
         AcceptInvitationRequest: {
             /** Token */
@@ -5616,6 +5885,52 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** AnthropicFileDeleted */
+        AnthropicFileDeleted: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default file_deleted
+             * @constant
+             */
+            type: "file_deleted";
+        };
+        /** AnthropicFileMetadata */
+        AnthropicFileMetadata: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Downloadable */
+            downloadable: boolean;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Filename */
+            filename: string;
+            /** Id */
+            id: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Type
+             * @default file
+             * @constant
+             */
+            type: "file";
+        } & {
+            [key: string]: unknown;
+        };
+        /** AnthropicFilePage */
+        AnthropicFilePage: {
+            /** Data */
+            data: components["schemas"]["AnthropicFileMetadata"][];
+            /** Next Page */
+            next_page?: string | null;
+        };
         /**
          * AudioContent
          * @description Audio content for a message.
@@ -5774,10 +6089,20 @@ export interface components {
         };
         /** Body_files-create_file */
         "Body_files-create_file": {
+            /**
+             * @description OpenAI hybrid expiry anchor.
+             * @enum {string}
+             */
+            "expires_after[anchor]"?: "created_at";
+            /** @description OpenAI hybrid retention, capped by the control-plane maximum. */
+            "expires_after[seconds]"?: number;
+            /** @description Anthropic hybrid retention, capped by the control-plane maximum. */
+            expires_in_seconds?: number;
             /** File */
             file: string;
             /**
              * Purpose
+             * @description Required for OpenAI hybrid uploads; unsupported for Anthropic hybrid uploads.
              * @default user_data
              */
             purpose: string;
@@ -6533,6 +6858,24 @@ export interface components {
             top_p?: number | null;
             /** User */
             user?: string | null;
+        };
+        /** CleanupClaim */
+        CleanupClaim: {
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
+        };
+        /** CleanupResult */
+        CleanupResult: {
+            /**
+             * Cleanup Token
+             * Format: password
+             */
+            cleanup_token: string;
+            /** Deleted */
+            deleted: boolean;
         };
         /**
          * ConfigField
@@ -7508,6 +7851,70 @@ export interface components {
             /** User Id */
             user_id?: string | null;
         };
+        /** FileListRequest */
+        FileListRequest: {
+            /** After Id */
+            after_id?: string | null;
+            /** Before Id */
+            before_id?: string | null;
+            /** Ids */
+            ids?: string[] | null;
+            /** Limit */
+            limit?: number | null;
+            /**
+             * Order
+             * @default desc
+             * @enum {string}
+             */
+            order: "asc" | "desc";
+            /** Page */
+            page?: string | null;
+            /**
+             * Provider
+             * @default anthropic
+             */
+            provider: string;
+            /** Purpose */
+            purpose?: string | null;
+            /**
+             * Sort By
+             * @default binding_created_at
+             * @enum {string}
+             */
+            sort_by: "binding_created_at" | "provider_created_at";
+        };
+        /**
+         * FileMetadata
+         * @description Bounded any-llm metadata; absent provider fields remain unknown.
+         */
+        FileMetadata: {
+            /** Created At */
+            created_at?: string | null;
+            /** Downloadable */
+            downloadable?: boolean | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Filename */
+            filename?: string | null;
+            /** Id */
+            id: string;
+            /** Mime Type */
+            mime_type?: string | null;
+            /** Purpose */
+            purpose?: string | null;
+            /** Size Bytes */
+            size_bytes?: number | null;
+            /** Status */
+            status?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** FinalizeUpload */
+        FinalizeUpload: {
+            /** Expires In Seconds */
+            expires_in_seconds?: number | null;
+            metadata: components["schemas"]["FileMetadata"];
+        };
         /** GateResultResponse */
         GateResultResponse: {
             /** Detail */
@@ -8017,6 +8424,18 @@ export interface components {
             default_target: string;
             /** Name */
             name: string;
+        };
+        /** LeaseResult */
+        LeaseResult: {
+            /** Results */
+            results: {
+                [key: string]: boolean;
+            };
+            /**
+             * Token
+             * Format: password
+             */
+            token: string;
         };
         /**
          * MailSettings
@@ -8659,6 +9078,65 @@ export interface components {
             spend_usd: number;
             /** Total Tokens */
             total_tokens: number;
+        };
+        /** OpenAIFileDeleted */
+        OpenAIFileDeleted: {
+            /**
+             * Deleted
+             * @default true
+             * @constant
+             */
+            deleted: true;
+            /** Id */
+            id: string;
+            /**
+             * Object
+             * @default file
+             * @constant
+             */
+            object: "file";
+        };
+        /** OpenAIFileMetadata */
+        OpenAIFileMetadata: {
+            /** Bytes */
+            bytes?: number | null;
+            /** Created At */
+            created_at?: number | null;
+            /** Expires At */
+            expires_at?: number | null;
+            /** Filename */
+            filename?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Object
+             * @default file
+             * @constant
+             */
+            object: "file";
+            /** Purpose */
+            purpose?: string | null;
+            /** Status */
+            status?: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** OpenAIFilePage */
+        OpenAIFilePage: {
+            /** Data */
+            data: components["schemas"]["OpenAIFileMetadata"][];
+            /** First Id */
+            first_id: string | null;
+            /** Has More */
+            has_more: boolean;
+            /** Last Id */
+            last_id: string | null;
+            /**
+             * Object
+             * @default list
+             * @constant
+             */
+            object: "list";
         };
         /**
          * OrgProviderKeyCreateRequest
@@ -9517,6 +9995,32 @@ export interface components {
             /** Data */
             data: components["schemas"]["OrganizationScopedBudgetPublic"][];
         };
+        /** OutputPrepare */
+        OutputPrepare: {
+            /** Attempt Id */
+            attempt_id: string;
+            /**
+             * Generation Id
+             * Format: uuid
+             */
+            generation_id: string;
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            /** Request Id */
+            request_id: string;
+        };
+        /** OutputRegister */
+        OutputRegister: {
+            metadata: components["schemas"]["FileMetadata"];
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+        };
         /**
          * OutputShape
          * @description The decision form a guardrail produces (aligns with the populated ``GuardrailOutput`` fields).
@@ -10017,6 +10521,23 @@ export interface components {
             /** Warm */
             warm: boolean;
         };
+        /** PrepareUpload */
+        PrepareUpload: {
+            /** Expires In Seconds */
+            expires_in_seconds?: number | null;
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            /**
+             * Provider
+             * @default anthropic
+             */
+            provider: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
         /**
          * PricingDriftRow
          * @description A stored deployment rate beside the default it shadows.
@@ -10367,6 +10888,16 @@ export interface components {
              */
             unreadable: number;
         };
+        /** References */
+        References: {
+            /** Ids */
+            ids: string[];
+            /**
+             * Provider
+             * @default anthropic
+             */
+            provider: string;
+        };
         /**
          * RegisterPasskeyRequest
          * @description A completed registration ceremony, with the label to file it under.
@@ -10486,6 +11017,19 @@ export interface components {
              * @description The token from the reset link.
              */
             token: string;
+        };
+        /** ResolveFile */
+        ResolveFile: {
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "metadata" | "download" | "delete";
+            /**
+             * Provider
+             * @default anthropic
+             */
+            provider: string;
         };
         /**
          * ResourceLink
@@ -14357,8 +14901,23 @@ export interface operations {
                 user?: string | null;
                 purpose?: string | null;
                 workspace_id?: string | null;
+                /** @description Hybrid GA cursor. */
+                page?: string;
+                /** @description Hybrid IDs filter; mutually exclusive with page and limit. */
+                "ids[]"?: string[];
+                /** @description OpenAI hybrid Files listing filter or cursor. */
+                after?: string;
+                /** @description OpenAI hybrid Files listing filter or cursor. */
+                before?: string;
+                /** @description OpenAI hybrid Files listing filter or cursor. */
+                order?: string;
             };
-            header?: never;
+            header?: {
+                /** @description Required for the Anthropic hybrid Files envelope only. */
+                "anthropic-version"?: string;
+                /** @description Hybrid Files provider selector; credentials remain authority-selected. */
+                "X-Otari-Files-Provider"?: "anthropic" | "openai";
+            };
             path?: never;
             cookie?: never;
         };
@@ -14372,7 +14931,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: unknown;
-                    };
+                    } | (components["schemas"]["AnthropicFilePage"] | components["schemas"]["OpenAIFilePage"]);
                 };
             };
             /** @description Validation Error */
@@ -14389,7 +14948,12 @@ export interface operations {
     "files-create_file": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Required for the Anthropic hybrid Files envelope only. */
+                "anthropic-version"?: string;
+                /** @description Hybrid Files provider selector; credentials remain authority-selected. */
+                "X-Otari-Files-Provider"?: "anthropic" | "openai";
+            };
             path?: never;
             cookie?: never;
         };
@@ -14407,7 +14971,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: unknown;
-                    };
+                    } | (components["schemas"]["AnthropicFileMetadata"] | components["schemas"]["OpenAIFileMetadata"]);
                 };
             };
             /** @description Validation Error */
@@ -14426,7 +14990,12 @@ export interface operations {
             query?: {
                 user?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description Required for the Anthropic hybrid Files envelope only. */
+                "anthropic-version"?: string;
+                /** @description Hybrid Files provider selector; credentials remain authority-selected. */
+                "X-Otari-Files-Provider"?: "anthropic" | "openai";
+            };
             path: {
                 file_id: string;
             };
@@ -14442,7 +15011,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: unknown;
-                    };
+                    } | (components["schemas"]["AnthropicFileMetadata"] | components["schemas"]["OpenAIFileMetadata"]);
                 };
             };
             /** @description Validation Error */
@@ -14461,7 +15030,12 @@ export interface operations {
             query?: {
                 user?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description Required for the Anthropic hybrid Files envelope only. */
+                "anthropic-version"?: string;
+                /** @description Hybrid Files provider selector; credentials remain authority-selected. */
+                "X-Otari-Files-Provider"?: "anthropic" | "openai";
+            };
             path: {
                 file_id: string;
             };
@@ -14477,7 +15051,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: unknown;
-                    };
+                    } | (components["schemas"]["AnthropicFileDeleted"] | components["schemas"]["OpenAIFileDeleted"]);
                 };
             };
             /** @description Validation Error */
@@ -14496,7 +15070,12 @@ export interface operations {
             query?: {
                 user?: string | null;
             };
-            header?: never;
+            header?: {
+                /** @description Required for the Anthropic hybrid Files envelope only. */
+                "anthropic-version"?: string;
+                /** @description Hybrid Files provider selector; credentials remain authority-selected. */
+                "X-Otari-Files-Provider"?: "anthropic" | "openai";
+            };
             path: {
                 file_id: string;
             };
@@ -14514,6 +15093,479 @@ export interface operations {
                 content: {
                     "*/*": string;
                     "application/octet-stream": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CleanupClaim"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-complete_lease": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lease_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaseResult"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-list_files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FileListRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-prepare_output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutputPrepare"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-register_output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutputRegister"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-abandon_output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AbandonUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-complete_output": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CleanupResult"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["References"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-backlog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+        };
+    };
+    "provider-files-prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrepareUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-abandon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                binding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AbandonUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-finalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                binding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FinalizeUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-cleanup_result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                binding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CleanupResult"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-files-resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveFile"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

@@ -168,6 +168,29 @@ async def test_lifespan_shutdown_completes_despite_a_stuck_refresher(
         pass
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_hybrid_file_cleanup_shares_lifespan_shutdown(monkeypatch: pytest.MonkeyPatch, enabled: bool) -> None:
+    monkeypatch.setenv("OTARI_AI_TOKEN", "test-gateway")
+    started, stopped = asyncio.Event(), asyncio.Event()
+
+    async def cleanup(_config: GatewayConfig) -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    monkeypatch.setattr(gateway_main, "run_provider_file_cleanup", cleanup)
+    app = FastAPI()
+    app.state.config = GatewayConfig(mode="hybrid", files_provider_native_enabled=enabled)
+    async with _create_lifespan()(app):
+        if enabled:
+            await asyncio.wait_for(started.wait(), timeout=1)
+        assert started.is_set() is enabled
+    assert stopped.is_set() is enabled
+
+
 def _recording_refresher(name: str, started: list[str]) -> Callable[..., Coroutine[Any, Any, None]]:
     """A stand-in refresher that records when it is called, not when it is awaited.
 

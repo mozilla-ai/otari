@@ -51,6 +51,8 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop,
     responses_tool_loop_stream,
 )
+from gateway.services.provider_files.contracts import FilesError
+from gateway.services.provider_files.references import reject_openai_file_state
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat
@@ -195,9 +197,7 @@ def _strip_gateway_minted_items(input_data: Any) -> Any:
     if not isinstance(input_data, list):
         return input_data
     kept = [
-        item
-        for item in input_data
-        if not (isinstance(item, dict) and item.get("type") in _GATEWAY_MINTED_ITEM_TYPES)
+        item for item in input_data if not (isinstance(item, dict) and item.get("type") in _GATEWAY_MINTED_ITEM_TYPES)
     ]
     if len(kept) != len(input_data):
         logger.debug("Stripped %d gateway-minted output item(s) from the inbound input", len(input_data) - len(kept))
@@ -502,6 +502,14 @@ async def create_response(
         )
         chars = len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or ""))
         return chars, stats.vision_usage()
+
+    if config.is_hybrid_mode:
+        if {"extra_body", "extra_query"} & (request_body.model_extra or {}).keys():
+            raise HTTPException(400, "Transport body overrides are not supported in hybrid mode")
+        try:
+            reject_openai_file_state(request_body.model_dump(exclude_unset=True))
+        except FilesError as exc:
+            raise HTTPException(exc.status_code, exc.detail) from None
 
     ctx = await resolve_request_context(
         adapter=_ADAPTER,

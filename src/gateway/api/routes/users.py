@@ -24,6 +24,7 @@ from gateway.models.budgets import Budget
 from gateway.models.money import as_float
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
+from gateway.repositories.tenancy.provider_file_repository import ProviderFileRepository
 from gateway.repositories.users_repository import in_organization
 from gateway.services.budget_periods import budget_window
 from gateway.services.model_access import validate_allowed_models
@@ -399,12 +400,14 @@ async def delete_user(
             detail="Could not erase this user's telemetry; the user was not deleted",
         ) from None
 
+    await ProviderFileRepository(db).lock_user(user_id)
     await db.execute(
         update(APIKey)
         .where(APIKey.user_id == user_id)
         .values(is_active=False)
         .execution_options(synchronize_session=False)
     )
+    await ProviderFileRepository(db).revoke_user(user_id, datetime.now(UTC))
     user.deleted_at = datetime.now(UTC)
 
     try:

@@ -13,15 +13,21 @@ import json
 import sys
 import tempfile
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from gateway.core.config import GatewayConfig
+from fastapi import APIRouter, FastAPI, Request
+
+from gateway.api.routes.hybrid_files import router as hybrid_files_router
+from gateway.api.routes.provider_files import create_provider_files_router
+from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.main import create_app
+from gateway.services.provider_files.contracts import FileAccount, FileScope, OutputPrepare
 
 
 def generate_openapi_spec() -> dict[str, object]:
@@ -47,7 +53,120 @@ def generate_openapi_spec() -> dict[str, object]:
             web_search_backend_token="openapi-generation-placeholder",
         )
         app = create_app(config)
-        return cast(dict[str, object], app.openapi())
+        app.include_router(
+            create_provider_files_router(
+                authenticate=_schema_identity,
+                authenticate_gateway=_schema_identity,
+                authorize_attempt=_schema_attempt,
+            ),
+            prefix=API_ROOT,
+        )
+        spec = app.openapi()
+        _merge_hybrid_files(spec)
+        return cast(dict[str, object], spec)
+
+
+async def _schema_identity(request: Request, uow: UnitOfWork) -> FileScope:
+    raise RuntimeError("Schema-only authentication dependency")
+
+
+async def _schema_attempt(scope: FileScope, request: OutputPrepare, uow: UnitOfWork) -> FileAccount:
+    raise RuntimeError("Schema-only inference authorization dependency")
+
+
+def _merge_hybrid_files(spec: dict[str, Any]) -> None:
+    """Publish both runtime contracts without replacing standalone storage schemas."""
+    hybrid = FastAPI()
+    routes = APIRouter(prefix=API_ROOT)
+    routes.include_router(hybrid_files_router)
+    hybrid.include_router(routes)
+    native = hybrid.openapi()
+    spec["components"]["schemas"].update(native.get("components", {}).get("schemas", {}))
+    for path, methods in native["paths"].items():
+        for method, operation in methods.items():
+            target = spec["paths"][path][method]
+            target["description"] = target.get("description", "") + (
+                "\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. "
+                "X-Otari-Files-Provider selects anthropic (default) or openai. "
+                "The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. "
+                "OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. "
+                "Hosted mode does not serve public file bytes."
+            )
+            schema = operation["responses"].get("200", {}).get("content", {}).get("application/json", {}).get("schema")
+            if schema:
+                media = target["responses"]["200"]["content"]["application/json"]
+                media["schema"] = {"anyOf": [media["schema"], schema]}
+            target.setdefault("parameters", []).append(
+                {
+                    "name": "anthropic-version",
+                    "in": "header",
+                    "required": False,
+                    "schema": {"type": "string"},
+                    "description": "Required for the Anthropic hybrid Files envelope only.",
+                }
+            )
+            target["parameters"].append(
+                {
+                    "name": "X-Otari-Files-Provider",
+                    "in": "header",
+                    "required": False,
+                    "schema": {"type": "string", "enum": ["anthropic", "openai"], "default": "anthropic"},
+                    "description": "Hybrid Files provider selector; credentials remain authority-selected.",
+                }
+            )
+    listing = spec["paths"][f"{API_ROOT}/files"]["get"]
+    listing["parameters"].extend(
+        [
+            {
+                "name": "page",
+                "in": "query",
+                "required": False,
+                "schema": {"type": "string"},
+                "description": "Hybrid GA cursor.",
+            },
+            {
+                "name": "ids[]",
+                "in": "query",
+                "required": False,
+                "schema": {"type": "array", "items": {"type": "string"}, "maxItems": 100},
+                "description": "Hybrid IDs filter; mutually exclusive with page and limit.",
+            },
+        ]
+    )
+    existing_names = {parameter["name"] for parameter in listing["parameters"]}
+    for name in ("after", "before", "order", "purpose"):
+        if name not in existing_names:
+            listing["parameters"].append(
+                {
+                    "name": name,
+                    "in": "query",
+                    "required": False,
+                    "schema": {"type": "string"},
+                    "description": "OpenAI hybrid Files listing filter or cursor.",
+                }
+            )
+    upload = spec["paths"][f"{API_ROOT}/files"]["post"]
+    body_ref = upload["requestBody"]["content"]["multipart/form-data"]["schema"]["$ref"].split("/")[-1]
+    spec["components"]["schemas"][body_ref]["properties"]["expires_in_seconds"] = {
+        "type": "integer",
+        "minimum": 3600,
+        "maximum": 7776000,
+        "description": "Anthropic hybrid retention, capped by the control-plane maximum.",
+    }
+    properties = spec["components"]["schemas"][body_ref]["properties"]
+    properties["purpose"]["description"] = (
+        "Required for OpenAI hybrid uploads; unsupported for Anthropic hybrid uploads."
+    )
+    properties["expires_after[anchor]"] = {
+        "type": "string",
+        "enum": ["created_at"],
+        "description": "OpenAI hybrid expiry anchor.",
+    }
+    properties["expires_after[seconds]"] = {
+        "type": "integer",
+        "minimum": 1,
+        "description": "OpenAI hybrid retention, capped by the control-plane maximum.",
+    }
 
 
 def write_spec(spec: dict[str, object], output_path: Path) -> None:
