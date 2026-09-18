@@ -128,23 +128,25 @@ export function bucketIndexRange(
   const n = starts.length
   if (n === 0) return { startIndex: 0, endIndex: 0 }
   const ms = starts.map((s) => new Date(s).getTime())
-  let startIndex = 0
-  if (startIso) {
-    const t = new Date(startIso).getTime()
-    for (let i = 0; i < n; i++) {
-      if (ms[i] <= t) startIndex = i
-    }
-  }
-  let endIndex = n - 1
-  if (endIso) {
-    const t = new Date(endIso).getTime()
-    endIndex = 0
-    for (let i = 0; i < n; i++) {
-      if (ms[i] < t) endIndex = i
-    }
-  }
-  if (endIndex < startIndex) endIndex = startIndex
-  return { startIndex, endIndex }
+  // No bucket matching means the window opens before the series does, which is
+  // the first bucket, so an absent match clamps to 0 rather than to -1.
+  const startMs = startIso ? new Date(startIso).getTime() : undefined
+  const endMs = endIso ? new Date(endIso).getTime() : undefined
+  const startIndex =
+    startMs === undefined
+      ? 0
+      : Math.max(
+          0,
+          ms.findLastIndex((value) => value <= startMs),
+        )
+  const endIndex =
+    endMs === undefined
+      ? n - 1
+      : Math.max(
+          0,
+          ms.findLastIndex((value) => value < endMs),
+        )
+  return { startIndex, endIndex: Math.max(startIndex, endIndex) }
 }
 
 // ---------- effective-window caption ----------

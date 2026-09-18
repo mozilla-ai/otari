@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ES2022",
     "useDefineForClassFields": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // "ES2023" for the library only, one step ahead of the emit target, so
+    // `findLast`/`findLastIndex` are typed: they are what the array-work rule
+    // asks a backwards index scan to become, and Vite's default browser
+    // baseline already ships them. The sibling configs here are ES2023 too.
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",

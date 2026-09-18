@@ -856,16 +856,20 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
   // multi-value filter travels whole, as repeated params: Activity reads the same
   // sets, so the log opens on exactly the traffic the chart was showing.
   const drillTo = (params: Record<string, string | string[] | undefined>) => {
-    const search: DashboardSearch = {}
-    if (winStart) search.start_date = winStart
-    if (winEnd) search.end_date = winEnd
-    for (const [key, value] of Object.entries(params)) {
-      const values = (
-        typeof value === "string" ? [value] : (value ?? [])
-      ).filter(Boolean)
-      if (values.length > 0) {
-        search[key] = values.length === 1 ? values[0] : values
-      }
+    const search: DashboardSearch = {
+      ...(winStart ? { start_date: winStart } : {}),
+      ...(winEnd ? { end_date: winEnd } : {}),
+      ...Object.fromEntries(
+        Object.entries(params).flatMap(
+          ([key, value]): [string, string | string[]][] => {
+            const values = (
+              typeof value === "string" ? [value] : (value ?? [])
+            ).filter(Boolean)
+            if (values.length === 0) return []
+            return [[key, values.length === 1 ? values[0] : values]]
+          },
+        ),
+      ),
     }
     navigate({ to: "/activity", search })
   }

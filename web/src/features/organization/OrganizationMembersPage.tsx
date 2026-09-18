@@ -883,8 +883,7 @@ export function OrganizationMembersPage() {
   )
   const placementsByUser = useMemo(() => {
     const names = new Map((workspaces.data ?? []).map((w) => [w.id, w.name]))
-    const byUser = new Map<string, WorkspacePlacement[]>()
-    for (const { workspaceId, member } of workspaceMembers.data) {
+    return workspaceMembers.data.reduce((byUser, { workspaceId, member }) => {
       const placement: WorkspacePlacement = {
         workspaceId,
         workspaceName: names.get(workspaceId) ?? workspaceId.slice(0, 8),
@@ -892,12 +891,11 @@ export function OrganizationMembersPage() {
         role: member.role,
         ceiling: ceilingByMembership.get(member.id) ?? null,
       }
-      byUser.set(member.user_id, [
-        ...(byUser.get(member.user_id) ?? []),
-        placement,
-      ])
-    }
-    return byUser
+      const placements = byUser.get(member.user_id)
+      if (placements) placements.push(placement)
+      else byUser.set(member.user_id, [placement])
+      return byUser
+    }, new Map<string, WorkspacePlacement[]>())
   }, [workspaces.data, workspaceMembers.data, ceilingByMembership])
   // What each workspace hands a new member: the aggregate default (the one
   // narrowed to no provider). The editor needs it for two reasons: to show what

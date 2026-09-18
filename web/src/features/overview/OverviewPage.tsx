@@ -1175,10 +1175,8 @@ function ChartHoverCard({
 function niceCeiling(value: number): number {
   if (!(value > 0)) return 1
   const magnitude = 10 ** Math.floor(Math.log10(value))
-  for (const step of [1, 2, 5, 10]) {
-    if (value <= step * magnitude) return step * magnitude
-  }
-  return 10 * magnitude
+  const step = [1, 2, 5, 10].find((candidate) => value <= candidate * magnitude)
+  return (step ?? 10) * magnitude
 }
 
 /** Axis money: whole dollars once the scale is past them, cents below. */

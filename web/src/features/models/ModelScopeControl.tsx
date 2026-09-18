@@ -63,22 +63,27 @@ export function ModelScopeControl({
   // does not appear twice. This is a pick-from-list control, not free text: every
   // stored entry is a real, canonical selector the backend will accept.
   const catalog = useMemo<CatalogOption[]>(() => {
+    const candidates: CatalogOption[] = [
+      ...(providers.data?.providers ?? []).map((p) => ({
+        id: `${p.instance}:*`,
+        label: `${p.instance}:*  ·  all ${p.instance} models`,
+      })),
+      ...(discoverable.data?.providers ?? []).flatMap((prov) =>
+        prov.models.map((m) => ({ id: m.key, label: m.key })),
+      ),
+      ...(aliases.data ?? []).map((a) => ({
+        id: a.target,
+        label: `${a.name}  ·  alias`,
+      })),
+    ]
+    // First label wins, so a discoverable model keeps its own name over the
+    // alias that resolves to it.
     const seen = new Set<string>()
-    const options: CatalogOption[] = []
-    const add = (id: string, label: string) => {
-      if (id && !seen.has(id)) {
-        seen.add(id)
-        options.push({ id, label })
-      }
-    }
-    for (const p of providers.data?.providers ?? []) {
-      add(`${p.instance}:*`, `${p.instance}:*  ·  all ${p.instance} models`)
-    }
-    for (const prov of discoverable.data?.providers ?? []) {
-      for (const m of prov.models) add(m.key, m.key)
-    }
-    for (const a of aliases.data ?? []) add(a.target, `${a.name}  ·  alias`)
-    return options
+    return candidates.filter((option) => {
+      if (!option.id || seen.has(option.id)) return false
+      seen.add(option.id)
+      return true
+    })
   }, [providers.data, discoverable.data, aliases.data])
 
   const visible = useMemo(() => {

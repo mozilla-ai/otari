@@ -231,14 +231,16 @@ export function mergeCredentialFields(
   rest: Record<string, unknown> | null,
   redacted: readonly string[] = [],
 ): Record<string, unknown> | null {
-  const merged: Record<string, unknown> = { ...(rest ?? {}) }
-  for (const key of new Set([...Object.keys(values), ...redacted])) {
-    const value = (values[key] ?? "").trim()
-    if (value !== "") {
-      merged[key] = value
-    } else if (redacted.includes(key)) {
-      merged[key] = REDACTED_CLIENT_ARG
-    }
+  const edited = [...new Set([...Object.keys(values), ...redacted])].flatMap(
+    (key): [string, unknown][] => {
+      const value = (values[key] ?? "").trim()
+      if (value !== "") return [[key, value]]
+      return redacted.includes(key) ? [[key, REDACTED_CLIENT_ARG]] : []
+    },
+  )
+  const merged: Record<string, unknown> = {
+    ...(rest ?? {}),
+    ...Object.fromEntries(edited),
   }
   return Object.keys(merged).length > 0 ? merged : null
 }
@@ -253,24 +255,30 @@ export function validateCredentialFields(
   values: CredentialFieldValues,
   redacted: readonly string[] = [],
 ): Record<string, string> {
-  const errors: Record<string, string> = {}
   const byKey = new Map(fields.map((field) => [field.key, field]))
   const isFilled = (field: ProviderCredentialFieldSpec) =>
     (values[field.key] ?? "").trim() !== "" || redacted.includes(field.key)
 
-  for (const field of fields) {
-    const value = (values[field.key] ?? "").trim()
-    if (value === "") {
-      if (field.isRequired && !redacted.includes(field.key)) {
-        errors[field.key] = `${field.label} is required for this provider.`
+  const errors: Record<string, string> = Object.fromEntries(
+    fields.flatMap((field): [string, string][] => {
+      const value = (values[field.key] ?? "").trim()
+      if (value === "") {
+        return field.isRequired && !redacted.includes(field.key)
+          ? [[field.key, `${field.label} is required for this provider.`]]
+          : []
       }
-      continue
-    }
-    if (field.pattern && !field.pattern.test(value)) {
-      errors[field.key] =
-        field.patternMessage ?? `${field.label} is not in the expected format.`
-    }
-  }
+      if (field.pattern && !field.pattern.test(value)) {
+        return [
+          [
+            field.key,
+            field.patternMessage ??
+              `${field.label} is not in the expected format.`,
+          ],
+        ]
+      }
+      return []
+    }),
+  )
 
   // Half a pair, reported on the half that is missing. Declared from both
   // sides, so filling in either one alone asks for the other.

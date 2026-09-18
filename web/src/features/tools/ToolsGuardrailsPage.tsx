@@ -346,12 +346,13 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
 
   // Latest rate per key. /api/v1/pricing is history-shaped (one row per
   // effective_at), and the newest row is the one in force.
-  const currentRates = new Map<string, number>()
-  for (const row of pricing.data ?? []) {
-    if (!currentRates.has(row.model_key)) {
-      currentRates.set(row.model_key, row.input_price_per_million)
-    }
-  }
+  const currentRates = (pricing.data ?? []).reduce(
+    (rates, row) =>
+      rates.has(row.model_key)
+        ? rates
+        : rates.set(row.model_key, row.input_price_per_million),
+    new Map<string, number>(),
+  )
 
   const data = query.data
   const disabled = !data

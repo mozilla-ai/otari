@@ -13,23 +13,22 @@ export function currentPricing(
   rows: PricingResponse[],
   now: number = Date.now(),
 ): PricingResponse[] {
-  const byModel = new Map<string, PricingResponse[]>()
-  for (const row of rows) {
-    const list = byModel.get(row.model_key) ?? []
-    list.push(row)
-    byModel.set(row.model_key, list)
-  }
+  const byModel = rows.reduce((groups, row) => {
+    const list = groups.get(row.model_key)
+    if (list) list.push(row)
+    else groups.set(row.model_key, [row])
+    return groups
+  }, new Map<string, PricingResponse[]>())
 
-  const current: PricingResponse[] = []
-  for (const list of byModel.values()) {
-    const sorted = [...list].sort(
-      (a, b) => Date.parse(a.effective_at) - Date.parse(b.effective_at),
-    )
-    const active = [...sorted]
-      .reverse()
-      .find((row) => Date.parse(row.effective_at) <= now)
-    current.push(active ?? sorted[0])
-  }
-
-  return current.sort((a, b) => a.model_key.localeCompare(b.model_key))
+  return [...byModel.values()]
+    .map((list) => {
+      const sorted = [...list].sort(
+        (a, b) => Date.parse(a.effective_at) - Date.parse(b.effective_at),
+      )
+      return (
+        sorted.findLast((row) => Date.parse(row.effective_at) <= now) ??
+        sorted[0]
+      )
+    })
+    .sort((a, b) => a.model_key.localeCompare(b.model_key))
 }

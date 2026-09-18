@@ -30,15 +30,14 @@ export function cacheSums(points: UsageSeriesPoint[]): {
   read: number
   write: number
 } {
-  let input = 0
-  let read = 0
-  let write = 0
-  for (const p of points) {
-    input += p.input_tokens ?? 0
-    read += p.cache_read_tokens ?? 0
-    write += p.cache_write_tokens ?? 0
-  }
-  return { input, read, write }
+  return points.reduce(
+    (sums, p) => ({
+      input: sums.input + (p.input_tokens ?? 0),
+      read: sums.read + (p.cache_read_tokens ?? 0),
+      write: sums.write + (p.cache_write_tokens ?? 0),
+    }),
+    { input: 0, read: 0, write: 0 },
+  )
 }
 
 export function cacheHitRate(points: UsageSeriesPoint[]): number | undefined {

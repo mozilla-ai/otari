@@ -39,9 +39,12 @@ function usageParams(filters: UsageFilters): URLSearchParams {
   // endpoints match any of them); an empty array is no filter at all, not a
   // filter matching nothing.
   const appendAll = (key: string, value: string | string[] | undefined) => {
-    for (const one of typeof value === "string" ? [value] : (value ?? [])) {
-      if (one) params.append(key, one)
-    }
+    const values = typeof value === "string" ? [value] : (value ?? [])
+    values
+      .filter((one) => one !== "")
+      .forEach((one) => {
+        params.append(key, one)
+      })
   }
   if (filters.workspace_id) params.set("workspace_id", filters.workspace_id)
   if (filters.start_date) params.set("start_date", filters.start_date)
@@ -286,7 +289,9 @@ export function useRequestGroups(groupIds: readonly string[]) {
     queryKey: [USAGE, "groups", scope.base, ids],
     queryFn: () => {
       const params = new URLSearchParams()
-      for (const id of ids) params.append("request_group_id", id)
+      ids.forEach((id) => {
+        params.append("request_group_id", id)
+      })
       params.set("limit", String(REQUEST_GROUP_PAGE_LIMIT))
       return apiFetch<UsageEntry[]>(`${scope.base}?${params.toString()}`)
     },
@@ -379,9 +384,10 @@ export function useUsageSummary(
       // A repeated query param has no empty-list form, so an empty selection goes
       // on the wire as the server's `none` sentinel.
       if (dimensions) {
-        for (const dimension of dimensions.length > 0 ? dimensions : ["none"]) {
+        const requested = dimensions.length > 0 ? dimensions : ["none"]
+        requested.forEach((dimension) => {
           params.append("dimensions", dimension)
-        }
+        })
       }
       return apiFetch<UsageSummary>(
         `${scope.base}/summary?${params.toString()}`,

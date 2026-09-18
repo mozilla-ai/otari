@@ -48,16 +48,18 @@ function dropSection(md: string, title: string): string {
   const lines = md.split("\n")
   const start = lines.findIndex((line) => line.trim() === `## ${title}`)
   if (start === -1) return md
-  let end = lines.length
-  let inFence = false
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^\s*```/.test(lines[i])) {
-      inFence = !inFence
-    } else if (!inFence && /^## /.test(lines[i])) {
-      end = i
-      break
+  // Fence state carries from line to line, so the search toggles as it walks and
+  // reads a heading only from outside a fenced block. `findIndex` stops at the
+  // first hit, which is the same ground the scan needs to cover.
+  let isInFence = false
+  const offset = lines.slice(start + 1).findIndex((line) => {
+    if (/^\s*```/.test(line)) {
+      isInFence = !isInFence
+      return false
     }
-  }
+    return !isInFence && /^## /.test(line)
+  })
+  const end = offset === -1 ? lines.length : start + 1 + offset
   // Collapse the blank-line run left where the section was removed.
   return [...lines.slice(0, start), ...lines.slice(end)]
     .join("\n")

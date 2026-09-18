@@ -59,14 +59,10 @@ export function splitModelKey(key: string): {
 export function buildPlaygroundModels(
   catalog: ModelListResponse | undefined,
 ): PlaygroundModel[] {
-  const seen = new Set<string>()
-  const models: PlaygroundModel[] = []
-  for (const entry of catalog?.data ?? []) {
-    if (seen.has(entry.id) || !isChatModel(entry.id)) continue
-    seen.add(entry.id)
-    models.push({ key: entry.id, ...splitModelKey(entry.id) })
-  }
-  return models
+  const chatKeys = (catalog?.data ?? [])
+    .map((entry) => entry.id)
+    .filter((id) => isChatModel(id))
+  return [...new Set(chatKeys)].map((key) => ({ key, ...splitModelKey(key) }))
 }
 
 export interface ModelGroup {
@@ -96,22 +92,18 @@ export function groupPlaygroundModels(params: {
 }): ModelGroup[] {
   const needle = params.search.trim().toLowerCase()
   const pinned = new Set(params.pinnedKeys)
-  const pinnedModels: PlaygroundModel[] = []
-  const byInstance = new Map<string, PlaygroundModel[]>()
-
-  for (const model of params.models) {
-    if (needle && !model.key.toLowerCase().includes(needle)) continue
-    if (pinned.has(model.key)) {
-      pinnedModels.push(model)
-      continue
-    }
-    const bucket = byInstance.get(model.instance)
-    if (bucket) {
-      bucket.push(model)
-    } else {
-      byInstance.set(model.instance, [model])
-    }
-  }
+  const matching = params.models.filter(
+    (model) => !needle || model.key.toLowerCase().includes(needle),
+  )
+  const pinnedModels = matching.filter((model) => pinned.has(model.key))
+  const byInstance = matching
+    .filter((model) => !pinned.has(model.key))
+    .reduce((groups, model) => {
+      const bucket = groups.get(model.instance)
+      if (bucket) bucket.push(model)
+      else groups.set(model.instance, [model])
+      return groups
+    }, new Map<string, PlaygroundModel[]>())
 
   const instanceGroups = Array.from(byInstance, ([instance, models]) => ({
     id: instance || "other",

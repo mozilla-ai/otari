@@ -542,18 +542,13 @@ function SecurityKeysSection({
 function groupFields(
   fields: ConfigField[],
 ): { name: string; fields: ConfigField[] }[] {
-  const order: { name: string; fields: ConfigField[] }[] = []
-  const byName = new Map<string, { name: string; fields: ConfigField[] }>()
-  for (const field of fields) {
-    let group = byName.get(field.group)
-    if (!group) {
-      group = { name: field.group, fields: [] }
-      byName.set(field.group, group)
-      order.push(group)
-    }
-    group.fields.push(field)
-  }
-  return order
+  const byName = fields.reduce((groups, field) => {
+    const group = groups.get(field.group)
+    if (group) group.fields.push(field)
+    else groups.set(field.group, { name: field.group, fields: [field] })
+    return groups
+  }, new Map<string, { name: string; fields: ConfigField[] }>())
+  return [...byName.values()]
 }
 
 export function SettingsPage() {

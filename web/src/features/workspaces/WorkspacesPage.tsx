@@ -729,18 +729,16 @@ export function WorkspacesPage() {
     const names = new Map(
       known.map((budget) => [budget.budget_id, nameBudget(budget)]),
     )
-    const byWorkspace = new Map<string, string>()
-    for (const { workspaceId, default: row } of workspaceDefaults.data) {
-      if (row.provider_key_id === null) {
-        // A default naming a budget this page did not read has nothing to derive
-        // a label from, so the id is all there is left to show.
-        byWorkspace.set(
+    // A default naming a budget this page did not read has nothing to derive a
+    // label from, so the id is all there is left to show.
+    return new Map(
+      workspaceDefaults.data
+        .filter(({ default: row }) => row.provider_key_id === null)
+        .map(({ workspaceId, default: row }) => [
           workspaceId,
           names.get(row.budget_id) ?? shortBudgetId(row.budget_id),
-        )
-      }
-    }
-    return byWorkspace
+        ]),
+    )
   }, [budgets.data, workspaceDefaults.data])
   // Only once the list has actually answered: an empty list while loading is
   // not one workspace, and disabling on it would flicker.
