@@ -18,7 +18,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_db, require_deployment_operator
 from gateway.models.api_keys import APIKey
-from gateway.models.budgets import Budget, ScopedBudget, ScopeType
+from gateway.models.budgets import (
+    SCOPE_API_TOKEN,
+    SCOPE_ORG_MEMBER,
+    SCOPE_ORGANIZATION,
+    SCOPE_WORKSPACE,
+    SCOPE_WORKSPACE_MEMBER,
+    Budget,
+    ScopedBudget,
+    ScopeType,
+)
 from gateway.models.money import as_float
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
 from gateway.services.budget_periods import period_window
@@ -155,16 +164,16 @@ async def _get_or_404(db: AsyncSession, budget_id: str) -> ScopedBudget:
 # What a scope's id has to name for the ceiling to ever bind, by scope type.
 # `api_token` keys on a string id, the rest on UUIDs.
 _ScopeSubject = type[Organization | Workspace | OrganizationMember | WorkspaceMember | APIKey]
-_SCOPE_SUBJECTS: dict[str, tuple[_ScopeSubject, str]] = {
-    "organization": (Organization, "Organization"),
-    "workspace": (Workspace, "Workspace"),
-    "workspace_member": (WorkspaceMember, "Workspace membership"),
-    "org_member": (OrganizationMember, "Organization membership"),
-    "api_token": (APIKey, "API key"),
+_SCOPE_SUBJECTS: dict[ScopeType, tuple[_ScopeSubject, str]] = {
+    SCOPE_ORGANIZATION: (Organization, "Organization"),
+    SCOPE_WORKSPACE: (Workspace, "Workspace"),
+    SCOPE_WORKSPACE_MEMBER: (WorkspaceMember, "Workspace membership"),
+    SCOPE_ORG_MEMBER: (OrganizationMember, "Organization membership"),
+    SCOPE_API_TOKEN: (APIKey, "API key"),
 }
 
 
-async def _require_scope_exists(db: AsyncSession, scope_type: str, scope_id: str) -> None:
+async def _require_scope_exists(db: AsyncSession, scope_type: ScopeType, scope_id: str) -> None:
     """Refuse a ceiling on a scope that does not exist.
 
     Without this a typo answers 200 and then never binds: resolution matches on
