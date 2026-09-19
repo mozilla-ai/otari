@@ -38,16 +38,19 @@ from gateway.exceptions.budget_exceptions import (
     WorkspaceBudgetDefaultBudgetNotFoundError,
     WorkspaceBudgetDefaultNotFoundError,
 )
-from gateway.models.budgets import Budget, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.budgets import (
+    SCOPE_WORKSPACE,
+    SCOPE_WORKSPACE_MEMBER,
+    Budget,
+    ScopedBudget,
+    WorkspaceBudgetDefault,
+)
 from gateway.models.money import as_float
 from gateway.models.tenancy import User, Workspace, WorkspaceMember
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
 from gateway.services.budget_periods import period_window
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
-
-_SCOPE_WORKSPACE = "workspace"
-_SCOPE_WORKSPACE_MEMBER = "workspace_member"
 
 # Page size for fanning a new default out across a workspace's active members,
 # and the ceiling a list read pages at.
@@ -164,7 +167,7 @@ class WorkspaceBudgetDefaultService:
         # ceiling would refuse its budget's deletion.
         await self.db.execute(
             delete(ScopedBudget).where(
-                ScopedBudget.scope_type == _SCOPE_WORKSPACE_MEMBER,
+                ScopedBudget.scope_type == SCOPE_WORKSPACE_MEMBER,
                 ScopedBudget.scope_id == str(member.id),
             )
         )
@@ -175,9 +178,9 @@ class WorkspaceBudgetDefaultService:
             delete(ScopedBudget)
             .where(
                 or_(
-                    and_(ScopedBudget.scope_type == _SCOPE_WORKSPACE, ScopedBudget.scope_id == str(workspace_id)),
+                    and_(ScopedBudget.scope_type == SCOPE_WORKSPACE, ScopedBudget.scope_id == str(workspace_id)),
                     and_(
-                        ScopedBudget.scope_type == _SCOPE_WORKSPACE_MEMBER,
+                        ScopedBudget.scope_type == SCOPE_WORKSPACE_MEMBER,
                         ScopedBudget.scope_id.in_([str(member_id) for member_id in member_ids]),
                     ),
                 )
@@ -268,7 +271,7 @@ class WorkspaceBudgetDefaultService:
         collision on any one id.
         """
         existing_stmt = select(ScopedBudget.scope_id).where(
-            ScopedBudget.scope_type == _SCOPE_WORKSPACE_MEMBER,
+            ScopedBudget.scope_type == SCOPE_WORKSPACE_MEMBER,
             col(ScopedBudget.scope_id).in_([str(member_id) for member_id in member_ids]),
         )
         existing_stmt = existing_stmt.where(
@@ -353,7 +356,7 @@ class WorkspaceBudgetDefaultService:
         )
         period_start, period_end = window if window is not None else (None, None)
         return ScopedBudget(
-            scope_type=_SCOPE_WORKSPACE_MEMBER,
+            scope_type=SCOPE_WORKSPACE_MEMBER,
             scope_id=str(member_id),
             provider_key_id=default.provider_key_id,
             budget_id=budget.budget_id,
@@ -399,7 +402,7 @@ class WorkspaceBudgetDefaultService:
 
     async def _existing_member_budget(self, member_id: uuid.UUID, provider_key_id: str | None) -> ScopedBudget | None:
         stmt = select(ScopedBudget).where(
-            ScopedBudget.scope_type == _SCOPE_WORKSPACE_MEMBER,
+            ScopedBudget.scope_type == SCOPE_WORKSPACE_MEMBER,
             ScopedBudget.scope_id == str(member_id),
         )
         stmt = stmt.where(
