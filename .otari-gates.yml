@@ -164,3 +164,14 @@ gates:
       A tracked file still carries a Git merge-conflict marker
       (<<<<<<</=======/>>>>>>>). Resolve the conflict and remove the
       markers before finishing.
+
+  - id: no-stranded-docblocks
+    type: check_passed
+    enforcement: required
+    verifier: .otari-gates/verifiers/no-stranded-docblocks.py
+    when_changed: ["web/src/**"]
+    message: >-
+      A docblock in web/src sits directly above a declaration it does not
+      document. See AGENTS.md, "Repository Conventions": a docblock belongs
+      immediately above the declaration it describes, and the way it stops
+      doing so is an insertion beside it.

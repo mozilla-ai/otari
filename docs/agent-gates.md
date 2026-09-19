@@ -402,6 +402,33 @@ in that branch run on the next `Stop` event without the reviewer deciding to
 run anything from it. Issue #1442 tracks what a trust step for that would
 look like; it is a recorded gap, not a settled one.
 
+**A verifier gets no interpreter or environment from otari**, only a `cwd`.
+`otari hook` execs the resolved script path directly (no shell, no
+`python3 script.py` wrapping), so a script's own shebang, resolved against
+whatever `PATH` the `otari hook` process itself inherited, is the only thing
+that decides what runs it; that `PATH` is not guaranteed to include this or
+any project's virtualenv, the same reason `otari hook setup` writes an
+absolute path for its own binary. A bash verifier only needs `bash` and
+whatever else it shells out to (`git`, in both of this repo's own examples),
+the same assumption `command_if_changed`'s own `require` phrases already
+make about the caller's environment. A Python verifier with no third-party
+dependency (`no-stranded-docblocks.py` below) is written to run under
+whatever `python3` a bare `#!/usr/bin/env python3` finds; confirmed, not
+assumed, against the *real* system Python a shebang actually resolves to
+outside an activated venv (macOS ships 3.9, where a `list[str] | None`
+return annotation raises `TypeError` at import time unless the module opens
+with `from __future__ import annotations`, since annotations are evaluated
+eagerly by default). A verifier that genuinely needs a third-party
+dependency should not assume a pre-existing venv (fragile the same way a
+hardcoded interpreter path is) or stay stdlib-only forever: prefer a
+self-contained `#!/usr/bin/env -S uv run --script` shebang with the
+dependency declared inline (PEP 723), which only needs `uv` itself on
+`PATH` and installs its own isolated environment on first run. Confirmed
+portable, not assumed: a real invocation of exactly that shebang, with an
+inline dependency, ran correctly on both a real macOS (BSD `env`, which
+does support `-S`, unlike its `grep`) and a real `debian:trixie-slim`
+container (GNU `env`).
+
 **Sharing or distributing a verifier across repos is explicitly out of
 scope**, the same way `command_if_changed`'s own doc section above notes what
 it does not build yet. No `npx`/`uvx`-style reference to a verifier that
@@ -438,8 +465,7 @@ shape `judge`'s own per-run cap and total budget take. A gate whose turn
 comes up after that budget is exhausted reports `error` without attempting
 the call at all, the same as a judge gate past its own deadline.
 
-This repo dogfoods one: `no-leftover-conflict-markers` in this repo's own
-`.otari-gates.yml` runs
+This repo dogfoods two. `no-leftover-conflict-markers` runs
 `.otari-gates/verifiers/no-conflict-markers.sh`, which fails when a tracked
 file still has a line starting with `<<<<<<<`, `=======`, or `>>>>>>>`. It
 uses `git grep`, not the system `grep` binary: `git grep` is compiled into
@@ -452,6 +478,31 @@ got it wrong when actually invoked as a subprocess. Confirmed against both a
 real macOS (BSD) `git` and a real `debian:trixie-slim` container (GNU): the
 same script reported `pass`, `fail` (with the offending lines on stdout), and
 `error` (not a git repository) identically on both.
+
+`no-stranded-docblocks` runs
+`.otari-gates/verifiers/no-stranded-docblocks.py`, AGENTS.md's own stranded-
+docblock detector (`\*/\n[ \t]*/\*\*`), reimplemented as a Python script
+rather than a policy-level allowlist entry: this is the exact check the
+abandoned prototype hardcoded into `cli.py` behind a closed set of
+otari-shipped verifiers, now expressible as a script this repo owns. Python's
+own `re` is what makes the *match* correct (the pattern spans a newline, the
+same class of problem `grep -P`/`--null-data` gets wrong on one platform or
+the other); getting the *interpreter* right needed a second fix, since a
+bare `#!/usr/bin/env python3` resolves to whatever `python3` is first on
+`PATH` in `otari hook`'s own inherited environment, not necessarily this or
+any project's virtualenv (see this gate type's own note above on that).
+Confirmed against the real system Python outside any venv (macOS's own
+3.9), which raised `TypeError` on a `list[str] | None` return annotation
+until the module added `from __future__ import annotations`. It also does
+not scan the whole `web/src` tree on every run: `web/src` currently carries
+pre-existing instances of this exact bug that this verifier did not
+introduce and that a whole-tree scan would keep failing this gate on, for
+every future change to `web/src` regardless of what that change touched.
+Instead it reads `git status --porcelain` itself (the same "changed" `otari
+hook` submits as its own evidence) and only scans files that actually
+changed, so an unrelated edit elsewhere in `web/src` is unaffected, at the
+cost of the same "if you touch a file, you inherit its pre-existing
+problems" trade a diff-scoped linter already makes.
 
 ## Calling the Hook Server
 
