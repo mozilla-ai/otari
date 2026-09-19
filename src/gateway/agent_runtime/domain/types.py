@@ -154,6 +154,19 @@ class JudgeGate:
     touched a matching path, so a rubric about, say, error-handling
     conventions is not re-judged, at real model-call cost, on a session that
     never touched application code.
+
+    ``judge_cli`` is optional and names which locally-installed CLI(s)
+    ``otari hook`` may use to make the model call this gate needs, in
+    preference order; the first one whose own binary is found on ``PATH``
+    wins. ``None`` (the default, and the only behavior a judge gate had
+    before this field existed) means no preference: the caller falls back to
+    whichever CLI its own invoking harness implies (Claude Code's hook ->
+    ``claude``, Codex's -> ``codex``). Naming one explicitly is what lets a
+    gate authored for, say, a Codex-only fleet require ``codex`` even when
+    invoked by a Claude Code hook, or list both so whichever is actually
+    installed on a given machine is used. This field changes nothing about
+    where the call happens: still entirely within ``otari hook``, never here
+    (see this gate's own opening paragraph).
     """
 
     id: str
@@ -161,6 +174,7 @@ class JudgeGate:
     rubric: str
     message: str
     when_changed: tuple[str, ...] = ()
+    judge_cli: tuple[str, ...] | None = None
     type: Literal["judge"] = "judge"
 
 

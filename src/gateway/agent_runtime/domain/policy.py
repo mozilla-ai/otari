@@ -55,6 +55,14 @@ _SUPPORTED_ENFORCEMENTS = {"required", "advisory"}
 # time rather than a gate that silently blocks on a model's say-so.
 _JUDGE_ENFORCEMENTS = {"advisory"}
 
+# Which locally-installed CLI(s) `otari hook` may use for a judge gate's own
+# model call (JudgeGate.judge_cli); see that field's own docstring. Kept as
+# its own set, not reused from anywhere `otari hook` itself defines, since
+# this module stays dependency-free of that CLI-only concern (subprocess
+# names, PATH resolution): a gate author only ever needs to know these two
+# names exist, not how either is actually invoked.
+_SUPPORTED_JUDGE_CLIS = {"claude", "codex"}
+
 # A `**` in a forbidden glob crosses path segments by recursing over every
 # split point in the submitted path (domain/evaluators.py's _segments_match).
 # One is what every example in this codebase uses; more than that multiplies
@@ -75,7 +83,7 @@ _GATE_FIELDS_BY_TYPE = {
     "changed_path": _COMMON_GATE_FIELDS | {"forbidden"},
     "command_match": _COMMON_GATE_FIELDS | {"forbidden"},
     "command_if_changed": _COMMON_GATE_FIELDS | {"when_changed", "require"},
-    "judge": _COMMON_GATE_FIELDS | {"rubric", "when_changed"},
+    "judge": _COMMON_GATE_FIELDS | {"rubric", "when_changed", "judge_cli"},
     "check_passed": _COMMON_GATE_FIELDS | {"verifier", "when_changed"},
 }
 
@@ -320,6 +328,31 @@ def _parse_gate(raw: Any) -> GateSpec:
         judge_when_changed = _parse_glob_list(
             gate_id, "when_changed", _require_string_list(raw, "when_changed", gate_id, gate_type)
         )
+    # judge_cli: optional, like when_changed above; absence means "no
+    # preference" (see JudgeGate's own docstring), not "always these two".
+    # Accepts a bare string as the one-entry case of the list form, not a
+    # different shape, since a gate author naming a single required CLI
+    # should not have to spell it as a one-item list.
+    judge_cli: tuple[str, ...] | None = None
+    if "judge_cli" in raw:
+        raw_judge_cli = raw["judge_cli"]
+        if isinstance(raw_judge_cli, str):
+            candidates = [raw_judge_cli] if raw_judge_cli else []
+        elif isinstance(raw_judge_cli, list) and all(isinstance(item, str) for item in raw_judge_cli):
+            candidates = list(dict.fromkeys(raw_judge_cli))
+        else:
+            candidates = []
+        if not candidates:
+            raise PolicyError(
+                f"Gate {gate_id!r} (type 'judge'): 'judge_cli' must be a non-empty string or list of strings."
+            )
+        unsupported = [item for item in candidates if item not in _SUPPORTED_JUDGE_CLIS]
+        if unsupported:
+            raise PolicyError(
+                f"Gate {gate_id!r}: judge_cli entries {unsupported!r} are not supported. "
+                f"Supported in this build: {', '.join(sorted(_SUPPORTED_JUDGE_CLIS))}."
+            )
+        judge_cli = tuple(candidates)
     # enforcement_value is already proven "advisory" by the _JUDGE_ENFORCEMENTS
     # check above; cast documents that narrowing the same way the plain
     # Enforcement cast above documents its own.
@@ -328,6 +361,7 @@ def _parse_gate(raw: Any) -> GateSpec:
         enforcement=cast(Literal["advisory"], enforcement_value),
         rubric=rubric,
         when_changed=tuple(judge_when_changed),
+        judge_cli=judge_cli,
         message=message,
     )
 

@@ -1133,7 +1133,11 @@ def test_stop_event_reports_error_when_claude_is_not_on_path(monkeypatch: pytest
     result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)})
     assert result.exit_code == 0, result.output
     assert captured["json"]["judge_results"] == [
-        {"gate_id": "follows-pattern", "outcome": "error", "reasoning": "the `claude` CLI was not found on PATH"}
+        {
+            "gate_id": "follows-pattern",
+            "outcome": "error",
+            "reasoning": "none of the configured judge CLI(s) were found on PATH: claude",
+        }
     ]
 
 

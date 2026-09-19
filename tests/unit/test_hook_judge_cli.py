@@ -1,0 +1,345 @@
+"""Unit tests for judge-gate CLI backend selection: a gate's own `judge_cli`,
+`--judge-cli`/`OTARI_HOOK_JUDGE_CLI`, and the invoking harness's own default,
+in that precedence order (see `_hook_collect_judge_verdicts` in
+`gateway.cli`). Complements `tests/unit/test_hook_cli.py` (which already
+covers the `claude` backend's own call shape end to end) by covering the
+selection mechanism itself and the `codex exec` backend's own call shape.
+"""
+
+import json
+import shutil
+import subprocess
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import httpx
+import pytest
+from click.testing import CliRunner
+
+import gateway.cli as gateway_cli
+from gateway.core.config import GatewayConfig
+
+
+class _FakeResponse:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def json(self) -> dict[str, Any]:
+        return self._payload
+
+
+@pytest.fixture(autouse=True)
+def _judge_log_in_tmp_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(gateway_cli, "_hook_judge_log_path", lambda: tmp_path / "judge-calls.log")
+
+
+@pytest.fixture(autouse=True)
+def _config_stub(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        gateway_cli, "load_config", lambda config_path=None: GatewayConfig(master_key="test-master-key")
+    )
+
+
+def _gates_yaml(judge_cli: str | None = None) -> str:
+    judge_cli_line = f"    judge_cli: {judge_cli}\n" if judge_cli is not None else ""
+    return (
+        "schema_version: '1.0'\n"
+        "policy:\n  id: test\n"
+        "gates:\n"
+        "  - id: g\n"
+        "    type: judge\n"
+        "    enforcement: advisory\n"
+        "    rubric: r\n"
+        f"{judge_cli_line}"
+        "    message: m\n"
+    )
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    (tmp_path / ".git").mkdir()
+    return tmp_path
+
+
+def _git_status_and_diff_run() -> Callable[..., subprocess.CompletedProcess[str]]:
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "diff"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected subprocess.run call before the judge CLI itself: {cmd}")
+
+    return fake_run
+
+
+def _invoke(payload: dict[str, Any], *, harness: str = "claude-code", extra: list[str] | None = None) -> Any:
+    args = ["--api-key", "test-key", "--harness", harness, *(extra or [])]
+    return CliRunner().invoke(gateway_cli.hook, args, input=json.dumps(payload))
+
+
+def _capture_post(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    return captured
+
+
+def test_claude_code_harness_defaults_to_the_claude_backend(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+    called_with: list[str] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        result = _git_status_and_diff_run()(cmd, **kwargs) if cmd[0] == "git" else None
+        if result is not None:
+            return result
+        called_with.append(cmd[0])
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}" if name in ("claude", "codex") else None)
+    captured = _capture_post(monkeypatch)
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code")
+    assert result.exit_code == 0, result.output
+    assert called_with == ["/usr/bin/claude"]
+    assert captured["json"]["judge_results"] == [{"gate_id": "g", "outcome": "pass", "reasoning": "ok"}]
+
+
+def test_codex_harness_defaults_to_the_codex_backend(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+    called_with: list[str] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        result = _git_status_and_diff_run()(cmd, **kwargs) if cmd[0] == "git" else None
+        if result is not None:
+            return result
+        called_with.append(cmd[0])
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}" if name in ("claude", "codex") else None)
+    captured = _capture_post(monkeypatch)
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="codex")
+    assert result.exit_code == 0, result.output
+    assert called_with == ["/usr/bin/codex"]
+    assert captured["json"]["judge_results"] == [{"gate_id": "g", "outcome": "pass", "reasoning": "ok"}]
+
+
+def test_codex_exec_is_invoked_read_only_and_non_interactive(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git":
+            return _git_status_and_diff_run()(cmd, **kwargs)
+        assert cmd[0] == "/usr/bin/codex"
+        assert cmd[1:3] == ["exec", "-"], "prompt goes over stdin, via the '-' pseudo-argument, not a trailing arg"
+        assert "--model" not in cmd, (
+            "no --judge-model given and no stable 'small codex model' to default to (see "
+            "_HOOK_JUDGE_DEFAULT_MODEL's own comment): --model is left off, not guessed"
+        )
+        assert cmd[cmd.index("--sandbox") + 1] == "read-only"
+        assert cmd[cmd.index("--ask-for-approval") + 1] == "never"
+        assert "--skip-git-repo-check" in cmd, "the judge workdir is a plain directory, not a Git repo"
+        assert "--ephemeral" in cmd, "a one-shot judge call must not leave a rollout file behind"
+        assert "input" in kwargs, "the prompt is piped over stdin, matching claude -p's own choice"
+        assert kwargs.get("cwd") == gateway_cli._hook_judge_workdir()
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout=json.dumps({"outcome": "fail", "reasoning": "no"}), stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/codex" if name == "codex" else None)
+    captured = _capture_post(monkeypatch)
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="codex")
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["judge_results"] == [{"gate_id": "g", "outcome": "fail", "reasoning": "no"}]
+
+
+def test_claude_gets_the_haiku_default_model_with_no_override(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git":
+            return _git_status_and_diff_run()(cmd, **kwargs)
+        assert cmd[cmd.index("--model") + 1] == gateway_cli._HOOK_JUDGE_DEFAULT_MODEL
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+    _capture_post(monkeypatch)
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code")
+    assert result.exit_code == 0, result.output
+
+
+def test_judge_model_flag_overrides_the_default_for_the_codex_backend(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git":
+            return _git_status_and_diff_run()(cmd, **kwargs)
+        assert cmd[cmd.index("--model") + 1] == "gpt-6-astra"
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/codex" if name == "codex" else None)
+    _capture_post(monkeypatch)
+
+    result = _invoke(
+        {"hook_event_name": "Stop", "cwd": str(repo)}, harness="codex", extra=["--judge-model", "gpt-6-astra"]
+    )
+    assert result.exit_code == 0, result.output
+
+
+def test_a_gates_own_judge_cli_overrides_the_harness_default(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """A gate authored to require codex gets codex even from a Claude Code hook."""
+    (repo / ".otari-gates.yml").write_text(_gates_yaml(judge_cli="codex"), encoding="utf-8")
+    called_with: list[str] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git":
+            return _git_status_and_diff_run()(cmd, **kwargs)
+        called_with.append(cmd[0])
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}" if name in ("claude", "codex") else None)
+    _capture_post(monkeypatch)
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code")
+    assert result.exit_code == 0, result.output
+    assert called_with == ["/usr/bin/codex"]
+
+
+def test_judge_cli_flag_overrides_the_harness_default_but_not_a_gates_own(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    (repo / ".otari-gates.yml").write_text(_gates_yaml(judge_cli="claude"), encoding="utf-8")
+    called_with: list[str] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git":
+            return _git_status_and_diff_run()(cmd, **kwargs)
+        called_with.append(cmd[0])
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}" if name in ("claude", "codex") else None)
+    _capture_post(monkeypatch)
+
+    # --judge-cli codex would win over the claude-code harness default, but
+    # the gate's own judge_cli: claude is more specific still and wins over both.
+    result = _invoke(
+        {"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code", extra=["--judge-cli", "codex"]
+    )
+    assert result.exit_code == 0, result.output
+    assert called_with == ["/usr/bin/claude"]
+
+
+def test_judge_cli_flag_overrides_the_harness_default_when_the_gate_has_none(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+    called_with: list[str] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git":
+            return _git_status_and_diff_run()(cmd, **kwargs)
+        called_with.append(cmd[0])
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}" if name in ("claude", "codex") else None)
+    _capture_post(monkeypatch)
+
+    result = _invoke(
+        {"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code", extra=["--judge-cli", "codex"]
+    )
+    assert result.exit_code == 0, result.output
+    assert called_with == ["/usr/bin/codex"]
+
+
+def test_judge_cli_falls_back_to_the_next_candidate_when_the_first_is_missing(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    (repo / ".otari-gates.yml").write_text(_gates_yaml(judge_cli="[claude, codex]"), encoding="utf-8")
+    called_with: list[str] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[0] == "git":
+            return _git_status_and_diff_run()(cmd, **kwargs)
+        called_with.append(cmd[0])
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    # Only codex is on PATH: claude is the preferred first candidate, but not available.
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/codex" if name == "codex" else None)
+    _capture_post(monkeypatch)
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code")
+    assert result.exit_code == 0, result.output
+    assert called_with == ["/usr/bin/codex"]
+
+
+def test_reports_error_naming_every_candidate_tried_when_none_are_on_path(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    (repo / ".otari-gates.yml").write_text(_gates_yaml(judge_cli="[claude, codex]"), encoding="utf-8")
+    monkeypatch.setattr(subprocess, "run", _git_status_and_diff_run())
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    captured = _capture_post(monkeypatch)
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code")
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["judge_results"] == [
+        {
+            "gate_id": "g",
+            "outcome": "error",
+            "reasoning": "none of the configured judge CLI(s) were found on PATH: claude, codex",
+        }
+    ]
+
+
+def test_dry_run_message_names_the_resolved_harness_default(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+    monkeypatch.setattr(subprocess, "run", _git_status_and_diff_run())
+    captured = _capture_post(monkeypatch)
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="codex", extra=["--judge-dry-run"])
+    assert result.exit_code == 0, result.output
+    assert "real codex call skipped" in captured["json"]["judge_results"][0]["reasoning"]
+
+
+def test_judge_cli_flag_rejects_an_unsupported_backend(repo: Path) -> None:
+    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, extra=["--judge-cli", "gemini"])
+    assert result.exit_code != 0
+    assert "claude" in result.output and "codex" in result.output

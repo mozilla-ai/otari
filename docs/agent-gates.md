@@ -19,12 +19,19 @@ This is the first slice. It ships:
 - Five gate types: `changed_path`, `command_match`, `command_if_changed`,
   `judge`, and `check_passed`.
 - `POST /api/v1/hooks/check`, evaluated against evidence the caller submits.
-- `otari hook --harness claude-code`, a real installed command that reads a
-  Claude Code hook payload and calls the endpoint above.
+- `otari hook --harness claude-code` and `otari hook --harness codex`, real
+  installed commands that read a Claude Code or Codex hook payload and call
+  the endpoint above.
 - `otari hook setup`, which registers it: writes a `PreToolUse` and a `Stop`
-  hook entry into Claude Code's own settings and, if this repo has no
+  hook entry into the harness's own settings (`.claude/settings.local.json`
+  for Claude Code, `.codex/hooks.json` for Codex) and, if this repo has no
   `.otari-gates.yml` yet, offers to scaffold a starter one. No reusable packs
-  yet, and no harness other than Claude Code.
+  yet. The Codex integration is newer and less exercised against a real
+  session than the Claude Code one; in particular, a session that runs
+  through Codex's own Code Mode does not yet get a `PreToolUse` dispatch at
+  all for a shell/apply_patch call it wraps in JS (openai/codex#23411, open
+  upstream), so only `Stop`'s own Git-status fallback and transcript scan
+  reach it today.
 
 This is a hook protocol, not a local filesystem reader: Otari never opens a
 caller's repository itself. The caller (an agent hook today; a native
@@ -223,6 +230,30 @@ evidence it already collected for `changed_path` gates.
     message: This change may not follow the error-handling conventions; take a look.
 ```
 
+`judge_cli` is also optional: a string or ordered list naming which locally
+installed CLI(s) may make this gate's own model call (`claude`, `codex`
+today). Omitted (the default, and the only behavior before this field
+existed), the caller picks whichever CLI its own invoking harness implies:
+a Claude Code hook uses `claude`, a Codex hook uses `codex`, so most
+policies never need this field at all. Naming one is for a gate that must
+always use a specific CLI regardless of which harness invoked the hook (a
+rubric that only works well with one model family, say); naming an ordered
+list is a fallback preference, tried in order until one is actually found on
+`PATH`, for a fleet where different machines have different CLIs installed.
+`otari hook`'s own `--judge-cli`/`OTARI_HOOK_JUDGE_CLI` sets a session-wide
+default between a gate's own preference and the harness default; see
+"Choosing a judge CLI" below for the full precedence and both CLIs' own call
+shape.
+
+```yaml
+  - id: follows-error-handling-pattern
+    type: judge
+    enforcement: advisory
+    rubric: Does this change follow the repository's error-handling conventions?
+    judge_cli: [claude, codex]
+    message: This change may not follow the error-handling conventions; take a look.
+```
+
 Otari never calls a model itself, the same way it never reads a caller's
 repository for any other gate: the caller reads `rubric` from the parsed
 policy, builds its own prompt from it plus its own diff and transcript, runs
@@ -234,46 +265,88 @@ the field table below). This route only relays that verdict into a
 call has neither a finished diff nor a full transcript to judge against yet,
 and submits no `judge_results` at all rather than an empty one: see the
 field table below for why that distinction matters), for every `judge` gate
-in the local policy it shells out to `claude -p --model <model> --tools ""
---strict-mcp-config` with a prompt built from the gate's `rubric`, `git diff
+in the local policy it resolves which CLI to use (see "Choosing a judge CLI"
+below), then calls it with a prompt built from the gate's `rubric`, `git diff
 HEAD`, and the assistant's own text replies from the session's transcript
 (never a `tool_use`/`tool_result` payload: a Bash call's own stdout or a
 Read's file contents dominate a raw transcript's bytes but carry no "why was
 this change made" signal a rubric can use), and requires exactly one JSON
 object back: `{"outcome": "pass" or "fail", "reasoning": "..."}`. This runs
-against the machine's own Claude Code subscription, not billed through
-Otari, from a dedicated `~/.otari/judge-workdir/` rather than the caller's
-own repo: the prompt is fully self-contained text, so the call never needs
-to run from the repo it is judging, and running it there anyway is how a
-real early version of this recursed into itself (see below). `--tools ""
---strict-mcp-config` disable every built-in tool and MCP server for this one
-call: the prompt embeds the diff and transcript verbatim, both
-attacker-influenceable (a crafted diff or transcript could talk the model
-into more than a verdict; see this gate type's own docstring above), and the
-call never needs a tool to do its one job. `<model>` defaults to Haiku, not
-the session's own (often larger) default model: a judge call is a small,
-structured pass/fail classification over bounded text, so it does not need a
-frontier model, and every applicable judge gate costs one full invocation.
-Override it with `--judge-model` or `OTARI_HOOK_JUDGE_MODEL` for a rubric
-that genuinely needs more capability. The prompt goes over stdin, not as a
-trailing argument: a diff or transcript can carry an embedded NUL byte,
-which `subprocess` accepts as stdin input but raises `ValueError` for as an
-argv element. A missing `claude` binary, a timeout, a launch failure
-(`OSError`, e.g. `~/.otari/judge-workdir/` itself failing to create), a NUL
-byte reaching this call some other way, a nonzero exit, or output that is
-not that one JSON object all submit `outcome: "error"` rather than raising
-(confirmed: an uncaught exception here used to exit `otari hook` before it
-ever reached `httpx.post`, taking every other gate in the policy,
-mechanical and required ones included, down with it), carrying the failure
-detail (capped at 4,096 characters, the same length
+against whatever subscription the resolved CLI is itself signed into, not
+billed through Otari, from a dedicated `~/.otari/judge-workdir/` rather than
+the caller's own repo: the prompt is fully self-contained text, so the call
+never needs to run from the repo it is judging, and running it there anyway
+is how a real early version of this recursed into itself (see below).
+`<model>` defaults to Haiku, not the session's own (often larger) default
+model: a judge call is a small, structured pass/fail classification over
+bounded text, so it does not need a frontier model, and every applicable
+judge gate costs one full invocation. Override it with `--judge-model` or
+`OTARI_HOOK_JUDGE_MODEL` for a rubric that genuinely needs more capability.
+The prompt goes over stdin, not as a trailing argument, for both CLIs: a
+diff or transcript can carry an embedded NUL byte, which `subprocess`
+accepts as stdin input but raises `ValueError` for as an argv element. None
+of the configured `judge_cli` candidates found on `PATH`, a timeout, a
+launch failure (`OSError`, e.g. `~/.otari/judge-workdir/` itself failing to
+create), a NUL byte reaching this call some other way, a nonzero exit, or
+output that is not that one JSON object all submit `outcome: "error"` rather
+than raising (confirmed: an uncaught exception here used to exit `otari
+hook` before it ever reached `httpx.post`, taking every other gate in the
+policy, mechanical and required ones included, down with it), carrying the
+failure detail (capped at 4,096 characters, the same length
 `JudgeVerdictRequest.reasoning` itself caps at server-side, since an
 oversize `reasoning` would otherwise 422 the *whole* request and silently
 skip every other gate the same way) as `reasoning`; since the gate is
 always advisory, an `error` verdict can only ever warn, never block. One
-exception: a nonzero exit whose message names `claude -p`'s own "prompt is
-too long" rejection retries once with the transcript dropped entirely
-(diff-only) before reporting `error`, since the transcript is supplementary
-context and the diff is the evidence the rubric actually needs.
+exception, `claude` only: a nonzero exit whose message names `claude -p`'s
+own "prompt is too long" rejection retries once with the transcript dropped
+entirely (diff-only) before reporting `error`, since the transcript is
+supplementary context and the diff is the evidence the rubric actually
+needs. `codex exec`'s own equivalent wording has not been confirmed against
+a real call, so that backend gets no such retry yet, reporting `error`
+directly on the same rejection instead.
+
+#### Choosing a judge CLI
+
+Precedence, most specific first: a gate's own `judge_cli`, then `otari
+hook`'s own `--judge-cli`/`OTARI_HOOK_JUDGE_CLI`, then a default keyed on
+`--harness` (`claude-code` → `claude`, `codex` → `codex`). Whichever list
+that produces is tried in order; the first entry whose own binary
+`shutil.which` finds on `PATH` is the one actually invoked, so a
+multi-entry list is a fallback preference, not a "use all of these"
+instruction, and an error message on a run where none resolve names every
+candidate that was tried.
+
+The two backends' own call shape differs in what each can bind, including
+what "no `--judge-model`/`OTARI_HOOK_JUDGE_MODEL` given" defaults to:
+
+- `claude`: `claude -p --model <model> --tools "" --strict-mcp-config`,
+  `<model>` defaulting to Haiku (`_HOOK_JUDGE_DEFAULT_MODEL`) with no
+  override; see the model paragraph above. `--tools ""`/`--strict-mcp-config`
+  disable every built-in tool and MCP server for this one call, dropping
+  their definitions from the prompt entirely: the prompt embeds the diff and
+  transcript verbatim, both attacker-influenceable (a crafted diff or
+  transcript could talk the model into more than a verdict; see this gate
+  type's own docstring above), and the call never needs a tool to do its one
+  job.
+- `codex`: `codex exec - [--model <model>] --sandbox read-only
+  --ask-for-approval never --skip-git-repo-check --ephemeral --color never`.
+  `--model` is included only when an override was actually given: unlike
+  `claude`, this backend gets no hardcoded "small model" default, since
+  Codex's own model catalog has no equally stable name to pin (confirmed
+  against a real account: its own session history names a current default of
+  `gpt-6-astra`, not any of the "cheap tier" ids OpenAI's own docs name
+  elsewhere), omitting the flag entirely falls back to whatever model that
+  account already has configured as its own default, rather than risk naming
+  one it might reject outright. Codex also documents no flag to drop
+  tool/MCP definitions from the prompt the way `claude`'s two flags do, so
+  `--sandbox read-only`/`--ask-for-approval never` only bound what an
+  attempted tool call could *do*, not whether the model attempts one; the
+  isolated judge workdir this runs in already limits what a read-only
+  sandboxed attempt could see either way. `--skip-git-repo-check` is needed
+  because that workdir is a plain directory, not a repository, and
+  `--ephemeral` keeps this one-shot call from leaving a rollout file behind
+  for a later `Stop` event's own transcript scan to mistake for real session
+  evidence.
 
 A diff `otari hook` could not collect at all (`git diff HEAD` failing: no
 `HEAD` yet, a timeout, `git` itself missing) is kept distinct from one it
@@ -303,15 +376,16 @@ it for that `Stop` event (confirmed against a real repo with such a file).
 
 `--judge-dry-run` (or `OTARI_HOOK_JUDGE_DRY_RUN`) runs everything up to the
 model call for real, policy parsing, `when_changed` filtering, diff and
-transcript collection, but skips `claude -p` itself, submitting `outcome:
-"error"` with a `reasoning` that estimates the prompt's size (`~4` chars per
+transcript collection, `judge_cli` resolution, but skips the resolved CLI
+itself, submitting `outcome: "error"` with a `reasoning` that names which
+CLI(s) would have been tried and estimates the prompt's size (`~4` chars per
 token, a rough estimate, not a real tokenizer count, and not the same ratio
 the caps above are sized against) instead. Paired with the audit log below,
 this answers "how often would this actually fire, and roughly how large
 would each call be" without spending a single real model call: useful before
 turning a new or newly-scoped judge gate loose on a live session.
 
-Every real `claude -p` attempt, dry-run or not, is appended to
+Every real judge-CLI attempt, dry-run or not, is appended to
 `~/.otari/judge-calls.log` (one line per gate, before the call as `outcome:
 invoking` and again once it resolves), regardless of Otari's own database:
 this is a local, otari-hook-only audit trail, never the rubric, diff,
@@ -703,9 +777,11 @@ blocking proves nothing about whether an interactive session's own
 `command_match`/`command_if_changed` gate is genuinely blocking.
 
 1. Run `otari hook setup`. It writes both a `PreToolUse` hook entry and a
-   `Stop` hook entry into `.claude/settings.local.json` (personal, usually
-   gitignored by a global `~/.config/git/ignore`, so it never lands in a
-   PR), both pointing at this install's own
+   `Stop` hook entry into `.claude/settings.local.json` (personal, and this
+   repo's own `.gitignore` covers it specifically, since the generated
+   command embeds a live API key or master key: see "Registering it for
+   Codex" below for the same file for that harness), both pointing at this
+   install's own
    `otari hook --harness claude-code`; Claude Code passes its own
    `hook_event_name` in the payload, so one callback serves both. If this
    repo has no `.otari-gates.yml` yet, it offers to write a small starter
@@ -728,9 +804,9 @@ blocking proves nothing about whether an interactive session's own
    every other hook or permission already in the file untouched.
 
    Safe to run again any time the policy or the credential changes.
-   `otari hook setup --harness claude-code` is currently the only harness;
-   `--api-key <key>` skips resolution and prompting outright, for a
-   non-interactive run.
+   `--harness codex` runs the same setup against Codex's own settings instead
+   (see "Registering it for Codex" below); `--api-key <key>` skips resolution
+   and prompting outright, for a non-interactive run.
 
    Three things about this are temporary, not deliberate design, and all
    trace back to one cause: this package installs into a per-project venv
@@ -823,16 +899,64 @@ there: this endpoint accepts either, a hook needs nothing the master key
 uniquely grants, and a credential written into a settings file or a command
 line is one you should be able to rotate on its own.
 
+### Registering it for Codex
+
+`otari hook setup --harness codex` writes the same pair of hook blocks into
+`.codex/hooks.json` instead, naming this install's own `otari hook --harness
+codex`. Personal, the same as `.claude/settings.local.json` above and for
+the same reason: the generated command embeds a live API key or master key,
+and this repo's own `.gitignore` covers this exact path specifically so it
+never lands in a commit or a PR.
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "apply_patch|Bash|exec|code_mode_exec",
+        "hooks": [{"type": "command", "command": "/abs/path/to/.venv/bin/otari hook --harness codex -c /abs/path/to/config.yml"}]
+      }
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "/abs/path/to/.venv/bin/otari hook --harness codex -c /abs/path/to/config.yml"}]}
+    ]
+  }
+}
+```
+
+Codex's own edit tool, `apply_patch`, carries no bare `file_path` the way
+Claude Code's `Edit`/`Write` do: the whole patch envelope arrives as
+`tool_input.command`, and the path(s) it touches (a single call can touch
+several) are read off its own `*** Add/Update/Delete File: <path>` header
+lines. Its shell tool hook-dispatches under the same canonical name Claude
+Code uses (`Bash`), but a turn run through Codex's own **Code Mode** wraps
+any number of shell/apply_patch calls in one JS snippet under a tool named
+`code_mode_exec` (Codex's own docs say a matcher may instead say `exec`, an
+alias for that wire name; unconfirmed against a real dispatch, so the
+generated matcher names both rather than depend on it); that whole snippet
+is submitted as "the command" rather than parsed apart, so a `command_match`
+gate still finds a forbidden phrase wherever it appears in it. As of this
+writing, Code Mode's
+own `PreToolUse` dispatch does not cover that surface at all
+(openai/codex#23411, open upstream), confirmed against a real Codex Desktop
+session that runs exclusively through Code Mode, so a policy relying only
+on `PreToolUse` will not see those edits/commands until that lands; `Stop`'s
+Git-status fallback and its own transcript scan (Codex's rollout JSONL, a
+different shape from Claude Code's Message-API transcript) still do, since
+neither depends on `PreToolUse` firing.
+
+### Known gaps
+
 `otari hook` is a thin, harness-specific transport, not a second copy of the
 evaluator: it collects evidence and calls the endpoint above; every actual
 decision still comes from `gateway.agent_runtime`. What neither command does
-yet: uninstall itself, probe whether it is correctly registered
-(`otari status`, not built), or support a harness other than Claude Code.
+yet: uninstall itself, or probe whether it is correctly registered
+(`otari status`, not built).
 
 ## What's next
 
 `otari status`, to probe whether a hook is correctly registered without
-re-running setup; a harness other than Claude Code; and sharing or
-distributing a `check_passed` verifier across repos (a registry, reusable
-"packs"), deliberately deferred rather than built alongside this first one
+re-running setup; and sharing or distributing a `check_passed` verifier
+across repos (a registry, reusable "packs"), deliberately deferred rather
+than built alongside this first one
 (see that gate type's own section above).

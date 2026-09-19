@@ -10,6 +10,7 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import click
 import uvicorn
@@ -243,6 +244,53 @@ _HOOK_EDIT_TOOL_PATH_FIELDS = {"Edit": "file_path", "Write": "file_path", "Noteb
 # command_match gate gets before the command runs; see docs/agent-gates.md.
 _HOOK_COMMAND_TOOL_FIELDS = {"Bash": "command"}
 
+# Codex hook-dispatches its own shell tool under the same canonical name
+# Claude Code uses ("Bash"; confirmed against openai/codex's own
+# HookToolName), plus, once a turn runs through Code Mode, "code_mode_exec":
+# a freeform JS snippet that can wrap any number of tools.exec_command()/
+# tools.apply_patch() calls rather than naming a single command ("exec" is
+# also accepted, in case a build reports the pre-canonicalization name). That
+# whole snippet is kept as "the command" here rather than parsed apart: a
+# forbidden phrase a command_match gate looks for still matches wherever it
+# appears in it, and Code Mode's own PreToolUse dispatch is not complete yet
+# (openai/codex#23411), so there is no reliable per-argument shape to parse
+# even if it were worth the fragility.
+_HOOK_COMMAND_TOOL_FIELDS_BY_HARNESS = {
+    "claude-code": _HOOK_COMMAND_TOOL_FIELDS,
+    "codex": {"Bash": "command", "code_mode_exec": "command", "exec": "command"},
+}
+
+# Codex's own edit tool, sharing Claude Code's apply_patch envelope
+# convention: unlike Edit/Write, tool_input carries no bare file_path;
+# "command" holds the whole patch text, and the path(s) it touches are named
+# on the envelope's own header lines instead (_hook_extract_patch_paths).
+_CODEX_PATCH_TOOL_NAME = "apply_patch"
+# A rename is its own two-line shape, not a fourth header verb: "*** Update
+# File: <old path>" immediately followed by "*** Move to: <new path>",
+# neither one alone naming where the file ends up.
+_PATCH_HEADER_RE = re.compile(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$", re.MULTILINE)
+
+
+def _hook_extract_patch_paths(patch_text: str) -> list[str]:
+    """Target path(s) named in an apply_patch envelope's own header lines.
+
+    One apply_patch call can touch several files, each named on its own
+    "*** Add/Update/Delete File: <path>" header line; order-preserving and
+    de-duplicated, since a policy gate cares about the set of touched paths,
+    not how many headers happened to name each one. A rename's own "*** Move
+    to: <path>" line is matched too, alongside the "Update File:" line naming
+    its old path that always precedes one: both the vacated and the landed-on
+    path are evidence a changed_path gate could care about, and reporting
+    only one would silently miss whichever gate is scoped to the other.
+    """
+    seen: dict[str, None] = {}
+    for match in _PATCH_HEADER_RE.finditer(patch_text):
+        path = match.group(1).strip()
+        if path:
+            seen[path] = None
+    return list(seen)
+
+
 # Mirrors the Hook Server's own per-command bound (routes/hooks.py's
 # _MAX_COMMAND_LENGTH). A literal rather than an import: this command talks to
 # a gateway over HTTP that may be a different build, so the number it truncates
@@ -467,6 +515,82 @@ def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None
     return [command for tool_use_id, command in requested if tool_use_id is None or tool_use_id not in denied_ids]
 
 
+# Codex's own equivalent of _PRETOOLUSE_DENIAL_MARKERS: no confirmed wrapper
+# string for a PreToolUse-denied call has been observed in a real Codex
+# transcript, so _hook_collect_codex_transcript_commands makes no attempt to
+# exclude one. That is the same safer direction Claude Code's own denial
+# handling argues for: keeping a denied command in evidence costs an
+# occasional false "ran", never a missed "ran".
+_CODEX_COMMAND_TOOL_NAMES = frozenset({"Bash", "shell", "local_shell", "exec_command"})
+
+
+def _hook_collect_codex_transcript_commands(transcript_path: Path) -> list[str] | None:
+    """Evidence for a `command_match`/`command_if_changed` gate on a Codex Stop event.
+
+    Codex's own rollout file (its `transcript_path`) is a JSONL log of
+    `response_item` records, a different shape from Claude Code's own
+    Message-API transcript that `_hook_collect_transcript_commands` reads. A
+    classic shell call appears as a `function_call` item whose `arguments` is
+    a JSON-encoded string carrying a `command` field (a string, or an argv
+    list joined with spaces here); a turn run through Code Mode instead wraps
+    any number of shell/apply_patch calls in one `custom_tool_call`
+    (`name: "exec"`) whose `input` is the raw JavaScript that issued them.
+    That JS text is kept whole as "the command", the same choice
+    `_HOOK_COMMAND_TOOL_FIELDS_BY_HARNESS` makes for a live PreToolUse call
+    and for the same reason: a forbidden phrase still matches wherever it
+    appears in it, with no per-argument parsing to get wrong.
+
+    Returns None only when the transcript itself cannot be read, the same
+    sentinel `_hook_collect_transcript_commands` uses.
+    """
+    try:
+        lines = transcript_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+
+    commands: list[str] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict) or record.get("type") != "response_item":
+            continue
+        item = record.get("payload")
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        if item_type == "custom_tool_call" and item.get("name") == "exec":
+            text = item.get("input")
+            if isinstance(text, str) and text:
+                commands.append(text)
+        elif item_type == "function_call" and item.get("name") in _CODEX_COMMAND_TOOL_NAMES:
+            raw_arguments = item.get("arguments")
+            # isinstance first, not a bare json.loads(... or "{}"): "arguments" is
+            # documented as a JSON-encoded string, but a malformed record or a
+            # future Codex shape carrying it pre-parsed (a dict/list) would
+            # otherwise reach json.loads and raise TypeError, which nothing here
+            # catches, crashing this whole Stop-event invocation instead of
+            # skipping the one record, the same fail-open contract every other
+            # per-record parse in this function already keeps.
+            if not isinstance(raw_arguments, str):
+                continue
+            try:
+                arguments = json.loads(raw_arguments)
+            except ValueError:
+                continue
+            if not isinstance(arguments, dict):
+                continue
+            command = arguments.get("command")
+            if isinstance(command, list):
+                command = " ".join(str(part) for part in command)
+            if isinstance(command, str) and command:
+                commands.append(command)
+    return commands
+
+
 # A judge gate's prompt is rubric + diff + transcript excerpt, each bounded
 # independently so one huge file or one long session can't build an unbounded
 # `claude -p` argv. Sized against a real measurement, not the "~4 chars/token"
@@ -524,6 +648,16 @@ _HOOK_JUDGE_TOTAL_BUDGET_SECONDS = 480
 # one full invocation against the caller's own subscription (see
 # _hook_run_judge). Overridable per-invocation with --judge-model /
 # OTARI_HOOK_JUDGE_MODEL for a rubric that genuinely needs more capability.
+#
+# claude only: Codex's own model catalog has no equally stable "small model"
+# name to hardcode the same way (confirmed against a real account: its own
+# session history names a current default of "gpt-6-astra", not any of the
+# "cheap tier" ids OpenAI's own docs name elsewhere, which is exactly the
+# kind of drift a hardcoded guess here would silently go stale against).
+# `_hook_run_judge` leaves `--model` off the codex backend's own invocation
+# entirely when neither this nor --judge-model apply, falling back to
+# whatever model that account already has configured as its own default,
+# rather than risk naming one Codex might reject outright.
 _HOOK_JUDGE_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
 _HOOK_JUDGE_PROMPT_TEMPLATE = """\
@@ -586,6 +720,47 @@ def _hook_extract_judge_transcript(transcript_path: Path) -> str:
             block["text"]
             for block in content
             if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+        )
+    return "\n".join(texts)
+
+
+def _hook_extract_codex_judge_transcript(transcript_path: Path) -> str:
+    """The assistant's own text replies from a Codex rollout, for a judge gate's prompt.
+
+    Codex's equivalent of `_hook_extract_judge_transcript`: an assistant
+    reply is a `response_item` of type `message`, `role: "assistant"`, its
+    own text under `content[].type == "output_text"` (`input_text` is the
+    role Codex gives the other direction (developer/user turns), which
+    carry no judgment about this session's own work).
+
+    Returns "" when the transcript cannot be read at all, or carries no
+    assistant text, the same as `_hook_extract_judge_transcript`.
+    """
+    try:
+        lines = transcript_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+
+    texts: list[str] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict) or record.get("type") != "response_item":
+            continue
+        item = record.get("payload")
+        if not isinstance(item, dict) or item.get("type") != "message" or item.get("role") != "assistant":
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        texts.extend(
+            block["text"]
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "output_text" and isinstance(block.get("text"), str)
         )
     return "\n".join(texts)
 
@@ -759,31 +934,27 @@ _HOOK_JUDGE_PROMPT_TOO_LONG_MARKER = "prompt is too long"
 _HOOK_MAX_JUDGE_REASONING_LENGTH = 4_096
 
 
-def _hook_call_claude_p(claude_path: str, model: str, prompt: str, *, deadline: float) -> tuple[str, str]:
-    """One `claude -p --model <model>` invocation; return (outcome, reasoning).
+def _hook_run_judge_subprocess(argv: list[str], prompt: str, *, deadline: float, label: str) -> tuple[str, str]:
+    """Shared tail of every judge-CLI backend's own invocation: run `argv`, parse its
+    stdout as the one JSON verdict object the judge prompt demands; return (outcome, reasoning).
+
+    Both `_hook_call_claude_p` and `_hook_call_codex_exec` build their own
+    `argv` (each backend's own flags are backend-specific: see each
+    function's own docstring for why) and hand it here for everything after
+    that: launching it, bounding it to what is left of the shared
+    `deadline`, and turning its stdout into a verdict. `label` (`"claude
+    -p"`/`"codex exec"`) names the backend in every message this produces,
+    the only difference in what each backend's own error/success text reads.
 
     outcome is always one of "pass"/"fail"/"error": a nonzero exit, a
     timeout, or output that is not the single JSON object the prompt demands
     are all "error", carrying the failure detail as reasoning rather than
-    raising. `claude -p`'s own "prompt is too long" rejection exits nonzero
-    with the message on stdout, not stderr (confirmed against a real call),
-    so the error detail falls back to stdout when stderr is empty.
+    raising.
 
     Runs with `cwd` set to `_hook_judge_workdir()`, never the repo being
     judged: see that function's own docstring for why (a real recursive
     incident) and why that is an isolated directory rather than a
     hooks-disabling flag.
-
-    `--tools ""` and `--strict-mcp-config`: this call's own prompt embeds the
-    diff and transcript verbatim, both attacker-influenceable (a crafted diff
-    or transcript could talk the model into more than a verdict; see the
-    `judge` gate type's own docstring on this), and it never needs a tool to
-    do its one job (read a prompt, emit one JSON object). `--tools ""`
-    disables every built-in tool; `--strict-mcp-config` with no `--mcp-config`
-    means no MCP server loads either, including one configured for the
-    repo being judged. Confirmed this still produces a normal verdict (and,
-    since it skips loading tool/MCP definitions into the system prompt,
-    measured cheaper than the same call without these flags).
 
     `deadline` (a `time.monotonic()` timestamp, see
     `_HOOK_JUDGE_TOTAL_BUDGET_SECONDS`) is shared across every gate and retry
@@ -798,7 +969,7 @@ def _hook_call_claude_p(claude_path: str, model: str, prompt: str, *, deadline: 
 
     try:
         result = subprocess.run(  # noqa: S603 - fixed argv, no shell, resolved executable path
-            [claude_path, "--model", model, "--tools", "", "--strict-mcp-config", "-p"],
+            argv,
             input=prompt,
             cwd=_hook_judge_workdir(),
             capture_output=True,
@@ -808,10 +979,10 @@ def _hook_call_claude_p(claude_path: str, model: str, prompt: str, *, deadline: 
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return "error", f"claude -p did not respond within {min(_HOOK_JUDGE_TIMEOUT_SECONDS, remaining):.0f}s"
+        return "error", f"{label} did not respond within {min(_HOOK_JUDGE_TIMEOUT_SECONDS, remaining):.0f}s"
     except (OSError, ValueError) as exc:
         # OSError: `_hook_judge_workdir()`'s own `mkdir` (permissions, disk
-        # full) or the subprocess launch itself (`claude` disappearing
+        # full) or the subprocess launch itself (the binary disappearing
         # between `shutil.which` and this call). ValueError: an embedded NUL
         # byte, which a diff or transcript can carry (confirmed: `subprocess`
         # raises "embedded null byte" for one in an argv element, the reason
@@ -819,33 +990,179 @@ def _hook_call_claude_p(claude_path: str, model: str, prompt: str, *, deadline: 
         # argument). Both used to propagate uncaught, exiting `otari hook`
         # before it ever reached `httpx.post` and skipping every other gate
         # in the policy, mechanical and required ones included.
-        return "error", f"could not run claude -p ({exc})"
+        return "error", f"could not run {label} ({exc})"
 
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
-        return "error", f"claude -p exited {result.returncode}: {detail[:500]}"
+        return "error", f"{label} exited {result.returncode}: {detail[:500]}"
 
     try:
         verdict = json.loads(_hook_strip_judge_code_fence(result.stdout))
     except ValueError:
-        return "error", f"claude -p did not return valid JSON: {result.stdout[:500]!r}"
+        return "error", f"{label} did not return valid JSON: {result.stdout[:500]!r}"
 
     outcome = verdict.get("outcome") if isinstance(verdict, dict) else None
     reasoning = verdict.get("reasoning") if isinstance(verdict, dict) else None
     if outcome not in ("pass", "fail") or not isinstance(reasoning, str):
-        return "error", f"claude -p returned an unrecognized verdict shape: {result.stdout[:500]!r}"
+        return "error", f"{label} returned an unrecognized verdict shape: {result.stdout[:500]!r}"
 
     return outcome, reasoning[:_HOOK_MAX_JUDGE_REASONING_LENGTH]
 
 
+def _hook_call_claude_p(claude_path: str, model: str, prompt: str, *, deadline: float) -> tuple[str, str]:
+    """One `claude -p --model <model>` invocation; return (outcome, reasoning).
+
+    `claude -p`'s own "prompt is too long" rejection exits nonzero with the
+    message on stdout, not stderr (confirmed against a real call), which is
+    why `_hook_run_judge_subprocess` falls back to stdout for its own error
+    detail when stderr is empty.
+
+    `--tools ""` and `--strict-mcp-config`: this call's own prompt embeds the
+    diff and transcript verbatim, both attacker-influenceable (a crafted diff
+    or transcript could talk the model into more than a verdict; see the
+    `judge` gate type's own docstring on this), and it never needs a tool to
+    do its one job (read a prompt, emit one JSON object). `--tools ""`
+    disables every built-in tool; `--strict-mcp-config` with no `--mcp-config`
+    means no MCP server loads either, including one configured for the
+    repo being judged. Confirmed this still produces a normal verdict (and,
+    since it skips loading tool/MCP definitions into the system prompt,
+    measured cheaper than the same call without these flags).
+    """
+    argv = [claude_path, "--model", model, "--tools", "", "--strict-mcp-config", "-p"]
+    return _hook_run_judge_subprocess(argv, prompt, deadline=deadline, label="claude -p")
+
+
+def _hook_call_codex_exec(codex_path: str, model: str | None, prompt: str, *, deadline: float) -> tuple[str, str]:
+    """One `codex exec -` invocation; return (outcome, reasoning).
+
+    `model` is `None` when `--judge-model`/`OTARI_HOOK_JUDGE_MODEL` named
+    none specifically (see
+    `_HOOK_JUDGE_DEFAULT_MODEL`'s own comment on why this backend gets no
+    hardcoded "small model" default the way `claude` does): `--model` is then
+    left off the invocation entirely, letting Codex fall back to whatever
+    model this account already has configured as its own default, rather
+    than risk naming one this build/account might reject outright.
+
+    Codex's own non-interactive one-shot mode: the prompt goes over stdin
+    (`-` in place of a positional prompt argument, `codex exec`'s own way of
+    reading one), matching `_hook_call_claude_p`'s own choice for the same
+    reason (a diff or transcript can carry an embedded NUL byte, which
+    `subprocess` rejects in an argv element but not in piped input).
+
+    `--sandbox read-only` and `--ask-for-approval never` keep this call from
+    taking any action even if the model attempts one: this call's own prompt
+    embeds the diff and transcript verbatim, both attacker-influenceable (see
+    JudgeGate's own docstring on this), and Codex documents no flag to drop
+    tool/MCP definitions from the prompt entirely the way `_hook_call_claude_p`'s
+    `--tools ""`/`--strict-mcp-config` do, so this only bounds what an
+    attempted tool call could *do*, not whether the model attempts one; the
+    isolated `_hook_judge_workdir()` this runs in already limits what a
+    read-only sandboxed attempt could see either way. `--skip-git-repo-check`
+    because that workdir is a plain directory, not a repository, and
+    `--ephemeral` so this one-shot call leaves no rollout file behind for a
+    future Stop event's own transcript scan to mistake for real session
+    evidence.
+
+    outcome is always one of "pass"/"fail"/"error", the same contract
+    `_hook_call_claude_p` returns: `codex exec` prints only the final agent
+    message to stdout, progress to stderr, matched here by parsing that
+    stdout as the single JSON object the prompt demands.
+
+    No equivalent to `_hook_call_claude_p`'s "prompt is too long" retry:
+    Codex's own rejection wording for an oversize prompt has not been
+    confirmed against a real call, so `_hook_run_judge` never applies that
+    retry to this backend rather than match a marker string that might never
+    fire.
+    """
+    argv = [codex_path, "exec", "-"]
+    if model is not None:
+        argv += ["--model", model]
+    argv += [
+        "--sandbox",
+        "read-only",
+        "--ask-for-approval",
+        "never",
+        "--skip-git-repo-check",
+        "--ephemeral",
+        "--color",
+        "never",
+    ]
+    return _hook_run_judge_subprocess(argv, prompt, deadline=deadline, label="codex exec")
+
+
+# Binary name `shutil.which` resolves for each judge_cli backend.
+# _hook_run_judge's own inline dispatch (not a dict of the two caller
+# functions: their `model` parameter is optional for codex, required for
+# claude, and a dict's value type would otherwise have to widen to the union
+# of both, losing the distinction a type checker could otherwise hold onto)
+# picks which one to call.
+_JUDGE_CLI_BINARY_NAMES = {"claude": "claude", "codex": "codex"}
+
+# Which judge_cli backend a gate gets when neither it nor --judge-cli names
+# one: whichever CLI the harness actually invoking this hook run is itself
+# built on. See _hook_collect_judge_verdicts for the full precedence order.
+_JUDGE_CLI_DEFAULT_BY_HARNESS = {"claude-code": ("claude",), "codex": ("codex",)}
+
+
+def _hook_resolve_judge_cli(candidates: tuple[str, ...]) -> tuple[str, str] | None:
+    """First of `candidates` (in that order) whose own binary is found on PATH; None if none are."""
+    for name in candidates:
+        binary = shutil.which(_JUDGE_CLI_BINARY_NAMES[name])
+        if binary:
+            return name, binary
+    return None
+
+
+def _parse_judge_cli(ctx: click.Context, param: click.Parameter, value: str | None) -> tuple[str, ...] | None:
+    """Parse `--judge-cli`/`OTARI_HOOK_JUDGE_CLI`: a comma-separated, ordered judge_cli override.
+
+    None (unset) means "no session-wide override": a gate's own `judge_cli`
+    still wins over it either way, and a gate naming none of its own falls
+    back to the invoking harness's own default (`_JUDGE_CLI_DEFAULT_BY_HARNESS`).
+    """
+    if value is None:
+        return None
+    names = tuple(name.strip() for name in value.split(",") if name.strip())
+    unsupported = [name for name in names if name not in _JUDGE_CLI_BINARY_NAMES]
+    if not names or unsupported:
+        raise click.BadParameter(
+            f"must be a comma-separated list of: {', '.join(sorted(_JUDGE_CLI_BINARY_NAMES))} (got {value!r})."
+        )
+    return names
+
+
 def _hook_run_judge(
-    rubric: str, diff: str, transcript: str, *, model: str, deadline: float, dry_run: bool = False
+    rubric: str,
+    diff: str,
+    transcript: str,
+    *,
+    judge_cli: tuple[str, ...],
+    model: str | None,
+    deadline: float,
+    dry_run: bool = False,
 ) -> tuple[str, str]:
-    """Invoke `claude -p --model <model>` for one judge gate's rubric; return (outcome, reasoning).
+    """Invoke the first available `judge_cli` backend for one judge gate's rubric; return (outcome, reasoning).
 
     Otari itself never calls a model (see JudgeGate's own docstring); this is
-    that call, made locally against the caller's own Claude Code
-    subscription, not billed through Otari.
+    that call, made locally against whatever subscription the resolved CLI
+    itself is signed into, not billed through Otari.
+
+    `model` is the caller's own explicit choice (`--judge-model`/
+    `OTARI_HOOK_JUDGE_MODEL`), or `None` for "no explicit choice, use this
+    backend's own default": `claude` gets `_HOOK_JUDGE_DEFAULT_MODEL`
+    (Haiku); `codex` gets none at all, `_hook_call_codex_exec` then omitting
+    `--model` entirely (see `_HOOK_JUDGE_DEFAULT_MODEL`'s own comment on why
+    the two are not symmetric here). Resolved after `judge_cli`, not before:
+    which default applies depends on which backend actually gets picked.
+
+    `judge_cli` is the already-resolved preference order for this one gate
+    (a gate's own `judge_cli`, else `--judge-cli`/`OTARI_HOOK_JUDGE_CLI`, else
+    the invoking harness's own default; see `_hook_collect_judge_verdicts`).
+    `_hook_resolve_judge_cli` picks the first entry whose own binary is on
+    PATH; this is what lets a gate listing `judge_cli: [claude, codex]` still
+    get a verdict on a machine with only one of the two installed, and what
+    makes a bare, single-entry list behave exactly as a hardcoded "claude"
+    always did before this existed.
 
     `dry_run` skips the real call entirely, before ever touching `shutil.which`
     or `subprocess`: the wire contract has no fourth outcome to spell "this
@@ -861,31 +1178,42 @@ def _hook_run_judge(
     entirely: the transcript is supplementary "why" context for a judge
     rubric, the diff is the primary evidence, so a diff-only retry is a
     strictly better fallback than reporting no verdict at all. Only for that
-    specific rejection, and only once: any other failure, or a rejection that
-    persists with no transcript left to drop, reports "error" as it always
-    has.
+    specific rejection, only once, and only against the `claude` backend
+    (`_hook_call_codex_exec`'s own docstring says why Codex gets no
+    equivalent yet): any other failure, or a rejection that persists with no
+    transcript left to drop, reports "error" as it always has.
     """
     if dry_run:
         prompt = _hook_build_judge_prompt(rubric, diff, transcript)
         estimated_tokens = _hook_estimate_tokens(prompt)
         return (
             "error",
-            f"--judge-dry-run: real claude -p call skipped; prompt would have been "
+            f"--judge-dry-run: real {'/'.join(judge_cli)} call skipped; prompt would have been "
             f"{len(prompt):,} chars (~{estimated_tokens:,} tokens estimated at "
             f"~{_HOOK_JUDGE_CHARS_PER_TOKEN_ESTIMATE} chars/token).",
         )
 
-    claude_path = shutil.which("claude")
-    if not claude_path:
-        return "error", "the `claude` CLI was not found on PATH"
+    resolved = _hook_resolve_judge_cli(judge_cli)
+    if resolved is None:
+        tried = ", ".join(_JUDGE_CLI_BINARY_NAMES[name] for name in judge_cli)
+        return "error", f"none of the configured judge CLI(s) were found on PATH: {tried}"
+    backend, binary_path = resolved
 
-    outcome, reasoning = _hook_call_claude_p(
-        claude_path, model, _hook_build_judge_prompt(rubric, diff, transcript), deadline=deadline
-    )
-    if outcome == "error" and transcript and _HOOK_JUDGE_PROMPT_TOO_LONG_MARKER in reasoning.lower():
-        outcome, reasoning = _hook_call_claude_p(
-            claude_path, model, _hook_build_judge_prompt(rubric, diff, ""), deadline=deadline
-        )
+    def call(prompt_text: str) -> tuple[str, str]:
+        if backend == "claude":
+            return _hook_call_claude_p(
+                binary_path, model if model is not None else _HOOK_JUDGE_DEFAULT_MODEL, prompt_text, deadline=deadline
+            )
+        return _hook_call_codex_exec(binary_path, model, prompt_text, deadline=deadline)
+
+    outcome, reasoning = call(_hook_build_judge_prompt(rubric, diff, transcript))
+    if (
+        backend == "claude"
+        and outcome == "error"
+        and transcript
+        and _HOOK_JUDGE_PROMPT_TOO_LONG_MARKER in reasoning.lower()
+    ):
+        outcome, reasoning = call(_hook_build_judge_prompt(rubric, diff, ""))
     return outcome, reasoning
 
 
@@ -896,10 +1224,12 @@ def _hook_collect_judge_verdicts(
     transcript_path: str | None,
     changed_paths: list[str],
     *,
-    judge_model: str,
+    judge_model: str | None,
     judge_dry_run: bool = False,
+    harness: str = "claude-code",
+    judge_cli_override: tuple[str, ...] | None = None,
 ) -> list[dict[str, str]]:
-    """Run every applicable judge gate in the local policy, one `claude -p` call each.
+    """Run every applicable judge gate in the local policy, one model-CLI call each.
 
     Parses the policy locally with the same pure `domain.policy.parse_policy`
     the Hook Server itself uses, purely to find which gates are judge gates
@@ -923,9 +1253,19 @@ def _hook_collect_judge_verdicts(
     `judge_dry_run` (see `hook`'s own `--judge-dry-run`) still runs this whole
     applicability check, still reads the diff and transcript, and still
     writes the same `_hook_log_judge_call` audit lines; only `_hook_run_judge`
-    itself skips the real `claude -p` call. This is what makes the resulting
+    itself skips the real model-CLI call. This is what makes the resulting
     log a real count of how often the model would have been invoked, not a
     guess: everything up to the call itself runs exactly as it would for real.
+
+    `harness` picks which transcript format `transcript_path` is read as
+    (Claude Code's Message-API transcript vs. Codex's rollout JSONL). It also
+    supplies the *default* judge_cli order (`_JUDGE_CLI_DEFAULT_BY_HARNESS`)
+    for a gate that names none of its own: precedence, most specific first,
+    is a gate's own `JudgeGate.judge_cli`, then this call's own
+    `judge_cli_override` (`hook`'s own `--judge-cli`/`OTARI_HOOK_JUDGE_CLI`),
+    then that harness default. A gate or override naming more than one CLI is
+    an ordered fallback list, resolved by `_hook_resolve_judge_cli`: the first
+    entry whose own binary is on PATH is what actually gets invoked.
     """
     try:
         spec = parse_policy(policy_yaml, source=str(gates_file))
@@ -959,7 +1299,8 @@ def _hook_collect_judge_verdicts(
     diff = _hook_collect_diff(repo_root)
     diff_collection_failed = diff is None
     diff = diff or ""
-    transcript = _hook_extract_judge_transcript(Path(transcript_path)) if transcript_path else ""
+    extract_transcript = _hook_extract_codex_judge_transcript if harness == "codex" else _hook_extract_judge_transcript
+    transcript = extract_transcript(Path(transcript_path)) if transcript_path else ""
     if len(transcript) > _HOOK_JUDGE_MAX_TRANSCRIPT_CHARS:
         click.echo(
             f"otari hook: transcript is {len(transcript):,} characters, over the "
@@ -980,7 +1321,7 @@ def _hook_collect_judge_verdicts(
 
     results = []
     for gate in judge_gates:
-        # Logged before the call, not after: a hung or killed `claude -p`
+        # Logged before the call, not after: a hung or killed model-CLI
         # invocation must still show up in the audit trail rather than
         # silently vanishing along with the process that would have logged
         # its outcome.
@@ -988,12 +1329,19 @@ def _hook_collect_judge_verdicts(
         if diff_collection_failed:
             # No model call at all: a diff this gate cannot see is not
             # evidence to judge against, and every other pre-flight failure
-            # here (a missing `claude` binary, an exhausted time budget)
-            # already reports "error" without one either.
+            # here (no configured judge_cli found on PATH, an exhausted time
+            # budget) already reports "error" without one either.
             outcome, reasoning = "error", "could not collect the working tree diff"
         else:
+            judge_cli = gate.judge_cli or judge_cli_override or _JUDGE_CLI_DEFAULT_BY_HARNESS.get(harness, ("claude",))
             outcome, reasoning = _hook_run_judge(
-                gate.rubric, diff, transcript, model=judge_model, deadline=deadline, dry_run=judge_dry_run
+                gate.rubric,
+                diff,
+                transcript,
+                judge_cli=judge_cli,
+                model=judge_model,
+                deadline=deadline,
+                dry_run=judge_dry_run,
             )
         _hook_log_judge_call(repo_root, gate.id, outcome, detail=reasoning if judge_dry_run else None)
         results.append({"gate_id": gate.id, "outcome": outcome, "reasoning": reasoning})
@@ -1207,7 +1555,7 @@ def _hook_collect_check_verdicts(
 @cli.group(name="hook", invoke_without_command=True)
 @click.option(
     "--harness",
-    type=click.Choice(["claude-code"]),
+    type=click.Choice(["claude-code", "codex"]),
     default="claude-code",
     show_default=True,
     help="Agent integration sending this callback.",
@@ -1224,9 +1572,23 @@ def _hook_collect_check_verdicts(
 @click.option(
     "--judge-model",
     envvar="OTARI_HOOK_JUDGE_MODEL",
-    default=_HOOK_JUDGE_DEFAULT_MODEL,
-    show_default=True,
-    help="Model `claude -p` uses for a judge gate's model call.",
+    default=None,
+    help=(
+        f"Model the resolved judge CLI uses for a judge gate's model call. Defaults to "
+        f"{_HOOK_JUDGE_DEFAULT_MODEL!r} when the resolved backend is claude; when it is codex, "
+        "left unset (that account's own default model applies) unless given explicitly here."
+    ),
+)
+@click.option(
+    "--judge-cli",
+    envvar="OTARI_HOOK_JUDGE_CLI",
+    default=None,
+    callback=_parse_judge_cli,
+    help=(
+        "Comma-separated, ordered judge-gate CLI backend(s) to try (claude, codex); the first one "
+        "found on PATH is used. A gate's own judge_cli overrides this; with neither set, defaults to "
+        "whichever CLI --harness itself implies."
+    ),
 )
 @click.option(
     "--judge-dry-run",
@@ -1246,7 +1608,8 @@ def hook(
     config: str | None,
     url: str | None,
     api_key: str | None,
-    judge_model: str,
+    judge_model: str | None,
+    judge_cli: tuple[str, ...] | None,
     judge_dry_run: bool,
 ) -> None:
     """Native callback entry point for a supported agent's hook protocol.
@@ -1258,11 +1621,20 @@ def hook(
     harness-specific transport. See docs/agent-gates.md.
 
     Exit code is this harness's own protocol, not otari policy check's:
-    Claude Code's PreToolUse and Stop hooks both take 0 (proceed) or 2 (block,
-    stderr shown to the agent). Never blocks on a problem that is not a
-    required gate failing: a missing policy, an unreachable gateway, or a
-    missing credential all exit 0, with a message on stderr where there is
+    Claude Code's and Codex's PreToolUse and Stop hooks both take 0 (proceed)
+    or 2 (block, stderr shown to the agent). Never blocks on a problem that is
+    not a required gate failing: a missing policy, an unreachable gateway, or
+    a missing credential all exit 0, with a message on stderr where there is
     one worth surfacing.
+
+    `--harness` picks which payload/transcript shape is expected and which
+    tool names are read as an edit vs. a command (see
+    `_HOOK_COMMAND_TOOL_FIELDS_BY_HARNESS`, `_CODEX_PATCH_TOOL_NAME`); Codex's
+    own Code Mode wraps shell/apply_patch calls in a JS snippet rather than
+    naming one tool, and its PreToolUse dispatch does not yet cover that
+    surface at all (openai/codex#23411), so a `changed_path`/`command_match`
+    gate scoped to `PreToolUse` will not see a Code Mode edit until upstream
+    fixes that; `Stop`'s own Git-status fallback and transcript scan still do.
 
     A group, not a plain command, so `otari hook setup` can live alongside
     it: invoked with no subcommand (the shape every existing settings file
@@ -1329,11 +1701,37 @@ def hook(
     if event == "PreToolUse":
         tool_name = payload.get("tool_name", "")
         tool_input = payload.get("tool_input") or {}
+        command_fields = _HOOK_COMMAND_TOOL_FIELDS_BY_HARNESS.get(harness, _HOOK_COMMAND_TOOL_FIELDS)
+        is_apply_patch = harness == "codex" and tool_name == _CODEX_PATCH_TOOL_NAME
         # A tool call is either an edit or a shell command, never both, so at
         # most one of these evidence lists is ever populated per call.
-        path_field = _HOOK_EDIT_TOOL_PATH_FIELDS.get(tool_name)
-        command_field = _HOOK_COMMAND_TOOL_FIELDS.get(tool_name)
-        if path_field:
+        path_field = None if is_apply_patch else _HOOK_EDIT_TOOL_PATH_FIELDS.get(tool_name)
+        command_field = command_fields.get(tool_name)
+        if is_apply_patch:
+            # apply_patch carries no bare file_path the way Edit/Write do:
+            # tool_input["command"] is the whole patch envelope, one or more
+            # files named on its own header lines.
+            patch_text = tool_input.get("command")
+            if not patch_text:
+                return
+            resolved_paths = []
+            for patch_path in _hook_extract_patch_paths(patch_text):
+                try:
+                    # Joined onto `repo` (the call's own cwd), not resolved
+                    # bare: an apply_patch header names its target relative to
+                    # the tool call's own working directory, unlike Edit/
+                    # Write's always-absolute file_path. `Path.__truediv__`
+                    # discards `repo` on its own if `patch_path` is already
+                    # absolute, so both shapes resolve correctly here. See the
+                    # Windows as_posix() note below: the same reason applies
+                    # here, one target at a time.
+                    resolved_paths.append((repo / patch_path).resolve().relative_to(root).as_posix())
+                except ValueError:
+                    continue  # Outside the repo: nothing this policy can name.
+            if not resolved_paths:
+                return
+            changed_paths = resolved_paths
+        elif path_field:
             target = tool_input.get(path_field)
             if not target:
                 return
@@ -1375,14 +1773,17 @@ def hook(
             return
         changed_paths = collected
 
-        # transcript_path is Claude Code's own name for the session's JSONL
-        # transcript on disk. Absent, or unreadable, submits None rather than
-        # `[]`: `[]` means "collected, and there is none", which would let a
-        # required command_match/command_if_changed gate read a failed
-        # collection as a clean pass instead of the unresolved `unknown` it
-        # actually is (see docs/agent-gates.md).
+        # transcript_path is the session's JSONL transcript on disk (each
+        # harness's own name/format for it). Absent, or unreadable, submits
+        # None rather than `[]`: `[]` means "collected, and there is none",
+        # which would let a required command_match/command_if_changed gate
+        # read a failed collection as a clean pass instead of the unresolved
+        # `unknown` it actually is (see docs/agent-gates.md).
         transcript_path = payload.get("transcript_path")
-        commands = _hook_collect_transcript_commands(Path(transcript_path)) if transcript_path else None
+        collect_transcript_commands = (
+            _hook_collect_codex_transcript_commands if harness == "codex" else _hook_collect_transcript_commands
+        )
+        commands = collect_transcript_commands(Path(transcript_path)) if transcript_path else None
         command_scope = "session"
         if commands:
             # Same truncation the PreToolUse Bash branch applies to its one
@@ -1410,6 +1811,8 @@ def hook(
             changed_paths,
             judge_model=judge_model,
             judge_dry_run=judge_dry_run,
+            harness=harness,
+            judge_cli_override=judge_cli,
         )
         check_results = _hook_collect_check_verdicts(policy_yaml, gates_file, root, changed_paths)
     else:
@@ -1502,7 +1905,7 @@ def hook(
         for gate in failing
     )
     if blocked:
-        # stop_hook_active is Claude Code's own signal that this Stop is
+        # stop_hook_active is the harness's own signal that this Stop is
         # already the continuation a previous block forced. It matters because
         # Claude Code overrides a Stop hook that blocks eight times running
         # without progress, and then simply lets the turn end: a required gate
@@ -1514,12 +1917,19 @@ def hook(
         # forbidden change. So keep blocking, and say plainly that the block
         # is finite, so the agent spends the remaining attempts fixing the
         # gate or telling the user it cannot, rather than retrying blind.
-        repeat_note = (
-            "\n  (already blocked once this turn; Claude Code overrides a Stop hook after 8 "
-            "consecutive blocks, so fix this now or say why you cannot.)"
-            if payload.get("stop_hook_active")
-            else ""
-        )
+        #
+        # Codex's own retry cap (if it has a fixed one) has not been
+        # confirmed against a real session the way Claude Code's has, so its
+        # note names no specific number rather than guessing one.
+        if payload.get("stop_hook_active"):
+            repeat_note = (
+                "\n  (already blocked once this turn; Claude Code overrides a Stop hook after 8 "
+                "consecutive blocks, so fix this now or say why you cannot.)"
+                if harness == "claude-code"
+                else "\n  (already blocked once this turn; fix this now or say why you cannot.)"
+            )
+        else:
+            repeat_note = ""
         click.echo(f"otari hook: blocked ({harness}, {event}):\n{summary}{repeat_note}", err=True)
         raise SystemExit(2)
     # An advisory gate failed but nothing required did: warn without
@@ -1535,8 +1945,8 @@ def hook(
 def _otari_binary_path() -> str:
     """Absolute path to this otari install's own binary.
 
-    Claude Code's hook subprocess does not inherit an activated shell's PATH,
-    so a bare "otari" often will not resolve. otari's own console-script
+    A hook subprocess (Claude Code's, Codex's) does not inherit an activated
+    shell's PATH, so a bare "otari" often will not resolve. otari's own console-script
     wrapper sits next to the interpreter running it (same venv/bin), which is
     what sys.executable already names.
     """
@@ -1647,10 +2057,31 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
     return not updated
 
 
+class _HookSetup(NamedTuple):
+    """Where one harness reads its own hook registration from, and the matcher vocabulary
+    (see _HOOK_EDIT_TOOL_PATH_FIELDS, _CODEX_PATCH_TOOL_NAME, _HOOK_COMMAND_TOOL_FIELDS_BY_HARNESS)
+    its own PreToolUse dispatch expects. Codex's own upstream docs say "exec" is accepted as a
+    matcher alias for what its payload actually reports as tool_name "code_mode_exec"; that has
+    not been confirmed against a real dispatch, so `command_matcher` below names both literally
+    rather than depend on the alias translation actually being implemented.
+    """
+
+    settings_dir: str
+    settings_name: str
+    edit_matcher: str
+    command_matcher: str
+
+
+_HOOK_SETUP_BY_HARNESS = {
+    "claude-code": _HookSetup(".claude", "settings.local.json", "Edit|Write|NotebookEdit", "Bash"),
+    "codex": _HookSetup(".codex", "hooks.json", "apply_patch", "Bash|exec|code_mode_exec"),
+}
+
+
 @hook.command(name="setup")
 @click.option(
     "--harness",
-    type=click.Choice(["claude-code"]),
+    type=click.Choice(["claude-code", "codex"]),
     default="claude-code",
     show_default=True,
     help="Agent integration to configure.",
@@ -1663,15 +2094,16 @@ def _merge_hook_entry(settings_path: Path, event: str, command: str, *, matcher:
 def hook_setup(harness: str, api_key: str | None) -> None:
     """Register otari hook in a supported agent's own settings.
 
-    Writes or updates a PreToolUse hook entry and a Stop hook entry in
-    .claude/settings.local.json (personal, gitignored, never committed) so
-    registering the Hook Server is not a manual JSON edit. Both point at the
-    same otari hook invocation; Claude Code passes its own hook_event_name in
-    the payload, so one callback serves either event. Offers to scaffold a
-    starter .otari-gates.yml when this repo has none yet, and picks the
-    PreToolUse matcher (whether it needs to cover Bash) from whatever gates
-    the policy turns out to have; Stop needs no matcher; see
-    docs/agent-gates.md for why both are registered unconditionally.
+    Writes or updates a PreToolUse hook entry and a Stop hook entry in the
+    harness's own personal, gitignored settings file (see
+    _HOOK_SETUP_BY_HARNESS) so registering the Hook Server is not a manual
+    JSON edit. Both point at the same otari hook invocation; the harness
+    passes its own hook_event_name in the payload, so one callback serves
+    either event. Offers to scaffold a starter .otari-gates.yml when this
+    repo has none yet, and picks the PreToolUse matcher (whether it needs to
+    cover a shell tool) from whatever gates the policy turns out to have;
+    Stop needs no matcher; see docs/agent-gates.md for why both are
+    registered unconditionally.
     """
     root = _hook_find_repo_root(Path.cwd())
     if root is None:
@@ -1688,8 +2120,9 @@ def hook_setup(harness: str, api_key: str | None) -> None:
                 f"passes until {gates_file.name} exists; see docs/agent-gates.md."
             )
 
+    setup = _HOOK_SETUP_BY_HARNESS[harness]
     include_bash = _gates_file_allows_bash(gates_file)
-    matcher = "Edit|Write|NotebookEdit|Bash" if include_bash else "Edit|Write|NotebookEdit"
+    matcher = f"{setup.edit_matcher}|{setup.command_matcher}" if include_bash else setup.edit_matcher
 
     embedded_key = api_key
     if not embedded_key:
@@ -1709,10 +2142,13 @@ def hook_setup(harness: str, api_key: str | None) -> None:
         command_parts += ["--api-key", embedded_key]
     command = shlex.join(command_parts)
 
-    settings_path = root / ".claude" / "settings.local.json"
+    settings_path = root / setup.settings_dir / setup.settings_name
     pretooluse_created = _merge_hook_entry(settings_path, "PreToolUse", command, matcher=matcher)
     click.echo(f"{'Added' if pretooluse_created else 'Updated'} the PreToolUse hook in {settings_path}.")
-    click.echo(f"Matcher: {matcher}" + ("" if include_bash else " (add a command_match gate to also cover Bash)"))
+    click.echo(
+        f"Matcher: {matcher}"
+        + ("" if include_bash else f" (add a command_match gate to also cover {setup.command_matcher})")
+    )
 
     # Registered unconditionally, not only when the policy has a gate that
     # benefits: changed_path already falls back to `git status` on Stop
