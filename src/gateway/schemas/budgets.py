@@ -10,7 +10,15 @@ import uuid
 
 from pydantic import BaseModel, Field
 
-from gateway.models.budgets import MAX_COUNT_LIMIT, Budget, BudgetResetLog, ResetAlignment, ScopedBudget, ScopeType
+from gateway.models.budgets import (
+    MAX_COUNT_LIMIT,
+    Budget,
+    BudgetResetLog,
+    ResetAlignment,
+    ScopedBudget,
+    ScopeType,
+    WorkspaceBudgetDefault,
+)
 from gateway.models.money import MAX_USD_LIMIT, as_float
 
 _PERIOD_DESCRIPTION = (
@@ -459,6 +467,77 @@ class OrganizationScopedBudgetsPublic(BaseModel):
     count: int
 
 
+class WorkspaceMemberBudgetPolicyCreate(BaseModel):
+    """Request body for creating a default."""
+
+    budget_id: str = Field(
+        min_length=1,
+        max_length=255,
+        description="The budget this workspace hands to every member",
+    )
+    provider_key_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        pattern=r"^\S+$",
+        description=(
+            "Narrow the default to one provider instance; omit or null to apply to every provider. "
+            "Must name a real instance: a blank value would materialize ceilings that never bind"
+        ),
+    )
+
+
+class WorkspaceMemberBudgetPolicyUpdate(BaseModel):
+    """Request body for pointing a default at a different budget.
+
+    Members already materialized from this default keep the budget they were
+    given: their ceiling names it directly, and this only changes what a member
+    joining afterwards is handed. Editing the *budget* is the retroactive act,
+    and it moves everyone naming it, in this workspace and outside it.
+    """
+
+    budget_id: str = Field(min_length=1, max_length=255)
+
+
+class WorkspaceMemberBudgetPolicyPublic(BaseModel):
+    """One default and its template values."""
+
+    id: str
+    workspace_id: uuid.UUID
+    budget_id: str
+    provider_key_id: str | None
+    name: str | None
+    max_budget: float | None
+    token_limit: int | None
+    request_limit: int | None
+    budget_duration_sec: int | None
+    reset_alignment: str | None
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_model(cls, default: WorkspaceBudgetDefault, budget: Budget) -> WorkspaceMemberBudgetPolicyPublic:
+        return cls(
+            id=default.id,
+            workspace_id=default.workspace_id,
+            budget_id=default.budget_id,
+            provider_key_id=default.provider_key_id,
+            name=budget.name,
+            max_budget=as_float(budget.max_budget),
+            token_limit=budget.token_limit,
+            request_limit=budget.request_limit,
+            budget_duration_sec=budget.budget_duration_sec,
+            reset_alignment=budget.reset_alignment,
+            created_at=default.created_at.isoformat(),
+            updated_at=default.updated_at.isoformat(),
+        )
+
+
+class WorkspaceMemberBudgetPoliciesPublic(BaseModel):
+    data: list[WorkspaceMemberBudgetPolicyPublic]
+    count: int
+
+
 __all__ = [
     "BudgetResetLogResponse",
     "BudgetResponse",
@@ -476,4 +555,8 @@ __all__ = [
     "ScopedBudgetResponse",
     "UpdateBudgetRequest",
     "UpdateScopedBudgetRequest",
+    "WorkspaceMemberBudgetPoliciesPublic",
+    "WorkspaceMemberBudgetPolicyCreate",
+    "WorkspaceMemberBudgetPolicyPublic",
+    "WorkspaceMemberBudgetPolicyUpdate",
 ]

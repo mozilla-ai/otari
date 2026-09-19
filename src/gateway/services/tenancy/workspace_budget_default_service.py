@@ -1,24 +1,10 @@
 """Workspace-level templates for per-member ``scoped_budgets`` ceilings.
 
-A default (``WorkspaceBudgetDefault``) is a workspace-level template for a
-per-member spend limit. When a member joins the workspace (or when a default
-is created on a workspace that already has members) it is **eagerly
-materialized** into a per-member :class:`ScopedBudget` row, so the ceiling is
-visible immediately rather than on first spend.
+A default is a template for a per-member spend limit.
+It is materialized into one ceiling per member when a member joins or when the default is created.
+The materialization methods flush only, and the create, update and delete methods commit.
 
-The wire DTOs keep the ``WorkspaceMemberBudgetPolicy*`` names from
-``otari-ai``'s ``budget_policy_service`` (the hosted equivalent this is ported
-from), so the generated client stays recognizable across both trees; the
-stored fields follow this repo's own ``ScopedBudget`` vocabulary
-(``max_budget``, ``budget_duration_sec``) rather than otari-ai's
-(``budget_limit``, ``spend_period``), since OSS budgets are USD/seconds-only
-with no token or request dimension.
-
-Materialization methods (``materialize_for_member``, ``materialize_for_default``)
-are flush-only: they do not commit, so they fold into the enclosing
-transaction at each call site (workspace creation, adding a member,
-organization-member creation with workspace assignments, and first-boot
-provisioning). CRUD methods commit on success.
+NOTE: A caller of a materialization method must commit the enclosing transaction.
 """
 
 from __future__ import annotations
@@ -27,7 +13,6 @@ import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, Field
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,9 +30,14 @@ from gateway.models.budgets import (
     ScopedBudget,
     WorkspaceBudgetDefault,
 )
-from gateway.models.money import as_float
 from gateway.models.tenancy import User, Workspace, WorkspaceMember
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
+from gateway.schemas.budgets import (
+    WorkspaceMemberBudgetPoliciesPublic,
+    WorkspaceMemberBudgetPolicyCreate,
+    WorkspaceMemberBudgetPolicyPublic,
+    WorkspaceMemberBudgetPolicyUpdate,
+)
 from gateway.services.budget_periods import period_window
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -56,96 +46,6 @@ from gateway.services.tenancy.organization_service import OrganizationService
 # and the ceiling a list read pages at.
 _MATERIALIZE_PAGE_SIZE = 500
 _MAX_LIST_LIMIT = 1000
-
-
-
-class WorkspaceMemberBudgetPolicyCreate(BaseModel):
-    """Request body for creating a default."""
-
-    budget_id: str = Field(
-        min_length=1,
-        max_length=255,
-        description="The budget this workspace hands to every member",
-    )
-    # Absent means every provider; a present value must name a real instance.
-    # Constrained rather than only length-checked because this template is
-    # materialized verbatim into a ceiling per member, and a ceiling whose
-    # `provider_key_id` is a blank string binds to nothing: resolution matches
-    # `provider_key_id == provider_instance OR IS NULL` and blank is neither, so
-    # every member would get a cap that is stored, listed, and never enforced.
-    # Reachable by an organization or workspace owner/admin, not only an operator,
-    # which is why it is refused here rather than left to the dashboard.
-    provider_key_id: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=255,
-        pattern=r"^\S+$",
-        description=(
-            "Narrow the default to one provider instance; omit or null to apply to every provider. "
-            "Must name a real instance: a blank value would materialize ceilings that never bind"
-        ),
-    )
-
-
-class WorkspaceMemberBudgetPolicyUpdate(BaseModel):
-    """Request body for pointing a default at a different budget.
-
-    Members already materialized from this default keep the budget they were
-    given: their ceiling names it directly, and this only changes what a member
-    joining afterwards is handed. Editing the *budget* is the retroactive act,
-    and it moves everyone naming it, in this workspace and outside it.
-    """
-
-    budget_id: str = Field(min_length=1, max_length=255)
-
-
-class WorkspaceMemberBudgetPolicyPublic(BaseModel):
-    """One default and its template values."""
-
-    id: str
-    workspace_id: uuid.UUID
-    budget_id: str
-    provider_key_id: str | None
-    # Read off the budget, not stored here. Carried on the wire so the dashboard
-    # can render a default without fetching every budget to resolve one id, and
-    # so this shape stays what it was before the limit moved onto the budget.
-    name: str | None
-    max_budget: float | None
-    token_limit: int | None
-    request_limit: int | None
-    budget_duration_sec: int | None
-    # The other way the budget can carry a period, alongside
-    # ``budget_duration_sec`` and never with it (a CHECK on ``budgets`` refuses
-    # both). Carried for the same reason ``ScopedBudgetResponse`` carries it: a
-    # default naming a calendar-aligned budget would otherwise read back with
-    # every period field null, which is how a row that never resets looks.
-    reset_alignment: str | None
-    created_at: str
-    updated_at: str
-
-    @classmethod
-    def from_model(cls, default: WorkspaceBudgetDefault, budget: Budget) -> WorkspaceMemberBudgetPolicyPublic:
-        return cls(
-            id=default.id,
-            workspace_id=default.workspace_id,
-            budget_id=default.budget_id,
-            provider_key_id=default.provider_key_id,
-            name=budget.name,
-            # Narrowed on the way out: the cap is exact in the database, while
-            # the wire contract and the dashboard client stay float.
-            max_budget=as_float(budget.max_budget),
-            token_limit=budget.token_limit,
-            request_limit=budget.request_limit,
-            budget_duration_sec=budget.budget_duration_sec,
-            reset_alignment=budget.reset_alignment,
-            created_at=default.created_at.isoformat(),
-            updated_at=default.updated_at.isoformat(),
-        )
-
-
-class WorkspaceMemberBudgetPoliciesPublic(BaseModel):
-    data: list[WorkspaceMemberBudgetPolicyPublic]
-    count: int
 
 
 class WorkspaceBudgetDefaultService:
@@ -589,10 +489,4 @@ class WorkspaceBudgetDefaultService:
         await self.db.commit()
 
 
-__all__ = [
-    "WorkspaceBudgetDefaultService",
-    "WorkspaceMemberBudgetPoliciesPublic",
-    "WorkspaceMemberBudgetPolicyCreate",
-    "WorkspaceMemberBudgetPolicyPublic",
-    "WorkspaceMemberBudgetPolicyUpdate",
-]
+__all__ = ["WorkspaceBudgetDefaultService"]

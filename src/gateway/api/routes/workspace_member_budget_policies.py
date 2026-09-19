@@ -16,13 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
 from gateway.api.routes.organizations import Message
-from gateway.services.tenancy.workspace_budget_default_service import (
-    WorkspaceBudgetDefaultService,
+from gateway.schemas.budgets import (
     WorkspaceMemberBudgetPoliciesPublic,
     WorkspaceMemberBudgetPolicyCreate,
     WorkspaceMemberBudgetPolicyPublic,
     WorkspaceMemberBudgetPolicyUpdate,
 )
+from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 # Auth is declared on the router, matching `routes/workspaces.py`: every
 # handler here needs the master key, and a future one that forgot the

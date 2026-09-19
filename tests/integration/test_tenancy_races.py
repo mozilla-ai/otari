@@ -43,6 +43,7 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.schemas.budgets import WorkspaceMemberBudgetPolicyCreate
 from gateway.services.password_service import verify_password_async
 from gateway.services.tenancy import OrganizationService, WorkspaceService, user_service
 from gateway.services.tenancy.errors import (
@@ -69,10 +70,7 @@ from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
     WorkspaceActivationService,
 )
-from gateway.services.tenancy.workspace_budget_default_service import (
-    WorkspaceBudgetDefaultService,
-    WorkspaceMemberBudgetPolicyCreate,
-)
+from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 from .tenancy_helpers import create_budget, create_member
 
