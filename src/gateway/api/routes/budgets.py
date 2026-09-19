@@ -11,12 +11,18 @@ from sqlmodel import col
 
 from gateway.api.deps import get_db, require_deployment_operator
 from gateway.core.surface import Surface
-from gateway.models.budgets import MAX_COUNT_LIMIT, Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.budgets import (
+    MAX_COUNT_LIMIT,
+    Budget,
+    BudgetResetLog,
+    ResetAlignment,
+    ScopedBudget,
+    WorkspaceBudgetDefault,
+)
 from gateway.models.money import MAX_USD_LIMIT, as_float, to_usd, to_usd_or_none
 from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.services.budget_retiming import cadence_of, retime_ceilings_for_budget
-from gateway.services.scoped_budget_service import ResetAlignment
 
 router = APIRouter(
     prefix="/budgets",

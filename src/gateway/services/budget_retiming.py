@@ -1,23 +1,8 @@
 """Move a budget's ceilings onto the cadence it now carries.
 
-A leaf module for the same reason :mod:`gateway.services.budget_periods` is one,
-and it sits directly on top of it.
-Both the deployment-wide and the tenant-scoped surface change a budget's period,
-and without a shared home the retiming would be written twice, which is a rule
-that holds on one surface and not the other.
-This imports the entity models and ``budget_periods`` only.
-
-**Why retiming is necessary at all.** A ceiling holds its own
-``period_start``/``period_end`` and reads the cadence *through* the budget it
-names, so editing the budget's period leaves the two disagreeing. One direction
-is an enforcement bug rather than a cosmetic one:
-``scoped_budget_service._roll_expired_periods`` only ever updates a row whose
-``period_end`` is not null (that guard is what makes the roll a lock-free
-compare-and-swap at the boundary), so a budget moved from "no reset" to a
-periodic cadence leaves its ceilings with NULL windows that never roll at all,
-accumulating spend forever while the API reports the new cadence. The reverse
-leaves a stale boundary that fires exactly once, at an arbitrary moment, zeroing
-counters for no reason anyone can point at.
+A ceiling stores its own window and reads the cadence through its budget.
+A change to the budget's period leaves the two in disagreement until the ceilings are retimed.
+A ceiling left with no window never rolls, so its spend accumulates while the budget reports a cadence.
 """
 
 from datetime import UTC, datetime

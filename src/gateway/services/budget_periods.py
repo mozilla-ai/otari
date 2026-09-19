@@ -1,26 +1,11 @@
-"""How a budget's reset cadence becomes a window, and the vocabulary for saying it.
+"""How a budget's reset cadence becomes a window.
 
-A leaf module on purpose.
-Every surface that caps spend derives its window here, so a calendar-aligned
-budget cannot get a real window on one path and none on another.
-Nothing here imports from the gateway, so any surface can depend on it.
+Every surface that caps spend derives its window here, so a calendar-aligned budget gets the same window on each.
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import Literal, get_args
 
-ALIGN_DAY = "calendar_day"
-ALIGN_WEEK = "calendar_week"
-ALIGN_MONTH = "calendar_month"
-
-# The other way a budget can carry a period, and the one place the wire
-# vocabulary is written. A budget holds either a duration in seconds (a rolling
-# window measured from the last reset) or one of these (a window snapped to a UTC
-# calendar boundary), never both: a CHECK on ``budgets`` refuses the fourth
-# state. This is not a period enum, it only says which boundary a reset snaps to,
-# and a calendar month is the one no number of seconds can name.
-ResetAlignment = Literal["calendar_day", "calendar_week", "calendar_month"]
-RESET_ALIGNMENTS: tuple[ResetAlignment, ...] = get_args(ResetAlignment)
+from gateway.models.budgets import ALIGN_DAY, ALIGN_MONTH, ALIGN_WEEK
 
 # An upper bound on a period length, in seconds (roughly ten years). Without one,
 # ``now + timedelta(seconds=...)`` overflows on an arbitrarily large value:
@@ -87,12 +72,7 @@ def budget_window(now: datetime, budget: object) -> tuple[datetime, datetime] | 
 
 
 __all__ = [
-    "ALIGN_DAY",
-    "ALIGN_MONTH",
-    "ALIGN_WEEK",
     "MAX_BUDGET_DURATION_SEC",
-    "RESET_ALIGNMENTS",
-    "ResetAlignment",
     "aligned_window",
     "budget_window",
     "period_window",

@@ -72,11 +72,11 @@ from gateway.exceptions.budget_exceptions import (
     OrganizationScopeNotFoundError,
 )
 from gateway.models.api_keys import APIKey
-from gateway.models.budgets import MAX_COUNT_LIMIT, Budget, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.budgets import MAX_COUNT_LIMIT, Budget, ResetAlignment, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.money import MAX_USD_LIMIT, as_float, to_usd_or_none
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.users import User as GatewayUser
-from gateway.services.budget_periods import ResetAlignment, period_window
+from gateway.services.budget_periods import period_window
 from gateway.services.budget_retiming import cadence_of, retime_ceilings_for_budget
 from gateway.services.tenancy.errors import TenancyValidationError
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -792,11 +792,8 @@ class OrganizationBudgetService:
         )
         budget = await self._require_own_budget(organization=organization, budget_id=request.budget_id)
 
-        # The window opens now rather than on first spend, so a period-limited
-        # ceiling has a defined end before any request has arrived. An aligned one
-        # opens on the boundary it is already past, so its first period is the
-        # remainder of the calendar period it was created in. Same derivation as
-        # `POST /v1/scoped-budgets`, through the leaf module both import.
+        # The window opens at creation, so a period-limited ceiling has an end before its first request.
+        # An aligned ceiling opens on the current calendar boundary, so its first period is a partial one.
         window = period_window(
             datetime.now(UTC),
             duration=budget.budget_duration_sec,

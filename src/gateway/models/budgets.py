@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal, get_args
 
 from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Uuid, false, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -30,6 +30,13 @@ from gateway.models.money import UsdCost
 # A quadrillion tokens is four orders of magnitude past any real allowance, and
 # leaves the sum of three of them ~9000x inside the type.
 MAX_COUNT_LIMIT = 1_000_000_000_000_000
+
+# An enum changes the published OpenAPI schema, so this stays a `Literal`.
+ResetAlignment = Literal["calendar_day", "calendar_week", "calendar_month"]
+RESET_ALIGNMENTS: tuple[ResetAlignment, ...] = get_args(ResetAlignment)
+ALIGN_DAY: ResetAlignment = "calendar_day"
+ALIGN_WEEK: ResetAlignment = "calendar_week"
+ALIGN_MONTH: ResetAlignment = "calendar_month"
 
 
 class Budget(Base):
