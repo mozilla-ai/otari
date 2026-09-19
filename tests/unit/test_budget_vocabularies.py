@@ -2,7 +2,11 @@
 
 The named constants cover each ``Literal``.
 The deployment route's scope table has a row for every scope type.
+Both ceiling create bodies refuse a scope type outside the vocabulary.
 """
+
+import pytest
+from pydantic import BaseModel, ValidationError
 
 from gateway.api.routes.scoped_budgets import _SCOPE_SUBJECTS
 from gateway.models.budgets import (
@@ -17,6 +21,7 @@ from gateway.models.budgets import (
     SCOPE_WORKSPACE,
     SCOPE_WORKSPACE_MEMBER,
 )
+from gateway.schemas.budgets import CreateScopedBudgetRequest, OrganizationScopedBudgetCreate
 
 
 def test_the_alignment_constants_cover_the_literal() -> None:
@@ -30,3 +35,9 @@ def test_the_scope_constants_cover_the_literal() -> None:
 
 def test_the_deployment_route_resolves_every_scope_type() -> None:
     assert set(_SCOPE_SUBJECTS) == set(SCOPE_TYPES)
+
+
+@pytest.mark.parametrize("create_body", [CreateScopedBudgetRequest, OrganizationScopedBudgetCreate])
+def test_a_ceiling_create_body_refuses_an_unknown_scope(create_body: type[BaseModel]) -> None:
+    with pytest.raises(ValidationError):
+        create_body.model_validate({"scope_type": "team", "scope_id": "x", "budget_id": "b"})

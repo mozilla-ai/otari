@@ -9,8 +9,7 @@ from fastapi import HTTPException
 
 from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes.pricing import PricingResponse
-from gateway.schemas.budgets import BudgetResponse
-from gateway.services.tenancy.organization_budget_service import OrganizationBudgetPublic
+from gateway.schemas.budgets import BudgetResponse, OrganizationBudgetPublic
 
 
 def _make_error(detail: str, status_code: int = 400) -> HTTPException:

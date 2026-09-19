@@ -48,14 +48,14 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.tenancy.errors import NotAuthorizedError, TenancyValidationError
-from gateway.services.tenancy.organization_budget_service import (
+from gateway.schemas.budgets import (
     OrganizationBudgetCreate,
-    OrganizationBudgetService,
     OrganizationBudgetUpdate,
     OrganizationScopedBudgetCreate,
     OrganizationScopedBudgetUpdate,
 )
+from gateway.services.tenancy.errors import NotAuthorizedError, TenancyValidationError
+from gateway.services.tenancy.organization_budget_service import OrganizationBudgetService
 
 _BUDGETS = f"{API_ROOT}/organizations/me/budgets"
 _CEILINGS = f"{API_ROOT}/organizations/me/spend-ceilings"

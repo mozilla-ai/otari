@@ -35,10 +35,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
 from gateway.api.routes.organizations import Message
-from gateway.services.tenancy.organization_budget_service import (
+from gateway.schemas.budgets import (
     OrganizationBudgetCreate,
     OrganizationBudgetPublic,
-    OrganizationBudgetService,
     OrganizationBudgetsPublic,
     OrganizationBudgetUpdate,
     OrganizationScopedBudgetCreate,
@@ -46,6 +45,7 @@ from gateway.services.tenancy.organization_budget_service import (
     OrganizationScopedBudgetsPublic,
     OrganizationScopedBudgetUpdate,
 )
+from gateway.services.tenancy.organization_budget_service import OrganizationBudgetService
 
 # Master key on the router, as every standalone management router declares it.
 # The role gate is a separate question answered in the service: the credential
