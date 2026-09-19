@@ -31,6 +31,9 @@ Enforces:
     named on a baseline, and the baseline only shrinks.
 15. Session accessor: only a repository imports session_for, so every query
     stays in the repository layer.
+16. Schema boundaries: a schema does not import the API, service, repository or
+    exception layer, or the composition root, so a request or response model
+    carries no behavior from another layer.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -147,6 +150,17 @@ RULES: dict[str, LayerRule] = {
         "allowed": ["gateway.models"],
         "forbidden": ["gateway.services", "gateway.api", "gateway.adapters"],
         "description": "Repositories",
+    },
+    "gateway/schemas": {
+        "allowed": ["gateway.models"],
+        "forbidden": [
+            "gateway.api",
+            "gateway.services",
+            "gateway.repositories",
+            "gateway.exceptions",
+            "gateway.container",
+        ],
+        "description": "Schemas",
     },
     # Leaf data types shared across layers (e.g. the routing Attempt, which
     # services build and the API layer executes). They sit below everything, so

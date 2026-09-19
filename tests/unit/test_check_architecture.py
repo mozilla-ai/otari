@@ -107,6 +107,26 @@ def test_repository_importing_service_is_flagged(tmp_path: Path) -> None:
     assert violations == [(1, "gateway.services.budget_service", "Forbidden import in Repositories")]
 
 
+@pytest.mark.parametrize(
+    "forbidden",
+    [
+        "gateway.api.deps",
+        "gateway.services.budget_periods",
+        "gateway.repositories.base_repository",
+        "gateway.exceptions.budget_exceptions",
+        "gateway.container",
+    ],
+)
+def test_schema_importing_a_layer_beside_or_above_it_is_flagged(tmp_path: Path, forbidden: str) -> None:
+    file_path = _write(tmp_path, "gateway/schemas/budgets.py", f"import {forbidden}\n")
+    assert check.check_file(file_path, tmp_path) == [(1, forbidden, "Forbidden import in Schemas")]
+
+
+def test_schema_importing_models_is_clean(tmp_path: Path) -> None:
+    file_path = _write(tmp_path, "gateway/schemas/budgets.py", "from gateway.models.budgets import Budget\n")
+    assert check.check_file(file_path, tmp_path) == []
+
+
 def test_api_route_importing_sqlalchemy_orm_is_flagged(tmp_path: Path) -> None:
     file_path = _write(tmp_path, "gateway/api/routes/users.py", "from sqlalchemy.orm import Session\n")
     assert check.check_file(file_path, tmp_path) == [(1, "sqlalchemy.orm", "Forbidden import in API routes")]
