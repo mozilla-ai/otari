@@ -15,7 +15,7 @@ fine: a test is not part of the graph the cycle runs through.
 
 from typing import get_args
 
-from gateway.services.scoped_budget_service import SCOPE_TYPES, ScopeType
+from gateway.models.budgets import SCOPE_TYPES, ScopeType
 from gateway.services.tenancy.organization_budget_service import (
     ORGANIZATION_SCOPE_TYPES,
     OrganizationScopeType,

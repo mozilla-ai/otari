@@ -31,12 +31,20 @@ from gateway.models.money import UsdCost
 # leaves the sum of three of them ~9000x inside the type.
 MAX_COUNT_LIMIT = 1_000_000_000_000_000
 
-# An enum changes the published OpenAPI schema, so this stays a `Literal`.
+# An enum changes the published OpenAPI schema, so both vocabularies stay `Literal`.
 ResetAlignment = Literal["calendar_day", "calendar_week", "calendar_month"]
 RESET_ALIGNMENTS: tuple[ResetAlignment, ...] = get_args(ResetAlignment)
 ALIGN_DAY: ResetAlignment = "calendar_day"
 ALIGN_WEEK: ResetAlignment = "calendar_week"
 ALIGN_MONTH: ResetAlignment = "calendar_month"
+
+ScopeType = Literal["organization", "workspace", "workspace_member", "org_member", "api_token"]
+SCOPE_TYPES: tuple[ScopeType, ...] = get_args(ScopeType)
+SCOPE_ORGANIZATION: ScopeType = "organization"
+SCOPE_WORKSPACE: ScopeType = "workspace"
+SCOPE_WORKSPACE_MEMBER: ScopeType = "workspace_member"
+SCOPE_ORG_MEMBER: ScopeType = "org_member"
+SCOPE_API_TOKEN: ScopeType = "api_token"
 
 
 class Budget(Base):

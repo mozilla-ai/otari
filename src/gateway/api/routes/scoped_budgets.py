@@ -18,15 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_db, require_deployment_operator
 from gateway.models.api_keys import APIKey
-from gateway.models.budgets import Budget, ScopedBudget
+from gateway.models.budgets import Budget, ScopedBudget, ScopeType
 from gateway.models.money import as_float
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
-
-# ``ScopeType`` comes from the service that resolves a scope, not from a copy
-# here: the ``Literal`` is what puts the allowed values in the OpenAPI schema,
-# and a second roster would eventually let a client create a scope enforcement
-# does not know.
-from gateway.services.scoped_budget_service import ScopeType, period_window
+from gateway.services.budget_periods import period_window
 
 # Auth is declared on the router, not repeated on each handler, following
 # `routes/organizations.py`: every handler here needs the master key, and a
