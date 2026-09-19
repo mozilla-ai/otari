@@ -29,11 +29,11 @@ same" as a reason.
 | Layer | Path | Does | Flag when it |
 | --- | --- | --- | --- |
 | Routes | `api/routes/<domain>.py` | Parses the request, calls one service method, returns a schema | Imports `sqlalchemy` or `sqlmodel`, builds a query, holds a business rule, defines a Pydantic model, imports a repository, or commits |
-| Schemas | `schemas/<domain>.py` | Holds Pydantic request and response models | Holds anything else |
+| Schemas | `schemas/<domain>.py` | Holds Pydantic request and response models, and their mapping from ORM rows | Holds anything else |
 | Services | `services/<domain>/` | Runs use cases: business rules and orchestration | Imports `sqlalchemy` or `sqlmodel`, builds a query, takes or holds a session in a class or in a module-level function, touches HTTP, or imports another domain's repository |
 | Repositories | `repositories/<domain>/`, modules ending in `_repository.py` | Runs every query, over `BaseRepository`, and flushes | Commits, or holds a business rule |
 | Exceptions | `exceptions/<domain>_exceptions.py` | Declares error classes, each with its own `status_code` | Handles an error |
-| Models | `models/<domain>.py` | Declares ORM tables | Holds logic |
+| Models | `models/<domain>.py` | Declares ORM tables, and the closed vocabulary of each string column that has one | Holds logic |
 
 ## How a service is built
 

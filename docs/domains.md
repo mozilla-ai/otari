@@ -17,9 +17,9 @@ with underscores (`api_keys`).
 | Routes | `api/routes/<domain>.py` | Parse the request, call one service, return a schema | Run a query, hold business rules, define schemas inline |
 | Services | `services/<domain>/`, whose `__init__.py` exports the one service and the types its public methods use | Use cases: business rules and orchestration | Run a query, hold the session, touch HTTP, import another domain's repositories |
 | Repositories | `repositories/<domain>/`, with modules that end in `_repository.py` | Every query, over `BaseRepository`; flush, never commit | Hold business rules, commit |
-| Schemas | `schemas/<domain>.py` | Pydantic request and response models | Anything else |
+| Schemas | `schemas/<domain>.py` | Pydantic request and response models, and their mapping from ORM rows | Anything else |
 | Exceptions | `exceptions/<domain>_exceptions.py` | The domain's error classes, each with its HTTP status | Handle errors |
-| Models | `models/<domain>.py` | ORM tables | Hold logic |
+| Models | `models/<domain>.py` | ORM tables, and the closed vocabulary of each string column that has one | Hold logic |
 
 How a domain fits together:
 
@@ -55,10 +55,10 @@ not the module beside it.
 
 ## The shape today
 
-Measured on `main` at `ecd07b13`, 2026-09-17. A module "runs queries" when it
-imports a query builder (`select`, `update`, `delete` or `insert` from
-SQLAlchemy or SQLModel) and calls `execute`, `exec`, `scalar`, `scalars` or
-`get` on a session.
+Measured on `main` at `ecd07b13`, 2026-09-17, and updated by each domain change
+since. A module "runs queries" when it imports a query builder (`select`,
+`update`, `delete` or `insert` from SQLAlchemy or SQLModel) and calls `execute`,
+`exec`, `scalar`, `scalars` or `get` on a session.
 
 | Measure | Count |
 | --- | --- |
@@ -66,12 +66,12 @@ SQLAlchemy or SQLModel) and calls `execute`, `exec`, `scalar`, `scalars` or
 | Service modules that run queries | 39, plus 2 that only call `session.get` |
 | Route modules | 72 |
 | Route modules that run queries | 17, plus 1 that only calls `session.get` |
-| Route modules that define Pydantic models inline | 42 |
+| Route modules that define Pydantic models inline | 40 |
 | Model modules | 19 |
 | Repository modules | 9: a base, `users_repository.py`, and 7 under `tenancy/` |
 | Service packages per domain | 1: `services/tools/`, which holds the built-in tool registry and no service yet. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
 | Repository packages per domain | None. `repositories/tenancy/` is an older subpackage |
-| Modules in `schemas/` | None; the package does not exist |
+| Modules in `schemas/` | One domain module so far, `budgets.py` |
 | Modules in `exceptions/` | The shared error bases in `_base.py`, which the package root re-exports, and one domain module so far, `budget_exceptions.py`. `services/tenancy/errors.py` holds the rest of the tenancy errors in 1,145 lines |
 
 ## The domains
@@ -141,8 +141,14 @@ Ceilings, reservations, reset periods and per-member policies.
   `budget_periods.py`, `budget_reservation_ledger.py`, `budget_retiming.py`,
   `tenancy/organization_budget_service.py`,
   `tenancy/workspace_budget_default_service.py`
+- Schemas: `budgets.py`
 - Exceptions: `budget_exceptions.py`
 - Models: `budgets.py`
+
+`models/budgets.py` holds the scope and reset-alignment vocabularies, with the
+columns they name, and the schemas and services both import them from there.
+The reservation statuses still sit in `budget_reservation_ledger.py` and move
+the same way.
 
 ### pricing
 
