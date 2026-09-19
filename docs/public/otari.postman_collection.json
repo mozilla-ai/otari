@@ -2035,7 +2035,7 @@
               },
               "raw": "{\n  \"policy_yaml\": \"string\"\n}"
             },
-            "description": "Evaluate a submitted policy against submitted evidence.\n\nAuthenticated with either an API key or the master key (the router-level\ngate), like ``POST /api/v1/usage/external-events``: this identifies who\nsent the request, not whether its evidence is true. `blocked` is set when\na required gate's outcome is not `pass`/`not_applicable` (an unresolved\ngate never counts as a pass).",
+            "description": "Evaluate a submitted policy against submitted evidence.\n\nAuthenticated with either an API key or the master key (the router-level\ngate), like ``POST /api/v1/usage/external-events``: this identifies who\nsent the request, not whether its evidence is true. `blocked` is set when\na required gate's outcome is not `pass`/`not_applicable` (an unresolved\ngate never counts as a pass).\n\nThe actual parse-and-evaluate work is\n``agent_runtime.domain.check.run_policy_check``, shared with ``otari\nhook``'s own local evaluation: this route's own job is authentication,\ntranslating that function's tri-state request fields into its own typed\nones, and turning ``PolicyCheckError`` into a 422.",
             "header": [
               {
                 "key": "Content-Type",

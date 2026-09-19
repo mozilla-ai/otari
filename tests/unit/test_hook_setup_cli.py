@@ -118,37 +118,24 @@ def test_explicit_api_key_flag_skips_resolution_and_prompting(repo: Path, monkey
     assert command == f"{_FAKE_OTARI_PATH} hook --harness claude-code --api-key explicit-key"
 
 
-def test_an_automatically_resolvable_credential_is_not_embedded(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A key found the same way `otari hook` finds it at runtime is not baked
+def test_no_api_key_means_no_credential_resolution_or_prompt(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no `--api-key`, the generated command carries no credential at all:
 
-    into the generated command: repeating that resolution keeps working
-    after the key rotates, where an embedded copy of today's value would not.
+    `otari hook` evaluates the local policy in process by default and needs
+    neither one, so `setup` must not resolve a `master_key` from config (even
+    when one is configured) or prompt for anything to get the same result.
     """
     (repo / ".otari-gates.yml").write_text(_CHANGED_PATH_ONLY_GATES, encoding="utf-8")
 
-    def fake_load_config(config_path: str | None = None) -> GatewayConfig:
-        return GatewayConfig(master_key="auto-resolved-key")
+    def fail_if_called(config_path: str | None = None) -> GatewayConfig:
+        raise AssertionError("load_config should not be called when --api-key is not given either")
 
-    monkeypatch.setattr(gateway_cli, "load_config", fake_load_config)
+    monkeypatch.setattr(gateway_cli, "load_config", fail_if_called)
     result = _invoke()  # no --api-key, and no prompt input provided: must not be asked for one
     assert result.exit_code == 0, result.output
     settings = _read_settings(repo)
     command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
     assert command == f"{_FAKE_OTARI_PATH} hook --harness claude-code"
-
-
-def test_prompts_for_a_credential_when_none_resolves_automatically(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (repo / ".otari-gates.yml").write_text(_CHANGED_PATH_ONLY_GATES, encoding="utf-8")
-
-    def fake_load_config(config_path: str | None = None) -> GatewayConfig:
-        return GatewayConfig(master_key=None)
-
-    monkeypatch.setattr(gateway_cli, "load_config", fake_load_config)
-    result = _invoke(input="prompted-key\n")
-    assert result.exit_code == 0, result.output
-    settings = _read_settings(repo)
-    command = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-    assert command == f"{_FAKE_OTARI_PATH} hook --harness claude-code --api-key prompted-key"
 
 
 def test_rerunning_updates_the_existing_entry_instead_of_duplicating_it(repo: Path) -> None:

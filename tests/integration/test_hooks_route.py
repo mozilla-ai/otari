@@ -178,7 +178,7 @@ def test_duplicated_globs_and_paths_resolve_quickly_instead_of_blocking(
     path_count * total_pattern_length is small when every string is one
     byte) yet, unmatched, cost 25,000,000 real match calls, which measured
     ~5s of synchronous blocking. Deduplicating at parse time and at the
-    evidence boundary (domain.policy, PolicyCheckRequest.changed_path_evidence)
+    evidence boundary (domain.policy, agent_runtime.domain.check.run_policy_check)
     collapses this to one pattern against one path.
 
     The budget below is deliberately far above what the deduplicated work

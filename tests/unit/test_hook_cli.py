@@ -246,6 +246,34 @@ def test_stop_event_blocks_on_git_status(monkeypatch: pytest.MonkeyPatch, repo: 
     assert captured["json"]["changed_paths"] == ["CHANGELOG.md"]
 
 
+def test_stop_event_evaluates_locally_and_blocks_on_git_status(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """The default, no-flag path's own full Stop-event pipeline: real Git
+
+    evidence collection feeding the real `run_policy_check`, not a mocked
+    `httpx.post` standing in for the evaluator. Every other Stop-event test
+    in this module opts into the remote mode (`--api-key`) and mocks the
+    network boundary instead; this is the only one that proves the default
+    path's evidence collection and evaluation are wired together correctly
+    end to end.
+    """
+    (repo / ".otari-gates.yml").write_text(
+        'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
+        "  - id: g\n    type: changed_path\n    enforcement: required\n"
+        '    forbidden: ["CHANGELOG.md"]\n    message: forbidden\n',
+        encoding="utf-8",
+    )
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout=" M CHANGELOG.md\0", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    payload = {"hook_event_name": "Stop", "cwd": str(repo)}
+    result = CliRunner().invoke(gateway_cli.hook, [], input=json.dumps(payload))
+    assert result.exit_code == 2, result.output
+    assert "forbidden" in result.output
+
+
 def _transcript_line(
     *, command: str | None = None, text: str | None = None, side_chain: bool = False, tool_use_id: str = "toolu_1"
 ) -> str:
@@ -742,7 +770,63 @@ def test_malformed_stdin_is_a_no_op() -> None:
     assert result.exit_code == 0, result.output
 
 
-def test_missing_credential_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path, config_stub: None) -> None:
+def test_no_flags_evaluates_locally_with_no_credential_needed(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """No `--api-key`/`--url` is the default now, not a missing-setup case:
+
+    `otari hook` evaluates `.otari-gates.yml` in process
+    (`agent_runtime.domain.check.run_policy_check`) and calls `httpx.post`
+    only when either flag opts into the other, HTTP-backed mode. A required
+    gate still blocks with no credential, no config, and no server at all.
+    """
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        raise AssertionError("httpx.post should not be called for the default, local evaluation path")
+
+    monkeypatch.setattr(httpx, "post", fail_if_called)
+    (repo / ".otari-gates.yml").write_text(
+        'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
+        "  - id: g\n    type: changed_path\n    enforcement: required\n"
+        '    forbidden: ["CHANGELOG.md"]\n    message: forbidden\n',
+        encoding="utf-8",
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
+    }
+    result = CliRunner().invoke(gateway_cli.hook, [], input=json.dumps(payload))
+    assert result.exit_code == 2, result.output
+    assert "forbidden" in result.output
+
+
+def test_malformed_local_policy_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """The local evaluation path's own fail-open contract: a policy
+
+    `run_policy_check` cannot parse must report and exit 0, the same as
+    every other evidence-collection failure this command handles, not raise.
+    """
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    (repo / ".otari-gates.yml").write_text("not: valid: yaml: at: all:\n  - [", encoding="utf-8")
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
+    }
+    result = CliRunner().invoke(gateway_cli.hook, [], input=json.dumps(payload))
+    assert result.exit_code == 0, result.output
+    assert "could not evaluate" in result.output
+
+
+def test_url_alone_without_a_resolvable_credential_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """The opt-in remote mode still needs a credential from somewhere:
+
+    `--url` alone opts in, but with no `--api-key` and no configured
+    `master_key`, there is nothing to authenticate the request with, and
+    that must fail open rather than block.
+    """
+
     def fake_load_config(config_path: str | None = None) -> GatewayConfig:
         return GatewayConfig(master_key=None)
 
@@ -753,7 +837,7 @@ def test_missing_credential_does_not_block(monkeypatch: pytest.MonkeyPatch, repo
         "tool_name": "Edit",
         "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
     }
-    result = CliRunner().invoke(gateway_cli.hook, [], input=json.dumps(payload))
+    result = CliRunner().invoke(gateway_cli.hook, ["--url", "http://gw.example:9000"], input=json.dumps(payload))
     assert result.exit_code == 0, result.output
     assert "no API key or master key resolved" in result.output
 
@@ -866,9 +950,15 @@ def test_unreachable_gateway_does_not_block(monkeypatch: pytest.MonkeyPatch, rep
     assert "could not reach" in result.output
 
 
-def test_falls_back_to_configured_master_key_and_localhost(
+def test_api_key_alone_opts_into_remote_and_falls_back_to_configured_localhost(
     monkeypatch: pytest.MonkeyPatch, repo: Path, config_stub: None
 ) -> None:
+    """`--api-key` with no `--url` is enough to opt into the HTTP-backed mode:
+
+    the credential is the given one, but the gateway's own URL still falls
+    back to the configured host/port, exactly as it did before local
+    evaluation existed.
+    """
     captured: dict[str, Any] = {}
 
     def fake_post(url: str, **kwargs: object) -> _FakeResponse:
@@ -883,9 +973,37 @@ def test_falls_back_to_configured_master_key_and_localhost(
         "tool_name": "Edit",
         "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
     }
-    result = CliRunner().invoke(gateway_cli.hook, [], input=json.dumps(payload))
+    result = CliRunner().invoke(gateway_cli.hook, ["--api-key", "given-key"], input=json.dumps(payload))
     assert result.exit_code == 0, result.output
     assert captured["url"] == "http://localhost:8000/api/v1/hooks/check"
+    assert captured["headers"]["Otari-Key"] == "given-key"
+
+
+def test_url_alone_opts_into_remote_and_falls_back_to_configured_master_key(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, config_stub: None
+) -> None:
+    """`--url` with no `--api-key` is likewise enough to opt in: the URL is
+
+    the given one, but the credential still falls back to the configured
+    ``master_key``.
+    """
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["url"] = url
+        captured["headers"] = kwargs.get("headers")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
+    }
+    result = CliRunner().invoke(gateway_cli.hook, ["--url", "http://gw.example:9000"], input=json.dumps(payload))
+    assert result.exit_code == 0, result.output
+    assert captured["url"] == "http://gw.example:9000/api/v1/hooks/check"
     # The bare token, not a ``Bearer `` prefix: deps.extract_credential_token
     # tolerates the prefix for back-compat, but a header named for the key
     # carries the raw token.
@@ -1001,6 +1119,42 @@ def test_stop_event_submits_a_judge_verdict_from_claude_p(
     assert captured["json"]["judge_results"] == [
         {"gate_id": "follows-pattern", "outcome": "fail", "reasoning": "does not match"}
     ]
+
+
+def test_stop_event_locally_evaluates_a_judge_verdict_and_warns(
+    monkeypatch: pytest.MonkeyPatch, judge_repo: Path, tmp_path: Path
+) -> None:
+    """The default path's own judge-gate flow, no `httpx.post` mock: the
+
+    locally-collected verdict must reach `run_policy_check` and come back as
+    an advisory, non-blocking `systemMessage`, not just get built correctly
+    for a mocked network call (`test_stop_event_submits_a_judge_verdict_from_claude_p`
+    covers that half already).
+    """
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "diff"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="+ changed line\n", stderr="")
+        if cmd[0] == "/usr/bin/claude":
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout=json.dumps({"outcome": "fail", "reasoning": "does not match"}), stderr=""
+            )
+        raise AssertionError(f"unexpected subprocess.run call: {cmd}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(_transcript_line(text="did some work") + "\n", encoding="utf-8")
+
+    payload = {"hook_event_name": "Stop", "cwd": str(judge_repo), "transcript_path": str(transcript)}
+    result = CliRunner().invoke(gateway_cli.hook, [], input=json.dumps(payload))
+    assert result.exit_code == 0, result.output
+    stdout_payload = json.loads(result.stdout)
+    assert "does not match" in stdout_payload["systemMessage"]
 
 
 def test_judge_model_is_overridable_via_flag(monkeypatch: pytest.MonkeyPatch, judge_repo: Path) -> None:

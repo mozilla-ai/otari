@@ -1265,6 +1265,12 @@ export interface paths {
          *     sent the request, not whether its evidence is true. `blocked` is set when
          *     a required gate's outcome is not `pass`/`not_applicable` (an unresolved
          *     gate never counts as a pass).
+         *
+         *     The actual parse-and-evaluate work is
+         *     ``agent_runtime.domain.check.run_policy_check``, shared with ``otari
+         *     hook``'s own local evaluation: this route's own job is authentication,
+         *     translating that function's tri-state request fields into its own typed
+         *     ones, and turning ``PolicyCheckError`` into a 422.
          */
         post: operations["hooks-check_policy"];
         delete?: never;
