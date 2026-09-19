@@ -355,6 +355,62 @@ def test_judge_gate_rejects_an_explicitly_empty_when_changed() -> None:
         parse_policy(policy, source="test.yml")
 
 
+def test_judge_gate_judge_cli_defaults_to_none() -> None:
+    """A judge gate that never mentions `judge_cli` keeps its pre-field behavior: no preference."""
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: r\n    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    gate = spec.gates[0]
+    assert isinstance(gate, JudgeGate)
+    assert gate.judge_cli is None
+
+
+def test_judge_gate_accepts_a_bare_judge_cli_string() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: r\n"
+        "    judge_cli: codex\n    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    gate = spec.gates[0]
+    assert isinstance(gate, JudgeGate)
+    assert gate.judge_cli == ("codex",)
+
+
+def test_judge_gate_accepts_an_ordered_judge_cli_list_deduplicated() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: r\n"
+        "    judge_cli: [codex, claude, codex]\n    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    gate = spec.gates[0]
+    assert isinstance(gate, JudgeGate)
+    assert gate.judge_cli == ("codex", "claude")
+
+
+def test_judge_gate_rejects_an_unsupported_judge_cli() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: r\n"
+        "    judge_cli: gemini\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="judge_cli"):
+        parse_policy(policy, source="test.yml")
+
+
+def test_judge_gate_rejects_an_explicitly_empty_judge_cli_list() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: r\n"
+        "    judge_cli: []\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="judge_cli"):
+        parse_policy(policy, source="test.yml")
+
+
 def test_parses_a_valid_check_passed_policy() -> None:
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
