@@ -48,3 +48,12 @@ node_modules
 # so it stays on disk and is only untracked. Deliberately unanchored: an install
 # run from web/ leaves the same store one level down.
 .pnpm-store/
+
+# otari hook setup's own generated settings: both embed a live Otari API key
+# or master key directly in the hook command (see docs/agent-gates.md), so
+# neither is safe to commit. Only these two files, not the whole .claude/ or
+# .codex/ directory: .claude/settings.json (team-shared, committed on
+# purpose) and any .claude/skills/ live under the same directory and must
+# stay tracked.
+.claude/settings.local.json
+.codex/hooks.json
