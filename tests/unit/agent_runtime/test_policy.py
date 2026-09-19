@@ -1,7 +1,13 @@
 import pytest
 
 from gateway.agent_runtime.domain.policy import MAX_GATE_ID_LENGTH, PolicyError, parse_policy
-from gateway.agent_runtime.domain.types import ChangedPathGate, CommandIfChangedGate, CommandMatchGate, JudgeGate
+from gateway.agent_runtime.domain.types import (
+    ChangedPathGate,
+    CheckPassedGate,
+    CommandIfChangedGate,
+    CommandMatchGate,
+    JudgeGate,
+)
 
 VALID_POLICY = """\
 schema_version: "1.0"
@@ -139,6 +145,11 @@ def test_parses_a_valid_policy() -> None:
             'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
             "  - id: g\n    type: command_if_changed\n    enforcement: required\n"
             '    forbidden: ["a"]\n    require: ["b"]\n    message: m\n'
+        ),
+        # Missing verifier on a check_passed gate.
+        (
+            'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+            "  - id: g\n    type: check_passed\n    enforcement: required\n    message: m\n"
         ),
     ],
 )
@@ -338,6 +349,119 @@ def test_judge_gate_rejects_an_explicitly_empty_when_changed() -> None:
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
         "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: r\n"
+        "    when_changed: []\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="when_changed"):
+        parse_policy(policy, source="test.yml")
+
+
+def test_parses_a_valid_check_passed_policy() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: no-leftover-conflict-markers\n    type: check_passed\n    enforcement: required\n"
+        "    verifier: .otari-gates/verifiers/no-conflict-markers.sh\n    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    assert len(spec.gates) == 1
+    gate = spec.gates[0]
+    assert isinstance(gate, CheckPassedGate)
+    assert gate.enforcement == "required"
+    assert gate.verifier == ".otari-gates/verifiers/no-conflict-markers.sh"
+
+
+def test_check_passed_gate_accepts_required_enforcement() -> None:
+    """Unlike judge, a verifier's exit code is reproducible, so required is allowed."""
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: check_passed\n    enforcement: required\n"
+        "    verifier: v.sh\n    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    gate = spec.gates[0]
+    assert isinstance(gate, CheckPassedGate)
+    assert gate.enforcement == "required"
+
+
+def test_check_passed_gate_accepts_advisory_enforcement() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: check_passed\n    enforcement: advisory\n"
+        "    verifier: v.sh\n    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    gate = spec.gates[0]
+    assert isinstance(gate, CheckPassedGate)
+    assert gate.enforcement == "advisory"
+
+
+def test_check_passed_gate_requires_a_non_empty_verifier() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: check_passed\n    enforcement: required\n"
+        "    verifier: '   '\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="verifier"):
+        parse_policy(policy, source="test.yml")
+
+
+def test_check_passed_gate_rejects_an_absolute_verifier_path() -> None:
+    """A verifier is a repo-relative path; an absolute one is not one this build runs against a repo root."""
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: check_passed\n    enforcement: required\n"
+        "    verifier: /etc/passwd\n    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="repo-relative"):
+        parse_policy(policy, source="test.yml")
+
+
+def test_check_passed_gate_rejects_a_verifier_with_a_nul_byte() -> None:
+    """A NUL byte reaching subprocess as an argv element raises ValueError; caught here as a clean 422 instead."""
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        '  - id: g\n    type: check_passed\n    enforcement: required\n    verifier: "v\\0.sh"\n    message: m\n'
+    )
+    with pytest.raises(PolicyError, match="NUL"):
+        parse_policy(policy, source="test.yml")
+
+
+def test_check_passed_gate_rejects_an_oversized_verifier() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        f"  - id: g\n    type: check_passed\n    enforcement: required\n    verifier: {'v' * 5_000}\n"
+        "    message: m\n"
+    )
+    with pytest.raises(PolicyError, match="verifier"):
+        parse_policy(policy, source="test.yml")
+
+
+def test_check_passed_gate_when_changed_defaults_to_always_applying() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: check_passed\n    enforcement: required\n    verifier: v.sh\n    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    gate = spec.gates[0]
+    assert isinstance(gate, CheckPassedGate)
+    assert gate.when_changed == ()
+
+
+def test_check_passed_gate_parses_when_changed_globs() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: check_passed\n    enforcement: required\n    verifier: v.sh\n"
+        "    when_changed: [src/**]\n    message: m\n"
+    )
+    spec = parse_policy(policy, source="test.yml")
+    gate = spec.gates[0]
+    assert isinstance(gate, CheckPassedGate)
+    assert gate.when_changed == ("src/**",)
+
+
+def test_check_passed_gate_rejects_an_explicitly_empty_when_changed() -> None:
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: check_passed\n    enforcement: required\n    verifier: v.sh\n"
         "    when_changed: []\n    message: m\n"
     )
     with pytest.raises(PolicyError, match="when_changed"):
