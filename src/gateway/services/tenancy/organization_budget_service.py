@@ -54,7 +54,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Literal, get_args
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
@@ -72,7 +71,20 @@ from gateway.exceptions.budget_exceptions import (
     OrganizationScopeNotFoundError,
 )
 from gateway.models.api_keys import APIKey
-from gateway.models.budgets import MAX_COUNT_LIMIT, Budget, ResetAlignment, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.budgets import (
+    MAX_COUNT_LIMIT,
+    SCOPE_API_TOKEN,
+    SCOPE_ORG_MEMBER,
+    SCOPE_ORGANIZATION,
+    SCOPE_TYPES,
+    SCOPE_WORKSPACE,
+    SCOPE_WORKSPACE_MEMBER,
+    Budget,
+    ResetAlignment,
+    ScopedBudget,
+    ScopeType,
+    WorkspaceBudgetDefault,
+)
 from gateway.models.money import MAX_USD_LIMIT, as_float, to_usd_or_none
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.users import User as GatewayUser
@@ -80,23 +92,6 @@ from gateway.services.budget_periods import period_window
 from gateway.services.budget_retiming import cadence_of, retime_ceilings_for_budget
 from gateway.services.tenancy.errors import TenancyValidationError
 from gateway.services.tenancy.organization_service import OrganizationService
-
-# The scopes this surface understands, spelled out rather than imported from
-# `scoped_budget_service`, which reaches this package through `workspace_scope`.
-# The values are identical to `ScopeType`.
-SCOPE_ORGANIZATION = "organization"
-SCOPE_WORKSPACE = "workspace"
-SCOPE_WORKSPACE_MEMBER = "workspace_member"
-SCOPE_ORG_MEMBER = "org_member"
-SCOPE_API_TOKEN = "api_token"
-
-# Spelled as a `Literal` and not just as the constants above, because the
-# `Literal` is what puts the allowed values in the OpenAPI schema and refuses an
-# unknown one at the boundary, exactly as `ScopeType` does for the deployment
-# router. The constants stay for the resolution code, where a bare string
-# comparison reads worse than a name.
-OrganizationScopeType = Literal["organization", "workspace", "workspace_member", "org_member", "api_token"]
-ORGANIZATION_SCOPE_TYPES: tuple[str, ...] = get_args(OrganizationScopeType)
 
 _MAX_LIST_LIMIT = 1000
 
@@ -232,7 +227,7 @@ class OrganizationBudgetsPublic(BaseModel):
 class OrganizationScopedBudgetCreate(BaseModel):
     """Attach one of the organization's budgets to a scope inside it."""
 
-    scope_type: OrganizationScopeType = Field(description="Which kind of identity this ceiling caps")
+    scope_type: ScopeType = Field(description="Which kind of identity this ceiling caps")
     scope_id: str = Field(
         min_length=1,
         max_length=255,
@@ -422,9 +417,7 @@ class OrganizationBudgetService:
             if workspace_id is None:
                 return None
             return await self._workspace_organization_id(workspace_id)
-        # Not reachable through the routes, which validate `scope_type` against
-        # `ORGANIZATION_SCOPE_TYPES` in the schema, so an unknown one here is a
-        # caller inside this process and resolving to nothing is the safe answer.
+        # A stored scope_type this build does not know resolves to no owner, which refuses rather than leaks.
         return None
 
     async def _workspace_organization_id(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
@@ -446,7 +439,7 @@ class OrganizationBudgetService:
         Both as 404 and with one message, so the response cannot be read as an
         oracle for whether another tenant holds that id.
         """
-        if scope_type not in ORGANIZATION_SCOPE_TYPES:
+        if scope_type not in SCOPE_TYPES:
             raise TenancyValidationError(f"Unknown scope type: {scope_type}")
         owner = await self._scope_organization_id(scope_type=scope_type, scope_id=scope_id)
         if owner is None or owner != organization.id:
@@ -916,8 +909,6 @@ class OrganizationBudgetService:
 
 
 __all__ = [
-    "ORGANIZATION_SCOPE_TYPES",
-    "OrganizationScopeType",
     "OrganizationBudgetCreate",
     "OrganizationBudgetPublic",
     "OrganizationBudgetService",
