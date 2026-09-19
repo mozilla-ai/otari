@@ -74,3 +74,27 @@ gates:
     message: >-
       You touched the CLI; run tests/unit/test_gateway_cli.py before
       finishing (see AGENTS.md, "Change Validation Checklist").
+
+  # command_if_changed's require list is an OR: any one phrase satisfies the
+  # gate. Requiring both make lint and make typecheck therefore needs two
+  # required gates sharing the same when_changed, not one gate with a
+  # two-item require list; blocked is true if either fails, giving the same
+  # enforcement a single AND-require would.
+  - id: python-changed-needs-lint
+    type: command_if_changed
+    enforcement: required
+    when_changed: ["src/**/*.py", "tests/**/*.py", "scripts/**/*.py"]
+    require: ["make lint"]
+    message: >-
+      Python source changed; run `make lint` before finishing (architecture
+      check + ruff; see CONTRIBUTING.md, "Making changes").
+
+  - id: python-changed-needs-typecheck
+    type: command_if_changed
+    enforcement: required
+    when_changed: ["src/**/*.py", "tests/**/*.py", "scripts/**/*.py"]
+    require: ["make typecheck"]
+    message: >-
+      Python source changed; run `make typecheck` before finishing (mypy
+      --strict; see CONTRIBUTING.md, "Making changes"). `make lint` alone
+      does not run it.

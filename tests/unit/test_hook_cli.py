@@ -238,12 +238,19 @@ def test_stop_event_blocks_on_git_status(monkeypatch: pytest.MonkeyPatch, repo: 
 
 
 def _transcript_line(
-    *, command: str | None = None, text: str | None = None, side_chain: bool = False, tool_use_id: str = "toolu_1"
+    *,
+    command: str | None = None,
+    edit_path: str | None = None,
+    text: str | None = None,
+    side_chain: bool = False,
+    tool_use_id: str = "toolu_1",
 ) -> str:
     """One JSONL line shaped like a real Claude Code transcript record."""
     content: list[dict[str, Any]]
     if command is not None:
         content = [{"type": "tool_use", "id": tool_use_id, "name": "Bash", "input": {"command": command}}]
+    elif edit_path is not None:
+        content = [{"type": "tool_use", "id": tool_use_id, "name": "Edit", "input": {"file_path": edit_path}}]
     else:
         content = [{"type": "text", "text": text or "hello"}]
     record = {
@@ -377,6 +384,118 @@ def test_stop_event_excludes_a_command_a_pretooluse_hook_denied(
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
     assert captured["json"]["commands"] == ["pnpm install"]
+
+
+def test_stop_event_excludes_a_command_that_ran_before_a_later_edit(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    """`make lint` run, then the file edited again with no re-run, must not
+
+    read as validation of the current working tree: the command is in the
+    session's history, but it never checked the code the edit produced.
+    """
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                _transcript_line(command="make lint", tool_use_id="toolu_lint"),
+                _transcript_line(edit_path="src/gateway/cli.py", tool_use_id="toolu_edit"),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["commands"] == []
+
+
+def test_stop_event_includes_a_command_that_ran_after_the_last_edit(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    """A re-run after the edit is real validation of the current tree and stays in evidence."""
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                _transcript_line(edit_path="src/gateway/cli.py", tool_use_id="toolu_edit"),
+                _transcript_line(command="make lint", tool_use_id="toolu_lint"),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["commands"] == ["make lint"]
+
+
+def test_stop_event_does_not_let_a_denied_edit_invalidate_prior_evidence(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    """A PreToolUse-denied edit never touched the working tree, so it must not
+
+    reset what "after the last edit" means: the same reasoning already
+    applied to a denied Bash call's own evidence.
+    """
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                _transcript_line(command="make lint", tool_use_id="toolu_lint"),
+                _transcript_line(edit_path="CHANGELOG.md", tool_use_id="toolu_denied_edit"),
+                _tool_result_line(
+                    tool_use_id="toolu_denied_edit",
+                    is_error=True,
+                    content="PreToolUse:Edit hook error: [otari hook]: otari hook: blocked (claude-code, PreToolUse)",
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["commands"] == ["make lint"]
 
 
 def test_stop_event_includes_a_command_that_ran_but_exited_nonzero(

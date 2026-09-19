@@ -408,6 +408,17 @@ def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None
     `command_if_changed`: a *denied* attempt at the required command would
     read as though it had run, satisfying a gate it never actually did.
 
+    A command that ran before the session's *last* edit-tool call (`Edit`,
+    `Write`, `NotebookEdit`) is excluded too, on the same reasoning applied
+    to time instead of denial: `command_if_changed` reads "the required
+    command is somewhere in this list" as "the required command validated
+    the current working tree," which is only true of a command that ran
+    after every edit. Otherwise `make lint` run once, followed by another
+    edit with no re-run, would still read as satisfied at `Stop`. A denied
+    edit is excluded from this ordering the same way a denied Bash call is
+    excluded from evidence: it never touched the working tree, so it must
+    not reset what "after the last edit" means.
+
     Returns None only when the transcript itself cannot be read (missing,
     permissions, not a file): the same fail-open sentinel
     `_hook_collect_changed_paths` uses, so the caller can tell "collected,
@@ -423,8 +434,10 @@ def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None
     # tool_use_id is None for a block missing or misshaping its own id: kept
     # in the requested list regardless (never silently dropped for that),
     # just ineligible to ever match an entry in denied_ids.
-    requested: list[tuple[str | None, str]] = []
+    requested: list[tuple[str | None, str, int]] = []
+    edit_positions: dict[str | None, int] = {}
     denied_ids: set[str] = set()
+    position = 0
     for line in lines:
         if not line.strip():
             continue
@@ -446,15 +459,28 @@ def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None
                 tool_input = block.get("input")
                 command = tool_input.get("command") if isinstance(tool_input, dict) else None
                 if isinstance(command, str) and command:
+                    position += 1
                     tool_use_id = block.get("id")
-                    requested.append((tool_use_id if isinstance(tool_use_id, str) else None, command))
+                    requested.append((tool_use_id if isinstance(tool_use_id, str) else None, command, position))
+            elif block_type == "tool_use" and block.get("name") in _HOOK_EDIT_TOOL_PATH_FIELDS:
+                position += 1
+                tool_use_id = block.get("id")
+                edit_positions[tool_use_id if isinstance(tool_use_id, str) else None] = position
             elif block_type == "tool_result" and block.get("is_error"):
                 tool_use_id = block.get("tool_use_id")
                 text = _tool_result_text(block.get("content"))
                 if isinstance(tool_use_id, str) and all(marker in text for marker in _PRETOOLUSE_DENIAL_MARKERS):
                     denied_ids.add(tool_use_id)
 
-    return [command for tool_use_id, command in requested if tool_use_id is None or tool_use_id not in denied_ids]
+    last_edit_position = max(
+        (pos for tool_use_id, pos in edit_positions.items() if tool_use_id is None or tool_use_id not in denied_ids),
+        default=0,
+    )
+    return [
+        command
+        for tool_use_id, command, command_position in requested
+        if (tool_use_id is None or tool_use_id not in denied_ids) and command_position > last_edit_position
+    ]
 
 
 @cli.group(name="hook", invoke_without_command=True)
