@@ -7,6 +7,7 @@ tests/integration/test_hooks_route.py.
 """
 
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -2097,3 +2098,326 @@ def test_a_first_stop_block_does_not_mention_the_budget(monkeypatch: pytest.Monk
     result = _invoke(payload)
     assert result.exit_code == 2
     assert "already blocked once" not in result.output
+
+
+def _write_verifier(tmp_path: Path, name: str, body: str) -> Path:
+    script = tmp_path / name
+    script.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8")
+    script.chmod(0o755)
+    return script
+
+
+def test_hook_run_check_verifier_passes_on_real_exit_zero(tmp_path: Path) -> None:
+    """No mocking: a real script, run as a real subprocess, exiting 0."""
+    _write_verifier(tmp_path, "v.sh", "exit 0")
+    outcome, detail = gateway_cli._hook_run_check_verifier(
+        tmp_path, "v.sh", deadline=time.monotonic() + 10
+    )
+    assert outcome == "pass"
+    assert detail == ""
+
+
+def test_hook_run_check_verifier_fails_on_real_exit_one_and_captures_stdout(tmp_path: Path) -> None:
+    _write_verifier(tmp_path, "v.sh", 'echo "conflicted.txt:2"\nexit 1')
+    outcome, detail = gateway_cli._hook_run_check_verifier(
+        tmp_path, "v.sh", deadline=time.monotonic() + 10
+    )
+    assert outcome == "fail"
+    assert detail == "conflicted.txt:2\n"
+
+
+@pytest.mark.parametrize("exit_code", [2, 7, 255])
+def test_hook_run_check_verifier_errors_on_other_exit_codes(tmp_path: Path, exit_code: int) -> None:
+    _write_verifier(tmp_path, "v.sh", f"exit {exit_code}")
+    outcome, _detail = gateway_cli._hook_run_check_verifier(
+        tmp_path, "v.sh", deadline=time.monotonic() + 10
+    )
+    assert outcome == "error"
+
+
+def test_hook_run_check_verifier_errors_when_the_script_does_not_exist(tmp_path: Path) -> None:
+    outcome, detail = gateway_cli._hook_run_check_verifier(
+        tmp_path, "does-not-exist.sh", deadline=time.monotonic() + 10
+    )
+    assert outcome == "error"
+    assert "does not exist" in detail
+
+
+def test_hook_run_check_verifier_errors_when_the_script_is_not_executable(tmp_path: Path) -> None:
+    script = tmp_path / "v.sh"
+    script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    # Deliberately not chmod +x: exec must raise PermissionError (an OSError).
+    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    assert outcome == "error"
+    assert "v.sh" in detail
+
+
+def test_hook_run_check_verifier_rejects_a_verifier_that_resolves_outside_the_repo_root(tmp_path: Path) -> None:
+    """A relative path with enough `..` segments could otherwise climb out of the repo.
+
+    domain.policy already rejects an absolute verifier at parse time, but a
+    relative one is validated again here, against the real filesystem, since
+    parsing has no filesystem to check against.
+    """
+    # "../outside.sh" from repo_root resolves to tmp_path/outside.sh: a real,
+    # executable, existing script that a broken guard would happily run.
+    outside = tmp_path / "outside.sh"
+    outside.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    outside.chmod(0o755)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    outcome, detail = gateway_cli._hook_run_check_verifier(
+        repo_root, f"../{outside.name}", deadline=time.monotonic() + 10
+    )
+    assert outcome == "error"
+    assert "outside the repo root" in detail
+
+
+def test_hook_run_check_verifier_errors_when_the_deadline_has_already_passed(tmp_path: Path) -> None:
+    _write_verifier(tmp_path, "v.sh", "exit 0")
+    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() - 1)
+    assert outcome == "error"
+    assert "budget exhausted" in detail
+
+
+def test_hook_run_check_verifier_times_out_on_a_real_slow_script(tmp_path: Path) -> None:
+    _write_verifier(tmp_path, "v.sh", "sleep 5\nexit 0")
+    # A near-zero remaining budget forces subprocess.run's own `timeout=` well
+    # under the script's real 5s sleep, without waiting for _HOOK_CHECK_TIMEOUT_SECONDS.
+    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 0.05)
+    assert outcome == "error"
+    assert "did not respond" in detail
+
+
+def test_hook_run_check_verifier_timeout_also_kills_a_background_child(tmp_path: Path) -> None:
+    """A timed-out verifier takes anything it backgrounded with it.
+
+    The verifier leaves `sleep 30` running, and that child inherits the
+    captured pipes. Killing the verifier alone leaves the child holding them,
+    outliving both this call's timeout and the whole run's shared budget, so
+    the verifier runs in a process group of its own and the timeout kills the
+    group.
+    """
+    _write_verifier(tmp_path, "v.sh", "sleep 30 &\necho $! > child.pid\nsleep 5\nexit 0")
+    # A whole second, not the 0.05s the plain timeout test uses: the script has
+    # to reach `echo $!` before the kill, or there is no recorded child to
+    # assert about.
+    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 1)
+    assert outcome == "error"
+    assert "did not respond" in detail
+
+    child_pid = int((tmp_path / "child.pid").read_text().strip())
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:  # the signal is delivered asynchronously
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.05)
+    pytest.fail(f"background child {child_pid} survived the verifier's timeout")
+
+
+def test_hook_run_check_verifier_replaces_undecodable_output(tmp_path: Path) -> None:
+    """Bytes that are not valid UTF-8 become replacement characters, not a crash.
+
+    Strict decoding raises `UnicodeDecodeError` from inside `subprocess`
+    itself, which is neither of the exceptions this function catches: it would
+    escape and take every other gate in the policy down with it.
+    """
+    _write_verifier(tmp_path, "v.sh", r"""printf 'bad: \xff\xfe'""" + "\nexit 1")
+    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    assert outcome == "fail"
+    assert detail.startswith("bad: ")
+    assert "\ufffd" in detail
+
+
+def test_hook_run_check_verifier_caps_detail_length(tmp_path: Path) -> None:
+    _write_verifier(tmp_path, "v.sh", 'printf "%0.sx" {1..10000}\nexit 1')
+    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    assert outcome == "fail"
+    assert len(detail) == gateway_cli._HOOK_MAX_CHECK_DETAIL_LENGTH
+
+
+_CHECK_GATES_YAML_TEMPLATE = (
+    "schema_version: '1.0'\n"
+    "policy:\n  id: test\n"
+    "gates:\n"
+    "  - id: no-leftover-conflict-markers\n"
+    "    type: check_passed\n"
+    "    enforcement: required\n"
+    "    verifier: {verifier}\n"
+    "    message: A tracked file still carries a Git merge-conflict marker.\n"
+)
+
+
+@pytest.fixture
+def check_repo(tmp_path: Path) -> Path:
+    (tmp_path / ".git").mkdir()
+    _write_verifier(tmp_path, "verify.sh", "exit 0")
+    (tmp_path / ".otari-gates.yml").write_text(
+        _CHECK_GATES_YAML_TEMPLATE.format(verifier="verify.sh"), encoding="utf-8"
+    )
+    return tmp_path
+
+
+def _git_status_only_run(git_status_stdout: str = "") -> Any:
+    """Fake `git status`; every other call (the verifier script itself) runs for real.
+
+    Unlike the judge tests' own dispatchers, which mock every subprocess.run
+    call including `claude -p`, this leaves the check_passed verifier's own
+    execution real: the point of these tests is to exercise a real script
+    under a real subprocess, not a second copy of `_hook_run_check_verifier`
+    that just returns a canned result.
+    """
+    real_run = subprocess.run
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=git_status_stdout, stderr="")
+        return real_run(cmd, **kwargs)
+
+    return fake_run
+
+
+def test_stop_event_submits_a_check_verdict_from_the_verifier_script(
+    monkeypatch: pytest.MonkeyPatch, check_repo: Path
+) -> None:
+    """End to end through `hook()`, with a real verifier script actually executed
+
+    (only `git status` is mocked): the Stop event runs the check_passed
+    gate's verifier and submits its real exit-code-derived verdict as
+    `check_results`.
+    """
+    monkeypatch.setattr(subprocess, "run", _git_status_only_run())
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(check_repo)})
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["check_results"] == [
+        {"gate_id": "no-leftover-conflict-markers", "outcome": "pass", "detail": ""}
+    ]
+
+
+def test_stop_event_submits_a_failing_check_verdict_and_blocks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    _write_verifier(tmp_path, "verify.sh", 'echo "conflicted.txt:2"\nexit 1')
+    (tmp_path / ".otari-gates.yml").write_text(
+        _CHECK_GATES_YAML_TEMPLATE.format(verifier="verify.sh"), encoding="utf-8"
+    )
+
+    monkeypatch.setattr(subprocess, "run", _git_status_only_run())
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse(
+            {
+                "blocked": True,
+                "results": [
+                    {
+                        "gate_id": "no-leftover-conflict-markers",
+                        "enforcement": "required",
+                        "outcome": "fail",
+                        "message": "A tracked file still carries a Git merge-conflict marker.",
+                        "detail": "conflicted.txt:2",
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
+    assert result.exit_code == 2, result.output
+    assert captured["json"]["check_results"] == [
+        {"gate_id": "no-leftover-conflict-markers", "outcome": "fail", "detail": "conflicted.txt:2\n"}
+    ]
+
+
+def test_pretooluse_submits_no_check_results(monkeypatch: pytest.MonkeyPatch, check_repo: Path) -> None:
+    """A PreToolUse call has no finished session for a verifier to check yet: `check_results`
+
+    must be omitted (None), not an empty list, so a required check_passed
+    gate resolves not_applicable rather than the unknown a genuinely missing
+    verdict would (see docs/agent-gates.md).
+    """
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(check_repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(check_repo / "README.md")},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["check_results"] is None
+
+
+def test_stop_event_skips_check_passed_gates_that_when_changed_excludes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A local `when_changed` skip means the verifier is never even run, not just excluded
+
+    from the wire result: the script here would fail if it ran (`exit 1`),
+    and the assertion below confirms the gate resolves via an empty
+    check_results list, never having invoked it.
+    """
+    (tmp_path / ".git").mkdir()
+    _write_verifier(tmp_path, "verify.sh", "exit 1")
+    policy = (
+        "schema_version: '1.0'\n"
+        "policy:\n  id: test\n"
+        "gates:\n"
+        "  - id: g\n"
+        "    type: check_passed\n"
+        "    enforcement: required\n"
+        "    verifier: verify.sh\n"
+        "    when_changed: ['src/**']\n"
+        "    message: m\n"
+    )
+    (tmp_path / ".otari-gates.yml").write_text(policy, encoding="utf-8")
+
+    monkeypatch.setattr(subprocess, "run", _git_status_only_run(git_status_stdout=" M docs/README.md\0"))
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["check_results"] == []
+
+
+def test_collect_check_verdicts_skips_gates_over_the_per_run_limit(tmp_path: Path) -> None:
+    _write_verifier(tmp_path, "verify.sh", "exit 0")
+    gates_yaml = ["schema_version: '1.0'\npolicy:\n  id: test\ngates:"]
+    gates_yaml.extend(
+        f"  - id: g{i}\n    type: check_passed\n    enforcement: required\n    verifier: verify.sh\n    message: m"
+        for i in range(gateway_cli._HOOK_CHECK_MAX_GATES_PER_RUN + 1)
+    )
+    gates_file = tmp_path / ".otari-gates.yml"
+    policy_yaml = "\n".join(gates_yaml) + "\n"
+    gates_file.write_text(policy_yaml, encoding="utf-8")
+
+    results = gateway_cli._hook_collect_check_verdicts(policy_yaml, gates_file, tmp_path, [])
+    assert len(results) == gateway_cli._HOOK_CHECK_MAX_GATES_PER_RUN
+    assert {r["outcome"] for r in results} == {"pass"}
+
+
+def test_collect_check_verdicts_returns_empty_for_an_unparseable_policy(tmp_path: Path) -> None:
+    gates_file = tmp_path / ".otari-gates.yml"
+    assert gateway_cli._hook_collect_check_verdicts("not: valid: yaml: at: all:", gates_file, tmp_path, []) == []

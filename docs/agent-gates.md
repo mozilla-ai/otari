@@ -16,8 +16,8 @@ diffs.
 
 This is the first slice. It ships:
 
-- Four gate types: `changed_path`, `command_match`, `command_if_changed`, and
-  `judge`.
+- Five gate types: `changed_path`, `command_match`, `command_if_changed`,
+  `judge`, and `check_passed`.
 - `POST /api/v1/hooks/check`, evaluated against evidence the caller submits.
 - `otari hook --harness claude-code`, a real installed command that reads a
   Claude Code hook payload and calls the endpoint above.
@@ -337,11 +337,121 @@ under Claude Code's own 600s default for the git evidence collection and the
 turn comes up after the deadline has already passed reports `error` without
 attempting the call at all.
 
-### Not built yet
+### `check_passed` (available now)
 
-- `check_passed`: a named verifier command passed on the current inputs.
-  Needs a bounded verifier runner (argv execution, deadlines, output caps,
-  input fingerprints).
+A gate whose verdict comes from a verifier script's own exit status, not a
+glob, a phrase, or a model. `verifier` is a repo-relative path to an
+executable script *in the calling repo* (e.g.
+`.otari-gates/verifiers/no-conflict-markers.sh`), not a closed set of
+otari-shipped implementations: anyone can write one and add the gate that
+runs it, without an otari code change or release. Unlike `judge`,
+`enforcement` is not restricted to `advisory`: a verifier's exit code is
+reproducible the way a glob or phrase match is, not a model's opinion, so a
+`required` `check_passed` gate can genuinely block.
+
+```yaml
+  - id: no-leftover-conflict-markers
+    type: check_passed
+    enforcement: required
+    verifier: .otari-gates/verifiers/no-conflict-markers.sh
+    message: >-
+      A tracked file still carries a Git merge-conflict marker
+      (<<<<<<</=======/>>>>>>>). Resolve the conflict and remove the
+      markers before finishing.
+```
+
+`when_changed` is optional, the same repo-relative POSIX glob grammar
+`judge`'s own field of that name uses. Omitted (the default), the gate always
+applies. Given, it scopes the gate to a session that actually touched a
+matching path, resolving `not_applicable` on a `Stop` event that changed
+nothing the gate cares about, without ever running the verifier to find that
+out: `otari hook` checks this locally, the same way it does for a `judge`
+gate's own `when_changed`.
+
+**The exit-code contract is fixed**, not something a verifier or a caller
+gets to redefine: exit `0` is `pass`, exit `1` is `fail`, anything else (a
+different exit code, an uncaught crash, a script that cannot be run at all)
+is `error`. `otari hook` runs the script with `cwd` at the repo root, so a
+verifier that wants to inspect the working tree (`git diff`, `git status`, a
+plain file scan, `git grep`) does so exactly the way a Makefile target or a
+pre-commit hook already checked into the repo would. Captured stdout, capped
+at a bounded length (`_HOOK_MAX_CHECK_DETAIL_LENGTH` in `cli.py`, the same
+4,096-character bound `judge`'s own `reasoning` uses), becomes the verdict's
+`detail` regardless of outcome; stderr is not read, since the wire contract
+has no separate slot for it and a verifier author is expected to write the
+human-readable reason to stdout.
+
+**No sandboxing, and no guard requiring the verifier to predate the diff
+under check, deliberately.** Be precise about what this adds, because it is
+not nothing: `check_passed` is the first gate type that *executes* something
+the policy names. `command_match` and `command_if_changed` inspect the
+command text the agent submitted, `changed_path` matches globs, and `judge`
+sends a prompt to `claude -p`; none of them runs a script the repo supplies.
+The boundary this sits behind is the repo itself. A script checked into the
+repo, named by that repo's own `.otari-gates.yml`, is the same trust level
+as a Makefile target, a pre-commit hook, or the test suite, every one of
+which a contributor already runs on a branch they have checked out.
+Resolving the verifier against the repo root, and refusing a path that
+climbs out of it, is what keeps it at that level rather than an arbitrary
+one. A "verifier must predate this diff" rule was considered and rejected
+specifically because it breaks the primary workflow this gate type is for:
+someone writing a new verifier and using it in the same change that
+introduces it. The case this does not distinguish is checking out someone
+else's branch to review it, where a policy and a verifier arriving together
+in that branch run on the next `Stop` event without the reviewer deciding to
+run anything from it. Issue #1442 tracks what a trust step for that would
+look like; it is a recorded gap, not a settled one.
+
+**Sharing or distributing a verifier across repos is explicitly out of
+scope**, the same way `command_if_changed`'s own doc section above notes what
+it does not build yet. No `npx`/`uvx`-style reference to a verifier that
+lives outside the calling repo, no registry, no reusable "packs": a verifier
+is always a path inside the repo whose policy names it. That is a
+deliberately separate, later problem.
+
+Otari never runs a verifier itself, the same way it never reads a caller's
+repository for any other gate: the caller (`otari hook`) runs the named
+script locally and submits the resulting verdict as `check_results` (see the
+field table below). This route only relays that verdict into a `GateResult`.
+
+`otari hook` is the reference caller, and only runs a check_passed gate's
+verifier on a `Stop` event, the same as `judge`: a `PreToolUse` call has no
+finished session for a verifier to check yet, and submits no `check_results`
+at all rather than an empty one (see the field table below for why that
+distinction matters). For every applicable `check_passed` gate in the local
+policy (`when_changed` filtered locally first, exactly like a `judge` gate's
+own filtering), it resolves `verifier` against the repo root, confirms the
+resolved path still lands inside the repo (a relative path with enough `..`
+segments must not run something outside the repo `otari hook` was invoked
+against, even though `domain.policy` already rejects an absolute `verifier`
+at parse time), and runs it as a plain subprocess: no shell, and no
+dependency on which interpreter or tool the script itself happens to invoke.
+
+A verifier is still a caller-controlled subprocess, so it is bounded the same
+way every other evidence collection in `otari hook` is: each call has its own
+timeout (`_HOOK_CHECK_TIMEOUT_SECONDS`, 30s, an order of magnitude tighter
+than `judge`'s own per-call timeout, since a verifier script is expected to
+be fast and deterministic, not a model call), and `otari hook` evaluates at
+most `_HOOK_CHECK_MAX_GATES_PER_RUN` (20) check_passed gates per `Stop` event
+within one shared `_HOOK_CHECK_TOTAL_BUDGET_SECONDS` (60s) budget, the same
+shape `judge`'s own per-run cap and total budget take. A gate whose turn
+comes up after that budget is exhausted reports `error` without attempting
+the call at all, the same as a judge gate past its own deadline.
+
+This repo dogfoods one: `no-leftover-conflict-markers` in this repo's own
+`.otari-gates.yml` runs
+`.otari-gates/verifiers/no-conflict-markers.sh`, which fails when a tracked
+file still has a line starting with `<<<<<<<`, `=======`, or `>>>>>>>`. It
+uses `git grep`, not the system `grep` binary: `git grep` is compiled into
+`git` itself and behaves the same on every platform `git` runs on, so this
+sidesteps the exact trap `AGENTS.md`'s own "Repository Conventions" section
+calls out for a different detector, where a documented `grep -rP` invocation
+only behaved as written through an interactive shell alias, and both real
+`grep` flavors (`-P`/`--null-data` semantics differ between BSD's and GNU's)
+got it wrong when actually invoked as a subprocess. Confirmed against both a
+real macOS (BSD) `git` and a real `debian:trixie-slim` container (GNU): the
+same script reported `pass`, `fail` (with the offending lines on stdout), and
+`error` (not a git repository) identically on both.
 
 ## Calling the Hook Server
 
@@ -409,7 +519,8 @@ required gate rather than passing it. Request/response fields:
 | `commands` | Shell commands the caller observed run or is about to run. Send `[]` if evidence was collected and there is none right now (a `command_match` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects command evidence at all (a required `command_match` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
 | `command_scope` | What `commands` covers: `call` (the default) for the single tool call about to run, `session` for every command the session has run so far. This decides which gates can resolve at all: `command_match` judges only `call` scope, `command_if_changed` only `session` scope. A caller that omits it keeps the `call` semantics it was written against. |
 | `judge_results` | Model verdicts the caller collected for this request's `judge` gates: a list of `{gate_id, outcome, reasoning}`, one entry per gate it judged. Tri-state, but for a different reason than `changed_paths`/`commands`: a verdict already names the one gate it judged, so there is no "collected, and there is none for this gate" case an empty list needs beyond a missing gate id, but omitting the field entirely (or an explicit `null`) means this caller's event type never runs judge gates at all (`otari hook` on `PreToolUse`) and resolves every judge gate `not_applicable` rather than the `unknown` a caller that does run judge gates but is genuinely missing one gets. `outcome` is one of `pass`, `fail`, or `error` (the caller's own model call failed or returned something it could not parse as a verdict). |
-| `blocked` | `true` when a `required` gate's outcome is not `pass`/`not_applicable`. An unresolved gate never counts as a pass. A `judge` gate can never set this: its `enforcement` is always `advisory`. |
+| `check_results` | Verifier verdicts the caller collected for this request's `check_passed` gates: a list of `{gate_id, outcome, detail}`, one entry per gate it checked. Tri-state exactly like `judge_results`, for the same reason: omitting the field (or sending `null`) means this caller's event type never runs check_passed gates at all and resolves every such gate `not_applicable` rather than the `unknown` a caller that does run them but is missing one gets. `outcome` is one of `pass`, `fail`, or `error` (the verifier script exited 0, 1, or anything else, including a crash). |
+| `blocked` | `true` when a `required` gate's outcome is not `pass`/`not_applicable`. An unresolved gate never counts as a pass. A `judge` gate can never set this: its `enforcement` is always `advisory`. A `check_passed` gate can, unlike `judge`: its `enforcement` may be `required`. |
 | `results[].outcome` | `pass`, `fail`, `unknown`, `error`, `not_applicable`, or `not_run`. |
 
 HTTP status codes:
@@ -496,6 +607,13 @@ which only mean something once there is a finished change to judge, not a
 itself to find each `judge` gate's `rubric`, then makes one local `claude -p`
 call per gate (not through `otari serve`; see the `judge` gate type above)
 and submits the resulting verdicts as `judge_results`.
+
+A `check_passed` gate also only ever runs on `Stop`, for the same reason: a
+`PreToolUse` call has no finished session for a verifier to check yet.
+`otari hook` parses the local policy to find each `check_passed` gate's
+`verifier`, resolves it against the repo root, and runs it locally as a
+subprocess (not through `otari serve`; see the `check_passed` gate type
+above), submitting the resulting verdicts as `check_results`.
 
 **The judge gate's own inner `claude -p` call does fire this same repo's own
 hooks, confirmed by a real recursive run, not assumed.** It runs with `cwd`
@@ -663,5 +781,7 @@ yet: uninstall itself, probe whether it is correctly registered
 ## What's next
 
 `otari status`, to probe whether a hook is correctly registered without
-re-running setup; a harness other than Claude Code; and the `check_passed`
-gate type described above as not built yet.
+re-running setup; a harness other than Claude Code; and sharing or
+distributing a `check_passed` verifier across repos (a registry, reusable
+"packs"), deliberately deferred rather than built alongside this first one
+(see that gate type's own section above).

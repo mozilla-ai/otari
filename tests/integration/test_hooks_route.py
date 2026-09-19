@@ -1151,3 +1151,242 @@ def test_judge_gate_rejects_required_enforcement(client: TestClient, master_key_
     )
     assert response.status_code == 422, response.text
     assert "judge" in response.json()["detail"]
+
+
+_CHECK_PASSED_POLICY = """\
+schema_version: "1.0"
+policy:
+  id: test/check-passed
+gates:
+  - id: no-leftover-conflict-markers
+    type: check_passed
+    enforcement: required
+    verifier: .otari-gates/verifiers/no-conflict-markers.sh
+    message: A tracked file still carries a Git merge-conflict marker.
+"""
+
+
+def test_check_passed_gate_relays_a_passing_verdict(client: TestClient, master_key_header: dict[str, str]) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _CHECK_PASSED_POLICY,
+            "check_results": [{"gate_id": "no-leftover-conflict-markers", "outcome": "pass", "detail": ""}],
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "pass"
+
+
+def test_check_passed_gate_relays_a_failing_verdict_and_blocks(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Unlike judge (always advisory), a check_passed gate can be required, so a failing
+
+    verifier verdict genuinely sets `blocked`: its exit code is reproducible,
+    not a model's opinion.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _CHECK_PASSED_POLICY,
+            "check_results": [
+                {"gate_id": "no-leftover-conflict-markers", "outcome": "fail", "detail": "conflicted.txt:2"}
+            ],
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is True
+    assert body["results"][0]["outcome"] == "fail"
+    assert body["results"][0]["message"] == "A tracked file still carries a Git merge-conflict marker."
+    assert body["results"][0]["detail"] == "conflicted.txt:2"
+
+
+def test_check_passed_gate_is_not_applicable_when_check_results_is_omitted_entirely(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Omitting `check_results` (as `otari hook` does on `PreToolUse`, which never
+
+    runs check_passed gates) resolves `not_applicable`, not `unknown`, and
+    never blocks even though this gate is required.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _CHECK_PASSED_POLICY},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "not_applicable"
+
+
+def test_check_passed_gate_is_unknown_and_blocks_when_check_results_is_submitted_but_empty(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A caller that does run check_passed gates for this event (`Stop`) but collected
+
+    nothing (an empty, not omitted, `check_results`) resolves `unknown` for a
+    gate genuinely missing its verdict, unlike an omitted field entirely
+    (see the sibling test above). Unlike judge's own equivalent test, this
+    blocks: the gate is required, and unknown is on the blocking side.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _CHECK_PASSED_POLICY, "check_results": []},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is True
+    assert body["results"][0]["outcome"] == "unknown"
+
+
+def test_check_passed_gate_reports_a_callers_verifier_error_and_blocks(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _CHECK_PASSED_POLICY,
+            "check_results": [
+                {
+                    "gate_id": "no-leftover-conflict-markers",
+                    "outcome": "error",
+                    "detail": "verifier did not respond within 30s",
+                }
+            ],
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is True
+    assert body["results"][0]["outcome"] == "error"
+
+
+_WHEN_CHANGED_CHECK_PASSED_POLICY = """\
+schema_version: "1.0"
+policy:
+  id: test/check-passed-when-changed
+gates:
+  - id: no-leftover-conflict-markers
+    type: check_passed
+    enforcement: required
+    verifier: .otari-gates/verifiers/no-conflict-markers.sh
+    when_changed: ["src/**"]
+    message: A tracked file still carries a Git merge-conflict marker.
+"""
+
+
+def test_check_passed_gate_with_when_changed_is_not_applicable_when_nothing_matches(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _WHEN_CHANGED_CHECK_PASSED_POLICY,
+            "changed_paths": ["docs/README.md"],
+            "check_results": [
+                {"gate_id": "no-leftover-conflict-markers", "outcome": "fail", "detail": "should not matter"}
+            ],
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "not_applicable"
+
+
+def test_check_passed_gate_with_when_changed_is_unknown_when_change_evidence_was_not_submitted(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _WHEN_CHANGED_CHECK_PASSED_POLICY,
+            "check_results": [{"gate_id": "no-leftover-conflict-markers", "outcome": "pass", "detail": ""}],
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is True
+    assert body["results"][0]["outcome"] == "unknown"
+
+
+def test_check_passed_gate_with_when_changed_still_resolves_the_verdict_once_a_matching_path_changed(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _WHEN_CHANGED_CHECK_PASSED_POLICY,
+            "changed_paths": ["src/module.py"],
+            "check_results": [
+                {"gate_id": "no-leftover-conflict-markers", "outcome": "fail", "detail": "conflicted.txt:2"}
+            ],
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is True
+    assert body["results"][0]["outcome"] == "fail"
+    assert body["results"][0]["detail"] == "conflicted.txt:2"
+
+
+def test_check_passed_gate_with_when_changed_is_not_applicable_on_a_pretooluse_shaped_request(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The exact shape `otari hook` submits on a `PreToolUse` edit to a path this
+
+    gate's `when_changed` matches: `changed_paths` naming that one path,
+    `check_results` omitted. Both conditions that could otherwise make this
+    gate block (an omitted verdict, a matched when_changed, required
+    enforcement) are present at once, and the gate must still resolve
+    `not_applicable`, not `unknown`.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _WHEN_CHANGED_CHECK_PASSED_POLICY, "changed_paths": ["src/module.py"]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "not_applicable"
+
+
+def test_check_passed_when_changed_oversized_workload_is_rejected(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A check_passed gate's `when_changed` globs share changed_path's own match-work
+
+    budget, the same as judge's own when_changed globs
+    (test_judge_when_changed_oversized_workload_is_rejected's own shape):
+    evaluate_check_passed calls the same matched_changed_paths those globs
+    are checked against, so excluding them from the budget would let a
+    policy with enough check_passed gates run that same unbounded match
+    work anyway.
+    """
+    when_changed = [f'"pattern-{i:03d}-{"x" * 40}"' for i in range(100)]
+    policy = (
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: g\n    type: check_passed\n    enforcement: required\n    verifier: v.sh\n"
+        f"    when_changed: [{', '.join(when_changed)}]\n    message: m\n"
+    )
+    changed_paths = [f"src/{'y' * 40}-{i:05d}.txt" for i in range(10_000)]
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": policy, "changed_paths": changed_paths},
+        headers=master_key_header,
+    )
+    assert response.status_code == 422, response.text
+    assert "match operations" in response.json()["detail"]

@@ -16,6 +16,7 @@ import yaml
 from gateway.agent_runtime.domain.evaluators import tokenize_phrase
 from gateway.agent_runtime.domain.types import (
     ChangedPathGate,
+    CheckPassedGate,
     CommandIfChangedGate,
     CommandMatchGate,
     Enforcement,
@@ -44,7 +45,7 @@ MAX_POLICY_BYTES = 256 * 1024
 MAX_GATE_ID_LENGTH = 200
 
 _SUPPORTED_SCHEMA_VERSIONS = {"1.0"}
-_SUPPORTED_GATE_TYPES = {"changed_path", "command_match", "command_if_changed", "judge"}
+_SUPPORTED_GATE_TYPES = {"changed_path", "command_match", "command_if_changed", "judge", "check_passed"}
 _SUPPORTED_ENFORCEMENTS = {"required", "advisory"}
 
 # A model's verdict is not reproducible the way a glob or phrase match is, so
@@ -75,12 +76,17 @@ _GATE_FIELDS_BY_TYPE = {
     "command_match": _COMMON_GATE_FIELDS | {"forbidden"},
     "command_if_changed": _COMMON_GATE_FIELDS | {"when_changed", "require"},
     "judge": _COMMON_GATE_FIELDS | {"rubric", "when_changed"},
+    "check_passed": _COMMON_GATE_FIELDS | {"verifier", "when_changed"},
 }
 
 # A rubric is prompt text, not a glob or phrase; bounded generously since it
 # feeds a model prompt the caller builds, not a matcher whose cost this
 # module has to estimate the way it does for _MAX_DOUBLE_STAR_PER_GLOB.
 _MAX_RUBRIC_BYTES = 16 * 1024
+
+# A verifier is a repo-relative path, not free text; bounded like a path
+# field rather than like rubric's prompt-text allowance.
+_MAX_VERIFIER_LENGTH = 4096
 
 
 class PolicyError(Exception):
@@ -264,6 +270,34 @@ def _parse_gate(raw: Any) -> GateSpec:
             enforcement=enforcement_value,
             when_changed=tuple(when_changed),
             require=tuple(require),
+            message=message,
+        )
+
+    if gate_type == "check_passed":
+        verifier = raw.get("verifier")
+        if not isinstance(verifier, str) or not verifier.strip():
+            raise PolicyError(f"Gate {gate_id!r} (type 'check_passed') needs a non-empty 'verifier'.")
+        if len(verifier) > _MAX_VERIFIER_LENGTH:
+            raise PolicyError(f"Gate {gate_id!r}: verifier is longer than {_MAX_VERIFIER_LENGTH} characters.")
+        if verifier.startswith("/"):
+            raise PolicyError(
+                f"Gate {gate_id!r}: verifier {verifier!r} must be a repo-relative path, not absolute."
+            )
+        if "\x00" in verifier:
+            raise PolicyError(f"Gate {gate_id!r}: verifier {verifier!r} contains a NUL byte.")
+        # Optional, like judge's own when_changed: absence means "always
+        # applies". See that field's own comment below for why a submitted
+        # but empty list is still rejected rather than treated the same way.
+        check_when_changed: list[str] = []
+        if "when_changed" in raw:
+            check_when_changed = _parse_glob_list(
+                gate_id, "when_changed", _require_string_list(raw, "when_changed", gate_id, gate_type)
+            )
+        return CheckPassedGate(
+            id=gate_id,
+            enforcement=enforcement_value,
+            verifier=verifier,
+            when_changed=tuple(check_when_changed),
             message=message,
         )
 

@@ -164,9 +164,53 @@ class JudgeGate:
     type: Literal["judge"] = "judge"
 
 
-# Extend this alias as check_passed lands; do not let a new gate type skip
-# it, or the policy loader's dispatch on ``type`` silently stops covering it.
-GateSpec = ChangedPathGate | CommandMatchGate | CommandIfChangedGate | JudgeGate
+@dataclass(frozen=True, slots=True)
+class CheckPassedGate:
+    """A gate whose verdict comes from a repo-local verifier script's own exit status.
+
+    ``verifier`` is a repo-relative path to an executable script in the
+    calling repo (e.g. ``.otari-gates/verifiers/no-conflict-markers.sh``), not
+    a closed set of otari-shipped implementations. Otari itself never runs
+    it, the same way it never reads a caller's repository for any other gate:
+    the caller (``otari hook``) runs the script with ``cwd`` at the repo
+    root and submits the resulting verdict as :class:`CheckEvidence`. The
+    exit-code contract is fixed and caller-independent: 0 is ``pass``, 1 is
+    ``fail``, anything else (including a crash) is ``error``. Captured
+    stdout, capped, becomes the verdict's ``detail``.
+
+    Unlike :class:`JudgeGate`, ``enforcement`` is not restricted to
+    ``advisory``: a verifier's exit code is reproducible the way a glob or
+    phrase match is, not a model's opinion, so a ``required`` check_passed
+    gate can genuinely block. This is also the first gate type that *runs*
+    something the policy names, rather than matching text or prompting a
+    model, so its trust boundary is the repo: a script checked into the repo
+    and named by that repo's own policy is the same trust level as a
+    Makefile target or a pre-commit hook, which is why the caller resolves
+    the verifier against the repo root and refuses a path that climbs out.
+    There is deliberately no guard requiring the verifier to predate the
+    diff under check, and no sandboxing: a "must predate this diff" rule was
+    considered and rejected because it breaks the primary workflow this gate
+    type is for, someone writing a new verifier and using it in the same
+    change. See docs/agent-gates.md, which records what that boundary does
+    not cover.
+
+    ``when_changed`` is optional and, like ``JudgeGate``'s own field of the
+    same name, the same repo-relative POSIX glob grammar
+    ``ChangedPathGate.forbidden`` uses. Empty (the default) means this gate
+    always applies.
+    """
+
+    id: str
+    enforcement: Enforcement
+    verifier: str
+    message: str
+    when_changed: tuple[str, ...] = ()
+    type: Literal["check_passed"] = "check_passed"
+
+
+# Extend this alias as a new gate type lands; do not let one skip it, or the
+# policy loader's dispatch on ``type`` silently stops covering it.
+GateSpec = ChangedPathGate | CommandMatchGate | CommandIfChangedGate | JudgeGate | CheckPassedGate
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +291,43 @@ class JudgeEvidence:
     """
 
     verdicts: tuple[JudgeVerdict, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CheckVerdict:
+    """One check_passed gate's verifier-produced verdict, as the caller observed it.
+
+    ``outcome`` mirrors :class:`JudgeVerdict`'s own shape: the caller's own
+    report, not a value Otari computed. ``"error"`` means the verifier
+    script itself could not be run or exited with a status other than 0 or
+    1 (a crash, a missing script, a permissions problem), distinct from
+    ``"fail"`` (exit 1: the script ran and found a violation). Otari does
+    not verify either. ``detail`` is the verifier's own captured stdout,
+    capped the same way :class:`JudgeVerdict.reasoning` is.
+    """
+
+    gate_id: str
+    outcome: Literal["pass", "fail", "error"]
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class CheckEvidence:
+    """Verdicts the caller collected for this request's check_passed gates.
+
+    Structured exactly like :class:`JudgeEvidence`, for the same reason: a
+    verdict already names the one gate it checked, so there is no
+    "collected, and there is none for this gate" case beyond a missing gate
+    id. What *is* a tri-state, the same as :class:`JudgeEvidence`'s own, is
+    ``evaluate_check_passed``'s ``evidence`` parameter being ``None`` at
+    all: a caller whose event type never runs check_passed gates
+    (``otari hook`` on `PreToolUse`) submits no ``CheckEvidence`` rather
+    than an empty one, and resolves ``not_applicable`` rather than the
+    ``unknown`` a caller that does run check_passed gates but is genuinely
+    missing a verdict for this one gets.
+    """
+
+    verdicts: tuple[CheckVerdict, ...]
 
 
 @dataclass(frozen=True, slots=True)

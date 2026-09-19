@@ -4,6 +4,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -16,7 +17,7 @@ from uvicorn.config import logger
 
 from gateway.agent_runtime.domain.evaluators import matched_changed_paths
 from gateway.agent_runtime.domain.policy import PolicyError, parse_policy
-from gateway.agent_runtime.domain.types import JudgeGate
+from gateway.agent_runtime.domain.types import CheckPassedGate, JudgeGate
 from gateway.core.config import API_KEY_HEADER, API_ROOT, load_config
 from gateway.log_config import setup_logger
 
@@ -999,6 +1000,210 @@ def _hook_collect_judge_verdicts(
     return results
 
 
+# A verifier script is expected to be fast and deterministic (a grep, a lint
+# rule, a small local test), not a model call, so this is bounded an order of
+# magnitude tighter than the judge gate's own per-call timeout
+# (_HOOK_JUDGE_TIMEOUT_SECONDS). One call taking this long is already a sign
+# something is wrong, not a slow-but-normal case to accommodate.
+_HOOK_CHECK_TIMEOUT_SECONDS = 30
+
+# Mirrors _HOOK_JUDGE_MAX_GATES_PER_RUN's own reasoning: each check_passed
+# gate costs one subprocess run, not a near-instant pattern match, so an
+# unbounded gate count must not turn one Stop event into unbounded
+# wall-clock.
+_HOOK_CHECK_MAX_GATES_PER_RUN = 20
+
+# One shared elapsed-time budget across every check_passed gate in one run,
+# the same shape _HOOK_JUDGE_TOTAL_BUDGET_SECONDS takes, scaled down for the
+# same reason _HOOK_CHECK_TIMEOUT_SECONDS is: verifier scripts are expected
+# to run in seconds, not minutes, and this budget still has to leave margin
+# under Claude Code's own 600s Stop-hook default alongside whatever judge
+# gates already claimed out of that same 600s in this run.
+_HOOK_CHECK_TOTAL_BUDGET_SECONDS = 60
+
+# Mirrors the Hook Server's own CheckVerdictRequest.detail cap
+# (routes/hooks.py, _MAX_CHECK_DETAIL_LENGTH): an oversize detail otherwise
+# 422s the *whole* /hooks/check request, fail-open, taking every other gate
+# in the same policy down with it.
+_HOOK_MAX_CHECK_DETAIL_LENGTH = 4_096
+
+
+def _hook_run_check_verifier(repo_root: Path, verifier: str, *, deadline: float) -> tuple[str, str]:
+    """Run one check_passed gate's verifier script; return (outcome, detail).
+
+    The exit-code contract is fixed, not something a caller or this command
+    decides: 0 is "pass", 1 is "fail", anything else -- a different exit
+    code, a crash, a missing or non-executable script -- is "error". This is
+    what lets `enforcement: required` genuinely block for this gate type,
+    unlike `judge`: the contract is reproducible, not a model's opinion.
+
+    `verifier` is resolved against `repo_root` and, before it is ever run,
+    confirmed to still resolve inside it (mirrors the same guard the
+    PreToolUse edit-path branch above applies to its own target path): a
+    policy naming `../../etc/passwd` or an absolute path domain.policy
+    already rejects at parse time, but a relative path can still climb out
+    with enough `..` segments, and running whatever that resolves to would
+    be a materially different, undocumented capability, not "run a
+    repo-local script".
+
+    No sandboxing beyond that check, and no guard requiring the script to
+    predate the diff under check, deliberately: see CheckPassedGate's own
+    docstring and docs/agent-gates.md for why. `cwd` is the repo root, so a
+    verifier that wants to inspect the working tree (`git diff`, `git
+    status`, a plain file scan) can do so exactly the way a Makefile target
+    or a pre-commit hook already checked into the repo would.
+
+    Captured stdout, capped at `_HOOK_MAX_CHECK_DETAIL_LENGTH`, is the
+    verdict's detail regardless of outcome; stderr is not read, since the
+    wire contract has no separate slot for it and stdout is what a verifier
+    author is expected to write the human-readable reason to. It is decoded
+    as UTF-8 with `errors="replace"` for the same reason
+    `_hook_collect_diff` does it: a verifier that echoes a tracked file's
+    own bytes can emit something that is not valid UTF-8, and strict
+    decoding raises `UnicodeDecodeError` from inside `subprocess` itself,
+    which would escape this function and take every other gate in the
+    policy down with it before the request ever reached the Hook Server.
+
+    The verifier leads a process group of its own (`start_new_session`) so
+    that the timeout reaches its descendants too. Stopping the verifier alone
+    leaves anything it backgrounded running, still holding the stdout and
+    stderr pipes it inherited, past both this call's cap and the whole run's
+    shared budget; on a platform whose timeout cleanup reads those pipes
+    (Windows) that is a hang, and everywhere it is at least an orphan the
+    gate spawned and never reclaimed.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return "error", "check time budget exhausted before this verifier could run"
+
+    resolved_root = repo_root.resolve()
+    script_path = (repo_root / verifier).resolve()
+    try:
+        script_path.relative_to(resolved_root)
+    except ValueError:
+        return "error", f"verifier {verifier!r} resolves outside the repo root"
+
+    if not script_path.is_file():
+        return "error", f"verifier {verifier!r} does not exist"
+
+    timeout = min(_HOOK_CHECK_TIMEOUT_SECONDS, remaining)
+    try:
+        process = subprocess.Popen(  # noqa: S603 - no shell, resolved path checked against repo_root above
+            [str(script_path)],
+            cwd=repo_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            start_new_session=True,
+        )
+    except OSError as exc:
+        # A script that is not executable, has no shebang, or does not exist
+        # by the time exec actually runs (a race after the is_file() check
+        # above) all raise OSError here rather than letting a crashed
+        # subprocess look any different from a script that genuinely ran
+        # and exited nonzero.
+        return "error", f"could not run verifier {verifier!r}: {exc}"
+
+    with process:
+        try:
+            stdout, _stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _hook_kill_process_group(process)
+            process.communicate()
+            return "error", f"verifier did not respond within {timeout:.0f}s"
+
+    detail = stdout[:_HOOK_MAX_CHECK_DETAIL_LENGTH]
+    if process.returncode == 0:
+        return "pass", detail
+    if process.returncode == 1:
+        return "fail", detail
+    return "error", detail or f"verifier exited with status {process.returncode}"
+
+
+def _hook_kill_process_group(process: subprocess.Popen[str]) -> None:
+    """SIGKILL a timed-out verifier along with anything it left running.
+
+    The verifier was started in a session of its own, so one `killpg` reaches
+    a background child too, which is the point: `process.kill()` alone leaves
+    such a child running with the captured pipes still open. SIGKILL, not
+    SIGTERM, because a verifier that ignored the deadline has already had its
+    chance to exit. Falls back to killing the verifier alone where there are
+    no process groups (Windows) or where the group is already gone.
+    """
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        return
+    except (AttributeError, OSError):
+        pass
+    try:
+        process.kill()
+    except OSError:
+        pass
+
+
+def _hook_collect_check_verdicts(
+    policy_yaml: str,
+    gates_file: Path,
+    repo_root: Path,
+    changed_paths: list[str],
+) -> list[dict[str, str]]:
+    """Run every applicable check_passed gate's verifier locally; return check_results.
+
+    Structured exactly like `_hook_collect_judge_verdicts`: parses the policy
+    locally with the same pure `domain.policy.parse_policy` the Hook Server
+    itself uses, purely to find which gates are check_passed gates and read
+    their `verifier`/`when_changed`; the Hook Server still re-parses and
+    validates the submitted `policy_yaml` on its own, so a mismatch here only
+    means check evidence for a gate the server would reject anyway. A local
+    parse failure collects no verdicts rather than raising: the existing
+    fail-open request still submits the policy text for the server to report
+    the same error on.
+
+    A gate with `when_changed` is skipped locally, before ever running its
+    verifier, when none of `changed_paths` matches its globs
+    (`domain.evaluators.matched_changed_paths`, the same grammar
+    `evaluate_check_passed`'s own applicability check uses server-side): the
+    same local optimization `_hook_collect_judge_verdicts` already applies to
+    a judge gate's own `when_changed`. A gate with no `when_changed` at all
+    keeps its unconditional, every-Stop-event behavior.
+    """
+    try:
+        spec = parse_policy(policy_yaml, source=str(gates_file))
+    except PolicyError:
+        return []
+
+    changed_paths_tuple = tuple(changed_paths)
+    check_gates = [
+        gate
+        for gate in spec.gates
+        if isinstance(gate, CheckPassedGate)
+        and (not gate.when_changed or matched_changed_paths(gate.when_changed, changed_paths_tuple))
+    ]
+    if not check_gates:
+        return []
+    if len(check_gates) > _HOOK_CHECK_MAX_GATES_PER_RUN:
+        skipped = [gate.id for gate in check_gates[_HOOK_CHECK_MAX_GATES_PER_RUN:]]
+        click.echo(
+            f"otari hook: {len(check_gates):,} check_passed gates in this policy, over the "
+            f"{_HOOK_CHECK_MAX_GATES_PER_RUN:,} limit; skipping: {', '.join(skipped)}.",
+            err=True,
+        )
+        check_gates = check_gates[:_HOOK_CHECK_MAX_GATES_PER_RUN]
+
+    # One deadline for the whole run, computed once, not a fresh budget per
+    # gate: see _HOOK_CHECK_TOTAL_BUDGET_SECONDS for why a per-call cap alone
+    # does not bound the total.
+    deadline = time.monotonic() + _HOOK_CHECK_TOTAL_BUDGET_SECONDS
+
+    results = []
+    for gate in check_gates:
+        outcome, detail = _hook_run_check_verifier(repo_root, gate.verifier, deadline=deadline)
+        results.append({"gate_id": gate.id, "outcome": outcome, "detail": detail})
+    return results
+
+
 @cli.group(name="hook", invoke_without_command=True)
 @click.option(
     "--harness",
@@ -1113,6 +1318,14 @@ def hook(
     # the Stop branch below ever reassigns this, to a real (possibly empty)
     # list.
     judge_results: list[dict[str, str]] | None = None
+    # None, not [], by default, for exactly the same reason judge_results is:
+    # a PreToolUse call has no finished session for a verifier to check yet,
+    # and never runs _hook_collect_check_verdicts at all, so submitting None
+    # resolves every check_passed gate not_applicable rather than the
+    # unknown a caller that does run check_passed gates but is missing one
+    # gets (see PolicyCheckRequest.check_results, evaluate_check_passed).
+    # Only the Stop branch below ever reassigns this.
+    check_results: list[dict[str, str]] | None = None
     if event == "PreToolUse":
         tool_name = payload.get("tool_name", "")
         tool_input = payload.get("tool_input") or {}
@@ -1198,6 +1411,7 @@ def hook(
             judge_model=judge_model,
             judge_dry_run=judge_dry_run,
         )
+        check_results = _hook_collect_check_verdicts(policy_yaml, gates_file, root, changed_paths)
     else:
         return  # An event this harness integration does not check yet.
 
@@ -1228,6 +1442,7 @@ def hook(
                 "commands": commands,
                 "command_scope": command_scope,
                 "judge_results": judge_results,
+                "check_results": check_results,
             },
             headers={API_KEY_HEADER: resolved_key},
             timeout=15.0,

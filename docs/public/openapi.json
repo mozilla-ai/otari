@@ -3381,6 +3381,39 @@
         "title": "ChatCompletionRequest",
         "type": "object"
       },
+      "CheckVerdictRequest": {
+        "additionalProperties": false,
+        "description": "One check_passed gate's verdict, as the caller's own verifier run produced it.\n\nMirrors ``JudgeVerdictRequest`` field-for-field: ``gate_id`` echoes back\nthe gate the policy itself named (same bound, same reason), ``outcome``\nis the caller's own report of the verifier's exit code (0/1/anything\nelse, mapped by the caller to pass/fail/error), and ``detail`` is the\nverifier's captured stdout, capped the same way ``reasoning`` is.",
+        "properties": {
+          "detail": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Detail",
+            "type": "string"
+          },
+          "gate_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Gate Id",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "pass",
+              "fail",
+              "error"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gate_id",
+          "outcome"
+        ],
+        "title": "CheckVerdictRequest",
+        "type": "object"
+      },
       "ConfigField": {
         "description": "One effective config value surfaced to the dashboard's config viewer.",
         "properties": {
@@ -10490,6 +10523,22 @@
             ],
             "description": "Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).",
             "title": "Changed Paths"
+          },
+          "check_results": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CheckVerdictRequest"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Verifier verdicts the caller collected for this request's check_passed gates.",
+            "title": "Check Results"
           },
           "command_scope": {
             "default": "call",

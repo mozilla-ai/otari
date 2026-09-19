@@ -6626,6 +6626,30 @@ export interface components {
             user?: string | null;
         };
         /**
+         * CheckVerdictRequest
+         * @description One check_passed gate's verdict, as the caller's own verifier run produced it.
+         *
+         *     Mirrors ``JudgeVerdictRequest`` field-for-field: ``gate_id`` echoes back
+         *     the gate the policy itself named (same bound, same reason), ``outcome``
+         *     is the caller's own report of the verifier's exit code (0/1/anything
+         *     else, mapped by the caller to pass/fail/error), and ``detail`` is the
+         *     verifier's captured stdout, capped the same way ``reasoning`` is.
+         */
+        CheckVerdictRequest: {
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /** Gate Id */
+            gate_id: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "pass" | "fail" | "error";
+        };
+        /**
          * ConfigField
          * @description One effective config value surfaced to the dashboard's config viewer.
          */
@@ -10116,6 +10140,11 @@ export interface components {
              * @description Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).
              */
             changed_paths?: string[] | null;
+            /**
+             * Check Results
+             * @description Verifier verdicts the caller collected for this request's check_passed gates.
+             */
+            check_results?: components["schemas"]["CheckVerdictRequest"][] | null;
             /**
              * Command Scope
              * @description What `commands` covers: `call` for the single tool call about to run, `session` for every command the session has run so far.

@@ -15,6 +15,8 @@ import shlex
 from gateway.agent_runtime.domain.types import (
     ChangedPathEvidence,
     ChangedPathGate,
+    CheckEvidence,
+    CheckPassedGate,
     CommandEvidence,
     CommandIfChangedGate,
     CommandMatchGate,
@@ -888,4 +890,80 @@ def evaluate_judge(
         outcome=Outcome.PASS,
         message="The model verdict judged this gate's rubric satisfied.",
         detail=verdict.reasoning or None,
+    )
+
+
+def evaluate_check_passed(
+    gate: CheckPassedGate, changed_path_evidence: ChangedPathEvidence | None, evidence: CheckEvidence | None
+) -> GateResult:
+    """Relay the caller's own verifier verdict for this gate; Otari never runs a verifier itself.
+
+    Structured exactly like ``evaluate_judge``, including the same
+    ``evidence is None`` (this event never runs check_passed gates, resolves
+    ``not_applicable``) vs. "ran check_passed gates but is missing this
+    one's verdict" (resolves ``unknown``) distinction; see that function's
+    own docstring and docs/agent-gates.md for why both matter here too.
+
+    Unlike a judge gate, this gate's outcome can genuinely block a required
+    gate: a verifier's exit code is reproducible, not a model's opinion, so
+    nothing here restricts ``gate.enforcement`` the way ``domain.policy``
+    restricts a judge gate's.
+    """
+    if evidence is None:
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.NOT_APPLICABLE,
+            message="This event does not evaluate check_passed gates.",
+        )
+
+    if gate.when_changed:
+        if changed_path_evidence is None:
+            return GateResult(
+                gate_id=gate.id,
+                enforcement=gate.enforcement,
+                outcome=Outcome.UNKNOWN,
+                message="Change evidence was not submitted.",
+            )
+        if not matched_changed_paths(gate.when_changed, changed_path_evidence.changed_paths):
+            return GateResult(
+                gate_id=gate.id,
+                enforcement=gate.enforcement,
+                outcome=Outcome.NOT_APPLICABLE,
+                message="No changed path matched this gate's when_changed globs.",
+            )
+
+    verdict = next((v for v in evidence.verdicts if v.gate_id == gate.id), None)
+    if verdict is None:
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.UNKNOWN,
+            message="No verifier result was submitted for this gate.",
+        )
+
+    if verdict.outcome == "error":
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.ERROR,
+            message="The verifier could not be run.",
+            detail=verdict.detail or None,
+        )
+
+    if verdict.outcome == "fail":
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.FAIL,
+            message=gate.message,
+            detail=verdict.detail or None,
+        )
+
+    return GateResult(
+        gate_id=gate.id,
+        enforcement=gate.enforcement,
+        outcome=Outcome.PASS,
+        message="The verifier reported no violation.",
+        detail=verdict.detail or None,
     )

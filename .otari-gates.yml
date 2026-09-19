@@ -155,3 +155,12 @@ gates:
       change, or records prior behavior instead of explaining a non-obvious
       WHY (see AGENTS.md, "Repository Conventions"): that belongs in the
       commit message, not left in the code.
+
+  - id: no-leftover-conflict-markers
+    type: check_passed
+    enforcement: required
+    verifier: .otari-gates/verifiers/no-conflict-markers.sh
+    message: >-
+      A tracked file still carries a Git merge-conflict marker
+      (<<<<<<</=======/>>>>>>>). Resolve the conflict and remove the
+      markers before finishing.
