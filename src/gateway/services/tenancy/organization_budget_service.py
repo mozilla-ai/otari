@@ -196,15 +196,23 @@ class OrganizationBudgetPublic(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_model(cls, budget: Budget, *, ceiling_count: int) -> OrganizationBudgetPublic:
-        # `organization_id` is narrowed rather than declared optional: every row
-        # this service returns was filtered on the caller's own, so a null here
-        # would be a bug in the query and not a state the wire should describe.
-        if budget.organization_id is None:  # pragma: no cover - the queries filter it
-            raise OrganizationBudgetNotFoundError(budget.budget_id)
+    def from_model(
+        cls,
+        budget: Budget,
+        *,
+        organization_id: uuid.UUID,
+        ceiling_count: int,
+    ) -> OrganizationBudgetPublic:
+        """Build the public form of a budget that the given organization owns.
+
+        Raises:
+            ValueError: The budget belongs to another owner, or to the deployment.
+        """
+        if budget.organization_id != organization_id:
+            raise ValueError("The budget does not belong to this organization")
         return cls(
             budget_id=budget.budget_id,
-            organization_id=budget.organization_id,
+            organization_id=organization_id,
             name=budget.name,
             # Narrowed on the way out: the cap is exact in the database, while
             # the wire contract and the dashboard client stay float.
@@ -514,7 +522,11 @@ class OrganizationBudgetService:
         }
         return OrganizationBudgetsPublic(
             data=[
-                OrganizationBudgetPublic.from_model(budget, ceiling_count=held.get(budget.budget_id, 0))
+                OrganizationBudgetPublic.from_model(
+                    budget,
+                    organization_id=organization.id,
+                    ceiling_count=held.get(budget.budget_id, 0),
+                )
                 for budget in budgets
             ],
             count=count,
@@ -538,7 +550,7 @@ class OrganizationBudgetService:
         await self.db.commit()
         await self.db.refresh(budget)
         # Freshly created, so nothing can name it yet.
-        return OrganizationBudgetPublic.from_model(budget, ceiling_count=0)
+        return OrganizationBudgetPublic.from_model(budget, organization_id=organization.id, ceiling_count=0)
 
     async def update_budget(
         self,
@@ -607,6 +619,7 @@ class OrganizationBudgetService:
         await self.db.refresh(budget)
         return OrganizationBudgetPublic.from_model(
             budget,
+            organization_id=organization.id,
             ceiling_count=await self._ceiling_count(budget.budget_id),
         )
 

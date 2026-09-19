@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes.budgets import BudgetResponse
 from gateway.api.routes.pricing import PricingResponse
+from gateway.services.tenancy.organization_budget_service import OrganizationBudgetPublic
 
 
 def _make_error(detail: str, status_code: int = 400) -> HTTPException:
@@ -274,3 +275,32 @@ def test_pricing_response_from_model() -> None:
     assert resp.cache_write_price_per_million == 15.0
     assert resp.created_at == "2025-03-01T00:00:00+00:00"
     assert resp.updated_at == "2025-03-02T00:00:00+00:00"
+
+
+def _organization_budget(owner: uuid.UUID | None) -> MagicMock:
+    budget = MagicMock()
+    budget.budget_id = "budget-4"
+    budget.organization_id = owner
+    budget.name = "Engineering monthly"
+    budget.max_budget = 250.0
+    budget.token_limit = None
+    budget.request_limit = None
+    budget.budget_duration_sec = None
+    budget.reset_alignment = "calendar_month"
+    budget.created_at = datetime(2025, 1, 1, tzinfo=UTC)
+    budget.updated_at = datetime(2025, 1, 2, tzinfo=UTC)
+    return budget
+
+
+def test_organization_budget_public_names_the_owner() -> None:
+    owner = uuid.uuid4()
+    public = OrganizationBudgetPublic.from_model(_organization_budget(owner), organization_id=owner, ceiling_count=2)
+    assert public.organization_id == owner
+    assert public.ceiling_count == 2
+
+
+@pytest.mark.parametrize("row_owner", [None, uuid.uuid4()], ids=["deployment budget", "another organization"])
+def test_organization_budget_public_refuses_a_budget_it_does_not_own(row_owner: uuid.UUID | None) -> None:
+    budget = _organization_budget(row_owner)
+    with pytest.raises(ValueError, match="does not belong to this organization"):
+        OrganizationBudgetPublic.from_model(budget, organization_id=uuid.uuid4(), ceiling_count=0)
