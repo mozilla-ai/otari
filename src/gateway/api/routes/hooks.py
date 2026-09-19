@@ -1,10 +1,13 @@
 """Otari's Hook Server: evaluate an Agent Gates policy against caller-submitted evidence.
 
-Otari never reads a caller's repository. The caller (an agent hook,
-eventually the native ``otari hook`` dispatcher) already read its own
-``.otari-gates.yml`` and collected its own Git evidence, and submits both
-here in one request; this route parses and evaluates them and returns the
-per-gate results. This is the integration mechanism that
+Otari never reads a caller's repository. The caller (an agent hook, e.g.
+``otari hook``) already read its own ``.otari-gates.yml`` and collected its
+own Git evidence, and submits both here in one request; this route parses
+and evaluates them and returns the per-gate results, exactly the way ``otari
+hook`` itself evaluates the same policy in process by default (see
+``agent_runtime.domain.check.run_policy_check``, which both call): this
+route is the opt-in path for a caller that wants a gateway to be the one
+deciding instead. This is the integration mechanism that
 docs/otari-product-foundation.md calls the Hook Server; see
 docs/agent-gates.md for the request/response contract.
 
@@ -23,32 +26,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.agent_runtime.domain.evaluators import (
-    evaluate_changed_path,
-    evaluate_check_passed,
-    evaluate_command_if_changed,
-    evaluate_command_match,
-    evaluate_judge,
-    tokenize_commands,
-    tokenize_phrases,
-)
-from gateway.agent_runtime.domain.policy import MAX_GATE_ID_LENGTH, MAX_POLICY_BYTES, PolicyError, parse_policy
-from gateway.agent_runtime.domain.types import (
-    ChangedPathEvidence,
-    ChangedPathGate,
-    CheckEvidence,
-    CheckPassedGate,
-    CheckVerdict,
-    CommandEvidence,
-    CommandIfChangedGate,
-    CommandMatchGate,
-    EvidenceScope,
-    GateResult,
-    GateSpec,
-    JudgeEvidence,
-    JudgeGate,
-    JudgeVerdict,
-)
+from gateway.agent_runtime.domain.check import PolicyCheckError, run_policy_check
+from gateway.agent_runtime.domain.policy import MAX_GATE_ID_LENGTH, MAX_POLICY_BYTES
+from gateway.agent_runtime.domain.types import CheckVerdict, EvidenceScope, JudgeVerdict
 from gateway.api.deps import extract_credential_token, get_config, get_db_if_needed, verify_api_key_or_master_key
 from gateway.core.config import GatewayConfig
 
@@ -74,7 +54,8 @@ async def verify_hook_caller(
     does there. That is weaker on purpose and it is all this endpoint needs: it
     reads no tenant data, writes nothing, bills nothing, and evaluates only
     the policy and evidence the caller sent in the same request. What a
-    request can cost is bounded by the work budgets below, not by who sent it.
+    request can cost is bounded by ``agent_runtime.domain.check``'s own work
+    budgets, not by who sent it.
     """
     if config.is_hybrid_mode:
         extract_credential_token(request)
@@ -100,78 +81,14 @@ router = APIRouter(
 # still bounded input: this caps a pathological request, not a real repo.
 # The policy_yaml bound is domain.policy's own MAX_POLICY_BYTES, reused here
 # rather than duplicated so the Pydantic-level and parser-level limits cannot
-# drift apart.
+# drift apart. The match-cost budgets that used to sit here (per-entry
+# length, and the total-work estimates for changed_path/command_match/
+# command_if_changed) moved to agent_runtime.domain.check.run_policy_check,
+# since they guard the evaluator's own cost, not this route's: `otari hook`'s
+# own local evaluation needs them just as much as an HTTP caller does, and
+# sharing one place keeps the two from drifting apart.
 _MAX_CHANGED_PATHS = 10_000
-_MAX_PATH_LENGTH = 4096
-
-# A per-match cost bound (domain/evaluators.py) does not bound the total cost
-# of one request: MAX_POLICY_BYTES and _MAX_CHANGED_PATHS are each generous
-# enough alone that maxing out both dimensions at once measured multiple
-# seconds of matching in testing (100 forbidden globs x 10,000 changed paths,
-# realistic lengths, took over 2.5s). This estimates total match work as
-# pattern_count * total_path_length + path_count * total_pattern_length,
-# which is what the matcher's own cost scales with, and rejects a request
-# whose combination is disproportionate rather than let it run. Chosen with
-# a safety margin under the ~350M-work / 0.58s point measured in benchmarking
-# (tests/unit/agent_runtime/test_evaluators.py); a realistic policy (tens of
-# gates, a handful of forbidden globs each) against a large changed-file set
-# stays at least an order of magnitude under it.
-_MAX_MATCH_WORK = 50_000_000
-
-# A byte-weighted budget alone understates a request built from many *short*
-# patterns and paths: each _segment_matches call costs a near-constant Python
-# function-call overhead regardless of how few bytes it compares, so a
-# request that is cheap by total bytes can still mean millions of individual
-# calls. 2,500 one-byte forbidden globs against 10,000 one-byte changed paths
-# measured 50,000,000 estimated work, exactly at (not over) _MAX_MATCH_WORK,
-# for 25,000,000 real match calls that took ~5s. This bounds the raw call
-# count directly, independent of length; benchmarking the same degenerate
-# shape (short, non-matching, all-distinct strings, so neither the matcher's
-# own short-circuits nor the deduplication in domain.policy and
-# changed_path_evidence collapse the work) measured 2,000,000 calls at
-# ~0.39-0.4s regardless of how that count split between pattern_count and
-# path_count.
-_MAX_COMPARISONS = 1_000_000
-
 _MAX_COMMANDS = 10_000
-_MAX_COMMAND_LENGTH = 4096
-
-# command_match's per-(phrase, command) match cost is a product, not a sum:
-# matching one forbidden phrase against one command segment is
-# O(len(segment tokens) * len(phrase tokens)) (domain/evaluators.py's
-# _contains_subsequence checks every candidate start position, each an
-# O(len(phrase)) slice comparison). Summed over every phrase against every
-# command, that product distributes into a single multiplication:
-# total_pattern_tokens * total_command_tokens. This is a different shape from
-# _MAX_MATCH_WORK's sum-of-cross-terms (changed_path's per-comparison cost is
-# a *sum* of lengths, not a product), so it needs its own bound and its own
-# calibration: 2,000 one-token forbidden phrases against 2,000 one-token
-# commands (4,000,000 estimated work) measured ~0.7s; chosen with margin
-# under that.
-_MAX_COMMAND_MATCH_WORK = 2_000_000
-
-# Independent of token length, for the same reason _MAX_COMPARISONS exists
-# alongside _MAX_MATCH_WORK: many short phrases against many near-empty
-# commands (e.g. all-whitespace strings, which tokenize to zero tokens each,
-# so _MAX_COMMAND_MATCH_WORK's product is zero regardless of phrase count)
-# is still one Python-level comparison per pair. 2,000 phrases against 10,000
-# such commands (20,000,000 comparisons, 0 estimated work) measured ~4.7s.
-# Chosen with margin under the ~1,000,000-comparisons / ~0.2s point measured
-# at the same degenerate shape.
-_MAX_COMMAND_COMPARISONS = 500_000
-
-# Tokenizing itself is not free: shlex.split costs roughly 100-350ns per
-# character it tokenizes, regardless of content, which is 50-150x the cost
-# of a plain len() check. That is irrelevant at the scale of one command,
-# but _MAX_COMMANDS * _MAX_COMMAND_LENGTH allows up to ~41,000,000
-# characters in one request, and tokenizing all of it measured several
-# seconds before either budget below ever saw a token count to reject: a
-# policy with zero command_match gates would still pay this cost computing
-# total_command_tokens, since that sum is what proves there is nothing to
-# bound. This caps the raw character total *before* any command is
-# tokenized, using only len() (uniformly cheap regardless of content).
-# 2,000,000 characters measured ~0.17s; chosen with margin under that.
-_MAX_TOTAL_COMMAND_CHARS = 2_000_000
 
 # A judge verdict is a small, fixed-shape record (see JudgeVerdictRequest), not
 # a pattern this route matches against other input, so its bound is a plain
@@ -299,44 +216,6 @@ class PolicyCheckRequest(BaseModel):
         description="Verifier verdicts the caller collected for this request's check_passed gates.",
     )
 
-    @property
-    def changed_path_evidence(self) -> ChangedPathEvidence | None:
-        # A duplicate path adds nothing a single copy wouldn't already tell a
-        # gate; collapsing it here means the work-budget check below and the
-        # actual matching agree on the same, cheaper count rather than one
-        # estimating off raw input and the other paying for the duplicates.
-        if self.changed_paths is None:
-            return None
-        return ChangedPathEvidence(changed_paths=tuple(dict.fromkeys(self.changed_paths)))
-
-    @property
-    def command_evidence(self) -> CommandEvidence | None:
-        if self.commands is None:
-            return None
-        return CommandEvidence(commands=tuple(dict.fromkeys(self.commands)), scope=self.command_scope)
-
-    @property
-    def judge_evidence(self) -> JudgeEvidence | None:
-        if self.judge_results is None:
-            return None
-        return JudgeEvidence(
-            verdicts=tuple(
-                JudgeVerdict(gate_id=verdict.gate_id, outcome=verdict.outcome, reasoning=verdict.reasoning)
-                for verdict in self.judge_results
-            )
-        )
-
-    @property
-    def check_evidence(self) -> CheckEvidence | None:
-        if self.check_results is None:
-            return None
-        return CheckEvidence(
-            verdicts=tuple(
-                CheckVerdict(gate_id=verdict.gate_id, outcome=verdict.outcome, detail=verdict.detail)
-                for verdict in self.check_results
-            )
-        )
-
 
 class GateResultResponse(BaseModel):
     gate_id: str
@@ -354,29 +233,6 @@ class PolicyCheckResponse(BaseModel):
     blocked: bool
 
 
-def _evaluate_gate(
-    gate: GateSpec,
-    changed_path_evidence: ChangedPathEvidence | None,
-    command_evidence: CommandEvidence | None,
-    judge_evidence: JudgeEvidence | None,
-    check_evidence: CheckEvidence | None,
-    segment_cache: dict[str, list[list[str]]] | None,
-    phrase_cache: dict[str, list[str]] | None,
-) -> GateResult:
-    """Dispatch one gate to its evaluator. Extend as a new gate type joins ``GateSpec``."""
-    if isinstance(gate, ChangedPathGate):
-        return evaluate_changed_path(gate, changed_path_evidence)
-    if isinstance(gate, CommandMatchGate):
-        return evaluate_command_match(gate, command_evidence, segment_cache=segment_cache, phrase_cache=phrase_cache)
-    if isinstance(gate, JudgeGate):
-        return evaluate_judge(gate, changed_path_evidence, judge_evidence)
-    if isinstance(gate, CheckPassedGate):
-        return evaluate_check_passed(gate, changed_path_evidence, check_evidence)
-    return evaluate_command_if_changed(
-        gate, changed_path_evidence, command_evidence, segment_cache=segment_cache, phrase_cache=phrase_cache
-    )
-
-
 @router.post("/check")
 async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     """Evaluate a submitted policy against submitted evidence.
@@ -386,159 +242,52 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     sent the request, not whether its evidence is true. `blocked` is set when
     a required gate's outcome is not `pass`/`not_applicable` (an unresolved
     gate never counts as a pass).
+
+    The actual parse-and-evaluate work is
+    ``agent_runtime.domain.check.run_policy_check``, shared with ``otari
+    hook``'s own local evaluation: this route's own job is authentication,
+    translating that function's tri-state request fields into its own typed
+    ones, and turning ``PolicyCheckError`` into a 422.
     """
     try:
-        spec = parse_policy(request.policy_yaml, source="request body")
-    except PolicyError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    for path in request.changed_paths or []:
-        if len(path) > _MAX_PATH_LENGTH:
-            raise HTTPException(status_code=422, detail=f"changed_paths entry exceeds {_MAX_PATH_LENGTH} characters.")
-    for command in request.commands or []:
-        if len(command) > _MAX_COMMAND_LENGTH:
-            raise HTTPException(status_code=422, detail=f"commands entry exceeds {_MAX_COMMAND_LENGTH} characters.")
-
-    changed_path_gates = [gate for gate in spec.gates if isinstance(gate, ChangedPathGate)]
-    command_match_gates = [gate for gate in spec.gates if isinstance(gate, CommandMatchGate)]
-    command_if_changed_gates = [gate for gate in spec.gates if isinstance(gate, CommandIfChangedGate)]
-    judge_gates = [gate for gate in spec.gates if isinstance(gate, JudgeGate)]
-    check_passed_gates = [gate for gate in spec.gates if isinstance(gate, CheckPassedGate)]
-
-    # Built once and reused below: gate.forbidden/when_changed/require are
-    # already deduplicated at parse time (domain.policy), and
-    # changed_path_evidence/command_evidence deduplicate their evidence lists
-    # the same way, so each estimate and its matching evaluation below always
-    # agree on the same, cheaper counts. command_if_changed's, judge's, and
-    # check_passed's own when_changed globs are path-matching work exactly
-    # like changed_path's forbidden globs (evaluate_judge/evaluate_check_passed
-    # both call the same matched_changed_paths), so all four share the same
-    # budget rather than needing a fifth one.
-    changed_path_evidence = request.changed_path_evidence
-    changed_paths = changed_path_evidence.changed_paths if changed_path_evidence is not None else ()
-    path_globs = (
-        [glob for gate in changed_path_gates for glob in gate.forbidden]
-        + [glob for gate in command_if_changed_gates for glob in gate.when_changed]
-        + [glob for gate in judge_gates for glob in gate.when_changed]
-        + [glob for gate in check_passed_gates for glob in gate.when_changed]
-    )
-    pattern_count = len(path_globs)
-    total_pattern_length = sum(len(glob) for glob in path_globs)
-    path_count = len(changed_paths)
-    total_path_length = sum(len(path) for path in changed_paths)
-    estimated_work = pattern_count * total_path_length + path_count * total_pattern_length
-    comparisons = pattern_count * path_count
-    if estimated_work > _MAX_MATCH_WORK or comparisons > _MAX_COMPARISONS:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"This policy and evidence would take an estimated {estimated_work:,} match operations "
-                f"across {comparisons:,} pattern/path comparisons, over this build's limits "
-                f"({_MAX_MATCH_WORK:,} and {_MAX_COMPARISONS:,} respectively). Narrow the policy's "
-                "forbidden globs or the submitted changed_paths."
+        result = run_policy_check(
+            request.policy_yaml,
+            source="request body",
+            changed_paths=request.changed_paths,
+            commands=request.commands,
+            command_scope=request.command_scope,
+            judge_results=(
+                None
+                if request.judge_results is None
+                else [
+                    JudgeVerdict(gate_id=verdict.gate_id, outcome=verdict.outcome, reasoning=verdict.reasoning)
+                    for verdict in request.judge_results
+                ]
+            ),
+            check_results=(
+                None
+                if request.check_results is None
+                else [
+                    CheckVerdict(gate_id=verdict.gate_id, outcome=verdict.outcome, detail=verdict.detail)
+                    for verdict in request.check_results
+                ]
             ),
         )
-
-    command_evidence = request.command_evidence
-    # Gated on there being a gate that reads command evidence at all:
-    # tokenizing a command is exactly the cost _MAX_TOTAL_COMMAND_CHARS below
-    # exists to bound. A policy with neither command_match nor
-    # command_if_changed (every policy shipped before this gate type
-    # existed) must not pay that cost just to prove there is nothing to
-    # bound it against. Also gated on evidence actually being present:
-    # `commands` omitted from the request means command_evidence is None,
-    # and there is nothing to tokenize or bound in that case either.
-    segment_cache: dict[str, list[list[str]]] | None = None
-    phrase_cache: dict[str, list[str]] | None = None
-    if (command_match_gates or command_if_changed_gates) and command_evidence is not None:
-        total_command_chars = sum(len(command) for command in command_evidence.commands)
-        if total_command_chars > _MAX_TOTAL_COMMAND_CHARS:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Submitted commands total {total_command_chars:,} characters, over the "
-                    f"{_MAX_TOTAL_COMMAND_CHARS:,} limit. Narrow the submitted commands."
-                ),
-            )
-
-        # Tokenized exactly once here and reused for both the estimate below
-        # and the real evaluation further down (passed to every
-        # evaluate_command_match/evaluate_command_if_changed call as
-        # segment_cache): each is called once per gate against this same
-        # evidence, and without sharing this, each call would re-tokenize
-        # every command from scratch, multiplying the already-checked cost
-        # above by the number of gates. A request with 100 command_match
-        # gates each forbidding "npm" against 250 distinct ~4,000-character
-        # commands passed every budget here (low token content, few phrases,
-        # under _MAX_TOTAL_COMMAND_CHARS) yet measured ~7s of synchronous
-        # blocking from exactly that multiplication before this was shared.
-        segment_cache = tokenize_commands(command_evidence.commands)
-
-        # Policy parsing already proved every forbidden/require phrase
-        # tokenizes (domain.policy's own validation), so this cannot raise.
-        # Shared with the evaluation below via phrase_cache for the same
-        # reason segment_cache is: tokenized here for the estimate and then
-        # again inside every evaluate_command_match/evaluate_command_if_changed
-        # call is the same work twice. command_if_changed's require phrases
-        # are command-matching work exactly like command_match's forbidden
-        # phrases, so they share the same budget and cache rather than
-        # needing a third one.
-        command_phrases = tuple(phrase for gate in command_match_gates for phrase in gate.forbidden) + tuple(
-            phrase for gate in command_if_changed_gates for phrase in gate.require
-        )
-        phrase_cache = tokenize_phrases(command_phrases)
-        # Per gate occurrence, not per distinct phrase text: phrase_cache
-        # dedupes identical phrase text across gates so each is tokenized
-        # once, but evaluate_command_match/evaluate_command_if_changed still
-        # run _contains_subsequence once per gate that carries it. Summing
-        # len(phrase_cache.values()) counted a shared phrase's tokens once
-        # regardless of how many gates forbid/require it, undercounting the
-        # real per-gate matching work whenever gates share phrase text.
-        phrase_count = sum(len(gate.forbidden) for gate in command_match_gates) + sum(
-            len(gate.require) for gate in command_if_changed_gates
-        )
-        total_phrase_tokens = sum(
-            len(phrase_cache[phrase]) for gate in command_match_gates for phrase in gate.forbidden
-        ) + sum(len(phrase_cache[phrase]) for gate in command_if_changed_gates for phrase in gate.require)
-        command_count = len(command_evidence.commands)
-        total_command_tokens = sum(len(segment) for segments in segment_cache.values() for segment in segments)
-        estimated_command_work = total_phrase_tokens * total_command_tokens
-        command_comparisons = phrase_count * command_count
-        if estimated_command_work > _MAX_COMMAND_MATCH_WORK or command_comparisons > _MAX_COMMAND_COMPARISONS:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"This policy and evidence would take an estimated {estimated_command_work:,} command match "
-                    f"operations across {command_comparisons:,} phrase/command comparisons, over this build's "
-                    f"limits ({_MAX_COMMAND_MATCH_WORK:,} and {_MAX_COMMAND_COMPARISONS:,} respectively). Narrow "
-                    "the policy's forbidden phrases or the submitted commands."
-                ),
-            )
-
-    # Evaluated in declaration order (not grouped by type) so a caller reading
-    # `results` positionally sees the same order as the policy it submitted.
-    judge_evidence = request.judge_evidence
-    check_evidence = request.check_evidence
-    results = [
-        _evaluate_gate(
-            gate, changed_path_evidence, command_evidence, judge_evidence, check_evidence, segment_cache, phrase_cache
-        )
-        for gate in spec.gates
-    ]
-    blocked = any(result.enforcement == "required" and result.outcome.is_blocking for result in results)
+    except PolicyCheckError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return PolicyCheckResponse(
-        policy_id=spec.policy_id,
-        schema_version=spec.schema_version,
+        policy_id=result.policy_id,
+        schema_version=result.schema_version,
         results=[
             GateResultResponse(
-                gate_id=result.gate_id,
-                enforcement=result.enforcement,
-                outcome=result.outcome.value,
-                message=result.message,
-                detail=result.detail,
+                gate_id=gate_result.gate_id,
+                enforcement=gate_result.enforcement,
+                outcome=gate_result.outcome.value,
+                message=gate_result.message,
+                detail=gate_result.detail,
             )
-            for result in results
+            for gate_result in result.results
         ],
-        blocked=blocked,
+        blocked=result.blocked,
     )

@@ -7,10 +7,15 @@ repository itself. Rules live in `.otari-gates.yml`, committed alongside the
 code they check, so they survive an agent swap and a clone the same way the
 rest of the repo does.
 
-This is core Otari, evaluated by `otari serve`'s Hook Server, not a separate
-package or plugin. It is not [Guardrails](guardrails.md), which checks
-request input/output at inference time; a gate checks agent actions and repo
-diffs.
+This is core Otari, not a separate package or plugin. It is not
+[Guardrails](guardrails.md), which checks request input/output at inference
+time; a gate checks agent actions and repo diffs. It also needs no running
+`otari serve`: the evaluator (`gateway.agent_runtime.domain.check`) is pure
+Python with no filesystem, network, subprocess, database, or clock access, so
+`otari hook` evaluates it in process by default, and `otari serve`'s own Hook
+Server (`POST /api/v1/hooks/check`) calls the exact same function. Pointing
+`otari hook` at a gateway over HTTP is an opt-in, not a requirement; see
+"Calling the Hook Server" below for why you might still want to.
 
 ## Status
 
@@ -18,10 +23,14 @@ This is the first slice. It ships:
 
 - Five gate types: `changed_path`, `command_match`, `command_if_changed`,
   `judge`, and `check_passed`.
-- `POST /api/v1/hooks/check`, evaluated against evidence the caller submits.
 - `otari hook --harness claude-code` and `otari hook --harness codex`, real
-  installed commands that read a Claude Code or Codex hook payload and call
-  the endpoint above.
+  installed commands that read a Claude Code or Codex hook payload, collect
+  the evidence it implies, and evaluate the repo's own `.otari-gates.yml`
+  against it in process, no server or credential required. Given `--url`
+  and/or `--api-key` (or their `OTARI_URL`/`OTARI_API_KEY` envvars), they
+  instead call `POST /api/v1/hooks/check` on a gateway over HTTP.
+- `POST /api/v1/hooks/check`, the same evaluation exposed over HTTP by
+  `otari serve`, for whoever opts a hook into it.
 - `otari hook setup`, which registers it: writes a `PreToolUse` and a `Stop`
   hook entry into the harness's own settings (`.claude/settings.local.json`
   for Claude Code, `.codex/hooks.json` for Codex) and, if this repo has no
@@ -580,6 +589,13 @@ problems" trade a diff-scoped linter already makes.
 
 ## Calling the Hook Server
 
+`otari hook` does not need this by default: it evaluates the local
+`.otari-gates.yml` in process (see "Status" above), and reaches this endpoint
+only when it is given `--url` and/or `--api-key` (or their `OTARI_URL`/
+`OTARI_API_KEY` envvars). Opting into it is for whoever wants a shared or
+hosted gateway, rather than the machine the agent is running on, to be the
+one deciding, or a central place a future check could report to.
+
 `POST /api/v1/hooks/check`, authenticated like
 `POST /api/v1/usage/external-events`: an ordinary API key or the master key
 in the `Otari-Key` header. This identifies who sent the request, not whether
@@ -656,9 +672,11 @@ HTTP status codes:
 | `401`/`403` | Missing or invalid API key / master key. |
 | `422` | `policy_yaml` is missing, malformed, or references an unsupported schema version or gate type. |
 
-`otari serve` must be running: there is no offline or local-only path in this
-build. A gate is only as useful as the evidence it is checked against, and
-evaluating that evidence is what this endpoint does.
+`otari serve` must be running for this endpoint specifically, since it is
+what serves it; `otari hook` itself does not need it, by default (see
+"Calling the Hook Server" above). A gate is only as useful as the evidence it
+is checked against, and evaluating that evidence, wherever it runs, is the
+one job both this endpoint and `otari hook`'s own local evaluation share.
 
 ## Trying it against a real Claude Code session
 
@@ -778,9 +796,8 @@ blocking proves nothing about whether an interactive session's own
 
 1. Run `otari hook setup`. It writes both a `PreToolUse` hook entry and a
    `Stop` hook entry into `.claude/settings.local.json` (personal, and this
-   repo's own `.gitignore` covers it specifically, since the generated
-   command embeds a live API key or master key: see "Registering it for
-   Codex" below for the same file for that harness), both pointing at this
+   repo's own `.gitignore` covers it specifically: see below for why it
+   still matters with no credential involved), both pointing at this
    install's own
    `otari hook --harness claude-code`; Claude Code passes its own
    `hook_event_name` in the payload, so one callback serves both. If this
@@ -796,34 +813,37 @@ blocking proves nothing about whether an interactive session's own
    since `changed_path` always benefits from its Git-status fallback there
    and a `command_if_changed` gate has no other event it can resolve on.
 
-   For a credential, it tries the same automatic resolution `otari hook`
-   itself does at runtime (config file, `.env`, environment) before asking;
-   if that finds nothing, it prompts once and writes the answer into the
-   generated command rather than into `.env`. Re-running `otari hook setup`
-   updates both entries in place rather than adding duplicates, and leaves
-   every other hook or permission already in the file untouched.
-
-   Safe to run again any time the policy or the credential changes.
+   With no `--api-key`, the generated command carries no credential at all:
+   `otari hook` evaluates the policy locally, and needs neither one nor a
+   running gateway to do it. `.claude/settings.local.json` stays gitignored
+   regardless, since it is still a personal file (its own registration
+   should not be everyone's default, and it may later carry `--api-key`).
+   Re-running `otari hook setup` updates both entries in place rather than
+   adding duplicates, and leaves every other hook or permission already in
+   the file untouched. Safe to run again any time the policy changes.
    `--harness codex` runs the same setup against Codex's own settings instead
-   (see "Registering it for Codex" below); `--api-key <key>` skips resolution
-   and prompting outright, for a non-interactive run.
+   (see "Registering it for Codex" below); `--api-key <key>` is the opt-in
+   into checking against a gateway over HTTP instead (see "Calling the Hook
+   Server" above) and embeds that credential in the generated command.
 
    Three things about this are temporary, not deliberate design, and all
    trace back to one cause: this package installs into a per-project venv
    today, not a single, stable, per-user location. `setup` identifies its own
    hook entry by the absolute path of that venv's `otari` binary, so a
    reinstalled or relocated environment leaves the old entry unrecognized
-   rather than updated in place. It has no `--config`/`-c` of its own (unlike
-   `otari hook` itself, see "Registering it by hand" below), so a
-   `master_key` living only in `config.yml` is neither found automatically
-   nor passed to the generated hook. And a manually entered credential is
-   embedded directly in the generated command: a subprocess argument visible
-   to anything that lists processes on the machine, not just a value in a
-   gitignored file. Once otari ships as a standalone install (Homebrew, most
-   likely) instead of a venv console script, it gains a fixed binary path to
-   match on and a well-known per-user config directory (`~/.config/otari` on
-   both macOS and Linux, not the platform-native convention) to read a
-   `master_key` from and write a prompted one into, closing all three without
+   rather than updated in place; this one applies regardless of `--api-key`.
+   The other two are specific to opting into the HTTP-backed mode: `setup`
+   has no `--config`/`-c` of its own (unlike `otari hook` itself, see
+   "Registering it by hand" below), so a `master_key` living only in
+   `config.yml` is neither found automatically nor passed to the generated
+   hook when opting in without `--api-key`; and a given `--api-key` is
+   embedded directly in the generated command, a subprocess argument
+   visible to anything that lists processes on the machine, not just a
+   value in a gitignored file. Once otari ships as a standalone install
+   (Homebrew, most likely) instead of a venv console script, it gains a
+   fixed binary path to match on and a well-known per-user config directory
+   (`~/.config/otari` on both macOS and Linux, not the platform-native
+   convention) to read a `master_key` from, closing all three without
    threading a flag through every entry point or ever putting a secret in
    argv. Fixed then, not now.
 
@@ -850,7 +870,7 @@ explicitly, one for `PreToolUse` and one for `Stop`:
         "hooks": [
           {
             "type": "command",
-            "command": "/abs/path/to/.venv/bin/otari hook --harness claude-code -c /abs/path/to/config.yml"
+            "command": "/abs/path/to/.venv/bin/otari hook --harness claude-code"
           }
         ]
       }
@@ -860,7 +880,7 @@ explicitly, one for `PreToolUse` and one for `Stop`:
         "hooks": [
           {
             "type": "command",
-            "command": "/abs/path/to/.venv/bin/otari hook --harness claude-code -c /abs/path/to/config.yml"
+            "command": "/abs/path/to/.venv/bin/otari hook --harness claude-code"
           }
         ]
       }
@@ -869,44 +889,49 @@ explicitly, one for `PreToolUse` and one for `Stop`:
 }
 ```
 
-Both paths are absolute on purpose. The hook subprocess does not inherit an
-activated shell's `PATH`, so a bare `otari` often will not resolve, and it
-does not reliably start in the directory the credential lookup below reads
-from either.
+The path is absolute on purpose. The hook subprocess does not inherit an
+activated shell's `PATH`, so a bare `otari` often will not resolve.
 
-With no `--url`/`--api-key`, `otari hook` resolves both the same way every
-other Otari command does, reading the gateway's own `host`/`port` and its
-`master_key`. It consults the config file `-c` names, the `.env` beside that
-file, the `.env` in the working directory, and the environment, with the
-environment taking precedence over the config file.
+That is everything the default, local evaluation needs: no `--url`,
+`--api-key`, or `-c`, and no `master_key` anywhere. Opting into checking
+against a gateway over HTTP instead (see "Calling the Hook Server" above)
+adds `--url`/`--api-key` (or their `OTARI_URL`/`OTARI_API_KEY` envvars) to
+the command, and, only in that mode, `otari hook` resolves whichever of the
+two is not given the same way every other Otari command does, reading the
+gateway's own `host`/`port` and its `master_key`. It consults the config
+file `-c` names, the `.env` beside that file, the `.env` in the working
+directory, and the environment, with the environment taking precedence over
+the config file.
 
 Nothing auto-discovers a `config.yml`. Without `-c`, a `config.yml` sitting
 in the working directory is not read, exactly as for `otari serve`. Pass
 `-c` whenever your `master_key` lives in `config.yml` rather than in `.env`
-or the environment, or the hook finds no credential.
+or the environment and you have opted into this mode without `--api-key`, or
+the hook finds no credential.
 
-Getting that wrong is quiet. A hook with no credential does what it does for
-any setup failure: prints to stderr and exits 0, and Claude Code shows a
-non-blocking hook's stderr only in its own debug log. The gates stop running
-and nothing in the transcript says so. After setting this up, confirm it
-works by editing a forbidden path (step 2 above) rather than by seeing no
-complaints.
+Getting that wrong is quiet. Once opted in, a hook with no credential does
+what it does for any setup failure: prints to stderr and exits 0, and Claude
+Code shows a non-blocking hook's stderr only in its own debug log. The gates
+stop running and nothing in the transcript says so. After setting this up,
+confirm it works by editing a forbidden path (step 2 above) rather than by
+seeing no complaints.
 
-All of this only applies when the hook runs on the same machine as the
-server. Otherwise point it at the gateway with `--url`/`--api-key`, or
-`OTARI_URL`/`OTARI_API_KEY`. Prefer an ordinary API key over the `master_key`
-there: this endpoint accepts either, a hook needs nothing the master key
-uniquely grants, and a credential written into a settings file or a command
-line is one you should be able to rotate on its own.
+All of the credential-resolution paragraph above only applies when the hook
+runs on the same machine as the server. Otherwise point it at the gateway
+with `--url`/`--api-key`, or `OTARI_URL`/`OTARI_API_KEY`. Prefer an ordinary
+API key over the `master_key` there: this endpoint accepts either, a hook
+needs nothing the master key uniquely grants, and a credential written into
+a settings file or a command line is one you should be able to rotate on its
+own.
 
 ### Registering it for Codex
 
 `otari hook setup --harness codex` writes the same pair of hook blocks into
 `.codex/hooks.json` instead, naming this install's own `otari hook --harness
-codex`. Personal, the same as `.claude/settings.local.json` above and for
-the same reason: the generated command embeds a live API key or master key,
-and this repo's own `.gitignore` covers this exact path specifically so it
-never lands in a commit or a PR.
+codex`. Personal, the same as `.claude/settings.local.json` above: its own
+registration should not be everyone's default, and it may later carry an
+opted-in `--api-key`, in which case this repo's own `.gitignore` covers this
+exact path specifically so that credential never lands in a commit or a PR.
 
 ```json
 {
@@ -914,11 +939,11 @@ never lands in a commit or a PR.
     "PreToolUse": [
       {
         "matcher": "apply_patch|Bash|exec|code_mode_exec",
-        "hooks": [{"type": "command", "command": "/abs/path/to/.venv/bin/otari hook --harness codex -c /abs/path/to/config.yml"}]
+        "hooks": [{"type": "command", "command": "/abs/path/to/.venv/bin/otari hook --harness codex"}]
       }
     ],
     "Stop": [
-      {"hooks": [{"type": "command", "command": "/abs/path/to/.venv/bin/otari hook --harness codex -c /abs/path/to/config.yml"}]}
+      {"hooks": [{"type": "command", "command": "/abs/path/to/.venv/bin/otari hook --harness codex"}]}
     ]
   }
 }
@@ -947,9 +972,11 @@ neither depends on `PreToolUse` firing.
 
 ### Known gaps
 
-`otari hook` is a thin, harness-specific transport, not a second copy of the
-evaluator: it collects evidence and calls the endpoint above; every actual
-decision still comes from `gateway.agent_runtime`. What neither command does
+`otari hook` is a thin, harness-specific evidence collector, not a second
+copy of the evaluator: it collects evidence and hands it to
+`agent_runtime.domain.check.run_policy_check`, the exact same function the
+Hook Server route calls; every actual decision comes from
+`gateway.agent_runtime`, whichever caller runs it. What neither command does
 yet: uninstall itself, or probe whether it is correctly registered
 (`otari status`, not built).
 

@@ -10,15 +10,16 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal, NamedTuple, cast
 
 import click
 import uvicorn
 from uvicorn.config import logger
 
+from gateway.agent_runtime.domain.check import PolicyCheckError, run_policy_check
 from gateway.agent_runtime.domain.evaluators import matched_changed_paths
 from gateway.agent_runtime.domain.policy import PolicyError, parse_policy
-from gateway.agent_runtime.domain.types import CheckPassedGate, JudgeGate
+from gateway.agent_runtime.domain.types import CheckPassedGate, CheckVerdict, EvidenceScope, JudgeGate, JudgeVerdict
 from gateway.core.config import API_KEY_HEADER, API_ROOT, load_config
 from gateway.log_config import setup_logger
 
@@ -291,23 +292,28 @@ def _hook_extract_patch_paths(patch_text: str) -> list[str]:
     return list(seen)
 
 
-# Mirrors the Hook Server's own per-command bound (routes/hooks.py's
-# _MAX_COMMAND_LENGTH). A literal rather than an import: this command talks to
-# a gateway over HTTP that may be a different build, so the number it truncates
-# to is its own best guess at the far side's limit, not a shared constant that
-# would imply the two are always one process.
+# Mirrors the evaluator's own per-command bound
+# (agent_runtime.domain.check's _MAX_COMMAND_LENGTH). A literal rather than
+# an import: the opt-in remote mode talks to a gateway over HTTP that may be
+# a different build, so the number it truncates to is its own best guess at
+# the far side's limit, not a shared constant that would imply the two are
+# always one process. The default, local mode calls the same evaluator
+# in process and would raise `PolicyCheckError` on the same bound anyway;
+# truncating here means an oversize command still gets checked, just with
+# its tail cut, rather than failing the whole check open.
 _HOOK_MAX_COMMAND_LENGTH = 4096
 
-# Mirror routes/hooks.py's own _MAX_COMMANDS/_MAX_TOTAL_COMMAND_CHARS, for the
-# same reason _HOOK_MAX_COMMAND_LENGTH does: per-command truncation alone does
-# not bound the total. A Stop event now submits every Bash command the whole
-# session ran, not the single command a PreToolUse call would carry, so
-# reaching this aggregate is a real, not pathological, outcome of a long
-# session with several long commands (501 commands truncated to
-# _HOOK_MAX_COMMAND_LENGTH each already clears 2,000,000 characters). Left
-# unbounded, the server 422s the whole request, and that failure is total: it
-# takes every gate in the policy with it, changed_path included, not just the
-# command-evidence ones.
+# Mirror agent_runtime.domain.check's own _MAX_COMMANDS/_MAX_TOTAL_COMMAND_CHARS,
+# for the same reason _HOOK_MAX_COMMAND_LENGTH does: per-command truncation
+# alone does not bound the total. A Stop event now submits every Bash
+# command the whole session ran, not the single command a PreToolUse call
+# would carry, so reaching this aggregate is a real, not pathological,
+# outcome of a long session with several long commands (501 commands
+# truncated to _HOOK_MAX_COMMAND_LENGTH each already clears 2,000,000
+# characters). Left unbounded, the evaluator (local or remote) 422s/raises
+# on the whole request, and that failure is total: it takes every gate in
+# the policy with it, changed_path included, not just the command-evidence
+# ones.
 _HOOK_MAX_COMMANDS = 10_000
 _HOOK_MAX_TOTAL_COMMAND_CHARS = 2_000_000
 
@@ -620,26 +626,27 @@ _HOOK_JUDGE_TIMEOUT_SECONDS = 300
 # unbounded wall-clock on a single Stop event: N gates at the timeout above
 # would be N * 300s in the worst case. Capped, with a visible truncation
 # message, the same "never let something scale unbounded and silently" rule
-# _bound_commands_for_submission and the Hook Server's own work-estimate
-# budgets (routes/hooks.py) already follow. Evaluated in declaration order, so
-# the same gates run first every time rather than an arbitrary subset.
+# _bound_commands_for_submission and the evaluator's own work-estimate
+# budgets (agent_runtime.domain.check) already follow. Evaluated in
+# declaration order, so the same gates run first every time rather than an
+# arbitrary subset.
 _HOOK_JUDGE_MAX_GATES_PER_RUN = 5
 
 # A per-call cap does not bound the total: 5 gates at up to 300s each, each
 # with its own possible retry (_HOOK_JUDGE_PROMPT_TOO_LONG_MARKER), is up to
 # 3,000s of judge calls alone. Claude Code's own command-hook timeout
 # defaults to 600s, after which it kills the hook and discards its output
-# entirely (see the hooks reference) -- meaning the Hook Server never gets
-# contacted at all, and every gate in the policy, mechanical and required
+# entirely (see the hooks reference) -- meaning the policy check itself never
+# gets run at all, and every gate in the policy, mechanical and required
 # ones included, goes unevaluated for that Stop event, not just the slow
 # judge gates. This is a *total* elapsed-time budget shared across every
 # judge gate and retry in one run (_hook_collect_judge_verdicts computes one
 # deadline before its gate loop, not one budget per gate), leaving real
 # margin under the 600s default for the git evidence collection and the
-# /hooks/check request that still have to happen afterward. A gate whose
-# turn comes up after the deadline has passed reports "error" without
-# attempting the call at all, the same fail-open contract a missing `claude`
-# binary already has.
+# `run_policy_check` call (or, opted in, the /hooks/check request) that
+# still has to happen afterward. A gate whose turn comes up after the
+# deadline has passed reports "error" without attempting the call at all,
+# the same fail-open contract a missing `claude` binary already has.
 _HOOK_JUDGE_TOTAL_BUDGET_SECONDS = 480
 
 # Haiku, not the session's own (often larger) default model: a judge call is a
@@ -1232,13 +1239,13 @@ def _hook_collect_judge_verdicts(
     """Run every applicable judge gate in the local policy, one model-CLI call each.
 
     Parses the policy locally with the same pure `domain.policy.parse_policy`
-    the Hook Server itself uses, purely to find which gates are judge gates
-    and read their `rubric`/`when_changed`; the Hook Server still re-parses
-    and validates the submitted `policy_yaml` on its own, so a mismatch here
-    only means judge evidence for a gate the server would reject anyway. A
-    local parse failure collects no verdicts rather than raising: the
-    existing fail-open request below still submits the policy text for the
-    server to report the same error on.
+    `run_policy_check` itself uses below, purely to find which gates are
+    judge gates and read their `rubric`/`when_changed`; that later call
+    re-parses and validates the same `policy_yaml` on its own, so a mismatch
+    here only means judge evidence for a gate that call would reject anyway.
+    A local parse failure collects no verdicts rather than raising: the
+    fail-open call to `run_policy_check` below still gets the same policy
+    text and reports the same error on it.
 
     A judge gate with `when_changed` is skipped locally, before ever reading
     the diff/transcript or shelling out to `claude -p`, when none of
@@ -1500,14 +1507,14 @@ def _hook_collect_check_verdicts(
     """Run every applicable check_passed gate's verifier locally; return check_results.
 
     Structured exactly like `_hook_collect_judge_verdicts`: parses the policy
-    locally with the same pure `domain.policy.parse_policy` the Hook Server
-    itself uses, purely to find which gates are check_passed gates and read
-    their `verifier`/`when_changed`; the Hook Server still re-parses and
-    validates the submitted `policy_yaml` on its own, so a mismatch here only
-    means check evidence for a gate the server would reject anyway. A local
-    parse failure collects no verdicts rather than raising: the existing
-    fail-open request still submits the policy text for the server to report
-    the same error on.
+    locally with the same pure `domain.policy.parse_policy` `run_policy_check`
+    itself uses below, purely to find which gates are check_passed gates and
+    read their `verifier`/`when_changed`; that later call re-parses and
+    validates the same `policy_yaml` on its own, so a mismatch here only
+    means check evidence for a gate that call would reject anyway. A local
+    parse failure collects no verdicts rather than raising: the fail-open
+    call to `run_policy_check` below still gets the same policy text and
+    reports the same error on it.
 
     A gate with `when_changed` is skipped locally, before ever running its
     verifier, when none of `changed_paths` matches its globs
@@ -1616,16 +1623,21 @@ def hook(
 
     Reads one JSON hook payload on stdin, collects the evidence that payload
     carries (a PreToolUse call's own target path, or a Stop event's Git
-    status), and calls POST /api/v1/hooks/check. Never reads or evaluates the
-    policy itself: gateway.agent_runtime does that; this command is a thin,
-    harness-specific transport. See docs/agent-gates.md.
+    status), and evaluates it against the local `.otari-gates.yml` itself, in
+    process, through `agent_runtime.domain.check.run_policy_check`: no server,
+    no credential, needed for this by default. `--url`/`--api-key` (or
+    `OTARI_URL`/`OTARI_API_KEY`) are the opt-in exception: give either and
+    this instead calls a gateway's `POST /api/v1/hooks/check` over HTTP the
+    way every version of this command before local evaluation existed did,
+    for whoever wants a shared/hosted gateway to be the one deciding rather
+    than the machine the agent is running on. See docs/agent-gates.md.
 
     Exit code is this harness's own protocol, not otari policy check's:
     Claude Code's and Codex's PreToolUse and Stop hooks both take 0 (proceed)
     or 2 (block, stderr shown to the agent). Never blocks on a problem that is
-    not a required gate failing: a missing policy, an unreachable gateway, or
-    a missing credential all exit 0, with a message on stderr where there is
-    one worth surfacing.
+    not a required gate failing: a missing or malformed policy, or (only in
+    the opt-in remote mode) an unreachable gateway or a missing credential,
+    all exit 0, with a message on stderr where there is one worth surfacing.
 
     `--harness` picks which payload/transcript shape is expected and which
     tool names are read as an edit vs. a command (see
@@ -1642,7 +1654,6 @@ def hook(
     """
     if ctx.invoked_subcommand is not None:
         return
-    import httpx
 
     try:
         payload = json.load(sys.stdin)
@@ -1678,9 +1689,9 @@ def hook(
     # nothing.
     commands: list[str] | None = []
     # "call" unless the Stop branch below really does collect the whole
-    # session: this is what tells the server which command-evidence gates can
-    # resolve at all, rather than leaving each to guess from an empty list.
-    command_scope = "call"
+    # session: this is what tells the evaluator which command-evidence gates
+    # can resolve at all, rather than leaving each to guess from an empty list.
+    command_scope: EvidenceScope = "call"
     # None, not [], by default: a PreToolUse call has neither a full diff nor
     # a finished transcript to judge against yet, and never runs
     # _hook_collect_judge_verdicts at all, so submitting None (rather than an
@@ -1818,64 +1829,123 @@ def hook(
     else:
         return  # An event this harness integration does not check yet.
 
-    try:
-        gateway_config = load_config(config)
-    except ValueError as exc:
-        # load_config runs GatewayConfig.validate_mode_selection(), which
-        # raises on a real misconfiguration (e.g. OTARI_MODE=hybrid with no
-        # OTARI_AI_TOKEN). That is a setup problem, not a required gate
-        # failing, so it falls under this command's own fail-open contract.
-        click.echo(f"otari hook: could not load config ({exc}), not blocking.", err=True)
-        return
-    # host is a bind address (0.0.0.0 is the documented default), not a connect
-    # target; a client dials localhost instead.
-    connect_host = "localhost" if gateway_config.host == "0.0.0.0" else gateway_config.host  # noqa: S104
-    resolved_url = url or f"http://{connect_host}:{gateway_config.port}"
-    resolved_key = api_key or gateway_config.master_key
-    if not resolved_key:
-        click.echo("otari hook: no API key or master key resolved, not blocking.", err=True)
-        return
+    # No `--url`/`--api-key` (nor their envvars): the common case, and the
+    # default now. Evaluate the local policy in process, the same pure
+    # `run_policy_check` the Hook Server route itself calls, so nothing here
+    # needs a running gateway, a credential, or the network at all.
+    if url is None and api_key is None:
+        try:
+            check_result = run_policy_check(
+                policy_yaml,
+                source=str(gates_file),
+                changed_paths=changed_paths,
+                commands=commands,
+                command_scope=command_scope,
+                judge_results=(
+                    None
+                    if judge_results is None
+                    else [
+                        JudgeVerdict(
+                            gate_id=v["gate_id"],
+                            outcome=cast(Literal["pass", "fail", "error"], v["outcome"]),
+                            reasoning=v["reasoning"],
+                        )
+                        for v in judge_results
+                    ]
+                ),
+                check_results=(
+                    None
+                    if check_results is None
+                    else [
+                        CheckVerdict(
+                            gate_id=v["gate_id"],
+                            outcome=cast(Literal["pass", "fail", "error"], v["outcome"]),
+                            detail=v["detail"],
+                        )
+                        for v in check_results
+                    ]
+                ),
+            )
+        except PolicyCheckError as exc:
+            click.echo(f"otari hook: could not evaluate {gates_file} ({exc}), not blocking.", err=True)
+            return
+        failing = [
+            {
+                "gate_id": gate_result.gate_id,
+                "enforcement": gate_result.enforcement,
+                "outcome": gate_result.outcome.value,
+                "message": gate_result.message,
+                "detail": gate_result.detail,
+            }
+            for gate_result in check_result.results
+            if gate_result.outcome.value not in ("pass", "not_applicable")
+        ]
+        blocked = check_result.blocked
+    else:
+        # Explicit opt-in: check against a gateway over HTTP instead, the way
+        # every version of this command before local evaluation existed did.
+        # For whoever wants a shared/hosted gateway to be the one deciding,
+        # or a central place data about the check could eventually land.
+        import httpx
 
-    try:
-        response = httpx.post(
-            f"{resolved_url.rstrip('/')}{API_ROOT}/hooks/check",
-            json={
-                "policy_yaml": policy_yaml,
-                "changed_paths": changed_paths,
-                "commands": commands,
-                "command_scope": command_scope,
-                "judge_results": judge_results,
-                "check_results": check_results,
-            },
-            headers={API_KEY_HEADER: resolved_key},
-            timeout=15.0,
-        )
-        response.raise_for_status()
-        result = response.json()
-        failing = [gate for gate in result["results"] if gate["outcome"] not in ("pass", "not_applicable")]
-        blocked = result["blocked"]
-    except httpx.HTTPStatusError as exc:
-        # Split from the transport branch below on purpose: the request did
-        # arrive and was answered, so "could not reach" would send whoever
-        # debugs this to the network instead of to the status and body that
-        # say what was actually wrong (a policy this build cannot parse, or
-        # evidence over one of the route's limits).
-        detail = exc.response.text[:500]
-        click.echo(
-            f"otari hook: {resolved_url} rejected the check ({exc.response.status_code}: {detail}), not blocking.",
-            err=True,
-        )
-        return
-    except httpx.HTTPError as exc:
-        click.echo(f"otari hook: could not reach {resolved_url} ({exc}), not blocking.", err=True)
-        return
-    except (ValueError, TypeError, KeyError) as exc:
-        # A body that is not JSON, or is JSON of a shape this command does not
-        # recognize. Same fail-open contract as an unreachable gateway: this
-        # command blocks on a required gate failing and on nothing else, so a
-        # response it cannot read must not surface as a traceback.
-        click.echo(f"otari hook: unreadable response from {resolved_url} ({exc!r}), not blocking.", err=True)
-        return
+        try:
+            gateway_config = load_config(config)
+        except ValueError as exc:
+            # load_config runs GatewayConfig.validate_mode_selection(), which
+            # raises on a real misconfiguration (e.g. OTARI_MODE=hybrid with no
+            # OTARI_AI_TOKEN). That is a setup problem, not a required gate
+            # failing, so it falls under this command's own fail-open contract.
+            click.echo(f"otari hook: could not load config ({exc}), not blocking.", err=True)
+            return
+        # host is a bind address (0.0.0.0 is the documented default), not a
+        # connect target; a client dials localhost instead.
+        connect_host = "localhost" if gateway_config.host == "0.0.0.0" else gateway_config.host  # noqa: S104
+        resolved_url = url or f"http://{connect_host}:{gateway_config.port}"
+        resolved_key = api_key or gateway_config.master_key
+        if not resolved_key:
+            click.echo("otari hook: no API key or master key resolved, not blocking.", err=True)
+            return
+
+        try:
+            response = httpx.post(
+                f"{resolved_url.rstrip('/')}{API_ROOT}/hooks/check",
+                json={
+                    "policy_yaml": policy_yaml,
+                    "changed_paths": changed_paths,
+                    "commands": commands,
+                    "command_scope": command_scope,
+                    "judge_results": judge_results,
+                    "check_results": check_results,
+                },
+                headers={API_KEY_HEADER: resolved_key},
+                timeout=15.0,
+            )
+            response.raise_for_status()
+            result = response.json()
+            failing = [gate for gate in result["results"] if gate["outcome"] not in ("pass", "not_applicable")]
+            blocked = result["blocked"]
+        except httpx.HTTPStatusError as exc:
+            # Split from the transport branch below on purpose: the request did
+            # arrive and was answered, so "could not reach" would send whoever
+            # debugs this to the network instead of to the status and body that
+            # say what was actually wrong (a policy this build cannot parse, or
+            # evidence over one of the route's limits).
+            detail = exc.response.text[:500]
+            click.echo(
+                f"otari hook: {resolved_url} rejected the check ({exc.response.status_code}: {detail}), not blocking.",
+                err=True,
+            )
+            return
+        except httpx.HTTPError as exc:
+            click.echo(f"otari hook: could not reach {resolved_url} ({exc}), not blocking.", err=True)
+            return
+        except (ValueError, TypeError, KeyError) as exc:
+            # A body that is not JSON, or is JSON of a shape this command does not
+            # recognize. Same fail-open contract as an unreachable gateway: this
+            # command blocks on a required gate failing and on nothing else, so a
+            # response it cannot read must not surface as a traceback.
+            click.echo(f"otari hook: unreadable response from {resolved_url} ({exc!r}), not blocking.", err=True)
+            return
 
     # `failing` mirrors Outcome's own non-blocking set (types.py), not just
     # "pass": a future gate type's not_applicable is a clean result too, and
@@ -1951,14 +2021,6 @@ def _otari_binary_path() -> str:
     what sys.executable already names.
     """
     return str(Path(sys.executable).with_name("otari"))
-
-
-def _resolve_hook_credential() -> str | None:
-    """Whatever `otari hook` would resolve automatically at runtime, no flags given."""
-    try:
-        return load_config(None).master_key
-    except ValueError:
-        return None
 
 
 def _gates_file_allows_bash(gates_file: Path) -> bool:
@@ -2089,21 +2151,25 @@ _HOOK_SETUP_BY_HARNESS = {
 @click.option(
     "--api-key",
     default=None,
-    help="Skip automatic/interactive credential resolution and use this.",
+    help=(
+        "Embed this credential in the generated command, opting the registered hook into checking "
+        "against a gateway over HTTP instead of evaluating the policy locally. Omit for the default: "
+        "no credential, no server, evaluated in process."
+    ),
 )
 def hook_setup(harness: str, api_key: str | None) -> None:
     """Register otari hook in a supported agent's own settings.
 
     Writes or updates a PreToolUse hook entry and a Stop hook entry in the
     harness's own personal, gitignored settings file (see
-    _HOOK_SETUP_BY_HARNESS) so registering the Hook Server is not a manual
-    JSON edit. Both point at the same otari hook invocation; the harness
-    passes its own hook_event_name in the payload, so one callback serves
-    either event. Offers to scaffold a starter .otari-gates.yml when this
-    repo has none yet, and picks the PreToolUse matcher (whether it needs to
-    cover a shell tool) from whatever gates the policy turns out to have;
-    Stop needs no matcher; see docs/agent-gates.md for why both are
-    registered unconditionally.
+    _HOOK_SETUP_BY_HARNESS) so registering it is not a manual JSON edit. Both
+    point at the same otari hook invocation; the harness passes its own
+    hook_event_name in the payload, so one callback serves either event.
+    Offers to scaffold a starter .otari-gates.yml when this repo has none
+    yet, and picks the PreToolUse matcher (whether it needs to cover a shell
+    tool) from whatever gates the policy turns out to have; Stop needs no
+    matcher; see docs/agent-gates.md for why both are registered
+    unconditionally.
     """
     root = _hook_find_repo_root(Path.cwd())
     if root is None:
@@ -2124,22 +2190,19 @@ def hook_setup(harness: str, api_key: str | None) -> None:
     include_bash = _gates_file_allows_bash(gates_file)
     matcher = f"{setup.edit_matcher}|{setup.command_matcher}" if include_bash else setup.edit_matcher
 
-    embedded_key = api_key
-    if not embedded_key:
-        resolved_key = _resolve_hook_credential()
-        if not resolved_key:
-            click.echo(
-                "Could not resolve a credential automatically (no master_key in config.yml, .env, or the environment)."
-            )
-            embedded_key = click.prompt("Enter an Otari API key or master key", hide_input=True)
-        # A key resolved automatically is not embedded: the same resolution
-        # otari hook already does at runtime keeps working, and this repeats
-        # it rather than pinning today's value (e.g. a master key that later
-        # rotates).
-
+    # No credential resolution, and no prompt: `otari hook` evaluates the
+    # local policy in process by default and needs neither. `--api-key` here
+    # is the explicit opt-in to the other mode, checking against a gateway
+    # over HTTP instead (see `hook`'s own docstring); embedding it is what
+    # lets that mode work from a hook subprocess that inherits no shell
+    # environment. Given no `--api-key`, the generated command carries none,
+    # and stays that way even if a `master_key` happens to be configured
+    # somewhere on this machine: resolving one here anyway would silently
+    # decide, on this install's behalf, that gate checks should hit the
+    # network at all.
     command_parts = [_otari_binary_path(), "hook", "--harness", harness]
-    if embedded_key:
-        command_parts += ["--api-key", embedded_key]
+    if api_key:
+        command_parts += ["--api-key", api_key]
     command = shlex.join(command_parts)
 
     settings_path = root / setup.settings_dir / setup.settings_name
