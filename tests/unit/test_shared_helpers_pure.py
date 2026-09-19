@@ -8,8 +8,8 @@ import pytest
 from fastapi import HTTPException
 
 from gateway.api.routes._helpers import resolve_user_id
-from gateway.api.routes.budgets import BudgetResponse
 from gateway.api.routes.pricing import PricingResponse
+from gateway.schemas.budgets import BudgetResponse
 from gateway.services.tenancy.organization_budget_service import OrganizationBudgetPublic
 
 
