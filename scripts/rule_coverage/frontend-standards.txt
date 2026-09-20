@@ -1,0 +1,155 @@
+# Rule-coverage manifest: the frontend-standards skill against the instructions
+# CodeRabbit reads.
+#
+# Pair:
+#   skill        .github/skills/frontend-standards/*.md
+#   instructions .github/instructions/frontend-standards.instructions.md
+#
+# tests/unit/test_frontend_rule_coverage.py checks this file against both from
+# the same commit: every `##`/`###` heading in the skill must appear here under
+# [covered] or [excluded], every entry here must still name a heading that
+# exists, every rung named here must still be numbered in the instructions, and
+# every rung the instructions state must be named by at least one heading. So
+# adding a section to a topic guide fails the repository's own tests until
+# somebody decides whether a reviewer needs it. That is the point: the decision
+# is a sentence of work at the moment it is cheap, rather than a discovery
+# months later that nothing was ever compared.
+#
+#   [covered]   a numbered rung in the instructions carries this heading's rule
+#   [excluded]  a reviewer needs nothing from it; give a reason
+#
+# The instructions are a deliberate compression rather than a mirror, so one
+# rung carries several headings and [excluded] is the common answer. Much of the
+# skill is how to write code rather than what to flag in a diff. Three reasons
+# recur, and they are the ones to reach for: the section is an index or a digest
+# of sections classified elsewhere; a test or a lint already fails on it, so
+# review adds nothing; or the finding is not visible in a diff at all.
+#
+# Entries are `<file> :: <heading>` with an optional `# reason` trailer, which
+# [excluded] requires. Under [covered] a `rung <n>` line opens the run of
+# headings that rung carries. Blank lines and `#` lines are ignored.
+#
+# Renaming a heading reads here as a delete plus an add. That is the same trade
+# scripts/sdk_codegen/sdk-endpoints.txt makes with a route path, and the fix is
+# the same: edit one line.
+
+[covered]
+
+rung 1
+components.md :: v2 → v3
+components.md :: Internal links go through the router
+
+rung 2
+components.md :: Customizing: which layer to reach for
+components.md :: Layout and spacing
+design-tokens.md :: The alias surface is not only color
+design-tokens.md :: The retired `--otari-*` palette
+
+rung 3
+SKILL.md :: A note on status colors
+design-tokens.md :: The token families
+design-tokens.md :: How they reach the screen
+design-tokens.md :: HeroUI ships a near-synonym for several of these
+design-tokens.md :: Porting a component from otari-ai
+design-tokens.md :: Type scale
+design-tokens.md :: Declaring a token is not registering it, and the difference is silent
+design-tokens.md :: Two rule tiers, and they are not interchangeable
+design-tokens.md :: A status dot takes a text-ramp value, never a surface one
+design-tokens.md :: Rules
+design-tokens.md :: Chart colors
+
+rung 4
+data-fetching.md :: The API boundary
+data-fetching.md :: Query conventions
+data-fetching.md :: Loading and error guards carry `&& !data`
+data-fetching.md :: Independent requests run together
+data-fetching.md :: Mutations invalidate what they change
+data-fetching.md :: An error has to go somewhere
+data-fetching.md :: Ask for a page, not for everything
+data-fetching.md :: Polling
+layout-stability.md :: Query guards: `&& !data`
+layout-stability.md :: Keep the previous page during a refetch
+performance.md :: The server does the shaping
+performance.md :: Long lists
+
+rung 5
+imports-and-modules.md :: Named exports, named imports
+imports-and-modules.md :: No barrel files
+naming-conventions.md :: Variables
+naming-conventions.md :: Functions
+naming-conventions.md :: Callback props are `on*`, handlers are what they do
+performance.md :: The React Compiler is enabled
+performance.md :: Effects clean up after themselves
+typescript-and-react.md :: TypeScript
+typescript-and-react.md :: React
+typescript-and-react.md :: A draft that resets when the value behind it moves
+typescript-and-react.md :: Array work reads declaratively
+
+rung 6
+component-architecture.md :: Check the primitives before writing one
+components.md :: Check the shared primitives before hand-rolling
+components.md :: The divided surface's own vocabulary
+imports-and-modules.md :: The layer boundary is a lint error, not a review note
+
+rung 7
+component-architecture.md :: File size is a design signal
+component-architecture.md :: Stateful pages, stateless parts
+component-architecture.md :: Do not copy structural markup
+component-architecture.md :: One component per file
+component-architecture.md :: No IIFEs in JSX
+component-architecture.md :: Route files export `Route` and nothing else
+naming-conventions.md :: Files
+performance.md :: Code splitting
+
+rung 8
+naming-conventions.md :: Vocabulary that carries meaning
+
+rung 9
+responsiveness.md :: Breakpoints
+responsiveness.md :: Rules
+responsiveness.md :: Tables
+
+rung 10
+imports-and-modules.md :: Test mocking
+testing.md :: Vitest
+testing.md :: Playwright: screenshots
+
+rung 11
+layout-stability.md :: Skeletons match what they replace
+layout-stability.md :: Theme is applied before the first paint
+layout-stability.md :: Chrome lives in the shell, not in a route
+layout-stability.md :: Reload is not a state-recovery tool
+performance.md :: Mount modals when they open
+performance.md :: Reading layout is a synchronous flush
+
+rung 12
+formatting-and-i18n.md :: Use `Intl`, never string arithmetic
+formatting-and-i18n.md :: Locale
+formatting-and-i18n.md :: Dates
+formatting-and-i18n.md :: Placeholders
+
+[excluded]
+
+# Indexes and digests: the rules themselves are classified at the sections they
+# summarize, and carrying them twice would put the same finding on two rungs.
+SKILL.md :: Critical rules  # a digest of the topic guides, each rule classified at its own guide
+SKILL.md :: Topic guides  # an index of the topic files
+layout-stability.md :: Anti-patterns  # restates the sections above it, each classified there
+responsiveness.md :: Anti-patterns  # restates the sections above it, each classified there
+naming-conventions.md :: Array work reads declaratively  # a pointer to typescript-and-react.md, where the rule is classified
+typescript-and-react.md :: Testing  # a pointer to testing.md, where the rules are classified
+
+# Already gated: a test or a lint fails on it, so a reviewer repeating it adds
+# only a second place for the rule to go stale.
+imports-and-modules.md :: Path aliases  # src/overlaySeams.test.ts fails on the half with teeth, a relative import of a seam; `@/` over `../../` elsewhere is formatting
+naming-conventions.md :: Constants  # casing is authoring guidance, and the review-visible half, query keys as module constants, is rung 4
+testing.md :: Playwright: behavioral  # src/e2eProjects.test.ts fails on the two mechanical rules; the rest describes the harness
+
+# Not visible in a diff: the finding needs a build, a run, or another repository,
+# which is not what a diff reviewer has in front of them.
+performance.md :: Watch the bundle when you add a dependency  # a chunk that grew is read off `pnpm run build`'s output, not off the diff
+design-tokens.md :: What stayed in otari-ai  # describes otari-ai/frontend's own code and why it was not ported; nothing under web/src can depart from it
+responsiveness.md :: What the shell already does, and what it does not  # states what AppShell handles today, so a page author knows what is left; no rule of its own
+testing.md :: Never wait a component's timer out in real time  # a slow test reports itself in the suite's own timing
+testing.md :: A timeout expiring usually means a starved worker  # diagnosis for a failing local run
+testing.md :: A combo box inside a dialog: Escape is not the way to close its popover  # a spec that gets this wrong fails in its own run, which is a louder reviewer than a comment

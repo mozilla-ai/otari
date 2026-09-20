@@ -64,11 +64,16 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    resolve to a `--color-*` token is outside the system and will not follow a retheme. Use the
    utilities the tokens back (`text-muted`, `bg-surface`, `border-border`, `text-danger`,
    `text-heading`), add a token there rather than scattering a hex, and add it to both theme
-   blocks. A raw hex, a numbered Tailwind palette class, and `bg-white` / `text-black` all
+   blocks *and* to the file's `@theme` block: a token declared and not registered generates no
+   utility, so the class at the call site silently resolves to nothing. A raw hex, a numbered Tailwind palette class, and `bg-white` / `text-black` all
    fail `web/src/styles/foundation.test.ts`, over the whole of `web/src`. Two pairings are
    easy to get wrong: a status word wears its own color on its own subtle fill
    (`text-danger` on `bg-danger-subtle`), but brand text on the brand tint takes
-   `text-primary-subtle-foreground`, not `text-accent`. Type comes from the seven roles, so a
+   `text-primary-subtle-foreground`, not `text-accent`. The two rule tiers are not
+   interchangeable either: `--color-border` divides one section from the next, while
+   `--color-border-subtle` divides repeated rows inside one, and a status dot takes the text
+   ramp (`bg-text-subtle`) because a surface value on a 6px square measures about 1.1:1 and is
+   not a quiet dot but no dot. Type comes from the seven roles, so a
    `text-[11px]` or a `text-2xl font-bold` is a finding. See
    [design-tokens.md](../skills/frontend-standards/design-tokens.md).
 
@@ -80,6 +85,7 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    `placeholderData: (prev) => prev`, or the page blanks on every filter change. Don't call
    `fetch()` directly for authenticated management requests; `apiFetch` uses the HttpOnly
    session cookie and signs out on 401, while public sign-in helpers stay outside that path.
+   Anything that must stay live takes `refetchInterval`, never a hand-rolled `setInterval`.
    Never mirror server state into `useState`, and never swallow a mutation error. **The
    dashboard is a thin rendering layer**: it does not filter, search, sort, join or aggregate
    server data, and it does not assemble one view out of several responses and join them by id
@@ -120,7 +126,9 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    `(e) => …`; the exemptions are a comparator's `(a, b)` and a `setState` updater's previous
    value. A function name starts with a verb (`formatCost`, `findFallthroughTarget`,
    `describePartialScopeSave`), because one named for its return value (`cost()`, `weightsOf()`)
-   reads like a variable at the call site. A loop that produces a value is a transformation written the long way, so `for...of`,
+   reads like a variable at the call site. A callback prop is named for the event
+   (`onConfirm`, `onRevoke`, `onSaved`) and the function behind it for the intent
+   (`revokeSelected`, `dismissBanner`), where `handleClick` says only that a click happened. A loop that produces a value is a transformation written the long way, so `for...of`,
    `for...in` and an index loop all read better as `map`/`filter`/`reduce`/`find`/`flatMap`
    (`for...in` additionally walks inherited keys: use `Object.entries`). `forEach` is correct
    where the body is genuinely only a side effect, and takes a block body: Biome's
@@ -255,3 +263,28 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
     and say what a new layer sits above rather than inventing a higher number. See
     [performance.md](../skills/frontend-standards/performance.md) and
     `web/design/motion-and-access.md`.
+
+    **Nothing flashes and nothing shifts.** A modal is mounted when it opens
+    (`{isConfirming && <ConfirmDialog isOpen … />}`) rather than kept in the tree behind a
+    prop, so its subtree, listeners and queries do not exist while it is closed. A skeleton is
+    the height of what it replaces, or everything below it jumps on swap. Global chrome
+    (sidebar, header, breadcrumbs) belongs to `AppShell` and not to a route component, which
+    remounts it on every navigation. `window.location.reload()` is not a refresh button:
+    invalidate the affected keys instead, and the root error boundary is its one legitimate
+    caller. A pre-paint decision, the theme above all, is resolved in `index.html`'s inline
+    script as well as in `useTheme`, so a change to the storage key, the three-state
+    resolution or the attributes that carry it has to reach both. See
+    [layout-stability.md](../skills/frontend-standards/layout-stability.md).
+
+12. **Numbers, money and dates go through `web/src/shared/helpers/format.ts`.** `Intl` does the
+    work, never string arithmetic: `"$" + value.toFixed(2)` loses grouping and rounds a
+    sub-cent cost to `$0.00`, which for a per-request price is not a rounding error but the
+    whole value. Construct a formatter once per module, not once per row of every render.
+    Numbers and money are pinned to `en-US` because the dashboard bills in USD, and
+    `format.test.ts` sweeps the tree for an unpinned `Intl` formatter and for a bare
+    `toLocaleString()`. A calendar date with no instant in it (`YYYY-MM`) is formatted from the
+    string rather than through a `Date`, which would shift it a day west of UTC, and timezone
+    arithmetic by hand (`d.setHours(d.getHours() - 5)`) breaks across DST. An absent value
+    renders as the placeholder these helpers already return, not as an empty cell and not as
+    `null`. See
+    [formatting-and-i18n.md](../skills/frontend-standards/formatting-and-i18n.md).

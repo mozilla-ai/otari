@@ -15,6 +15,10 @@ on:
       - 'cliff.toml'
       # A unit test runs this workflow's shell steps.
       - '.github/workflows/otari-release.yml'
+      # A unit test maps every frontend-standards heading to the review rung
+      # that carries it, so a drift between the two has to fail here.
+      - '.github/skills/frontend-standards/**'
+      - '.github/instructions/frontend-standards.instructions.md'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-tests.yml'
@@ -32,6 +36,10 @@ on:
       - 'cliff.toml'
       # A unit test runs this workflow's shell steps.
       - '.github/workflows/otari-release.yml'
+      # A unit test maps every frontend-standards heading to the review rung
+      # that carries it, so a drift between the two has to fail here.
+      - '.github/skills/frontend-standards/**'
+      - '.github/instructions/frontend-standards.instructions.md'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-tests.yml'

@@ -30,6 +30,18 @@ because it loads for a different reader (CodeRabbit) that never sees the rest. E
 else, a fact told in two layers is a fact that will go stale in one of them, and the stale copy
 is the one someone believes.
 
+For the frontend pair, that drift now fails a test rather than waiting to be noticed.
+`scripts/rule_coverage/frontend-standards.txt` classifies every `##`/`###` heading of the skill
+as `[covered]` by a numbered rung of the instructions or `[excluded]` with a reason, and
+`tests/unit/test_frontend_rule_coverage.py` asserts the map is total both ways: an unclassified
+heading fails, an entry naming a heading that is gone fails, and so does a rung no heading maps
+to. Adding a section to a topic guide therefore owes one manifest line. `[excluded]` is the
+common answer, because much of the skill is how to write code rather than what to flag in a
+diff; the point is that the answer is recorded rather than assumed. The check is structural, not
+a prose comparison: the two layers say the same thing in deliberately different words, so the
+instructions carry 12 rungs against the skill's 84 headings and anything comparing wording would
+fight that compression forever.
+
 ## Architecture (Big Picture)
 For the open-core OSS/enterprise seam (ports, adapters, the capability lines, and the rules for keeping the boundary), see [ARCHITECTURE.md](ARCHITECTURE.md). It is a north-star document describing the intended architecture, so ground current-state work in `src/gateway/`.
 
