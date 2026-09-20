@@ -136,22 +136,36 @@ def skill_headings(skill_dir: Path) -> list[str]:
     return headings
 
 
-def instruction_rungs(path: Path) -> dict[int, str]:
-    """The numbered rungs an instructions file states, as ``number -> subject``."""
+def parse_rungs(text: str) -> dict[int, str]:
+    """The numbered rungs an instructions file states, as ``number -> subject``.
+
+    A repeated number raises rather than overwriting. Two rungs numbered alike
+    would drop one of them out of the comparison entirely while the numbering
+    stayed a contiguous sequence, so the manifest would look complete with a
+    rule missing from it.
+    """
     rungs: dict[int, str] = {}
     in_fence = False
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    for number, raw in enumerate(text.splitlines(), start=1):
         if _FENCE.match(raw):
             in_fence = not in_fence
             continue
         if in_fence:
             continue
         match = _RUNG.match(raw)
-        if match:
-            body = match.group(2)
-            subject = _SUBJECT.match(body)
-            rungs[int(match.group(1))] = subject.group(1) if subject else body
+        if not match:
+            continue
+        rung = int(match.group(1))
+        if rung in rungs:
+            raise ValueError(f"line {number}: rung {rung} is numbered twice")
+        subject = _SUBJECT.match(match.group(2))
+        rungs[rung] = subject.group(1) if subject else match.group(2)
     return rungs
+
+
+def instruction_rungs(path: Path) -> dict[int, str]:
+    """``parse_rungs`` over an instructions file on disk."""
+    return parse_rungs(path.read_text(encoding="utf-8"))
 
 
 def misnumbered_rungs(rungs: dict[int, str]) -> list[int]:

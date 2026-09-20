@@ -55,6 +55,17 @@ def test_skill_headings_are_usable_as_keys(headings: list[str]) -> None:
     )
 
 
+def test_a_repeated_rung_number_is_rejected() -> None:
+    """Two rungs numbered alike would drop one out of the comparison silently.
+
+    The numbering stays a contiguous sequence either way, so nothing else here
+    would notice; the manifest would simply look complete with a rule missing
+    from it.
+    """
+    with pytest.raises(ValueError, match="rung 11 is numbered twice"):
+        rc.parse_rungs("11. **One rule.** Body.\n11. **Another.** Body.\n")
+
+
 def test_rungs_are_numbered_without_gaps(rungs: dict[int, str]) -> None:
     """The manifest keys on a rung's number, so the numbering has to stay a sequence."""
     missing = rc.misnumbered_rungs(rungs)
