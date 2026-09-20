@@ -38,9 +38,9 @@ heading fails, an entry naming a heading that is gone fails, and so does a rung 
 to. Adding a section to a topic guide therefore owes one manifest line. `[excluded]` is the
 common answer, because much of the skill is how to write code rather than what to flag in a
 diff; the point is that the answer is recorded rather than assumed. The check is structural, not
-a prose comparison: the two layers say the same thing in deliberately different words, so the
-instructions carry 12 rungs against the skill's 84 headings and anything comparing wording would
-fight that compression forever.
+a prose comparison: the two layers say the same thing in deliberately different words, and the
+instructions carry an order of magnitude fewer rungs than the skill has headings, so anything
+comparing wording would fight that compression forever.
 
 ## Architecture (Big Picture)
 For the open-core OSS/enterprise seam (ports, adapters, the capability lines, and the rules for keeping the boundary), see [ARCHITECTURE.md](ARCHITECTURE.md). It is a north-star document describing the intended architecture, so ground current-state work in `src/gateway/`.

@@ -49,9 +49,11 @@ SEPARATOR = " :: "
 # names the file rather than stating a rule.
 _HEADING = re.compile(r"^#{2,3}\s+(\S.*?)\s*$")
 _FENCE = re.compile(r"^\s*(```|~~~)")
-# A rung is a top-level numbered item whose subject is bolded, which is the
-# shape every rung in the instructions files has.
-_RUNG = re.compile(r"^(\d+)\.\s+\*\*(.+?)\*\*")
+# A rung is any top-level numbered item. Reading the number rather than the
+# bold that usually follows it means a rung written without one is still seen,
+# instead of silently dropping out of the "every rung is grounded" direction.
+_RUNG = re.compile(r"^(\d+)\.\s+(\S.*?)\s*$")
+_SUBJECT = re.compile(r"^\*\*(.+?)\*\*")
 _RUNG_MARKER = re.compile(r"^rung\s+(\d+)$")
 
 
@@ -146,16 +148,36 @@ def instruction_rungs(path: Path) -> dict[int, str]:
             continue
         match = _RUNG.match(raw)
         if match:
-            rungs[int(match.group(1))] = match.group(2)
+            body = match.group(2)
+            subject = _SUBJECT.match(body)
+            rungs[int(match.group(1))] = subject.group(1) if subject else body
     return rungs
 
 
-def duplicate_headings(headings: list[str]) -> list[str]:
-    """Headings that appear twice in one file, sorted.
+def misnumbered_rungs(rungs: dict[int, str]) -> list[int]:
+    """The numbers missing from ``1..n``, sorted.
 
-    The manifest keys on the heading text, so two sections of one file sharing a
-    name cannot both be classified. Renaming one is the fix.
+    A gap means a rung was dropped or renumbered, and a stray top-level numbered
+    list elsewhere in the file shows up the same way. Either one makes the rung
+    keys in the manifest mean something other than what they meant when it was
+    written, so both are worth failing on.
     """
+    return [] if not rungs else sorted(set(range(1, max(rungs) + 1)) - set(rungs))
+
+
+def unkeyable_headings(headings: list[str]) -> list[str]:
+    """Headings the manifest cannot key on, sorted.
+
+    Two sections of one file sharing a name collide, and the entry format reads
+    `#` as the start of a reason trailer and `::` as the file separator, so a
+    heading containing either cannot be written down unambiguously. Renaming the
+    heading is the fix in all three cases.
+    """
+    unkeyable = {h for h in headings if "#" in h or h.count(SEPARATOR) != 1}
+    return sorted(unkeyable | set(_duplicates(headings)))
+
+
+def _duplicates(headings: list[str]) -> list[str]:
     seen: set[str] = set()
     duplicates: set[str] = set()
     for heading in headings:

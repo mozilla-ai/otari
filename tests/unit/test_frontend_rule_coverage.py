@@ -26,7 +26,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts" / "rule_coverage"))
 
 import rule_manifest as rc  # noqa: E402
 
-MANIFEST = "scripts/rule_coverage/frontend-standards.txt"
+MANIFEST = rc.FRONTEND_MANIFEST.relative_to(rc.REPO_ROOT)
 
 
 @pytest.fixture(scope="module")
@@ -45,12 +45,23 @@ def rungs() -> dict[int, str]:
 
 
 def test_skill_headings_are_usable_as_keys(headings: list[str]) -> None:
-    """A heading is the manifest's key, so a file cannot have two of one name."""
+    """The heading text is the manifest's key, so it has to be unique and writable."""
     assert headings, "no headings found; did the skill directory move?"
-    duplicates = rc.duplicate_headings(headings)
-    assert not duplicates, (
-        f"two sections of one skill file share a heading: {duplicates}. The manifest keys on "
-        "the heading text, so only one of them can be classified. Rename one."
+    unkeyable = rc.unkeyable_headings(headings)
+    assert not unkeyable, (
+        f"these skill headings cannot be manifest keys: {unkeyable}. Either two sections of one "
+        f"file share the heading, or it contains `#` (which opens a reason trailer) or "
+        f"`{rc.SEPARATOR.strip()}` (the file separator). Rename the heading."
+    )
+
+
+def test_rungs_are_numbered_without_gaps(rungs: dict[int, str]) -> None:
+    """The manifest keys on a rung's number, so the numbering has to stay a sequence."""
+    missing = rc.misnumbered_rungs(rungs)
+    assert not missing, (
+        f"{rc.FRONTEND_INSTRUCTIONS.relative_to(rc.REPO_ROOT)} numbers its rungs "
+        f"{sorted(rungs)}, skipping {missing}. A gap means a rung was dropped or renumbered "
+        f"under the entries in {MANIFEST} that name it, so re-point them and close the gap."
     )
 
 
