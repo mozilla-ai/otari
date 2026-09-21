@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Callable, Coroutine
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from contextlib import AsyncExitStack
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -256,6 +256,25 @@ async def retrieve_file(file_id: str, request: Request, config: Config) -> Anthr
     return envelope.metadata(resolved.metadata)
 
 
+def _download_headers(upstream: Mapping[str, str], max_bytes: int) -> dict[str, str]:
+    """Reject an oversized download before the 200 is committed; keep the descriptive headers."""
+    lowered = {name.lower(): value for name, value in upstream.items()}
+    headers = {name: lowered[name] for name in ("content-type", "content-disposition") if name in lowered}
+    declared = lowered.get("content-length")
+    if declared is None:
+        return headers
+    try:
+        length = int(declared)
+    except ValueError:
+        raise FilesError(502, "Provider returned an invalid download") from None
+    if length > max_bytes:
+        raise FilesError(413, "File size limit exceeded")
+    # The SDK decodes the body, so the length only describes it when nothing was encoded.
+    if lowered.get("content-encoding", "identity") == "identity":
+        headers["content-length"] = declared
+    return headers
+
+
 @router.get("/files/{file_id}/content")
 async def download_file(file_id: str, request: Request, config: Config) -> Response:
     client = files_client(request, config)
@@ -267,6 +286,8 @@ async def download_file(file_id: str, request: Request, config: Config) -> Respo
         raise FilesError(502, "Authorization service returned an invalid file account")
     check_file_account(resolved.account, envelope.provider)
     require_download(envelope.provider, resolved.metadata)
+    if resolved.metadata.size_bytes is not None and resolved.metadata.size_bytes > config.files_max_bytes:
+        raise FilesError(413, "File size limit exceeded")
     track_request(request, endpoint="/files", model="files", provider=resolved.account.provider)
     stack = AsyncExitStack()
     deadline = asyncio.get_running_loop().time() + config.files_transfer_timeout_seconds
@@ -278,16 +299,16 @@ async def download_file(file_id: str, request: Request, config: Config) -> Respo
             download = await stack.enter_async_context(
                 provider.adownload_file(file_id, max_retries=0, extra_headers=envelope.headers(request))
             )
-        headers = {
-            name: value
-            for name, value in download.headers.items()
-            if name.lower() in {"content-type", "content-disposition"}
-        }
     except BaseException as exc:
         await stack.aclose()
         if not isinstance(exc, Exception):
             raise
         raise provider_error(exc) from None
+    try:
+        headers = _download_headers(download.headers, config.files_max_bytes)
+    except BaseException:
+        await stack.aclose()
+        raise
 
     async def chunks() -> AsyncIterator[bytes]:
         total = 0
@@ -303,6 +324,8 @@ async def download_file(file_id: str, request: Request, config: Config) -> Respo
                     break
                 total += len(chunk)
                 if total > config.files_max_bytes:
+                    # Past the headers by now; the abort leaves the body
+                    # unterminated so the client sees a failed transfer.
                     raise FilesError(413, "File size limit exceeded")
                 yield chunk
         finally:

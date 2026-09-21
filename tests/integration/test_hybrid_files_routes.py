@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from any_llm.types.files import AsyncFileDownload
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
@@ -157,3 +158,56 @@ def test_finalize_failure_compensates_without_exposing_id(
     assert events.count("finalize-failed") == 3
     assert "provider-delete" in events
     assert events[-1].endswith("/abandon")
+
+
+@pytest.mark.parametrize("oversized", ["metadata", "content-length", None])
+def test_oversized_download_is_refused_before_the_body(
+    file_client: tuple[TestClient, list[str]], monkeypatch: pytest.MonkeyPatch, oversized: str | None
+) -> None:
+    """The 413 must precede the 200, since a streaming abort cannot take one back."""
+    client, events = file_client
+    payload = b"x" * (2048 if oversized else 4)
+    data = FileMetadata(
+        id="file_provider",
+        filename="example.csv",
+        mime_type="text/csv",
+        size_bytes=len(payload) if oversized == "metadata" else None,
+        created_at=datetime.now(UTC),
+        downloadable=True,
+    )
+    account = FileAccount(generation_id=uuid.uuid4(), api_key=SecretStr("provider-secret"))
+
+    async def post(self: object, path: str, body: dict[str, Any], result_type: type[Any]) -> Any:
+        events.append(path)
+        return ResolvedFile(metadata=data, account=account)
+
+    class Provider:
+        @asynccontextmanager
+        async def adownload_file(self, file_id: str, **kwargs: Any) -> AsyncIterator[AsyncFileDownload]:
+            events.append("provider-download")
+
+            async def chunks() -> AsyncIterator[bytes]:
+                events.append("provider-chunk")
+                yield payload
+
+            yield AsyncFileDownload(
+                status_code=200,
+                headers={"Content-Type": "text/csv", "Content-Length": str(len(payload))},
+                chunks=chunks(),
+            )
+
+    @asynccontextmanager
+    async def provider(*args: Any, **kwargs: Any) -> AsyncIterator[Provider]:
+        yield Provider()
+
+    monkeypatch.setattr(PlatformFilesClient, "post", post)
+    monkeypatch.setattr(hybrid_files, "provider_client", provider)
+    response = client.get(API_ROOT + "/files/file_provider/content", headers=HEADERS)
+    if oversized is None:
+        assert response.status_code == 200, response.text
+        assert response.content == payload
+        assert response.headers["content-length"] == "4"
+        return
+    assert response.status_code == 413, response.text
+    assert "provider-chunk" not in events
+    assert ("provider-download" in events) == (oversized == "content-length")
