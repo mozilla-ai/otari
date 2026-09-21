@@ -29,6 +29,7 @@ from gateway.models.budgets import (
     RESERVATION_SETTLED,
     BudgetReservation,
     BudgetReservationScope,
+    ReservationStatus,
 )
 from gateway.models.users import User
 from gateway.services.budgets._scoped_enforcement import release as release_scoped
@@ -191,7 +192,7 @@ async def grow(
     return True
 
 
-async def try_terminate(db: AsyncSession, reservation_id: str | None, status: str) -> bool:
+async def try_terminate(db: AsyncSession, reservation_id: str | None, status: ReservationStatus) -> bool:
     """Claim the ACTIVE -> terminal transition, reporting whether this caller won.
 
     This is the whole point of the ledger. The ``WHERE status = ACTIVE`` guard is
