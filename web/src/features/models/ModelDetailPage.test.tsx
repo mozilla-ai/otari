@@ -232,6 +232,22 @@ describe("ModelDetailPage", () => {
     expect(screen.getByText(/Also served by Groq/)).toBeInTheDocument()
   })
 
+  it("marks each offering's provider", async () => {
+    // Keyed on the provider type, which is what the instance is named after
+    // until an operator renames it. Both offerings here resolve, so both rows
+    // carry a mark rather than a tile.
+    mockApi()
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const offerings = await screen.findByRole("grid", {
+      name: "Offerings of GLM-5.3",
+    })
+    const rows = within(offerings).getAllByRole("row").slice(1)
+    for (const row of rows) {
+      expect(row.querySelector("svg")).not.toBeNull()
+    }
+  })
+
   it("opens the drawer with the request to send, to the gateway's pick or a pinned provider", async () => {
     mockApi()
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)

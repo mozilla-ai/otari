@@ -25,6 +25,7 @@ import { UseModelDrawer } from "@/features/models/UseModelDrawer"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
 import { useCatalogModel } from "@/shared/api/models"
 import { useOrganizationContext } from "@/shared/api/organizations"
+import { ProviderMark } from "@/shared/components/marks/BrandMark"
 import {
   formatContext,
   formatRate,
@@ -208,15 +209,25 @@ function offeringColumns({
       cell: ({ offering: row }) => (
         // One line: the selector, which is as long as the provider makes it,
         // opens under the row instead of setting every row's height.
-        <span className="text-body whitespace-nowrap">
-          {providerDisplayName(row.provider)}
-          <span className="text-caption">
-            {" · "}
-            {row.provider_type !== row.provider
-              ? `${providerDisplayName(row.provider_type)} · `
-              : ""}
-            {credentialLabel(row.credential)}
-            {row.quantization ? ` · ${row.quantization}` : ""}
+        <span className="text-body flex items-center gap-2 whitespace-nowrap">
+          {/* Keyed on the type rather than the instance, which is what the
+              instance is named after until an operator renames it. The name
+              stays the instance either way, and the type is still spelled out
+              below when the two differ. */}
+          <ProviderMark
+            providerId={row.provider_type || row.provider}
+            label={providerDisplayName(row.provider)}
+          />
+          <span>
+            {providerDisplayName(row.provider)}
+            <span className="text-caption">
+              {" · "}
+              {row.provider_type !== row.provider
+                ? `${providerDisplayName(row.provider_type)} · `
+                : ""}
+              {credentialLabel(row.credential)}
+              {row.quantization ? ` · ${row.quantization}` : ""}
+            </span>
           </span>
         </span>
       ),
