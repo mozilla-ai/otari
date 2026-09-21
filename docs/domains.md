@@ -76,7 +76,7 @@ since. A module "runs queries" when it imports a query builder (`select`,
 
 ## The domains
 
-Fifteen domains plus a shared set. A module appears once. Paths are relative to
+Sixteen domains plus a shared set. A module appears once. Paths are relative to
 their layer's directory. A domain package is listed by its directory, which
 covers every module inside it. A route module whose name starts with an underscore is
 a shared helper, which the target shape moves out of the routes layer.
@@ -280,6 +280,20 @@ nothing about what triggers an alert and imports no other domain. Each trigger
 lives in the domain it watches and calls the alerts service.
 
 - No code yet. It arrives in the target shape.
+
+### overview
+
+The dashboard overview's summary: the counts and the budget health that the
+page shows, in one answer. It is a read model across api-keys, organizations
+and budgets, so it has no tables of its own and writes nothing.
+
+- Routes: `overview.py`
+- Services: `overview/`
+- Repositories: `overview/`
+
+`overview/overview_repository.py` reads the tables of those three domains
+directly, and it takes the session instead of extending `BaseRepository`. The
+target shape has the overview service ask each domain's service for its data.
 
 ### Shared
 
