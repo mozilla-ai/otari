@@ -876,7 +876,12 @@ async def create_message(
                     ctx.route.attempts, ctx.route.fallback_enabled = [selected], False
                 adapter = _FileMessagesAdapter(client, ctx.route.request_id, references)
         except FilesError as exc:
-            raise _anthropic_error(_ERR_API, exc.detail, exc.status_code) from None
+            raise _anthropic_error(
+                _STATUS_TO_ANTHROPIC_TYPE.get(exc.status_code, _ERR_API),
+                exc.detail,
+                exc.status_code,
+                headers=exc.headers,
+            ) from None
 
     tool_ctx = await prepare_gateway_tools(
         adapter=adapter,
@@ -997,7 +1002,12 @@ async def create_message(
             try:
                 await adapter.finalize_outputs(result)
             except FilesError as exc:
-                raise _anthropic_error(_ERR_API, exc.detail, exc.status_code) from None
+                raise _anthropic_error(
+                    _STATUS_TO_ANTHROPIC_TYPE.get(exc.status_code, _ERR_API),
+                    exc.detail,
+                    exc.status_code,
+                    headers=exc.headers,
+                ) from None
         return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path

@@ -19,9 +19,27 @@ from .test_hybrid_mode_messages import _attempt, _message_response, _resolve_pay
 
 
 @pytest.mark.parametrize(
-    "outcome", ["success", "foreign", "wrong_generation", "wrong_provider", "registration_failure"]
+    "outcome, status_code, error_type",
+    [
+        ("success", 200, None),
+        ("foreign", 404, "not_found_error"),
+        ("wrong_generation", 403, "permission_error"),
+        ("wrong_provider", 502, "api_error"),
+        ("registration_failure", 502, "api_error"),
+        ("reference_failure", 400, "invalid_request_error"),
+        ("reference_failure", 401, "authentication_error"),
+        ("reference_failure", 403, "permission_error"),
+        ("reference_failure", 429, "rate_limit_error"),
+        ("registration_failure", 400, "invalid_request_error"),
+        ("registration_failure", 401, "authentication_error"),
+        ("registration_failure", 403, "permission_error"),
+        ("registration_failure", 404, "not_found_error"),
+        ("registration_failure", 429, "rate_limit_error"),
+    ],
 )
-def test_file_reference_dispatch_and_accounting(monkeypatch: pytest.MonkeyPatch, outcome: str) -> None:
+def test_file_reference_dispatch_and_accounting(
+    monkeypatch: pytest.MonkeyPatch, outcome: str, status_code: int, error_type: str | None
+) -> None:
     monkeypatch.setenv("OTARI_AI_TOKEN", "gateway-token")
     generation = uuid.uuid4()
     account = FileAccount(
@@ -61,6 +79,8 @@ def test_file_reference_dispatch_and_accounting(monkeypatch: pytest.MonkeyPatch,
             assert body == {"ids": ["file_history"], "provider": "anthropic"}
             if outcome == "foreign":
                 raise FilesError(404, "File not found")
+            if outcome == "reference_failure":
+                raise FilesError(status_code, "File reference rejected", headers={"Retry-After": "30"})
             return account
         if path == "outputs/prepare":
             assert body["attempt_id"] == attempts[1]["attempt_id"]
@@ -84,7 +104,7 @@ def test_file_reference_dispatch_and_accounting(monkeypatch: pytest.MonkeyPatch,
         events.append("register")
         assert "usage" in events
         if outcome == "registration_failure":
-            raise FilesError(502, "Unable to register generated files")
+            raise FilesError(status_code, "Unable to register generated files", headers={"Retry-After": "30"})
 
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", platform)
     monkeypatch.setattr("gateway.api.routes.messages.amessages", provider)
@@ -114,17 +134,12 @@ def test_file_reference_dispatch_and_accounting(monkeypatch: pytest.MonkeyPatch,
                 ],
             },
         )
-    assert (
-        response.status_code
-        == {
-            "success": 200,
-            "foreign": 404,
-            "wrong_generation": 403,
-            "wrong_provider": 502,
-            "registration_failure": 502,
-        }[outcome]
-    ), response.text
-    if outcome in {"foreign", "wrong_generation", "wrong_provider"}:
+    assert response.status_code == status_code, response.text
+    if error_type is not None:
+        assert response.json()["detail"]["error"]["type"] == error_type
+    if outcome in {"reference_failure", "registration_failure"}:
+        assert response.headers["Retry-After"] == "30"
+    if outcome in {"foreign", "wrong_generation", "wrong_provider", "reference_failure"}:
         assert "provider" not in events
     else:
         assert events.count("provider") == 1

@@ -894,7 +894,7 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
     @model_validator(mode="after")
     def validate_provider_file_limits(self) -> "GatewayConfig":
         if (
-            (self.is_hybrid_mode or self.files_provider_native_enabled)
+            self.files_provider_native_enabled
             and self.files_retention_hours is not None
             and self.files_retention_hours > 2160
         ):
