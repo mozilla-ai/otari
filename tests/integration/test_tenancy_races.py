@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
+from gateway.api.deps import get_workspace_service
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
@@ -414,7 +415,7 @@ async def test_concurrent_deletes_cannot_remove_the_last_workspace(
             user = await UserRepository(session).get(owner.id)
             assert user is not None
             try:
-                service = WorkspaceService(session, membership_listener=WorkspaceBudgetDefaultService(session))
+                service = get_workspace_service(session)
                 await service.delete_workspace(user=user, workspace_id=workspace_id)
             except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
                 return exc
@@ -511,10 +512,8 @@ async def test_a_join_during_a_workspace_delete_leaves_no_orphaned_ceiling(
     async with sessions() as session:
         actor = await UserRepository(session).get(owner.id)
         assert actor is not None
-        deleter = WorkspaceService(
-            session,
-            membership_listener=_PausingListener(WorkspaceBudgetDefaultService(session), let_the_join_run),
-        )
+        deleter = get_workspace_service(session)
+        deleter._membership_listener = _PausingListener(WorkspaceBudgetDefaultService(session), let_the_join_run)
         await deleter.delete_workspace(user=actor, workspace_id=target.id)
     await joining
 

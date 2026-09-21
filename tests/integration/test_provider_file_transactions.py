@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.api.deps import get_org_provider_key_service
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.provider_files import ProviderFileOutputOperation
 from gateway.models.provider_keys import OrgProviderKey, OrgProviderKeyUpdateRequest, WorkspaceProviderKeyOverride
@@ -28,7 +29,6 @@ from gateway.services.provider_files.lifecycle import ProviderFileService
 from gateway.services.provider_files.outputs import ProviderFileOutputs
 from gateway.services.secret_box import encrypt_secret
 from gateway.services.tenancy.errors import OrgProviderKeyAlreadyExistsError, TenancyConflictError
-from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 
 from .test_org_provider_keys import _member
 from .test_provider_file_lifecycle import files_setup as files_setup
@@ -63,7 +63,7 @@ async def test_refused_secret_release_commits_revocation(
     await async_db.commit()
     operation = await files.prepare(scope, account, PrepareUpload(operation_id=uuid.uuid4(), size_bytes=20))
     await files.finalize(scope, operation.id, metadata())
-    keys = OrgProviderKeyService(async_db)
+    keys = get_org_provider_key_service(async_db)
     with pytest.raises(TenancyConflictError, match="cleanup must finish"):
         if action == "replace":
             await keys.update_key_for_user(
@@ -107,7 +107,7 @@ async def test_restore_active_key_preserves_provider_file_account(
     operation = await files.prepare(scope, account, PrepareUpload(operation_id=uuid.uuid4(), size_bytes=20))
     await files.finalize(scope, operation.id, metadata())
 
-    restored = await OrgProviderKeyService(async_db).restore_key_for_user(user=owner, key_id=key_id)
+    restored = await get_org_provider_key_service(async_db).restore_key_for_user(user=owner, key_id=key_id)
 
     stored_generation = await repo.account(account.generation_id)
     binding = await repo.get(operation.id)
@@ -140,7 +140,7 @@ async def test_secret_update_failure_rolls_back_retirement(
         )
     )
     await async_db.commit()
-    keys = OrgProviderKeyService(async_db)
+    keys = get_org_provider_key_service(async_db)
     monkeypatch.setattr(
         keys.keys, "update_key", AsyncMock(side_effect=IntegrityError("injected", {}, ValueError("injected conflict")))
     )
@@ -286,7 +286,7 @@ async def _blocked_replacement(
     )
     await async_db.commit()
     with pytest.raises(TenancyConflictError, match="cleanup must finish"):
-        await OrgProviderKeyService(async_db).update_key_for_user(
+        await get_org_provider_key_service(async_db).update_key_for_user(
             user=owner, key_id=key_id, request=OrgProviderKeyUpdateRequest(api_key="replacement")
         )
     await async_db.rollback()
@@ -339,3 +339,27 @@ async def test_blocked_retirement_finalizes_on_selection_after_outputs_expire(
     assert selected is not None and selected.generation_id != account.generation_id
     retired = await ProviderFileRepository(async_db).account(account.generation_id)
     assert retired is not None and retired.status == "retired"
+
+
+async def test_output_preparation_rate_limits_only_new_operations(
+    async_db: AsyncSession, files_setup: tuple[ProviderFileService, FileScope, FileAccount]
+) -> None:
+    files, scope, account = files_setup
+    files.rate_limit_rpm = 2
+    outputs = ProviderFileOutputs(files)
+    request = OutputPrepare(
+        operation_id=uuid.uuid4(), request_id="request", attempt_id="attempt", generation_id=account.generation_id
+    )
+    operation = await outputs.prepare(scope, account, request)
+    assert (await outputs.prepare(scope, account, request)).id == operation.id
+    await outputs.complete(operation.id, scope.gateway_id, operation.cleanup_token.get_secret_value())
+    second = await outputs.prepare(scope, account, request.model_copy(update={"operation_id": uuid.uuid4()}))
+    await outputs.complete(second.id, scope.gateway_id, second.cleanup_token.get_secret_value())
+    refused = request.model_copy(update={"operation_id": uuid.uuid4()})
+    with pytest.raises(FilesError, match="rate limit") as failure:
+        await outputs.prepare(scope, account, refused)
+    assert failure.value.status_code == 429
+    assert await ProviderFileRepository(async_db).output_operation(refused.operation_id) is None
+    await async_db.rollback()
+    other = scope.model_copy(update={"user_id": "other"})
+    assert (await outputs.prepare(other, account, refused)).id == refused.operation_id

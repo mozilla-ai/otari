@@ -70,6 +70,7 @@ class ProviderFileOutputs:
             ):
                 raise FilesError(409, "Output operation conflict")
         else:
+            await self.service._rate_limit(scope, now)
             count, size = await self.repo.capacity(scope.workspace_id, scope.user_id, now)
             reserved = min(20, self.service.max_files - count)
             available = min(reserved * self.service.max_bytes, self.service.max_outstanding_bytes - size)

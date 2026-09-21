@@ -27,13 +27,16 @@ from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.repositories.overview.overview_repository import OverviewRepository
+from gateway.repositories.tenancy.attribution_user_repository import AttributionUserRepository
+from gateway.repositories.tenancy.provider_file_repository import ProviderFileRepository
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.overview.overview_service import OverviewService
+from gateway.services.provider_files import ProviderFileRevocations
 from gateway.services.routing import clear_router_backend_cache
-from gateway.services.tenancy import OrganizationService
+from gateway.services.tenancy import AttributionUserService, OrganizationService, OrgProviderKeyService
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
@@ -51,6 +54,28 @@ AUTH_FAILURES = Counter(
     ["reason"],
     registry=REGISTRY,
 )
+
+
+def get_org_provider_key_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrgProviderKeyService:
+    uow = UnitOfWork(db)
+    return OrgProviderKeyService(
+        db, uow=uow, revocation_listener=ProviderFileRevocations(ProviderFileRepository(db), uow)
+    )
+
+
+def get_workspace_service(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceService:
+    return WorkspaceService(
+        db,
+        membership_listener=WorkspaceBudgetDefaultService(db),
+        revocation_listener=ProviderFileRevocations(ProviderFileRepository(db), UnitOfWork(db)),
+    )
+
+
+def get_attribution_user_service(db: Annotated[AsyncSession, Depends(get_db)]) -> AttributionUserService:
+    uow = UnitOfWork(db)
+    return AttributionUserService(
+        AttributionUserRepository(uow), uow, ProviderFileRevocations(ProviderFileRepository(uow), uow)
+    )
 
 
 def record_auth_failure(reason: str) -> None:

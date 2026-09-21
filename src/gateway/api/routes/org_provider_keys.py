@@ -16,9 +16,8 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, get_org_provider_key_service, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.core.surface import Surface
 from gateway.models.provider_keys import (
@@ -51,11 +50,6 @@ workspace_router = APIRouter(
     tags=["provider-keys"],
     dependencies=[Depends(verify_master_key)],
 )
-
-
-def get_org_provider_key_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrgProviderKeyService:
-    """Build the org provider key service on the request's session."""
-    return OrgProviderKeyService(db)
 
 
 OrgProviderKeyServiceDep = Annotated[OrgProviderKeyService, Depends(get_org_provider_key_service)]

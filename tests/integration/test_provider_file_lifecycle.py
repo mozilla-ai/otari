@@ -129,7 +129,7 @@ async def test_delete_revokes_before_provider_and_retries_survive(
     row = await ProviderFileRepository(async_db).get(operation.id)
     assert row is not None and row.state == "pending_cleanup" and row.cleanup_attempts == 1
     await service.cleanup_result(operation.id, scope.gateway_id, resolved.cleanup_token.get_secret_value(), True)
-    assert row.state == "deleted"
+    assert str(row.state) == "deleted"
 
 
 async def test_expired_files_are_hidden(
@@ -210,7 +210,7 @@ async def test_output_cleanup_survives_user_revocation(
     row = await ProviderFileRepository(async_db).get(cleanup.operation_id)
     assert row is not None and row.state == "pending_cleanup" and row.provider_file_id == "file_late"
     await service.cleanup_result(row.id, scope.gateway_id, cleanup.cleanup_token.get_secret_value(), True)
-    assert row.state == "deleted"
+    assert str(row.state) == "deleted"
 
 
 async def test_cursor_scope_and_snapshot(files_setup: tuple[ProviderFileService, FileScope, FileAccount]) -> None:

@@ -78,8 +78,6 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
     resolve_active_key,
 )
-from gateway.repositories.tenancy.provider_file_repository import ProviderFileRepository
-from gateway.services.provider_files.accounts import retire_byo_account
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
@@ -102,6 +100,7 @@ from gateway.services.tenancy.errors import (
     WorkspaceProviderKeyOverrideConflictError,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.revocation_listener import RevocationListener
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 # Same value as provider_store_service.PROVIDER_CACHE_TTL_SECONDS, defined
@@ -381,14 +380,23 @@ async def _gate_api_base(api_base: str | None) -> None:
 class OrgProviderKeyService:
     """Business logic for the organization provider key surface."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(
+        self, db: AsyncSession, *, revocation_listener: RevocationListener | None = None, uow: UnitOfWork | None = None
+    ):
         self.db = db
-        self.uow = UnitOfWork(db)
+        self.uow = uow or UnitOfWork(db)
+        self._revocation_listener = revocation_listener
         self.keys = OrgProviderKeyRepository(db)
         self.overrides = WorkspaceProviderKeyOverrideRepository(db)
         self.restrictions = WorkspaceProviderModelRestrictionRepository(db)
         self.workspaces = WorkspaceRepository(db)
         self.organizations = OrganizationService(db, membership_listener=None)
+
+    @property
+    def _revocations(self) -> RevocationListener:
+        if self._revocation_listener is None:
+            raise RuntimeError("Credential mutations require a revocation listener")
+        return self._revocation_listener
 
     # ------------------------------------------------------------------
     # Organization-scoped keys
@@ -506,7 +514,7 @@ class OrgProviderKeyService:
         try:
             async with self.uow:
                 if {"encrypted_api_key", "api_base", "client_args"} & update_data.keys():
-                    blocked = await retire_byo_account(self.uow, key, release_secret=True)
+                    blocked = await self._revocations.retire_key(key, release_secret=True)
                 if not blocked:
                     await self.keys.update_key(key, update_data)
         except IntegrityError:
@@ -531,7 +539,7 @@ class OrgProviderKeyService:
             raise OrgProviderKeyNotFoundError(key_id)
 
         async with self.uow:
-            await retire_byo_account(self.uow, key, release_secret=False)
+            await self._revocations.retire_key(key, release_secret=False)
             updated = await self.keys.update_key(key, {"archived_at": datetime.now(UTC), "is_org_default": False})
         await refresh_org_provider_cache(self.db)
         return updated.to_public(usable=key_is_usable(updated))
@@ -548,7 +556,7 @@ class OrgProviderKeyService:
             return key.to_public(usable=key_is_usable(key))
 
         async with self.uow:
-            blocked = await retire_byo_account(self.uow, key, release_secret=True)
+            blocked = await self._revocations.retire_key(key, release_secret=True)
             if not blocked:
                 await self.keys.update_key(key, {"archived_at": None})
         self._raise_if_file_cleanup_pending(blocked)
@@ -570,7 +578,7 @@ class OrgProviderKeyService:
             raise OrgProviderKeyNotArchivedError(key_id)
 
         async with self.uow:
-            blocked = await retire_byo_account(self.uow, key, release_secret=True)
+            blocked = await self._revocations.retire_key(key, release_secret=True)
             if not blocked:
                 await self.keys.delete_key(key)
         self._raise_if_file_cleanup_pending(blocked)
@@ -689,7 +697,7 @@ class OrgProviderKeyService:
         # spans the variable set of override rows a "pin" can land in (unlike
         # `set_org_default`, which is a single row the partial unique index
         # already arbitrates).
-        await ProviderFileRepository(self.db).lock_organization(workspace.organization_id)
+        await self.organizations.organizations.lock(workspace.organization_id)
         await WorkspaceRepository(self.db).lock(workspace.id)
 
         existing = await self.overrides.get(workspace_id=workspace.id, org_provider_key_id=key.id)
@@ -732,16 +740,7 @@ class OrgProviderKeyService:
             result_default, result_disabled = created.is_default, created.disabled
 
         if new_disabled and not current_disabled:
-            files = ProviderFileRepository(self.db)
-            generation = await files.latest_account("organization_key", str(key.id), workspace.organization_id)
-            if generation is not None:
-                await files.revoke(
-                    datetime.now(UTC),
-                    "workspace_credential_disabled",
-                    organization_id=workspace.organization_id,
-                    workspace_id=workspace.id,
-                    generation_id=generation.id,
-                )
+            await self._revocations.workspace_key_disabled(workspace.organization_id, workspace.id, key.id)
             await self.restrictions.delete_for_workspace_key(workspace_id=workspace.id, org_provider_key_id=key.id)
 
         await self.db.commit()

@@ -5,6 +5,7 @@ provisioning that gives a standalone deployment an identity to act as. The route
 files under `gateway.api.routes` stay thin composition over these services.
 """
 
+from gateway.services.tenancy.attribution_user_service import AttributionUserService
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
@@ -13,6 +14,7 @@ from gateway.services.tenancy.provisioning_service import ensure_bootstrap_ident
 from gateway.services.tenancy.workspace_service import WorkspaceService
 
 __all__ = [
+    "AttributionUserService",
     "DeploymentUserService",
     "OrgProviderKeyService",
     "OrganizationDomainService",

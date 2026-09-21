@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import BaseModel, ConfigDict, SecretStr
@@ -144,3 +145,80 @@ async def test_generic_output_registration_accepts_ids_without_anthropic_blocks(
     binder = inference.FileOutputBinder(PlatformFilesClient("https://authority", "gateway", "user"), operation, [])
     await binder.register_ids(["file_generated", "file_generated"])
     assert calls == ["file_generated"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [None, "metadata", "registration"])
+async def test_output_batches_share_client_and_finish_siblings(
+    monkeypatch: pytest.MonkeyPatch, failure: str | None
+) -> None:
+    operation = Operation(
+        id=uuid.uuid4(),
+        cleanup_token=SecretStr("cleanup"),
+        deadline=datetime.now(UTC) + timedelta(minutes=1),
+        account=FileAccount(generation_id=uuid.uuid4(), api_key=SecretStr("key")),
+        max_bytes=100,
+        expires_in_seconds=3600,
+    )
+    opened = closed = active = maximum = 0
+    registered: list[str] = []
+    fetched: list[str] = []
+
+    class Provider:
+        async def aretrieve_file(self, file_id: str, **kwargs: Any) -> FileMetadata:
+            nonlocal active, maximum
+            active += 1
+            maximum = max(maximum, active)
+            fetched.append(file_id)
+            try:
+                await asyncio.sleep(0)
+                if failure == "metadata" and file_id == "file_0":
+                    raise ValueError("invalid metadata")
+                return FileMetadata(id=file_id)
+            finally:
+                active -= 1
+
+    @asynccontextmanager
+    async def provider(*args: Any, **kwargs: Any) -> AsyncIterator[Provider]:
+        nonlocal opened, closed
+        opened += 1
+        try:
+            yield Provider()
+        finally:
+            assert active == 0
+            closed += 1
+
+    async def retry(self: Any, path: str, body: dict[str, Any], result_type: type[Any]) -> Any:
+        assert path == "outputs/register"
+        file_id = body["metadata"]["id"]
+        await asyncio.sleep(0)
+        if failure == "registration" and file_id == "file_0":
+            raise FilesError(502, "unavailable")
+        registered.append(file_id)
+        return FileMetadata(id=file_id)
+
+    monkeypatch.setattr(inference, "provider_client", provider)
+    monkeypatch.setattr(PlatformFilesClient, "retry", retry)
+    binder = inference.FileOutputBinder(
+        PlatformFilesClient("https://authority", "gateway", "user"), operation, ["input"]
+    )
+    compensate = AsyncMock()
+    monkeypatch.setattr(binder, "compensate", compensate)
+    ids = ["input", "file_0", *[f"file_{i}" for i in range(9)]]
+    if failure:
+        with pytest.raises(FilesError):
+            await binder.register_ids(ids)
+        assert set(registered) == {"file_1", "file_2", "file_3"}
+        if failure == "metadata":
+            compensate.assert_awaited_once_with(None, "file_0")
+        else:
+            compensate.assert_awaited_once_with(FileMetadata(id="file_0"))
+    else:
+        await binder.register_ids(ids)
+        assert len(registered) == 9
+        compensate.assert_not_awaited()
+        await binder.register_ids(ids)
+    assert len(fetched) == len(set(fetched))
+    assert binder.bound == {"input", *registered}
+    assert opened == closed == 1
+    assert maximum == 4

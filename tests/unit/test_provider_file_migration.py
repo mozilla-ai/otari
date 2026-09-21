@@ -5,7 +5,10 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import CheckConstraint, create_engine, inspect
+from sqlmodel import SQLModel
+
+from gateway.models import provider_files  # noqa: F401
 
 TABLES = {
     "provider_account_generations",
@@ -40,5 +43,16 @@ def test_provider_file_migration_round_trip(tmp_path: Path) -> None:
         assert {"purpose", "provider_created_at"} <= {
             column["name"] for column in inspect(engine).get_columns("provider_file_bindings")
         }
+        for table_name in TABLES:
+            expected = {
+                constraint.name: str(constraint.sqltext)
+                for constraint in SQLModel.metadata.tables[table_name].constraints
+                if isinstance(constraint, CheckConstraint)
+            }
+            actual = {
+                constraint["name"]: constraint["sqltext"]
+                for constraint in inspect(engine).get_check_constraints(table_name)
+            }
+            assert actual == expected
     finally:
         engine.dispose()

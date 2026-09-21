@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.api.deps import get_workspace_service
 from gateway.models.budgets import ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
@@ -181,7 +182,9 @@ async def test_delete_workspace_announces_the_workspace_and_its_members(async_db
     doomed_membership = await _membership_id(async_db, doomed.id, owner.id)
     listener = RecordingListener()
 
-    await WorkspaceService(async_db, membership_listener=listener).delete_workspace(user=owner, workspace_id=doomed.id)
+    service = get_workspace_service(async_db)
+    service._membership_listener = listener
+    await service.delete_workspace(user=owner, workspace_id=doomed.id)
 
     assert listener.deleted == [(doomed.id, [doomed_membership])]
 

@@ -33,6 +33,10 @@ def upgrade() -> None:
         sa.Column("lease_token_hash", sqlmodel.sql.sqltypes.AutoString(length=64), nullable=True),
         sa.Column("lease_gateway_id", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=True),
         sa.Column("lease_deadline", sa.DateTime(timezone=True), nullable=True),
+        sa.CheckConstraint(
+            "credential_source IN ('organization_key', 'hosted_backend')", name="ck_provider_account_source"
+        ),
+        sa.CheckConstraint("status IN ('active', 'retiring', 'retired')", name="ck_provider_account_status"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "organization_id",
@@ -81,6 +85,7 @@ def upgrade() -> None:
         sa.Column("state", sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
         sa.Column("reserved_files", sa.Integer(), nullable=False),
         sa.Column("reserved_bytes", sa.BigInteger(), nullable=False),
+        sa.CheckConstraint("state IN ('active', 'revoked', 'completed')", name="ck_provider_file_output_state"),
         sa.ForeignKeyConstraint(
             ["provider_account_generation_id"], ["provider_account_generations.id"], ondelete="RESTRICT"
         ),
@@ -135,6 +140,9 @@ def upgrade() -> None:
         sa.Column("cleanup_after", sa.DateTime(timezone=True), nullable=True),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("lease_id", sa.Uuid(), nullable=True),
+        sa.CheckConstraint(
+            "state IN ('pending_upload', 'active', 'pending_cleanup', 'deleted')", name="ck_provider_file_state"
+        ),
         sa.ForeignKeyConstraint(["output_operation_id"], ["provider_file_output_operations.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(
             ["provider_account_generation_id"], ["provider_account_generations.id"], ondelete="RESTRICT"

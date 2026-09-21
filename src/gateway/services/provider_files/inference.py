@@ -1,6 +1,10 @@
 """Withhold provider output references until their durable binding is active."""
 
+import asyncio
 from collections.abc import Iterable
+from contextlib import AsyncExitStack
+from itertools import batched
+from typing import Any
 
 from gateway.services.provider_files.client import PlatformFilesClient
 from gateway.services.provider_files.contracts import FileMetadata, FilesError, Operation, OutputCleanup, WireModel
@@ -14,29 +18,45 @@ class FileOutputBinder:
         self.bound = set(existing_ids)
 
     async def register_ids(self, ids: Iterable[str]) -> None:
-        for file_id in ids:
-            if file_id in self.bound:
-                continue
+        pending = [file_id for file_id in dict.fromkeys(ids) if file_id not in self.bound]
+        if not pending:
+            return
+        async with AsyncExitStack() as stack:
             try:
-                async with provider_client(self.operation.account) as provider:
-                    result = await provider.aretrieve_file(file_id, max_retries=0)
-                    metadata = FileMetadata.model_validate(result.model_dump(exclude_unset=True))
+                provider = await stack.enter_async_context(provider_client(self.operation.account))
             except Exception:
-                await self.compensate(None, file_id)
+                for file_id in pending:
+                    await self.compensate(None, file_id)
                 raise FilesError(502, "Provider file metadata could not be registered") from None
-            try:
-                await self.client.retry(
-                    "outputs/register",
-                    {
-                        "operation_id": str(self.operation.id),
-                        "metadata": metadata.model_dump(mode="json", exclude_unset=True),
-                    },
-                    FileMetadata,
+            for batch in batched(pending, 4):
+                # Finish every sibling's registration or compensation before releasing the client.
+                results = await asyncio.gather(
+                    *(self._register_id(provider, file_id) for file_id in batch), return_exceptions=True
                 )
-            except FilesError:
-                await self.compensate(metadata)
-                raise
-            self.bound.add(file_id)
+                for result in results:
+                    if isinstance(result, BaseException):
+                        raise result
+
+    async def _register_id(self, provider: Any, file_id: str) -> None:
+        try:
+            result = await provider.aretrieve_file(file_id, max_retries=0)
+            metadata = FileMetadata.model_validate(result.model_dump(exclude_unset=True))
+        except Exception:
+            await self.compensate(None, file_id)
+            raise FilesError(502, "Provider file metadata could not be registered") from None
+        try:
+            await self.client.retry(
+                "outputs/register",
+                {
+                    "operation_id": str(self.operation.id),
+                    "metadata": metadata.model_dump(mode="json", exclude_unset=True),
+                },
+                FileMetadata,
+            )
+        except FilesError:
+            await self.compensate(metadata)
+            raise
+        self.bound.add(file_id)
 
     async def complete(self) -> None:
         try:

@@ -5,29 +5,30 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CallerOrganization,
     TelemetryStoragePortDep,
+    get_attribution_user_service,
     get_config,
     get_db,
     require_deployment_operator,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
 from gateway.log_config import logger
-from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget
 from gateway.models.money import as_float
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
-from gateway.repositories.tenancy.provider_file_repository import ProviderFileRepository
 from gateway.repositories.users_repository import in_organization
 from gateway.services.budget_periods import budget_window
 from gateway.services.model_access import validate_allowed_models
+from gateway.services.tenancy import AttributionUserService
 
 router = APIRouter(
     prefix="/users",
@@ -368,9 +369,10 @@ async def delete_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     storage: TelemetryStoragePortDep,
     organization_id: CallerOrganization,
+    service: Annotated[AttributionUserService, Depends(get_attribution_user_service)],
 ) -> None:
     """Delete a user in the caller's organization, and erase their telemetry."""
-    user = await _load_user_in_organization(db, user_id, organization_id)
+    await _load_user_in_organization(db, user_id, organization_id)
 
     # Explicit erasure, not a database ON DELETE cascade: this endpoint
     # soft-deletes the user (deleted_at), so the users row is never hard-deleted
@@ -400,20 +402,9 @@ async def delete_user(
             detail="Could not erase this user's telemetry; the user was not deleted",
         ) from None
 
-    await ProviderFileRepository(db).lock_user(user_id)
-    await db.execute(
-        update(APIKey)
-        .where(APIKey.user_id == user_id)
-        .values(is_active=False)
-        .execution_options(synchronize_session=False)
-    )
-    await ProviderFileRepository(db).revoke_user(user_id, datetime.now(UTC))
-    user.deleted_at = datetime.now(UTC)
-
     try:
-        await db.commit()
-    except SQLAlchemyError:
-        await db.rollback()
+        await service.delete(user_id, organization_id)
+    except DATABASE_ERRORS:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error",

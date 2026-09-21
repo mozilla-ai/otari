@@ -398,7 +398,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/messages.py",
     "gateway/api/routes/models.py",
     "gateway/api/routes/moderations.py",
-    "gateway/api/routes/org_provider_keys.py",
     "gateway/api/routes/organization_budgets.py",
     "gateway/api/routes/organization_guardrails.py",
     "gateway/api/routes/organization_keys.py",
@@ -426,7 +425,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/workspace_mcp_servers.py",
     "gateway/api/routes/workspace_member_budget_policies.py",
     "gateway/api/routes/workspace_web_search.py",
-    "gateway/api/routes/workspaces.py",
 )
 
 

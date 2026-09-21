@@ -16,7 +16,6 @@ two-row insert here.
 """
 
 import uuid
-from datetime import UTC, datetime
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,7 +35,6 @@ from gateway.models.tenancy import (
     WorkspaceUpdate,
 )
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
-from gateway.repositories.tenancy.provider_file_repository import ProviderFileRepository
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.errors import (
     InvalidRoleError,
@@ -50,17 +48,25 @@ from gateway.services.tenancy.errors import (
 )
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.revocation_listener import RevocationListener
 
 
 class WorkspaceService:
     """Business logic for the workspace surface."""
 
-    def __init__(self, db: AsyncSession, *, membership_listener: MembershipListener):
+    def __init__(
+        self,
+        db: AsyncSession,
+        *,
+        membership_listener: MembershipListener,
+        revocation_listener: RevocationListener | None = None,
+    ):
         self.db = db
         self.workspaces = WorkspaceRepository(db)
         self.members = WorkspaceMemberRepository(db)
         self.organizations = OrganizationService(db, membership_listener=None)
         self._membership_listener = membership_listener
+        self._revocation_listener = revocation_listener
 
     # ------------------------------------------------------------------
     # Scoping and authorization
@@ -297,15 +303,12 @@ class WorkspaceService:
         # leaves an orphaned ceiling behind.
         await self.workspaces.lock(workspace_id)
 
+        if self._revocation_listener is None:
+            raise RuntimeError("Workspace deletion requires a revocation listener")
         try:
             member_ids = await self.members.ids_for_workspace(workspace_id)
             await self._membership_listener.workspace_deleted(workspace_id, member_ids)
-            await ProviderFileRepository(self.db).revoke(
-                datetime.now(UTC),
-                "workspace_deletion",
-                organization_id=organization.id,
-                workspace_id=workspace_id,
-            )
+            await self._revocation_listener.workspace_deleted(organization.id, workspace_id)
             await self.workspaces.delete_workspace(workspace)
             await self.db.commit()
         except IntegrityError:

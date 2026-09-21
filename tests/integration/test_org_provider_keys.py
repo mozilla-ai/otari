@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.api.deps import get_org_provider_key_service
 from gateway.core.config import GatewayConfig
 from gateway.models.provider_keys import (
     OrgProviderKey,
@@ -104,7 +105,7 @@ def _create_request(
 async def test_crud_round_trip(async_db: AsyncSession) -> None:
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    service = OrgProviderKeyService(async_db)
+    service = get_org_provider_key_service(async_db)
 
     created = await service.create_key_for_user(user=owner, request=_create_request())
     assert created.last4 == "1234"
@@ -282,7 +283,7 @@ async def test_set_org_default_clears_the_previous_default(async_db: AsyncSessio
 async def test_set_org_default_refuses_an_archived_key(async_db: AsyncSession) -> None:
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    service = OrgProviderKeyService(async_db)
+    service = get_org_provider_key_service(async_db)
     key = await service.create_key_for_user(user=owner, request=_create_request())
     await service.archive_key_for_user(user=owner, key_id=key.id)
 
@@ -398,7 +399,7 @@ async def test_archiving_the_default_falls_through_to_earliest_fallback(async_db
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, organization, owner=owner)
-    service = OrgProviderKeyService(async_db)
+    service = get_org_provider_key_service(async_db)
 
     fallback = await service.create_key_for_user(user=owner, request=_create_request(name="fallback"))
     default_key = await service.create_key_for_user(user=owner, request=_create_request(name="default"))
@@ -415,7 +416,7 @@ async def test_pinning_reenables_a_disabled_key_and_disabling_unpins(async_db: A
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, organization, owner=owner)
-    service = OrgProviderKeyService(async_db)
+    service = get_org_provider_key_service(async_db)
     key = await service.create_key_for_user(user=owner, request=_create_request())
 
     disabled = await service.set_workspace_override_for_user(
@@ -449,7 +450,7 @@ async def test_repinning_an_already_pinned_key_stays_pinned(async_db: AsyncSessi
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, organization, owner=owner)
-    service = OrgProviderKeyService(async_db)
+    service = get_org_provider_key_service(async_db)
     key = await service.create_key_for_user(user=owner, request=_create_request())
 
     first = await service.set_workspace_override_for_user(
@@ -489,7 +490,7 @@ async def test_disabling_a_key_cascades_deleting_its_model_restrictions(async_db
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, organization, owner=owner)
-    service = OrgProviderKeyService(async_db)
+    service = get_org_provider_key_service(async_db)
     key = await service.create_key_for_user(user=owner, request=_create_request())
 
     await service.add_model_restriction_for_user(user=owner, workspace_id=workspace.id, key_id=key.id, model="gpt-4o")
@@ -554,7 +555,7 @@ async def test_an_override_write_answers_with_the_allow_list_it_left_behind(asyn
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, organization, owner=owner)
-    service = OrgProviderKeyService(async_db)
+    service = get_org_provider_key_service(async_db)
     key = await service.create_key_for_user(user=owner, request=_create_request())
     await service.add_model_restriction_for_user(user=owner, workspace_id=workspace.id, key_id=key.id, model="gpt-4o")
 
@@ -576,7 +577,7 @@ async def test_restricting_models_on_a_disabled_key_is_refused(async_db: AsyncSe
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, organization, owner=owner)
-    service = OrgProviderKeyService(async_db)
+    service = get_org_provider_key_service(async_db)
     key = await service.create_key_for_user(user=owner, request=_create_request())
     await service.set_workspace_override_for_user(
         user=owner, workspace_id=workspace.id, key_id=key.id, request=WorkspaceProviderKeyOverrideRequest(disabled=True)
@@ -595,7 +596,7 @@ async def test_model_restriction_is_cached_for_the_active_key(async_db: AsyncSes
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, organization, owner=owner)
-    service = OrgProviderKeyService(async_db)
+    service = get_org_provider_key_service(async_db)
     key = await service.create_key_for_user(user=owner, request=_create_request())
     await service.set_org_default_for_user(user=owner, key_id=key.id)
     await service.add_model_restriction_for_user(user=owner, workspace_id=workspace.id, key_id=key.id, model="gpt-4o")
@@ -648,7 +649,7 @@ async def test_model_restriction_follows_the_active_key_not_a_stale_one(async_db
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, organization, owner=owner)
-    service = OrgProviderKeyService(async_db)
+    service = get_org_provider_key_service(async_db)
     key_a = await service.create_key_for_user(user=owner, request=_create_request(name="a"))
     await service.set_org_default_for_user(user=owner, key_id=key_a.id)
     await service.add_model_restriction_for_user(user=owner, workspace_id=workspace.id, key_id=key_a.id, model="gpt-4o")
