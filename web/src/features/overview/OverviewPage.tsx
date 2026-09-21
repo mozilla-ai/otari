@@ -805,9 +805,18 @@ function OverviewHeader({
 // table, so on a hosted deployment an unreachable instance is not a row the
 // organization page could show. `AttentionStrip` drops the link there rather
 // than sending somebody to a page the instance is not on.
+// Where "add a provider" should send somebody, given what this deployment
+// serves. The organization's own page is preferred where it is served, which is
+// now everywhere: it is the one an organization owner or admin can actually use,
+// where `/providers` is the deployment's own credentials and refuses anyone who
+// is not the operator. Standalone publishes both surfaces, so the order here is
+// what decides, and getting it the other way round would send most admins to a
+// page that turns them away.
 function useAddProviderRoute(): "/providers" | "/organization/provider-keys" {
   const serves = useSurfaces()
-  return serves("providers") ? "/providers" : "/organization/provider-keys"
+  return serves("organization_providers")
+    ? "/organization/provider-keys"
+    : "/providers"
 }
 
 function GetStartedStrip() {

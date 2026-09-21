@@ -373,6 +373,19 @@ DELETE /api/v1/organizations/me/provider-keys/{key_id}                        # 
 POST /api/v1/organizations/me/provider-keys/{key_id}/archive                  # dashboard-only
 POST /api/v1/organizations/me/provider-keys/{key_id}/restore                  # dashboard-only
 POST /api/v1/organizations/me/provider-keys/{key_id}/default                  # dashboard-only
+# The models offered on one of those keys, their rates and their serving
+# switches (otari#643 follow-up). Same surface, same reason: an SDK caller sends
+# a model and a key, and which of an organization's adopted models are served
+# through which credential is administered, not called. The effect is visible to
+# an SDK caller in the two places it should be, `GET /api/v1/models` and a 403 at
+# dispatch, never as these rows.
+GET /api/v1/organizations/me/provider-keys/{key_id}/models                     # dashboard-only
+POST /api/v1/organizations/me/provider-keys/{key_id}/models                    # dashboard-only
+PATCH /api/v1/organizations/me/provider-keys/{key_id}/models/{model_id}        # dashboard-only
+DELETE /api/v1/organizations/me/provider-keys/{key_id}/models/{model_id}       # dashboard-only
+POST /api/v1/organizations/me/provider-keys/{key_id}/models/refresh            # dashboard-only
+POST /api/v1/organizations/me/provider-keys/{key_id}/pricing/refresh           # dashboard-only
+GET /api/v1/organizations/me/provider-keys/{key_id}/available-models           # dashboard-only
 GET /api/v1/workspaces/{workspace_id}/provider-keys                           # dashboard-only
 PATCH /api/v1/workspaces/{workspace_id}/provider-keys/{key_id}                # dashboard-only
 DELETE /api/v1/workspaces/{workspace_id}/provider-keys/{key_id}               # dashboard-only

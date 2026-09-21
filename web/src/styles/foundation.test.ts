@@ -718,11 +718,11 @@ describe("a table is a region, not a card", () => {
     "otari-mcp-table",
     "otari-members-table",
     "otari-models-table",
+    "otari-offered-models-table",
     "otari-overview-activity",
     "otari-pricing-table",
     "otari-provider-keys-table",
     "otari-providers-table",
-    "otari-rate-overrides-table",
     "otari-routing-table",
     "otari-workspaces-table",
   ]

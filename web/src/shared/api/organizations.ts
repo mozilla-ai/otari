@@ -16,12 +16,16 @@ import type {
   InvitationPreview,
   InviteOrganizationMemberRequest,
   InviteOrganizationMemberResult,
+  OfferOrgProviderModelRequest,
   Organization,
   OrganizationContext,
   OrganizationDomain,
   OrganizationMember,
   OrganizationMembers,
+  OrgProviderAvailableModels,
   OrgProviderKey,
+  OrgProviderModel,
+  OrgProviderModelsRefresh,
   PendingOrganizationInvitation,
   SwitchOrganizationRequest,
   UpdateOrganizationDomainRequest,
@@ -29,13 +33,18 @@ import type {
   UpdateOrganizationRequest,
   UpdateOrgProviderKeyRequest,
 } from "@/client"
-import { ApiError, apiFetch } from "@/shared/api/client"
+import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
+  CATALOG,
+  MODELS,
+  NO_RETRY,
   ORGANIZATION_CONTEXT,
   ORGANIZATION_DOMAINS,
   ORGANIZATION_MEMBERS,
+  ORGANIZATION_PROVIDER_AVAILABLE_MODELS,
   ORGANIZATION_PROVIDER_KEYS,
+  ORGANIZATION_PROVIDER_MODELS,
   ORGANIZATIONS,
   WORKSPACES,
 } from "@/shared/api/queryKeys"
@@ -432,6 +441,28 @@ function invalidateOrgProviderKeys(
   void queryClient.invalidateQueries({
     queryKey: [ORGANIZATION_PROVIDER_KEYS],
   })
+  // The models ride the key: archiving one withdraws what it served, restoring
+  // one brings it back, and a rotated credential reaches a different catalog. A
+  // panel left open on a stale list would offer a switch over models the key no
+  // longer reaches.
+  void queryClient.invalidateQueries({
+    queryKey: [ORGANIZATION_PROVIDER_MODELS],
+  })
+}
+
+// Every model write moves three reads: this key's panel, and both catalog
+// surfaces, because an offered model appears in the listing carrying its price
+// and a withdrawn one leaves it. The same three `invalidateOrganizationPricing`
+// moves, for the same reason.
+function invalidateOrgProviderModels(
+  queryClient: ReturnType<typeof useQueryClient>,
+  keyId: string,
+): void {
+  void queryClient.invalidateQueries({
+    queryKey: [ORGANIZATION_PROVIDER_MODELS, keyId],
+  })
+  void queryClient.invalidateQueries({ queryKey: [MODELS] })
+  void queryClient.invalidateQueries({ queryKey: [CATALOG] })
 }
 
 // The organization's own upstream provider credentials (#670), which every
@@ -618,6 +649,120 @@ export function useDeleteOrganizationDomain() {
         { method: "DELETE" },
       ),
     onSuccess: () => invalidateOrganizationDomains(queryClient),
+  })
+}
+
+// The models an organization offers on one of its provider keys, and what each
+// currently costs it. Paged on the server, because one provider can list several
+// hundred models.
+//
+// `placeholderData` follows `useOrganizationPricing`'s shape rather than a bare
+// `keepPreviousData`, and the difference is load-bearing here: the key id is
+// part of the query key, so `keepPreviousData` would paint one provider's models
+// under another provider's name for a frame every time a different row is
+// expanded.
+export function useOrgProviderModels(
+  keyId: string,
+  page: number,
+  pageSize: number,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [ORGANIZATION_PROVIDER_MODELS, keyId, page, pageSize],
+    queryFn: () =>
+      apiFetch<{ data: OrgProviderModel[]; count: number }>(
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models?skip=${page * pageSize}&limit=${pageSize}`,
+      ),
+    staleTime: 60_000,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === keyId ? previous : undefined,
+    enabled,
+  })
+}
+
+// What the provider says it serves on the stored credential. Answering means
+// dialing the upstream, so it is fetched only while the add-model form is open
+// and held for a minute: one dial per form visit, not one per re-render.
+export function useOrgProviderAvailableModels(keyId: string, enabled: boolean) {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: [ORGANIZATION_PROVIDER_AVAILABLE_MODELS, keyId],
+    queryFn: () =>
+      apiFetch<OrgProviderAvailableModels>(
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/available-models`,
+      ),
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+export function useOfferOrgProviderModel(keyId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: OfferOrgProviderModelRequest) =>
+      apiFetch<OrgProviderModel>(
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => invalidateOrgProviderModels(queryClient, keyId),
+  })
+}
+
+export function useSetOrgProviderModelEnabled(keyId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ modelId, enabled }: { modelId: string; enabled: boolean }) =>
+      apiFetch<OrgProviderModel>(
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models/${encodeURIComponent(modelId)}`,
+        { method: "PATCH", body: JSON.stringify({ enabled }) },
+      ),
+    onSuccess: () => invalidateOrgProviderModels(queryClient, keyId),
+  })
+}
+
+export function useWithdrawOrgProviderModel(keyId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (modelId: string) =>
+      apiFetch<{ message: string }>(
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models/${encodeURIComponent(modelId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => invalidateOrgProviderModels(queryClient, keyId),
+  })
+}
+
+// Both refreshes carry `longRequestSignal`, as the deployment pricing preview
+// does: one re-dials the provider and the other walks the community dataset per
+// model, and neither fits the default request budget.
+export function useRefreshOrgProviderModels(keyId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<OrgProviderModelsRefresh>(
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models/refresh`,
+        { method: "POST", signal: longRequestSignal() },
+      ),
+    onSuccess: () => {
+      invalidateOrgProviderModels(queryClient, keyId)
+      // The dial's answer is fresher than whatever the picker last cached.
+      void queryClient.invalidateQueries({
+        queryKey: [ORGANIZATION_PROVIDER_AVAILABLE_MODELS, keyId],
+      })
+    },
+  })
+}
+
+export function useRefreshOrgProviderModelPricing(keyId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<OrgProviderModelsRefresh>(
+        `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/pricing/refresh`,
+        { method: "POST", signal: longRequestSignal() },
+      ),
+    // Not the available-models key: this one never asks the provider anything.
+    onSuccess: () => invalidateOrgProviderModels(queryClient, keyId),
   })
 }
 

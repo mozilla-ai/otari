@@ -233,10 +233,12 @@ describe("AppShell responsive layout", () => {
     await renderShell(bootstrap(), { url: "/organization" })
 
     await user.click(screen.getByRole("button", { name: "Open navigation" }))
-    await user.click(await screen.findByRole("link", { name: "Providers" }))
+    await user.click(
+      await screen.findByRole("link", { name: "Deployment providers" }),
+    )
 
     expect(await screen.findByText("PROVIDERS PAGE")).toBeInTheDocument()
-    expect(document.title).toBe("Providers · Otari")
+    expect(document.title).toBe("Deployment providers · Otari")
     // Navigating closes the drawer so the page it landed on is not hidden behind it.
     expect(
       screen.getByRole("button", { name: "Open navigation" }),
@@ -262,16 +264,17 @@ describe("AppShell responsive layout", () => {
     )
 
     await user.click(await screen.findByRole("link", { name: "Organization" }))
-    const providers = await screen.findByRole("link", { name: "Providers" })
+    const providers = await screen.findByRole("link", {
+      name: "Deployment providers",
+    })
     expect(providers).not.toHaveAttribute("aria-current")
 
     await user.click(providers)
 
     expect(await screen.findByText("PROVIDERS PAGE")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Providers" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    )
+    expect(
+      screen.getByRole("link", { name: "Deployment providers" }),
+    ).toHaveAttribute("aria-current", "page")
     expect(
       screen.getByRole("link", { name: "Org settings" }),
     ).not.toHaveAttribute("aria-current")
@@ -589,8 +592,8 @@ describe("AppShell surface gating", () => {
       "Members & roles",
       "Email domains",
       "Spend & budgets",
-      "Model pricing",
       "Providers",
+      "Deployment providers",
       "Org settings",
     ])
     // Settings and Accounts are on the deployment rail now, not this one.
@@ -717,7 +720,7 @@ describe("AppShell entitlement gating", () => {
     })
 
     expect(
-      await screen.findByText("Providers is not available here"),
+      await screen.findByText("Deployment providers is not available here"),
     ).toBeInTheDocument()
     expect(screen.queryByText("PAGE CONTENT")).toBeNull()
   })
@@ -1432,7 +1435,9 @@ describe("the telemetry the sidebar records", () => {
     const user = userEvent.setup()
     await renderShell(bootstrap(), { url: "/organization" })
 
-    await user.click(await screen.findByRole("link", { name: "Providers" }))
+    await user.click(
+      await screen.findByRole("link", { name: "Deployment providers" }),
+    )
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
       tab_name: "providers",
@@ -1448,10 +1453,10 @@ describe("the telemetry the sidebar records", () => {
     const user = userEvent.setup()
     await renderShell(bootstrap(), { url: "/organization/members" })
 
-    await user.click(await screen.findByRole("link", { name: "Model pricing" }))
+    await user.click(await screen.findByRole("link", { name: "Providers" }))
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
-      tab_name: "pricing",
+      tab_name: "provider-keys",
       context: "organization_settings",
     })
   })
@@ -1462,7 +1467,9 @@ describe("the telemetry the sidebar records", () => {
     const user = userEvent.setup()
     await renderShell(bootstrap(), { url: "/providers" })
 
-    await user.click(await screen.findByRole("link", { name: "Providers" }))
+    await user.click(
+      await screen.findByRole("link", { name: "Deployment providers" }),
+    )
 
     expect(recordEvent).not.toHaveBeenCalled()
   })

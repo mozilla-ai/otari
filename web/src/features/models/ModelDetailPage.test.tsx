@@ -284,14 +284,14 @@ describe("ModelDetailPage", () => {
     )
   })
 
-  it("links an operator to Model pricing to edit a rate, and nobody else", async () => {
+  it("links an operator to Providers to edit a rate, and nobody else", async () => {
     mockApi()
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
 
     const links = await screen.findAllByRole("link", { name: "Edit rate" })
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
-      "/organization/pricing?model=fireworks%3Aaccounts%2Ffireworks%2Fmodels%2Fglm-5p3",
-      "/organization/pricing?model=nebius%3Azai-org%2FGLM-5.3",
+      "/organization/provider-keys?model=fireworks%3Aaccounts%2Ffireworks%2Fmodels%2Fglm-5p3",
+      "/organization/provider-keys?model=nebius%3Azai-org%2FGLM-5.3",
     ])
     // Nothing on this page writes a price.
     expect(
@@ -313,7 +313,7 @@ describe("ModelDetailPage", () => {
 
     const links = await screen.findAllByRole("link", { name: "Set your rate" })
     expect(links.map((link) => link.getAttribute("href"))).toContain(
-      "/organization/pricing?override=nebius%3Azai-org%2FGLM-5.3",
+      "/organization/provider-keys?override=nebius%3Azai-org%2FGLM-5.3",
     )
     expect(screen.queryByRole("link", { name: "Edit rate" })).toBeNull()
   })
@@ -390,7 +390,7 @@ describe("ModelDetailPage", () => {
     await screen.findByRole("grid", { name: "Offerings of GLM-5.3" })
     expect(screen.queryByRole("link", { name: "Edit rate" })).toBeNull()
     expect(screen.queryByRole("link", { name: "Add a provider" })).toBeNull()
-    expect(screen.queryByRole("link", { name: "Model pricing" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Providers" })).toBeNull()
   })
 
   it("reports a model that does not exist rather than an empty page", async () => {

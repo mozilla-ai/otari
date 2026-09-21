@@ -29,6 +29,7 @@ def test_the_surface_lists_are_spelled_out() -> None:
         "budgets",
         "keys",
         "models",
+        "organization_providers",
         "organizations",
         "playground",
         "pricing",

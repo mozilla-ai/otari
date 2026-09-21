@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from gateway.core.config import API_ROOT
 from gateway.models.provider_keys import (
     OrgProviderKey,
+    OrgProviderKeyModel,
     WorkspaceProviderKeyOverride,
     WorkspaceProviderModelRestriction,
 )
@@ -298,6 +299,126 @@ def test_a_workspace_model_restriction_narrows_a_members_catalog(
     # The admin still reads the organization's whole provider, because lifting one
     # workspace's restriction is theirs to do.
     assert _catalog_as(client, world, "alpha_owner") == {_OPENAI_MODEL, _OPENAI_OTHER}
+
+
+def test_an_offered_model_narrows_the_catalog_and_appears_in_it(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """Two things at once, and they are the point of the offered-models table.
+
+    Narrowing: the organization has adopted one of its provider's models, so the
+    other stops being listed even though the key still reaches the provider.
+
+    Listing: ``gpt-5-adopted`` is priced by nothing and discovered by nothing, so
+    before this table it could not appear in the catalog at all. It appears
+    because the organization offered it.
+    """
+    session = db_session_factory()
+    try:
+        session.add(
+            OrgProviderKeyModel(
+                organization_id=world.alpha,
+                org_provider_key_id=world.keys["alpha_openai"],
+                model="gpt-5-adopted",
+                enabled=True,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    assert _catalog_as(client, world, "alpha_member") == {"openai:gpt-5-adopted"}
+    assert _catalog_as(client, world, "alpha_owner") == {"openai:gpt-5-adopted"}
+
+
+def test_a_model_switched_off_leaves_the_catalog(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """The catalog never advertises a model that would be refused at inference,
+    and the serving switch is what refuses it."""
+    session = db_session_factory()
+    try:
+        session.add_all(
+            [
+                OrgProviderKeyModel(
+                    organization_id=world.alpha,
+                    org_provider_key_id=world.keys["alpha_openai"],
+                    model="gpt-4o-mini",
+                    enabled=True,
+                ),
+                OrgProviderKeyModel(
+                    organization_id=world.alpha,
+                    org_provider_key_id=world.keys["alpha_openai"],
+                    model="gpt-4o",
+                    enabled=False,
+                ),
+            ]
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    assert _catalog_as(client, world, "alpha_member") == {_OPENAI_MODEL}
+
+
+def test_the_two_narrowings_intersect_rather_than_widen(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """A workspace restriction may only narrow what the organization offers, and
+    the organization offering a model does not lift the workspace's own list."""
+    session = db_session_factory()
+    try:
+        session.add_all(
+            [
+                OrgProviderKeyModel(
+                    organization_id=world.alpha,
+                    org_provider_key_id=world.keys["alpha_openai"],
+                    model="gpt-4o-mini",
+                    enabled=True,
+                ),
+                OrgProviderKeyModel(
+                    organization_id=world.alpha,
+                    org_provider_key_id=world.keys["alpha_openai"],
+                    model="gpt-4o",
+                    enabled=True,
+                ),
+                WorkspaceProviderModelRestriction(
+                    workspace_id=world.workspaces["alpha_one"],
+                    organization_id=world.alpha,
+                    org_provider_key_id=world.keys["alpha_openai"],
+                    model="gpt-4o-mini",
+                ),
+            ]
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    # The member is in the restricted workspace, so they get the intersection.
+    assert _catalog_as(client, world, "alpha_member") == {_OPENAI_MODEL}
+    # The admin reads the organization whole, so the workspace's own list does
+    # not bind them, but what the organization withdrew still does.
+    assert _catalog_as(client, world, "alpha_owner") == {_OPENAI_MODEL, _OPENAI_OTHER}
+
+
+def test_another_organization_never_sees_an_offered_model(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    session = db_session_factory()
+    try:
+        session.add(
+            OrgProviderKeyModel(
+                organization_id=world.alpha,
+                org_provider_key_id=world.keys["alpha_openai"],
+                model="gpt-5-adopted",
+                enabled=True,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    assert "openai:gpt-5-adopted" not in _catalog_as(client, world, "beta_member")
 
 
 def test_a_single_model_read_agrees_with_the_listing(client: TestClient, world: _World) -> None:

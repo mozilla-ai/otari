@@ -4107,7 +4107,7 @@
               },
               "raw": "{\n  \"provider\": \"string\",\n  \"name\": \"string\"\n}"
             },
-            "description": "Create a provider key in the caller's organization. Organization owners and admins only.",
+            "description": "Create a provider key in the caller's organization. Organization owners and admins only.\n\nEverything the provider lists on the new credential is offered at once, so a\nkey starts with its real catalog rather than an empty list an admin retypes\nby hand. A provider that will not say (no listing endpoint, unreachable,\ncredential refused) yields a key with no models rather than a failed create:\nthe credential may still be right for dispatch, and models can be added by\nname. The response is the key either way; the models are read back through\n``GET /{key_id}/models``.",
             "header": [
               {
                 "key": "Content-Type",
@@ -4233,6 +4233,36 @@
           }
         },
         {
+          "name": "List Org Provider Key Available Models",
+          "request": {
+            "description": "Ask the provider what it serves on this key's stored credential.\n\nDials the upstream on every call rather than caching: the caller is a model\npicker, opened rarely and entitled to a current answer. The credential never\nleaves the process; only model names come back. Organization owners and\nadmins only.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys",
+                ":key_id",
+                "available-models"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/available-models",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Set Org Provider Key Default",
           "request": {
             "description": "Make a key the organization's default for its provider. Organization owners and admins only.",
@@ -4252,6 +4282,242 @@
                 "default"
               ],
               "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/default",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Org Provider Key Models",
+          "request": {
+            "description": "List the models offered on one key, each with the rate it currently serves at.\n\nOrganization owners and admins only. ``count`` is the total rather than the\npage length, so a client knows whether another page is owed.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys",
+                ":key_id",
+                "models"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/models?skip=&limit=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Add Org Provider Key Model",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"string\"\n}"
+            },
+            "description": "Offer one model by name, for a backend whose models cannot be listed.\n\nCarries no rate: an organization's rates are written through\n``/api/v1/organizations/me/pricing``, so a price set here and a price set\nthere could not disagree about what a request costs. The offer seeds the\ncommunity default like any other, and a model nothing prices arrives\ndisabled. Organization owners and admins only.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys",
+                ":key_id",
+                "models"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/models",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Refresh Org Provider Key Models",
+          "request": {
+            "description": "Ask the provider again and offer whatever is newly listed.\n\nAdditive only: nothing already offered is removed or switched off, because\ndelisting a model is a decision the serving switch owns and an upstream\nhiccup must not empty a catalog. New models follow the offer rule, seeded\nwith the community default rate and disabled when nothing prices them. A\nrate this surface seeded and nobody has changed moves to today's default.\nOrganization owners and admins only.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys",
+                ":key_id",
+                "models",
+                "refresh"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/models/refresh",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Set Org Provider Key Model Enabled",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"enabled\": false\n}"
+            },
+            "description": "Turn one offered model's serving switch on or off. Organization owners and admins only.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys",
+                ":key_id",
+                "models",
+                ":model_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/models/:model_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "model_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Remove Org Provider Key Model",
+          "request": {
+            "description": "Stop offering one model. Its rate and its history stay. Organization owners and admins only.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys",
+                ":key_id",
+                "models",
+                ":model_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/models/:model_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "model_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Refresh Org Provider Key Model Pricing",
+          "request": {
+            "description": "Move every rate this surface seeded onto today's community default.\n\nThe other half of the refresh above, without the dial: re-reading community\nrates is cheap and asking a provider for its whole catalog is not, so an\nadmin who only wants the price move does not wait on an upstream. A rate an\nadmin has since set is left alone, and a model that arrived unpriced is\noffered a rate and switched on if one has appeared. Organization owners and\nadmins only.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys",
+                ":key_id",
+                "pricing",
+                "refresh"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/provider-keys/:key_id/pricing/refresh",
               "variable": [
                 {
                   "description": "path parameter",

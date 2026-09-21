@@ -90,13 +90,17 @@ describe("rail location memory", () => {
     // The half a write-time check cannot cover: the entry was visible when it was
     // stored, and a gateway restarted against a config reporting fewer surfaces
     // changed the answer underneath it.
-    window.localStorage.setItem(ORGANIZATION_KEY, "/organization/pricing")
+    //
+    // A destination that is still gated, which is the whole point of the case:
+    // an unregistered path is dropped by the test above for a different reason,
+    // so using one here would keep passing while testing nothing.
+    window.localStorage.setItem(ORGANIZATION_KEY, "/organization/usage")
 
     expect(
-      lastLocation("organization", withoutSurface("pricing")),
+      lastLocation("organization", withoutSurface("organization_usage")),
     ).toBeUndefined()
     expect(lastLocation("organization", showsEverything)).toEqual({
-      to: "/organization/pricing",
+      to: "/organization/usage",
     })
   })
 

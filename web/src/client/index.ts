@@ -350,6 +350,20 @@ export type OrgProviderKey = Schemas["OrgProviderKeyPublic"]
 export type CreateOrgProviderKeyRequest = Schemas["OrgProviderKeyCreateRequest"]
 export type UpdateOrgProviderKeyRequest = Schemas["OrgProviderKeyUpdateRequest"]
 
+// The models an organization offers on one of those keys. `price_source` names
+// the rung of the pricing ladder that answered, in the vocabulary the Models
+// page already uses, so a rate shown here and a rate shown there cannot claim
+// different provenance for the same number. A refresh reports its own failure in
+// the body rather than throwing, which is why `error` is on the result type.
+export type OrgProviderModel = Schemas["OrgProviderKeyModelPublic"]
+export type OfferOrgProviderModelRequest =
+  Schemas["OrgProviderKeyModelCreateRequest"]
+export type UpdateOrgProviderModelRequest =
+  Schemas["OrgProviderKeyModelUpdateRequest"]
+export type OrgProviderModelsRefresh = Schemas["OrgProviderModelsRefreshPublic"]
+export type OrgProviderAvailableModels =
+  Schemas["OrgProviderAvailableModelsPublic"]
+
 // An organization's email-domain claims. A claim is inert until its DNS TXT
 // record is found, so `verified_at` is the field the UI branches on and
 // `verification_record` is the whole string an admin publishes.

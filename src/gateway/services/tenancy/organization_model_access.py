@@ -40,6 +40,7 @@ from gateway.core.config import GatewayConfig
 from gateway.models.provider_keys import OrgProviderKey
 from gateway.models.tenancy import User, Workspace
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.repositories.tenancy.org_provider_key_model_repository import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy.org_provider_key_repository import (
     OrgProviderKeyRepository,
     WorkspaceProviderModelRestrictionRepository,
@@ -49,7 +50,7 @@ from gateway.services.tenancy.authorization import VisibleWorkspaceScope, resolv
 from gateway.services.tenancy.errors import TenancyForbiddenError, TenancyNotFoundError
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, has_credential, key_is_usable
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.workspace_scope import lookup_default_workspace_id
+from gateway.services.workspace_scope import lookup_default_workspace_id, organization_for_workspace_id
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,18 @@ class SessionCatalogScope:
     deployment_supplied_providers: frozenset[str]
     """Hosted providers the deployment pays for in at least one of the organization's workspaces."""
 
+    offered_keys: frozenset[str]
+    """Canonical ``provider:model`` selectors the organization offers and serves.
+
+    The allow-list above says what this caller *may* reach; this says what the
+    catalog should *list*. The two are different questions for these models
+    alone: discovery dials ``config.providers`` instances only, so a model on an
+    organization's own key is permitted by the allow-list and listed by nothing,
+    and it took an organization adopting models for that gap to matter. Empty for
+    a caller with no offered models, which is every caller on a deployment where
+    nobody has adopted any.
+    """
+
 
 async def _get_hosted_providers(model_provider: ModelProviderPort | None, organization_id: uuid.UUID) -> frozenset[str]:
     if model_provider is None:
@@ -84,11 +97,41 @@ async def _get_hosted_providers(model_provider: ModelProviderPort | None, organi
     return frozenset(provider_key(provider) for provider in hosted)
 
 
+def _narrowed(
+    prefix: str,
+    offered: list[str] | None,
+    restricted: list[str] | None,
+) -> set[str]:
+    """One key's entries, narrowed by whichever of the two allow-lists exist.
+
+    Two independent narrowings over one key, and **absence means different
+    things from presence in both**. No offered rows means the key has never been
+    refreshed, so it still reaches everything its provider serves; no restriction
+    rows means this workspace has not narrowed it. An *empty* list is the
+    opposite answer in both cases, and it is reachable: an organization can
+    switch every model off.
+
+    They compose by intersection, never union, because each may only narrow. A
+    workspace's restriction cannot reach a model the organization withdrew, and
+    the organization offering a model does not lift a workspace's own list.
+    """
+    if offered is None and restricted is None:
+        return {f"{prefix}:*"}
+    if offered is None:
+        allowed = set(restricted or ())
+    elif restricted is None:
+        allowed = set(offered)
+    else:
+        allowed = set(offered) & set(restricted)
+    return {f"{prefix}:{model}" for model in allowed}
+
+
 async def _get_byo_allowlist(db: AsyncSession, active_keys: dict[uuid.UUID, dict[str, OrgProviderKey]]) -> set[str]:
     """Returns the BYO allow-list the caller's workspaces resolve to.
 
-    A model restriction narrows a provider to the models it names.
-    The result is the union across the workspaces: a model one of them can call is a model this caller can call.
+    Two narrowings apply per key: the models the organization offers and serves
+    on it, and the workspace's own restriction. The result is the union across
+    the workspaces: a model one of them can call is a model this caller can call.
     """
     usable = {
         (workspace_id, key.id): provider
@@ -97,13 +140,14 @@ async def _get_byo_allowlist(db: AsyncSession, active_keys: dict[uuid.UUID, dict
         if key_is_usable(key)
     }
     restrictions = await WorkspaceProviderModelRestrictionRepository(db).list_for_workspace_keys(usable)
+    offered = await OrgProviderKeyModelRepository(db).enabled_models_for_keys({key for _, key in usable})
     allowlist: set[str] = set()
     for (workspace_id, key_id), provider in usable.items():
-        prefix = provider_key(provider)
-        allowed = restrictions.get((workspace_id, key_id))
-        # An absent narrowing is not an empty allow-list: no restriction row means
-        # every model of that provider (see ``WorkspaceProviderModelRestriction``).
-        allowlist.update({f"{prefix}:{model}" for model in allowed} if allowed else {f"{prefix}:*"})
+        allowlist |= _narrowed(
+            provider_key(provider),
+            offered.get(key_id),
+            restrictions.get((workspace_id, key_id)),
+        )
     return allowlist
 
 
@@ -124,6 +168,69 @@ async def _sees_default_workspace(db: AsyncSession, scope: VisibleWorkspaceScope
         )
     ).scalar_one_or_none()
     return owner == scope.organization.id
+
+
+async def resolve_workspace_offered_keys(db: AsyncSession, workspace_id: uuid.UUID | None) -> frozenset[str]:
+    """The ``provider:model`` selectors one workspace's organization offers and serves.
+
+    The API key's counterpart to :attr:`SessionCatalogScope.offered_keys`, and the
+    reason it exists separately: ``catalog_scope`` answers an API key from the
+    key's own stored allow-list without ever resolving its organization, so
+    nothing on that path would otherwise know that the organization had adopted
+    any models. ``GET /api/v1/models`` with an API key *is* the data-plane
+    catalog, so leaving it out would list the adopted models to the dashboard and
+    not to the callers that dispatch them.
+
+    Narrowed exactly as dispatch narrows: the key names one workspace, so the
+    keys active *in that workspace* are what it reaches.
+    """
+    if workspace_id is None:
+        return frozenset()
+    organization_id = await organization_for_workspace_id(db, workspace_id)
+    if organization_id is None:
+        return frozenset()
+    active_keys = await OrgProviderKeyService(db).get_active_keys(
+        organization_id=organization_id, workspace_ids=[workspace_id]
+    )
+    entries = await _get_byo_allowlist(db, active_keys)
+    # A ``provider:*`` entry is an unnarrowed key: it says the workspace may
+    # reach everything that provider serves and nothing about what to list.
+    return frozenset(entry for entry in entries if not entry.endswith(":*"))
+
+
+async def resolve_organization_offered_keys(db: AsyncSession, organization_id: uuid.UUID) -> frozenset[str]:
+    """Every ``provider:model`` one organization offers and serves, across its keys.
+
+    The unnarrowed answer, for a caller who is not acting inside one workspace: a
+    deployment operator, or a master key, both of which read the catalog whole.
+    No workspace restriction applies, because a narrowing one workspace set is
+    not a narrowing of what such a caller may see; what the organization itself
+    switched off still is.
+    """
+    live = [key for key in await OrgProviderKeyRepository(db).list_live_keys(organization_id) if key_is_usable(key)]
+    if not live:
+        return frozenset()
+    offered = await OrgProviderKeyModelRepository(db).enabled_models_for_keys({key.id for key in live})
+    entries: set[str] = set()
+    for key in live:
+        entries |= _narrowed(provider_key(key.provider), offered.get(key.id), None)
+    return frozenset(entry for entry in entries if not entry.endswith(":*"))
+
+
+async def resolve_default_workspace_offered_keys(db: AsyncSession) -> frozenset[str]:
+    """What the deployment's own organization offers, for a master-key caller.
+
+    ``lookup_default_workspace_id`` rather than ``default_workspace_id``: the
+    latter provisions a workspace when none exists, which a catalog read must not
+    do as a side effect.
+    """
+    workspace_id = await lookup_default_workspace_id(db)
+    if workspace_id is None:
+        return frozenset()
+    organization_id = await organization_for_workspace_id(db, workspace_id)
+    if organization_id is None:
+        return frozenset()
+    return await resolve_organization_offered_keys(db, organization_id)
 
 
 async def resolve_session_catalog_scope(
@@ -150,17 +257,27 @@ async def resolve_session_catalog_scope(
         scope = await resolve_visible_workspace_scope(db, user=user, organizations=services)
     except (TenancyForbiddenError, TenancyNotFoundError):
         return SessionCatalogScope(
-            allowlist=sorted(allowlist), reads_default_workspace=False, deployment_supplied_providers=frozenset()
+            allowlist=sorted(allowlist),
+            reads_default_workspace=False,
+            deployment_supplied_providers=frozenset(),
+            offered_keys=frozenset(),
         )
 
     provider_keys = OrgProviderKeyService(db)
     hosted = await _get_hosted_providers(model_provider, scope.organization.id)
     if scope.sees_every_workspace:
-        byo_allowlist = {
-            f"{provider_key(key.provider)}:*"
-            for key in await OrgProviderKeyRepository(db).list_live_keys(scope.organization.id)
-            if key_is_usable(key)
-        }
+        live_keys = [
+            live
+            for live in await OrgProviderKeyRepository(db).list_live_keys(scope.organization.id)
+            if key_is_usable(live)
+        ]
+        # No workspace restriction applies here: this caller sees every workspace,
+        # so a narrowing one of them set is not a narrowing of what they may see.
+        # What the organization itself withdrew still is.
+        offered = await OrgProviderKeyModelRepository(db).enabled_models_for_keys({live.id for live in live_keys})
+        byo_allowlist: set[str] = set()
+        for live in live_keys:
+            byo_allowlist |= _narrowed(provider_key(live.provider), offered.get(live.id), None)
         reachable_hosted = hosted
     else:
         active_keys = await provider_keys.get_active_keys(
@@ -182,6 +299,10 @@ async def resolve_session_catalog_scope(
         allowlist=sorted(allowlist),
         reads_default_workspace=await _sees_default_workspace(db, scope),
         deployment_supplied_providers=hosted - byo_providers,
+        # Only the entries naming one model. A ``provider:*`` is an unnarrowed
+        # key, which says the organization may reach everything that provider
+        # serves and nothing about which of them to list.
+        offered_keys=frozenset(entry for entry in byo_allowlist if not entry.endswith(":*")),
     )
 
 

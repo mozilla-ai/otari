@@ -18,21 +18,42 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
+from gateway.api.deps import (
+    CurrentIdentity,
+    ModelProviderPortDep,
+    get_config,
+    get_db,
+    get_unit_of_work,
+    verify_master_key,
+)
 from gateway.api.routes.organizations import Message
+from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.provider_keys import (
+    OrgProviderAvailableModelsPublic,
     OrgProviderKeyCreateRequest,
+    OrgProviderKeyModelCreateRequest,
+    OrgProviderKeyModelPublic,
+    OrgProviderKeyModelsPublic,
+    OrgProviderKeyModelUpdateRequest,
     OrgProviderKeyPublic,
     OrgProviderKeysPublic,
     OrgProviderKeyUpdateRequest,
+    OrgProviderModelsRefreshPublic,
     WorkspaceProviderKeyOverridePublic,
     WorkspaceProviderKeyOverrideRequest,
     WorkspaceProviderKeyOverridesPublic,
     WorkspaceProviderModelRestrictionRequest,
     WorkspaceProviderModelRestrictionsPublic,
 )
+from gateway.repositories.pricing import OrganizationModelPricingRepository
+from gateway.repositories.tenancy import OrgProviderKeyModelRepository, OrgProviderKeyRepository
+from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.tenancy import OrgProviderKeyService
+from gateway.services.tenancy.org_provider_key_service import refresh_org_provider_cache
+from gateway.services.tenancy.org_provider_model_service import OrgProviderModelService
+from gateway.services.tenancy.organization_service import OrganizationService
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
 # see organizations.py/workspaces.py for the same note.
@@ -42,9 +63,15 @@ org_router = APIRouter(
     dependencies=[Depends(verify_master_key)],
 )
 
-# Hosted replacement for ``providers``. Not named after its prefix, since
-# ``organizations`` is already a surface.
-SURFACE = Surface("organization_providers", standalone=False)
+# Published by both topologies. It began as the hosted replacement for
+# ``providers``, where a credential keyed on an instance name alone is served to
+# every tenant; it is served on standalone too because the page behind it is now
+# where an organization's models are offered, priced and switched, which is a
+# tenant's question whether or not the deployment has more than one tenant.
+# ``providers`` stays standalone-only beside it, and the two are disjoint
+# mechanisms (see ``models/provider_keys.py``), so neither stands in for the
+# other. Not named after its prefix, since ``organizations`` is already a surface.
+SURFACE = Surface("organization_providers")
 
 workspace_router = APIRouter(
     prefix="/workspaces/{workspace_id}/provider-keys",
@@ -59,6 +86,35 @@ def get_org_provider_key_service(db: Annotated[AsyncSession, Depends(get_db)]) -
 
 
 OrgProviderKeyServiceDep = Annotated[OrgProviderKeyService, Depends(get_org_provider_key_service)]
+
+
+def get_org_provider_model_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    model_provider: ModelProviderPortDep,
+) -> OrgProviderModelService:
+    """Build the offered-models service on the request's session and unit of work.
+
+    The service itself names neither the session nor SQLAlchemy, so its
+    repositories and its cache-refresh callable are assembled here. The unit of
+    work and the services built on the session are over the *same* session (see
+    ``deps.get_unit_of_work``), so a block's commit also settles what they staged.
+    """
+    return OrgProviderModelService(
+        uow,
+        organizations=OrganizationService(db, membership_listener=None),
+        org_pricing=OrganizationPricingService(db, config, model_provider=model_provider),
+        models=OrgProviderKeyModelRepository(uow),
+        pricing=OrganizationModelPricingRepository(uow),
+        keys=OrgProviderKeyRepository(db),
+        refresh_overlay=lambda: refresh_org_provider_cache(db),
+    )
+
+
+OrgProviderModelServiceDep = Annotated[OrgProviderModelService, Depends(get_org_provider_model_service)]
+
+DiscoveryTimeout = Annotated[GatewayConfig, Depends(get_config)]
 
 
 # ==============================================================================
@@ -83,11 +139,28 @@ async def list_org_provider_keys(
 @org_router.post("", status_code=status.HTTP_201_CREATED)
 async def create_org_provider_key(
     service: OrgProviderKeyServiceDep,
+    models: OrgProviderModelServiceDep,
     current_identity: CurrentIdentity,
     body: OrgProviderKeyCreateRequest,
+    config: DiscoveryTimeout,
 ) -> OrgProviderKeyPublic:
-    """Create a provider key in the caller's organization. Organization owners and admins only."""
-    return await service.create_key_for_user(user=current_identity, request=body)
+    """Create a provider key in the caller's organization. Organization owners and admins only.
+
+    Everything the provider lists on the new credential is offered at once, so a
+    key starts with its real catalog rather than an empty list an admin retypes
+    by hand. A provider that will not say (no listing endpoint, unreachable,
+    credential refused) yields a key with no models rather than a failed create:
+    the credential may still be right for dispatch, and models can be added by
+    name. The response is the key either way; the models are read back through
+    ``GET /{key_id}/models``.
+    """
+    key = await service.create_key_for_user(user=current_identity, request=body)
+    # After the create has committed, so the dial is not held inside its
+    # transaction, and tolerant of its own failure for the reason above.
+    await models.offer_discovered_models(
+        user=current_identity, key_id=key.id, timeout=config.model_discovery_timeout_seconds
+    )
+    return key
 
 
 @org_router.patch("/{key_id}")
@@ -140,6 +213,140 @@ async def set_org_provider_key_default(
 ) -> OrgProviderKeyPublic:
     """Make a key the organization's default for its provider. Organization owners and admins only."""
     return await service.set_org_default_for_user(user=current_identity, key_id=key_id)
+
+
+# ==============================================================================
+# Offered models
+# ==============================================================================
+#
+# The model half of a provider key: what the credential reaches, what each model
+# costs this organization, and whether the runtime serves it.
+#
+# Every failure a *provider* can hand back is reported in the body rather than as
+# a status: an unreachable upstream, a credential the provider refused, a backend
+# with no model-listing endpoint, and a stored key this deployment can no longer
+# decrypt are all facts about the provider or the deployment rather than about
+# the request, and the page renders each beside a list that is still standing.
+# A 4xx here means the *request* was wrong: no such key, no such model, a name
+# already offered.
+
+
+@org_router.get("/{key_id}/models")
+async def list_org_provider_key_models(
+    service: OrgProviderModelServiceDep,
+    current_identity: CurrentIdentity,
+    key_id: uuid.UUID,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 500,
+) -> OrgProviderKeyModelsPublic:
+    """List the models offered on one key, each with the rate it currently serves at.
+
+    Organization owners and admins only. ``count`` is the total rather than the
+    page length, so a client knows whether another page is owed.
+    """
+    return await service.list_models(user=current_identity, key_id=key_id, skip=skip, limit=limit)
+
+
+@org_router.post("/{key_id}/models", status_code=status.HTTP_201_CREATED)
+async def add_org_provider_key_model(
+    service: OrgProviderModelServiceDep,
+    current_identity: CurrentIdentity,
+    key_id: uuid.UUID,
+    body: OrgProviderKeyModelCreateRequest,
+) -> OrgProviderKeyModelPublic:
+    """Offer one model by name, for a backend whose models cannot be listed.
+
+    Carries no rate: an organization's rates are written through
+    ``/api/v1/organizations/me/pricing``, so a price set here and a price set
+    there could not disagree about what a request costs. The offer seeds the
+    community default like any other, and a model nothing prices arrives
+    disabled. Organization owners and admins only.
+    """
+    return await service.add_model(user=current_identity, key_id=key_id, model=body.model)
+
+
+@org_router.patch("/{key_id}/models/{model_id}")
+async def set_org_provider_key_model_enabled(
+    service: OrgProviderModelServiceDep,
+    current_identity: CurrentIdentity,
+    key_id: uuid.UUID,
+    model_id: uuid.UUID,
+    body: OrgProviderKeyModelUpdateRequest,
+) -> OrgProviderKeyModelPublic:
+    """Turn one offered model's serving switch on or off. Organization owners and admins only."""
+    return await service.set_model_enabled(
+        user=current_identity, key_id=key_id, model_id=model_id, enabled=body.enabled
+    )
+
+
+@org_router.delete("/{key_id}/models/{model_id}")
+async def remove_org_provider_key_model(
+    service: OrgProviderModelServiceDep,
+    current_identity: CurrentIdentity,
+    key_id: uuid.UUID,
+    model_id: uuid.UUID,
+) -> Message:
+    """Stop offering one model. Its rate and its history stay. Organization owners and admins only."""
+    await service.remove_model(user=current_identity, key_id=key_id, model_id=model_id)
+    return Message(message="Model no longer offered")
+
+
+@org_router.post("/{key_id}/models/refresh")
+async def refresh_org_provider_key_models(
+    service: OrgProviderModelServiceDep,
+    current_identity: CurrentIdentity,
+    key_id: uuid.UUID,
+    config: DiscoveryTimeout,
+) -> OrgProviderModelsRefreshPublic:
+    """Ask the provider again and offer whatever is newly listed.
+
+    Additive only: nothing already offered is removed or switched off, because
+    delisting a model is a decision the serving switch owns and an upstream
+    hiccup must not empty a catalog. New models follow the offer rule, seeded
+    with the community default rate and disabled when nothing prices them. A
+    rate this surface seeded and nobody has changed moves to today's default.
+    Organization owners and admins only.
+    """
+    return await service.refresh_models(
+        user=current_identity, key_id=key_id, timeout=config.model_discovery_timeout_seconds
+    )
+
+
+@org_router.post("/{key_id}/pricing/refresh")
+async def refresh_org_provider_key_model_pricing(
+    service: OrgProviderModelServiceDep,
+    current_identity: CurrentIdentity,
+    key_id: uuid.UUID,
+) -> OrgProviderModelsRefreshPublic:
+    """Move every rate this surface seeded onto today's community default.
+
+    The other half of the refresh above, without the dial: re-reading community
+    rates is cheap and asking a provider for its whole catalog is not, so an
+    admin who only wants the price move does not wait on an upstream. A rate an
+    admin has since set is left alone, and a model that arrived unpriced is
+    offered a rate and switched on if one has appeared. Organization owners and
+    admins only.
+    """
+    return await service.refresh_pricing(user=current_identity, key_id=key_id)
+
+
+@org_router.get("/{key_id}/available-models")
+async def list_org_provider_key_available_models(
+    service: OrgProviderModelServiceDep,
+    current_identity: CurrentIdentity,
+    key_id: uuid.UUID,
+    config: DiscoveryTimeout,
+) -> OrgProviderAvailableModelsPublic:
+    """Ask the provider what it serves on this key's stored credential.
+
+    Dials the upstream on every call rather than caching: the caller is a model
+    picker, opened rarely and entitled to a current answer. The credential never
+    leaves the process; only model names come back. Organization owners and
+    admins only.
+    """
+    return await service.available_models(
+        user=current_identity, key_id=key_id, timeout=config.model_discovery_timeout_seconds
+    )
 
 
 # ==============================================================================

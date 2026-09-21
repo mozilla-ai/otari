@@ -24,6 +24,7 @@ import {
   MODELS,
   NO_RETRY,
   ORGANIZATION_PRICING,
+  ORGANIZATION_PROVIDER_MODELS,
   PRICING,
   PRICING_DRIFT,
   PRICING_PENDING,
@@ -179,6 +180,12 @@ export function useConfirmPricingRefresh() {
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
       void queryClient.invalidateQueries({ queryKey: [CATALOG] })
       void queryClient.invalidateQueries({ queryKey: [PROVIDERS] })
+      // Accepting a snapshot moves every offered model still priced from the
+      // community defaults, so an open provider panel would otherwise keep
+      // showing yesterday's number beside a catalog that has already moved.
+      void queryClient.invalidateQueries({
+        queryKey: [ORGANIZATION_PROVIDER_MODELS],
+      })
     },
   })
 }

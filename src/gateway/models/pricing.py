@@ -16,8 +16,12 @@ from gateway.models.money import UsdRate
 # on these spellings, and the request schemas validate against them.
 PRICING_UNITS: tuple[str, ...] = ("tokens", "requests", "images")
 
-# The vocabulary of ``origin`` on the same two tables.
-PRICING_ORIGINS: tuple[str, ...] = ("config", "api", "migration")
+# The vocabulary of ``origin`` on the same two tables. ``seed`` belongs to
+# ``organization_model_pricing`` alone: it marks a rate the offered-models
+# surface copied from the community dataset on the organization's behalf, which
+# a later refresh may move, where every other origin is a rate somebody chose
+# and a refresh leaves alone.
+PRICING_ORIGINS: tuple[str, ...] = ("config", "api", "migration", "seed")
 
 
 class PricingSnapshot(Base):

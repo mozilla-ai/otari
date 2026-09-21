@@ -3,6 +3,7 @@ import { useState } from "react"
 import {
   FiArchive,
   FiEdit2,
+  FiList,
   FiRotateCcw,
   FiStar,
   FiTrash2,
@@ -27,6 +28,9 @@ import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { CatalogPolicy } from "@/features/pricing/CatalogPolicy"
+import { DeploymentPriceTable } from "@/features/pricing/DeploymentPriceTable"
+import { PricingRefreshSection } from "@/features/pricing/PricingRefreshSection"
 import {
   BYO_UNSUPPORTED_PROVIDERS,
   type CredentialFieldValues,
@@ -54,10 +58,24 @@ import {
   useSetOrgProviderKeyDefault,
   useUpdateOrgProviderKey,
 } from "@/shared/api/organizations"
+import { useOrganizationPricing } from "@/shared/api/pricing"
 import { formatRelative } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
+import { useUrlState } from "@/shared/helpers/urlState"
 
-import { canManage } from "./roles"
+import { PricingOverrideDialog } from "../PricingOverrideDialog"
+import { canManage, isDeploymentOperator } from "../roles"
+import { ProviderModelsPanel } from "./ProviderModelsPanel"
+
+// One page of overrides is enough to seed the editor and the overlap check: the
+// dialog needs the row it is editing and the periods it must not collide with,
+// and an organization with more rates than this pages them on its own read.
+const OVERRIDE_PAGE_SIZE = 200
+
+// The two URL-held pieces of page state: which key's models are open, and which
+// model's rate is being edited. `override` is the name the Models detail page
+// already links with, so it is a contract rather than a choice.
+const URL_DEFAULTS = { provider: "", override: "" }
 
 // The organization's own upstream credentials: one BYO key per provider that
 // every workspace under the tenant inherits.
@@ -281,7 +299,7 @@ function KeyForm({
   )
 }
 
-export function OrganizationProviderKeysPage() {
+export function OrganizationProvidersPage() {
   const context = useOrganizationContext()
   // One predicate for the whole page now that the list read is
   // organization-management-gated on the server too (otari-ai#1944): a member
@@ -292,6 +310,10 @@ export function OrganizationProviderKeysPage() {
   // Not widened to `isDeploymentOperator`: the server gates these rows on the
   // organization role alone, and operating the deployment grants no role.
   const canEdit = canManage(context.data)
+  // The other authority axis, read once for the whole page: operating the
+  // deployment is not an organization role and confers none, so the two gate
+  // different bands and neither stands in for the other.
+  const isOperator = isDeploymentOperator(context.data)
   const keys = useOrgProviderKeys(canEdit)
   // Same gate the `/providers` page applies, for the same reason: without
   // `OTARI_SECRET_KEY` the gateway cannot encrypt a credential, so the write
@@ -307,6 +329,13 @@ export function OrganizationProviderKeysPage() {
   const [editingId, setEditingId] = useState<string>()
   const [showArchived, setShowArchived] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<OrgProviderKey>()
+  // Which key's models are open, and which model's rate is being edited. Both
+  // in the URL: an expanded panel is worth sharing, and `?override=` is a
+  // contract the Models detail page links into.
+  const url = useUrlState(URL_DEFAULTS)
+  const expandedKeyId = url.get("provider")
+  const ratingModelKey = url.get("override")
+  const overrides = useOrganizationPricing(0, OVERRIDE_PAGE_SIZE, canEdit)
 
   // Bumped on each open, and the create form is keyed on it, so the draft (the
   // plaintext secret included) is fresh every time and untouched through the
@@ -432,6 +461,16 @@ export function OrganizationProviderKeysPage() {
             </>
           ) : (
             <>
+              <RowAction
+                icon={FiList}
+                label="Models"
+                ariaLabel={`Models on ${row.name}`}
+                onPress={() =>
+                  url.patch({
+                    provider: expandedKeyId === row.id ? "" : row.id,
+                  })
+                }
+              />
               <RowAction
                 icon={FiStar}
                 label="Make default"
@@ -585,6 +624,16 @@ export function OrganizationProviderKeysPage() {
             getRowKey={(row) => row.id}
             isLoading={context.isPending || keys.isLoading}
             emptyContent="No provider keys yet. Add one to let every workspace in this organization call that provider."
+            detailKey={expandedKeyId === "" ? null : expandedKeyId}
+            renderDetail={(row) => (
+              <ProviderModelsPanel
+                providerKey={row}
+                canEdit={canEdit}
+                onEditRate={(model) =>
+                  url.patch({ override: `${row.provider}:${model.model}` })
+                }
+              />
+            )}
           />
         </TableScrollFrame>
       ) : null}
@@ -614,6 +663,39 @@ export function OrganizationProviderKeysPage() {
           })
         }}
       />
+
+      {/* The organization's own rate for one model, opened from a model row or
+          from the Models detail page's "Set your rate" link. Mounted here
+          rather than inside the panel because the panel lives in a table cell,
+          and a dialog rendered from one closes with the row that opened it. */}
+      {canEdit ? (
+        <PricingOverrideDialog
+          key={ratingModelKey}
+          isOpen={ratingModelKey !== ""}
+          onOpenChange={(open) => {
+            if (!open) url.patch({ override: "" })
+          }}
+          editing={(overrides.data?.data ?? []).find(
+            (row) => row.model_key === ratingModelKey,
+          )}
+          initialModelKey={ratingModelKey}
+          existing={overrides.data?.data ?? []}
+          onSaved={() => url.patch({ override: "" })}
+        />
+      ) : null}
+
+      {/* The deployment's own price list, below the organization's own
+          providers. Both halves of it are the deployment's rather than this
+          tenant's, and the two that write are `require_deployment_operator`
+          server-side, so they are withheld from anyone else rather than fired
+          into a refusal banner. The table itself is readable by any session. */}
+      {isOperator ? (
+        <>
+          <CatalogPolicy />
+          <PricingRefreshSection />
+        </>
+      ) : null}
+      <DeploymentPriceTable canPrice={isOperator} />
     </div>
   )
 }

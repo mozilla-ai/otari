@@ -224,11 +224,12 @@ describe("the shell's mount point", () => {
     // the surfaces before the page rendered, so a destination this deployment
     // does not host is answerable now and no entitlement query can change it.
     // Waiting on one would hold back a panel that is already correct.
-    // `/organization/provider-keys` is gated on `organization_providers`, which
+    // `/organization/usage` is gated on `organization_usage`, which
     // `STANDALONE_SURFACES` does not report, so the base registry gates it off
-    // in this build with no overlay contribution involved.
+    // in this build with no overlay contribution involved. (It used to be
+    // `/organization/provider-keys`; standalone publishes that surface now.)
     resolved.value = { capabilities: [], isLoading: true }
-    await renderShell(<p>PROVIDER KEYS</p>, "/organization/provider-keys")
+    await renderShell(<p>ORGANIZATION USAGE</p>, "/organization/usage")
 
     expect(await screen.findByText(/is not available here/)).toBeInTheDocument()
     expect(screen.queryByRole("status")).not.toBeInTheDocument()

@@ -22,6 +22,7 @@ import type {
   OrganizationMember,
   OrganizationSpendCeiling,
   OrgProviderKey,
+  OrgProviderModel,
   PendingOrganizationInvitation,
   PricingResponse,
   ScopedBudget,
@@ -147,6 +148,7 @@ const STANDALONE_SURFACES = [
   "budgets",
   "keys",
   "models",
+  "organization_providers",
   "organizations",
   "playground",
   "pricing",
@@ -160,16 +162,20 @@ const STANDALONE_SURFACES = [
 ]
 
 // The same list for a hosted (multi-tenant) deployment, kept in step with
-// HOSTED_SURFACES beside it: the process-global provider page drops, the
-// organization-scoped one takes its place, the Playground drops because a
-// control plane serves no inference (otari#822), and the organization-wide
-// Usage page appears, being a destination only where "my organization" is
-// narrower than "everything" (otari-ai#1963).
+// HOSTED_SURFACES beside it: the process-global provider page drops, because a
+// credential keyed on an instance name alone is served to every tenant; the
+// Playground drops because a control plane serves no inference (otari#822); and
+// the organization-wide Usage page appears, being a destination only where "my
+// organization" is narrower than "everything" (otari-ai#1963).
+//
+// `organization_providers` is no longer part of that difference. It is on the
+// standalone list above, because the page behind it is where an organization's
+// models are offered, priced and switched, which is a tenant's question whether
+// or not the deployment has more than one tenant.
 const HOSTED_DROPS = new Set(["providers", "playground"])
 
 export const HOSTED_SURFACES = [
   ...STANDALONE_SURFACES.filter((surface) => !HOSTED_DROPS.has(surface)),
-  "organization_providers",
   "organization_usage",
 ]
 
@@ -654,6 +660,35 @@ export function organizationDomain(
     // already proven would let a test about the pending state pass by accident.
     verified_at: null,
     proof_expires_at: null,
+    created_at: "2026-08-24T00:00:00+00:00",
+    updated_at: null,
+    ...overrides,
+  }
+}
+
+/**
+ * One model an organization offers on a provider key.
+ *
+ * Priced from the community defaults and served, which is what the offer rule
+ * produces for a model the pricing data knows: a test about an unpriced or
+ * withheld model says so, because those are the states the panel has to show
+ * differently.
+ */
+export function orgProviderModel(
+  overrides: Partial<OrgProviderModel> = {},
+): OrgProviderModel {
+  return {
+    id: "77777777-7777-7777-7777-777777777777",
+    org_provider_key_id: "66666666-6666-6666-6666-666666666666",
+    model: "gpt-4o",
+    input_price_per_million: 2.5,
+    output_price_per_million: 10,
+    cache_read_price_per_million: null,
+    cache_write_price_per_million: null,
+    cache_write_1h_price_per_million: null,
+    price_source: "default",
+    pricing_id: null,
+    enabled: true,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,
     ...overrides,

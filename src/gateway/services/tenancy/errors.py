@@ -688,6 +688,34 @@ class OrgProviderKeyNotArchivedError(TenancyValidationError):
         super().__init__(f"Provider key {key_id} must be archived before it can be deleted")
 
 
+class OrgProviderModelNotFoundError(TenancyNotFoundError):
+    def __init__(self, model_id: object):
+        super().__init__(f"Offered model {model_id} not found")
+
+
+class OrgProviderModelNameRequiredError(TenancyValidationError):
+    """A model name that is blank once trimmed.
+
+    The name is half of the pricing key, so a blank one would store a row
+    nothing can ever price or dispatch.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("A model name is required")
+
+
+class OrgProviderModelAlreadyOfferedError(TenancyConflictError):
+    """The model is already offered on this key.
+
+    The unique index (``uq_org_provider_key_models_key_model``) is the actual
+    arbiter; this is what a racing insert's ``IntegrityError`` is mapped to, the
+    same shape ``OrgProviderKeyAlreadyExistsError`` has.
+    """
+
+    def __init__(self, provider: str, model: str) -> None:
+        super().__init__(f"'{model}' is already offered on this '{provider}' key")
+
+
 class OrgDefaultProviderKeyConflictError(TenancyConflictError):
     """Two concurrent 'set default' calls raced for the same (organization, provider).
 
@@ -1074,6 +1102,9 @@ __all__ = [
     "NotAuthorizedError",
     "OrgDefaultProviderKeyConflictError",
     "OrgProviderKeyAlreadyExistsError",
+    "OrgProviderModelAlreadyOfferedError",
+    "OrgProviderModelNameRequiredError",
+    "OrgProviderModelNotFoundError",
     "OrgProviderKeyArchivedError",
     "OrgProviderKeyDisabledForWorkspaceError",
     "OrgProviderKeyNameRequiredError",

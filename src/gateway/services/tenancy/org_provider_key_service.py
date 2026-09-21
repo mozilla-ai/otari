@@ -57,6 +57,7 @@ from gateway.log_config import logger
 from gateway.models.provider_keys import (
     OrgProviderKey,
     OrgProviderKeyCreateRequest,
+    OrgProviderKeyModel,
     OrgProviderKeyPublic,
     OrgProviderKeysPublic,
     OrgProviderKeyUpdateRequest,
@@ -202,9 +203,9 @@ def reset_org_provider_cache() -> None:
 async def refresh_org_provider_cache(db: AsyncSession) -> None:
     """Reload every organization's effective key per (workspace, provider) in one pass.
 
-    Four queries total, independent of how many organizations or workspaces
+    Five queries total, independent of how many organizations or workspaces
     exist: every workspace's organization, every non-archived key, every
-    override, and every model restriction. The precedence tiers
+    override, every model restriction, and every offered model. The precedence tiers
     (`resolve_active_key`) are then applied in Python once per (workspace,
     provider) pair that actually has a key, not once per workspace times
     every provider that exists anywhere.
@@ -225,6 +226,7 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     )
     overrides = (await db.execute(select(WorkspaceProviderKeyOverride))).scalars().all()
     restrictions = (await db.execute(select(WorkspaceProviderModelRestriction))).scalars().all()
+    offered_models = (await db.execute(select(OrgProviderKeyModel))).scalars().all()
 
     keys_by_org_provider: dict[tuple[uuid.UUID, str], list[OrgProviderKey]] = defaultdict(list)
     providers_by_org: dict[uuid.UUID, set[str]] = defaultdict(set)
@@ -237,6 +239,15 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     models_by_workspace_key: dict[tuple[uuid.UUID, uuid.UUID], list[str]] = defaultdict(list)
     for restriction in restrictions:
         models_by_workspace_key[(restriction.workspace_id, restriction.org_provider_key_id)].append(restriction.model)
+
+    # Keyed on every key that offers a row, not only on the ones offering a
+    # *served* row: a key whose every model is switched off has to read as an
+    # empty allow-list rather than as an absent one.
+    enabled_models_by_key: dict[uuid.UUID, list[str]] = {}
+    for offered_model in offered_models:
+        served = enabled_models_by_key.setdefault(offered_model.org_provider_key_id, [])
+        if offered_model.enabled:
+            served.append(offered_model.model)
 
     new_cache: dict[tuple[uuid.UUID, str], dict[str, Any]] = {}
     new_restrictions: dict[tuple[uuid.UUID, str], list[str]] = {}
@@ -260,9 +271,22 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
                     workspace_id,
                 )
                 continue
-            allowed_models = models_by_workspace_key.get((workspace_id, active.id))
-            if allowed_models:
-                new_restrictions[(workspace_id, provider)] = allowed_models
+            # Two narrowings, and neither may widen the other. The workspace's
+            # own restriction is what it was; the organization's offered models
+            # are the serving switches on this key. An entry is stored when
+            # either exists, **including when the result is empty**: an
+            # organization that switched every model off serves none, and
+            # omitting the entry would read as unrestricted.
+            restricted = models_by_workspace_key.get((workspace_id, active.id))
+            offered = enabled_models_by_key.get(active.id)
+            if offered is None and restricted is None:
+                continue
+            if offered is None:
+                new_restrictions[(workspace_id, provider)] = list(restricted or ())
+            elif restricted is None:
+                new_restrictions[(workspace_id, provider)] = list(offered)
+            else:
+                new_restrictions[(workspace_id, provider)] = sorted(set(offered) & set(restricted))
 
     _org_cache.clear()
     _org_cache.update(new_cache)

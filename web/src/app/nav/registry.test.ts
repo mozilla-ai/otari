@@ -84,10 +84,9 @@ describe("nav registry", () => {
       "Members & roles",
       "Email domains",
       "Spend & budgets",
-      "Model pricing",
       "Guardrails",
       "Providers",
-      "Providers",
+      "Deployment providers",
       "Org settings",
       "Settings",
       "Accounts",
@@ -229,10 +228,12 @@ describe("nav registry", () => {
       ["Members & roles", "organizations"],
       ["Email domains", "organizations"],
     ])
+    // One row, not two: Model pricing folded into Providers, where an
+    // organization's models are offered, priced and switched together, and its
+    // old path is a redirect. A rail row points at a real page.
     const money = ORG_NAV_SECTIONS.find((section) => section.id === "org-money")
     expect(money?.items.map((item) => [item.label, item.surface])).toEqual([
       ["Spend & budgets", "budgets"],
-      ["Model pricing", "pricing"],
     ])
     // No row gates on `users` any more. The gateway still serves that surface
     // (budgets, keys and the roster all read /api/v1/users), but a person is a
@@ -325,24 +326,27 @@ describe("nav registry", () => {
   })
 
   it("gates every declared-but-unserved destination on a surface", () => {
-    // The organization rail draws three rows this gateway does not offer and
-    // still declares. Each is declared so the rail matches on a deployment that
-    // does serve them, and gated on a surface `STANDALONE_SURFACES` does not
-    // report so the row is absent here. Pinned as the whole set, because the
-    // failure mode is silent in both directions: a missing gate ships a link to
-    // a page that cannot work, and a gate on a surface the bootstrap *does*
-    // report hides a page that can. A typo in a surface name is silent the same
-    // way, since `NavItemBase.surface` is a bare string.
+    // The organization rail draws two rows this gateway does not offer and still
+    // declares. Each is declared so the rail matches on a deployment that does
+    // serve them, and gated on a surface `STANDALONE_SURFACES` does not report
+    // so the row is absent here. Pinned as the whole set, because the failure
+    // mode is silent in both directions: a missing gate ships a link to a page
+    // that cannot work, and a gate on a surface the bootstrap *does* report
+    // hides a page that can. A typo in a surface name is silent the same way,
+    // since `NavItemBase.surface` is a bare string.
     //
     // Only the guardrail ceiling is an actual absence: no edition here serves
-    // that API. The other two are editorial, with the API mounted either way,
-    // and they differ in what the choice is about. Provider keys is about which
-    // credential table the deployment should be showing at all. Usage is about
-    // a question that only exists once tenants do (otari-ai#1963): standalone's
+    // that API. Usage is editorial, with the API mounted either way, about a
+    // question that only exists once tenants do (otari-ai#1963): standalone's
     // organization is the deployment, so `/usage` already answers it whole.
-    // One mechanism, three reasons, so the set is worth reading as a list.
+    //
+    // Provider keys used to be a third. It is not any more:
+    // `organization_providers` is published by both topologies, because the page
+    // behind it is where an organization's models are offered, priced and
+    // switched, which is a tenant's question on either. Its row therefore
+    // renders here, beside the process-global one, which is why the two no
+    // longer share a label.
     const unserved = new Map([
-      ["/organization/provider-keys", "organization_providers"],
       ["/organization/guardrails", "organization_guardrails"],
       ["/organization/usage", "organization_usage"],
     ])
@@ -356,6 +360,7 @@ describe("nav registry", () => {
       "budgets",
       "keys",
       "models",
+      "organization_providers",
       "organizations",
       "pricing",
       "providers",
@@ -369,9 +374,15 @@ describe("nav registry", () => {
     for (const surface of unserved.values()) {
       expect(standalone).not.toContain(surface)
     }
-    // The three are not one category past that point, so the other direction is
-    // asserted per row. Two are served by a hosted deployment and withheld from
-    // standalone, which is what makes their rows appear there; the guardrail
+    // The row that moved, asserted from the other side: a standalone gateway
+    // reports this one, so its gate is what lets the row render rather than what
+    // hides it.
+    expect(standalone).toContain(
+      navItemForPath("/organization/provider-keys")?.surface,
+    )
+    // The two are not one category past that point, so the other direction is
+    // asserted per row. Usage is served by a hosted deployment and withheld from
+    // standalone, which is what makes its row appear there; the guardrail
     // ceiling has no endpoint on *either* edition and is declared for a
     // deployment that does serve it, so it is absent from both lists.
     //
@@ -438,9 +449,17 @@ describe("nav registry", () => {
     )
     expect(general?.label).toBe("General")
     expect(general?.items.map((item) => item.to)).toEqual([
-      "/providers",
       "/organization/provider-keys",
+      "/providers",
       "/organization",
+    ])
+    // The labels are the thing under test now that both rows render on a
+    // standalone deployment: they used to share "Providers" on the
+    // understanding that exactly one of them ever did.
+    expect(general?.items.map((item) => item.label)).toEqual([
+      "Providers",
+      "Deployment providers",
+      "Org settings",
     ])
   })
 

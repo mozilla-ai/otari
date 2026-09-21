@@ -157,15 +157,20 @@ class OrganizationPricingService:
         """
         if await DeploymentUserService(self.db).has_administration_access(user):
             return
-        if await self._is_deployment_supplied(organization_id, model_key):
+        if await self.is_deployment_supplied(organization_id, model_key):
             raise OrganizationPricingManagedModelError(model_key)
 
-    async def _is_deployment_supplied(self, organization_id: uuid.UUID, model_key: str) -> bool:
+    async def is_deployment_supplied(self, organization_id: uuid.UUID, model_key: str) -> bool:
         """Whether the deployment, not the organization, pays the upstream bill for ``model_key``.
 
         A ``config.providers`` instance always does.
         A bare key does when a workspace lacks a usable BYO key and the port would serve it on a hosted credential.
         A port refusal also counts, because the model still runs on a deployment-owned upstream.
+
+        Public because the question has a second asker with a different answer to
+        give: the offered-models surface skips seeding a rate for such a model
+        rather than refusing, since the model is still legitimately offered and
+        simply prices from the deployment's list instead.
         """
         if is_deployment_instance_key(self.config, model_key):
             return True
@@ -430,6 +435,11 @@ class OrganizationPricingService:
         row.effective_from = effective_from
         row.effective_to = effective_to
         row.unit = override.unit
+        # The rate is somebody's choice now, whatever it was before. A row the
+        # offered-models surface seeded carries ``seed`` and its refresh moves it
+        # to each day's community default; leaving that marking on a rate an
+        # admin has just set would have the next refresh overwrite it.
+        row.origin = "api"
         await self._flush_or_conflict(organization_id, row.model_key, effective_from, exclude_id=row.id)
         return row
 

@@ -13,7 +13,9 @@ import type {
   PricingResponse,
 } from "@/client"
 import { currentPricing } from "@/features/models/pricing"
-import { ModelPricingPage } from "@/features/pricing/ModelPricingPage"
+import { CatalogPolicy } from "@/features/pricing/CatalogPolicy"
+import { DeploymentPriceTable } from "@/features/pricing/DeploymentPriceTable"
+import { PricingRefreshSection } from "@/features/pricing/PricingRefreshSection"
 import { API_ROOT } from "@/shared/api/client"
 import { organizationContext } from "@/tests/fixtures"
 import { getModalBackdrop } from "@/tests/modal"
@@ -154,7 +156,29 @@ function mockApi(
     })
 }
 
-function renderPage(ui: ReactElement, url = "/organization/pricing") {
+/**
+ * The deployment price bands, composed as the Providers page composes them.
+ *
+ * Both halves gate on the same predicate the page reads once: the catalog policy
+ * and the refresh flow are `require_deployment_operator` server-side, so they
+ * are withheld from anyone else rather than fired into a refusal banner, and the
+ * table itself is readable by any session.
+ */
+function PricingBands({ isOperator }: { isOperator: boolean }) {
+  return (
+    <>
+      {isOperator ? (
+        <>
+          <CatalogPolicy />
+          <PricingRefreshSection />
+        </>
+      ) : null}
+      <DeploymentPriceTable canPrice={isOperator} />
+    </>
+  )
+}
+
+function renderPage(ui: ReactElement, url = "/organization/provider-keys") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -164,7 +188,7 @@ function renderPage(ui: ReactElement, url = "/organization/pricing") {
   )
 }
 
-describe("ModelPricingPage", () => {
+describe("the deployment price bands", () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
@@ -185,7 +209,7 @@ describe("ModelPricingPage", () => {
         }),
       ],
     })
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
 
     const table = await screen.findByRole("grid", { name: "Model prices" })
     const rows = within(table).getAllByRole("row")
@@ -205,7 +229,7 @@ describe("ModelPricingPage", () => {
         price({ model_key: `openai:model-${String(index).padStart(2, "0")}` }),
       ),
     })
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
 
     const table = await screen.findByRole("grid", { name: "Model prices" })
     // One header row and a page of 25, not all 30.
@@ -229,7 +253,7 @@ describe("ModelPricingPage", () => {
         price({ model_key: `openai:model-${String(index).padStart(2, "0")}` }),
       ),
     })
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
 
     await screen.findByRole("grid", { name: "Model prices" })
     await user.click(
@@ -265,7 +289,7 @@ describe("ModelPricingPage", () => {
         }),
       ],
     })
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
 
     const table = await screen.findByRole("grid", { name: "Model prices" })
     expect(within(table).getByText("$0.0025")).toBeInTheDocument()
@@ -275,7 +299,7 @@ describe("ModelPricingPage", () => {
 
   it("says an unset cache rate is unset rather than free", async () => {
     mockApi({ pricing: [price({ cache_read_price_per_million: null })] })
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
 
     const table = await screen.findByRole("grid", { name: "Model prices" })
     // A model with no cache-read rate is not one that reads cache for free, and
@@ -286,7 +310,7 @@ describe("ModelPricingPage", () => {
 
   it("says what an unpriced model costs when defaults are on", async () => {
     mockApi({ settings: { default_pricing: true } })
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
 
     expect(await screen.findByText(/Default pricing is on/)).toBeInTheDocument()
   })
@@ -295,7 +319,7 @@ describe("ModelPricingPage", () => {
     // The consequential case: with defaults off, a model absent from this table
     // is either refused or served for free, and which one is a separate switch.
     mockApi({ settings: { default_pricing: false, require_pricing: true } })
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
 
     expect(
       await screen.findByText(/Default pricing is off/),
@@ -305,14 +329,14 @@ describe("ModelPricingPage", () => {
 
   it("says a request is served for free when nothing requires a price", async () => {
     mockApi({ settings: { default_pricing: false, require_pricing: false } })
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
 
     expect(await screen.findByText(/metered at zero/)).toBeInTheDocument()
   })
 
   it("offers to price a model elsewhere when none is priced yet", async () => {
     mockApi({ pricing: [] })
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
 
     expect(
       await screen.findByText(/No model carries a stored price yet/),
@@ -325,7 +349,7 @@ describe("ModelPricingPage", () => {
       if (url.includes(`${API_ROOT}/settings`)) return jsonResponse(SETTINGS)
       return new Response(JSON.stringify({ detail: "nope" }), { status: 500 })
     })
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
 
     // An empty table after a failed read says "nothing is priced", which is the
     // opposite of what a 500 means.
@@ -336,7 +360,7 @@ describe("ModelPricingPage", () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
 
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
     await screen.findByText("Default pricing catalog")
 
     await user.click(
@@ -377,7 +401,7 @@ describe("ModelPricingPage", () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
 
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
     await screen.findByText("Default pricing catalog")
     await user.click(
       screen.getByRole("button", { name: "Check for price updates" }),
@@ -423,7 +447,7 @@ describe("ModelPricingPage", () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
 
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
     await screen.findByText("Default pricing catalog")
     await user.click(
       screen.getByRole("button", { name: "Check for price updates" }),
@@ -454,7 +478,7 @@ describe("ModelPricingPage", () => {
     const fetchMock = mockApi({ pending: PRICE_REFRESH })
     const user = userEvent.setup()
 
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
 
     expect(
       await screen.findByText(/The scheduled check found 2 changed, 1 added/),
@@ -507,7 +531,7 @@ describe("ModelPricingPage", () => {
       ],
     })
 
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
 
     expect(
       await screen.findByText(
@@ -552,7 +576,7 @@ describe("ModelPricingPage", () => {
       ],
     })
 
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
 
     const grid = await screen.findByRole("grid", { name: "Model prices" })
     expect(
@@ -568,23 +592,20 @@ describe("ModelPricingPage", () => {
     expect(mini).not.toHaveTextContent("%")
   })
 
-  it("gives an organization admin the prices and its own overrides, not the catalog", async () => {
-    // The roles matrix puts Model pricing at Edit for an admin (otari-ai#1943),
-    // and the page is two halves: the organization's rate overrides, which the
-    // server already lets an owner or admin write, and the deployment's catalog
-    // controls, which it does not. So an admin gets the first and the price
-    // table, and the second is withheld rather than rendered as a refusal.
+  it("gives an organization admin the prices without the catalog controls", async () => {
+    // The roles matrix puts this destination at Edit for an admin
+    // (otari-ai#1943), and the bands are the deployment's half of it: an admin
+    // reads the prices and gets neither the policy banner nor the refresh flow,
+    // withheld rather than rendered as a refusal. Their own rates are on the
+    // providers above, which is a different component's test.
     const fetchMock = mockApi({
-      // An admin, not the owner the fixture defaults to: the matrix row is
-      // about the admin, and `canManage` is what the overrides card asks.
       context: organizationContext({
         role: "admin",
         deployment_operator: false,
       }),
     })
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator={false} />)
 
-    expect(await screen.findByText("Rate overrides")).toBeInTheDocument()
     await screen.findByRole("grid", { name: "Model prices" })
     expect(screen.queryByText("Default pricing catalog")).toBeNull()
     expect(
@@ -612,7 +633,7 @@ describe("ModelPricingPage", () => {
       pricing: [],
       context: organizationContext({ deployment_operator: false }),
     })
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator={false} />)
 
     expect(
       await screen.findByText("No model carries a stored price yet."),
@@ -626,7 +647,10 @@ describe("ModelPricingPage", () => {
     // The Models detail links here with `?model=<selector>`; an operator lands
     // on that model's stored rate with the editor open.
     mockApi({ pricing: [price({ model_key: "openai:gpt-5" })] })
-    renderPage(<ModelPricingPage />, "/organization/pricing?model=openai:gpt-5")
+    renderPage(
+      <PricingBands isOperator />,
+      "/organization/provider-keys?model=openai:gpt-5",
+    )
 
     expect(
       await screen.findByRole("heading", { name: /Edit price for/ }),
@@ -645,8 +669,8 @@ describe("ModelPricingPage", () => {
   it("offers to set a price for a selector with no stored rate", async () => {
     mockApi({ pricing: [] })
     renderPage(
-      <ModelPricingPage />,
-      "/organization/pricing?model=home_lab:qwen3-32b",
+      <PricingBands isOperator />,
+      "/organization/provider-keys?model=home_lab:qwen3-32b",
     )
 
     expect(
@@ -664,7 +688,7 @@ describe("ModelPricingPage", () => {
     // The other side of the split, pinned so a future change cannot quietly take
     // the catalog away from the caller it belongs to.
     mockApi()
-    renderPage(<ModelPricingPage />)
+    renderPage(<PricingBands isOperator />)
 
     expect(
       await screen.findByText("Default pricing catalog"),

@@ -15,7 +15,6 @@ import {
   FiServer,
   FiShield,
   FiSliders,
-  FiTag,
   FiTool,
   FiUserCheck,
   FiUsers,
@@ -212,19 +211,19 @@ const BASE_NAV_SECTIONS = [
  * provisioned for itself. The gate is written anyway because it is the thing
  * that becomes load-bearing the moment per-user sign-in lands (otari-ai#1716).
  *
- * Two of the design's rows are **declared and gated on a surface the standalone
+ * One of the design's rows is **declared and gated on a surface the standalone
  * bootstrap does not report** (`STANDALONE_SURFACES` in
- * `src/gateway/api/routes/bootstrap.py` is that list), so each row is absent
- * here and present on a deployment that serves it, and a group whose every row
- * is gated drops entirely, heading included. The organization guardrail ceiling
- * is one, and this gateway serves no such surface at all. The organization's own
- * provider credentials are the other, and that one is a *choice* rather than an
- * absence: the API and the page both exist, and a hosted deployment reports
- * `organization_providers` in place of the process-global `providers`, because
- * a credential keyed on an instance name alone is served to every tenant. That
- * row sits under General beside the process-global `providers` row it stands in
- * for; the guardrail ceiling is in Gateway, beside nothing, which is why that
- * whole group drops here.
+ * `src/gateway/api/routes/bootstrap.py` is that list), so it is absent here and
+ * present on a deployment that serves it, and a group whose every row is gated
+ * drops entirely, heading included. The organization guardrail ceiling is that
+ * row, and this gateway serves no such surface at all; it is in Gateway, beside
+ * nothing, which is why that whole group drops here.
+ *
+ * The organization's own provider credentials used to be a second such row, and
+ * are not any more: `organization_providers` is published by both topologies now
+ * that the page behind it is where an organization's models are offered, priced
+ * and switched. It sits under General beside the process-global `providers` row,
+ * and the two no longer share a label; see that pair for why.
  *
  * The design draws two more, Billing and Gateways, and neither is declared here
  * at all, because neither is this build's to declare: Billing is
@@ -318,33 +317,6 @@ const ORGANIZATION_NAV_SECTIONS = [
         surface: "budgets",
         icon: FiDollarSign,
       },
-      // Tenant-scoped in fact as well as in the design: a rate applies to every
-      // workspace and every key in the deployment. The catalog had no home
-      // before (its refresh flow sat in the gateway's runtime Settings next to
-      // the master key), so this is where it lives, while one model's rate stays
-      // on Models, beside the model it prices.
-      //
-      // No `operatorOnly` any more, because the page behind it is not one
-      // answer: the roles matrix puts Model pricing at Edit for an admin
-      // (otari-ai#1943), and the server already agreed. The organization's own
-      // rate overrides are management-gated, and the catalog read serves any
-      // session; only the refresh flow and the policy read are the operator's,
-      // and the page withholds those from anyone else rather than refusing the
-      // whole destination. Reached from the organization rail, which the shell
-      // already opens only to a caller who manages the organization, so a plain
-      // member is not offered it.
-      {
-        to: "/organization/pricing",
-        label: "Model pricing",
-        // `pricing`, not `settings`: the table and the refresh flow are
-        // `/pricing`, its own router, and this page reads `/settings` only
-        // for the policy banner an operator sees. This gateway serves the
-        // surfaces as one set, so the two are the same answer here; the axis
-        // exists for the deployment where they come apart, and there this row
-        // would otherwise offer a page whose data is not served.
-        surface: "pricing",
-        icon: FiTag,
-      },
     ],
   },
   {
@@ -366,13 +338,27 @@ const ORGANIZATION_NAV_SECTIONS = [
     id: "org-general",
     label: "General",
     items: [
-      // Two rows, one label, and exactly one of them ever renders: a
-      // deployment reports the process-global surface or the tenant-scoped one,
-      // never both. They are different tables behind different endpoints, so
-      // the shared label is the honest one rather than a duplicate. "Providers"
-      // and not "Provider credentials" either way: the page manages the
-      // credential *and* the instance it belongs to, and the rail has one line.
+      // Two rows, and on a standalone deployment both of them render. That is
+      // new: `organization_providers` used to be the hosted replacement for
+      // `providers`, so the pair could share the label "Providers" on the
+      // understanding that a deployment reported one or the other. The
+      // organization row is now where an organization's models are offered,
+      // priced and switched, which is a tenant's question on either topology,
+      // so standalone publishes both surfaces and the labels have to tell them
+      // apart.
       //
+      // The organization's own row keeps the bare noun, because this rail is
+      // already scoped to the organization and the row whose scope is *not* the
+      // rail's is the one that needs qualifying. "Deployment providers" is also
+      // what its `operatorOnly` already says in the gating: those credentials
+      // are keyed on an instance name and belong to the process, so every
+      // organization on the deployment is served them.
+      {
+        to: "/organization/provider-keys",
+        label: "Providers",
+        surface: "organization_providers",
+        icon: FiBox,
+      },
       // `operatorOnly` here rather than on the organization rail's own entry
       // point is the one exception to the deployment-rail placement the other
       // two `operatorOnly` rows follow: a deployment operator who is not an
@@ -382,16 +368,10 @@ const ORGANIZATION_NAV_SECTIONS = [
       // (docblock above) becomes load-bearing at otari-ai#1716.
       {
         to: "/providers",
-        label: "Providers",
+        label: "Deployment providers",
         surface: "providers",
         icon: FiBox,
         operatorOnly: "refused",
-      },
-      {
-        to: "/organization/provider-keys",
-        label: "Providers",
-        surface: "organization_providers",
-        icon: FiBox,
       },
       {
         to: "/organization",

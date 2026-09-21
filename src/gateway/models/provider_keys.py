@@ -13,7 +13,7 @@ an existing ``config.providers`` entry never consults these tables, and a
 bare ``provider:model`` selector never consults ``config.providers`` for a
 workspace that has an org-scoped key. See mozilla-ai/otari#643.
 
-Three tables, named to avoid a collision that already exists in this
+Four tables, named to avoid a collision that already exists in this
 codebase: ``ScopedBudget.provider_key_id`` (`models/budgets.py`) already
 means "an instance-name string, no FK". These tables use ``org_provider_key``
 throughout so no column here is ever ambiguously named ``provider_key_id``.
@@ -34,6 +34,11 @@ throughout so no column here is ever ambiguously named ``provider_key_id``.
   a per-workspace, per-key model allow-list. No rows for a
   ``(workspace, key)`` pair means every model is allowed; one or more rows
   narrows it to exactly those.
+- ``OrgProviderKeyModel`` (``org_provider_key_models``): the models the
+  organization offers on one key, each with a serving switch. Absent rows mean
+  the key is unnarrowed, the same convention as the table above; present rows
+  narrow the organization to the enabled ones, in the catalog and at dispatch
+  alike. The rate is not here: it lives in ``organization_model_pricing``.
 
 Style follows ``models/tenancy.py``: SQLModel (not the declarative ``Base``
 style) because these are tenancy-scoped tables sharing the same mixins and
@@ -42,7 +47,7 @@ style) because these are tenancy-scoped tables sharing the same mixins and
 join explicitly.
 
 CASCADE, not the ``RESTRICT`` default `AGENTS.md` states for a gateway table
-gaining tenancy scope, is deliberate here: these three tables are org- and
+gaining tenancy scope, is deliberate here: these four tables are org- and
 workspace-*owned* resources, like ``organization_member``/``workspace_member``
 (CASCADE), not durable request-plane history like ``usage_logs``/``api_keys``
 (RESTRICT, so a workspace delete cannot silently take budgets or usage with
@@ -54,7 +59,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Column, ForeignKeyConstraint, Index, UniqueConstraint, text
+from sqlalchemy import JSON, Column, ForeignKeyConstraint, Index, UniqueConstraint, text, true
 from sqlmodel import Field, SQLModel
 
 from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
@@ -319,9 +324,145 @@ class WorkspaceProviderModelRestriction(SQLModel, PrimaryKeyMixin, CreatedAtMixi
     model: str = Field(max_length=255)
 
 
+# ==============================================================================
+# Offered models
+# ==============================================================================
+
+
+class OrgProviderKeyModelCreateRequest(SQLModel):
+    """Offer one model on a key, for a backend whose models cannot be listed."""
+
+    model: str = Field(max_length=255)
+
+
+class OrgProviderKeyModelUpdateRequest(SQLModel):
+    """Whether the runtime serves this model. The only field an update may change.
+
+    A rate is not here: an organization's rates live in
+    ``organization_model_pricing`` and are written through
+    ``/organizations/me/pricing``, so a price set on this surface and a price set
+    on that one could not disagree.
+    """
+
+    enabled: bool
+
+
+class OrgProviderKeyModelPublic(SQLModel):
+    """One offered model, with the rate the caller's organization is charged for it.
+
+    ``price_source`` says which rung of ``services.pricing_service`` answered:
+    ``organization`` for a rate an admin set, ``default`` for the
+    community-maintained rate this surface seeded or the genai-prices fallback,
+    ``deployment`` for the deployment's own price list, and None when nothing
+    prices the model yet. ``pricing_id`` names the organization's own row where
+    there is one, so a client can edit that rate without re-deriving the key.
+    """
+
+    id: uuid.UUID
+    org_provider_key_id: uuid.UUID
+    model: str
+    input_price_per_million: float | None = None
+    output_price_per_million: float | None = None
+    cache_read_price_per_million: float | None = None
+    cache_write_price_per_million: float | None = None
+    cache_write_1h_price_per_million: float | None = None
+    price_source: str | None = None
+    pricing_id: uuid.UUID | None = None
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class OrgProviderKeyModelsPublic(SQLModel):
+    """One page of a key's offered models, and how many there are in total."""
+
+    data: list[OrgProviderKeyModelPublic]
+    count: int
+
+
+class OrgProviderModelsRefreshPublic(SQLModel):
+    """What a refresh did: what it newly offered, what it repriced, and the list's new size.
+
+    Failure is a field rather than a status, for the reason
+    ``OrgProviderAvailableModelsPublic`` gives: the list is still standing, and
+    the panel renders the reason beside it.
+    """
+
+    # Required rather than defaulted, both of them, so the wire contract says
+    # these lists are always present. Defaulted, OpenAPI marks them optional and
+    # every client has to guard a field the server always sends.
+    added: list[str]
+    repriced: list[str]
+    count: int
+    error: str | None = None
+    discovery_unsupported: bool = False
+
+
+class OrgProviderAvailableModelsPublic(SQLModel):
+    """What the provider says it serves on this key's stored credential.
+
+    Failure is a field rather than a status: an unreachable upstream, or a
+    provider with no model listing, is an answer about the provider rather than
+    about this request, and the form still has to render (with a plain text box)
+    when the list cannot be fetched.
+    """
+
+    provider: str
+    models: list[str] = Field(default_factory=list)
+    error: str | None = None
+    discovery_unsupported: bool = False
+
+
+class OrgProviderKeyModel(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+    """One model an organization offers on one of its provider keys.
+
+    Membership and a serving switch, nothing more. The rate lives in
+    ``organization_model_pricing`` keyed ``provider:model``, which is the store
+    ``services.pricing_service.find_model_pricing`` already reads first for a
+    request whose organization is known, so billing reads exactly what this
+    surface writes and no copy can drift.
+
+    **No rows for a key means the key is unnarrowed**, exactly as
+    ``WorkspaceProviderModelRestriction`` means it: a key that has never been
+    refreshed keeps reaching every model of its provider. One or more rows
+    narrows the organization to the enabled ones, which is how the serving
+    switch reaches both the catalog
+    (``services/tenancy/organization_model_access``) and dispatch
+    (``cached_org_model_restriction``).
+    """
+
+    __tablename__ = "org_provider_key_models"
+    __table_args__ = (
+        UniqueConstraint("org_provider_key_id", "model", name="uq_org_provider_key_models_key_model"),
+        # Same reasoning as `WorkspaceProviderKeyOverride`'s matching constraint.
+        ForeignKeyConstraint(
+            ["organization_id", "org_provider_key_id"],
+            ["org_provider_keys.organization_id", "org_provider_keys.id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    # Denormalized from the key's own organization; see the composite FK above
+    # for why it is stored rather than joined at read time.
+    organization_id: uuid.UUID
+    org_provider_key_id: uuid.UUID = Field(index=True)
+    model: str = Field(max_length=255)
+    # A model nothing prices is offered but not served, so a model the pricing
+    # data has not caught up with cannot be billed at nothing.
+    enabled: bool = Field(default=True, nullable=False, sa_column_kwargs={"server_default": true()})
+
+
+
 __all__ = [
     "OrgProviderKey",
     "OrgProviderKeyCreateRequest",
+    "OrgProviderAvailableModelsPublic",
+    "OrgProviderKeyModel",
+    "OrgProviderKeyModelCreateRequest",
+    "OrgProviderKeyModelPublic",
+    "OrgProviderKeyModelUpdateRequest",
+    "OrgProviderKeyModelsPublic",
+    "OrgProviderModelsRefreshPublic",
     "OrgProviderKeyPublic",
     "OrgProviderKeyUpdateRequest",
     "OrgProviderKeysPublic",

@@ -290,10 +290,14 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     ``provider_credentials`` is keyed on the instance name alone, so a credential
     added through ``/providers`` is served to every organization on the
     deployment and shadows that organization's own BYO key. The page is right for
-    the single-tenant product and wrong for a control plane, and the
-    organization-scoped one is the other way around. ``organization_usage`` is
-    the row that exists only where tenants do: standalone's organization is the
-    deployment, so ``/usage`` already answers it whole (otari-ai#1963).
+    the single-tenant product and wrong for a control plane, so ``providers`` is
+    withheld here. Its counterpart is *not* the mirror image any more:
+    ``organization_providers`` is published by both topologies, because the page
+    behind it is where an organization's models are offered, priced and switched,
+    which is a tenant's question whether or not the deployment has more than one
+    tenant. ``organization_usage`` is the row that exists only where tenants do:
+    standalone's organization is the deployment, so ``/usage`` already answers it
+    whole (otari-ai#1963).
 
     ``playground`` is the one row withheld for a reason that is not about
     credentials or scope at all, and not about the topology either: the page
@@ -317,7 +321,6 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     # Everything else is standalone's set, so a surface added there is not
     # silently withheld from a control plane.
     assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
-        "organization_providers",
         "organization_usage",
         "playground",
         "providers",
@@ -343,7 +346,6 @@ def test_hosted_publishes_the_playground_once_it_knows_its_data_plane(tmp_path: 
     # The rest of the hosted set is unchanged by the address: this is one row's
     # availability, not a different edition.
     assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
-        "organization_providers",
         "organization_usage",
         "providers",
     }

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { OrganizationProviderKeysPage } from "@/features/organization/OrganizationProviderKeysPage"
+import { OrganizationProvidersPage } from "@/features/organization/providers/OrganizationProvidersPage"
 
 export const Route = createFileRoute("/organization/provider-keys")({
-  component: OrganizationProviderKeysPage,
+  component: OrganizationProvidersPage,
 })

@@ -55,7 +55,7 @@ describe("a build that replaces the nav-item module", () => {
   it("appends a contributed row after the organization section's own", () => {
     expect(
       section(ORG_NAV_SECTIONS, "org-money")?.items.map((item) => item.label),
-    ).toEqual(["Spend & budgets", "Model pricing", "Billing"])
+    ).toEqual(["Spend & budgets", "Billing"])
   })
 
   it("appends into a second organization section from the same list", () => {

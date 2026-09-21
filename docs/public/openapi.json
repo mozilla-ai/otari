@@ -8024,6 +8024,43 @@
         "title": "OfferingUsage",
         "type": "object"
       },
+      "OrgProviderAvailableModelsPublic": {
+        "description": "What the provider says it serves on this key's stored credential.\n\nFailure is a field rather than a status: an unreachable upstream, or a\nprovider with no model listing, is an answer about the provider rather than\nabout this request, and the form still has to render (with a plain text box)\nwhen the list cannot be fetched.",
+        "properties": {
+          "discovery_unsupported": {
+            "default": false,
+            "title": "Discovery Unsupported",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "OrgProviderAvailableModelsPublic",
+        "type": "object"
+      },
       "OrgProviderKeyCreateRequest": {
         "description": "What a caller sends to create a key.\n\nThe plaintext key is never stored as sent: the service encrypts it\n(`services/secret_box.py`) and keeps only the ciphertext and ``last4``,\nthe same convention `providers.ProviderCredential` already uses.",
         "properties": {
@@ -8078,6 +8115,184 @@
           "name"
         ],
         "title": "OrgProviderKeyCreateRequest",
+        "type": "object"
+      },
+      "OrgProviderKeyModelCreateRequest": {
+        "description": "Offer one model on a key, for a backend whose models cannot be listed.",
+        "properties": {
+          "model": {
+            "maxLength": 255,
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "OrgProviderKeyModelCreateRequest",
+        "type": "object"
+      },
+      "OrgProviderKeyModelPublic": {
+        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``default`` for the\ncommunity-maintained rate this surface seeded or the genai-prices fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.",
+        "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 1H Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Price Per Million"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Price Per Million"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "org_provider_key_id": {
+            "format": "uuid",
+            "title": "Org Provider Key Id",
+            "type": "string"
+          },
+          "output_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Price Per Million"
+          },
+          "price_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Source"
+          },
+          "pricing_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricing Id"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "org_provider_key_id",
+          "model",
+          "enabled",
+          "created_at"
+        ],
+        "title": "OrgProviderKeyModelPublic",
+        "type": "object"
+      },
+      "OrgProviderKeyModelUpdateRequest": {
+        "description": "Whether the runtime serves this model. The only field an update may change.\n\nA rate is not here: an organization's rates live in\n``organization_model_pricing`` and are written through\n``/organizations/me/pricing``, so a price set on this surface and a price set\non that one could not disagree.",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "OrgProviderKeyModelUpdateRequest",
+        "type": "object"
+      },
+      "OrgProviderKeyModelsPublic": {
+        "description": "One page of a key's offered models, and how many there are in total.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OrgProviderKeyModelPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "OrgProviderKeyModelsPublic",
         "type": "object"
       },
       "OrgProviderKeyPublic": {
@@ -8259,6 +8474,52 @@
           "count"
         ],
         "title": "OrgProviderKeysPublic",
+        "type": "object"
+      },
+      "OrgProviderModelsRefreshPublic": {
+        "description": "What a refresh did: what it newly offered, what it repriced, and the list's new size.\n\nFailure is a field rather than a status, for the reason\n``OrgProviderAvailableModelsPublic`` gives: the list is still standing, and\nthe panel renders the reason beside it.",
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "discovery_unsupported": {
+            "default": false,
+            "title": "Discovery Unsupported",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "repriced": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repriced",
+            "type": "array"
+          }
+        },
+        "required": [
+          "added",
+          "repriced",
+          "count"
+        ],
+        "title": "OrgProviderModelsRefreshPublic",
         "type": "object"
       },
       "OrganizationBudgetCreate": {
@@ -24526,7 +24787,7 @@
         ]
       },
       "post": {
-        "description": "Create a provider key in the caller's organization. Organization owners and admins only.",
+        "description": "Create a provider key in the caller's organization. Organization owners and admins only.\n\nEverything the provider lists on the new credential is offered at once, so a\nkey starts with its real catalog rather than an empty list an admin retypes\nby hand. A provider that will not say (no listing endpoint, unreachable,\ncredential refused) yields a key with no models rather than a failed create:\nthe credential may still be right for dispatch, and models can be added by\nname. The response is the key either way; the models are read back through\n``GET /{key_id}/models``.",
         "operationId": "provider-keys-create_org_provider_key",
         "requestBody": {
           "content": {
@@ -24738,6 +24999,58 @@
         ]
       }
     },
+    "/api/v1/organizations/me/provider-keys/{key_id}/available-models": {
+      "get": {
+        "description": "Ask the provider what it serves on this key's stored credential.\n\nDials the upstream on every call rather than caching: the caller is a model\npicker, opened rarely and entitled to a current answer. The credential never\nleaves the process; only model names come back. Organization owners and\nadmins only.",
+        "operationId": "provider-keys-list_org_provider_key_available_models",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderAvailableModelsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Org Provider Key Available Models",
+        "tags": [
+          "provider-keys"
+        ]
+      }
+    },
     "/api/v1/organizations/me/provider-keys/{key_id}/default": {
       "post": {
         "description": "Make a key the organization's default for its provider. Organization owners and admins only.",
@@ -24785,6 +25098,381 @@
           }
         ],
         "summary": "Set Org Provider Key Default",
+        "tags": [
+          "provider-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/provider-keys/{key_id}/models": {
+      "get": {
+        "description": "List the models offered on one key, each with the rate it currently serves at.\n\nOrganization owners and admins only. ``count`` is the total rather than the\npage length, so a client knows whether another page is owed.",
+        "operationId": "provider-keys-list_org_provider_key_models",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeyModelsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Org Provider Key Models",
+        "tags": [
+          "provider-keys"
+        ]
+      },
+      "post": {
+        "description": "Offer one model by name, for a backend whose models cannot be listed.\n\nCarries no rate: an organization's rates are written through\n``/api/v1/organizations/me/pricing``, so a price set here and a price set\nthere could not disagree about what a request costs. The offer seeds the\ncommunity default like any other, and a model nothing prices arrives\ndisabled. Organization owners and admins only.",
+        "operationId": "provider-keys-add_org_provider_key_model",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgProviderKeyModelCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeyModelPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Add Org Provider Key Model",
+        "tags": [
+          "provider-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/provider-keys/{key_id}/models/refresh": {
+      "post": {
+        "description": "Ask the provider again and offer whatever is newly listed.\n\nAdditive only: nothing already offered is removed or switched off, because\ndelisting a model is a decision the serving switch owns and an upstream\nhiccup must not empty a catalog. New models follow the offer rule, seeded\nwith the community default rate and disabled when nothing prices them. A\nrate this surface seeded and nobody has changed moves to today's default.\nOrganization owners and admins only.",
+        "operationId": "provider-keys-refresh_org_provider_key_models",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderModelsRefreshPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Refresh Org Provider Key Models",
+        "tags": [
+          "provider-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/provider-keys/{key_id}/models/{model_id}": {
+      "delete": {
+        "description": "Stop offering one model. Its rate and its history stay. Organization owners and admins only.",
+        "operationId": "provider-keys-remove_org_provider_key_model",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Remove Org Provider Key Model",
+        "tags": [
+          "provider-keys"
+        ]
+      },
+      "patch": {
+        "description": "Turn one offered model's serving switch on or off. Organization owners and admins only.",
+        "operationId": "provider-keys-set_org_provider_key_model_enabled",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgProviderKeyModelUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeyModelPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Org Provider Key Model Enabled",
+        "tags": [
+          "provider-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/provider-keys/{key_id}/pricing/refresh": {
+      "post": {
+        "description": "Move every rate this surface seeded onto today's community default.\n\nThe other half of the refresh above, without the dial: re-reading community\nrates is cheap and asking a provider for its whole catalog is not, so an\nadmin who only wants the price move does not wait on an upstream. A rate an\nadmin has since set is left alone, and a model that arrived unpriced is\noffered a rate and switched on if one has appeared. Organization owners and\nadmins only.",
+        "operationId": "provider-keys-refresh_org_provider_key_model_pricing",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderModelsRefreshPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Refresh Org Provider Key Model Pricing",
         "tags": [
           "provider-keys"
         ]

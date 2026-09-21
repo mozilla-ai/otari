@@ -89,7 +89,7 @@ The workspace view contains day-to-day gateway operations:
   list of cards with a rail of filters beside it, and a page per model where
   every offering of it is compared, one per provider, each with its own limits
   and the price your organization is charged. It is read-only; a rate is set on
-  Model pricing.
+  Providers.
 - Tools
 - API keys and workspace members
 
@@ -99,9 +99,11 @@ The organization view contains tenant-wide administration:
 - Workspaces and organization members
 - Email domains, for joining colleagues automatically
 - Spend and budgets
-- Organization pricing
-- General: Providers, followed by Org settings. Providers manages deployment
-  credentials in standalone mode and organization provider keys in hosted mode.
+- General: Providers, followed by Deployment providers and Org settings.
+  Providers is the organization's own upstream credentials, the models each one
+  reaches, and what this organization pays for them. Deployment providers is the
+  process-wide credential list, which a deployment operator manages and which is
+  served to every organization; it appears in standalone mode only.
 
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the
@@ -111,15 +113,16 @@ What a page shows can also depend on who is signed in, not only on the
 deployment. Spend and budgets is the clearest case: an organization owner or
 admin manages their own organization's budgets and the spend ceilings holding
 them, while a deployment operator gets the deployment-wide budgets and the
-gateway users assigned to them. Model pricing splits the same way, with the
-default pricing catalog kept to an operator and the organization's own rate
-overrides open to its admins. An override covers a model the organization
-supplies the provider key for; a model reached through one of the deployment's
-own provider instances is priced by the catalog, because the deployment holds
-that credential and settles its upstream bill. For an operator that section
-also shows the update a scheduled genai-prices check has left for review, when
-the defaults were last accepted and by whom, and how far each stored rate sits
-from today's default.
+gateway users assigned to them. Providers splits the same way. Its upper half is
+the organization's, open to its owners and admins: the keys, the models each key
+offers, and the rate each model is billed at. Its lower half is the deployment's
+price catalog, kept to an operator, who also sees the update a scheduled
+genai-prices check has left for review, when the defaults were last accepted and
+by whom, and how far each stored rate sits from today's default. An organization
+may set its own rate for a model it supplies the provider key for; a model
+reached through one of the deployment's own provider instances is priced by the
+catalog, because the deployment holds that credential and settles its upstream
+bill.
 
 Exact page names and availability can change with deployment mode and installed
 extensions. The running dashboard is the source of truth.

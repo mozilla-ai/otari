@@ -46,7 +46,12 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import is_deployment_instance_key, normalize_pricing_key, split_selector
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
-from gateway.services.tenancy.organization_model_access import resolve_session_catalog_scope
+from gateway.services.tenancy.organization_model_access import (
+    resolve_default_workspace_offered_keys,
+    resolve_organization_offered_keys,
+    resolve_session_catalog_scope,
+    resolve_workspace_offered_keys,
+)
 
 if TYPE_CHECKING:
     from any_llm.types.model import Model
@@ -382,6 +387,27 @@ class CatalogScope:
     deployment_supplied_providers: frozenset[str]
     """Hosted providers the deployment pays for in at least one of the organization's workspaces."""
 
+    offered_keys: frozenset[str]
+    """Selectors the caller's organization offers on its own provider keys.
+
+    Listed by nothing else. Discovery (phase 1) dials ``config.providers``
+    instances, and the pricing-only pass (phase 2) lists keys the *deployment*
+    price list names, so a model an organization adopted on its own credential is
+    permitted by the allow-list and published by neither. See phase 2b.
+    """
+
+
+async def _operator_offered_keys(db: AsyncSession, identity: TenancyUser) -> frozenset[str]:
+    """The offered models of the organization a deployment operator is acting in.
+
+    ``active_organization_id`` is the pointer the rest of the tenancy surface
+    reads, and an operator who points at nothing has no organization's models to
+    be shown.
+    """
+    if identity.active_organization_id is None:
+        return frozenset()
+    return await resolve_organization_offered_keys(db, identity.active_organization_id)
+
 
 async def catalog_scope(
     db: AsyncSession,
@@ -408,15 +434,29 @@ async def catalog_scope(
             allowlist=[f"{instance}:*" for instance in config.providers],
             reads_workspace_layer=False,
             deployment_supplied_providers=frozenset(),
+            offered_keys=frozenset(),
         )
     if session_identity is not None:
         if await DeploymentUserService(db).has_administration_access(session_identity):
-            return CatalogScope(allowlist=None, reads_workspace_layer=True, deployment_supplied_providers=frozenset())
+            # Unrestricted, and still carrying its *own* organization's offered
+            # models. Not every organization's: that would cross the tenant line
+            # the rest of this function draws. But not none either, which is what
+            # this branch answered first and got wrong: on a standalone
+            # deployment the operator is also the single organization's owner, so
+            # they adopt a model on Providers and would then not find it in the
+            # catalog they were just told it joined.
+            return CatalogScope(
+                allowlist=None,
+                reads_workspace_layer=True,
+                deployment_supplied_providers=frozenset(),
+                offered_keys=await _operator_offered_keys(db, session_identity),
+            )
         scope = await resolve_session_catalog_scope(db, config, user=session_identity, model_provider=model_provider)
         return CatalogScope(
             allowlist=scope.allowlist,
             reads_workspace_layer=scope.reads_default_workspace,
             deployment_supplied_providers=scope.deployment_supplied_providers,
+            offered_keys=scope.offered_keys,
         )
     api_key, is_master_key = auth
     # An API key's hosted models stay unflagged, because this does not resolve the key's organization.
@@ -424,6 +464,15 @@ async def catalog_scope(
         allowlist=None if is_master_key else await resolve_request_allowlist(db, api_key),
         reads_workspace_layer=True,
         deployment_supplied_providers=frozenset(),
+        # A master key is the deployment acting on its own behalf, which lands in
+        # the default workspace exactly as pricing resolution does for it; a real
+        # key names its own workspace, and what that workspace's organization
+        # offers is what it may be shown.
+        offered_keys=(
+            await resolve_default_workspace_offered_keys(db)
+            if is_master_key
+            else await resolve_workspace_offered_keys(db, api_key.workspace_id if api_key else None)
+        ),
     )
 
 
@@ -573,6 +622,37 @@ async def build_merged_catalog(
         if model_key.startswith(f"{GATEWAY_TOOL_PRICING_PROVIDER}:"):
             continue
         merged[model_key] = model_from_pricing(pricing)
+
+    # Phase 2b: models the caller's organization offers on its own provider keys.
+    #
+    # The phase that exists because neither of the two above can list these. A
+    # BYO key is not a discovery source (phase 1 dials ``config.providers``
+    # instances only), and an organization's own rate lives in
+    # ``organization_model_pricing`` rather than in the deployment price list
+    # phase 2 reads, so before this an organization could adopt a model, price it
+    # and serve it while the catalog said it did not exist.
+    #
+    # Priced by phase 3 and then by the per-viewer pass, which reads the
+    # organization's own rate, so nothing here carries a price of its own: doing
+    # so would state a rate from the wrong rung.
+    #
+    # ``?provider=`` filters these like any real model, and the allow-list filter
+    # at the end still applies: an offered model the caller's key may not use is
+    # withheld exactly as a discovered one would be.
+    for model_key in sorted(scope.offered_keys):
+        if model_key in merged or normalize_pricing_key(config, model_key) in alias_targets:
+            continue
+        owner = owner_from_key(model_key)
+        if provider is not None and owner != provider:
+            continue
+        merged[model_key] = ModelObject(
+            id=model_key,
+            created=0,
+            owned_by=owner,
+            pricing=None,
+            pricing_source="none",
+            context_window=context_window_for_key(model_key),
+        )
 
     # Phase 3: fill the genai-prices default for unpriced models, so the catalog
     # shows the effective rate when the fallback is active. Database pricing

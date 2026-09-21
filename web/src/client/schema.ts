@@ -2401,6 +2401,14 @@ export interface paths {
         /**
          * Create Org Provider Key
          * @description Create a provider key in the caller's organization. Organization owners and admins only.
+         *
+         *     Everything the provider lists on the new credential is offered at once, so a
+         *     key starts with its real catalog rather than an empty list an admin retypes
+         *     by hand. A provider that will not say (no listing endpoint, unreachable,
+         *     credential refused) yields a key with no models rather than a failed create:
+         *     the credential may still be right for dispatch, and models can be added by
+         *     name. The response is the key either way; the models are read back through
+         *     ``GET /{key_id}/models``.
          */
         post: operations["provider-keys-create_org_provider_key"];
         delete?: never;
@@ -2453,6 +2461,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/provider-keys/{key_id}/available-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Org Provider Key Available Models
+         * @description Ask the provider what it serves on this key's stored credential.
+         *
+         *     Dials the upstream on every call rather than caching: the caller is a model
+         *     picker, opened rarely and entitled to a current answer. The credential never
+         *     leaves the process; only model names come back. Organization owners and
+         *     admins only.
+         */
+        get: operations["provider-keys-list_org_provider_key_available_models"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/provider-keys/{key_id}/default": {
         parameters: {
             query?: never;
@@ -2467,6 +2500,117 @@ export interface paths {
          * @description Make a key the organization's default for its provider. Organization owners and admins only.
          */
         post: operations["provider-keys-set_org_provider_key_default"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/provider-keys/{key_id}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Org Provider Key Models
+         * @description List the models offered on one key, each with the rate it currently serves at.
+         *
+         *     Organization owners and admins only. ``count`` is the total rather than the
+         *     page length, so a client knows whether another page is owed.
+         */
+        get: operations["provider-keys-list_org_provider_key_models"];
+        put?: never;
+        /**
+         * Add Org Provider Key Model
+         * @description Offer one model by name, for a backend whose models cannot be listed.
+         *
+         *     Carries no rate: an organization's rates are written through
+         *     ``/api/v1/organizations/me/pricing``, so a price set here and a price set
+         *     there could not disagree about what a request costs. The offer seeds the
+         *     community default like any other, and a model nothing prices arrives
+         *     disabled. Organization owners and admins only.
+         */
+        post: operations["provider-keys-add_org_provider_key_model"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/provider-keys/{key_id}/models/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Org Provider Key Models
+         * @description Ask the provider again and offer whatever is newly listed.
+         *
+         *     Additive only: nothing already offered is removed or switched off, because
+         *     delisting a model is a decision the serving switch owns and an upstream
+         *     hiccup must not empty a catalog. New models follow the offer rule, seeded
+         *     with the community default rate and disabled when nothing prices them. A
+         *     rate this surface seeded and nobody has changed moves to today's default.
+         *     Organization owners and admins only.
+         */
+        post: operations["provider-keys-refresh_org_provider_key_models"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/provider-keys/{key_id}/models/{model_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Org Provider Key Model
+         * @description Stop offering one model. Its rate and its history stay. Organization owners and admins only.
+         */
+        delete: operations["provider-keys-remove_org_provider_key_model"];
+        options?: never;
+        head?: never;
+        /**
+         * Set Org Provider Key Model Enabled
+         * @description Turn one offered model's serving switch on or off. Organization owners and admins only.
+         */
+        patch: operations["provider-keys-set_org_provider_key_model_enabled"];
+        trace?: never;
+    };
+    "/api/v1/organizations/me/provider-keys/{key_id}/pricing/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Org Provider Key Model Pricing
+         * @description Move every rate this surface seeded onto today's community default.
+         *
+         *     The other half of the refresh above, without the dial: re-reading community
+         *     rates is cheap and asking a provider for its whole catalog is not, so an
+         *     admin who only wants the price move does not wait on an upstream. A rate an
+         *     admin has since set is left alone, and a model that arrived unpriced is
+         *     offered a rate and switched on if one has appeared. Organization owners and
+         *     admins only.
+         */
+        post: operations["provider-keys-refresh_org_provider_key_model_pricing"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8878,6 +9022,28 @@ export interface components {
             total_tokens: number;
         };
         /**
+         * OrgProviderAvailableModelsPublic
+         * @description What the provider says it serves on this key's stored credential.
+         *
+         *     Failure is a field rather than a status: an unreachable upstream, or a
+         *     provider with no model listing, is an answer about the provider rather than
+         *     about this request, and the form still has to render (with a plain text box)
+         *     when the list cannot be fetched.
+         */
+        OrgProviderAvailableModelsPublic: {
+            /**
+             * Discovery Unsupported
+             * @default false
+             */
+            discovery_unsupported: boolean;
+            /** Error */
+            error?: string | null;
+            /** Models */
+            models?: string[];
+            /** Provider */
+            provider: string;
+        };
+        /**
          * OrgProviderKeyCreateRequest
          * @description What a caller sends to create a key.
          *
@@ -8898,6 +9064,85 @@ export interface components {
             name: string;
             /** Provider */
             provider: string;
+        };
+        /**
+         * OrgProviderKeyModelCreateRequest
+         * @description Offer one model on a key, for a backend whose models cannot be listed.
+         */
+        OrgProviderKeyModelCreateRequest: {
+            /** Model */
+            model: string;
+        };
+        /**
+         * OrgProviderKeyModelPublic
+         * @description One offered model, with the rate the caller's organization is charged for it.
+         *
+         *     ``price_source`` says which rung of ``services.pricing_service`` answered:
+         *     ``organization`` for a rate an admin set, ``default`` for the
+         *     community-maintained rate this surface seeded or the genai-prices fallback,
+         *     ``deployment`` for the deployment's own price list, and None when nothing
+         *     prices the model yet. ``pricing_id`` names the organization's own row where
+         *     there is one, so a client can edit that rate without re-deriving the key.
+         */
+        OrgProviderKeyModelPublic: {
+            /** Cache Read Price Per Million */
+            cache_read_price_per_million?: number | null;
+            /** Cache Write 1H Price Per Million */
+            cache_write_1h_price_per_million?: number | null;
+            /** Cache Write Price Per Million */
+            cache_write_price_per_million?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Input Price Per Million */
+            input_price_per_million?: number | null;
+            /** Model */
+            model: string;
+            /**
+             * Org Provider Key Id
+             * Format: uuid
+             */
+            org_provider_key_id: string;
+            /** Output Price Per Million */
+            output_price_per_million?: number | null;
+            /** Price Source */
+            price_source?: string | null;
+            /** Pricing Id */
+            pricing_id?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * OrgProviderKeyModelUpdateRequest
+         * @description Whether the runtime serves this model. The only field an update may change.
+         *
+         *     A rate is not here: an organization's rates live in
+         *     ``organization_model_pricing`` and are written through
+         *     ``/organizations/me/pricing``, so a price set on this surface and a price set
+         *     on that one could not disagree.
+         */
+        OrgProviderKeyModelUpdateRequest: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /**
+         * OrgProviderKeyModelsPublic
+         * @description One page of a key's offered models, and how many there are in total.
+         */
+        OrgProviderKeyModelsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["OrgProviderKeyModelPublic"][];
         };
         /**
          * OrgProviderKeyPublic
@@ -8965,6 +9210,29 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["OrgProviderKeyPublic"][];
+        };
+        /**
+         * OrgProviderModelsRefreshPublic
+         * @description What a refresh did: what it newly offered, what it repriced, and the list's new size.
+         *
+         *     Failure is a field rather than a status, for the reason
+         *     ``OrgProviderAvailableModelsPublic`` gives: the list is still standing, and
+         *     the panel renders the reason beside it.
+         */
+        OrgProviderModelsRefreshPublic: {
+            /** Added */
+            added: string[];
+            /** Count */
+            count: number;
+            /**
+             * Discovery Unsupported
+             * @default false
+             */
+            discovery_unsupported: boolean;
+            /** Error */
+            error?: string | null;
+            /** Repriced */
+            repriced: string[];
         };
         /**
          * OrganizationBudgetCreate
@@ -17055,6 +17323,37 @@ export interface operations {
             };
         };
     };
+    "provider-keys-list_org_provider_key_available_models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderAvailableModelsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "provider-keys-set_org_provider_key_default": {
         parameters: {
             query?: never;
@@ -17073,6 +17372,207 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrgProviderKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-keys-list_org_provider_key_models": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderKeyModelsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-keys-add_org_provider_key_model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrgProviderKeyModelCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderKeyModelPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-keys-refresh_org_provider_key_models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderModelsRefreshPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-keys-remove_org_provider_key_model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-keys-set_org_provider_key_model_enabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrgProviderKeyModelUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderKeyModelPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-keys-refresh_org_provider_key_model_pricing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderModelsRefreshPublic"];
                 };
             };
             /** @description Validation Error */

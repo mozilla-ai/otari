@@ -157,13 +157,30 @@ test.describe("organization rail", () => {
     await captureScreenshot(page, "workspaces")
   })
 
-  test("organization model pricing", async ({ page }) => {
+  test("organization providers", async ({ page }) => {
+    // Model pricing folded into this page, so its bands are below the
+    // organization's own providers rather than at a destination of their own.
     await login(page)
-    await gotoRoute(page, "/organization/pricing")
+    await gotoRoute(page, "/organization/provider-keys")
     await expect(
-      page.getByRole("heading", { name: /model pricing/i }).first(),
+      page.getByRole("heading", { name: /^providers$/i }).first(),
     ).toBeVisible()
-    await captureScreenshot(page, "organization-model-pricing")
+    await captureScreenshot(page, "organization-providers")
+  })
+
+  test("organization provider models panel", async ({ page }) => {
+    // The panel is the point of the merge and sits inside a row, so the page
+    // capture above does not reach it. Expanded by pressing the row's own
+    // control rather than by a seeded id, which is created at run time.
+    await login(page)
+    await gotoRoute(page, "/organization/provider-keys")
+    const models = page.getByRole("button", { name: /^Models on / }).first()
+    await expect(models).toBeVisible()
+    await models.click()
+    await expect(
+      page.getByRole("heading", { name: /^Models on / }),
+    ).toBeVisible()
+    await captureScreenshot(page, "organization-provider-models")
   })
 
   test("organization usage", async ({ page }) => {

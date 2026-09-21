@@ -145,7 +145,7 @@ export interface NavSection {
  *
  * The seam `overlaySections.ts` cannot cover: that one appends whole sections,
  * and an overlay's destination does not always want one of its own. Billing
- * belongs in "Cost & billing" beside `/budgets` and `/organization/pricing`, a
+ * belongs in "Cost & billing" beside `/budgets`, a
  * section the base owns, so without this an overlay would have to edit
  * `registry.ts` to place it, which cardinal rule 6 rules out.
  *

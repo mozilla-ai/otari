@@ -2566,26 +2566,17 @@ main {
 .otari-workspaces-table[data-scrolled="true"] .table__cell[data-key="name"] {
   border-right: 1px solid var(--color-control-border);
 }
-.otari-pricing-table .table__row .table__cell,
-.otari-rate-overrides-table .table__row .table__cell {
+.otari-pricing-table .table__row .table__cell {
   height: 3.25rem;
   padding-block: 0;
 }
 .otari-pricing-table .table__column[data-key="input"],
 .otari-pricing-table .table__column[data-key="output"],
-.otari-pricing-table .table__column[data-key="cacheRead"],
-.otari-rate-overrides-table .table__column[data-key="input"],
-.otari-rate-overrides-table .table__column[data-key="output"],
-.otari-rate-overrides-table .table__column[data-key="cache_read"],
-.otari-rate-overrides-table .table__column[data-key="cache_write"] {
+.otari-pricing-table .table__column[data-key="cacheRead"] {
   width: 8.125rem;
   min-width: 8.125rem;
   padding-inline: 0.625rem;
 }
-.otari-rate-overrides-table .table__cell[data-key="input"],
-.otari-rate-overrides-table .table__cell[data-key="output"],
-.otari-rate-overrides-table .table__cell[data-key="cache_read"],
-.otari-rate-overrides-table .table__cell[data-key="cache_write"],
 .otari-pricing-table .table__cell[data-key="input"],
 .otari-pricing-table .table__cell[data-key="output"],
 .otari-pricing-table .table__cell[data-key="cacheRead"] {
@@ -2611,23 +2602,8 @@ main {
 .otari-pricing-table .table__column[data-key="spacer"] {
   min-width: 0;
 }
-.otari-rate-overrides-table .table__column[data-key="period"] {
-  min-width: 12.5rem;
-}
-.otari-rate-overrides-table .table__column[data-key="status"] {
-  width: 8.125rem;
-  min-width: 8.125rem;
-}
-.otari-rate-overrides-table .table__column[data-key="actions"] {
-  width: 6rem;
-  min-width: 6rem;
-}
-/* One width for both, so the model key occupies the same lane in the catalog
-   and in the overrides below it. */
 .otari-pricing-table .table__column[data-key="modelKey"],
-.otari-pricing-table .table__cell[data-key="modelKey"],
-.otari-rate-overrides-table .table__column[data-key="model_key"],
-.otari-rate-overrides-table .table__cell[data-key="model_key"] {
+.otari-pricing-table .table__cell[data-key="modelKey"] {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -2636,11 +2612,7 @@ main {
   min-width: 16.0625rem;
 }
 .otari-pricing-table[data-scrolled="true"] .table__column[data-key="modelKey"],
-.otari-pricing-table[data-scrolled="true"] .table__cell[data-key="modelKey"],
-.otari-rate-overrides-table[data-scrolled="true"]
-  .table__column[data-key="model_key"],
-.otari-rate-overrides-table[data-scrolled="true"]
-  .table__cell[data-key="model_key"] {
+.otari-pricing-table[data-scrolled="true"] .table__cell[data-key="modelKey"] {
   border-right: 1px solid var(--color-control-border);
 }
 .otari-provider-keys-table .table__row .table__cell {
@@ -2684,6 +2656,36 @@ main {
   .table__column[data-key="name"],
 .otari-provider-keys-table[data-scrolled="true"] .table__cell[data-key="name"] {
   border-right: 1px solid var(--color-control-border);
+}
+/* The models offered on one organization provider key, inside that key's row
+   detail. Five rate lanes and two controls, so the name lane is the one that
+   absorbs what is left; the table scrolls in its own frame rather than widening
+   the row it sits in. */
+.otari-offered-models-table .table__row .table__cell {
+  height: 3.625rem;
+  padding-block: 0;
+}
+.otari-offered-models-table .table__column[data-key="model"] {
+  min-width: 16rem;
+}
+.otari-offered-models-table .table__column[data-key="input"],
+.otari-offered-models-table .table__column[data-key="output"],
+.otari-offered-models-table .table__column[data-key="cache_read"],
+.otari-offered-models-table .table__column[data-key="cache_write"] {
+  width: 7.5rem;
+  min-width: 7.5rem;
+}
+.otari-offered-models-table .table__column[data-key="source"] {
+  width: 8.75rem;
+  min-width: 8.75rem;
+}
+.otari-offered-models-table .table__column[data-key="enabled"] {
+  width: 6.25rem;
+  min-width: 6.25rem;
+}
+.otari-offered-models-table .table__column[data-key="actions"] {
+  width: 6.25rem;
+  min-width: 6.25rem;
 }
 .otari-members-table .table__row .table__cell {
   height: 3.625rem;

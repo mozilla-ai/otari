@@ -315,7 +315,7 @@ function offeringColumns({
       header: "Actions",
       cell: ({ offering: row }) => (
         <Link
-          to="/organization/pricing"
+          to="/organization/provider-keys"
           search={{ model: row.selector }}
           className="text-link hover:text-link-hover"
         >
@@ -336,7 +336,7 @@ function offeringColumns({
       cell: ({ offering: row }) =>
         row.credential === "organization" ? (
           <Link
-            to="/organization/pricing"
+            to="/organization/provider-keys"
             search={{ override: row.selector }}
             className="text-link hover:text-link-hover"
           >
@@ -476,10 +476,10 @@ export function ModelDetailView({
           <div className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-3">
             {canPrice ? (
               <Link
-                to="/organization/pricing"
+                to="/organization/provider-keys"
                 className="inline-flex min-h-9 items-center text-sm text-link hover:text-link-hover"
               >
-                Model pricing
+                Providers
               </Link>
             ) : null}
             {model.offerings.length > 0 ? (
