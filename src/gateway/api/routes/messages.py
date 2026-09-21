@@ -304,6 +304,13 @@ _STATUS_TO_ANTHROPIC_TYPE = {
 }
 
 
+def _files_error(exc: FilesError) -> HTTPException:
+    """Carry a Files failure into the Anthropic envelope with its status and headers intact."""
+    return _anthropic_error(
+        _STATUS_TO_ANTHROPIC_TYPE.get(exc.status_code, _ERR_API), exc.detail, exc.status_code, headers=exc.headers
+    )
+
+
 def _ensure_anthropic_error(exc: HTTPException) -> HTTPException:
     """Re-wrap a plain-string ``HTTPException`` in the Anthropic error envelope,
     preserving the status code and headers (e.g. a 429's ``Retry-After``).
@@ -638,6 +645,14 @@ class _FileMessagesAdapter(_MessagesAdapter):
         return result
 
     async def _binder(self, kwargs: dict[str, Any]) -> AnthropicFileOutputBinder:
+        # Raised as an HTTPException so the attempt runners, which map any other
+        # exception to a generic provider failure, hand it back unchanged.
+        try:
+            return await self._prepare_binder(kwargs)
+        except FilesError as exc:
+            raise _files_error(exc) from None
+
+    async def _prepare_binder(self, kwargs: dict[str, Any]) -> AnthropicFileOutputBinder:
         attempt = kwargs.pop("_file_attempt")
         if attempt.provider != "anthropic" or not attempt.provider_account_generation_id:
             raise FilesError(403, "Provider file outputs require an authorized Anthropic account")
@@ -876,12 +891,7 @@ async def create_message(
                     ctx.route.attempts, ctx.route.fallback_enabled = [selected], False
                 adapter = _FileMessagesAdapter(client, ctx.route.request_id, references)
         except FilesError as exc:
-            raise _anthropic_error(
-                _STATUS_TO_ANTHROPIC_TYPE.get(exc.status_code, _ERR_API),
-                exc.detail,
-                exc.status_code,
-                headers=exc.headers,
-            ) from None
+            raise _files_error(exc) from None
 
     tool_ctx = await prepare_gateway_tools(
         adapter=adapter,
@@ -1002,12 +1012,7 @@ async def create_message(
             try:
                 await adapter.finalize_outputs(result)
             except FilesError as exc:
-                raise _anthropic_error(
-                    _STATUS_TO_ANTHROPIC_TYPE.get(exc.status_code, _ERR_API),
-                    exc.detail,
-                    exc.status_code,
-                    headers=exc.headers,
-                ) from None
+                raise _files_error(exc) from None
         return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path

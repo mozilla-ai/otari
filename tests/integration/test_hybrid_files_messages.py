@@ -144,3 +144,63 @@ def test_file_reference_dispatch_and_accounting(
     else:
         assert events.count("provider") == 1
         assert events.index("usage") < events.index("register")
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("attempt_count", [1, 2])
+@pytest.mark.parametrize(
+    "status_code, error_type",
+    [(403, "permission_error"), (409, "api_error"), (429, "rate_limit_error")],
+)
+def test_output_preparation_failure_keeps_its_status(
+    monkeypatch: pytest.MonkeyPatch, stream: bool, attempt_count: int, status_code: int, error_type: str
+) -> None:
+    """A Files refusal before dispatch reaches the caller as itself, not as a provider failure."""
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gateway-token")
+    attempts = [_attempt(index, str(uuid.uuid4()), "owned-model", "owned-key") for index in range(attempt_count)]
+    for attempt in attempts:
+        attempt["managed"] = False
+        attempt["provider_account_generation_id"] = str(uuid.uuid4())
+    events: list[str] = []
+
+    async def platform(url: str, **kwargs: Any) -> httpx.Response:
+        if url.endswith("/resolve"):
+            return httpx.Response(200, json=_resolve_payload(attempts))
+        events.append("usage")
+        return httpx.Response(200, json={"correlation_id": kwargs["body"]["correlation_id"], "status": "completed"})
+
+    async def files(self: Any, path: str, body: dict[str, Any], result_type: Any) -> Any:
+        events.append(path)
+        assert path == "outputs/prepare"
+        raise FilesError(status_code, "Provider file outputs unavailable", headers={"Retry-After": "30"})
+
+    async def provider(**kwargs: Any) -> Any:
+        raise AssertionError("the provider must not be called when output preparation fails")
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", platform)
+    monkeypatch.setattr("gateway.api.routes.messages.amessages", provider)
+    monkeypatch.setattr(PlatformFilesClient, "post", files)
+    app = app_for(
+        GatewayConfig(
+            mode="hybrid",
+            platform={"base_url": "http://platform.test/api/v1"},
+            files_provider_native_enabled=True,
+        )
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            f"{API_ROOT}/messages",
+            headers={"Authorization": "Bearer user-token"},
+            json={
+                "model": "routed-model",
+                "max_tokens": 100,
+                "stream": stream,
+                "container": "container_01ABC",
+                "messages": [{"role": "user", "content": "Run it."}],
+            },
+        )
+    assert response.status_code == status_code, response.text
+    body = response.json()["detail"]["error"]
+    assert body == {"type": error_type, "message": "Provider file outputs unavailable"}
+    assert response.headers["Retry-After"] == "30"
+    assert events.count("outputs/prepare") == (attempt_count if stream else 1)
