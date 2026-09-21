@@ -631,11 +631,18 @@ class OrganizationService:
         user: User,
         skip: int = 0,
         limit: int = 100,
+        search: str | None = None,
     ) -> ActiveOrganizationMembersPublic:
-        """List the organization's roster. Any active member may read it."""
+        """List the organization's roster. Any active member may read it.
+
+        ``search`` narrows on name and email so a picker over this roster can ask
+        the server rather than filtering the page it was given (otari#1380).
+        """
         organization = await self.get_active_organization_for_user(user)
 
-        rows, count = await self.members.get_by_organization_with_users(organization.id, skip=skip, limit=limit)
+        rows, count = await self.members.get_by_organization_with_users(
+            organization.id, skip=skip, limit=limit, search=search
+        )
         # One query for the whole page rather than a lookup per row: the roster is
         # the picker the dashboard builds its key-owner list from, so every row
         # needs to say whether it can own a key.

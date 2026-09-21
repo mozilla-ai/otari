@@ -4,7 +4,8 @@ import {
   type ComboBoxOption,
 } from "@/design-system/forms/ComboBoxField"
 import { isPrefixedSelector } from "@/features/models/modelKey"
-import { useDiscoverableModels, useModels } from "@/shared/api/models"
+import { useCatalogSearch, useDiscoverableModels } from "@/shared/api/models"
+import { useDebounced } from "@/shared/hooks/useDebounced"
 
 // How many matches to render at once. A single provider can report a few hundred
 // models, and past this the popover is a wall of text nobody scrolls; typing one
@@ -36,24 +37,50 @@ export function useModelCatalog(
 ) {
   const isDiscovery = source === "discovery"
   const discoverable = useDiscoverableModels(isDiscovery)
-  const catalog = useModels(!isDiscovery)
+  // The catalog's matches, chosen by the server. Debounced on the way into the
+  // key, or every keystroke is a request and the answers race (otari#1380).
+  // Discovery still filters what it was given: `/v1/models/discoverable` takes
+  // no search term, and it lists what a provider reports rather than what this
+  // deployment serves, so the catalog is not a stand-in for it. #1380 carries
+  // the reasoning.
+  const term = useDebounced(value.trim())
+  const catalog = useCatalogSearch(term, MAX_VISIBLE + 1, !isDiscovery)
 
   const { visible, total, failed, isSourceEmpty } = useMemo(() => {
     const query = value.trim().toLowerCase()
     const providers = isDiscovery ? (discoverable.data?.providers ?? []) : []
+    if (!isDiscovery) {
+      // One row per selector, because a selector is what the field submits and
+      // the catalog folds several of them onto one model. The narrowing is the
+      // server's; this only unfolds what it sent, keeping the selectors that
+      // answer the term so a matched model does not drag its siblings in.
+      const selectors = (catalog.data?.models ?? []).flatMap((model) =>
+        model.selectors.filter(
+          (selector) =>
+            isPrefixedSelector(selector) &&
+            (!query || selector.toLowerCase().includes(query)),
+        ),
+      )
+      const options: ComboBoxOption[] = [...new Set(selectors)]
+        .sort((a, b) => a.localeCompare(b))
+        .map((selector) => ({ value: selector, label: selector }))
+      return {
+        visible: options.slice(0, MAX_VISIBLE),
+        // The server's count of matching models, which is what the hint is
+        // about: the rows withheld are models, not selectors of one model.
+        total: Math.max(options.length, catalog.data?.count ?? 0),
+        failed: [],
+        isSourceEmpty: !term && options.length === 0,
+      }
+    }
     // Provider order is preserved, so rows still cluster by provider even
-    // without section headers. The catalog arrives already sorted by key,
-    // which clusters it the same way.
-    const all: ComboBoxOption[] = isDiscovery
-      ? providers.flatMap((provider) =>
-          provider.models.map((model) => ({
-            value: model.key,
-            label: model.key,
-          })),
-        )
-      : (catalog.data?.data ?? [])
-          .filter((model) => isPrefixedSelector(model.id))
-          .map((model) => ({ value: model.id, label: model.id }))
+    // without section headers.
+    const all: ComboBoxOption[] = providers.flatMap((provider) =>
+      provider.models.map((model) => ({
+        value: model.key,
+        label: model.key,
+      })),
+    )
     const hits = query
       ? all.filter((option) => option.value.toLowerCase().includes(query))
       : all
@@ -63,7 +90,7 @@ export function useModelCatalog(
       failed: providers.filter((provider) => !provider.ok),
       isSourceEmpty: all.length === 0,
     }
-  }, [catalog.data, discoverable.data, isDiscovery, value])
+  }, [catalog.data, discoverable.data, isDiscovery, term, value])
 
   // `isLoading` rather than the `isPending && !data` the rest of the dashboard
   // guards on, and for the property that rules it out there: it is false for a

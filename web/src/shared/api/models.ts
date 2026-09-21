@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import type {
   CatalogModelDetail,
   CatalogResponse,
@@ -27,6 +27,36 @@ export function useCatalog() {
     queryKey: [CATALOG, "list"],
     queryFn: () => apiFetch<CatalogResponse>("/catalog/models"),
     staleTime: 60_000,
+  })
+}
+
+/**
+ * The catalog narrowed to a search term, for a picker.
+ *
+ * The term goes to the server, so what comes back is the matches out of the
+ * whole catalog rather than the matches out of whatever page was fetched
+ * (otari#1380). Bounded because a picker shows a handful of rows: the popover
+ * cannot render a thousand, and `count` is what tells the reader how many more
+ * there are.
+ *
+ * Debounce the term before it gets here (`useDebounced`), or every keystroke is
+ * a request and the answers race.
+ */
+export function useCatalogSearch(
+  search: string,
+  limit: number,
+  enabled = true,
+) {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: [CATALOG, "search", search, limit],
+    queryFn: () =>
+      apiFetch<CatalogResponse>(
+        `/catalog/models?limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+      ),
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    enabled,
   })
 }
 

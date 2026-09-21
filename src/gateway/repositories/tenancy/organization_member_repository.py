@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -21,6 +21,24 @@ from gateway.repositories.tenancy.user_repository import user_alphabetical_order
 # Statuses a membership can hold and still belong on the roster. Removal
 # suspends rather than deletes, so "suspended" is the one that drops off.
 LISTABLE_STATUSES = ("active", "invited")
+
+
+_LIKE_ESCAPE = "\\"
+
+
+def _contains_pattern(term: str) -> str:
+    """A case-folded ``LIKE`` pattern matching ``term`` anywhere.
+
+    The wildcards are escaped, so searching for ``100%`` finds the members whose
+    name contains that text rather than every member: a picker takes whatever
+    somebody types, and an unescaped ``%`` or ``_`` there is a wildcard nobody
+    asked for.
+    """
+
+    escaped = term.lower()
+    for character in (_LIKE_ESCAPE, "%", "_"):
+        escaped = escaped.replace(character, _LIKE_ESCAPE + character)
+    return f"%{escaped}%"
 
 
 class OrganizationMemberRepository(
@@ -198,29 +216,43 @@ class OrganizationMemberRepository(
         *,
         skip: int = 0,
         limit: int = 100,
+        search: str | None = None,
     ) -> tuple[list[tuple[OrganizationMember, User]], int]:
         """Return a page of the roster as ``(membership, identity)`` pairs, plus the total.
 
         One join rather than a lookup per row, so a roster of N members costs
         one query instead of N+1.
+
+        ``search`` narrows on the name and the email, case-insensitively, and the
+        count narrows with it: a picker that searched the page it had fetched
+        offered a subset of the roster and said nothing about it (otari#1380), so
+        the match has to happen where every row is.
         """
+        filters = [
+            col(OrganizationMember.organization_id) == organization_id,
+            col(OrganizationMember.status).in_(LISTABLE_STATUSES),
+        ]
+        if term := (search or "").strip():
+            pattern = _contains_pattern(term)
+            filters.append(
+                or_(
+                    func.lower(col(User.full_name)).like(pattern, escape=_LIKE_ESCAPE),
+                    func.lower(col(User.email)).like(pattern, escape=_LIKE_ESCAPE),
+                )
+            )
+
         count_result = await self.db.execute(
             select(func.count())
             .select_from(OrganizationMember)
-            .where(
-                col(OrganizationMember.organization_id) == organization_id,
-                col(OrganizationMember.status).in_(LISTABLE_STATUSES),
-            )
+            .join(User, col(OrganizationMember.user_id) == col(User.id))
+            .where(*filters)
         )
         count = count_result.scalar_one()
 
         result = await self.db.execute(
             select(OrganizationMember, User)
             .join(User, col(OrganizationMember.user_id) == col(User.id))
-            .where(
-                col(OrganizationMember.organization_id) == organization_id,
-                col(OrganizationMember.status).in_(LISTABLE_STATUSES),
-            )
+            .where(*filters)
             .order_by(user_alphabetical_order(), col(OrganizationMember.id))
             .offset(skip)
             .limit(limit)

@@ -98,6 +98,7 @@ const CATALOG: CatalogResponse = {
   default_pricing: true,
   defaults_as_of: null,
   metadata_available: true,
+  count: 1,
   models: [GLM],
 }
 

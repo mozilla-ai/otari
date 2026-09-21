@@ -1605,9 +1605,27 @@
                   "disabled": true,
                   "key": "at_context",
                   "value": ""
+                },
+                {
+                  "description": "Narrow to models whose name, catalog id or any selector contains this text, case-insensitively.",
+                  "disabled": true,
+                  "key": "search",
+                  "value": ""
+                },
+                {
+                  "description": "Number of models to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of models to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context="
+              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit="
             }
           }
         },
@@ -2931,7 +2949,7 @@
         {
           "name": "List Active Organization Members",
           "request": {
-            "description": "List the members of the caller's active organization.",
+            "description": "List the members of the caller's active organization.\n\n``search`` narrows the page and the count together, so a caller offering\nthese members as options can ask for the matches instead of filtering\nwhatever page it happened to fetch.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2957,9 +2975,15 @@
                   "disabled": true,
                   "key": "limit",
                   "value": ""
+                },
+                {
+                  "description": "Narrow to members whose name or email contains this text, case-insensitively.",
+                  "disabled": true,
+                  "key": "search",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/members?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/members?skip=&limit=&search="
             }
           }
         },

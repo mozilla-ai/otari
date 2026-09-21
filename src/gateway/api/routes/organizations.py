@@ -183,12 +183,25 @@ async def list_active_organization_members(
     current_identity: CurrentIdentity,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
+    search: Annotated[
+        str | None,
+        Query(
+            max_length=200,
+            description="Narrow to members whose name or email contains this text, case-insensitively.",
+        ),
+    ] = None,
 ) -> ActiveOrganizationMembersPublic:
-    """List the members of the caller's active organization."""
+    """List the members of the caller's active organization.
+
+    ``search`` narrows the page and the count together, so a caller offering
+    these members as options can ask for the matches instead of filtering
+    whatever page it happened to fetch.
+    """
     return await service.list_active_organization_members_for_user(
         user=current_identity,
         skip=skip,
         limit=limit,
+        search=search,
     )
 
 

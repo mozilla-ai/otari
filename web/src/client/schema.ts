@@ -2132,6 +2132,10 @@ export interface paths {
         /**
          * List Active Organization Members
          * @description List the members of the caller's active organization.
+         *
+         *     ``search`` narrows the page and the count together, so a caller offering
+         *     these members as options can ask for the matches instead of filtering
+         *     whatever page it happened to fetch.
          */
         get: operations["organizations-list_active_organization_members"];
         put?: never;
@@ -6477,6 +6481,11 @@ export interface components {
          * @description The grouped catalog, and the facts a reader needs to interpret its prices.
          */
         CatalogResponse: {
+            /**
+             * Count
+             * @description Models matching the search, before the window, so a caller can page without reading them all.
+             */
+            count: number;
             /**
              * Default Pricing
              * @description Whether an unpriced model is metered at the genai-prices default.
@@ -14365,6 +14374,12 @@ export interface operations {
             query?: {
                 /** @description Compare prices for a request of this many input tokens: each model's minimum is taken from the pricing tier that request would settle at. Omitted, the base rates compare. */
                 at_context?: number | null;
+                /** @description Narrow to models whose name, catalog id or any selector contains this text, case-insensitively. */
+                search?: string | null;
+                /** @description Number of models to skip */
+                skip?: number;
+                /** @description Maximum number of models to return */
+                limit?: number;
             };
             header?: never;
             path?: never;
@@ -16368,6 +16383,8 @@ export interface operations {
                 skip?: number;
                 /** @description Maximum number of records to return */
                 limit?: number;
+                /** @description Narrow to members whose name or email contains this text, case-insensitively. */
+                search?: string | null;
             };
             header?: never;
             path?: never;

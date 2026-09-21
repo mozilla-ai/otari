@@ -165,6 +165,81 @@ def test_the_catalog_folds_two_spellings_into_one_model(priced: TestClient, mast
     assert glm["open_weights"] is True
 
 
+def test_the_search_matches_the_name_a_reader_sees(priced: TestClient, master_header: dict[str, str]) -> None:
+    body = _get(priced, f"{API_ROOT}/catalog/models?search=kimi", headers=master_header)
+
+    assert [model["id"] for model in body["models"]] == ["moonshotai/kimi-k2.6"]
+    # The count narrows with the page, so a caller pages the matches and not the
+    # catalog.
+    assert body["count"] == 1
+
+
+def test_the_search_matches_a_selector_too(priced: TestClient, master_header: dict[str, str]) -> None:
+    """A picker is typed into by somebody who knows the selector they will send,
+    not only the name the catalog prints."""
+
+    body = _get(priced, f"{API_ROOT}/catalog/models?search=fireworks", headers=master_header)
+
+    assert [model["id"] for model in body["models"]] == ["z-ai/glm-5.3"]
+
+
+def test_the_search_ignores_case(priced: TestClient, master_header: dict[str, str]) -> None:
+    body = _get(priced, f"{API_ROOT}/catalog/models?search=KIMI", headers=master_header)
+
+    assert [model["id"] for model in body["models"]] == ["moonshotai/kimi-k2.6"]
+
+
+def test_a_blank_search_is_no_filter(priced: TestClient, master_header: dict[str, str]) -> None:
+    """A cleared box is not a search for the empty string."""
+
+    body = _get(priced, f"{API_ROOT}/catalog/models?search=%20%20", headers=master_header)
+
+    assert body["count"] == 2
+
+
+def test_an_unmatched_search_is_an_empty_catalog_rather_than_an_error(
+    priced: TestClient,
+    master_header: dict[str, str],
+) -> None:
+    body = _get(priced, f"{API_ROOT}/catalog/models?search=nothing-serves-this", headers=master_header)
+
+    assert body["models"] == []
+    assert body["count"] == 0
+
+
+def test_the_window_pages_the_matches(priced: TestClient, master_header: dict[str, str]) -> None:
+    first = _get(priced, f"{API_ROOT}/catalog/models?skip=0&limit=1", headers=master_header)
+    second = _get(priced, f"{API_ROOT}/catalog/models?skip=1&limit=1", headers=master_header)
+
+    # The total is the catalog's, on both, so a pager can say how far it is
+    # through something it has not read.
+    assert first["count"] == second["count"] == 2
+    assert len(first["models"]) == len(second["models"]) == 1
+    assert first["models"][0]["id"] != second["models"][0]["id"]
+
+
+def test_the_search_cannot_widen_what_the_caller_may_see(
+    priced: TestClient,
+    master_header: dict[str, str],
+) -> None:
+    """Narrowing only. A term matching nothing this caller may name still lists
+    nothing, rather than reaching past the catalog they were given."""
+
+    everything = _get(priced, f"{API_ROOT}/catalog/models", headers=master_header)
+    searched = _get(priced, f"{API_ROOT}/catalog/models?search=glm", headers=master_header)
+
+    assert {model["id"] for model in searched["models"]} <= {model["id"] for model in everything["models"]}
+
+
+def test_the_window_is_bounded(priced: TestClient, master_header: dict[str, str]) -> None:
+    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
+        over = priced.get(f"{API_ROOT}/catalog/models?limit=1001", headers=master_header)
+        long_term = priced.get(f"{API_ROOT}/catalog/models?search={'x' * 201}", headers=master_header)
+
+    assert over.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert long_term.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
 def test_the_detail_lists_every_offering_cheapest_first(priced: TestClient, master_header: dict[str, str]) -> None:
     body = _get(priced, f"{API_ROOT}/catalog/models/z-ai/glm-5.3", headers=master_header)
 

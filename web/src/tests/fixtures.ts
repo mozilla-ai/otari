@@ -77,6 +77,9 @@ export function catalogResponse(
     default_pricing: false,
     defaults_as_of: null,
     metadata_available: false,
+    // The route's own answer: the matches before the window, which with no
+    // window is however many the fixture carries.
+    count: models.length,
     models,
     ...overrides,
   }

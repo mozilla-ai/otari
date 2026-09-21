@@ -29,24 +29,19 @@ const DISCOVERABLE = {
   ],
 }
 
+// The catalog route's shape: folded by model, each carrying the selectors that
+// serve it. An alias is a display name rather than a selector a provider
+// answers to, so it is not among them.
 const CATALOG = {
-  object: "list",
-  data: [
+  default_pricing: false,
+  defaults_as_of: null,
+  metadata_available: true,
+  count: 1,
+  models: [
     {
-      id: "openai:gpt-5-mini",
-      object: "model",
-      created: 0,
-      owned_by: "openai",
-      pricing_source: "none",
-    },
-    // An alias: a display name rather than a model a provider serves, so it is
-    // no answer to "which selector is this rate stored under".
-    {
-      id: "fast",
-      object: "model",
-      created: 0,
-      owned_by: "otari",
-      pricing_source: "none",
+      id: "openai/gpt-5-mini",
+      name: "GPT-5 mini",
+      selectors: ["openai:gpt-5-mini"],
     },
   ],
 }
@@ -216,12 +211,36 @@ describe("ModelComboBox", () => {
       )
       await screen.findByRole("combobox", { name: "Model key" })
       await vi.waitFor(() => {
-        expect(urls.some((url) => url.endsWith("/models"))).toBe(true)
+        expect(urls.some((url) => url.includes("/catalog/models"))).toBe(true)
       })
 
       expect(urls.some((url) => url.includes("/models/discoverable"))).toBe(
         false,
       )
+    })
+
+    it("sends the search to the server rather than filtering what it fetched", async () => {
+      // otari#1380. Filtering the page it had fetched offered a subset of the
+      // catalog and said nothing about it, so a search for a model that exists
+      // could answer that there is none.
+      const urls = mockBothSources()
+      renderWithClient(
+        <ModelComboBox
+          label="Model key"
+          value="gpt"
+          onChange={() => {}}
+          source="catalog"
+        />,
+      )
+      await screen.findByRole("combobox", { name: "Model key" })
+
+      await vi.waitFor(() => {
+        expect(
+          urls.some((url) =>
+            url.includes("/catalog/models?limit=51&search=gpt"),
+          ),
+        ).toBe(true)
+      })
     })
 
     it("offers what the catalog serves, and not the names that only stand for it", async () => {

@@ -274,6 +274,9 @@ class CatalogResponse(BaseModel):
     metadata_available: bool = Field(
         description="False when models.dev could not be read; descriptions are then absent."
     )
+    count: int = Field(
+        description="Models matching the search, before the window, so a caller can page without reading them all."
+    )
     models: list[CatalogModelSummary]
 
 
@@ -620,6 +623,26 @@ async def _merged_for(
     )
 
 
+def _matches(model: CatalogModelSummary, search: str | None) -> bool:
+    """Whether a catalog row answers this search.
+
+    The name, the catalog id and every selector, because a person picking a
+    model types whichever of those they know: the vendor-qualified name they
+    read in the list, or the ``provider:model`` selector they will send.
+
+    Matched here rather than in the browser, which is what this parameter is
+    for (otari#1380): a picker filtering the page it had fetched offered a
+    subset of the catalog and said nothing about it.
+    """
+
+    term = (search or "").strip().lower()
+    if not term:
+        return True
+    if term in model.name.lower() or term in model.id.lower():
+        return True
+    return any(term in selector.lower() for selector in model.selectors)
+
+
 @router.get("/models")
 async def list_catalog(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -637,6 +660,18 @@ async def list_catalog(
             ),
         ),
     ] = None,
+    search: Annotated[
+        str | None,
+        Query(
+            max_length=200,
+            description=(
+                "Narrow to models whose name, catalog id or any selector contains this text, "
+                "case-insensitively."
+            ),
+        ),
+    ] = None,
+    skip: Annotated[int, Query(ge=0, description="Number of models to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of models to return")] = 100,
 ) -> CatalogResponse:
     """The models this caller may use, one entry each however many providers serve it.
 
@@ -652,11 +687,16 @@ async def list_catalog(
         _summary(identity, [grouped.offerings[selector] for selector in identity.selectors], at_context)
         for identity in grouped.identities.values()
     ]
+    matched = sorted(
+        (model for model in models if _matches(model, search)),
+        key=lambda m: (m.name.lower(), m.id),
+    )
     return CatalogResponse(
         default_pricing=default_pricing_enabled(),
         defaults_as_of=await _defaults_as_of(db),
         metadata_available=grouped.catalog is not None,
-        models=sorted(models, key=lambda m: (m.name.lower(), m.id)),
+        count=len(matched),
+        models=matched[skip : skip + limit],
     )
 
 

@@ -98,6 +98,24 @@ function mockApi({
       }
       return jsonResponse(writeBody, writeStatus)
     }
+    // The picker's own source, folded by model and narrowed by the server.
+    if (url.includes(`${API_ROOT}/catalog/models`)) {
+      const term = new URL(url, "http://localhost").searchParams.get("search")
+      const selectors = [...models, ...managedModels].filter(
+        (id) => !term || id.toLowerCase().includes(term.toLowerCase()),
+      )
+      return jsonResponse({
+        default_pricing: false,
+        defaults_as_of: null,
+        metadata_available: true,
+        count: selectors.length,
+        models: selectors.map((id) => ({
+          id,
+          name: id,
+          selectors: [id],
+        })),
+      })
+    }
     if (url.endsWith(`${API_ROOT}/models`)) {
       return jsonResponse({
         object: "list",
