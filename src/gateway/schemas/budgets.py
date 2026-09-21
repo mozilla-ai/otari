@@ -182,11 +182,15 @@ class CreateScopedBudgetRequest(BaseModel):
     name: str | None = Field(default=None, max_length=200, description="Admin-facing label for this ceiling")
 
 
-class UpdateScopedBudgetRequest(BaseModel):
-    """Request model for updating a scoped budget."""
+class ScopedBudgetChanges(BaseModel):
+    """The two editable fields of a scoped ceiling: the budget it enforces and its label."""
 
     budget_id: str | None = Field(default=None, min_length=1, max_length=255)
     name: str | None = Field(default=None, max_length=200)
+
+
+class UpdateScopedBudgetRequest(ScopedBudgetChanges):
+    """Request model for updating a scoped budget."""
 
 
 class ScopedBudgetResponse(BaseModel):
@@ -380,7 +384,7 @@ class OrganizationScopedBudgetCreate(BaseModel):
     name: str | None = Field(default=None, max_length=200, description="Admin-facing label for this ceiling")
 
 
-class OrganizationScopedBudgetUpdate(BaseModel):
+class OrganizationScopedBudgetUpdate(ScopedBudgetChanges):
     """Relabel a ceiling, or point it at a different budget of this organization's.
 
     The scope and the provider narrowing are not editable, for the reason
@@ -388,9 +392,6 @@ class OrganizationScopedBudgetUpdate(BaseModel):
     a different identity while carrying its spend, which is a delete and a
     create, not an update.
     """
-
-    budget_id: str | None = Field(default=None, min_length=1, max_length=255)
-    name: str | None = Field(default=None, max_length=200)
 
 
 class OrganizationScopedBudgetPublic(BaseModel):
