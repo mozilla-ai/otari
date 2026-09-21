@@ -205,37 +205,32 @@ async def _compensate_upload(
         deleted = False
         if metadata is not None and not (isinstance(failure, FilesError) and failure.status_code == 409):
             try:
-                async with provider_client(operation.account) as provider:
+                async with asyncio.timeout(10), provider_client(operation.account) as provider:
                     await provider.adelete_file(metadata.id, max_retries=0, extra_headers=headers)
                 deleted = True
             except Exception as exc:
                 deleted = provider_error(exc).status_code == 404
         try:
-            await client.retry(
-                f"uploads/{operation.id}/abandon",
-                {
-                    "cleanup_token": operation.cleanup_token.get_secret_value(),
-                    "metadata": metadata.model_dump(mode="json", exclude_unset=True) if metadata else None,
-                    "deleted": deleted,
-                    "outcome_unknown": started
-                    and metadata is None
-                    and (
-                        not isinstance(failure, Exception)
-                        or provider_error(failure).status_code not in {400, 404, 413, 429}
-                    ),
-                },
-                WireModel,
-            )
-        except FilesError:
+            async with asyncio.timeout(10):
+                await client.retry(
+                    f"uploads/{operation.id}/abandon",
+                    {
+                        "cleanup_token": operation.cleanup_token.get_secret_value(),
+                        "metadata": metadata.model_dump(mode="json", exclude_unset=True) if metadata else None,
+                        "deleted": deleted,
+                        "outcome_unknown": started
+                        and metadata is None
+                        and (
+                            not isinstance(failure, Exception)
+                            or provider_error(failure).status_code not in {400, 404, 413, 429}
+                        ),
+                    },
+                    WireModel,
+                )
+        except (FilesError, TimeoutError):
             pass
 
-    async def bounded_compensate() -> None:
-        try:
-            await asyncio.wait_for(compensate(), timeout=20)
-        except TimeoutError:
-            pass
-
-    await asyncio.shield(asyncio.create_task(bounded_compensate()))
+    await asyncio.shield(asyncio.create_task(compensate()))
 
 
 @router.get("/files", response_model=AnthropicFilePage | OpenAIFilePage, response_model_exclude_unset=True)

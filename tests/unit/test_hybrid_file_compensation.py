@@ -1,8 +1,8 @@
-"""Upload compensation survives handler cancellation but remains time-bounded."""
+"""Upload compensation survives cancellation and reserves time for abandonment."""
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -17,12 +17,15 @@ from gateway.services.provider_files.contracts import FileAccount, FileMetadata,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel_handler", [False, True])
-@pytest.mark.parametrize("expire", [False, True])
+@pytest.mark.parametrize("expire", [None, "delete", "report"])
 async def test_upload_compensation_survives_cancellation_and_honors_timeout(
-    monkeypatch: pytest.MonkeyPatch, cancel_handler: bool, expire: bool
+    monkeypatch: pytest.MonkeyPatch, cancel_handler: bool, expire: str | None
 ) -> None:
-    entered, release, finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    entered, release = asyncio.Event(), asyncio.Event()
+    reporting, report_release = asyncio.Event(), asyncio.Event()
     events: list[str] = []
+    timers: list[asyncio.Timeout] = []
+    tasks: list[asyncio.Task[None]] = []
     operation = Operation(
         id=uuid.uuid4(),
         cleanup_token=SecretStr("cleanup"),
@@ -50,25 +53,35 @@ async def test_upload_compensation_survives_cancellation_and_honors_timeout(
     async def retry(self: Any, path: str, body: dict[str, Any], result_type: type[Any]) -> Any:
         assert path == f"uploads/{operation.id}/abandon"
         assert body["metadata"] == {"id": metadata.id}
-        assert body["deleted"] is True
-        events.append("reported")
+        assert body["deleted"] is (expire != "delete")
+        assert body["outcome_unknown"] is False
+        reporting.set()
+        try:
+            await report_release.wait()
+            events.append("reported")
+        except asyncio.CancelledError:
+            events.append("report-cancelled")
+            raise
         return result_type()
 
-    real_wait_for = asyncio.wait_for
-    timer = asyncio.timeout(None)
+    real_timeout, real_create_task = asyncio.timeout, asyncio.create_task
 
-    async def controlled_wait_for(awaitable: Any, timeout: float) -> Any:
-        assert timeout == 20
-        try:
-            async with timer:
-                return await awaitable
-        finally:
-            finished.set()
+    def controlled_timeout(delay: float | None) -> asyncio.Timeout:
+        assert delay == 10
+        timer = real_timeout(None)
+        timers.append(timer)
+        return timer
+
+    def capture_task(coroutine: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
+        task = real_create_task(coroutine)
+        tasks.append(task)
+        return task
 
     monkeypatch.setattr(hybrid_files, "provider_client", provider)
     monkeypatch.setattr(PlatformFilesClient, "retry", retry)
-    monkeypatch.setattr(asyncio, "wait_for", controlled_wait_for)
-    handler = asyncio.create_task(
+    monkeypatch.setattr(asyncio, "timeout", controlled_timeout)
+    monkeypatch.setattr(asyncio, "create_task", capture_task)
+    handler = real_create_task(
         hybrid_files._compensate_upload(
             PlatformFilesClient("https://authority", "gateway", "user"),
             operation,
@@ -79,21 +92,34 @@ async def test_upload_compensation_survives_cancellation_and_honors_timeout(
         )
     )
     try:
-        await real_wait_for(entered.wait(), timeout=1)
+        await asyncio.wait_for(entered.wait(), timeout=1)
         if cancel_handler:
             handler.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await handler
             assert events == []
-        if expire:
-            timer.reschedule(asyncio.get_running_loop().time())
+        if expire == "delete":
+            timers[0].reschedule(asyncio.get_running_loop().time())
         else:
             release.set()
-        await real_wait_for(finished.wait(), timeout=1)
+        await asyncio.wait_for(reporting.wait(), timeout=1)
+        assert len(timers) == 2
+        if expire == "report":
+            timers[1].reschedule(asyncio.get_running_loop().time())
+        else:
+            report_release.set()
+        await asyncio.wait_for(tasks[0], timeout=1)
         if not cancel_handler:
             await handler
-        assert events == (["delete-cancelled"] if expire else ["deleted", "reported"])
+        assert events == [
+            "delete-cancelled" if expire == "delete" else "deleted",
+            "report-cancelled" if expire == "report" else "reported",
+        ]
     finally:
         release.set()
+        report_release.set()
         if not handler.done():
-            await real_wait_for(handler, timeout=1)
+            await asyncio.wait_for(handler, timeout=1)
+        for task in tasks:
+            if not task.done():
+                await asyncio.wait_for(task, timeout=1)
