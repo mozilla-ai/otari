@@ -30,7 +30,7 @@ def test_a_blank_spaced_or_overlong_narrowing_is_refused(
 
 
 @pytest.mark.parametrize(("body", "required"), _NARROWING_BODIES)
-@pytest.mark.parametrize("accepted", [None, "openai", "x" * 255])
+@pytest.mark.parametrize("accepted", [None, "x", "openai", "x" * 255])
 def test_a_narrowing_is_optional_and_bounded(
     body: type[BaseModel], required: dict[str, Any], accepted: str | None
 ) -> None:
