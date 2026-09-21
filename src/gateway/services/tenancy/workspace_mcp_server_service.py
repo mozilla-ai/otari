@@ -387,12 +387,8 @@ class WorkspaceMcpServerService:
     ) -> WorkspaceMcpServersPublic:
         """List a page of the workspace's servers, plus the total.
 
-        Reachable by any member who can see the workspace, like the workspace
-        surfaces beside it (`workspace_budget_default_service` is the pattern);
-        see `_require_management` for why the gate here is visibility alone.
-        The rows never carry a token either way, and a caller who may read the
-        workspace without managing it also gets any credential embedded in the
-        URL itself masked (see `WorkspaceMcpServerPublic.from_model`).
+        Any member who can see the workspace may call this.
+        A caller who cannot manage the workspace gets any credential in a server URL masked.
         """
         workspace = await authorization.resolve_visible_workspace(
             self.db, user=user, workspace_id=workspace_id, organizations=self.organizations
@@ -439,11 +435,7 @@ class WorkspaceMcpServerService:
         resolved_workspace_id = await self._require_management(user, workspace_id)
         await _validate_url(request.url, has_token=bool(request.authorization_token))
 
-        # "At most N rows for this workspace" spans a variable set of rows, so no
-        # single unique index can hold it and the count below would otherwise be
-        # a read that a concurrent create invalidates before this one inserts.
-        # Same lock, for the same read-decide-write reason, that
-        # `workspace_budget_default_service` and `org_provider_key_service` take.
+        # The workspace lock stops a concurrent create from invalidating the count below before this insert.
         await WorkspaceRepository(self.db).lock(resolved_workspace_id)
 
         count = (

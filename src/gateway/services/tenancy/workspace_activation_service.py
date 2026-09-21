@@ -289,15 +289,8 @@ class WorkspaceActivationService:
             self._require_offerable(workspace=workspace, state=state)
 
         plaintext = self.key_format.mint()
-        # Owned by the caller's own request-plane row, not the shared ``default``
-        # user that ``POST /v1/keys`` falls back to. Two reasons: the dashboard's
-        # own key form requires an owner, so a key minted from a dashboard flow
-        # should have a real one; and a key owned by an identity's attribution row
-        # is what makes the request bill through that member's scoped ceilings
-        # (`services/scoped_budget_service.py` resolves the identity back out of
-        # ``users.user_id``), where one owned by ``default`` would sit outside
-        # every per-member budget. The row normally exists already: first-boot
-        # provisioning mints the operator's, and adding a member mints theirs.
+        # The key is owned by the caller's attribution row and not the shared ``default`` user,
+        # so its requests bill through that member's scoped ceilings.
         owner = await get_or_create_attribution_user(
             self.db,
             user_id=str(user.id),

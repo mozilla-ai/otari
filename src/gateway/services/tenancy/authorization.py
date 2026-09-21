@@ -1,20 +1,8 @@
 """Shared workspace-visibility and workspace-management checks.
 
-Extracted from :class:`WorkspaceService`, whose private methods now delegate
-here, so :class:`WorkspaceBudgetDefaultService` enforces the same two rules
-rather than carrying a second, driftable copy of them. A leaf module on
-purpose: it reaches :class:`OrganizationService` (to resolve the caller's
-active organization and organization-level role) but nothing here reaches
-back, which is what lets ``workspace_budget_default_service`` sit between
-``workspace_service`` and ``organization_service`` in the import graph without
-closing a cycle.
-
-Every check below reads only active organization and workspace membership.
-``User.is_superuser`` is deployment-operator status, not an organization or
-workspace role, and is deliberately never consulted here: an operator's
-tenant-scoped access is decided by their own membership exactly as anyone
-else's is. Deployment-wide surfaces are gated separately, by
-``require_deployment_operator`` at the router level. See mozilla-ai/otari#1011.
+This is a leaf module: it reaches :class:`OrganizationService`, and nothing in organizations reaches back.
+Every check reads only active organization and workspace membership.
+``User.is_superuser`` is deployment-operator status and is never consulted here.
 """
 
 import uuid

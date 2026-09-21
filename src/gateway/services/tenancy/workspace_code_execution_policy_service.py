@@ -1,46 +1,15 @@
 """A workspace's policy over the deployment-wide code-execution sandbox.
 
-The sandbox is an operator concern and stays one: its URL and any credential
-live in the deployment's tool settings, and nothing here can point a workspace
-at a different backend. What a policy row decides is *who on this deployment
-may ask for code execution, and within which limits*.
-
-Composition follows the rule in ``src/gateway/AGENTS.md`` (#655, settled in
-#678): a workspace row may veto and may refine, never grant. So
-
-* ``enabled=False`` refuses ``otari_code_execution`` for the workspace;
-* ``max_iterations`` and ``exec_timeout_s`` are floored against what the
-  request would otherwise get, so a value above the deployment's own ceiling
-  narrows nothing rather than raising it;
-* ``default_purpose_hint`` fills in only when the request named none, the same
-  precedence the hybrid path applies to the policy it resolves from otari.ai;
-* ``tools`` intersects the tool kinds the deployment's sandbox backend already
-  serves, so it can only take one away, and a list that leaves nothing runnable
-  refuses the request rather than serving an empty tool set;
-* ``image`` names the sandbox image the workspace's code runs in, and may only
-  name one the operator has already curated into ``sandbox_allowed_session_images``
-  (plus the deployment's own ``sandbox_session_image``). A workspace-settable image is a
-  supply-chain surface rather than a string, so the allow-list is the whole
-  point of the column: without one, a workspace pins nothing;
-* and **no row means no narrowing**, which is what makes a deployment that
-  configures nothing behave exactly as it did.
-
-The CRUD half is master-key routed (``routes/workspace_code_execution_policy.py``)
-and role-gated per workspace: an organization owner/admin, or an owner/admin of
-the workspace itself, may read *and* write it. Reads are gated too, which is a
-departure from ``workspace_budget_default_service`` next door and a port of the
-hosted service's own rule: code execution is a security and billing posture for
-the whole workspace, not a per-member allowance. It is looser than the hosted
-version in one way, admitting a workspace owner/admin and not only an
-organization one, because that is the management gate every other
-per-workspace surface in this repository uses
-(``authorization.require_workspace_management_access``).
-
-The request-path half is :func:`resolve_workspace_code_execution_policy`, a
-plain read with no identity: the caller has already authenticated, and the
-workspace comes off the key, never off a header (``services/workspace_scope``).
-It is called from ``prepare_gateway_tools`` at admission, where the request's
-session is live, and its values land on ``ToolContext``.
+The sandbox stays an operator concern, and a policy decides who may ask for code execution and within which limits.
+A workspace row may veto and may refine, and it never grants.
+``enabled=False`` refuses ``otari_code_execution`` for the workspace.
+``max_iterations`` and ``exec_timeout_s`` can only lower what the request would otherwise get.
+``default_purpose_hint`` applies only when the request names none.
+``tools`` intersects the tool kinds the sandbox backend serves, and an empty result refuses the request.
+``image`` may name only an image on the operator's allow-list, because a settable image is a supply-chain surface.
+No row means no narrowing.
+Reads and writes both require an owner or admin of the organization or of the workspace.
+:func:`resolve_workspace_code_execution_policy` is a plain read with no identity, and the workspace comes from the key.
 """
 
 from __future__ import annotations
