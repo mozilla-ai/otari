@@ -22,7 +22,14 @@ from sqlalchemy.orm import Mapped
 
 from gateway.core.database import create_session
 from gateway.log_config import logger
-from gateway.models.budgets import BudgetReservation, BudgetReservationScope
+from gateway.models.budgets import (
+    RESERVATION_ACTIVE,
+    RESERVATION_EXPIRED,
+    RESERVATION_RELEASED,
+    RESERVATION_SETTLED,
+    BudgetReservation,
+    BudgetReservationScope,
+)
 from gateway.models.users import User
 from gateway.services.budgets._scoped_enforcement import release as release_scoped
 
@@ -34,13 +41,6 @@ if TYPE_CHECKING:
     from gateway.services.budgets._scoped_enforcement import ApplicableBudget
 
 ZERO = Decimal(0)
-
-# The lifecycle, as stored. Plain strings rather than a database enum so a new
-# state needs no enum migration (the same reasoning as ``scoped_budgets.scope_type``).
-RESERVATION_ACTIVE = "active"
-RESERVATION_SETTLED = "settled"  # Actual recorded, hold released
-RESERVATION_RELEASED = "released"  # Hold returned with no spend recorded
-RESERVATION_EXPIRED = "expired"  # Reclaimed by the TTL sweep after leaking
 
 # The three a row can rest in. Written out as a set the retention query can ask
 # for by equality: ``status != ACTIVE`` reads the same but is an inequality on

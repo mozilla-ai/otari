@@ -31,7 +31,7 @@ from gateway.models.money import UsdCost
 # leaves the sum of three of them ~9000x inside the type.
 MAX_COUNT_LIMIT = 1_000_000_000_000_000
 
-# An enum changes the published OpenAPI schema, so both vocabularies stay `Literal`.
+# An enum changes the published OpenAPI schema, so the two published vocabularies stay `Literal`.
 ResetAlignment = Literal["calendar_day", "calendar_week", "calendar_month"]
 RESET_ALIGNMENTS: tuple[ResetAlignment, ...] = get_args(ResetAlignment)
 ALIGN_DAY: ResetAlignment = "calendar_day"
@@ -45,6 +45,13 @@ SCOPE_WORKSPACE: ScopeType = "workspace"
 SCOPE_WORKSPACE_MEMBER: ScopeType = "workspace_member"
 SCOPE_ORG_MEMBER: ScopeType = "org_member"
 SCOPE_API_TOKEN: ScopeType = "api_token"
+
+ReservationStatus = Literal["active", "settled", "released", "expired"]
+RESERVATION_STATUSES: tuple[ReservationStatus, ...] = get_args(ReservationStatus)
+RESERVATION_ACTIVE: ReservationStatus = "active"
+RESERVATION_SETTLED: ReservationStatus = "settled"
+RESERVATION_RELEASED: ReservationStatus = "released"
+RESERVATION_EXPIRED: ReservationStatus = "expired"
 
 
 class Budget(Base):
@@ -330,7 +337,7 @@ class BudgetReservation(Base):
     # takes the hold, and the release has to match what the reserve did.
     user_reserved: Mapped[bool] = mapped_column(default=False, server_default=false())
     # The status is a plain string and not a database enum, so a new state needs no enum migration.
-    # Its values are the ``RESERVATION_*`` constants in ``services/budgets/_ledger.py``.
+    # Its values are ``RESERVATION_STATUSES``.
     status: Mapped[str] = mapped_column(default="active", server_default="active", nullable=False)
     # After this instant a still-active row is treated as leaked and reclaimed.
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
