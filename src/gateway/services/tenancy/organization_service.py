@@ -268,6 +268,14 @@ class OrganizationService:
         """Whether an identity is an active member of an organization."""
         return await self.members.get_active_by_organization_and_user(organization_id, user_id) is not None
 
+    async def has_organization(self, organization_id: uuid.UUID) -> bool:
+        """Return whether an organization with this ID exists."""
+        return await self.organizations.get(organization_id) is not None
+
+    async def get_workspace_ids_in_organization(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
+        """Return the ID of every workspace in an organization."""
+        return await self.workspace_rows.get_ids_by_organization(organization_id)
+
     async def _to_context(
         self,
         *,
