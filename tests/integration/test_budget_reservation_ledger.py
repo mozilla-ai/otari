@@ -23,7 +23,16 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from gateway.models.budgets import Budget, BudgetReservation, BudgetReservationScope, ScopedBudget
+from gateway.models.budgets import (
+    RESERVATION_ACTIVE,
+    RESERVATION_EXPIRED,
+    RESERVATION_RELEASED,
+    RESERVATION_SETTLED,
+    Budget,
+    BudgetReservation,
+    BudgetReservationScope,
+    ScopedBudget,
+)
 from gateway.models.users import User
 from gateway.services.budgets import _ledger as ledger
 from gateway.services.budgets import (
@@ -109,7 +118,7 @@ async def test_a_hold_becomes_a_row_on_both_mechanisms(async_db: AsyncSession, t
     rows = await _rows(async_db, tenancy.user_id)
     assert len(rows) == 1
     assert rows[0].id == handle.reservation_id
-    assert rows[0].status == ledger.RESERVATION_ACTIVE
+    assert rows[0].status == RESERVATION_ACTIVE
     assert rows[0].user_reserved is True
     assert rows[0].estimate == Decimal("2.000000")
     assert rows[0].expires_at > datetime.now(UTC)
@@ -145,7 +154,7 @@ async def test_reconcile_is_idempotent_by_reservation_identity(async_db: AsyncSe
     assert reserved == pytest.approx(0.0)
 
     rows = await _rows(async_db, tenancy.user_id)
-    assert rows[0].status == ledger.RESERVATION_SETTLED
+    assert rows[0].status == RESERVATION_SETTLED
 
 
 @pytest.mark.asyncio
@@ -171,7 +180,7 @@ async def test_refund_is_idempotent_and_records_no_spend(async_db: AsyncSession,
     assert current == pytest.approx(0.0)
     assert reserved == pytest.approx(0.0)
     rows = await _rows(async_db, tenancy.user_id)
-    assert rows[0].status == ledger.RESERVATION_RELEASED
+    assert rows[0].status == RESERVATION_RELEASED
 
 
 @pytest.mark.asyncio
@@ -217,9 +226,9 @@ async def test_a_second_hold_survives_the_first_being_reclaimed(async_db: AsyncS
     _, reserved = await _counters(async_db, cap.id)
     assert reserved == pytest.approx(2.0)
 
-    assert await _status(async_db, leaked.reservation_id) == ledger.RESERVATION_EXPIRED
+    assert await _status(async_db, leaked.reservation_id) == RESERVATION_EXPIRED
     assert live.reservation_id is not None
-    assert await _status(async_db, live.reservation_id) == ledger.RESERVATION_ACTIVE
+    assert await _status(async_db, live.reservation_id) == RESERVATION_ACTIVE
 
 
 @pytest.mark.asyncio
@@ -248,7 +257,7 @@ async def test_settling_a_reclaimed_hold_does_not_release_it_twice(async_db: Asy
     user = await _user(async_db, tenancy.user_id)
     assert user.spend == Decimal("1.000000")
     assert user.reserved == Decimal("0.000000")
-    assert await _status(async_db, handle.reservation_id) == ledger.RESERVATION_SETTLED
+    assert await _status(async_db, handle.reservation_id) == RESERVATION_SETTLED
 
     # And a second late settlement is still a no-op.
     await reconcile_reservation(async_db, handle, 1.0)
@@ -344,7 +353,7 @@ async def test_a_top_up_after_a_reclaim_returns_the_delta(async_db: AsyncSession
     assert (await _user(async_db, tenancy.user_id)).reserved == Decimal("0.000000")
     _, reserved = await _counters(async_db, cap.id)
     assert reserved == pytest.approx(0.0)
-    assert await _status(async_db, handle.reservation_id) == ledger.RESERVATION_EXPIRED
+    assert await _status(async_db, handle.reservation_id) == RESERVATION_EXPIRED
     async_db.expire_all()
     assert (await async_db.get_one(BudgetReservation, handle.reservation_id)).estimate == Decimal("1.000000")
     lines = await _lines(async_db, handle.reservation_id)
@@ -471,7 +480,7 @@ async def test_a_failed_settlement_leaves_the_row_reclaimable(async_db: AsyncSes
     await async_db.rollback()
 
     # The row is still claimable, so the sweep can still return the hold.
-    assert await _status(async_db, handle.reservation_id) == ledger.RESERVATION_ACTIVE
+    assert await _status(async_db, handle.reservation_id) == RESERVATION_ACTIVE
     row = await async_db.get_one(BudgetReservation, handle.reservation_id)
     row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
     await async_db.commit()

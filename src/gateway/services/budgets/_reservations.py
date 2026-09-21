@@ -17,7 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.metered_pricing import estimate_metered_cost
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
-from gateway.models.budgets import MAX_COUNT_LIMIT, Budget, BudgetResetLog
+from gateway.models.budgets import (
+    MAX_COUNT_LIMIT,
+    RESERVATION_RELEASED,
+    RESERVATION_SETTLED,
+    Budget,
+    BudgetResetLog,
+)
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing
 from gateway.models.users import User
@@ -786,7 +792,7 @@ async def reconcile_reservation(
     # expression clamps at zero that would pass silently as an under-count of
     # live holds rather than fail.
     reclaimed_early = False
-    if not await ledger.try_terminate(db, handle.reservation_id, ledger.RESERVATION_SETTLED):
+    if not await ledger.try_terminate(db, handle.reservation_id, RESERVATION_SETTLED):
         # Losing that claim has two causes and they settle differently. Another
         # settlement site for this request already ran, and there is nothing left
         # to do; or the TTL sweep reclaimed the hold while the request was still
@@ -899,7 +905,7 @@ async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> Non
     reachable from roughly seven sites, and only control flow (a ``raise`` after
     each) has kept two of them from firing for one request.
     """
-    if not await ledger.try_terminate(db, handle.reservation_id, ledger.RESERVATION_RELEASED):
+    if not await ledger.try_terminate(db, handle.reservation_id, RESERVATION_RELEASED):
         # Commit rather than roll back the empty transaction: the guarded UPDATE
         # matched nothing, so there is nothing to undo, and ``rollback()`` expires
         # every ORM instance in the session regardless of ``expire_on_commit``,
