@@ -73,6 +73,57 @@ function mockApi(opts: {
   const budgetList = opts.budgets ?? []
   const requests: Request[] = []
 
+  // The join the gateway does now (otari#1381), so a test still describes the
+  // world in its parts: which workspaces exist, who is in them, what each
+  // membership is capped at, and what the gateway identity behind a member has
+  // spent. The page reads the result off the row rather than assembling it.
+  const ceilingFor = (membershipId: string) =>
+    scopedBudgets.find(
+      (budget) =>
+        budget.scope_type === "workspace_member" &&
+        budget.scope_id === membershipId,
+    ) ?? null
+  const joined = (member: OrganizationMember): OrganizationMember => ({
+    ...member,
+    workspaces: workspaces.flatMap((workspace) =>
+      (workspaceMembers[workspace.id] ?? [])
+        .filter((row) => row.user_id === member.user_id)
+        .map((row) => {
+          const ceiling = ceilingFor(row.id)
+          return {
+            workspace_id: workspace.id,
+            workspace_name: workspace.name,
+            workspace_member_id: row.id,
+            role: row.role,
+            ceiling: ceiling
+              ? {
+                  id: ceiling.id,
+                  budget_id: ceiling.budget_id,
+                  max_budget: ceiling.max_budget,
+                }
+              : null,
+          }
+        }),
+    ),
+    // Withheld from a caller who does not operate the deployment, which is what
+    // the route does with these deployment-wide figures.
+    attribution: context.deployment_operator
+      ? (() => {
+          const row = users.find(
+            (user) => user.user_id === member.attribution_user_id,
+          )
+          return row
+            ? {
+                spend: row.spend,
+                reserved: row.reserved,
+                blocked: row.blocked,
+                allowed_models: row.allowed_models,
+              }
+            : null
+        })()
+      : null,
+  })
+
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     const method = (init?.method ?? "GET").toUpperCase()
@@ -137,7 +188,15 @@ function mockApi(opts: {
     }
     if (url.includes(`${API_ROOT}/organizations/me/members`)) {
       if (method === "GET") {
-        return jsonResponse({ data: members, count: members.length })
+        // The window, like the route: a test that ignored it could not tell a
+        // paged read from a read of everything.
+        const params = new URL(url, "http://localhost").searchParams
+        const skip = Number(params.get("skip") ?? 0)
+        const limit = Number(params.get("limit") ?? 100)
+        return jsonResponse({
+          data: members.slice(skip, skip + limit).map(joined),
+          count: members.length,
+        })
       }
       if (method === "POST") {
         return jsonResponse(
@@ -644,6 +703,85 @@ describe("OrganizationMembersPage", () => {
     expect(revoke?.url).toContain(
       `${API_ROOT}/organizations/me/member-invitations/invitation-1`,
     )
+  })
+
+  it("asks for a page of the roster rather than walking it", async () => {
+    // The other half of otari#1381: with the row carrying its own workspaces,
+    // ceilings and spend, the table has nothing left to join against and can
+    // ask for the window it shows.
+    const requests = mockApi({
+      members: Array.from({ length: 30 }, (_, index) =>
+        organizationMember({
+          organization_member_id: `member-${index}`,
+          user_id: `user-${index}`,
+          full_name: `Member ${String(index).padStart(2, "0")}`,
+        }),
+      ),
+    })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Member 00")
+    // The window's worth, not the roster: 24 is the last of a page of 25.
+    expect(screen.getByText("Member 24")).toBeInTheDocument()
+    expect(screen.queryByText("Member 25")).toBeNull()
+    await waitFor(() => {
+      expect(
+        requests.some((request) =>
+          request.url.includes("/organizations/me/members?skip=0&limit=25"),
+        ),
+      ).toBe(true)
+    })
+  })
+
+  it("pages the roster without reading the rest", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({
+      members: Array.from({ length: 30 }, (_, index) =>
+        organizationMember({
+          organization_member_id: `member-${index}`,
+          user_id: `user-${index}`,
+          full_name: `Member ${String(index).padStart(2, "0")}`,
+        }),
+      ),
+    })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Member 00")
+    await user.click(screen.getByRole("button", { name: "Next page, members" }))
+
+    await waitFor(() => {
+      expect(
+        requests.some((request) =>
+          request.url.includes("/organizations/me/members?skip=25&limit=25"),
+        ),
+      ).toBe(true)
+    })
+    expect(await screen.findByText("Member 25")).toBeInTheDocument()
+  })
+
+  it("reads the roster alone, and the rest only when the editor opens", async () => {
+    // otari#1381. The table used to fetch seven collections and join them in
+    // the browser: every gateway identity, every workspace, a roster per
+    // workspace, every budget and every ceiling. The row carries what it needs
+    // now, and the three the editor wants are asked for when it opens.
+    const requests = mockApi({
+      context: organizationContext({ deployment_operator: true }),
+      members: [ANALYST],
+      workspaces: [workspace()],
+    })
+    renderPage(<OrganizationMembersPage />)
+    await screen.findByText("Analyst")
+
+    const read = (path: string) =>
+      requests.some(
+        (request) => request.method === "GET" && request.url.includes(path),
+      )
+    await waitFor(() => {
+      expect(read(`${API_ROOT}/organizations/me/members`)).toBe(true)
+    })
+    expect(read(`${API_ROOT}/users`)).toBe(false)
+    expect(read(`${API_ROOT}/scoped-budgets`)).toBe(false)
+    expect(read(`${API_ROOT}/budgets`)).toBe(false)
   })
 
   it("shows what a member may call and what they have spent", async () => {

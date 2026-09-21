@@ -468,6 +468,10 @@ export type CallerWorkspaceMembership =
 export type UpdateOrganizationRequest =
   Schemas["ActiveOrganizationUpdateRequest"]
 export type OrganizationMember = Schemas["ActiveOrganizationMemberPublic"]
+export type OrganizationMembers = Schemas["ActiveOrganizationMembersPublic"]
+export type MemberWorkspacePlacement = Schemas["MemberWorkspacePlacementPublic"]
+export type MemberCeiling = Schemas["MemberCeilingPublic"]
+export type MemberAttribution = Schemas["MemberAttributionPublic"]
 export type UpdateOrganizationMemberRequest =
   Schemas["ActiveOrganizationMemberUpdateRequest"]
 export type CreateOrganizationMemberRequest = Defaulted<

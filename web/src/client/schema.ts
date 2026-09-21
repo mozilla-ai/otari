@@ -5275,6 +5275,7 @@ export interface components {
          *     is what lets either answer land without the dashboard changing.
          */
         ActiveOrganizationMemberPublic: {
+            attribution?: components["schemas"]["MemberAttributionPublic"] | null;
             /** Attribution User Id */
             attribution_user_id?: string | null;
             /**
@@ -5298,6 +5299,8 @@ export interface components {
             updated_at?: string | null;
             /** User Id */
             user_id?: string | null;
+            /** Workspaces */
+            workspaces?: components["schemas"]["MemberWorkspacePlacementPublic"][];
         };
         /** ActiveOrganizationMemberUpdateRequest */
         ActiveOrganizationMemberUpdateRequest: {
@@ -8386,6 +8389,65 @@ export interface components {
             tools: components["schemas"]["McpToolDefinition"][];
             /** Warnings */
             warnings: components["schemas"]["McpToolWarning"][];
+        };
+        /**
+         * MemberAttributionPublic
+         * @description What the gateway identity behind a membership has spent, and may reach.
+         *
+         *     Deployment-wide facts, so they are withheld from a caller who does not
+         *     operate the deployment rather than zeroed: ``/api/v1/users`` refuses them,
+         *     and a zero here would read as a member who has spent nothing.
+         */
+        MemberAttributionPublic: {
+            /** Allowed Models */
+            allowed_models?: string[] | null;
+            /** Blocked */
+            blocked: boolean;
+            /** Reserved */
+            reserved: number;
+            /** Spend */
+            spend: number;
+        };
+        /**
+         * MemberCeilingPublic
+         * @description The spend ceiling on one workspace membership, as the roster reports it.
+         *
+         *     Three fields rather than the whole ``scoped_budgets`` row: the figure the
+         *     roster prints, the budget its editor picks, and the id that edit writes to.
+         */
+        MemberCeilingPublic: {
+            /** Budget Id */
+            budget_id: string;
+            /** Id */
+            id: string;
+            /** Max Budget */
+            max_budget: number | null;
+        };
+        /**
+         * MemberWorkspacePlacementPublic
+         * @description One workspace a member is in, with their role and ceiling there.
+         *
+         *     A ceiling is keyed on the *membership*, not on the person, so a member of two
+         *     workspaces has two of them. The membership id is carried in its own right
+         *     rather than read back off the ceiling, because it is needed precisely when
+         *     there is no ceiling yet and one is about to be created.
+         */
+        MemberWorkspacePlacementPublic: {
+            ceiling?: components["schemas"]["MemberCeilingPublic"] | null;
+            /** Role */
+            role: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * Workspace Member Id
+             * Format: uuid
+             */
+            workspace_member_id: string;
+            /** Workspace Name */
+            workspace_name: string;
         };
         /**
          * Message

@@ -382,6 +382,16 @@
       "ActiveOrganizationMemberPublic": {
         "description": "A member row joined to the identity behind it, as the roster shows it.\n\nField-for-field the platform's shape, so the ported roster page is not\nrewritten around a new contract, with two consequences of the OSS line:\n``email`` is nullable here (a local operator identity has no sign-in\naddress), and ``invitation_id`` is always null until the invitation flow\nrehomes, which is what fills it.\n\n``attribution_user_id`` is the addition the platform has no counterpart for.\nKeys, budgets, and usage attach to the gateway's string-keyed ``users`` row,\nnot to this UUID identity, so this carries the ``user_id`` a caller passes to\nwhen minting a key for this member. It is null when no usable row\nexists (nobody minted one, or it was soft-deleted through\nsoft-deleted), which is the signal not to offer this member as a key\nowner: key creation would refuse. How the two ids converge is the open\nquestion in otari-ai#1727; this field is the join until it is answered, and\nis what lets either answer land without the dashboard changing.",
         "properties": {
+          "attribution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemberAttributionPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "attribution_user_id": {
             "anyOf": [
               {
@@ -475,6 +485,13 @@
               }
             ],
             "title": "User Id"
+          },
+          "workspaces": {
+            "items": {
+              "$ref": "#/components/schemas/MemberWorkspacePlacementPublic"
+            },
+            "title": "Workspaces",
+            "type": "array"
           }
         },
         "required": [
@@ -6926,6 +6943,116 @@
           "warnings"
         ],
         "title": "McpToolsResponse",
+        "type": "object"
+      },
+      "MemberAttributionPublic": {
+        "description": "What the gateway identity behind a membership has spent, and may reach.\n\nDeployment-wide facts, so they are withheld from a caller who does not\noperate the deployment rather than zeroed: ``/api/v1/users`` refuses them,\nand a zero here would read as a member who has spent nothing.",
+        "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
+          },
+          "blocked": {
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "reserved": {
+            "title": "Reserved",
+            "type": "number"
+          },
+          "spend": {
+            "title": "Spend",
+            "type": "number"
+          }
+        },
+        "required": [
+          "spend",
+          "reserved",
+          "blocked"
+        ],
+        "title": "MemberAttributionPublic",
+        "type": "object"
+      },
+      "MemberCeilingPublic": {
+        "description": "The spend ceiling on one workspace membership, as the roster reports it.\n\nThree fields rather than the whole ``scoped_budgets`` row: the figure the\nroster prints, the budget its editor picks, and the id that edit writes to.",
+        "properties": {
+          "budget_id": {
+            "title": "Budget Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "max_budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Budget"
+          }
+        },
+        "required": [
+          "id",
+          "budget_id",
+          "max_budget"
+        ],
+        "title": "MemberCeilingPublic",
+        "type": "object"
+      },
+      "MemberWorkspacePlacementPublic": {
+        "description": "One workspace a member is in, with their role and ceiling there.\n\nA ceiling is keyed on the *membership*, not on the person, so a member of two\nworkspaces has two of them. The membership id is carried in its own right\nrather than read back off the ceiling, because it is needed precisely when\nthere is no ceiling yet and one is about to be created.",
+        "properties": {
+          "ceiling": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemberCeilingPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          },
+          "workspace_member_id": {
+            "format": "uuid",
+            "title": "Workspace Member Id",
+            "type": "string"
+          },
+          "workspace_name": {
+            "title": "Workspace Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "workspace_name",
+          "workspace_member_id",
+          "role"
+        ],
+        "title": "MemberWorkspacePlacementPublic",
         "type": "object"
       },
       "Message": {

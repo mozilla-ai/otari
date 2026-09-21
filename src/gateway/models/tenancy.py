@@ -605,6 +605,48 @@ class OrganizationMembersPublic(SQLModel):
     count: int
 
 
+class MemberCeilingPublic(SQLModel):
+    """The spend ceiling on one workspace membership, as the roster reports it.
+
+    Three fields rather than the whole ``scoped_budgets`` row: the figure the
+    roster prints, the budget its editor picks, and the id that edit writes to.
+    """
+
+    id: str
+    budget_id: str
+    max_budget: float | None
+
+
+class MemberWorkspacePlacementPublic(SQLModel):
+    """One workspace a member is in, with their role and ceiling there.
+
+    A ceiling is keyed on the *membership*, not on the person, so a member of two
+    workspaces has two of them. The membership id is carried in its own right
+    rather than read back off the ceiling, because it is needed precisely when
+    there is no ceiling yet and one is about to be created.
+    """
+
+    workspace_id: uuid.UUID
+    workspace_name: str
+    workspace_member_id: uuid.UUID
+    role: str
+    ceiling: MemberCeilingPublic | None = None
+
+
+class MemberAttributionPublic(SQLModel):
+    """What the gateway identity behind a membership has spent, and may reach.
+
+    Deployment-wide facts, so they are withheld from a caller who does not
+    operate the deployment rather than zeroed: ``/api/v1/users`` refuses them,
+    and a zero here would read as a member who has spent nothing.
+    """
+
+    spend: float
+    reserved: float
+    blocked: bool
+    allowed_models: list[str] | None = None
+
+
 class ActiveOrganizationMemberPublic(SQLModel):
     """A member row joined to the identity behind it, as the roster shows it.
 
@@ -635,6 +677,8 @@ class ActiveOrganizationMemberPublic(SQLModel):
     status: str
     created_at: datetime
     updated_at: datetime | None = None
+    workspaces: list[MemberWorkspacePlacementPublic] = Field(default_factory=list)
+    attribution: MemberAttributionPublic | None = None
 
 
 class ActiveOrganizationMembersPublic(SQLModel):

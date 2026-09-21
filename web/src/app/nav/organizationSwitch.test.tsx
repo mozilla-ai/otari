@@ -50,15 +50,6 @@ function emptySummary(): UsageSummary {
   }
 }
 
-/**
- * Two organizations, the caller's role in the second one being what a test says.
- *
- * The transport is spied on rather than the hooks, so the real query keys, gates
- * and paths run. `/organizations/me` answers for whichever organization is
- * active, and the spend-ceilings read refuses anyone who is not an owner or an
- * admin of it, which is the gate `require_active_organization_management_access`
- * draws on the server.
- */
 /** The overview summary an organization admin gets, carrying one ceiling. */
 function ceilingSummary({
   spent,
@@ -86,6 +77,15 @@ function ceilingSummary({
   }
 }
 
+/**
+ * Two organizations, the caller's role in the second one being what a test says.
+ *
+ * The transport is spied on rather than the hooks, so the real query keys, gates
+ * and paths run. `/organizations/me` answers for whichever organization is
+ * active, and the spend-ceilings read refuses anyone who is not an owner or an
+ * admin of it, which is the gate `require_active_organization_management_access`
+ * draws on the server.
+ */
 function mockApi({
   roleThere,
   holdCeilingsHere,

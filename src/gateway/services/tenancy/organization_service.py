@@ -42,6 +42,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.models.money import as_float
 from gateway.models.tenancy import (
     MANAGEMENT_ROLES,
     AcceptInvitationResultPublic,
@@ -58,6 +59,9 @@ from gateway.models.tenancy import (
     InvitationPreviewPublic,
     InviteOrganizationMemberRequest,
     InviteOrganizationMemberResultPublic,
+    MemberAttributionPublic,
+    MemberCeilingPublic,
+    MemberWorkspacePlacementPublic,
     Organization,
     OrganizationCreateRequest,
     OrganizationMember,
@@ -66,7 +70,9 @@ from gateway.models.tenancy import (
     PendingOrganizationInvitationPublic,
     PendingOrganizationInvitationsPublic,
     User,
+    Workspace,
     WorkspaceAssignmentRequest,
+    WorkspaceMember,
     WorkspaceMemberUpdate,
 )
 from gateway.repositories.tenancy import (
@@ -78,6 +84,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.repositories.users_repository import (
+    attribution_spend,
     get_or_create_attribution_user,
     live_attribution_user_ids,
 )
@@ -653,6 +660,40 @@ class OrganizationService:
             membership.id for membership, _ in rows if membership.status == "invited"
         )
         invitation_by_member = {invitation.organization_member_id: invitation.id for invitation in pending}
+        # Where each member is and what they may spend there, for the page and
+        # not per workspace: the roster used to fan a read out per workspace and
+        # join the results in the browser (otari#1381).
+        placements = await self.members.placements_for_users(
+            organization.id, [member_user.id for _, member_user in rows]
+        )
+        ceiling_rows = await self.members.ceilings_for_memberships(
+            membership.id for by_user in placements.values() for membership, _ in by_user
+        )
+        ceilings = {
+            scope_id: MemberCeilingPublic(
+                id=ceiling.id,
+                budget_id=ceiling.budget_id,
+                max_budget=as_float(budget.max_budget),
+            )
+            for scope_id, (ceiling, budget) in ceiling_rows.items()
+        }
+        # Deployment-wide, so withheld rather than zeroed from a caller who does
+        # not operate the deployment: `/api/v1/users` refuses them, and a zero
+        # would read as a member who has spent nothing.
+        spend_rows = (
+            await attribution_spend(self.db, [str(member_user.id) for _, member_user in rows])
+            if await DeploymentUserService(self.db).has_administration_access(user)
+            else {}
+        )
+        spend = {
+            user_id: MemberAttributionPublic(
+                spend=float(row.spend),
+                reserved=float(row.reserved),
+                blocked=row.blocked,
+                allowed_models=row.allowed_models,
+            )
+            for user_id, row in spend_rows.items()
+        }
         return ActiveOrganizationMembersPublic(
             data=[
                 self._to_member_public(
@@ -660,6 +701,9 @@ class OrganizationService:
                     member_user,
                     live=live,
                     invitation_id=invitation_by_member.get(membership.id),
+                    placements=placements.get(member_user.id, []),
+                    ceilings=ceilings,
+                    spend=spend.get(str(member_user.id)),
                 )
                 for membership, member_user in rows
             ],
@@ -1588,8 +1632,12 @@ class OrganizationService:
         *,
         live: set[str],
         invitation_id: uuid.UUID | None = None,
+        placements: list[tuple[WorkspaceMember, Workspace]] | None = None,
+        ceilings: dict[str, MemberCeilingPublic] | None = None,
+        spend: MemberAttributionPublic | None = None,
     ) -> ActiveOrganizationMemberPublic:
         attribution_user_id = str(user.id)
+        by_membership = ceilings or {}
         return ActiveOrganizationMemberPublic(
             organization_member_id=membership.id,
             user_id=user.id,
@@ -1601,6 +1649,17 @@ class OrganizationService:
             status=membership.status,
             created_at=membership.created_at,
             updated_at=membership.updated_at,
+            workspaces=[
+                MemberWorkspacePlacementPublic(
+                    workspace_id=workspace.id,
+                    workspace_name=workspace.name,
+                    workspace_member_id=workspace_membership.id,
+                    role=workspace_membership.role,
+                    ceiling=by_membership.get(str(workspace_membership.id)),
+                )
+                for workspace_membership, workspace in (placements or [])
+            ],
+            attribution=spend,
         )
 
 

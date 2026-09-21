@@ -1,5 +1,6 @@
 import {
   hashKey,
+  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
@@ -19,6 +20,7 @@ import type {
   OrganizationContext,
   OrganizationDomain,
   OrganizationMember,
+  OrganizationMembers,
   OrgProviderKey,
   PendingOrganizationInvitation,
   SwitchOrganizationRequest,
@@ -170,6 +172,29 @@ export function useOrganizationMembers(enabled = true) {
       fetchAllPaged<OrganizationMember>("/organizations/me/members"),
     staleTime: 60_000,
     enabled,
+  })
+}
+
+/**
+ * One page of the roster, with the total.
+ *
+ * The rows carry their own workspaces, ceilings and spend since otari#1381, so
+ * the members table can ask for a page rather than reading the roster to join
+ * six other collections against it.
+ *
+ * Separate from `useOrganizationMembers` rather than replacing it: that one
+ * still answers the two readers who genuinely want every row, a label lookup
+ * and a candidate list, and both are tracked elsewhere (otari#1380).
+ */
+export function useOrganizationMembersPage(page: number, pageSize: number) {
+  return useQuery({
+    queryKey: [ORGANIZATION_MEMBERS, "page", page, pageSize],
+    queryFn: () =>
+      apiFetch<OrganizationMembers>(
+        `/organizations/me/members?skip=${page * pageSize}&limit=${pageSize}`,
+      ),
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 }
 

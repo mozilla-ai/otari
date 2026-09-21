@@ -165,42 +165,6 @@ export function useWorkspaceBudgetDefaults(workspaceId: string | null) {
 }
 
 /**
- * Every workspace's roster, as one list, each row paired with its workspace.
- *
- * Same fan-out as `useAllWorkspaceBudgetDefaults` and for the same reason: a
- * roster is only served per workspace, and a standalone deployment has few. It
- * is what lets the organization roster answer "which workspaces is this person
- * in", which is otherwise only answerable one workspace at a time.
- */
-export function useAllWorkspaceMembers(workspaceIds: string[]) {
-  return useQueries({
-    queries: workspaceIds.map((workspaceId) => ({
-      queryKey: [WORKSPACES, workspaceId, "members"],
-      queryFn: () =>
-        fetchAllPaged<WorkspaceMember>(
-          `/workspaces/${encodeURIComponent(workspaceId)}/members`,
-        ),
-      staleTime: 60_000,
-    })),
-    combine: (results) => ({
-      data: results.flatMap((result, index) =>
-        (result.data ?? []).map((row) => ({
-          workspaceId: workspaceIds[index],
-          member: row,
-        })),
-      ),
-      isLoading: results.some((result) => result.isLoading),
-      // The first failure, surfaced rather than swallowed: a rejected read
-      // contributes nothing to `data`, so without this the caller cannot tell a
-      // workspace with no rows from one whose read failed, and a lost membership
-      // or a lost ceiling looks exactly like a deliberate absence.
-      error: results.find((result) => result.error)?.error ?? null,
-      isSuccess: results.every((result) => result.isSuccess),
-    }),
-  })
-}
-
-/**
  * Every workspace's budget defaults, as one list.
  *
  * A fan-out rather than one call: defaults are only served per workspace

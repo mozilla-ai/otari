@@ -8,12 +8,15 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.models.budgets import Budget, ScopedBudget
 from gateway.models.tenancy import (
     Organization,
     OrganizationMember,
     OrganizationMemberCreate,
     OrganizationMemberUpdate,
     User,
+    Workspace,
+    WorkspaceMember,
 )
 from gateway.repositories.base_repository import BaseRepository
 from gateway.repositories.tenancy.user_repository import user_alphabetical_order
@@ -333,6 +336,65 @@ class OrganizationMemberRepository(
             .limit(limit)
         )
         return [(member, organization) for member, organization in result.all()], count
+
+
+
+    async def placements_for_users(
+        self,
+        organization_id: uuid.UUID,
+        user_ids: Iterable[uuid.UUID],
+    ) -> dict[uuid.UUID, list[tuple[WorkspaceMember, Workspace]]]:
+        """Which workspaces each of these identities belongs to, with the workspace.
+
+        Two bounded reads for a page of members rather than one per workspace:
+        the roster page used to fan out a roster read per workspace and join the
+        results in the browser (otari#1381).
+        """
+
+        ids = list(user_ids)
+        if not ids:
+            return {}
+
+        rows = (
+            await self.db.execute(
+                select(WorkspaceMember, Workspace)
+                .join(Workspace, col(WorkspaceMember.workspace_id) == col(Workspace.id))
+                .where(
+                    col(Workspace.organization_id) == organization_id,
+                    col(WorkspaceMember.user_id).in_(ids),
+                )
+                .order_by(col(Workspace.name), col(Workspace.id))
+            )
+        ).all()
+
+        placements: dict[uuid.UUID, list[tuple[WorkspaceMember, Workspace]]] = {}
+        for membership, workspace in rows:
+            placements.setdefault(membership.user_id, []).append((membership, workspace))
+        return placements
+
+    async def ceilings_for_memberships(
+        self,
+        membership_ids: Iterable[uuid.UUID],
+    ) -> dict[str, tuple[ScopedBudget, Budget]]:
+        """The spend ceiling on each of these workspace memberships, by membership id.
+
+        ``scoped_budgets.scope_id`` is text while a membership id is a UUID, so
+        the ids are matched as strings here rather than cast in SQL, which the
+        two engines spell differently.
+        """
+
+        keys = [str(membership_id) for membership_id in membership_ids]
+        if not keys:
+            return {}
+
+        rows = (
+            await self.db.execute(
+                select(ScopedBudget, Budget)
+                .join(Budget, ScopedBudget.budget_id == Budget.budget_id)
+                .where(ScopedBudget.scope_type == "workspace_member", ScopedBudget.scope_id.in_(keys))
+            )
+        ).all()
+        return {ceiling.scope_id: (ceiling, budget) for ceiling, budget in rows}
 
 
 __all__ = ["LISTABLE_STATUSES", "OrganizationMemberRepository"]
