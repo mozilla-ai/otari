@@ -231,3 +231,21 @@ async def test_the_reservation_sweeper_is_the_one_worker_a_setting_turns_off(
 
     assert "budget reservation sweep" not in names
     assert names == [worker.name for worker in _LIFESPAN_WORKERS if worker.name != "budget reservation sweep"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config",
+    [
+        GatewayConfig(master_key="sk-test-master", files_sweep_interval_sec=0),
+        GatewayConfig(master_key="sk-test-master", files_enabled=False),
+    ],
+)
+async def test_the_file_sweeper_stops_with_files_or_its_interval(
+    monkeypatch: pytest.MonkeyPatch, config: GatewayConfig
+) -> None:
+    """Disabling files, or the sweep alone, drops that one worker and no other."""
+    names, _called = await _started_worker_names(config, monkeypatch)
+
+    assert "file retention sweep" not in names
+    assert names == [worker.name for worker in _LIFESPAN_WORKERS if worker.name != "file retention sweep"]

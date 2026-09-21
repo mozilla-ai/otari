@@ -210,9 +210,10 @@ retrieval, code execution and files.
   `web_retrieval_network.py`, `web_retrieval_policy.py`,
   `search_tool_store_service.py`, `tool_settings_service.py`,
   `tool_format.py`, `tool_usage.py`, `file_service.py`, `file_store.py`,
-  `file_extractors.py`, `tenancy/workspace_mcp_server_service.py`,
+  `file_extractors.py`, `files/`, `tenancy/workspace_mcp_server_service.py`,
   `tenancy/workspace_web_search_service.py`,
   `tenancy/workspace_code_execution_policy_service.py`
+- Repositories: `files/`
 - Models: `tools.py`, `mcp.py`
 
 ### guardrails

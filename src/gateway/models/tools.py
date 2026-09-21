@@ -4,7 +4,19 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, String, Text, UniqueConstraint, Uuid, func, true
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    func,
+    true,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
@@ -86,6 +98,19 @@ class FileObject(Base):
     """
 
     __tablename__ = "file_objects"
+    __table_args__ = (
+        # The listing's shape: the tenant predicates, then the keyset sort the
+        # cursor pages on. Without them every page sorts the user's whole set;
+        # the second serves a master-key listing that names no workspace.
+        Index(
+            "ix_file_objects_user_workspace_created",
+            "user_id",
+            "workspace_id",
+            "created_at",
+            "id",
+        ),
+        Index("ix_file_objects_user_created", "user_id", "created_at", "id"),
+    )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: f"file-{uuid.uuid4().hex}")
     # Always set to the authenticated user; non-null enforces the user-scoping
@@ -102,11 +127,23 @@ class FileObject(Base):
     mime_type: Mapped[str] = mapped_column()
     bytes: Mapped[int] = mapped_column()
     purpose: Mapped[str] = mapped_column(default="user_data")
-    storage_ref: Mapped[str] = mapped_column()
+    # Null for a file whose bytes a provider holds; see ``provider`` below.
+    storage_ref: Mapped[str | None] = mapped_column(nullable=True)
+    # Set when a provider's own sandbox produced the file, naming the any-llm
+    # provider whose files API serves its bytes. The row exists so the
+    # deployment knows who may read that id: the provider authenticates the
+    # deployment's credential, which is coarser than a workspace-scoped key.
+    provider: Mapped[str | None] = mapped_column(nullable=True)
+    # The configured instance the run dispatched through, whose credential is
+    # the one that can read the file back; None means the provider's own entry.
+    provider_instance: Mapped[str | None] = mapped_column(nullable=True)
+    # The provider's container, for a provider that keys a download on it
+    # (OpenAI does; Anthropic's files API takes the id alone).
+    provider_container_id: Mapped[str | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
     )
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
 
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
@@ -121,6 +158,28 @@ class FileObject(Base):
             "expires_at": _epoch_seconds(self.expires_at),
             "filename": self.filename,
             "purpose": self.purpose,
+        }
+
+    def to_anthropic_dict(self) -> dict[str, Any]:
+        """Convert to the Anthropic Files API ``FileMetadata`` shape.
+
+        Anthropic's SDK reads ``size_bytes`` and ``mime_type`` where OpenAI's
+        reads ``bytes`` and nothing, and takes ``created_at`` as an RFC 3339
+        string rather than an epoch. ``downloadable`` is always true here: the
+        gateway serves every stored file's bytes back, unlike Anthropic, which
+        withholds user uploads.
+        """
+        created_at = self.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        return {
+            "id": self.id,
+            "type": "file",
+            "filename": self.filename,
+            "mime_type": self.mime_type,
+            "size_bytes": self.bytes,
+            "created_at": created_at.isoformat().replace("+00:00", "Z"),
+            "downloadable": True,
         }
 
 
@@ -252,6 +311,12 @@ class WorkspaceCodeExecutionPolicy(Base):
     # ``WorkspaceWebSearchConfig`` stores its domain lists that way: short, read
     # whole, and nothing queries into it.
     tools: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    # NULL means "no workspace pin": the deployment's ``code_execution_executor``
+    # (and, where it leaves room, the request's header) decides who runs a
+    # provider-named code-execution declaration. A stored value is a pin the
+    # request cannot argue with. One of ``CodeExecutor``'s values; the service
+    # refuses anything else, and the column is sized for that vocabulary.
+    executor: Mapped[str | None] = mapped_column(String(16), default=None)
     # ``UtcDateTime`` for the same reason ``WorkspaceBudgetDefault`` uses it:
     # these are serialized with ``.isoformat()`` for the dashboard, and a plain
     # ``DateTime(timezone=True)`` round-trips naive on SQLite.

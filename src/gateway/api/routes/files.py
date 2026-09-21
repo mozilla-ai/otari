@@ -12,18 +12,24 @@ request-plane row does (``services/workspace_scope``). A keyed request is confin
 to its own key's workspace on every verb; a master-key request is the operator
 acting deployment-wide and sees every workspace, narrowable on the listing with
 ``workspace_id``, matching ``GET /api/v1/keys``.
+
+The same five routes serve two SDKs. OpenAI's and Anthropic's Files APIs share
+their paths and verbs and differ only in the JSON they return, so the response
+shape follows the caller: a request carrying Anthropic's ``anthropic-version``
+header (which its SDK sends on every call) gets ``FileMetadata``, everything
+else gets the OpenAI file object.
 """
 
-import mimetypes
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator
-from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any
+from datetime import UTC, datetime
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+import httpx
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,8 +39,9 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.tools import FileObject
-from gateway.services.file_service import fetch_file
+from gateway.services.file_service import expiry_for, fetch_file, guess_mime_type
 from gateway.services.file_store import FileStore
+from gateway.services.files.provider_files import stream_provider_file
 from gateway.services.workspace_scope import default_workspace_id
 
 router = APIRouter(tags=["files"])
@@ -42,6 +49,22 @@ router = APIRouter(tags=["files"])
 # OpenAI's documented file purposes plus a generic default. We don't enforce the
 # enum (forward-compat), but normalise the empty case to "user_data".
 _DEFAULT_PURPOSE = "user_data"
+
+# Listing page bounds. The default is OpenAI's; the ceiling is well under
+# OpenAI's 10000 because a page is one query and one JSON body.
+_DEFAULT_LIST_LIMIT = 100
+_MAX_LIST_LIMIT = 1000
+
+
+def _anthropic_shape(raw_request: Request) -> bool:
+    """Whether the caller speaks Anthropic's Files API rather than OpenAI's."""
+    return "anthropic-version" in raw_request.headers or any(
+        beta.strip().startswith("files-api") for beta in raw_request.headers.get("anthropic-beta", "").split(",")
+    )
+
+
+def _serialize(record: FileObject, raw_request: Request) -> dict[str, Any]:
+    return record.to_anthropic_dict() if _anthropic_shape(raw_request) else record.to_dict()
 
 
 def _request_workspace_id(auth_result: tuple[APIKey | None, bool]) -> uuid.UUID | None:
@@ -158,18 +181,9 @@ def _content_disposition(filename: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
 
 
-def _guess_mime(filename: str | None, declared: str | None) -> str:
-    if declared and declared != "application/octet-stream":
-        return declared
-    if filename:
-        guessed, _ = mimetypes.guess_type(filename)
-        if guessed:
-            return guessed
-    return declared or "application/octet-stream"
-
-
 @router.post("/files")
 async def create_file(
+    raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -178,7 +192,7 @@ async def create_file(
     purpose: str = Form(_DEFAULT_PURPOSE),
     user: str | None = Form(None),
 ) -> dict[str, Any]:
-    """OpenAI-compatible file upload endpoint."""
+    """Upload a file. Answers in the OpenAI or Anthropic file shape, following the caller's headers."""
     if not config.files_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
 
@@ -197,21 +211,18 @@ async def create_file(
         await file_store.delete(storage_ref)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
 
-    expires_at: datetime | None = None
-    if config.files_retention_hours is not None:
-        expires_at = datetime.now(UTC) + timedelta(hours=config.files_retention_hours)
-
+    now = datetime.now(UTC)
     record = FileObject(
         id=file_id,
         user_id=user_id,
         workspace_id=workspace_id,
         filename=file.filename or file_id,
-        mime_type=_guess_mime(file.filename, file.content_type),
+        mime_type=guess_mime_type(file.filename, file.content_type),
         bytes=size,
         purpose=purpose or _DEFAULT_PURPOSE,
         storage_ref=storage_ref,
-        created_at=datetime.now(UTC),
-        expires_at=expires_at,
+        created_at=now,
+        expires_at=expiry_for(config, now),
     )
     db.add(record)
     try:
@@ -230,22 +241,32 @@ async def create_file(
     logger.info(
         "Stored file %s (%d bytes) for user %s in workspace %s", file_id, size, user_id, workspace_id
     )
-    return record.to_dict()
+    return _serialize(record, raw_request)
 
 
 @router.get("/files")
 async def list_files(
+    raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     user: str | None = None,
     purpose: str | None = None,
     workspace_id: uuid.UUID | None = None,
+    limit: Annotated[int, Query(ge=1, le=_MAX_LIST_LIMIT)] = _DEFAULT_LIST_LIMIT,
+    after: str | None = None,
+    after_id: str | None = None,
+    order: Literal["asc", "desc"] = "desc",
 ) -> dict[str, Any]:
     """List the authenticated user's uploaded files in the request's workspace.
 
     ``workspace_id`` narrows a master-key listing to one workspace; a keyed
     request is already confined to its key's own and cannot widen or move it.
+
+    Pages are cursor-based: ``after`` (OpenAI) or ``after_id`` (Anthropic) names
+    the last file of the previous page, and ``has_more`` says whether to ask
+    again. A cursor that has since been deleted or has expired is still a
+    position; one the caller never owned is a 404.
     """
     if not config.files_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
@@ -256,24 +277,70 @@ async def list_files(
     # request is confined either way, so refusing it would only add a way to get
     # an error instead of the same answer.
     scope = _request_workspace_id(auth_result) or workspace_id
+    # Expired rows are excluded for the same reason ``fetch_file`` excludes
+    # them: the sweep reclaims them on a timer, so between expiry and the next
+    # tick a listing would otherwise offer files that every other verb 404s.
     stmt = select(FileObject).where(
         FileObject.user_id == user_id,
         FileObject.deleted_at.is_(None),
+        or_(FileObject.expires_at.is_(None), FileObject.expires_at > datetime.now(UTC)),
     )
     if scope is not None:
         stmt = stmt.where(FileObject.workspace_id == scope)
     if purpose is not None:
         stmt = stmt.where(FileObject.purpose == purpose)
-    stmt = stmt.order_by(FileObject.created_at.desc())
 
-    result = await db.execute(stmt)
-    records = result.scalars().all()
-    return {"object": "list", "data": [r.to_dict() for r in records]}
+    cursor_id = after or after_id
+    if cursor_id is not None:
+        # A position, not a file: the row is read with the tenant predicates
+        # only, so a cursor that was deleted or expired between two pages (the
+        # usual "list, delete each, list again" loop) still says where the next
+        # page starts. Another user's id stays a 404.
+        cursor_conditions = [FileObject.id == cursor_id, FileObject.user_id == user_id]
+        if scope is not None:
+            cursor_conditions.append(FileObject.workspace_id == scope)
+        cursor = (await db.execute(select(FileObject).where(*cursor_conditions))).scalar_one_or_none()
+        if cursor is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+        # (created_at, id) is the sort key, so the page after the cursor is
+        # everything strictly past it in that order. Spelled as two clauses
+        # rather than a row-value comparison, which SQLite only partly supports.
+        if order == "desc":
+            past = or_(
+                FileObject.created_at < cursor.created_at,
+                and_(FileObject.created_at == cursor.created_at, FileObject.id < cursor.id),
+            )
+        else:
+            past = or_(
+                FileObject.created_at > cursor.created_at,
+                and_(FileObject.created_at == cursor.created_at, FileObject.id > cursor.id),
+            )
+        stmt = stmt.where(past)
+
+    if order == "desc":
+        stmt = stmt.order_by(FileObject.created_at.desc(), FileObject.id.desc())
+    else:
+        stmt = stmt.order_by(FileObject.created_at.asc(), FileObject.id.asc())
+    # One past the page tells us whether there is a next one without a count.
+    records = list((await db.execute(stmt.limit(limit + 1))).scalars().all())
+    has_more = len(records) > limit
+    records = records[:limit]
+
+    page: dict[str, Any] = {
+        "data": [_serialize(r, raw_request) for r in records],
+        "has_more": has_more,
+        "first_id": records[0].id if records else None,
+        "last_id": records[-1].id if records else None,
+    }
+    if not _anthropic_shape(raw_request):
+        page = {"object": "list", **page}
+    return page
 
 
 @router.get("/files/{file_id}")
 async def get_file(
     file_id: str,
+    raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -287,7 +354,7 @@ async def get_file(
     record = await fetch_file(db, file_id, user_id, workspace_id=_request_workspace_id(auth_result))
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    return record.to_dict()
+    return _serialize(record, raw_request)
 
 
 @router.get(
@@ -328,11 +395,39 @@ async def get_file_content(
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
+    if record.provider is not None:
+        # The bytes live in the provider's own container; Otari holds the row
+        # that says whose they are and streams them through.
+        try:
+            body = await _prime(stream_provider_file(record, config))
+        except LookupError as exc:
+            logger.error("No credential to read %s file %s: %s", record.provider, file_id, exc)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to read file",
+            ) from exc
+        except httpx.HTTPError as exc:
+            logger.warning("Provider %s refused file %s: %s", record.provider, file_id, exc)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="The provider holding this file could not serve it",
+            ) from exc
+        return StreamingResponse(
+            body,
+            media_type=record.mime_type,
+            headers={"Content-Disposition": _content_disposition(record.filename)},
+        )
+
     # No Content-Length: it would come from record.bytes (DB) while the body
     # comes from the storage backend (disk). If those ever diverge (partial
     # write, corruption), a length header derived from the DB value would be
     # wrong, and clients trust that header over what actually arrives. Chunked
     # transfer encoding doesn't need to declare a length up front.
+    if record.storage_ref is None:
+        # Neither a blob of ours nor a provider's: nothing can be served.
+        logger.error("File %s has no storage ref and no provider", file_id)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
     try:
         body = await _prime(file_store.get_stream(record.storage_ref))
     except OSError as exc:
@@ -352,6 +447,7 @@ async def get_file_content(
 @router.delete("/files/{file_id}")
 async def delete_file(
     file_id: str,
+    raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -383,8 +479,11 @@ async def delete_file(
     # view. Removing the blob is best-effort cleanup: a backend failure must not
     # turn a successful delete into a 500 (it would only leave an orphaned blob).
     try:
-        await file_store.delete(storage_ref)
+        if storage_ref is not None:
+            await file_store.delete(storage_ref)
     except OSError as exc:
         logger.warning("Soft-deleted file %s but failed to remove its blob %s: %s", file_id, storage_ref, exc)
 
+    if _anthropic_shape(raw_request):
+        return {"id": file_id, "type": "file_deleted"}
     return {"id": file_id, "object": "file", "deleted": True}

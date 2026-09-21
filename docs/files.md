@@ -55,7 +55,105 @@ Otari also requires pricing for that model key by default: add pricing, enable
 an intentionally unpriced backend.
 
 You can also inline a file as a base64 `data:` URL (`file.file_data`) or send an
-`image_url` block, with or without uploading first.
+`image_url` block, with or without uploading first. On the Responses API a
+`input_file` or `input_image` item may sit directly in `input` as well as inside
+a message.
+
+### Using the OpenAI or Anthropic SDK
+
+The five routes (`POST`/`GET /v1/files`, `GET`/`DELETE /v1/files/{id}`,
+`GET /v1/files/{id}/content`) share their paths and verbs with both vendors'
+Files APIs, so either official SDK works against Otari with only its base URL
+changed. The response shape follows the caller: a request carrying Anthropic's
+`anthropic-version` header, which its SDK sends on every call, gets Anthropic's
+`FileMetadata` (`type`, `size_bytes`, `mime_type`, `downloadable`, an RFC 3339
+`created_at`); everything else gets the OpenAI file object (`object`, `bytes`,
+`purpose`, an epoch `created_at`).
+
+Mind the base URL: Anthropic's SDK appends `/v1` itself, so it takes
+`http://localhost:8000/api`, while an OpenAI-compatible client takes
+`http://localhost:8000/api/v1` (see the
+[API reference](api-reference.md)).
+
+```python
+from anthropic import Anthropic
+client = Anthropic(base_url="http://localhost:8000/api", api_key="<your-api-key>")
+meta = client.beta.files.upload(file=("report.pdf", open("report.pdf", "rb"), "application/pdf"))
+client.beta.files.download(meta.id)  # Otari serves every stored file's bytes back
+```
+
+Listings are cursor-paged: `limit` (default 100, at most 1000), `after`
+(OpenAI) or `after_id` (Anthropic) naming the last file of the previous page,
+`order` (`desc` by default), and `has_more`, `first_id`, `last_id` on the page.
+
+## Files and code execution
+
+When a request's code runs on Otari's sandbox, because it declared the
+`otari_code_execution` tool or because the
+[executor](tools.md#code-execution-executor) brought a provider's own
+declaration here, every uploaded file it references is also seeded into the
+sandbox session's working directory, so the code the model writes can open it.
+The file keeps its own filename, reduced to its last path segment; a second
+upload with the same name is suffixed (`data.csv`, then `data-2.csv`), and the
+marker the model is given carries the name the file actually has. An Anthropic
+`container_upload` block (`{"type": "container_upload", "file_id": "..."}`) is
+for the sandbox only: the model is told the file is there and never sees its
+contents. A `document`, `file`, or `input_file` block with a `file_id` is both
+shown to the model (extracted or passed through as usual) and seeded. Without a
+sandbox in the request, a `container_upload` block is read as a document. That
+is also what happens when the executor leaves a provider's declaration with the
+provider: whether a file is staged follows who runs the code, decided once from
+the workspace pin, the header and the deployment default.
+
+A file the code writes into the working directory comes back as a new stored
+file owned by the same user and workspace, with purpose `code_execution_output`.
+Otari finds it two ways and unions them: the result block's own list of produced
+files, and a listing of the workspace after each call compared with the one
+before, so a backend that leaves the block's list empty (the reference container
+does) still has its files collected. A seeded input the code rewrote counts as
+produced.
+The model sees it in the tool result as `chart.png (file_id: file-...)` and is
+asked to pass that id on, and the caller downloads it with
+`GET /v1/files/{id}/content`. A caller who declared Anthropic's own code tool
+also gets the id in the `code_execution_tool_result` block's
+`code_execution_output` entries, where Anthropic's SDK looks for it. Both directions need a sandbox backend that
+implements the protocol's optional `PutFile` and `GetFile` operations, and
+collecting a file the block does not name needs `ListFiles` as well; a seed the
+backend refuses fails the request rather than running code over a missing input,
+while an output that cannot be fetched is named without an id and the run stands.
+
+### A file the provider's own sandbox produced
+
+A declaration the [executor](tools.md#code-execution-executor) leaves with the
+provider runs in the provider's container, and the file it writes stays there,
+under the provider's own id. Otari copies nothing, and records a row saying
+whose that file is and which provider holds it, so
+`GET /v1/files/{id}/content` streams the bytes through on demand and the same
+download serves a chart whichever sandbox drew it. The row is also what keeps
+that safe: a provider authenticates the deployment's credential, which is
+coarser than a workspace-scoped key, so the user and workspace predicate every
+other file gets is applied here before anything is fetched.
+
+Three things follow from Otari not holding the bytes. A listing shows `0` for
+the size, because the provider does not say how many bytes there are until they
+are read. The provider's id is what travels, rather than one of Otari's, since
+rewriting it would break a client that echoes the turn back with a container
+reference the provider never issued. And such a file cannot be an *input* to a
+later request: a `file_id` block naming one is dropped, because there is
+nothing local to extract or seed a session with. Anthropic and OpenAI are the
+providers Otari can fetch back from; a native run on any other is announced by
+the provider and downloaded from it.
+
+One call may store at most `files_output_max_files` files and
+`files_output_max_bytes` in total (20 files and 64 MB by default, the latter also
+bounded by `files_max_bytes`). What a run writes is untrusted, so a file past
+either cap is named in the tool result without an id rather than stored. A
+produced file is streamed from the sandbox into the store and never held whole.
+
+> The reference `otari-sandbox-container` leaves the result block's
+> file-reference list empty, so with it collection depends on `ListFiles`, which
+> it implements. A backend that neither names nor lists a file does not have it
+> collected.
 
 ### Who can see an uploaded file
 
@@ -109,7 +207,19 @@ in order:
 See [config.example.yml](../config.example.yml) for the full list. Key knobs:
 
 - `files_enabled`, `files_backend`, `files_local_dir`, `files_max_bytes`,
-`files_retention_hours`: upload storage.
+`files_retention_hours`: upload storage. `files_output_max_files` and
+`files_output_max_bytes` bound what one code-execution call may store from its
+sandbox (see above). `files_backend` is `local` (a
+directory), `s3` (boto3, `files_s3_*`), or `fsspec`: any filesystem
+[fsspec](https://filesystem-spec.readthedocs.io) has an implementation for,
+named by `files_url` (`gcs://bucket/prefix`, `abfs://container/prefix`,
+`s3://bucket/prefix`, `sftp://host/path`, `file:///path`, ...) with the
+implementation's own keyword arguments in `files_storage_options`. It is an
+optional extra, `pip install otari[fsspec]`, like `otari[s3]`; install the
+implementation package for the protocol as well (`gcsfs`, `adlfs`, `s3fs`, `paramiko`);
+most read their standard credential environment variables on their own. An expired file answers 404 at once,
+and the background sweep (`files_sweep_interval_sec`, hourly by default, `0` to
+disable) then reclaims its bytes and row along with those of deleted files.
 - `file_understanding_enabled`: master switch for content normalization.
 - `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:
 how images are handled for text-only models. The describe model may be a local

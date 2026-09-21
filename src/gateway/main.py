@@ -33,6 +33,7 @@ from gateway.services.budgets import run_reservation_sweeper
 from gateway.services.catalog_selectors import reset_selector_index
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.file_store import build_file_store
+from gateway.services.files import run_file_sweeper
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
 from gateway.services.model_catalog_service import (
@@ -167,6 +168,13 @@ def _start_reservation_sweeper(config: GatewayConfig) -> Coroutine[Any, Any, Non
     )
 
 
+def _start_file_sweeper(config: GatewayConfig) -> Coroutine[Any, Any, None] | None:
+    """Return the file retention sweep, or None when files or the interval disable it."""
+    if not config.files_enabled or config.files_sweep_interval_sec <= 0:
+        return None
+    return run_file_sweeper(config.files_sweep_interval_sec, build_file_store(config))
+
+
 # The periodic background workers a standalone deployment runs.
 # A new worker is one entry here.
 #
@@ -198,6 +206,9 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     # Not a cache reload: this returns leaked budget holds. Without it a user
     # whose single request leaked would hold against their budget forever.
     _LifespanWorker("budget reservation sweep", _start_reservation_sweeper),
+    # Same posture for uploaded files: expiry hides a file, this gives its
+    # bytes back.
+    _LifespanWorker("file retention sweep", _start_file_sweeper),
 )
 
 

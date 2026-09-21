@@ -359,6 +359,32 @@ def test_expired_file_returns_404(
     assert client.get(f"{API_ROOT}/files/{file_id}/content", headers=api_key_header).status_code == 404
 
 
+def test_an_expired_file_is_not_listed(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    db_session: Session,
+) -> None:
+    """The listing hides what every other verb 404s, rather than waiting for the sweep."""
+    live = client.post(
+        f"{API_ROOT}/files", headers=api_key_header, files={"file": ("live.txt", b"hi", "text/plain")}
+    ).json()["id"]
+    gone = client.post(
+        f"{API_ROOT}/files", headers=api_key_header, files={"file": ("gone.txt", b"hi", "text/plain")}
+    ).json()["id"]
+
+    record = db_session.get(FileObject, gone)
+    assert record is not None
+    record.expires_at = datetime.now(UTC) - timedelta(hours=1)
+    db_session.commit()
+
+    listed = client.get(f"{API_ROOT}/files", headers=api_key_header)
+    assert listed.status_code == 200, listed.text
+    ids = {row["id"] for row in listed.json()["data"]}
+    assert live in ids
+    assert gone not in ids
+
+
 def test_vision_describe_side_call_is_billed(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -462,3 +488,207 @@ def test_files_user_mismatch_ignored_when_lenient(
     listing = client.get(f"{API_ROOT}/files", headers=api_key_header)
     assert listing.status_code == 200
     assert any(f["id"] == file_id for f in listing.json()["data"])
+
+
+_ANTHROPIC = {"anthropic-version": "2023-06-01"}
+
+
+def test_anthropic_sdk_headers_get_anthropic_shapes(
+    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None
+) -> None:
+    """The Anthropic SDK sends ``anthropic-version`` on every call and reads ``FileMetadata``."""
+    headers = {**api_key_header, **_ANTHROPIC}
+    up = client.post(f"{API_ROOT}/files", headers=headers, files={"file": ("a.pdf", b"%PDF-1.4", "application/pdf")})
+    assert up.status_code == 200, up.text
+    meta = up.json()
+    assert meta["type"] == "file"
+    assert meta["size_bytes"] == len(b"%PDF-1.4")
+    assert meta["mime_type"] == "application/pdf"
+    assert meta["downloadable"] is True
+    assert meta["created_at"].endswith("Z")
+    assert "object" not in meta and "bytes" not in meta
+
+    got = client.get(f"{API_ROOT}/files/{meta['id']}", headers=headers)
+    assert got.status_code == 200
+    assert got.json()["size_bytes"] == len(b"%PDF-1.4")
+
+    listed = client.get(f"{API_ROOT}/files", headers=headers)
+    assert listed.status_code == 200
+    page = listed.json()
+    assert "object" not in page
+    assert page["has_more"] is False
+    assert page["first_id"] == page["last_id"] == meta["id"]
+
+    # The same file, read with OpenAI's headers, is the OpenAI object.
+    assert client.get(f"{API_ROOT}/files/{meta['id']}", headers=api_key_header).json()["object"] == "file"
+
+    deleted = client.delete(f"{API_ROOT}/files/{meta['id']}", headers=headers)
+    assert deleted.status_code == 200
+    assert deleted.json() == {"id": meta["id"], "type": "file_deleted"}
+
+
+def test_list_is_cursor_paged(client: TestClient, api_key_header: dict[str, str], tmp_file_store: None) -> None:
+    ids = [
+        client.post(
+            f"{API_ROOT}/files", headers=api_key_header, files={"file": (f"{n}.txt", b"x", "text/plain")}
+        ).json()["id"]
+        for n in range(3)
+    ]
+
+    first = client.get(f"{API_ROOT}/files", headers=api_key_header, params={"limit": 2}).json()
+    assert first["object"] == "list"
+    assert len(first["data"]) == 2
+    assert first["has_more"] is True
+    assert first["first_id"] == first["data"][0]["id"]
+    assert first["last_id"] == first["data"][1]["id"]
+
+    second = client.get(
+        f"{API_ROOT}/files", headers=api_key_header, params={"limit": 2, "after": first["last_id"]}
+    ).json()
+    assert len(second["data"]) == 1
+    assert second["has_more"] is False
+    seen = [f["id"] for f in first["data"] + second["data"]]
+    assert sorted(seen) == sorted(ids)
+    assert len(set(seen)) == 3
+
+    # Anthropic's cursor name, ascending, walks the same set the other way.
+    asc = client.get(
+        f"{API_ROOT}/files", headers={**api_key_header, **_ANTHROPIC}, params={"limit": 3, "order": "asc"}
+    ).json()
+    assert [f["id"] for f in asc["data"]] == list(reversed(seen))
+    tail = client.get(
+        f"{API_ROOT}/files",
+        headers={**api_key_header, **_ANTHROPIC},
+        params={"after_id": asc["data"][0]["id"], "order": "asc"},
+    ).json()
+    assert [f["id"] for f in tail["data"]] == [f["id"] for f in asc["data"][1:]]
+
+    # A cursor that has since been deleted is still a position: the usual
+    # "list a page, delete each, list again from last_id" loop must not 404
+    # on its second page.
+    assert client.delete(f"{API_ROOT}/files/{first['last_id']}", headers=api_key_header).status_code == 200
+    after_deleted = client.get(
+        f"{API_ROOT}/files", headers=api_key_header, params={"limit": 2, "after": first["last_id"]}
+    )
+    assert after_deleted.status_code == 200
+    assert [f["id"] for f in after_deleted.json()["data"]] == [second["data"][0]["id"]]
+
+    # A cursor the caller never owned answers like a direct read of it would.
+    assert client.get(f"{API_ROOT}/files", headers=api_key_header, params={"after": "file-nope"}).status_code == 404
+    assert client.get(f"{API_ROOT}/files", headers=api_key_header, params={"limit": 0}).status_code == 422
+
+
+def test_sweep_reclaims_expired_and_deleted_files(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    tmp_path: Path,
+    db_session: Session,
+    test_config: Any,
+) -> None:
+    """Expiry hides a file; the sweep takes its bytes and row, and a deleted file's row with them."""
+    import asyncio
+
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from gateway.core.unit_of_work import UnitOfWork
+    from gateway.services.files import sweep_files
+
+    def _upload(name: str) -> str:
+        resp = client.post(
+            f"{API_ROOT}/files", headers=api_key_header, files={"file": (name, b"payload", "text/plain")}
+        )
+        assert resp.status_code == 200, resp.text
+        return str(resp.json()["id"])
+
+    expired, deleted, live = _upload("expired.txt"), _upload("deleted.txt"), _upload("live.txt")
+    # Every row here is an upload, so its blob ref is set; ``storage_ref`` is
+    # nullable only for a file a provider holds.
+    refs = {
+        row.id: str(row.storage_ref)
+        for row in db_session.query(FileObject).filter(FileObject.id.in_([expired, deleted, live])).all()
+    }
+    db_session.query(FileObject).filter(FileObject.id == expired).update(
+        {"expires_at": datetime.now(UTC) - timedelta(hours=1)}
+    )
+    db_session.commit()
+    assert client.delete(f"{API_ROOT}/files/{deleted}", headers=api_key_header).status_code == 200
+    assert (tmp_path / refs[expired]).exists()
+
+    store = LocalDirFileStore(str(tmp_path))
+
+    async def _sweep() -> int:
+        engine = create_async_engine(make_url(test_config.database_url).set(drivername="postgresql+asyncpg"))
+        try:
+            async with async_sessionmaker(engine)() as db, UnitOfWork(db) as uow:
+                batch = await sweep_files(uow, store, batch_size=10)
+                return batch.reclaimed
+        finally:
+            await engine.dispose()
+
+    assert asyncio.run(_sweep()) == 2
+    db_session.expire_all()
+    remaining = {row.id for row in db_session.query(FileObject).all()}
+    assert expired not in remaining and deleted not in remaining and live in remaining
+    assert not (tmp_path / refs[expired]).exists()
+    assert (tmp_path / refs[live]).exists()
+    assert client.get(f"{API_ROOT}/files/{live}", headers=api_key_header).status_code == 200
+
+
+def test_sweep_pages_past_rows_whose_blob_will_not_delete(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    tmp_path: Path,
+    db_session: Session,
+    test_config: Any,
+) -> None:
+    """A row whose blob keeps failing must not park at the head and hide the rows behind it."""
+    import asyncio
+
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from gateway.core.unit_of_work import UnitOfWork
+    from gateway.services.files import sweep_files
+
+    ids = []
+    for name in ("stuck-1.txt", "stuck-2.txt", "fine.txt"):
+        resp = client.post(
+            f"{API_ROOT}/files", headers=api_key_header, files={"file": (name, b"payload", "text/plain")}
+        )
+        assert resp.status_code == 200, resp.text
+        ids.append(str(resp.json()["id"]))
+    db_session.query(FileObject).filter(FileObject.id.in_(ids)).update(
+        {"expires_at": datetime.now(UTC) - timedelta(hours=1)}
+    )
+    db_session.commit()
+    refs = {row.id: str(row.storage_ref) for row in db_session.query(FileObject).filter(FileObject.id.in_(ids)).all()}
+    stuck = {refs[ids[0]], refs[ids[1]]}
+
+    class _StickyStore(LocalDirFileStore):
+        async def delete(self, storage_ref: str) -> None:
+            if storage_ref in stuck:
+                raise PermissionError(storage_ref)
+            await super().delete(storage_ref)
+
+    store = _StickyStore(str(tmp_path))
+
+    async def _sweep_two_batches() -> list[tuple[int, int]]:
+        engine = create_async_engine(make_url(test_config.database_url).set(drivername="postgresql+asyncpg"))
+        try:
+            async with async_sessionmaker(engine)() as db, UnitOfWork(db) as uow:
+                first = await sweep_files(uow, store, batch_size=2)
+                second = await sweep_files(uow, store, batch_size=2, after=first.cursor)
+                return [(first.seen, first.reclaimed), (second.seen, second.reclaimed)]
+        finally:
+            await engine.dispose()
+
+    # The first batch is the two stuck rows and reclaims nothing; the second,
+    # started past them, reaches the one that can go.
+    assert asyncio.run(_sweep_two_batches()) == [(2, 0), (1, 1)]
+    db_session.expire_all()
+    remaining = {row.id for row in db_session.query(FileObject).filter(FileObject.id.in_(ids)).all()}
+    assert remaining == {ids[0], ids[1]}
+    assert not (tmp_path / refs[ids[2]]).exists()
