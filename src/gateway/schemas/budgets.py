@@ -259,9 +259,9 @@ class ScopedBudgetResponse(ScopedCeilingFigures):
     """
 
     @classmethod
-    def from_model(cls, budget: ScopedBudget, limit: Budget) -> ScopedBudgetResponse:
+    def from_model(cls, ceiling: ScopedBudget, budget: Budget) -> ScopedBudgetResponse:
         """Create a ScopedBudgetResponse from a ceiling and the budget it names."""
-        return cls(**cls._figures_of(budget, limit))
+        return cls(**cls._figures_of(ceiling, budget))
 
 
 class OrganizationBudgetRates(BaseModel):
