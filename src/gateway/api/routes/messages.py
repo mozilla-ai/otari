@@ -621,16 +621,28 @@ def _reject_container_on_managed_credential(ctx: RequestContext) -> None:
 
 
 class _FileMessagesAdapter(_MessagesAdapter):
-    def __init__(self, client: PlatformFilesClient, request_id: str, references: list[str]) -> None:
+    def __init__(
+        self,
+        client: PlatformFilesClient,
+        request_id: str,
+        references: list[str],
+        *,
+        native_outputs: bool,
+        reference_account: FileAccount | None,
+    ) -> None:
         self.files_client = client
         self.files_request_id = request_id
         self.file_references = references
+        self.native_outputs = native_outputs
+        self.reference_account = reference_account
         self.pending_binder: AnthropicFileOutputBinder | None = None
 
     def attempt_kwargs(self, attempt: ResolvedAttempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
         result = super().attempt_kwargs(attempt, base_request_fields)
         result["api_key"], result["api_base"] = attempt.api_key, attempt.api_base
         result["client_args"] = {"max_retries": 0}
+        if self.reference_account is not None and self.reference_account.workspace is not None:
+            result["client_args"]["default_headers"] = {"anthropic-workspace-id": self.reference_account.workspace}
         supplied = result.get("extra_headers")
         result["extra_headers"] = (
             {
@@ -644,7 +656,7 @@ class _FileMessagesAdapter(_MessagesAdapter):
         result["_file_attempt"] = attempt
         return result
 
-    async def _binder(self, kwargs: dict[str, Any]) -> AnthropicFileOutputBinder:
+    async def _binder(self, kwargs: dict[str, Any]) -> AnthropicFileOutputBinder | None:
         # Raised as an HTTPException so the attempt runners, which map any other
         # exception to a generic provider failure, hand it back unchanged.
         try:
@@ -652,10 +664,12 @@ class _FileMessagesAdapter(_MessagesAdapter):
         except FilesError as exc:
             raise _files_error(exc) from None
 
-    async def _prepare_binder(self, kwargs: dict[str, Any]) -> AnthropicFileOutputBinder:
+    async def _prepare_binder(self, kwargs: dict[str, Any]) -> AnthropicFileOutputBinder | None:
         attempt = kwargs.pop("_file_attempt")
         if attempt.provider != "anthropic" or not attempt.provider_account_generation_id:
             raise FilesError(403, "Provider file outputs require an authorized Anthropic account")
+        if not self.native_outputs:
+            return None
         operation = await self.files_client.post(
             "outputs/prepare",
             {
@@ -682,7 +696,8 @@ class _FileMessagesAdapter(_MessagesAdapter):
         try:
             result = await super().call_provider(kwargs)
         except BaseException:
-            await binder.complete()
+            if binder is not None:
+                await binder.complete()
             raise
         self.pending_binder = binder
         return result
@@ -700,9 +715,10 @@ class _FileMessagesAdapter(_MessagesAdapter):
         try:
             stream = await super().open_provider_stream(kwargs)
         except BaseException:
-            await binder.complete()
+            if binder is not None:
+                await binder.complete()
             raise
-        return binder.stream(stream)
+        return binder.stream(stream) if binder is not None else stream
 
     async def run_tool_loop(
         self,
@@ -725,7 +741,8 @@ class _FileMessagesAdapter(_MessagesAdapter):
                 web_search_budget=web_search_budget,
             )
         except BaseException:
-            await binder.complete()
+            if binder is not None:
+                await binder.complete()
             raise
         self.pending_binder = binder
         return result
@@ -748,7 +765,7 @@ class _FileMessagesAdapter(_MessagesAdapter):
                 emit_native_web_search=emit_native_web_search,
                 web_search_budget=web_search_budget,
             )
-            async for event in binder.stream(source):
+            async for event in binder.stream(source) if binder is not None else source:
                 yield event
 
         return stream()
@@ -872,6 +889,7 @@ async def create_message(
                     raise FilesError(400, "Hybrid provider file references and native outputs are not enabled")
                 assert ctx.route is not None and ctx.user_token is not None
                 client = PlatformFilesClient(config.platform["base_url"], config.platform_token or "", ctx.user_token)
+                account = None
                 if references:
                     account = await client.post(
                         "references/resolve", {"ids": references, "provider": "anthropic"}, FileAccount
@@ -886,10 +904,17 @@ async def create_message(
                     if not attempts:
                         raise FilesError(403, "File account is not authorized by the requested model policy")
                     selected = attempts[0]
-                    selected.api_key, selected.api_base = account.api_key.get_secret_value(), account.api_base
+                    if selected.api_key != account.api_key.get_secret_value() or selected.api_base != account.api_base:
+                        raise FilesError(409, "Inference provider account changed before dispatch")
                     selected.extra_params = None
                     ctx.route.attempts, ctx.route.fallback_enabled = [selected], False
-                adapter = _FileMessagesAdapter(client, ctx.route.request_id, references)
+                adapter = _FileMessagesAdapter(
+                    client,
+                    ctx.route.request_id,
+                    references,
+                    native_outputs=native_outputs,
+                    reference_account=account,
+                )
         except FilesError as exc:
             raise _files_error(exc) from None
 

@@ -1,11 +1,14 @@
 """File ownership gates dispatch and output failures preserve inference accounting."""
 
 import uuid
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from any_llm.types.messages import MessageDelta, MessageDeltaEvent, MessageDeltaUsage
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
@@ -25,6 +28,8 @@ from .test_hybrid_mode_messages import _attempt, _message_response, _resolve_pay
         ("foreign", 404, "not_found_error"),
         ("wrong_generation", 403, "permission_error"),
         ("wrong_provider", 502, "api_error"),
+        ("wrong_key", 409, "api_error"),
+        ("wrong_base", 409, "api_error"),
         ("registration_failure", 502, "api_error"),
         ("reference_failure", 400, "invalid_request_error"),
         ("reference_failure", 401, "authentication_error"),
@@ -44,13 +49,16 @@ def test_file_reference_dispatch_and_accounting(
     generation = uuid.uuid4()
     account = FileAccount(
         generation_id=generation,
-        api_key=SecretStr("owned-key"),
+        api_key=SecretStr("different-key" if outcome == "wrong_key" else "owned-key"),
+        api_base="https://different.example" if outcome == "wrong_base" else None,
         provider="openai" if outcome == "wrong_provider" else "anthropic",
     )
     attempts = [
         _attempt(0, str(uuid.uuid4()), "other-model", "other-key"),
         _attempt(1, str(uuid.uuid4()), "owned-model", "owned-key"),
     ]
+    for attempt in attempts:
+        attempt["managed"] = False
     attempts[1]["provider_account_generation_id"] = str(uuid.uuid4() if outcome == "wrong_generation" else generation)
     events: list[str] = []
 
@@ -74,6 +82,8 @@ def test_file_reference_dispatch_and_accounting(
         )
 
     async def files(self: Any, path: str, body: dict[str, Any], result_type: Any) -> Any:
+        if path == "cleanup/claim":
+            return {"lease": None}
         events.append(path)
         if path == "references/resolve":
             assert body == {"ids": ["file_history"], "provider": "anthropic"}
@@ -124,6 +134,7 @@ def test_file_reference_dispatch_and_accounting(
             json={
                 "model": "routed-model",
                 "max_tokens": 100,
+                **({"container": "container_01ABC"} if outcome == "registration_failure" else {}),
                 "messages": [
                     {
                         "role": "user",
@@ -139,11 +150,113 @@ def test_file_reference_dispatch_and_accounting(
         assert response.json()["detail"]["error"]["type"] == error_type
     if outcome in {"reference_failure", "registration_failure"}:
         assert response.headers["Retry-After"] == "30"
-    if outcome in {"foreign", "wrong_generation", "wrong_provider", "reference_failure"}:
+    if outcome in {"foreign", "wrong_generation", "wrong_provider", "wrong_key", "wrong_base", "reference_failure"}:
         assert "provider" not in events
+        assert "outputs/prepare" not in events
     else:
         assert events.count("provider") == 1
-        assert events.index("usage") < events.index("register")
+        if outcome == "registration_failure":
+            assert events.index("usage") < events.index("register")
+        else:
+            assert events == ["references/resolve", "provider", "usage"]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("tool_loop", [False, True])
+def test_input_only_dispatch_skips_full_output_quota(
+    monkeypatch: pytest.MonkeyPatch, stream: bool, tool_loop: bool
+) -> None:
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gateway-token")
+    generation = uuid.uuid4()
+    account = FileAccount(generation_id=generation, api_key=SecretStr("owned-key"), workspace="trusted-workspace")
+    attempt = _attempt(0, str(uuid.uuid4()), "owned-model", "owned-key")
+    attempt["provider_account_generation_id"] = str(generation)
+    events: list[str] = []
+
+    async def platform(url: str, **kwargs: Any) -> httpx.Response:
+        if url.endswith("/resolve"):
+            return httpx.Response(200, json=_resolve_payload([attempt]))
+        events.append("usage")
+        return httpx.Response(200, json={"correlation_id": kwargs["body"]["correlation_id"], "status": "completed"})
+
+    async def files(self: Any, path: str, body: dict[str, Any], result_type: Any) -> Any:
+        if path == "cleanup/claim":
+            return {"lease": None}
+        events.append(path)
+        if path == "references/resolve":
+            return account
+        if path == "outputs/prepare":
+            raise FilesError(429, "File capacity exceeded")
+        raise AssertionError(f"Unexpected Files call: {path}")
+
+    def check_dispatch(kwargs: dict[str, Any]) -> None:
+        events.append("provider")
+        assert kwargs["api_key"] == "owned-key"
+        assert kwargs["model"] == "anthropic:owned-model"
+        assert kwargs["client_args"] == {
+            "max_retries": 0,
+            "default_headers": {"anthropic-workspace-id": "trusted-workspace"},
+        }
+        assert "_file_attempt" not in kwargs
+        assert not {"anthropic-workspace-id", "x-api-key"} & kwargs.get("extra_headers", {}).keys()
+
+    async def chunks() -> AsyncIterator[MessageDeltaEvent]:
+        yield MessageDeltaEvent(
+            type="message_delta",
+            delta=MessageDelta(stop_reason="end_turn", stop_sequence=None),
+            usage=MessageDeltaUsage(input_tokens=3, output_tokens=5),
+        )
+
+    async def provider(**kwargs: Any) -> Any:
+        check_dispatch(kwargs)
+        return chunks() if stream else _message_response()
+
+    async def loop(**kwargs: Any) -> Any:
+        check_dispatch(kwargs["completion_kwargs"])
+        return _message_response()
+
+    async def loop_stream(**kwargs: Any) -> AsyncIterator[MessageDeltaEvent]:
+        check_dispatch(kwargs["completion_kwargs"])
+        async for event in chunks():
+            yield event
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", platform)
+    monkeypatch.setattr(PlatformFilesClient, "post", files)
+    monkeypatch.setattr("gateway.api.routes.messages.amessages", provider)
+    monkeypatch.setattr("gateway.api.routes.messages.anthropic_tool_loop", loop)
+    monkeypatch.setattr("gateway.api.routes.messages.anthropic_tool_loop_stream", loop_stream)
+    monkeypatch.setattr(
+        "gateway.services.mcp_client.MCPClientPool.__aenter__",
+        AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [])),
+    )
+    monkeypatch.setattr("gateway.services.mcp_client.MCPClientPool.__aexit__", AsyncMock(return_value=None))
+    app = app_for(
+        GatewayConfig(
+            mode="hybrid",
+            platform={"base_url": "http://platform.test/api/v1"},
+            files_provider_native_enabled=True,
+        )
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            f"{API_ROOT}/messages",
+            headers={"Authorization": "Bearer user-token"},
+            json={
+                "model": "routed-model",
+                "max_tokens": 100,
+                "stream": stream,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "document", "source": {"type": "file", "file_id": "file_history"}}],
+                    }
+                ],
+                "extra_headers": {"anthropic-workspace-id": "foreign", "x-api-key": "foreign"},
+                **({"mcp_servers": [{"name": "test", "url": "http://127.0.0.1:18080/mcp"}]} if tool_loop else {}),
+            },
+        )
+    assert response.status_code == 200, response.text
+    assert events == ["references/resolve", "provider", "usage"]
 
 
 @pytest.mark.parametrize("stream", [False, True])
