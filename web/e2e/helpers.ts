@@ -32,9 +32,10 @@ export const nav = (page: Page): Locator =>
  * the page's `h1` and fails strict mode with two elements. Scoping to `main` is
  * what `nav()` does in the other direction, and it stays right however the rail's
  * markup changes.
+ *
+ * Matched exactly, because the Budgets onboarding heading ("No budgets yet")
+ * would otherwise also substring-match that page's title.
  */
-// Exact: the Budgets onboarding heading ("No budgets yet") would otherwise also
-// substring-match the page title.
 export const pageHeading = (page: Page, name: string): Locator =>
   page.getByRole("main").getByRole("heading", { name, exact: true })
 

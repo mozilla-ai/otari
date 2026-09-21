@@ -221,8 +221,10 @@ const BASE_NAV_SECTIONS = [
  * provider credentials are the other, and that one is a *choice* rather than an
  * absence: the API and the page both exist, and a hosted deployment reports
  * `organization_providers` in place of the process-global `providers`, because
- * a credential keyed on an instance name alone is served to every tenant. Both
- * are rows under General, beside the row they belong with.
+ * a credential keyed on an instance name alone is served to every tenant. That
+ * row sits under General beside the process-global `providers` row it stands in
+ * for; the guardrail ceiling is in Gateway, beside nothing, which is why that
+ * whole group drops here.
  *
  * The design draws two more, Billing and Gateways, and neither is declared here
  * at all, because neither is this build's to declare: Billing is
@@ -370,6 +372,14 @@ const ORGANIZATION_NAV_SECTIONS = [
       // the shared label is the honest one rather than a duplicate. "Providers"
       // and not "Provider credentials" either way: the page manages the
       // credential *and* the instance it belongs to, and the rail has one line.
+      //
+      // `operatorOnly` here rather than on the organization rail's own entry
+      // point is the one exception to the deployment-rail placement the other
+      // two `operatorOnly` rows follow: a deployment operator who is not an
+      // organization owner or admin has no rail path to this row at all. Silent
+      // today, because standalone's one operator always owns the organization
+      // its own gateway provisioned; it stops holding once the rail's own gate
+      // (docblock above) becomes load-bearing at otari-ai#1716.
       {
         to: "/providers",
         label: "Providers",
