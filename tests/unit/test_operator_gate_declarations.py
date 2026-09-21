@@ -109,6 +109,7 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "chat.router": _DATA_PLANE,
     "embeddings.router": _DATA_PLANE,
     "files.router": _DATA_PLANE,
+    "hybrid_files.router": _DATA_PLANE,
     "images.router": _DATA_PLANE,
     "mcp.router": _DATA_PLANE,
     "messages.router": _DATA_PLANE,
