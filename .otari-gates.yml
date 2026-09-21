@@ -130,6 +130,11 @@ gates:
       `pnpm --dir web run client:generate` rather than editing it by hand
       (see web/AGENTS.md, "Data and generated files").
 
+  # judge and check_passed gates (this one and the two below) only ever
+  # evaluate on a Stop event: otari hook has no finished diff or session for
+  # either a model or a verifier to check against on a PreToolUse call. See
+  # docs/agent-gates.md, "judge"/"check_passed" and "Trying it against a
+  # real Claude Code session".
   - id: no-narrative-comments
     type: judge
     enforcement: advisory
