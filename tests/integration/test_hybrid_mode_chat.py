@@ -40,14 +40,57 @@ def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     reset_db()
 
 
-def test_hybrid_mode_requires_authorization_header(platform_client: TestClient) -> None:
+def test_hybrid_mode_requires_credentials(platform_client: TestClient) -> None:
     response = platform_client.post(
         f"{API_ROOT}/chat/completions",
         json={"model": "openai:gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
     )
 
     assert response.status_code == 401
-    assert response.json() == {"detail": "Missing authentication token"}
+    assert response.json() == {"detail": "Missing Otari-Key, Authorization, or x-api-key header"}
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Authorization": "Bearer user_test_token"},
+        {"Otari-Key": "user_test_token"},
+        {"Otari-Key": "Bearer user_test_token"},
+        {"x-api-key": "user_test_token"},
+    ],
+)
+def test_hybrid_mode_accepts_standalone_credential_headers(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    headers: dict[str, str],
+) -> None:
+    """Hybrid mode reads the same headers as standalone mode, so a key keeps
+    working when a caller moves between deployments; only who verifies the
+    token differs."""
+    forwarded_tokens: list[str] = []
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        forwarded_tokens.append(headers["X-User-Token"])
+        return httpx.Response(401, json={"detail": "Invalid user token"})
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+
+    response = platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "openai:gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
+        headers=headers,
+    )
+
+    # The 401 comes from the platform's verdict on the forwarded token, not
+    # from the gateway failing to read the header.
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid user token"}
+    assert forwarded_tokens == ["user_test_token"]
 
 
 def test_hybrid_mode_maps_resolve_unauthorized(

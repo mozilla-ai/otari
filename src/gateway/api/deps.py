@@ -119,7 +119,7 @@ def get_enabled_features(request: Request) -> tuple[CoreFeature, ...]:
     return enabled
 
 
-def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:
+def _extract_bearer_token(request: Request) -> str:
     """Extract the API token from the request headers.
 
     The canonical Otari-Key header carries the token directly. A ``Bearer ``
@@ -352,14 +352,12 @@ def _api_key_format(request: Request, db: AsyncSession) -> ApiKeyFormatPort:
 async def verify_api_key(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> APIKey:
     """Verify API key from Otari-Key header.
 
     Args:
         request: FastAPI request object
         db: Database session
-        config: Gateway configuration
 
     Returns:
         APIKey object if valid
@@ -368,7 +366,7 @@ async def verify_api_key(
         HTTPException: If key is invalid, inactive, or expired
 
     """
-    token = _extract_bearer_token(request, config)
+    token = _extract_bearer_token(request)
     return await _verify_and_update_api_key(db, token, _api_key_format(request, db))
 
 
@@ -398,7 +396,7 @@ async def verify_master_key(
     """
     if session_identity is not None:
         return None
-    token = _extract_bearer_token(request, config)
+    token = _extract_bearer_token(request)
 
     if config.master_key is None:
         stored_hash = await _load_generated_master_key_hash(config, db)
@@ -503,7 +501,7 @@ async def verify_api_key_or_master_key(
         HTTPException: If key is invalid, inactive, or expired
 
     """
-    token = _extract_bearer_token(request, config)
+    token = _extract_bearer_token(request)
 
     if await is_valid_master_key(token, config, db):
         return None, True

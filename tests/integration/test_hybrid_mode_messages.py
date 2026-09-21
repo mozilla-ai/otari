@@ -118,7 +118,7 @@ def _message_response_with_1h_cache_write() -> MessageResponse:
     )
 
 
-def test_hybrid_mode_requires_authorization_header(platform_client: TestClient) -> None:
+def test_hybrid_mode_requires_credentials(platform_client: TestClient) -> None:
     response = platform_client.post(
         f"{API_ROOT}/messages",
         json={
@@ -133,7 +133,10 @@ def test_hybrid_mode_requires_authorization_header(platform_client: TestClient) 
     assert response.json() == {
         "detail": {
             "type": "error",
-            "error": {"type": "authentication_error", "message": "Missing authentication token"},
+            "error": {
+                "type": "authentication_error",
+                "message": "Missing Otari-Key, Authorization, or x-api-key header",
+            },
         }
     }
 
@@ -967,7 +970,7 @@ def test_hybrid_mode_tool_loop_streaming_forwards_session_label(
     assert success_reports[0]["session_label"] == "my-run-personas"
 
 
-def test_hybrid_mode_count_tokens_requires_authorization_header(
+def test_hybrid_mode_count_tokens_requires_credentials(
     platform_client: TestClient,
 ) -> None:
     response = platform_client.post(
@@ -982,7 +985,10 @@ def test_hybrid_mode_count_tokens_requires_authorization_header(
     assert response.json() == {
         "detail": {
             "type": "error",
-            "error": {"type": "authentication_error", "message": "Missing authentication token"},
+            "error": {
+                "type": "authentication_error",
+                "message": "Missing Otari-Key, Authorization, or x-api-key header",
+            },
         }
     }
 

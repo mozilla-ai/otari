@@ -27,6 +27,7 @@ from openai import APIConnectionError as _OpenAIAPIConnectionError
 from openai import APITimeoutError as _OpenAIAPITimeoutError
 from pydantic import BaseModel, Field, ValidationError
 
+from gateway.api.deps import _extract_bearer_token
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import (
     cache_read_tokens_of,
@@ -466,19 +467,16 @@ async def run_platform_attempts(
 
 
 def _extract_platform_user_token(request: Request) -> str:
-    """Pull the user's bearer token off the ``Authorization`` header.
+    """Pull the user's platform token off the request headers.
 
     Used in hybrid mode to forward the caller's identity to the platform's
     resolve endpoint. Standalone mode uses ``verify_api_key_or_master_key``
-    instead.
+    instead. Both read the same headers via ``_extract_bearer_token``, so a
+    key authenticates the same way whichever mode a deployment runs in; only
+    who verifies the token differs (the platform here, the local database
+    there).
     """
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authentication token",
-        )
-    token = auth_header[7:].strip()
+    token = _extract_bearer_token(request).strip()
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

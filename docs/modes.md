@@ -68,8 +68,9 @@ otari serve
 
 Hybrid serves health, bootstrap, Chat Completions, Messages, and Responses. It
 does not initialize the local management database or use local provider
-configuration. Clients authenticate with an otari.ai user token in
-`Authorization: Bearer <token>`.
+configuration. Clients authenticate with an otari.ai user
+token, accepted in the same header forms as standalone mode
+(`Authorization: Bearer`, `Otari-Key`, or `x-api-key`).
 
 The gateway asks the platform to resolve an ordered set of provider attempts,
 tries retryable fallbacks before a response begins, and reports each outcome.

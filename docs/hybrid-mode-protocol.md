@@ -27,8 +27,8 @@ Every endpoint requires `X-Gateway-Token: <gw_...>` in the request headers. This
 proves the caller is an Otari instance configured against this platform
 deployment. The three resolve endpoints additionally require `X-User-Token:
 <tk_...>`, which is the workspace API token forwarded opaquely from the end
-user's `Authorization: Bearer ...` header. The usage endpoint sends only the
-gateway token.
+user's credential header (`Authorization: Bearer`, `Otari-Key`, or
+`x-api-key`). The usage endpoint sends only the gateway token.
 
 ## Extension policy
 

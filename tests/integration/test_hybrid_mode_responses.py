@@ -103,14 +103,14 @@ def _response_object() -> Response:
     )
 
 
-def test_hybrid_mode_requires_authorization_header(platform_client: TestClient) -> None:
+def test_hybrid_mode_requires_credentials(platform_client: TestClient) -> None:
     response = platform_client.post(
         f"{API_ROOT}/responses",
         json={"model": "openai:gpt-4o-mini", "input": "hi"},
     )
 
     assert response.status_code == 401
-    assert response.json() == {"detail": "Missing authentication token"}
+    assert response.json() == {"detail": "Missing Otari-Key, Authorization, or x-api-key header"}
 
 
 def test_hybrid_mode_sets_correlation_id_and_reports_usage(

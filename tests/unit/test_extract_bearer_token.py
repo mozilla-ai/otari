@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from gateway.api.deps import _extract_bearer_token
-from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER
 from gateway.metrics import REGISTRY
 
 
@@ -27,25 +27,19 @@ def _make_request(headers: dict[str, str]) -> Request:
     return Request(scope)
 
 
-@pytest.fixture
-def config() -> GatewayConfig:
-    """A minimal config object; ``_extract_bearer_token`` does not read fields from it."""
-    return GatewayConfig(master_key="test-master-key", auto_migrate=False)
-
-
-def test_canonical_header_returns_token(config: GatewayConfig) -> None:
+def test_canonical_header_returns_token() -> None:
     request = _make_request({API_KEY_HEADER: "Bearer token-canonical"})
 
-    assert _extract_bearer_token(request, config) == "token-canonical"
+    assert _extract_bearer_token(request) == "token-canonical"
 
 
-def test_authorization_header_returns_token(config: GatewayConfig) -> None:
+def test_authorization_header_returns_token() -> None:
     request = _make_request({"Authorization": "Bearer token-auth"})
 
-    assert _extract_bearer_token(request, config) == "token-auth"
+    assert _extract_bearer_token(request) == "token-auth"
 
 
-def test_canonical_takes_precedence_over_authorization(config: GatewayConfig) -> None:
+def test_canonical_takes_precedence_over_authorization() -> None:
     request = _make_request(
         {
             API_KEY_HEADER: "Bearer canonical-wins",
@@ -53,31 +47,31 @@ def test_canonical_takes_precedence_over_authorization(config: GatewayConfig) ->
         }
     )
 
-    assert _extract_bearer_token(request, config) == "canonical-wins"
+    assert _extract_bearer_token(request) == "canonical-wins"
 
 
 @pytest.mark.parametrize("legacy_header", ["AnyLLM-Key", "X-AnyLLM-Key"])
-def test_legacy_header_is_no_longer_honored(config: GatewayConfig, legacy_header: str) -> None:
+def test_legacy_header_is_no_longer_honored(legacy_header: str) -> None:
     """The pre-rename AnyLLM-Key / X-AnyLLM-Key aliases were removed: a request
     carrying only a legacy header is treated as missing credentials."""
     request = _make_request({legacy_header: "Bearer token-legacy"})
 
     with pytest.raises(HTTPException) as exc_info:
-        _extract_bearer_token(request, config)
+        _extract_bearer_token(request)
 
     assert exc_info.value.status_code == 401
     assert API_KEY_HEADER in exc_info.value.detail
 
 
-def test_canonical_header_accepts_raw_token(config: GatewayConfig) -> None:
+def test_canonical_header_accepts_raw_token() -> None:
     # The dashboard hands out `Otari-Key: gw-...` with no Bearer prefix; the raw
     # token is returned verbatim.
     request = _make_request({API_KEY_HEADER: "gw-raw-canonical"})
 
-    assert _extract_bearer_token(request, config) == "gw-raw-canonical"
+    assert _extract_bearer_token(request) == "gw-raw-canonical"
 
 
-def test_malformed_authorization_header_raises_401(config: GatewayConfig) -> None:
+def test_malformed_authorization_header_raises_401() -> None:
     """A non-Bearer Authorization scheme is the ``invalid_format`` auth-failure trigger.
 
     It is the only one since the ``gw-`` shape check came off the key-verify path
@@ -87,18 +81,18 @@ def test_malformed_authorization_header_raises_401(config: GatewayConfig) -> Non
     before = REGISTRY.get_sample_value("gateway_auth_failures_total", {"reason": "invalid_format"}) or 0.0
 
     with pytest.raises(HTTPException) as exc_info:
-        _extract_bearer_token(request, config)
+        _extract_bearer_token(request)
 
     assert exc_info.value.status_code == 401
     after = REGISTRY.get_sample_value("gateway_auth_failures_total", {"reason": "invalid_format"}) or 0.0
     assert after - before == 1.0
 
 
-def test_missing_credentials_raises_401(config: GatewayConfig) -> None:
+def test_missing_credentials_raises_401() -> None:
     request = _make_request({})
 
     with pytest.raises(HTTPException) as exc_info:
-        _extract_bearer_token(request, config)
+        _extract_bearer_token(request)
 
     assert exc_info.value.status_code == 401
     assert API_KEY_HEADER in exc_info.value.detail
@@ -109,13 +103,13 @@ def test_missing_credentials_raises_401(config: GatewayConfig) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_x_api_key_header_returns_raw_token(config: GatewayConfig) -> None:
+def test_x_api_key_header_returns_raw_token() -> None:
     request = _make_request({X_API_KEY_HEADER: "test-raw-token"})
 
-    assert _extract_bearer_token(request, config) == "test-raw-token"
+    assert _extract_bearer_token(request) == "test-raw-token"
 
 
-def test_authorization_takes_precedence_over_x_api_key(config: GatewayConfig) -> None:
+def test_authorization_takes_precedence_over_x_api_key() -> None:
     request = _make_request(
         {
             "Authorization": "Bearer bearer-wins",
@@ -123,10 +117,10 @@ def test_authorization_takes_precedence_over_x_api_key(config: GatewayConfig) ->
         }
     )
 
-    assert _extract_bearer_token(request, config) == "bearer-wins"
+    assert _extract_bearer_token(request) == "bearer-wins"
 
 
-def test_canonical_takes_precedence_over_x_api_key(config: GatewayConfig) -> None:
+def test_canonical_takes_precedence_over_x_api_key() -> None:
     request = _make_request(
         {
             API_KEY_HEADER: "Bearer canonical-wins",
@@ -134,11 +128,11 @@ def test_canonical_takes_precedence_over_x_api_key(config: GatewayConfig) -> Non
         }
     )
 
-    assert _extract_bearer_token(request, config) == "canonical-wins"
+    assert _extract_bearer_token(request) == "canonical-wins"
 
 
-def test_x_api_key_without_bearer_prefix_succeeds(config: GatewayConfig) -> None:
+def test_x_api_key_without_bearer_prefix_succeeds() -> None:
     request = _make_request({X_API_KEY_HEADER: "test-raw-token-no-bearer-prefix"})
 
-    token = _extract_bearer_token(request, config)
+    token = _extract_bearer_token(request)
     assert token == "test-raw-token-no-bearer-prefix"
