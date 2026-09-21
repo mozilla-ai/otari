@@ -482,6 +482,54 @@ describe("OrganizationBudgetsPage", () => {
     })
   })
 
+  it("goes back to the first page when the organization changes", async () => {
+    // Switching invalidates every query rather than remounting the page, so the
+    // window survives the switch. Left alone, the new organization is asked for
+    // a page its shorter list does not reach, that answers empty, the card steps
+    // back, and the two walk down a page per request until they meet zero.
+    const user = userEvent.setup()
+    const requests = mockApi({
+      ceilings: Array.from({ length: 30 }, (_, index) =>
+        spendCeiling({
+          id: `cccccccc-1111-2222-3333-${String(index).padStart(12, "0")}`,
+        }),
+      ),
+    })
+    const { switchTo } = renderPage()
+
+    await screen.findByRole("grid", { name: "Organization spend ceilings" })
+    await user.click(
+      screen.getByRole("button", { name: "Next page, spend ceilings" }),
+    )
+    await waitFor(() => {
+      expect(
+        requests.some((request) => request.url.includes("skip=25&limit=25")),
+      ).toBe(true)
+    })
+
+    const box = screen.getByRole("textbox", {
+      name: "Page number, spend ceilings",
+    })
+    expect(box).toHaveValue("2")
+
+    switchTo(
+      admin({
+        organization: {
+          ...admin().organization,
+          id: "99999999-1111-2222-3333-444444444444",
+        },
+      }),
+    )
+
+    // Back to the first window, so the new organization is never asked for a
+    // page its list may not reach.
+    await waitFor(() => {
+      expect(
+        screen.getByRole("textbox", { name: "Page number, spend ceilings" }),
+      ).toHaveValue("1")
+    })
+  })
+
   it("marks a ceiling whose budget is set outside the organization", async () => {
     // What the otari-ai cutover writes. Listed rather than hidden, because it is
     // enforcing today and omitting it would let the page read as uncapped.

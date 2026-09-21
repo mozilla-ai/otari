@@ -74,6 +74,10 @@ export function SpendCeilingsCard({
     setDialogOpen(false)
     setEditing(undefined)
     setPendingDelete(undefined)
+    // The page too, or the new organization is asked for a window its shorter
+    // list does not reach: that answers empty, the step-back below decrements,
+    // and the two walk down a page per request until they meet zero.
+    setPage(0)
   }
 
   const rows = ceilings.data?.data ?? []

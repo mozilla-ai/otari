@@ -93,6 +93,19 @@ export function RateOverridesCard() {
   const overrides = useOrganizationPricing(page, pageSize)
   const remove = useDeleteOrganizationPricing()
 
+  // Switching organization invalidates every query rather than remounting this
+  // card, so the window survives the switch. Reset it, or the new organization
+  // is asked for a page its shorter list does not reach: that answers empty,
+  // the step-back below decrements, and the two walk down a page per request
+  // until they meet zero. Adjusted during render rather than in an effect, so
+  // nothing fetches against the new organization holding the old one's page.
+  const organizationId = context.data?.organization.id ?? null
+  const [shownFor, setShownFor] = useState(organizationId)
+  if (shownFor !== organizationId) {
+    setShownFor(organizationId)
+    setPage(0)
+  }
+
   const [isDialogOpen, setDialogOpen] = useState(false)
   // Bumped on every open and used as the dialog's key, so the draft is cleared
   // on the way in rather than on the way out. These values set money.
