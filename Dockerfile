@@ -39,7 +39,9 @@ RUN pip install --no-cache-dir --upgrade pip uv
 
 COPY pyproject.toml uv.lock ./
 COPY src ./src
-RUN uv sync --frozen --no-dev
+# --extra metrics: the image is the self-hosted default, where a Prometheus
+# scrape is expected to be one config flag away rather than a reinstall.
+RUN uv sync --frozen --no-dev --extra metrics
 
 FROM python:3.14-slim AS runtime
 

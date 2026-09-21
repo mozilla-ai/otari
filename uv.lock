@@ -1048,7 +1048,6 @@ dependencies = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-proto" },
     { name = "pillow" },
-    { name = "prometheus-client" },
     { name = "psycopg2-binary" },
     { name = "pydantic-settings" },
     { name = "pypdfium2" },
@@ -1063,6 +1062,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+metrics = [
+    { name = "prometheus-client" },
+]
 ocr = [
     { name = "numpy" },
     { name = "rapidocr-onnxruntime" },
@@ -1078,6 +1080,7 @@ dev = [
     { name = "moto", extra = ["s3"] },
     { name = "mypy" },
     { name = "packaging" },
+    { name = "prometheus-client" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -1112,7 +1115,7 @@ requires-dist = [
     { name = "opentelemetry-api", specifier = ">=1.39.1" },
     { name = "opentelemetry-proto", specifier = ">=1.39.1" },
     { name = "pillow", specifier = ">=12.3.0" },
-    { name = "prometheus-client", specifier = ">=0.20.0" },
+    { name = "prometheus-client", marker = "extra == 'metrics'", specifier = ">=0.20.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.9" },
     { name = "pydantic-settings", specifier = ">=2.14.2" },
     { name = "pypdfium2", specifier = ">=4.30.0" },
@@ -1126,7 +1129,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
     { name = "webauthn", specifier = ">=2.5.0" },
 ]
-provides-extras = ["ocr", "s3"]
+provides-extras = ["metrics", "ocr", "s3"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1135,6 +1138,7 @@ dev = [
     { name = "moto", extras = ["s3"], specifier = ">=5.0.0" },
     { name = "mypy" },
     { name = "packaging", specifier = ">=24.0" },
+    { name = "prometheus-client", specifier = ">=0.20.0" },
     { name = "pytest", specifier = ">=9.0.3,<10" },
     { name = "pytest-asyncio", specifier = ">=0.26.0" },
     { name = "pytest-cov", specifier = ">=6.2.1,<8" },

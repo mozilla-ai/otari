@@ -80,7 +80,6 @@ dependencies = [
     "opentelemetry-api>=1.39.1",
     "pillow>=12.3.0",
     "pypdfium2>=4.30.0",
-    "prometheus-client>=0.20.0",
     "psycopg2-binary>=2.9.9",
     "pydantic-settings>=2.14.2",
     "python-dotenv>=1.0.0",
@@ -108,10 +107,22 @@ ocr = [
 s3 = [
     "boto3>=1.42.0",
 ]
+# Prometheus scrape at /metrics. Optional so a deployment that never scrapes
+# pays neither the import (prometheus_client.exposition pulls in http.server and
+# wsgiref.simple_server, which nothing else here needs) nor the collection; when
+# absent the metric objects in gateway.metrics are no-ops and `enable_metrics`
+# refuses to start. The Docker image installs it.
+metrics = [
+    "prometheus-client>=0.20.0",
+]
 
 [dependency-groups]
 dev = [
     "boto3-stubs[s3]",
+    # The metrics extra, which the dev group installs unconditionally: the tests
+    # that pin the exposed metric families need the real library, and mypy checks
+    # gateway.metrics against it rather than against its no-op fallback.
+    "prometheus-client>=0.20.0",
     # Validating payloads against the published code-execution contract
     # (docs/public/code-execution-openapi.yaml), in its conformance script and
     # the test that keeps the spec and the doc in agreement. Nothing at runtime

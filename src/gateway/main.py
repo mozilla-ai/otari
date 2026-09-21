@@ -292,6 +292,27 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+def _validate_metrics_support(config: GatewayConfig) -> None:
+    """Refuse to start when metrics are asked for but the extra is not installed.
+
+    ``prometheus-client`` is an optional extra, and without it the metric objects
+    in :mod:`gateway.metrics` fall back to no-ops. Registering ``/metrics`` on top
+    of those would answer a scrape with an empty body, which reads as a broken
+    exporter rather than a missing install, so say which it is here instead.
+    """
+    if not config.enable_metrics:
+        return
+
+    from gateway.metrics import PROMETHEUS_AVAILABLE
+
+    if not PROMETHEUS_AVAILABLE:
+        msg = (
+            "enable_metrics is set but prometheus-client is not installed. "
+            "Install it with: pip install gateway[metrics]"
+        )
+        raise ValueError(msg)
+
+
 def _validate_platform_config(config: GatewayConfig) -> None:
     config.validate_mode_selection()
     if not config.is_hybrid_mode:
@@ -594,6 +615,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     _validate_platform_config(config)
     _warn_if_hosted_has_no_data_plane(config)
+    _validate_metrics_support(config)
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()
