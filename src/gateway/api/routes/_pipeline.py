@@ -1019,26 +1019,7 @@ async def resolve_dispatch_provider(
     try:
         resolved = resolve_provider_selector(config, model_selector, ctx.user_id, workspace_id=ctx.workspace_id)
     except (ValueError, AnyLLMError) as exc:
-        # The preamble deliberately tolerated this selector, so a reservation is
-        # already held: refund it, then record the drop. The hold is not always
-        # zero, so this refund is load-bearing rather than a formality. The
-        # preamble carries an unresolvable selector into the pricing lookup as
-        # the bare model with no provider, and find_model_pricing then keys on
-        # the model alone, which is exactly the `provider:model` form stored
-        # pricing rows use. An instance removed from config while its pricing row
-        # survives therefore prices, reserves a real estimate, and only fails
-        # here; before this refund existed the hold stayed on users.reserved
-        # until the reservation sweep reclaims it (see budget_reservation_ledger:
-        # the budget reset zeroes spend and leaves the hold in place, so before the
-        # ledger nothing gave it back at all).
-        #
-        # Releasing here and then raising is safe only because no caller above
-        # catches this 400 and releases again: refund_reservation is not
-        # idempotent (_release_reserved clamps at 0, but a second call still
-        # subtracts the estimate a second time, silently handing the user budget
-        # they never gave back). chat.py, messages.py and responses.py all let
-        # the 400 propagate. Anyone adding an outer handler around
-        # resolve_dispatch_provider must not refund in it.
+        # A reservation is already held for this selector, so it is released before the rejection is recorded.
         await release_reservation(ctx)
         await log_gateway_rejection(
             db=ctx.db,
@@ -1939,11 +1920,8 @@ async def resolve_request_context(
             max_output_tokens=estimate_inputs.max_output_tokens,
             default_output_tokens=estimate_inputs.default_output_tokens,
         )
-        # A key flagged exclude_from_budget still logs its cost but is never
-        # reserved, reconciled into users.spend, or gated. Master-key callers have
-        # api_key None and stay on the enforced path. The decision is threaded
-        # through the reservation handle so every downstream reconcile/refund/top-up
-        # site inherits it (see budget_service.reconcile_reservation).
+        # A key flagged exclude_from_budget logs its cost and is never reserved, reconciled into users.spend, or gated.
+        # A master-key caller has no API key and stays on the enforced path.
         budget_exempt = api_key is not None and api_key.exclude_from_budget
         # Reserve first so user/blocked/budget rejections (404/403) take
         # precedence over the missing-pricing rejection (402); refund if we

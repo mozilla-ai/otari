@@ -53,10 +53,7 @@ class SingleLogWriter:
     async def put(self, log: UsageLog) -> None:
         async with create_log_session() as db:
             try:
-                # Spend is owned by the budget reservation reconcile path
-                # (gateway.services.budget_service), not the log writer — the
-                # writer is pure logging. Reconciling here would double-charge
-                # and, under the batch writer, lag the budget gate.
+                # The writer only logs, because the reservation reconcile path owns spend.
                 db.add(log)
                 await db.commit()
                 ROWS.labels(writer="single", result="written").inc()

@@ -346,8 +346,7 @@ async def claim_poll_tick(session: AsyncSession, interval_seconds: float) -> boo
         )
         .values(updated_at=now)
     )
-    # getattr with a default: mypy sees .execute() as Result, and rowcount lives
-    # on CursorResult. Matches budget_service's conditional updates.
+    # ``rowcount`` lives on CursorResult, and mypy sees the result of ``execute()`` as Result.
     if getattr(result, "rowcount", 0) == 1:
         await session.commit()
         return True

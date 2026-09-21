@@ -320,22 +320,11 @@ async def _authenticate(
 ) -> _Principal:
     """Authenticate, and rate-limit the principal before any outbound access.
 
-    Hybrid mode carries the user token through to the platform resolver, which
-    is both the authorization and the rate-limit boundary there (R-ADM-2); Otari
-    preserves whatever 429 it returns. Standalone authenticates the key and
-    charges the request to that key's own bucket here.
-
-    A master-key request is refused. It holds no workspace of its own, so it can
-    only ever resolve a stored server through the deployment's default
-    workspace, which would let operator credentials reach one tenant's
-    configured servers. No stored server is accessible to it, and that is what
-    the 404 says.
-
-    A blocked user is refused too, and has to be refused here. ``users.blocked``
-    is read in ``budget_service.reserve_budget``, which is the only place any
-    request plane consults it, and these routes never reach it because they
-    reserve nothing. Without this, blocking someone would stop their completions
-    and leave them driving mutating MCP tools through the gateway.
+    In hybrid mode the user token passes through to the platform resolver, which authorizes and rate-limits (R-ADM-2).
+    A 429 from the platform resolver is passed on to the caller.
+    In standalone mode the key is authenticated and the request is charged to that key's bucket.
+    A master-key request is refused with a 404, because it has no workspace and would reach one tenant's servers.
+    A blocked user is refused here, because these routes reserve nothing and never reach the budget gate.
     """
     if config.is_hybrid_mode:
         return _Principal(user_token=extract_credential_token(raw_request), workspace_id=None)

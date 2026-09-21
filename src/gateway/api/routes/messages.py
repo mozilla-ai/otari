@@ -849,12 +849,8 @@ async def create_message(
     return result.model_dump(exclude_none=True)
 
 
-# The gateway has no tokenizer (see budget_service.estimate_cost), so input
-# tokens are approximated as ``chars / 4`` — the same heuristic used for budget
-# pre-debit. count_tokens callers (e.g. Claude Code) use the result only to
-# gauge headroom against the context window, so an approximate count is fine.
-# Round up: an over-count keeps callers safely inside the context window, while
-# an under-count could let a prompt slip over the limit.
+# Input tokens are approximated as ``chars / 4``, because the gateway has no tokenizer.
+# The count rounds up, so a caller that gauges context-window headroom stays inside the limit.
 _CHARS_PER_TOKEN = 4
 
 

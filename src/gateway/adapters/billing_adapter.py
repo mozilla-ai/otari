@@ -1,14 +1,7 @@
-"""Null Object billing adapter, for a deployment that bills nobody.
+"""This Null Object adapter satisfies the billing port for a deployment that bills nobody.
 
-Satisfies :class:`gateway.ports.billing_port.BillingPort` with the honest
-answer for a deployment that owes nothing: an operator running Otari pays their
-own upstream bill for their own users, so there is nothing to meter, hold, or
-charge.
-
-Every method does nothing and neither gate ever refuses, so the request path
-runs unchanged with no funding model in it. Budgets still bound what a request
-may spend; they are a separate capability, enforced in
-``gateway.services.budget_service``, and are unaffected by this.
+Every method does nothing and neither gate refuses, so the request path runs with no funding model.
+Budgets are a separate capability and still bound what a request may spend.
 """
 
 import uuid
