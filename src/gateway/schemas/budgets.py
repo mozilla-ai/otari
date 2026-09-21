@@ -193,7 +193,7 @@ class UpdateScopedBudgetRequest(ScopedBudgetChanges):
     """Request model for updating a scoped budget."""
 
 
-class ScopedCeilingFigures(BaseModel):
+class ScopedBudgetFigures(BaseModel):
     """One scoped ceiling: its identity, its live counters, and the limits and period of its budget."""
 
     id: str
@@ -246,7 +246,7 @@ class ScopedCeilingFigures(BaseModel):
         }
 
 
-class ScopedBudgetResponse(ScopedCeilingFigures):
+class ScopedBudgetResponse(ScopedBudgetFigures):
     """One scoped ceiling and its live counters.
 
     Unlike ``/api/v1/budgets``, the counters are the row's own: a scoped ceiling is
@@ -403,7 +403,7 @@ class OrganizationScopedBudgetUpdate(ScopedBudgetChanges):
     """
 
 
-class OrganizationScopedBudgetPublic(ScopedCeilingFigures):
+class OrganizationScopedBudgetPublic(ScopedBudgetFigures):
     """One ceiling inside the organization, and the figures it enforces.
 
     The limit and the period are read through the budget rather than stored here,
@@ -514,8 +514,8 @@ __all__ = [
     "OrganizationScopedBudgetUpdate",
     "OrganizationScopedBudgetsPublic",
     "ScopedBudgetChanges",
+    "ScopedBudgetFigures",
     "ScopedBudgetResponse",
-    "ScopedCeilingFigures",
     "UpdateBudgetRequest",
     "UpdateScopedBudgetRequest",
     "WorkspaceMemberBudgetPoliciesPublic",
