@@ -852,7 +852,7 @@ async def create_message(
                 )
                 or request.container is not None
             )
-            if references or (native_outputs and config.files_provider_native_enabled):
+            if references or native_outputs:
                 if not config.files_provider_native_enabled:
                     raise FilesError(400, "Hybrid provider file references and native outputs are not enabled")
                 assert ctx.route is not None and ctx.user_token is not None

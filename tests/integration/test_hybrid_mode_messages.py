@@ -1284,11 +1284,22 @@ def test_container_is_refused_on_a_managed_credential(
     assert calls == [], "the provider must not be called at all"
 
 
-def test_container_reaches_a_byo_credential(
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(
+    "native_fields",
+    [
+        {"container": "container_01ABC"},
+        {"tools": [{"type": "code_execution_20250522", "name": "code_execution"}]},
+    ],
+    ids=["container", "code_execution"],
+)
+def test_native_outputs_are_refused_when_files_are_disabled(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    native_fields: dict[str, Any],
+    stream: bool,
 ) -> None:
-    """On the workspace's own key the container is already the caller's."""
+    """Native outputs need Files enabled even on a BYO credential without file references."""
     calls: list[str] = []
     _container_route(monkeypatch, managed=False, calls=calls)
 
@@ -1298,13 +1309,15 @@ def test_container_reaches_a_byo_credential(
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 100,
-            "container": "container_01ABC",
+            "stream": stream,
+            **native_fields,
         },
         headers={"Authorization": "Bearer user_test_token"},
     )
 
-    assert response.status_code == 200, response.text
-    assert calls == ["container_01ABC"]
+    assert response.status_code == 400, response.text
+    assert "native outputs are not enabled" in response.json()["detail"]["error"]["message"]
+    assert calls == [], "the provider must not be called when Files are disabled"
 
 
 def test_a_managed_attempt_anywhere_on_the_route_refuses_the_container(
