@@ -64,13 +64,13 @@ since. A module "runs queries" when it imports a query builder (`select`,
 | --- | --- |
 | Service modules | 108, of which 71 sit flat at the top of `services/` |
 | Service modules that run queries | 39, plus 2 that only call `session.get` |
-| Route modules | 72 |
+| Route modules | 73 |
 | Route modules that run queries | 17, plus 1 that only calls `session.get` |
-| Route modules that define Pydantic models inline | 40 |
+| Route modules that define Pydantic models inline | 41 |
 | Model modules | 19 |
-| Repository modules | 9: a base, `users_repository.py`, and 7 under `tenancy/` |
-| Service packages per domain | 1: `services/tools/`, which holds the built-in tool registry and no service yet. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
-| Repository packages per domain | None. `repositories/tenancy/` is an older subpackage |
+| Repository modules | 10: a base, `users_repository.py`, 7 under `tenancy/`, and `overview/overview_repository.py` |
+| Service packages per domain | 2: `services/tools/`, which holds the built-in tool registry and no service yet, and `services/overview/`. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
+| Repository packages per domain | 1: `repositories/overview/`. `repositories/tenancy/` is an older subpackage |
 | Modules in `schemas/` | One domain module so far, `budgets.py` |
 | Modules in `exceptions/` | The shared error bases in `_base.py`, which the package root re-exports, and one domain module so far, `budget_exceptions.py`. `services/tenancy/errors.py` holds the rest of the tenancy errors in 1,145 lines |
 
