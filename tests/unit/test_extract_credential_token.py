@@ -168,3 +168,18 @@ def test_whitespace_only_credential_is_missing(headers: dict[str, str]) -> None:
 
     assert exc_info.value.status_code == 401
     assert API_KEY_HEADER in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {API_KEY_HEADER: " Bearer tk_padded "},
+        {"Authorization": " Bearer tk_padded "},
+    ],
+)
+def test_padded_bearer_prefix_is_recognized(headers: dict[str, str]) -> None:
+    """Leading whitespace does not hide the Bearer scheme: the prefix comes off
+    and the token is returned bare, in both headers that accept it."""
+    request = _make_request(headers)
+
+    assert extract_credential_token(request) == "tk_padded"

@@ -139,10 +139,15 @@ def extract_credential_token(request: Request) -> str:
     token: str | None = None
     value = request.headers.get(API_KEY_HEADER)
     if value:
+        # Leading whitespace comes off before the scheme check, so a padded
+        # value still has its Bearer prefix recognized rather than kept as
+        # part of the token.
+        value = value.lstrip()
         token = value[7:] if value.startswith("Bearer ") else value
     else:
         auth_header = request.headers.get("Authorization")
         if auth_header:
+            auth_header = auth_header.lstrip()
             if not auth_header.startswith("Bearer "):
                 record_auth_failure("invalid_format")
                 raise HTTPException(
