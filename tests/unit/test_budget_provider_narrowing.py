@@ -42,10 +42,8 @@ def test_an_omitted_narrowing_is_none(body: type[BaseModel], required: dict[str,
     assert body.model_validate(required).model_dump()["provider_key_id"] is None
 
 
-@pytest.mark.parametrize(("body", "_required"), _NARROWING_BODIES)
-def test_the_published_narrowing_constraints_are_the_same_on_every_body(
-    body: type[BaseModel], _required: dict[str, Any]
-) -> None:
+@pytest.mark.parametrize("body", [body for body, _ in _NARROWING_BODIES])
+def test_the_published_narrowing_constraints_are_the_same_on_every_body(body: type[BaseModel]) -> None:
     published = body.model_json_schema()["properties"]["provider_key_id"]
     assert published["anyOf"] == [_PUBLISHED_STRING_CONSTRAINTS, {"type": "null"}]
     assert published["default"] is None
