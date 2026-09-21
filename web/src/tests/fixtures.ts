@@ -11,6 +11,8 @@ import type {
   ApiKey,
   Budget,
   CallerOrganizationMembership,
+  CatalogModelSummary,
+  CatalogResponse,
   DeploymentBootstrap,
   DeploymentUser,
   Organization,
@@ -35,6 +37,47 @@ import type {
   WorkspaceProviderKeyOverride,
   WorkspaceWebSearchConfig,
 } from "@/client"
+
+export function catalogModelSummary(
+  overrides: Partial<CatalogModelSummary> &
+    Pick<CatalogModelSummary, "id" | "selectors">,
+): CatalogModelSummary {
+  return {
+    name: overrides.id,
+    vendor: null,
+    capabilities: {
+      reasoning: false,
+      tool_call: false,
+      structured_output: false,
+      attachment: false,
+      temperature: false,
+    },
+    input_modalities: [],
+    output_modalities: [],
+    deprecated: false,
+    open_weights: false,
+    offering_count: overrides.selectors.length,
+    provider_count: overrides.selectors.length,
+    providers: [],
+    price_sources: [],
+    unpriced_count: overrides.selectors.length,
+    discovered: true,
+    ...overrides,
+  }
+}
+
+export function catalogResponse(
+  models: CatalogModelSummary[],
+  overrides: Partial<Omit<CatalogResponse, "models">> = {},
+): CatalogResponse {
+  return {
+    default_pricing: false,
+    defaults_as_of: null,
+    metadata_available: false,
+    models,
+    ...overrides,
+  }
+}
 
 export function usageTotals(overrides: Partial<UsageTotals> = {}): UsageTotals {
   return {

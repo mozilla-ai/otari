@@ -1,15 +1,18 @@
 // Which of the catalog's models the Playground offers, and how they are grouped.
 //
-// The gateway's `/models` already answers the hard half: it is scoped to what
-// the caller could route to, with aliases and policies resolved, so nothing here
-// re-derives access. What is left is editorial. The Playground only chats, so a
-// catalog entry that cannot hold a conversation should not be offered, and the
+// Built from the grouped catalog (`/catalog/models`), the same read the Models
+// page renders, so the two surfaces cannot disagree about what the caller may
+// use. The flat `/models` listing would disagree: it also carries aliases and
+// routing policies, which the Models page deliberately leaves to Routing. The
+// catalog is scoped server-side to what the caller could route to, so nothing
+// here re-derives access. What is left is editorial. The Playground only chats,
+// so an offering that cannot hold a conversation should not be offered, and the
 // picker groups by provider instance because that is how a model is addressed.
 
-import type { ModelListResponse } from "@/client"
+import type { CatalogResponse } from "@/client"
 
 export interface PlaygroundModel {
-  /** The selector to send as `model`, which is the catalog's own id. */
+  /** The offering's selector, sent as the `model` of a chat completion. */
   key: string
   /** The provider instance the key names, or "" for a bare model name. */
   instance: string
@@ -17,9 +20,11 @@ export interface PlaygroundModel {
   label: string
 }
 
-// Models that cannot hold a conversation. Matched on the id because the catalog
-// carries no modality: every phase of it publishes `instance:model` and a
-// context window, and the provider's own naming is the only signal available.
+// Models that cannot hold a conversation. Matched on the selector's model
+// label, never its instance prefix (an instance named "guard" or "embeddings"
+// says nothing about what its models do), because the structured metadata is
+// empty for undiscovered offerings and the provider's own naming is the one
+// signal present on every row.
 //
 // It errs toward *keeping* a model, deliberately. A chat model wrongly hidden is
 // a model somebody cannot use and cannot see why; an embedding model wrongly
@@ -29,9 +34,9 @@ export interface PlaygroundModel {
 const NOT_A_CHAT_MODEL =
   /embed|whisper|\btts\b|tts-|dall-e|stable-diffusion|moderation|rerank|transcrib|\bstt\b|guard/i
 
-/** Whether a catalog id can be sent as the `model` of a chat completion. */
-export function isChatModel(modelId: string): boolean {
-  return !NOT_A_CHAT_MODEL.test(modelId)
+/** Whether an offering selector names something that can hold a conversation. */
+export function isChatModel(selector: string): boolean {
+  return !NOT_A_CHAT_MODEL.test(splitModelKey(selector).label)
 }
 
 /** Split `instance:model` into its parts; a bare name has no instance. */
@@ -48,21 +53,26 @@ export function splitModelKey(key: string): {
 }
 
 /**
- * The models the picker offers, in the order the catalog returned them.
+ * The models the picker offers: one row per offering, in catalog order.
  *
- * Order is preserved rather than sorted: the catalog's own phases put
- * discovered models before priced-only ones, and re-sorting here would shuffle
- * a deployment's most-used models in among every id a provider happens to
- * publish. Duplicate ids are collapsed, because a model that is both discovered
- * and priced appears once in a picker.
+ * A row is an offering's selector rather than the model's catalog id, because
+ * the Playground addresses one provider instance and the picker groups by it.
+ * The catalog arrives sorted by model name, and preserving that order is what
+ * keeps each instance group's rows name-sorted once the picker partitions
+ * them; group order itself is first-seen instance. Duplicate selectors are
+ * collapsed, because a selector two models somehow shared would render as two
+ * rows that look like different models.
  */
 export function buildPlaygroundModels(
-  catalog: ModelListResponse | undefined,
+  catalog: CatalogResponse | undefined,
 ): PlaygroundModel[] {
-  const chatKeys = (catalog?.data ?? [])
-    .map((entry) => entry.id)
-    .filter((id) => isChatModel(id))
-  return [...new Set(chatKeys)].map((key) => ({ key, ...splitModelKey(key) }))
+  const chatSelectors = (catalog?.models ?? [])
+    .flatMap((model) => model.selectors)
+    .filter((selector) => isChatModel(selector))
+  return [...new Set(chatSelectors)].map((key) => ({
+    key,
+    ...splitModelKey(key),
+  }))
 }
 
 export interface ModelGroup {

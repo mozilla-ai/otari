@@ -2,7 +2,7 @@ import type { FormEvent, KeyboardEvent } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { PlaygroundComparisonPreference } from "@/client"
-import { useModels } from "@/shared/api/models"
+import { useCatalog } from "@/shared/api/models"
 import {
   fetchPlaygroundConversation,
   useDeletePlaygroundComparison,
@@ -70,7 +70,9 @@ export function usePlayground() {
   const { selected, isLoading: isLoadingWorkspace } = useSelectedWorkspace()
   const workspaceId = selected?.workspace_id
 
-  const catalog = useModels()
+  // The grouped catalog, not the flat `/models` listing; playgroundModels.ts
+  // says why.
+  const catalog = useCatalog()
   const models = buildPlaygroundModels(catalog.data)
 
   const consent = usePlaygroundConsent()
@@ -478,7 +480,7 @@ export function usePlayground() {
       saveConversation.error ?? saveComparison.error ?? loadError ?? undefined,
     // The catalog read's own error, so the gate notice can report the failure
     // rather than a generic one: it is the only gate with something to say.
-    catalogError: catalog.error,
+    catalogError: catalog.error ?? undefined,
     workspaceId,
     isBusy,
     canChat: workspaceId !== undefined && panelA.model !== "",

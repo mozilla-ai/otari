@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
-import type { ModelListResponse } from "@/client"
+import type { CatalogResponse } from "@/client"
+import { catalogModelSummary, catalogResponse } from "@/tests/fixtures"
 
 import {
   buildPlaygroundModels,
@@ -11,17 +12,13 @@ import {
   splitModelKey,
 } from "./playgroundModels"
 
-function catalog(...ids: string[]): ModelListResponse {
-  return {
-    object: "list",
-    data: ids.map((id) => ({
-      id,
-      object: "model",
-      created: 0,
-      owned_by: "test",
-      pricing_source: "none",
-    })),
-  } as ModelListResponse
+/** A grouped catalog of single-offering models, one per selector. */
+function catalog(...selectors: string[]): CatalogResponse {
+  return catalogResponse(
+    selectors.map((selector) =>
+      catalogModelSummary({ id: selector, selectors: [selector] }),
+    ),
+  )
 }
 
 describe("isChatModel", () => {
@@ -47,6 +44,14 @@ describe("isChatModel", () => {
     // says nothing about why, which is worse than one confusing refusal.
     expect(isChatModel("acme:model-7")).toBe(true)
   })
+
+  it("ignores the instance prefix, which says nothing about the model", () => {
+    // An operator naming an instance "guard" or "embeddings" must not hide
+    // that instance's whole chat catalog.
+    expect(isChatModel("guard:gpt-4o")).toBe(true)
+    expect(isChatModel("embeddings:claude")).toBe(true)
+    expect(isChatModel("guard:llama-guard-3")).toBe(false)
+  })
 })
 
 describe("splitModelKey", () => {
@@ -64,8 +69,8 @@ describe("splitModelKey", () => {
 
 describe("buildPlaygroundModels", () => {
   it("keeps the catalog's own order", () => {
-    // Re-sorting would shuffle a deployment's most-used models in among every
-    // id a provider happens to publish.
+    // The catalog arrives sorted by model name; re-sorting by selector would
+    // split offerings of one model away from each other.
     const models = buildPlaygroundModels(
       catalog("zeta:a", "alpha:b", "middle:c"),
     )
@@ -76,7 +81,24 @@ describe("buildPlaygroundModels", () => {
     ])
   })
 
-  it("collapses a model the catalog lists twice", () => {
+  it("offers every offering of a model the catalog folded", () => {
+    // The Models page shows one card for GLM with two providers; the picker
+    // shows both selectors, because that is what a request addresses.
+    const models = buildPlaygroundModels(
+      catalogResponse([
+        catalogModelSummary({
+          id: "z-ai/glm",
+          selectors: ["fireworks:glm", "nebius:glm"],
+        }),
+      ]),
+    )
+    expect(models.map((entry) => entry.key)).toEqual([
+      "fireworks:glm",
+      "nebius:glm",
+    ])
+  })
+
+  it("collapses a selector the catalog lists twice", () => {
     expect(
       buildPlaygroundModels(catalog("openai:gpt-4o", "openai:gpt-4o")),
     ).toHaveLength(1)

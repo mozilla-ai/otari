@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type {
-  ModelListResponse,
+  CatalogResponse,
   OrganizationContext,
   PlaygroundComparisons,
   PlaygroundConsent,
@@ -19,7 +19,11 @@ import {
   SelectedWorkspaceProvider,
   useSelectedWorkspace,
 } from "@/shared/hooks/SelectedWorkspace"
-import { organizationContext } from "@/tests/fixtures"
+import {
+  catalogModelSummary,
+  catalogResponse,
+  organizationContext,
+} from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
 /** Mirrors `RATING_ACKNOWLEDGEMENT_MS` in `hooks/usePlayground.ts`. */
@@ -27,33 +31,18 @@ const RATING_ACKNOWLEDGEMENT_MS = 3000
 
 const WORKSPACE_ID = "44444444-4444-4444-4444-444444444444"
 
-const CATALOG: ModelListResponse = {
-  object: "list",
-  data: [
-    {
-      id: "openai:gpt-4o",
-      object: "model",
-      created: 0,
-      owned_by: "openai",
-      pricing_source: "none",
-    },
-    {
-      id: "anthropic:claude-sonnet-4",
-      object: "model",
-      created: 0,
-      owned_by: "anthropic",
-      pricing_source: "none",
-    },
-    // Not a chat model: it must not reach the picker.
-    {
-      id: "openai:text-embedding-3-small",
-      object: "model",
-      created: 0,
-      owned_by: "openai",
-      pricing_source: "none",
-    },
-  ],
-} as ModelListResponse
+const CATALOG: CatalogResponse = catalogResponse([
+  catalogModelSummary({ id: "gpt-4o", selectors: ["openai:gpt-4o"] }),
+  catalogModelSummary({
+    id: "claude-sonnet-4",
+    selectors: ["anthropic:claude-sonnet-4"],
+  }),
+  // Not a chat model: it must not reach the picker.
+  catalogModelSummary({
+    id: "text-embedding-3-small",
+    selectors: ["openai:text-embedding-3-small"],
+  }),
+])
 
 const NO_TOOLS: PlaygroundTools = {
   web_search: {
@@ -118,7 +107,7 @@ interface ApiState {
   conversations?: PlaygroundConversations
   comparisons?: PlaygroundComparisons
   favorites?: PlaygroundFavoriteModels
-  catalog?: ModelListResponse
+  catalog?: CatalogResponse
   messages?: PlaygroundMessages
   context?: OrganizationContext
 }
@@ -147,7 +136,7 @@ function mockApi(state: ApiState = {}) {
       if (path.startsWith("/organizations/me")) {
         return (state.context ?? context()) as never
       }
-      if (path.startsWith("/models")) {
+      if (path.startsWith("/catalog/models")) {
         return (state.catalog ?? CATALOG) as never
       }
       if (path.startsWith("/playground/tools")) return NO_TOOLS as never
@@ -322,8 +311,14 @@ describe("the Playground before the first question", () => {
     mockApi({
       catalog: {
         ...CATALOG,
-        data: [...CATALOG.data, { ...CATALOG.data[0], id: "backup:gpt-4o" }],
-      } as ModelListResponse,
+        models: [
+          catalogModelSummary({
+            id: "gpt-4o",
+            selectors: ["openai:gpt-4o", "backup:gpt-4o"],
+          }),
+          ...CATALOG.models.slice(1),
+        ],
+      },
     })
     renderPage()
     await screen.findByText("Try a prompt.")
@@ -367,7 +362,7 @@ describe("the Playground before the first question", () => {
   })
 
   it("says what to do when the deployment serves no models", async () => {
-    mockApi({ catalog: { object: "list", data: [] } as ModelListResponse })
+    mockApi({ catalog: { ...CATALOG, models: [] } })
     renderPage()
 
     expect(
