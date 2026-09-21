@@ -1,47 +1,12 @@
-"""The reservation ledger: one row per in-flight budget hold.
+"""The reservation ledger holds one row per in-flight budget hold.
 
-``users.reserved`` and ``scoped_budgets.reserved_spend`` remain the counters the
-budget gate reads, and this module does not change how a hold is taken. What it
-adds is the identity behind a hold (mozilla-ai/otari#742), which is what the two
-outstanding guarantees need:
-
-* **Release is idempotent.** ``reserve_budget`` has roughly seven release sites
-  and nothing but control flow (each one is followed by ``raise``) keeps two of
-  them from firing for one request. A second release subtracts the hold twice,
-  and because the release expression clamps at zero that surfaces not as an
-  error but as an under-count of live holds, weakening the overspend guarantee
-  the gate exists to provide. Here the ACTIVE -> terminal claim decides, so only
-  the first release does the work.
-* **A leaked hold is reclaimable individually.** #724 fixed a path where a
-  release never ran; the residue of that class of bug used to be an amount that
-  could be seen only in aggregate and released by nothing at all. Note that the
-  budget reset was never the backstop it was widely described as: both
-  ``_cas_reset_user_budget`` and ``_roll_expired_periods`` zero *spend* and leave
-  the hold where it is, so a leak shrank the headroom permanently. A row gives it
-  an owner, an age and a TTL.
-
-**No row locks**, matching :mod:`gateway.services.scoped_budget_service`: the
-sweep reads candidate rows without ``FOR UPDATE`` and lets the conditional
-UPDATE in :func:`try_terminate` arbitrate. Two sweepers may read the same row,
-but only one wins the transition and releases. That also keeps the chain
-dialect-neutral, since SQLite has no ``SKIP LOCKED``.
-
-The row is written **after** the holds it records. Of the two windows in which
-the counter and the ledger can disagree, only that one is safe: a hold with no
-row is the pre-existing leak this sweep bounds, while a row with no hold would
-have the sweep hand back an amount nobody is holding and under-count the live
-ones.
-
-**The claim and the release it authorizes commit together.** A row is never
-observed terminal while its hold is still outstanding, because the two are one
-transaction: if the release fails, the claim rolls back with it and the row stays
-active for a later sweep to find. That is why ``try_terminate`` and
-``scoped_budget_service.release``/``settle`` both take ``commit=False``. The
-price is a row lock on the reservation held for the length of that transaction,
-which is a couple of UPDATEs and never spans the provider call the hold guards.
-
-Standalone mode only. Hybrid mode reserves nothing locally, because the platform
-holds against its own ledger.
+A row gives a hold an identity, an age and a time to live (TTL).
+Release is idempotent, because only the first claim of an active row does the work.
+The sweep reclaims a leaked hold on its own.
+The sweep takes no row lock, and the conditional UPDATE in :func:`try_terminate` decides between two sweepers.
+A row is written after the holds it records, so the sweep never releases an amount that nobody holds.
+A claim and the release it authorizes commit in one transaction, so a terminal row never has an outstanding hold.
+This module runs in standalone mode only, because in hybrid mode the platform holds against its own ledger.
 """
 
 from __future__ import annotations
@@ -86,16 +51,10 @@ TERMINAL_STATUSES = (RESERVATION_SETTLED, RESERVATION_RELEASED, RESERVATION_EXPI
 
 
 def release_reserved_expression(estimate: Decimal) -> object:
-    """Column expression that subtracts ``estimate`` from ``users.reserved``, clamped at 0.
+    """Return the column expression that subtracts ``estimate`` from ``users.reserved``, clamped at 0.
 
-    Uses CASE rather than GREATEST for SQLite compatibility. Both arms are
-    ``Decimal`` so the CASE resolves as ``numeric``: a bare ``0.0`` in the clamp
-    arm would make PostgreSQL type the whole expression ``double precision`` and
-    round-trip the untouched amount through a binary float.
-
-    Lives here rather than in :mod:`gateway.services.budget_service` because the
-    reclaim path needs the same expression, and two copies of that reasoning
-    would drift.
+    The expression uses CASE rather than GREATEST for SQLite compatibility.
+    Both arms are ``Decimal``, because a float arm makes PostgreSQL type the expression ``double precision``.
     """
     return case(
         (User.reserved - estimate < ZERO, ZERO),
@@ -212,12 +171,7 @@ async def grow(
         .execution_options(synchronize_session=False)
     )
     if not getattr(result, "rowcount", 0):
-        # No rollback: the UPDATE matched nothing, so there is nothing to undo, and
-        # ``rollback()`` expires every ORM instance in the session, which turns the
-        # caller's next attribute read into sync IO on an async session
-        # (``MissingGreenlet``). The same trap is documented in
-        # ``budget_service._cas_reset_user_budget``. The caller's own compensating
-        # writes commit this empty transaction along with them.
+        # A rollback here would expire every ORM instance in the session and force sync IO on the caller's next read.
         return False
     if scoped_delta > ZERO or scoped_token_delta > 0:
         # In the same transaction as the guarded UPDATE above, so the lines cannot
@@ -320,10 +274,7 @@ async def _release_holds(db: AsyncSession, reservation: BudgetReservation) -> No
         .tuples()
         .all()
     )
-    # Grouped by the amounts because ``scoped_budget_service.release`` takes one
-    # figure per axis for a set of ceilings. Today every line of a reservation
-    # carries the same three, so this is one call; it stays correct if that ever
-    # stops being true.
+    # ``release_scoped`` takes one figure per axis for a set of ceilings, so the lines group by their amounts.
     by_amounts: dict[tuple[Decimal, int, int], list[str]] = {}
     for scoped_budget_id, amount, token_amount, request_amount in lines:
         if amount > ZERO or token_amount > 0 or request_amount > 0:
@@ -367,8 +318,7 @@ async def _reclaim(db: AsyncSession, expired: Sequence[BudgetReservation]) -> in
         # mean a failure in the release left a row terminal with its hold still
         # held, and no later sweep would look at that row again.
         if not await try_terminate(db, reservation.id, RESERVATION_EXPIRED):
-            # Empty transaction, and ``rollback()`` would expire the rows this loop
-            # is still iterating over (see budget_service for the same trap).
+            # This commits the empty transaction, because a rollback would expire the rows this loop iterates over.
             await db.commit()
             continue
         await _release_holds(db, reservation)

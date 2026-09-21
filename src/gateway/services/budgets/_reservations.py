@@ -275,17 +275,8 @@ def _normalize_strategy(strategy: str | None) -> str:
 class ReservationHandle:
     """Tracks a budget reservation so it can be reconciled or released.
 
-    ``estimate`` is the amount added to ``users.reserved`` at reservation time;
-    ``reserved`` records whether that write actually happened (it is skipped for
-    the ``disabled`` strategy, users without a budget, and free models). The
-    handle is passed to :func:`reconcile_reservation` on success or
-    :func:`refund_reservation` on failure.
-
-    The scoped-budget fields track the second, independent mechanism (see
-    :mod:`gateway.services.scoped_budget_service`). They are separate from
-    ``estimate`` / ``reserved`` because the two can diverge: a user with no
-    budget row still holds against every scoped ceiling that applies, and a
-    reservation that grows may grow on one mechanism and not the other.
+    ``reserved`` records whether ``estimate`` was added to ``users.reserved``.
+    The scoped fields are separate, because a user with no budget can still hold against a scoped ceiling.
     """
 
     user_id: str
@@ -315,11 +306,7 @@ class ReservationHandle:
     # Not split, because a request count never grows: a top-up belongs to a
     # request already counted, so both legs hold what they held at admission.
     request_estimate: int = 0
-    # The ledger row recording this hold, or None when the request holds nothing
-    # worth ledgering (a free model, a budget-exempt key, a user with no budget
-    # and no scoped ceiling). It is what makes reconcile/refund idempotent and a
-    # leaked hold reclaimable by identity; see
-    # :mod:`gateway.services.budget_reservation_ledger`.
+    # This is None when the request holds nothing: a free model, a budget-exempt key, or no budget and no ceiling.
     reservation_id: str | None = None
 
     @property
@@ -477,47 +464,18 @@ async def reserve_budget(
 ) -> ReservationHandle:
     """Atomically pre-debit an estimated cost against every budget that applies.
 
-    This replaces the old check-then-call pattern (validate, release the lock,
-    call the provider, write spend in a *later* transaction) that allowed
-    concurrent requests to all pass a stale budget check and collectively
-    overspend. Here the estimate is committed to ``users.reserved`` via a single
-    conditional UPDATE: if it would push ``spend + reserved`` past ``max_budget``
-    the row count is zero and we reject with 403. No row lock is held across the
-    provider network call.
+    Raises ``HTTPException`` 404 for an unknown user and 403 when the user is blocked or a budget has no room.
+    No row lock is held across the provider call.
+    ``organization_id`` selects the rate overrides that decide whether ``model`` is free.
+    Without it the deployment price list decides.
+    A caller that passes no token estimate holds no tokens, so a token ceiling binds it at settlement.
+    ``requests`` is 1 for a request that takes its own hold and 0 for a top-up.
+    ``new_request=False`` marks a top-up, which is checked only for whether the delta fits.
+    ``scope`` adds the tenancy-scoped ceilings, and every one of them must also admit the estimate.
+    The scoped ceilings are held first and released if the per-user gate refuses, so a refused request leaves no hold.
+    ``record_reservation=False`` writes no ledger row, for a top-up whose request already has one.
 
-    ``organization_id`` is whose rate overrides decide whether ``model`` is free,
-    and it is passed in rather than derived here: the caller has already resolved
-    it for its own pricing lookup, and re-deriving it would repeat the two
-    un-memoized reads a master-key request pays for ``default_workspace_id``.
-    Omitted, the free-model check reads the deployment price list, which is what
-    it did before overrides existed.
-
-    A budget caps three axes and each is held here: ``estimated_tokens`` is the
-    upper bound from :func:`estimate_tokens`, and ``requests`` is 1 for a request
-    taking its own hold and 0 for a top-up on a request already counted. A caller
-    that passes no token estimate holds nothing on that axis, so a token ceiling
-    still binds it through settlement, one request later, rather than at
-    admission.
-
-    ``new_request=False`` marks a top-up, which is only asked whether the delta
-    fits: see :func:`gateway.services.scoped_budget_service.reserve` for why an
-    admission test refuses a request that is already holding.
-
-    ``scope`` opts the request into the second mechanism, the tenancy-scoped
-    ceilings in ``scoped_budgets``. Those are resolved from the workspace the
-    request bills to and the identity behind the key, and every one of them must
-    also admit the estimate. They are held first, and released again if the
-    per-user gate then refuses, so a rejected request leaves no counter behind.
-
-    The returned handle must be passed to :func:`reconcile_reservation` (success)
-    or :func:`refund_reservation` (failure) so the reservation does not leak.
-
-    Every hold taken here is also written to the reservation ledger, which is what
-    gives it an identity: reconcile and refund claim that row before touching a
-    counter, so a second one is a no-op rather than a second refund, and a hold
-    the request never gets back to is reclaimable on its own rather than only in
-    aggregate. ``record_reservation=False`` is for :func:`increase_reservation`,
-    which grows the row this request already has instead of opening a second one.
+    NOTE: The caller must pass the returned handle to :func:`reconcile_reservation` or :func:`refund_reservation`.
     """
     # Widened once, here, so every expression below is exact whatever the caller
     # handed in: a route that estimates a flat dollar amount still passes a float,
@@ -778,12 +736,7 @@ async def reserve_budget(
 
 
 def _release_reserved(estimate: Decimal) -> object:
-    """Column expression that subtracts ``estimate`` from reserved, clamped at 0.
-
-    Defined in :mod:`gateway.services.budget_reservation_ledger`, which needs the
-    same expression for the reclaim path; re-exported here so the call sites in
-    this module read as they always have.
-    """
+    """Return the column expression that subtracts ``estimate`` from reserved, clamped at 0."""
     return ledger.release_reserved_expression(estimate)
 
 

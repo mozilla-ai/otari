@@ -1,31 +1,10 @@
-"""Enforcement for ``scoped_budgets``: the tenancy-scoped spending ceilings.
+"""Enforce the tenancy-scoped spending ceilings in ``scoped_budgets``.
 
-The legacy per-user path in :mod:`gateway.services.budget_service` is unchanged
-and still enforced; this is a second mechanism beside it. A request resolves the
-scopes it bills to (its workspace, that workspace's organization, the caller's
-membership rows, and the API key itself), collects every ceiling attached to one
-of them, and must pass all of them.
-
-Each row is an independent ceiling. There is deliberately no check that the
-children of a scope sum to less than their parent: the parent ceiling already
-bounds the total, so the extra rule would refuse configurations that cannot
-overspend.
-
-**Three axes, one hold.** The budget a ceiling names can cap dollars, tokens and
-requests independently (``max_budget``, ``token_limit``, ``request_limit``), so a
-reservation holds on all three at once and a ceiling admits it only when every
-capped axis has room. The dollar and token amounts are estimates reconciled at
-settlement; the request count is exact at admission, so its hold is what
-settlement records.
-
-**No row locks.** ``budget_service.reserve_budget`` is lock-free by design, and
-this path stays that way: one conditional UPDATE per ceiling, each committed on
-its own, so no lock is held across the next one or across the provider call. The
-price is that a partial reservation is possible, and the price of that is
-compensation: when a ceiling refuses, the holds already taken are released
-before the request is rejected. The ceilings are always visited in one total
-order so concurrent reservers converge on the same sequence instead of each
-compensating the other's progress.
+A request must pass every ceiling attached to a scope it bills to.
+The scopes are its workspace, that workspace's organization, the caller's memberships and the API key.
+A reservation holds dollars, tokens and requests at once, and a ceiling admits it only when every capped axis has room.
+Each ceiling is independent, so the children of a scope may sum to more than their parent.
+No hold takes a row lock, so a refusal releases the holds already taken.
 """
 
 from __future__ import annotations
@@ -493,22 +472,10 @@ async def blocked_axis(
     requests: int,
     new_request: bool,
 ) -> str:
-    """Which capped axis left this ceiling no room, for the refusal message.
+    """Return the name of the capped axis that left this ceiling no room.
 
-    :func:`reserve` refuses by matching no row, so nothing in its result says
-    which of three caps bound. Read here instead, on the refusal path only, and
-    named in the 403: "has exceeded budget limit" alone cannot tell an operator a
-    spent allowance from a spent token allowance, which is the signal a cutover
-    onto a token or request cap needs.
-
-    Both of the clauses :func:`admits` builds, and for its reason: an arrival is
-    refused either because the axis is already at its cap or because this hold
-    would push it past, and a helper reproducing one of them finds no axis for
-    the other shape. ``amount=None`` skips the dollar axis, which :func:`reserve`
-    likewise does not ask about. The hold therefore has to come from the caller, since the
-    row cannot say what was being asked of it. The dollar axis is called
-    "budget", so its message is unchanged; see
-    ``budget_service._blocked_axis``.
+    The test must mirror both clauses of the admission test in :func:`reserve`, or a refusal names the wrong axis.
+    ``amount=None`` skips the dollar axis, which is named "budget".
     """
     row = (
         await db.execute(
