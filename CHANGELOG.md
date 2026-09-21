@@ -4,6 +4,35 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.6.5](https://github.com/mozilla-ai/otari/releases/tag/v0.6.5) - 2026-09-21
+
+
+
+### Bug Fixes
+
+- **dashboard:** Keep an unsaved settings edit when the server value moves in [#1390](https://github.com/mozilla-ai/otari/pull/1390) by [@khaledosman](https://github.com/khaledosman) ([`b49638d`](https://github.com/mozilla-ai/otari/commit/b49638d39f21eeeb93d250ee8deddfc1c852137e))
+- **dashboard:** Read the query cache as the external store it is in [#1397](https://github.com/mozilla-ai/otari/pull/1397) by [@khaledosman](https://github.com/khaledosman) ([`57f245c`](https://github.com/mozilla-ai/otari/commit/57f245ca6291fd5025de7fb39f834eb994b58ae5))
+- **tenancy:** Stop a workspace delete leaving a joining member's ceiling behind in [#1395](https://github.com/mozilla-ai/otari/pull/1395) by [@peteski22](https://github.com/peteski22) ([`b330b37`](https://github.com/mozilla-ai/otari/commit/b330b379cf912782c46cafba86d480483e8ec71f))
+- **dashboard:** Remove API key table copy action in [#1361](https://github.com/mozilla-ai/otari/pull/1361) by [@jigjigjig](https://github.com/jigjigjig) ([`610a6a5`](https://github.com/mozilla-ai/otari/commit/610a6a5ca6728b62a294b2b0c6d287ffc8e63bd8))
+- **dashboard:** Move Providers into organization General settings in [#1305](https://github.com/mozilla-ai/otari/pull/1305) by [@jigjigjig](https://github.com/jigjigjig) ([`472de4b`](https://github.com/mozilla-ai/otari/commit/472de4b5b328434083c31a9e9a3610d06ab591fe))
+- **dashboard:** Offer the Playground the models the catalog lists in [#1418](https://github.com/mozilla-ai/otari/pull/1418) by [@tbille](https://github.com/tbille) ([`13419be`](https://github.com/mozilla-ai/otari/commit/13419beb115a76ab24c1e57094f5c5f5c8b5b68b))
+- **dashboard:** Page the organization rate overrides table in [#1424](https://github.com/mozilla-ai/otari/pull/1424) by [@khaledosman](https://github.com/khaledosman) ([`f919407`](https://github.com/mozilla-ai/otari/commit/f919407d33b4a6ac9bd30cb8048a9ebcd6a69be6))
+- **usage:** Redact the upstream error before it is stored on the usage row in [#1426](https://github.com/mozilla-ai/otari/pull/1426) by [@daavoo](https://github.com/daavoo) ([`9e7531c`](https://github.com/mozilla-ai/otari/commit/9e7531c7f1b7675b736af3d79dae76047551ed92))
+- **policy-checks:** Keep the judge gate bounded, out of its own hooks, and within the server's own budget ([`466774d`](https://github.com/mozilla-ai/otari/commit/466774d4fd52984d92f0917d2d096173cd989f48))
+- **policy-checks:** Fail open only on truly unfixable judge evidence, never on a fixable gap ([`ac2a9ae`](https://github.com/mozilla-ai/otari/commit/ac2a9ae8731eb0a77ebae3c91e3b93237ec1cd2e))
+- **policy-checks:** Guard the gates-file read so it fails open on non-UTF-8 or a race in [#1387](https://github.com/mozilla-ai/otari/pull/1387) ([`03c979a`](https://github.com/mozilla-ai/otari/commit/03c979ad5d717d646e2164eade4007db7a3951a9))
+- **dashboard:** Page the organization spend ceilings table in [#1429](https://github.com/mozilla-ai/otari/pull/1429) by [@khaledosman](https://github.com/khaledosman) ([`e1561f2`](https://github.com/mozilla-ai/otari/commit/e1561f2bb13c9c280942d1134eeb00ec778ff62f))
+- **hybrid:** Accept the standalone credential headers on the platform path in [#1423](https://github.com/mozilla-ai/otari/pull/1423) by [@tbille](https://github.com/tbille) ([`d1916bb`](https://github.com/mozilla-ai/otari/commit/d1916bb17453476e4332609c43b7fe6b324c3db3))
+
+
+### Features
+
+- **pricing:** Answer current model rates on their own paged route in [#1419](https://github.com/mozilla-ai/otari/pull/1419) by [@khaledosman](https://github.com/khaledosman) ([`2689f60`](https://github.com/mozilla-ai/otari/commit/2689f60a84880a5de015f1756bfb115498525a29))
+- **overview:** Summarize the dashboard overview server-side in [#1428](https://github.com/mozilla-ai/otari/pull/1428) by [@khaledosman](https://github.com/khaledosman) ([`6513128`](https://github.com/mozilla-ai/otari/commit/65131288a2f4307481ecf2cd0154416b5b245794))
+- **policy-checks:** Add a judge gate that evaluates a rubric via a local model call ([`011ed0b`](https://github.com/mozilla-ai/otari/commit/011ed0b137b93047703faa6404b1b11225d486a3))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.6.4...v0.6.5
 ## [0.6.4](https://github.com/mozilla-ai/otari/releases/tag/v0.6.4) - 2026-09-18
 
 
