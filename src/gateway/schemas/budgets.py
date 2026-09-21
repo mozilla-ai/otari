@@ -31,7 +31,7 @@ _ALIGNMENT_DESCRIPTION = (
 )
 
 # A blank value matches no provider instance, so a ceiling that stored one would never bind.
-_ProviderKeyId = Annotated[str | None, Field(min_length=1, max_length=255, pattern=r"^\S+$")]
+_ProviderKeyId = Annotated[str, Field(min_length=1, max_length=255, pattern=r"^\S+$")]
 
 
 class CreateBudgetRequest(BaseModel):
@@ -166,7 +166,7 @@ class CreateScopedBudgetRequest(BaseModel):
         max_length=255,
         description="Id of the capped identity: an organization, workspace, membership row, or API key",
     )
-    provider_key_id: _ProviderKeyId = Field(
+    provider_key_id: _ProviderKeyId | None = Field(
         default=None,
         description=(
             "Narrow the cap to one provider instance; omit or null to cap spend across every provider. "
@@ -365,7 +365,7 @@ class OrganizationScopedBudgetCreate(BaseModel):
             "a membership in either, or an API key in one"
         ),
     )
-    provider_key_id: _ProviderKeyId = Field(
+    provider_key_id: _ProviderKeyId | None = Field(
         default=None,
         description=(
             "Narrow the cap to one provider instance; omit or null to cap spend across every provider. "
@@ -473,7 +473,7 @@ class WorkspaceMemberBudgetPolicyCreate(BaseModel):
         max_length=255,
         description="The budget this workspace hands to every member",
     )
-    provider_key_id: _ProviderKeyId = Field(
+    provider_key_id: _ProviderKeyId | None = Field(
         default=None,
         description=(
             "Narrow the default to one provider instance; omit or null to apply to every provider. "
