@@ -544,6 +544,8 @@ class OrgProviderKeyService:
         key = await self.keys.get_in_organization(key_id, organization.id)
         if key is None:
             raise OrgProviderKeyNotFoundError(key_id)
+        if key.archived_at is None:
+            return key.to_public(usable=key_is_usable(key))
 
         async with self.uow:
             blocked = await retire_byo_account(self.uow, key, release_secret=True)

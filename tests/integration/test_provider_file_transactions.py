@@ -83,6 +83,39 @@ async def test_refused_secret_release_commits_revocation(
     assert binding is not None and binding.state == "pending_cleanup"
 
 
+async def test_restore_active_key_preserves_provider_file_account(
+    async_db: AsyncSession, files_setup: tuple[ProviderFileService, FileScope, FileAccount]
+) -> None:
+    files, scope, account = files_setup
+    repo = ProviderFileRepository(async_db)
+    organization = await async_db.get(Organization, scope.organization_id)
+    assert organization is not None
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    generation = await repo.account(account.generation_id)
+    assert generation is not None
+    key_id = uuid.UUID(generation.credential_ref)
+    await repo.save(
+        OrgProviderKey(
+            id=key_id,
+            organization_id=scope.organization_id,
+            provider="anthropic",
+            name="Files",
+            encrypted_api_key=encrypt_secret("original-credential"),
+        )
+    )
+    await async_db.commit()
+    operation = await files.prepare(scope, account, PrepareUpload(operation_id=uuid.uuid4(), size_bytes=20))
+    await files.finalize(scope, operation.id, metadata())
+
+    restored = await OrgProviderKeyService(async_db).restore_key_for_user(user=owner, key_id=key_id)
+
+    stored_generation = await repo.account(account.generation_id)
+    binding = await repo.get(operation.id)
+    assert restored.archived_at is None
+    assert stored_generation is not None and stored_generation.status == "active"
+    assert binding is not None and binding.state == "active"
+
+
 async def test_secret_update_failure_rolls_back_retirement(
     async_db: AsyncSession,
     files_setup: tuple[ProviderFileService, FileScope, FileAccount],
