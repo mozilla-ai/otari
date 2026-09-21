@@ -118,3 +118,14 @@ gates:
       rather than editing the list by hand, so uv.lock moves with it. If
       you changed something else in the file, run `uv lock` to confirm the
       lockfile is still in sync.
+
+  - id: dashboard-client-changed-needs-codegen
+    type: command_if_changed
+    enforcement: required
+    when_changed: ["web/src/client/schema.ts"]
+    require: ["client:generate"]
+    message: >-
+      web/src/client/schema.ts is generated from docs/public/openapi.json and
+      committed, with a CI drift check over it. Run
+      `pnpm --dir web run client:generate` rather than editing it by hand
+      (see web/AGENTS.md, "Data and generated files").
