@@ -1,32 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import type { Budget, ProviderHealthResponse } from "@/client"
+import type { AllocationHealth, ProviderHealthResponse } from "@/client"
 import {
-  budgetHealth,
+  allocationStrip,
   errorRateHealth,
   providerHealthStatus,
-  spendCeilingHealth,
 } from "@/features/overview/overview"
-import { organizationSpendCeiling, usageTotals } from "@/tests/fixtures"
-
-function budget(over: Partial<Budget>): Budget {
-  return {
-    budget_id: "b",
-    organization_id: null,
-    name: null,
-    max_budget: 100,
-    token_limit: null,
-    request_limit: null,
-    reset_alignment: null,
-    budget_duration_sec: null,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    user_count: 1,
-    total_spend: 0,
-    total_reserved: 0,
-    ...over,
-  }
-}
+import { usageTotals } from "@/tests/fixtures"
 
 const totals = usageTotals
 
@@ -84,182 +64,103 @@ describe("providerHealthStatus", () => {
   })
 })
 
-describe("budgetHealth", () => {
-  it("is neutral with no budgets configured", () => {
-    expect(budgetHealth([]).status).toBe("neutral")
-    expect(budgetHealth([]).label).toBe("No budgets configured")
-  })
+const LABELS = {
+  none: "No budgets configured",
+  noneCapped: "No capped budgets",
+}
 
-  it("excludes unlimited caps and user-less budgets", () => {
-    const result = budgetHealth([
-      budget({ max_budget: null, total_spend: 9999 }),
-      budget({ user_count: 0, total_spend: 9999 }),
-    ])
+function health(over: Partial<AllocationHealth> = {}): AllocationHealth {
+  return {
+    over_count: 0,
+    near_count: 0,
+    capped_count: 1,
+    total_count: 1,
+    worst: {
+      budget_id: "11111111-2222-3333-4444-555555555555",
+      name: "Monthly",
+      spent: 50,
+      allocated: 100,
+    },
+    ...over,
+  }
+}
+
+describe("allocationStrip", () => {
+  it("is neutral with nothing configured", () => {
+    const result = allocationStrip(health({ total_count: 0 }), LABELS)
+
     expect(result.status).toBe("neutral")
-    expect(result.cappedCount).toBe(0)
+    expect(result.label).toBe("No budgets configured")
   })
 
-  it("uses cap * user_count for allocation (per-user cap)", () => {
-    // cap 10 * 2 users = 20 allocated; spend 25 => over.
-    const result = budgetHealth([
-      budget({ max_budget: 10, user_count: 2, total_spend: 25, name: "team" }),
-    ])
-    expect(result.status).toBe("alert")
-    expect(result.overCount).toBe(1)
-    expect(result.worst).toEqual({
-      name: "team",
-      spent: 25,
-      allocated: 20,
-      pct: 1.25,
-    })
+  it("tells nothing configured from nothing capped", () => {
+    const result = allocationStrip(
+      health({ capped_count: 0, worst: null }),
+      LABELS,
+    )
+
+    expect(result.status).toBe("neutral")
+    expect(result.label).toBe("No capped budgets")
   })
 
-  it("reads spend against a cap of zero as over, not as within budget", () => {
-    // `max_budget` is `ge=0` on the wire, so a budget that admits nothing is a
-    // real figure, and spend recorded before it was lowered to zero is a real
-    // state. Dividing was the trap: it left the row at 0% and the strip
-    // reporting "All within budget" over a cap that refuses every request.
-    const result = budgetHealth([
-      budget({ max_budget: 0, user_count: 2, total_spend: 5, name: "frozen" }),
-    ])
-    expect(result.status).toBe("alert")
-    expect(result.overCount).toBe(1)
-    expect(result.worst?.pct).toBe(1)
-
-    // An untouched zero cap has nothing to report and stays on track.
-    expect(
-      budgetHealth([budget({ max_budget: 0, user_count: 2, total_spend: 0 })])
-        .status,
-    ).toBe("ok")
+  it("is neutral where the caller may not see the strip at all", () => {
+    // Withheld rather than empty, so the page says the same thing it says for
+    // a deployment with no budgets rather than showing a false zero.
+    expect(allocationStrip(null, LABELS).status).toBe("neutral")
+    expect(allocationStrip(undefined, LABELS).label).toBe(
+      "No budgets configured",
+    )
   })
 
-  it("flags near-limit at 80% and picks the worst-off budget", () => {
-    const result = budgetHealth([
-      budget({
-        budget_id: "a",
-        max_budget: 100,
-        user_count: 1,
-        total_spend: 50,
-      }), // 50%
-      budget({
-        budget_id: "b",
-        max_budget: 100,
-        user_count: 1,
-        total_spend: 85,
-      }), // 85% near
-    ])
-    expect(result.status).toBe("warn")
-    expect(result.nearCount).toBe(1)
-    // Neither is named, and both cap the same figure over the same period, so
-    // each carries its id to tell them apart.
-    expect(result.worst?.name).toBe("$100.00 (b)")
+  it("derives the share from the worst row the server picked", () => {
+    const result = allocationStrip(
+      health({ worst: { ...health().worst!, spent: 75, allocated: 300 } }),
+      LABELS,
+    )
+
+    expect(result.worst?.pct).toBe(0.25)
   })
 
-  it("names an unnamed budget by its figure rather than by its id", () => {
-    const result = budgetHealth([
-      budget({
-        budget_id: "3f2a9c41-1111-2222-3333-444444444444",
-        max_budget: 100,
-        user_count: 1,
-        total_spend: 85,
+  it("reads spend against an allowance of zero as a full share", () => {
+    // It admits nothing, so anything spent is past it, and the share has no
+    // finite value to render.
+    const result = allocationStrip(
+      health({
+        over_count: 1,
+        worst: { ...health().worst!, spent: 5, allocated: 0 },
       }),
-    ])
-    expect(result.worst?.name).toBe("$100.00")
-  })
-})
-
-describe("spendCeilingHealth", () => {
-  const named = (ceiling: { name: string | null }) => ceiling.name ?? "a scope"
-
-  it("is neutral with nothing capped", () => {
-    expect(spendCeilingHealth([], named).status).toBe("neutral")
-    expect(
-      spendCeilingHealth(
-        [organizationSpendCeiling({ max_budget: null, current_spend: 9999 })],
-        named,
-      ).cappedCount,
-    ).toBe(0)
-  })
-
-  it("judges spend plus what is reserved against the ceiling's own figure", () => {
-    // A ceiling refuses on the sum, so the cell has to judge the sum. Its
-    // `max_budget` is the pooled figure, not a per-user cap, so no roster
-    // multiplies it the way `budgetHealth` multiplies a budget's.
-    const result = spendCeilingHealth(
-      [
-        organizationSpendCeiling({
-          name: "Staging cap",
-          max_budget: 250,
-          current_spend: 180,
-          reserved_spend: 20,
-        }),
-      ],
-      named,
+      LABELS,
     )
-    expect(result.status).toBe("warn")
-    expect(result.worst).toEqual({
-      name: "Staging cap",
-      spent: 200,
-      allocated: 250,
-      pct: 0.8,
-    })
-  })
 
-  it("counts a ceiling the organization may not edit", () => {
-    // `manageable` is descriptive, never a permission: the row is enforcing
-    // against this organization whoever set its figure, so it is judged.
-    const result = spendCeilingHealth(
-      [
-        organizationSpendCeiling({
-          name: "Deployment cap",
-          manageable: false,
-          max_budget: 100,
-          current_spend: 150,
-        }),
-      ],
-      named,
-    )
-    expect(result.status).toBe("alert")
-    expect(result.overCount).toBe(1)
-    expect(result.worst?.name).toBe("Deployment cap")
-  })
-
-  it("reads spend against a ceiling of zero as over", () => {
-    const result = spendCeilingHealth(
-      [
-        organizationSpendCeiling({
-          name: "Frozen",
-          max_budget: 0,
-          current_spend: 5,
-        }),
-      ],
-      named,
-    )
-    expect(result.status).toBe("alert")
-    expect(result.overCount).toBe(1)
-    // 100%, not Infinity: the share has no finite value, and the severity word
-    // beside it is what says the cap was exceeded rather than reached.
     expect(result.worst?.pct).toBe(1)
+    expect(result.status).toBe("alert")
   })
 
-  it("picks the worst-off ceiling", () => {
-    const result = spendCeilingHealth(
-      [
-        organizationSpendCeiling({
-          id: "a",
-          max_budget: 100,
-          current_spend: 10,
-        }),
-        organizationSpendCeiling({
-          id: "b",
-          name: "tightest",
-          max_budget: 100,
-          current_spend: 90,
-        }),
-      ],
-      named,
+  it("names an unnamed row by its id fingerprint", () => {
+    const result = allocationStrip(
+      health({ worst: { ...health().worst!, name: null } }),
+      LABELS,
     )
-    expect(result.worst?.name).toBe("tightest")
-    expect(result.nearCount).toBe(1)
+
+    expect(result.worst?.name).toBe("11111111")
+  })
+
+  it("words the strip from the counts the server returned", () => {
+    expect(allocationStrip(health({ over_count: 2 }), LABELS).label).toBe(
+      "2 over limit",
+    )
+    expect(allocationStrip(health({ near_count: 1 }), LABELS).label).toBe(
+      "1 near limit",
+    )
+    expect(allocationStrip(health(), LABELS).label).toBe("All within budget")
+  })
+
+  it("puts over-limit ahead of near-limit in the status", () => {
+    const result = allocationStrip(
+      health({ over_count: 1, near_count: 3 }),
+      LABELS,
+    )
+
+    expect(result.status).toBe("alert")
   })
 })

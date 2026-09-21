@@ -26,10 +26,12 @@ from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
+from gateway.services.overview.overview_service import OverviewService
 from gateway.services.routing import clear_router_backend_cache
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
@@ -739,6 +741,21 @@ def get_telemetry_storage_port(
     return container.resolve(TelemetryStoragePort, db)
 
 
+def get_overview_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OverviewService:
+    """Build the dashboard overview's summary service on the request's session.
+
+    Assembled here rather than in the route, because a route does not name a
+    session type (``scripts/check_architecture.py``, rule 12).
+    """
+    return OverviewService(
+        OverviewRepository(db),
+        OrganizationService(db, membership_listener=None),
+        DeploymentUserService(db),
+    )
+
+
+OverviewServiceDep = Annotated[OverviewService, Depends(get_overview_service)]
+
 ApiKeyFormatPortDep = Annotated[ApiKeyFormatPort, Depends(get_api_key_format_port)]
 BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
 EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
@@ -808,6 +825,7 @@ __all__ = [
     "CallerOrganization",
     "CurrentIdentity",
     "EntitlementPortDep",
+    "OverviewServiceDep",
     "GrowthSignalPortDep",
     "IdentityProviderPortDep",
     "ModelProviderPortDep",

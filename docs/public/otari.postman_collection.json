@@ -5313,6 +5313,38 @@
     {
       "item": [
         {
+          "name": "Get Overview",
+          "request": {
+            "description": "Summarize what the dashboard overview shows beside its usage chart.\n\nThe counts and the budget judgment in one answer, so the page does not read\nfour collections to compute them. A workspace outside the caller's\norganization is treated as none given rather than refused, because the id\ncomes from a switcher whose contents can go stale.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "overview"
+              ],
+              "query": [
+                {
+                  "description": "Narrow the counts to one workspace of the caller's organization.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/overview?workspace_id="
+            }
+          }
+        }
+      ],
+      "name": "overview"
+    },
+    {
+      "item": [
+        {
           "name": "Playground Chat Completions",
           "request": {
             "body": {

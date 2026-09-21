@@ -1234,6 +1234,50 @@
         "title": "AliasResponse",
         "type": "object"
       },
+      "AllocationHealthResponse": {
+        "description": "One set of capped rows, reduced to what a strip renders.",
+        "properties": {
+          "capped_count": {
+            "description": "Rows with a finite cap, which are the ones that can be judged.",
+            "title": "Capped Count",
+            "type": "integer"
+          },
+          "near_count": {
+            "description": "Rows at 80% of their allowance or more, but not past it.",
+            "title": "Near Count",
+            "type": "integer"
+          },
+          "over_count": {
+            "description": "Rows at or past their allowance.",
+            "title": "Over Count",
+            "type": "integer"
+          },
+          "total_count": {
+            "description": "Rows of any kind, so a caller can tell 'none configured' from 'none caps spend'.",
+            "title": "Total Count",
+            "type": "integer"
+          },
+          "worst": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorstAllocationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "over_count",
+          "near_count",
+          "capped_count",
+          "total_count",
+          "worst"
+        ],
+        "title": "AllocationHealthResponse",
+        "type": "object"
+      },
       "Annotations": {
         "additionalProperties": true,
         "properties": {
@@ -9620,6 +9664,48 @@
         "title": "OutputShape",
         "type": "string"
       },
+      "OverviewSummaryResponse": {
+        "description": "What the dashboard overview renders beside its usage chart.\n\n``budgets`` and ``ceilings`` are null where the caller may not see them,\nwhich is not the same as a strip with nothing in it: deployment budgets are\nthe operator's, and spend ceilings are an organization owner's or admin's.",
+        "properties": {
+          "active_keys": {
+            "title": "Active Keys",
+            "type": "integer"
+          },
+          "active_members": {
+            "description": "Active members of the named workspace; 0 when none is named.",
+            "title": "Active Members",
+            "type": "integer"
+          },
+          "budgets": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AllocationHealthResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ceilings": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AllocationHealthResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "active_keys",
+          "active_members",
+          "budgets",
+          "ceilings"
+        ],
+        "title": "OverviewSummaryResponse",
+        "type": "object"
+      },
       "PasskeySessionResponse": {
         "description": "A dashboard session minted by a passkey (the token travels only in the cookie).\n\nThe same three fields ``POST /api/v1/auth/session`` answers, deliberately: the\ndashboard's sign-in path does not care which credential got it here.",
         "properties": {
@@ -17478,6 +17564,43 @@
           "count"
         ],
         "title": "WorkspacesPublic",
+        "type": "object"
+      },
+      "WorstAllocationResponse": {
+        "description": "The row furthest through its allowance.",
+        "properties": {
+          "allocated": {
+            "title": "Allocated",
+            "type": "number"
+          },
+          "budget_id": {
+            "title": "Budget Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The row's own name, or null where nobody gave it one.",
+            "title": "Name"
+          },
+          "spent": {
+            "title": "Spent",
+            "type": "number"
+          }
+        },
+        "required": [
+          "budget_id",
+          "name",
+          "spent",
+          "allocated"
+        ],
+        "title": "WorstAllocationResponse",
         "type": "object"
       }
     },
@@ -26231,6 +26354,67 @@
         "summary": "Organization Usage Summary",
         "tags": [
           "organization-usage"
+        ]
+      }
+    },
+    "/api/v1/overview": {
+      "get": {
+        "description": "Summarize what the dashboard overview shows beside its usage chart.\n\nThe counts and the budget judgment in one answer, so the page does not read\nfour collections to compute them. A workspace outside the caller's\norganization is treated as none given rather than refused, because the id\ncomes from a switcher whose contents can go stale.",
+        "operationId": "overview-get_overview",
+        "parameters": [
+          {
+            "description": "Narrow the counts to one workspace of the caller's organization.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Narrow the counts to one workspace of the caller's organization.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverviewSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Overview",
+        "tags": [
+          "overview"
         ]
       }
     },

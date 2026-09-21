@@ -264,6 +264,12 @@ export type ModelMetadataResponse = Schemas["ModelMetadataResponse"]
 export type DiscoverableModel = Schemas["DiscoverableModel"]
 export type DiscoverableProvider = Schemas["DiscoverableProvider"]
 export type DiscoverableModelsResponse = Schemas["DiscoverableModelsResponse"]
+// The overview's strips, judged server-side: the page renders three integers
+// and one worst-case row, and used to download four collections to get them.
+export type OverviewSummary = Schemas["OverviewSummaryResponse"]
+export type AllocationHealth = Schemas["AllocationHealthResponse"]
+export type WorstAllocation = Schemas["WorstAllocationResponse"]
+
 export type PricingResponse = Schemas["PricingResponse"]
 export type CurrentPricingPage = Schemas["CurrentPricingPage"]
 export type PricingTier = Schemas["PricingTier"]

@@ -1,10 +1,9 @@
 import type {
-  Budget,
-  OrganizationSpendCeiling,
+  AllocationHealth,
   ProviderHealthResponse,
   UsageTotals,
 } from "@/client"
-import { budgetLabeler } from "@/features/budgets/budgetLabel"
+import { shortBudgetId } from "@/features/budgets/budgetLabel"
 
 // Attention-routing status for an overview tile / the system-status strip.
 // "neutral" means "nothing to judge here" (no data, unlimited, none configured)
@@ -65,13 +64,6 @@ export interface BudgetHealth {
   worst?: { name: string; spent: number; allocated: number; pct: number }
 }
 
-/** One judgeable row: what it is called, what it has spent, what it may spend. */
-interface Allocation {
-  name: string
-  spent: number
-  allocated: number
-}
-
 /** No row here has a utilization, so there is nothing to be healthy or not. */
 function noneToJudge(label: string): BudgetHealth {
   return {
@@ -84,102 +76,54 @@ function noneToJudge(label: string): BudgetHealth {
 }
 
 /**
- * The judgment, once rows are reduced to allocations. Shared by the two signals
- * below so the deployment strip and the tenant one cannot classify the same
- * utilization differently.
+ * The server's scan, turned into the strip this page draws.
+ *
+ * The gateway decides which row is worst and how many are over or near, because
+ * that means reading every row (otari#1425). What stays here is the wording and
+ * the percentage, which are presentation: putting them on the wire would make
+ * the API own UI copy.
+ *
+ * `health` is null where the caller may not see the strip at all, which is not
+ * the same as a strip with nothing in it, so both answer "neutral" but with
+ * different words.
  */
-function allocationHealth(capped: Allocation[]): BudgetHealth {
-  // A zero allocation admits nothing, so anything spent against one is over it.
-  // Reported as a full 100% rather than as the infinite ratio it really is: the
-  // share has no finite value, and a cell reading "Infinity%" tells the reader
-  // less than "Over budget" at 100% does. It is a floor, so a row measurably
-  // further past its limit still wins `worst`.
-  const scored = capped.map((row) => ({
-    ...row,
-    pct: row.allocated > 0 ? row.spent / row.allocated : row.spent > 0 ? 1 : 0,
-  }))
-  const overCount = scored.filter((row) => row.pct >= 1).length
-  const nearCount = scored.filter(
-    (row) => row.pct >= BUDGET_WARN && row.pct < 1,
-  ).length
-  const worst = scored.reduce<BudgetHealth["worst"]>(
-    (highest, row) => (highest && highest.pct >= row.pct ? highest : row),
-    undefined,
-  )
-  const status: Health = overCount > 0 ? "alert" : nearCount > 0 ? "warn" : "ok"
-  const label =
-    overCount > 0
-      ? `${overCount} over limit`
-      : nearCount > 0
-        ? `${nearCount} near limit`
-        : "All within budget"
+export function allocationStrip(
+  health: AllocationHealth | null | undefined,
+  labels: { none: string; noneCapped: string },
+): BudgetHealth {
+  if (!health || health.total_count === 0) return noneToJudge(labels.none)
+  if (health.capped_count === 0 || !health.worst) {
+    return noneToJudge(labels.noneCapped)
+  }
+  const { worst } = health
+  const status: Health =
+    health.over_count > 0 ? "alert" : health.near_count > 0 ? "warn" : "ok"
   return {
     status,
-    label,
-    overCount,
-    nearCount,
-    cappedCount: capped.length,
-    worst,
+    label:
+      health.over_count > 0
+        ? `${health.over_count} over limit`
+        : health.near_count > 0
+          ? `${health.near_count} near limit`
+          : "All within budget",
+    overCount: health.over_count,
+    nearCount: health.near_count,
+    cappedCount: health.capped_count,
+    worst: {
+      // A row nobody named falls back to the id fingerprint the budgets list
+      // already shows, which is what the labeler did for an unnamed budget.
+      name: worst.name ?? shortBudgetId(worst.budget_id),
+      spent: worst.spent,
+      allocated: worst.allocated,
+      // A zero allowance admits nothing, so anything spent against one is over
+      // it. Reported as a full 100% rather than the infinite ratio it really
+      // is, which is also how the gateway ranks it.
+      pct:
+        worst.allocated > 0
+          ? worst.spent / worst.allocated
+          : worst.spent > 0
+            ? 1
+            : 0,
+    },
   }
-}
-
-/**
- * The deployment's own budgets, as the operator strip reads them.
- *
- * `max_budget` there is a PER-USER cap that users share, so the honest
- * allocation is cap * user_count (which is what BudgetsPage's UsageCell shows).
- * Unlimited caps and user-less budgets have no utilization to judge.
- */
-export function budgetHealth(budgets: Budget[]): BudgetHealth {
-  if (budgets.length === 0) {
-    return noneToJudge("No budgets configured")
-  }
-  const nameBudget = budgetLabeler(budgets)
-  const capped = budgets
-    .filter((budget) => budget.max_budget !== null && budget.user_count > 0)
-    .map((budget) => ({
-      name: nameBudget(budget),
-      spent: budget.total_spend,
-      allocated: (budget.max_budget as number) * budget.user_count,
-    }))
-  if (capped.length === 0) {
-    return noneToJudge("No capped budgets")
-  }
-  return allocationHealth(capped)
-}
-
-/**
- * The same judgment over the rows a tenant can read: their organization's spend
- * ceilings.
- *
- * A ceiling carries its own counters, so the allocation is `max_budget` itself
- * rather than a per-user cap times a roster, and what it is judged against is
- * `current_spend + reserved_spend`, the sum a ceiling actually refuses on.
- *
- * `manageable` is deliberately not consulted. It says whose figure this is, not
- * whose spend: a ceiling naming a budget the organization does not own is
- * enforcing against that organization today, so dropping it would let the page
- * read as uncapped.
- *
- * `nameOf` names a row for the reader, because a ceiling's own label is optional
- * and what it caps is an id on the wire.
- */
-export function spendCeilingHealth(
-  ceilings: readonly OrganizationSpendCeiling[],
-  nameOf: (ceiling: OrganizationSpendCeiling) => string,
-): BudgetHealth {
-  if (ceilings.length === 0) {
-    return noneToJudge("No spend ceilings configured")
-  }
-  const capped = ceilings
-    .filter((budget) => budget.max_budget !== null)
-    .map((budget) => ({
-      name: nameOf(budget),
-      spent: budget.current_spend + budget.reserved_spend,
-      allocated: budget.max_budget as number,
-    }))
-  if (capped.length === 0) {
-    return noneToJudge("No ceiling caps spend")
-  }
-  return allocationHealth(capped)
 }

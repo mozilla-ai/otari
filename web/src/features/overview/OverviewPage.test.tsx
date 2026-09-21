@@ -5,7 +5,12 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { DeploymentBootstrap, UsageSummary } from "@/client"
+import type {
+  AllocationHealth,
+  DeploymentBootstrap,
+  OverviewSummary,
+  UsageSummary,
+} from "@/client"
 import {
   localDayKey,
   OverviewIndex,
@@ -15,15 +20,12 @@ import { API_ROOT } from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
-  apiKey,
   bootstrap,
   HOSTED_SURFACES,
   organizationContext,
-  organizationSpendCeiling,
   seriesPoint,
   usageTotals,
   workspaceActivation,
-  workspaceMember,
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
@@ -67,6 +69,34 @@ function summary(
   }
 }
 
+/** Everything withheld by default, which is what a member's overview looks like. */
+function overviewSummary(over: Partial<OverviewSummary> = {}): OverviewSummary {
+  return {
+    active_keys: 0,
+    active_members: 0,
+    budgets: null,
+    ceilings: null,
+    ...over,
+  }
+}
+
+/** One strip's scan, as the gateway answers it. */
+function strip(over: Partial<AllocationHealth> = {}): AllocationHealth {
+  return {
+    over_count: 0,
+    near_count: 0,
+    capped_count: 1,
+    total_count: 1,
+    worst: {
+      budget_id: "11111111-2222-3333-4444-555555555555",
+      name: "Monthly",
+      spent: 50,
+      allocated: 100,
+    },
+    ...over,
+  }
+}
+
 interface Bodies {
   today?: Partial<UsageSummary["totals"]>
   period?: Partial<UsageSummary["totals"]>
@@ -74,6 +104,10 @@ interface Bodies {
   /** The 30-day daily series, which is what the spend chart draws. */
   series?: UsageSummary["series"]
   health?: unknown
+  /** The overview's own summary: the two rail counts and the budget strips. */
+  overview?: Partial<OverviewSummary>
+  /** A summary per workspace id, for the counts that follow the switcher. */
+  overviewByWorkspace?: Record<string, Partial<OverviewSummary>>
   budgets?: unknown
   /** The organization's spend ceilings, which is the tenant's budget signal. */
   ceilings?: unknown
@@ -135,6 +169,18 @@ function mockApi(b: Bodies) {
         return jsonResponse(summary(b.today ?? {}))
       if (url.includes("end_date=")) return jsonResponse(summary(b.prev ?? {}))
       return jsonResponse(summary(b.period ?? {}, b.series))
+    }
+    if (url.includes(`${API_ROOT}/overview`)) {
+      // The workspace travels in the query, because the gateway is what scopes
+      // the counts now. Keyed on it here so a test can show the rail moving.
+      const scoped = new URL(url, "http://localhost").searchParams.get(
+        "workspace_id",
+      )
+      return jsonResponse(
+        overviewSummary(
+          (scoped ? b.overviewByWorkspace?.[scoped] : undefined) ?? b.overview,
+        ),
+      )
     }
     if (url.includes(`${API_ROOT}/providers/health`)) {
       return jsonResponse(
@@ -249,16 +295,11 @@ describe("OverviewPage", () => {
   it("counts the selected workspace's own active members in the rail", async () => {
     mockApi({
       context: TWO_WORKSPACES,
-      workspaceMembers: {
-        [WORKSPACE_A]: [
-          workspaceMember({ id: "a1" }),
-          workspaceMember({ id: "a2" }),
-          // Invited, not active: on the roster and not in the count.
-          workspaceMember({ id: "a3", status: "invited" }),
-        ],
-        [WORKSPACE_B]: [
-          workspaceMember({ id: "b1", workspace_id: WORKSPACE_B }),
-        ],
+      // Counted by the gateway, which scopes to the workspace in the query and
+      // leaves an invited membership out of "active".
+      overviewByWorkspace: {
+        [WORKSPACE_A]: { active_members: 2 },
+        [WORKSPACE_B]: { active_members: 1 },
       },
     })
 
@@ -276,15 +317,9 @@ describe("OverviewPage", () => {
   it("moves that count when a different workspace is selected", async () => {
     mockApi({
       context: TWO_WORKSPACES,
-      workspaceMembers: {
-        [WORKSPACE_A]: [
-          workspaceMember({ id: "a1" }),
-          workspaceMember({ id: "a2" }),
-          workspaceMember({ id: "a3", status: "invited" }),
-        ],
-        [WORKSPACE_B]: [
-          workspaceMember({ id: "b1", workspace_id: WORKSPACE_B }),
-        ],
+      overviewByWorkspace: {
+        [WORKSPACE_A]: { active_members: 2 },
+        [WORKSPACE_B]: { active_members: 1 },
       },
     })
 
@@ -479,29 +514,24 @@ describe("OverviewPage", () => {
     expect(within(tile).queryByText(/%/)).not.toBeInTheDocument()
   })
 
-  it("computes budget health with cap * user_count and links to budgets", async () => {
+  it("renders the budget strip from the scan the gateway returned", async () => {
+    // The cap-times-users arithmetic is the gateway's now, so what is checked
+    // here is the wording and the share, which are this page's own.
     mockApi({
-      budgets: [
-        {
-          budget_id: "team",
-          name: "team",
-          max_budget: 10,
-          user_count: 2,
-          total_spend: 25,
-          total_reserved: 0,
-        },
-        {
-          budget_id: "x",
-          name: "x",
-          max_budget: null,
-          user_count: 1,
-          total_spend: 9999,
-          total_reserved: 0,
-        },
-      ],
+      overview: {
+        budgets: strip({
+          over_count: 1,
+          worst: {
+            budget_id: "team",
+            name: "team",
+            spent: 25,
+            allocated: 20,
+          },
+        }),
+      },
     })
     renderPage(<OverviewPage />)
-    expect(await screen.findByText("125.0%")).toBeInTheDocument() // 25 / (10*2)
+    expect(await screen.findByText("125.0%")).toBeInTheDocument()
     expect(screen.getByText("OVER BUDGET")).toBeInTheDocument()
     // The meter names the budget it is reporting on, so the graphic is not a
     // decoration a screen reader has to skip past. `progressbar` and not `img`:
@@ -526,16 +556,12 @@ describe("OverviewPage", () => {
         total: 3,
         checked_at: "2026-07-22T00:00:00Z",
       },
-      budgets: [
-        {
-          budget_id: "team",
-          name: "team",
-          max_budget: 10,
-          user_count: 2,
-          total_spend: 25,
-          total_reserved: 0,
-        },
-      ],
+      overview: {
+        budgets: strip({
+          over_count: 1,
+          worst: { budget_id: "team", name: "team", spent: 25, allocated: 20 },
+        }),
+      },
     })
     renderPage(<OverviewPage />)
     // Provider health has no tile of its own; a degraded state surfaces only via
@@ -656,7 +682,7 @@ describe("OverviewPage", () => {
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse(organizationContext())
       }
-      if (url.includes(`${API_ROOT}/budgets`))
+      if (url.includes(`${API_ROOT}/overview`))
         return jsonResponse({ detail: "boom" }, 500)
       if (url.includes(`${API_ROOT}/usage/summary`))
         return jsonResponse(summary({ cost: 200, request_count: 10 }))
@@ -843,19 +869,18 @@ function mockScopedApi(b: Bodies): string[] {
     if (url.includes(`${API_ROOT}/organizations/me/usage`)) {
       return jsonResponse(b.logs ?? [])
     }
-    // The tenant surface the rest of the page reads: the organization's spend
-    // ceilings behind the budget cell (owner or admin, in a `Paged` envelope),
-    // its own keys, and the selected workspace's roster, which any member of
-    // that workspace may read.
-    if (url.includes(`${API_ROOT}/organizations/me/spend-ceilings`)) {
-      return jsonResponse({ data: b.ceilings ?? [] })
-    }
-    if (url.includes(`${API_ROOT}/organizations/me/keys`)) {
-      return jsonResponse(b.keys ?? [])
-    }
-    const scopedRoster = url.match(/\/api\/v1\/workspaces\/([^/?]+)\/members/)
-    if (scopedRoster) {
-      return jsonResponse({ data: b.workspaceMembers?.[scopedRoster[1]] ?? [] })
+    // The one tenant surface the rest of the page reads. The ceiling strip and
+    // both rail counts come from here now, scoped and judged by the gateway,
+    // which is also what withholds the ceilings from a plain member.
+    if (url.includes(`${API_ROOT}/overview`)) {
+      const scoped = new URL(url, "http://localhost").searchParams.get(
+        "workspace_id",
+      )
+      return jsonResponse(
+        overviewSummary(
+          (scoped ? b.overviewByWorkspace?.[scoped] : undefined) ?? b.overview,
+        ),
+      )
     }
     // The two reads the setup guide adds to this page. Both are open to any
     // signed-in caller: the catalog is scoped to the caller's own providers
@@ -912,8 +937,15 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     expect(
       requested.some((url) => url.endsWith(`${API_ROOT}/admin/access`)),
     ).toBe(false)
+    // /v1/overview is the one exception and is scoped by the identity asking
+    // rather than by its prefix: it derives the caller's organization server
+    // side and withholds the deployment-budget strip from anyone who does not
+    // operate the deployment. It cannot sit under /organizations/me because for
+    // an operator it also answers for the deployment.
     const scoped = requested.filter(
-      (url) => !url.endsWith(`${API_ROOT}/organizations/me`),
+      (url) =>
+        !url.endsWith(`${API_ROOT}/organizations/me`) &&
+        !url.includes(`${API_ROOT}/overview`),
     )
     expect(scoped.length).toBeGreaterThan(0)
     for (const url of scoped) {
@@ -1038,22 +1070,25 @@ describe("the tenant Overview's budget signal", () => {
     const requested = mockScopedApi({
       context: { role: "admin" },
       period: { cost: 200, request_count: 2000 },
-      ceilings: [
-        organizationSpendCeiling({ current_spend: 50, max_budget: 250 }),
-        organizationSpendCeiling({
-          id: "dddddddd-1111-2222-3333-444444444444",
-          name: "Staging cap",
-          current_spend: 180,
-          reserved_spend: 20,
-          max_budget: 250,
+      // 200 of 250, reserved included: a ceiling refuses on spend plus what is
+      // held against requests in flight, and the gateway sums the same two.
+      overview: {
+        ceilings: strip({
+          near_count: 1,
+          capped_count: 2,
+          total_count: 2,
+          worst: {
+            budget_id: "dddddddd-1111-2222-3333-444444444444",
+            name: "Staging cap",
+            spent: 200,
+            allocated: 250,
+          },
         }),
-      ],
+      },
     })
     renderPage(<OverviewIndex />)
 
     expect(await screen.findByText("Budget health")).toBeInTheDocument()
-    // 200 of 250, reserved included: a ceiling refuses on spend plus what is
-    // held against requests in flight, so the cell judges the same sum.
     expect(await screen.findByText("80.0%")).toBeInTheDocument()
     expect(screen.getByText("NEAR LIMIT")).toBeInTheDocument()
     // The same meter the Spend page's own rows draw, naming the row it is about.
@@ -1062,11 +1097,6 @@ describe("the tenant Overview's budget signal", () => {
         name: "Tightest spend ceiling: Staging cap",
       }),
     ).toBeInTheDocument()
-    expect(
-      requested.some((url) =>
-        url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
-      ),
-    ).toBe(true)
     // And never /api/v1/budgets, the operator cell's endpoint, which is
     // deployment-wide and answers 403 to this caller.
     expect(requested.some((url) => url.includes(`${API_ROOT}/budgets`))).toBe(
@@ -1081,14 +1111,17 @@ describe("the tenant Overview's budget signal", () => {
     // the tenant is over the cap that is actually refusing their requests.
     mockScopedApi({
       context: { role: "admin" },
-      ceilings: [
-        organizationSpendCeiling({
-          name: "Deployment cap",
-          manageable: false,
-          current_spend: 300,
-          max_budget: 250,
+      overview: {
+        ceilings: strip({
+          over_count: 1,
+          worst: {
+            budget_id: "eeeeeeee-1111-2222-3333-444444444444",
+            name: "Deployment cap",
+            spent: 300,
+            allocated: 250,
+          },
         }),
-      ],
+      },
     })
     renderPage(<OverviewIndex />)
 
@@ -1124,7 +1157,7 @@ describe("the tenant Overview's budget signal", () => {
           organizationContext({ deployment_operator: false, role: "admin" }),
         )
       }
-      if (url.includes(`${API_ROOT}/organizations/me/spend-ceilings`)) {
+      if (url.includes(`${API_ROOT}/overview`)) {
         return jsonResponse({ detail: "ceilings exploded" }, 500)
       }
       if (url.includes(`${API_ROOT}/organizations/me/usage/summary`)) {
@@ -1147,7 +1180,19 @@ describe("the tenant Overview's budget signal", () => {
   })
 
   it("says so when the organization has capped nothing", async () => {
-    mockScopedApi({ context: { role: "admin" }, ceilings: [] })
+    mockScopedApi({
+      context: { role: "admin" },
+      // Visible to this caller and empty, which is not the same as withheld.
+      overview: {
+        ceilings: {
+          over_count: 0,
+          near_count: 0,
+          capped_count: 0,
+          total_count: 0,
+          worst: null,
+        },
+      },
+    })
     renderPage(<OverviewIndex />)
 
     // Awaited, not read off the first paint: an unresolved query and an empty
@@ -1187,17 +1232,11 @@ describe("the tenant Overview's chart and rail", () => {
   it("counts the tenant's own keys and the workspace's roster", async () => {
     const requested = mockScopedApi({
       context: { ...TWO_WORKSPACES, role: "admin" },
-      keys: [
-        apiKey(),
-        apiKey({ id: "key-2", is_active: false }),
-        apiKey({ id: "key-3" }),
-      ],
-      workspaceMembers: {
-        [WORKSPACE_A]: [
-          workspaceMember({ id: "a1" }),
-          workspaceMember({ id: "a2" }),
-          workspaceMember({ id: "a3", status: "invited" }),
-        ],
+      // Both counts come from one read, scoped to the workspace in the query.
+      // A revoked key and an invited membership are outside "active", which the
+      // gateway is what decides now.
+      overviewByWorkspace: {
+        [WORKSPACE_A]: { active_keys: 2, active_members: 2 },
       },
     })
     renderPageInWorkspace(<OverviewIndex />, WORKSPACE_A)
@@ -1214,11 +1253,11 @@ describe("the tenant Overview's chart and rail", () => {
         within(rail as HTMLElement).getByText("Active members").parentElement,
       ).toHaveTextContent("2")
     })
-    // Their own key list, which is the surface otari-ai#1941 gave them, and not
-    // the deployment-wide /api/v1/keys the operator page reads.
+    // The counts are asked for by workspace, and never off the deployment-wide
+    // /api/v1/keys the operator page used to read here.
     expect(
       requested.some((url) =>
-        url.includes(`${API_ROOT}/organizations/me/keys`),
+        url.includes(`${API_ROOT}/overview?workspace_id=${WORKSPACE_A}`),
       ),
     ).toBe(true)
   })
@@ -1347,9 +1386,13 @@ describe("OverviewIndex operator-ness", () => {
     ).toBeLessThan(4)
 
     // And it asked nothing the deployment-wide page would have: not the gate,
-    // and no endpoint outside the surface the hooks fell back to.
+    // and no endpoint outside the surface the hooks fell back to. /v1/overview
+    // is the exception the scoped-surface test above explains: it is scoped by
+    // the identity asking rather than by its prefix.
     const asked = requested.filter(
-      (url) => !url.endsWith(`${API_ROOT}/organizations/me`),
+      (url) =>
+        !url.endsWith(`${API_ROOT}/organizations/me`) &&
+        !url.includes(`${API_ROOT}/overview`),
     )
     expect(asked.length).toBeGreaterThan(0)
     for (const url of asked) {

@@ -16,27 +16,23 @@ import { KpiCell } from "@/design-system/metrics/KpiCell"
 import { KpiStrip } from "@/design-system/metrics/KpiStrip"
 import { SpendMeter } from "@/design-system/metrics/SpendMeter"
 import { TrendChip } from "@/design-system/metrics/TrendChip"
-import { scopeLabel } from "@/features/budgets/organizationBudget"
 import { SetupGuide } from "@/features/onboarding/SetupGuide"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
 import {
-  budgetHealth,
+  allocationStrip,
+  type BudgetHealth,
   errorRateHealth,
   providerHealthStatus,
-  spendCeilingHealth,
 } from "@/features/overview/overview"
-import { useKeys } from "@/shared/api/apiKeys"
-import { useBudgets, useOrganizationSpendCeilings } from "@/shared/api/budgets"
 import { useModels } from "@/shared/api/models"
 import { useOrganizationContext } from "@/shared/api/organizations"
+import { useOverviewSummary } from "@/shared/api/overview"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import {
   NO_BREAKDOWNS,
   useUsageLogs,
   useUsageSummary,
 } from "@/shared/api/usage"
-import { useUsers } from "@/shared/api/users"
-import { useWorkspaceMembers } from "@/shared/api/workspaces"
 import {
   deltaFraction,
   formatNumber,
@@ -383,7 +379,6 @@ function OrganizationOverview() {
   // opens the organization rail in `AppShell`. A member is refused there, so a
   // member is not asked here (the matrix has Spend & budgets Hidden for them).
   const managesSpend = canManage(context.data)
-  const ceilings = useOrganizationSpendCeilings(managesSpend)
   // What this caller could route a request to, which is the setup guide's gate
   // here: `/providers`, the operator page's answer to the same question,
   // refuses this caller. The catalog is not operator-gated and is filtered to
@@ -392,39 +387,27 @@ function OrganizationOverview() {
   // to send a request to yet. Not asked until a workspace is selected, since the
   // guide is about one.
   const models = useModels(scope !== undefined)
-  // The two rail counts, both on surfaces this caller already reads:
-  // `useKeys` picks `/organizations/me/keys` for a non-operator
-  // (otari-ai#1941), and a workspace's roster is readable by any member of it.
-  const keys = useKeys(scope)
-  const members = useWorkspaceMembers(scope ?? null)
+  // The rail counts and the ceiling strip in one read. Each used to be a whole
+  // collection fetched to produce one number (otari#1425); the gateway scopes
+  // and judges them now, and withholds the ceilings a member may not see.
+  const summary = useOverviewSummary(scope)
 
   const periodSeries = period.data?.series ?? []
-  const organizationName =
-    context.data?.organization.name ?? "This organization"
-  const ceilingHealth = spendCeilingHealth(
-    ceilings.data ?? [],
-    (ceiling) =>
-      ceiling.name ??
-      // No workspace roster is loaded here, so a workspace ceiling reads as
-      // "A workspace", which is what the Spend page shows for an id it cannot
-      // resolve either.
-      scopeLabel(ceiling, { organizationName, workspaces: [] }),
-  )
+  const ceilingHealth = allocationStrip(summary.data?.ceilings, {
+    none: "No spend ceilings configured",
+    noneCapped: "No ceiling caps spend",
+  })
 
   // Why the cell has no percentage to show, once the read has landed. The two
   // are told apart because they ask for different things: nothing is capped
   // yet, or what is capped is capped on tokens or requests rather than dollars.
   const noCeilingReason =
-    (ceilings.data?.length ?? 0) === 0
+    (summary.data?.ceilings?.total_count ?? 0) === 0
       ? "no spend ceilings set"
       : "no ceiling caps spend"
 
-  const activeKeys = (keys.data ?? []).filter(
-    (apiKey) => apiKey.is_active,
-  ).length
-  const activeMembers = (members.data ?? []).filter(
-    (member) => member.status === "active",
-  ).length
+  const activeKeys = summary.data?.active_keys ?? 0
+  const activeMembers = summary.data?.active_members ?? 0
 
   // Recent activity is excluded for the operator page's reason: it renders its
   // own inline banner, so including it here would double-report. The previous
@@ -432,34 +415,25 @@ function OrganizationOverview() {
   // would otherwise just silently strip them. The catalog is excluded too: it
   // decides whether an optional offer appears, not whether this page is right.
   const loadError =
-    today.error ??
-    period.error ??
-    previous.error ??
-    ceilings.error ??
-    keys.error ??
-    members.error
+    today.error ?? period.error ?? previous.error ?? summary.error
 
   const refresh = () => {
     void today.refetch()
     void period.refetch()
     void previous.refetch()
     void recent.refetch()
-    void keys.refetch()
-    void members.refetch()
+    void summary.refetch()
     // Both guarded because `refetch` runs a disabled query: the catalog would be
     // asked with no workspace to use it, and the ceilings with a role the server
     // refuses.
     if (scope !== undefined) void models.refetch()
-    if (managesSpend) void ceilings.refetch()
   }
   const isRefreshing =
     today.isFetching ||
     period.isFetching ||
     previous.isFetching ||
     recent.isFetching ||
-    keys.isFetching ||
-    members.isFetching ||
-    ceilings.isFetching ||
+    summary.isFetching ||
     models.isFetching
 
   return (
@@ -493,12 +467,12 @@ function OrganizationOverview() {
             // read that as "loaded, and zero" is the false zero
             // otari-ai#1935 and #1961 were both about.
             value={
-              ceilings.data && ceilingHealth.worst
+              summary.data?.ceilings && ceilingHealth.worst
                 ? formatPct(ceilingHealth.worst.pct)
                 : "—"
             }
             severity={
-              ceilings.data &&
+              summary.data?.ceilings &&
               ceilingHealth.worst &&
               ceilingHealth.status !== "neutral"
                 ? {
@@ -508,9 +482,9 @@ function OrganizationOverview() {
                 : undefined
             }
             subline={
-              ceilings.data && ceilingHealth.worst
+              summary.data?.ceilings && ceilingHealth.worst
                 ? undefined
-                : ceilings.data
+                : summary.data?.ceilings
                   ? noCeilingReason
                   : "no data"
             }
@@ -518,7 +492,7 @@ function OrganizationOverview() {
             // component the Spend page's own rows use, so the two cannot say
             // different things about one ceiling.
             graphic={
-              ceilings.data && ceilingHealth.worst ? (
+              summary.data?.ceilings && ceilingHealth.worst ? (
                 <SpendMeter
                   spent={ceilingHealth.worst.spent}
                   allocated={ceilingHealth.worst.allocated}
@@ -534,8 +508,8 @@ function OrganizationOverview() {
 
       <ActivitySplit
         recent={recent}
-        activeKeys={keys.data ? activeKeys : null}
-        activeMembers={members.data ? activeMembers : null}
+        activeKeys={summary.data ? activeKeys : null}
+        activeMembers={summary.data ? activeMembers : null}
         links={railLinks(managesSpend)}
       />
     </div>
@@ -603,16 +577,11 @@ export function OverviewPage({
   const usage = useUsageOverview()
   const { today, period, previous, recent } = usage
   const health = useProviderHealth()
-  const budgets = useBudgets()
-  // Same scope as the API keys page this tile links to, so the count and the
-  // table behind it cannot disagree.
-  const keys = useKeys(usage.scope)
-  const users = useUsers()
-  // The rail this feeds is headed "This workspace", so it counts the selected
-  // workspace's roster and not the organization's: an organization member need
-  // not be a member of every workspace, so the deployment-wide count would
-  // overcount the rail and stay put when the switcher moves.
-  const members = useWorkspaceMembers(usage.scope ?? null)
+  // The two rail counts and the budget strip in one read (otari#1425). The
+  // counts are scoped the way the pages they link to are scoped, so the tile
+  // and the table behind it cannot disagree: keys by the selected workspace,
+  // members by that workspace's roster rather than the organization's.
+  const summary = useOverviewSummary(usage.scope)
 
   const periodSeries = period.data?.series ?? []
 
@@ -620,15 +589,14 @@ export function OverviewPage({
   // pure, so it is derived here again rather than threaded out of the cells.
   const err = errorRateHealth(period.data?.totals)
 
-  const budget = budgetHealth(budgets.data ?? [])
+  const budget = allocationStrip(summary.data?.budgets, {
+    none: "No budgets configured",
+    noneCapped: "No capped budgets",
+  })
   const providerHealth = providerHealthStatus(health.data)
 
-  const activeKeys = (keys.data ?? []).filter(
-    (apiKey) => apiKey.is_active,
-  ).length
-  const activeMembers = (members.data ?? []).filter(
-    (member) => member.status === "active",
-  ).length
+  const activeKeys = summary.data?.active_keys ?? 0
+  const activeMembers = summary.data?.active_members ?? 0
 
   // The getting-started state is an onboarding empty state: the gateway has no
   // providers AND no recorded usage. Imported OTLP usage lands in the usage
@@ -652,10 +620,7 @@ export function OverviewPage({
     period.error ??
     previous.error ??
     health.error ??
-    budgets.error ??
-    keys.error ??
-    users.error ??
-    members.error
+    summary.error
 
   // Manual refresh for the whole page; the windows already advance across
   // midnight on focus, but the numbers within a day are only as fresh as the
@@ -666,10 +631,7 @@ export function OverviewPage({
     void period.refetch()
     void previous.refetch()
     void health.refetch()
-    void budgets.refetch()
-    void keys.refetch()
-    void users.refetch()
-    void members.refetch()
+    void summary.refetch()
     void recent.refetch()
   }
   const isRefreshing =
@@ -678,10 +640,7 @@ export function OverviewPage({
     period.isFetching ||
     previous.isFetching ||
     health.isFetching ||
-    budgets.isFetching ||
-    keys.isFetching ||
-    users.isFetching ||
-    members.isFetching ||
+    summary.isFetching ||
     recent.isFetching
 
   return (
@@ -712,8 +671,8 @@ export function OverviewPage({
         errRate={err.rate}
         // The strip evaluates health, budgets, and error rate only after all
         // three load successfully, avoiding transient or false alerts.
-        isReady={health.isSuccess && budgets.isSuccess && period.isSuccess}
-        hasFailed={health.isError || budgets.isError || period.isError}
+        isReady={health.isSuccess && summary.isSuccess && period.isSuccess}
+        hasFailed={health.isError || summary.isError || period.isError}
       />
 
       <KpiStrip isEmpty={isEmpty}>
@@ -726,10 +685,12 @@ export function OverviewPage({
         <KpiCell
           label="Budget health"
           value={
-            budgets.data && budget.worst ? formatPct(budget.worst.pct) : "—"
+            summary.data?.budgets && budget.worst
+              ? formatPct(budget.worst.pct)
+              : "—"
           }
           severity={
-            budgets.data && budget.worst && budget.status !== "neutral"
+            summary.data?.budgets && budget.worst && budget.status !== "neutral"
               ? { status: budget.status, word: BUDGET_WORDS[budget.status] }
               : undefined
           }
@@ -737,11 +698,11 @@ export function OverviewPage({
           // no budgets showed a bare em dash on the populated page and only
           // explained itself in the empty state.
           subline={
-            budgets.data && budget.worst
+            summary.data?.budgets && budget.worst
               ? undefined
               : isEmpty
                 ? "NO BUDGETS SET"
-                : budgets.data
+                : summary.data?.budgets
                   ? "no budgets set"
                   : "no data"
           }
@@ -751,7 +712,7 @@ export function OverviewPage({
           // component as the Budgets table's cell, so the two cannot say
           // different things about the same budget.
           graphic={
-            !isEmpty && budgets.data && budget.worst ? (
+            !isEmpty && summary.data?.budgets && budget.worst ? (
               <SpendMeter
                 spent={budget.worst.spent}
                 allocated={budget.worst.allocated}
@@ -771,8 +732,8 @@ export function OverviewPage({
 
       <ActivitySplit
         recent={recent}
-        activeKeys={keys.data ? activeKeys : null}
-        activeMembers={members.data ? activeMembers : null}
+        activeKeys={summary.data ? activeKeys : null}
+        activeMembers={summary.data ? activeMembers : null}
         // An operator reaches every one of these; the rail on the tenant page
         // drops the two the organization rail withholds from a member.
         links={RAIL_LINKS}
@@ -896,7 +857,7 @@ function AttentionStrip({
   healthy: number
   degraded: number
   total: number
-  budget: ReturnType<typeof budgetHealth>
+  budget: BudgetHealth
   errStatus: "ok" | "warn" | "alert" | "neutral"
   errRate: number | null
   isReady: boolean

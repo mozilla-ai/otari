@@ -2726,6 +2726,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Overview
+         * @description Summarize what the dashboard overview shows beside its usage chart.
+         *
+         *     The counts and the budget judgment in one answer, so the page does not read
+         *     four collections to compute them. A workspace outside the caller's
+         *     organization is treated as none given rather than refused, because the id
+         *     comes from a switcher whose contents can go stale.
+         */
+        get: operations["overview-get_overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/playground/chat/completions": {
         parameters: {
             query?: never;
@@ -5633,6 +5658,33 @@ export interface components {
             user_id?: string | null;
             /** Workspace Id */
             workspace_id?: string | null;
+        };
+        /**
+         * AllocationHealthResponse
+         * @description One set of capped rows, reduced to what a strip renders.
+         */
+        AllocationHealthResponse: {
+            /**
+             * Capped Count
+             * @description Rows with a finite cap, which are the ones that can be judged.
+             */
+            capped_count: number;
+            /**
+             * Near Count
+             * @description Rows at 80% of their allowance or more, but not past it.
+             */
+            near_count: number;
+            /**
+             * Over Count
+             * @description Rows at or past their allowance.
+             */
+            over_count: number;
+            /**
+             * Total Count
+             * @description Rows of any kind, so a caller can tell 'none configured' from 'none caps spend'.
+             */
+            total_count: number;
+            worst: components["schemas"]["WorstAllocationResponse"] | null;
         };
         /** Annotations */
         Annotations: {
@@ -9571,6 +9623,25 @@ export interface components {
          */
         OutputShape: "binary" | "multi_label" | "categorical" | "score" | "rubric" | "span";
         /**
+         * OverviewSummaryResponse
+         * @description What the dashboard overview renders beside its usage chart.
+         *
+         *     ``budgets`` and ``ceilings`` are null where the caller may not see them,
+         *     which is not the same as a strip with nothing in it: deployment budgets are
+         *     the operator's, and spend ceilings are an organization owner's or admin's.
+         */
+        OverviewSummaryResponse: {
+            /** Active Keys */
+            active_keys: number;
+            /**
+             * Active Members
+             * @description Active members of the named workspace; 0 when none is named.
+             */
+            active_members: number;
+            budgets: components["schemas"]["AllocationHealthResponse"] | null;
+            ceilings: components["schemas"]["AllocationHealthResponse"] | null;
+        };
+        /**
          * PasskeySessionResponse
          * @description A dashboard session minted by a passkey (the token travels only in the cookie).
          *
@@ -12879,6 +12950,23 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["WorkspacePublic"][];
+        };
+        /**
+         * WorstAllocationResponse
+         * @description The row furthest through its allowance.
+         */
+        WorstAllocationResponse: {
+            /** Allocated */
+            allocated: number;
+            /** Budget Id */
+            budget_id: string;
+            /**
+             * Name
+             * @description The row's own name, or null where nobody gave it one.
+             */
+            name: string | null;
+            /** Spent */
+            spent: number;
         };
     };
     responses: never;
@@ -17368,6 +17456,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "overview-get_overview": {
+        parameters: {
+            query?: {
+                /** @description Narrow the counts to one workspace of the caller's organization. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverviewSummaryResponse"];
                 };
             };
             /** @description Validation Error */

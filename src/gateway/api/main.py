@@ -42,6 +42,7 @@ from gateway.api.routes import (
     organization_usage,
     organizations,
     otlp,
+    overview,
     playground,
     pricing,
     providers,
@@ -241,6 +242,7 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig, enabled_featur
     api.include_router(org_provider_keys.workspace_router)
     api.include_router(budgets.router)
     api.include_router(scoped_budgets.router)
+    api.include_router(overview.router)
     api.include_router(aliases.router)
     api.include_router(routing.router)
     api.include_router(routing_memory.router)

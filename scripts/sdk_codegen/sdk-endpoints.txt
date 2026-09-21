@@ -141,6 +141,7 @@ POST /api/v1/auth/session                           # dashboard-only
 # Deployment bootstrap: tells the dashboard shell which deployment served it, so
 # it exists for a browser deciding what to render. An SDK already knows.
 GET /api/v1/bootstrap                               # dashboard-only
+GET /api/v1/overview                                # dashboard-only: one page's strips, not a resource
 DELETE /api/v1/auth/session                         # dashboard-only
 # Setting the dashboard sign-in password: the other half of the same browser
 # flow. An SDK authenticates with the master key or an API key and never holds

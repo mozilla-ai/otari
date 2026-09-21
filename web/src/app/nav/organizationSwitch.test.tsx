@@ -14,7 +14,6 @@ import {
   callerOrganizationMembership,
   organization,
   organizationContext,
-  organizationSpendCeiling,
   usageTotals,
 } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
@@ -60,6 +59,33 @@ function emptySummary(): UsageSummary {
  * admin of it, which is the gate `require_active_organization_management_access`
  * draws on the server.
  */
+/** The overview summary an organization admin gets, carrying one ceiling. */
+function ceilingSummary({
+  spent,
+  allocated,
+}: {
+  spent: number
+  allocated: number
+}) {
+  return {
+    active_keys: 0,
+    active_members: 0,
+    budgets: null,
+    ceilings: {
+      over_count: spent >= allocated ? 1 : 0,
+      near_count: spent / allocated >= 0.8 && spent < allocated ? 1 : 0,
+      capped_count: 1,
+      total_count: 1,
+      worst: {
+        budget_id: "cccccccc-1111-2222-3333-444444444444",
+        name: "Ceiling",
+        spent,
+        allocated,
+      },
+    },
+  }
+}
+
 function mockApi({
   roleThere,
   holdCeilingsHere,
@@ -126,34 +152,28 @@ function mockApi({
       ]
       return { data: rows, count: rows.length } as never
     }
-    if (url.startsWith("/organizations/me/spend-ceilings")) {
+    if (url.startsWith("/overview")) {
       if (active === "there") {
         if (roleThere !== "admin") {
-          throw new apiClient.ApiError(
-            403,
-            "Not enough privileges to perform this action",
-          )
+          // The strip is withheld rather than refused: the summary answers 200
+          // for a member and simply carries no ceilings.
+          return {
+            active_keys: 0,
+            active_members: 0,
+            budgets: null,
+            ceilings: null,
+          } as never
         }
         // A different figure from the one here, so the cell says which
         // organization answered it: 10 of 100.
-        return {
-          data: [
-            organizationSpendCeiling({ max_budget: 100, current_spend: 10 }),
-          ],
-          count: 1,
-        } as never
+        return ceilingSummary({ spent: 10, allocated: 100 }) as never
       }
       if (holdCeilingsHere) {
         await holdCeilingsHere.held
         holdCeilingsHere.answered()
       }
       // 200 of 250, which the budget-health cell reads as 80.0%.
-      return {
-        data: [
-          organizationSpendCeiling({ max_budget: 250, current_spend: 200 }),
-        ],
-        count: 1,
-      } as never
+      return ceilingSummary({ spent: 200, allocated: 250 }) as never
     }
     if (url.startsWith("/organizations/me/usage/summary")) {
       return emptySummary() as never
@@ -227,26 +247,31 @@ describe("switching organization", () => {
     window.localStorage.clear()
   })
 
-  it("does not ask for a read the organization it moved to refuses", async () => {
+  it("keeps a page working where the new role is lower", async () => {
     const requests = mockApi({ roleThere: "member" })
     renderShellOverPage()
     await screen.findByText(/At-a-glance spend/)
 
     await switchOrganization()
 
-    // The page's own reads are made again, and the owners-and-admins-only one
-    // is not: the role that opened it is the one in the organization just left.
-    // Asking anyway is what left "Not enough privileges to perform this action"
-    // on a page that was working, until the operator reloaded it.
+    // The page's own reads are made again, the summary among them. It is asked
+    // for whatever the role, because it answers 200 and leaves the ceilings out
+    // for a caller who may not see them; the client used to have to withhold a
+    // ceilings read instead, and asking anyway left "Not enough privileges to
+    // perform this action" on a page that was working.
     await waitFor(() => {
       expect(
         afterSwitch(requests).some((r) => r.includes("usage/summary")),
       ).toBe(true)
     })
-    expect(
-      afterSwitch(requests).some((r) => r.includes("spend-ceilings")),
-    ).toBe(false)
+    await waitFor(() => {
+      expect(afterSwitch(requests).some((r) => r.includes("/overview"))).toBe(
+        true,
+      )
+    })
     expect(screen.queryByText(/Not enough privileges/)).toBeNull()
+    // And no budget cell, because the summary withheld the strip.
+    expect(screen.queryByText("10.0%")).toBeNull()
   })
 
   it("takes the new role from the switch's own answer", async () => {
@@ -303,9 +328,9 @@ describe("switching organization", () => {
     // it belongs to the organization just left, not for as long as the caller
     // is switching.
     await waitFor(() => {
-      expect(
-        afterSwitch(requests).some((r) => r.includes("spend-ceilings")),
-      ).toBe(true)
+      expect(afterSwitch(requests).some((r) => r.includes("/overview"))).toBe(
+        true,
+      )
     })
     expect(screen.queryByText(/Not enough privileges/)).toBeNull()
   })

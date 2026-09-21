@@ -17,6 +17,7 @@ export const MODELS = "models"
 // own key so the two reads can be cached apart, and every pricing mutation
 // invalidates both: a rate change moves a row in each.
 export const CATALOG = "catalog"
+export const OVERVIEW = "overview"
 export const PRICING = "pricing"
 // The three operator reads beside the price list: an update the scheduled
 // refresh left waiting, the accepted-snapshot history, and each stored rate
