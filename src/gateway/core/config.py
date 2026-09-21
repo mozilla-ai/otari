@@ -23,6 +23,7 @@ from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
+from gateway.types.code_execution import CodeExecutor
 
 API_KEY_HEADER = "Otari-Key"
 # Aliases accepted for a provider instance's ``provider_type`` that map onto a
@@ -118,6 +119,7 @@ ENV_BRIDGED_FIELDS = (
     "sandbox_purpose_hint",
     "sandbox_session_image",
     "sandbox_allowed_session_images",
+    "code_execution_executor",
     "web_search_url",
     "web_search_purpose_hint",
     "web_search_engines",
@@ -878,7 +880,10 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
     )
     files_backend: Annotated[str, Shown(SettingsGroup.FILES)] = Field(
         default="local",
-        description="Blob backend for uploaded file bytes: 'local' (filesystem) or 's3'. Future: 'gcs'.",
+        description=(
+            "Blob backend for uploaded file bytes: 'local' (a directory), 's3' (boto3), or 'fsspec' "
+            "(any filesystem fsspec has an implementation for, named by files_url)."
+        ),
     )
     files_local_dir: Annotated[str, Shown(SettingsGroup.FILES)] = Field(
         default="./otari-files",
@@ -903,18 +908,61 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
             "'us-east-1' when unset."
         ),
     )
+    files_url: Annotated[str | None, Shown(SettingsGroup.FILES)] = Field(
+        default=None,
+        description=(
+            "Root URL for the 'fsspec' files backend, e.g. 'gcs://bucket/otari-files', "
+            "'abfs://container/prefix', 's3://bucket/prefix', 'sftp://host/path' or "
+            "'file:///var/lib/otari/files'. Needs the otari[fsspec] extra and the protocol's own "
+            "implementation package (gcsfs, adlfs, s3fs, paramiko, ...). Required when files_backend "
+            "is 'fsspec'."
+        ),
+    )
+    files_storage_options: Annotated[dict[str, Any], SECRET] = Field(
+        default_factory=dict,
+        description=(
+            "Keyword arguments for the fsspec implementation behind files_url: credentials, "
+            "endpoint URLs, regions, project ids. Passed through untouched and never logged; "
+            "most implementations also read their standard environment variables, so this "
+            "can usually stay empty."
+        ),
+    )
     files_max_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
         default=512 * 1024 * 1024,
         ge=1,
         description="Maximum size in bytes for a single uploaded file.",
+    )
+    files_output_max_files: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=20,
+        ge=0,
+        description=(
+            "Most files one code-execution call may have stored from its sandbox workspace. "
+            "Files past the count are named in the tool result but not stored."
+        ),
+    )
+    files_output_max_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=64 * 1024 * 1024,
+        ge=1,
+        description=(
+            "Total bytes one code-execution call may have stored from its sandbox workspace, across "
+            "all the files it produced. A file that would take the call past it is named but not stored."
+        ),
     )
     files_retention_hours: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(
         default=None,
         ge=1,
         description=(
             "Stop serving files older than this many hours: expired files become inaccessible "
-            "(404) and can no longer be referenced. Their stored bytes are not yet reclaimed "
-            "automatically, so periodic cleanup is an operator task. None keeps files indefinitely."
+            "(404) and can no longer be referenced, and the file sweep then reclaims their bytes "
+            "and rows. None keeps files indefinitely."
+        ),
+    )
+    files_sweep_interval_sec: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=3600,
+        ge=0,
+        description=(
+            "How often the background file sweep reclaims the bytes and rows of expired and "
+            "deleted files. 0 disables the sweep, leaving cleanup to the operator."
         ),
     )
     file_understanding_enabled: Annotated[bool, Shown(SettingsGroup.VISION)] = Field(
@@ -1013,6 +1061,19 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
             "not editable from the dashboard: it is the operator's supply-chain allow-list, and "
             "sandbox_session_image is always pinnable whether or not it appears here. When unset, a "
             "workspace may not pin an image at all."
+        ),
+    )
+    code_execution_executor: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
+        default=None,
+        description=(
+            "Who runs the code a provider-native code-execution declaration asks for "
+            "(Anthropic's code_execution_<date>, OpenAI's code_interpreter, the bare code_execution). "
+            "'auto' (the default when unset) forwards it to the provider when that provider runs the "
+            "tool natively for the model, and runs it on this gateway's sandbox otherwise, so a request "
+            "written for a frontier model keeps working when the model is swapped. 'otari' always runs it "
+            "on the sandbox; 'provider' always forwards it. A workspace policy may pin a value and the "
+            "X-Otari-Code-Execution header may choose one per request where the workspace has not. "
+            "The explicit otari_code_execution type is always run by the gateway."
         ),
     )
     web_fetch_enabled: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
@@ -1761,6 +1822,15 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
             and not entry.get("api_base")
         ]
 
+    def effective_code_executor(self) -> CodeExecutor:
+        """The deployment's answer to who runs a provider-named code-execution tool.
+
+        ``auto`` when nothing is set, so an upgrade changes nothing for a request the
+        provider was already serving and only claims the ones it could not.
+        """
+        configured = (self.code_execution_executor or "").strip() or otari_env("CODE_EXECUTION_EXECUTOR")
+        return CodeExecutor.parse(configured) or CodeExecutor.AUTO
+
     def sandbox_configured(self) -> bool:
         """Whether this deployment can run ``otari_code_execution`` at all.
 
@@ -2034,6 +2104,17 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
             msg = f"mail_transport must be one of {sorted(MAIL_TRANSPORT_SETTINGS)}, got '{value}'"
             raise ValueError(msg)
         return normalized
+
+    @field_validator("code_execution_executor")
+    @classmethod
+    def _validate_code_execution_executor(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        executor = CodeExecutor.parse(value)
+        if executor is None:
+            msg = f"code_execution_executor must be one of {[e.value for e in CodeExecutor]}, got '{value}'"
+            raise ValueError(msg)
+        return executor.value
 
     @field_validator("vision_strategy")
     @classmethod
