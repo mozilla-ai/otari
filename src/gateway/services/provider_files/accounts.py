@@ -117,6 +117,8 @@ class FileAccountResolver:
         if key is None:
             return None
         generation = await self.repo.latest_account("organization_key", str(key.id), scope.organization_id)
+        if generation is not None:
+            await finalize_retirement(self.repo, generation, datetime.now(UTC))
         if generation is None or generation.status == "retired":
             number = generation.generation + 1 if generation is not None else 1
             generation = ProviderAccountGeneration(
@@ -194,8 +196,19 @@ async def retire_account_generation(
     now = datetime.now(UTC)
     row.status = "retiring"
     await repo.revoke(now, "credential_retirement", organization_id=row.organization_id, generation_id=row.id)
-    if release_secret and await repo.account_busy(row.id, now):
-        return True
-    if release_secret:
-        row.status, row.retired_at = "retired", now
-    return False
+    if not release_secret:
+        return False
+    return not await finalize_retirement(repo, row, now)
+
+
+async def finalize_retirement(repo: ProviderFileRepository, row: ProviderAccountGeneration, now: datetime) -> bool:
+    """Retire a draining generation once nothing on it is live; return whether it did.
+
+    A retirement that was refused because files were still live is finished
+    here, by cleanup completion and by the next account selection, so the
+    credential does not stay unusable until an admin repeats the refused edit.
+    """
+    if row.status != "retiring" or await repo.account_busy(row.id, now):
+        return False
+    row.status, row.retired_at = "retired", now
+    return True

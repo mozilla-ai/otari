@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 from pydantic import SecretStr
 
-from gateway.services.provider_files.accounts import FileAccountResolver
+from gateway.services.provider_files.accounts import FileAccountResolver, finalize_retirement
 from gateway.services.provider_files.contracts import CleanupItem, CleanupLease, FileAccount, FilesError, LeaseResult
 from gateway.services.provider_files.lifecycle import ProviderFileService
 
@@ -87,3 +87,4 @@ class ProviderFileCleanup:
                     self.service.apply_cleanup(row, result.results.get(row.id, False))
                 row.lease_id = None
             account.lease_id = account.lease_token_hash = account.lease_gateway_id = account.lease_deadline = None
+            await finalize_retirement(self.repo, account, datetime.now(UTC))
