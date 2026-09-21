@@ -62,15 +62,15 @@ since. A module "runs queries" when it imports a query builder (`select`,
 
 | Measure | Count |
 | --- | --- |
-| Service modules | 111, of which 66 sit flat at the top of `services/` |
+| Service modules | 112, of which 66 sit flat at the top of `services/` |
 | Service modules that run queries | 38, plus 2 that only call `session.get` |
 | Route modules | 73 |
 | Route modules that run queries | 17, plus 1 that only calls `session.get` |
 | Route modules that define Pydantic models inline | 40 |
 | Model modules | 19 |
-| Repository modules | 10: a base, `users_repository.py`, 7 under `tenancy/`, and `overview/overview_repository.py` |
-| Service packages per domain | 3: `services/tools/`, which holds the built-in tool registry and no service yet, `services/overview/` and `services/budgets/`. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
-| Repository packages per domain | 1: `repositories/overview/`. `repositories/tenancy/` is an older subpackage |
+| Repository modules | 11: a base, `users_repository.py`, 7 under `tenancy/`, `overview/overview_repository.py` and `api_keys/api_key_repository.py` |
+| Service packages per domain | 4: `services/tools/`, which holds the built-in tool registry and no service yet, `services/overview/`, `services/budgets/` and `services/api_keys/`. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
+| Repository packages per domain | 2: `repositories/overview/` and `repositories/api_keys/`. `repositories/tenancy/` is an older subpackage |
 | Modules in `schemas/` | Two domain modules so far, `budgets.py` and `overview.py` |
 | Modules in `exceptions/` | The shared error bases in `_base.py`, which the package root re-exports, and one domain module so far, `budget_exceptions.py`. `services/tenancy/errors.py` holds the rest of the tenancy errors in 1,145 lines |
 
@@ -128,7 +128,8 @@ provisioning, the setup guide, and the gateway's billing users.
 The deployment's and the members' API keys, and which models a key may reach.
 
 - Routes: `keys.py`, `organization_keys.py`
-- Services: `model_access.py`, `bootstrap_service.py`
+- Services: `api_keys/`, `model_access.py`, `bootstrap_service.py`
+- Repositories: `api_keys/`
 - Models: `api_keys.py`
 
 ### budgets
