@@ -1,18 +1,7 @@
-"""Every service module imports on its own, in a fresh interpreter.
+"""Every listed service module imports first in a fresh interpreter.
 
-Import cycles between services are invisible in normal use, because the app
-imports its packages in an order that happens to resolve them: `api/main.py`
-pulls in `services.tenancy` before anything reaches `services.workspace_scope`,
-so the half-initialized module is already complete by the time it is read. The
-first thing to import one of them *first* is what breaks, and that is usually a
-new script, a migration helper, or a test, which is a poor place to discover it.
-
-Each module is therefore imported as the very first thing a subprocess does,
-which is the only way to see the cycle. `workspace_scope` and
-`scoped_budget_service` are here because both did fail this way:
-`workspace_scope` imports `tenancy.provisioning_service`, which runs
-`tenancy/__init__`, which imports `workspace_service`, which imported back into
-`workspace_scope` at module scope.
+The app imports its packages in an order that hides an import cycle between services.
+A subprocess that imports one module first is the only way to see the cycle.
 """
 
 import subprocess
@@ -25,20 +14,18 @@ import pytest
 # for a specific shape, not an inventory to keep in step with the directory.
 _MODULES = [
     "gateway.services.workspace_scope",
-    "gateway.services.scoped_budget_service",
-    "gateway.services.budget_service",
+    "gateway.services.budgets",
+    "gateway.services.budgets._scoped_enforcement",
+    "gateway.services.budgets._reservations",
     "gateway.services.tenancy",
     "gateway.services.tenancy.workspace_service",
     "gateway.services.tenancy.organization_service",
     "gateway.services.tenancy.provisioning_service",
-    # workspace_budget_default_service reaches organization_service and
-    # authorization, and nothing in organizations reaches it. authorization sits
-    # between workspace_service and organization_service. Pinned here for the
-    # same reason as the two above them.
-    "gateway.services.tenancy.workspace_budget_default_service",
+    # _member_policies reaches organization_service and authorization, and no organizations module reaches it.
+    "gateway.services.budgets._member_policies",
     "gateway.services.tenancy.authorization",
-    "gateway.services.tenancy.organization_budget_service",
-    "gateway.services.budget_retiming",
+    "gateway.services.budgets._organization_surface",
+    "gateway.services.budgets._retiming",
     # workspace_mcp_server_service reaches authorization and organization_service
     # the same way, and is additionally imported from the request pipeline, which
     # is a second entry point into the graph.
@@ -65,13 +52,7 @@ def test_module_imports_first(module: str) -> None:
 
 # Budgets depends on organizations, never the reverse, so an organizations
 # module must not load a budget module.
-_BUDGET_MODULE_PREFIXES = (
-    "gateway.services.budget",
-    "gateway.services.scoped_budget_service",
-    "gateway.services.tenancy.organization_budget_service",
-    "gateway.services.tenancy.workspace_budget_default_service",
-    "gateway.services.budgets",
-)
+_BUDGETS_PACKAGE = "gateway.services.budgets"
 
 
 @pytest.mark.parametrize(
@@ -86,7 +67,7 @@ def test_organizations_modules_load_no_budget_module(module: str) -> None:
     code = (
         "import sys, importlib\n"
         f"importlib.import_module({module!r})\n"
-        f"loaded = sorted(m for m in sys.modules if m.startswith({_BUDGET_MODULE_PREFIXES!r}))\n"
+        f"loaded = sorted(m for m in sys.modules if m.startswith({_BUDGETS_PACKAGE!r}))\n"
         "print(','.join(loaded))\n"
     )
 
