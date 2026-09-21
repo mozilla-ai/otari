@@ -1,35 +1,12 @@
-"""Organizations: active-organization resolution, CRUD, and membership.
+"""This module resolves a caller's active organization and manages organizations and their members.
 
-Rehomed from the platform's ``OrganizationService`` plus the membership half of
-``OrganizationMembershipService``, converted to async. The authorization rules,
-the membership constraints, and the response shapes are the platform's; what is
-gone is the depth that has no home in the OSS base yet: mixpanel tracking,
-managed provider-key and default-gateway provisioning, email-domain auto-join,
-teams, and the org's budget and pricing surfaces. Those arrive with their own
-slices, tracked under mozilla-ai/otari-ai#1452, and this service is where they
-attach. Emailed invitations shipped here in mozilla-ai/otari#641 (see
-``invite_active_organization_member_for_user``/``accept_invitation`` below);
-``create_active_organization_member_for_user`` is the older, still-supported
-immediate path this replaced no part of.
+A method that acts for a caller never trusts an organization that the request names.
+It acts in the caller's active organization, or in one it reaches through the caller's own membership.
+An ID that names another tenant's row answers not-found, so a caller cannot probe which IDs exist.
 
-One rule runs through every method: a caller only ever acts inside the
-organization their identity is currently pointed at, and every method but one
-resolves that organization from the caller alone rather than from the request.
-The exception is ``switch_active_organization_for_user``, which is the method
-that *moves* the pointer and so has to be told where to; it answers not-found
-for an id the caller holds no active membership in, so naming another tenant's
-organization tells the caller nothing about it.
-
-A standalone deployment still *boots* one organization, provisioned at first
-boot, and that is the shape almost every deployment keeps. But a second one is
-reachable (accept an invitation into an organization elsewhere on the same
-deployment and you hold two memberships), so creating one, listing the ones you
-belong to, and switching between them are part of this surface rather than an
-overlay's: the tables are here, the invariants that decide who becomes owner
-and what happens to ``active_organization_id`` are here, and an overlay that
-contributes no tables could only fork them (mozilla-ai/otari#715). Deleting an
-organization is still absent, which is a separate question: the rows every
-historical attribution resolves through hang off it.
+A deployment can hold more than one organization.
+Creating, listing and switching organizations therefore belong here rather than in an overlay.
+The service offers no way to delete an organization, because historical attribution resolves through its rows.
 """
 
 import hashlib
