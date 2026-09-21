@@ -3414,6 +3414,16 @@
         "title": "CheckVerdictRequest",
         "type": "object"
       },
+      "CodeExecutor": {
+        "description": "Who runs the code a request's code-execution tool asks for.\n\nThe one vocabulary shared by the deployment setting, the workspace policy,\nthe per-request header and the platform's resolve payload, so a value read\nfrom any of them means the same thing at admission.",
+        "enum": [
+          "auto",
+          "otari",
+          "provider"
+        ],
+        "title": "CodeExecutor",
+        "type": "string"
+      },
       "ConfigField": {
         "description": "One effective config value surfaced to the dashboard's config viewer.",
         "properties": {
@@ -6690,7 +6700,7 @@
         "description": "One tool the gateway can run itself.",
         "properties": {
           "accepted_types": {
-            "description": "Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled.",
+            "description": "Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled, and for code execution the provider-named keywords unless the deployment's executor is `provider`.",
             "items": {
               "type": "string"
             },
@@ -13659,6 +13669,20 @@
       "ToolSettingField": {
         "description": "One editable tool/guardrail field surfaced to the dashboard.",
         "properties": {
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
           "description": {
             "anyOf": [
               {
@@ -14514,6 +14538,17 @@
           "web_search_url": "http://searxng:8080"
         },
         "properties": {
+          "code_execution_executor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code Execution Executor"
+          },
           "guardrails_url": {
             "anyOf": [
               {
@@ -16657,6 +16692,16 @@
             ],
             "title": "Exec Timeout S"
           },
+          "executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "image": {
             "anyOf": [
               {
@@ -16726,6 +16771,7 @@
           "exec_timeout_s",
           "image",
           "tools",
+          "executor",
           "created_at",
           "updated_at"
         ],
@@ -16766,6 +16812,17 @@
             ],
             "description": "Ceiling on one execution's runtime in seconds; only ever lowers the effective limit, so at most 60",
             "title": "Exec Timeout S"
+          },
+          "executor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeExecutor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who runs a provider-native code-execution declaration for this workspace: 'auto' (the provider when it runs the tool natively for the model, else this gateway's sandbox), 'otari' or 'provider'. Pins over the deployment default and over the request's X-Otari-Code-Execution header; null leaves both in charge"
           },
           "image": {
             "anyOf": [
@@ -20600,7 +20657,7 @@
     },
     "/api/v1/files": {
       "get": {
-        "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.",
+        "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.\n\nPages are cursor-based: ``after`` (OpenAI) or ``after_id`` (Anthropic) names\nthe last file of the previous page, and ``has_more`` says whether to ask\nagain. A cursor that has since been deleted or has expired is still a\nposition; one the caller never owned is a 404.",
         "operationId": "files-list_files",
         "parameters": [
           {
@@ -20651,6 +20708,64 @@
               ],
               "title": "Workspace Id"
             }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Order",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -20691,7 +20806,7 @@
         ]
       },
       "post": {
-        "description": "OpenAI-compatible file upload endpoint.",
+        "description": "Upload a file. Answers in the OpenAI or Anthropic file shape, following the caller's headers.",
         "operationId": "files-create_file",
         "requestBody": {
           "content": {
