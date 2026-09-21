@@ -23,6 +23,7 @@ const meta = {
   args: {
     value: [],
     onChange: () => {},
+    onQueryChange: () => {},
     users: USERS,
     label: "Applies to",
   },

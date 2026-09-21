@@ -1,11 +1,10 @@
-import { type ReactNode, useState } from "react"
+import type { ReactNode } from "react"
 
 import type { User } from "@/client"
 import {
   ComboBoxField,
   type ComboBoxOption,
 } from "@/design-system/forms/ComboBoxField"
-import { useMemberAttributionLabels } from "@/features/organization/attribution"
 
 import { userOptionText } from "./userOptions"
 
@@ -22,6 +21,7 @@ export function UserComboBox({
   value,
   onChange,
   users,
+  onQueryChange,
   description,
   label = "Owner",
   placeholder = "Pick a user, or type a new id…",
@@ -30,6 +30,13 @@ export function UserComboBox({
   value: string
   onChange: (userId: string) => void
   users: User[]
+  /**
+   * Where to report what is being typed. The field owns the input's text; the
+   * page owns the term, because the page is what fetches. A field that filtered
+   * `users` itself would offer the matches out of whatever page had been
+   * fetched (otari#1380).
+   */
+  onQueryChange: (query: string) => void
   description?: ReactNode
   label?: ReactNode
   placeholder?: string
@@ -39,19 +46,13 @@ export function UserComboBox({
   // will 404.
   unknownHint?: ReactNode
 }) {
-  // Read here rather than taken as a prop, so no call site can forget it and
-  // leave a person reading as the UUID their identity was minted under. The
-  // read is gated on the `organizations` surface and shares its query key with
-  // every other reader of the roster.
-  const memberLabels = useMemberAttributionLabels()
-
   // The id stays the value submitted whatever the row reads as, and rides along
   // as the hint so it is still what a search can match.
   const options: ComboBoxOption[] = users
     .filter((user) => !user.user_id.startsWith("apikey-"))
     .map((user) => ({
       value: user.user_id,
-      ...userOptionText(user, memberLabels),
+      ...userOptionText(user),
     }))
     .sort((a, b) => {
       // A roster-named row is the one carrying a hint, and it sorts to the
@@ -61,19 +62,9 @@ export function UserComboBox({
       return a.label.localeCompare(b.label)
     })
 
-  // What is being searched for, reported by the field because it owns the
-  // input's text. Not the value: an id an operator types is a value, and a name
-  // they type is only ever a search.
-  const [query, setQuery] = useState("")
-  const q = query.trim().toLowerCase()
-  const visible = options
-    .filter(
-      (option) =>
-        !q ||
-        option.value.toLowerCase().includes(q) ||
-        option.label.toLowerCase().includes(q),
-    )
-    .slice(0, 50)
+  // Rendered as handed over: the narrowing is the server's, and filtering here
+  // again would hide a match that arrived while the field's text moved on.
+  const visible = options.slice(0, 50)
 
   const ownerId = value.trim()
   const isKnownOwner = options.some((option) => option.value === ownerId)
@@ -93,7 +84,7 @@ export function UserComboBox({
       // Trimmed, because a pasted id often carries a space and every caller
       // submits this as an owner id.
       onChange={(next) => onChange(next.trim())}
-      onQueryChange={setQuery}
+      onQueryChange={onQueryChange}
       options={visible}
       description={creatingHint}
       placeholder={placeholder}

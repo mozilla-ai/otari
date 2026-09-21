@@ -4,45 +4,18 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { DeploymentBootstrap, OrganizationMember, User } from "@/client"
+import type { DeploymentBootstrap, User } from "@/client"
 import { UserComboBox } from "@/features/users/UserComboBox"
-import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap, organizationMember } from "@/tests/fixtures"
+import { bootstrap } from "@/tests/fixtures"
 
 // Only the fields the picker reads; the rest of User is irrelevant here.
-function user(user_id: string, alias: string | null = null): User {
-  return { user_id, alias } as User
-}
-
-// A roster row for the owner id it bills through, which is the join the picker
-// reads to put a name on that id.
-function member(
-  attributionUserId: string,
-  fullName: string,
-): OrganizationMember {
-  return organizationMember({
-    organization_member_id: attributionUserId,
-    attribution_user_id: attributionUserId,
-    full_name: fullName,
-  })
-}
-
-// Mocked at the transport rather than at the hook, so the component's own query,
-// its key and its surface gate all run.
-function mockRoster(members: OrganizationMember[], status = 200) {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-    const isRoster = String(input).includes(
-      `${API_ROOT}/organizations/me/members`,
-    )
-    const body = isRoster
-      ? { data: members, count: members.length }
-      : { detail: "not mocked" }
-    return new Response(JSON.stringify(body), {
-      status: isRoster ? status : 501,
-      headers: { "Content-Type": "application/json" },
-    })
-  })
+function user(
+  user_id: string,
+  alias: string | null = null,
+  display_name: string | null = null,
+): User {
+  return { user_id, alias, display_name } as User
 }
 
 function renderBox(
@@ -67,8 +40,14 @@ describe("UserComboBox", () => {
   })
 
   it("caps its width so the field and dropdown trigger stay within reach", () => {
-    mockRoster([])
-    renderBox(<UserComboBox value="" onChange={() => {}} users={[]} />)
+    renderBox(
+      <UserComboBox
+        value=""
+        onChange={() => {}}
+        onQueryChange={() => {}}
+        users={[]}
+      />,
+    )
 
     // The field is bounded rather than stretching across the whole form (#328).
     const field = screen.getByRole("combobox").closest(".max-w-md")
@@ -76,8 +55,14 @@ describe("UserComboBox", () => {
   })
 
   it("says why the popover is empty rather than opening a silent box", async () => {
-    mockRoster([])
-    renderBox(<UserComboBox value="" onChange={() => {}} users={[]} />)
+    renderBox(
+      <UserComboBox
+        value=""
+        onChange={() => {}}
+        onQueryChange={() => {}}
+        users={[]}
+      />,
+    )
 
     await userEvent.click(screen.getByRole("combobox"))
 
@@ -89,12 +74,15 @@ describe("UserComboBox", () => {
   })
 
   it("names a member by the roster, with their owner id as the second line", async () => {
-    mockRoster([member(UUID, "Alice Example")])
     renderBox(
       <UserComboBox
         value=""
         onChange={() => {}}
-        users={[user(UUID, "alice@example.com"), user("ci-bot")]}
+        onQueryChange={() => {}}
+        users={[
+          user(UUID, "alice@example.com", "Alice Example"),
+          user("ci-bot"),
+        ]}
       />,
     )
 
@@ -113,63 +101,76 @@ describe("UserComboBox", () => {
     expect(screen.getByRole("option", { name: "ci-bot" })).toBeInTheDocument()
   })
 
-  it("finds a member by the id they are billed under, not only by name", async () => {
-    mockRoster([member(UUID, "Alice Example")])
+  it("reports what is typed rather than filtering the rows it was given", async () => {
+    // The page fetches the matches, so a field that filtered here would offer
+    // the matches out of whatever page had already arrived (otari#1380).
+    const typed: string[] = []
     renderBox(
       <UserComboBox
         value=""
         onChange={() => {}}
-        users={[user(UUID), user("ci-bot")]}
+        onQueryChange={(query) => typed.push(query)}
+        users={[user(UUID, null, "Alice Example"), user("ci-bot")]}
       />,
     )
 
-    await userEvent.type(screen.getByRole("combobox"), UUID)
+    await userEvent.type(screen.getByRole("combobox"), "ali")
 
-    // The id an operator pastes out of a log or an API response still reaches
-    // the person, even though the row no longer leads with it.
-    expect(
-      await screen.findByRole("option", { name: `Alice Example (${UUID})` }),
-    ).toBeInTheDocument()
-    expect(screen.queryByRole("option", { name: "ci-bot" })).toBeNull()
+    expect(typed.at(-1)).toBe("ali")
+    // Both rows stay: narrowing them is the server's answer, arriving next.
+    await userEvent.click(screen.getByRole("combobox"))
+    expect(screen.getByRole("option", { name: "ci-bot" })).toBeInTheDocument()
   })
 
-  it("falls back to the bare id when the roster cannot be read", async () => {
-    mockRoster([], 500)
+  it("falls back to the bare id for a row nobody named", async () => {
     renderBox(
-      <UserComboBox value="" onChange={() => {}} users={[user(UUID)]} />,
+      <UserComboBox
+        value=""
+        onChange={() => {}}
+        onQueryChange={() => {}}
+        users={[user(UUID)]}
+      />,
     )
 
     await userEvent.click(screen.getByRole("combobox"))
 
-    // A failed roster read leaves the owner as findable as it was before names
-    // existed, rather than an empty row.
+    // A row with no name is as findable as it was before names existed, rather
+    // than an empty row.
     expect(
       await screen.findByRole("option", { name: UUID }),
     ).toBeInTheDocument()
   })
 
-  it("asks for no roster on a deployment that hosts none", async () => {
-    const fetchMock = mockRoster([member(UUID, "Alice Example")])
+  it("reads no roster of its own, whatever the deployment hosts", async () => {
+    // The name arrives on the row (otari#1380). The picker used to fetch the
+    // roster itself and join by id, which is what stopped the search moving to
+    // the server: a picker is typed into with the name it shows.
+    const fetchMock = vi.spyOn(globalThis, "fetch")
     renderBox(
-      <UserComboBox value="" onChange={() => {}} users={[user(UUID)]} />,
+      <UserComboBox
+        value=""
+        onChange={() => {}}
+        onQueryChange={() => {}}
+        users={[user(UUID, null, "Alice Example")]}
+      />,
       bootstrap({ surfaces: [] }),
     )
 
     await userEvent.click(screen.getByRole("combobox"))
 
     expect(
-      await screen.findByRole("option", { name: UUID }),
+      await screen.findByRole("option", { name: `Alice Example (${UUID})` }),
     ).toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it("sorts members ahead of the ids nobody named", async () => {
-    mockRoster([member(UUID, "Zoe Example")])
     renderBox(
       <UserComboBox
         value=""
         onChange={() => {}}
-        users={[user("aaa-bot"), user(UUID)]}
+        onQueryChange={() => {}}
+        users={[user("aaa-bot"), user(UUID, null, "Zoe Example")]}
       />,
     )
 
@@ -184,13 +185,13 @@ describe("UserComboBox", () => {
   })
 
   it("submits the owner id, not the label shown for it", async () => {
-    mockRoster([member(UUID, "Alice Example")])
     const changes: string[] = []
     renderBox(
       <UserComboBox
         value=""
         onChange={(id) => changes.push(id)}
-        users={[user(UUID, "alice@example.com")]}
+        users={[user(UUID, "alice@example.com", "Alice Example")]}
+        onQueryChange={() => {}}
       />,
     )
 
@@ -209,13 +210,13 @@ describe("UserComboBox", () => {
     // name is exactly another user's id, and a member sorts ahead of it. What
     // answers it now is that typed text is not looked up at all, so there is
     // nothing for the two rows to compete over.
-    mockRoster([member(UUID, "ci-bot")])
     const changes: string[] = []
     renderBox(
       <UserComboBox
         value=""
         onChange={(id) => changes.push(id)}
-        users={[user(UUID), user("ci-bot")]}
+        users={[user(UUID, null, "Alice Example"), user("ci-bot")]}
+        onQueryChange={() => {}}
       />,
     )
 
@@ -227,13 +228,13 @@ describe("UserComboBox", () => {
   it("submits the picked member, not the owner whose id is their roster name", async () => {
     // The same collision as above, reached from the other side: the row that was
     // picked is the member, and their label is the other owner's id.
-    mockRoster([member(UUID, "ci-bot")])
     const changes: string[] = []
     renderBox(
       <UserComboBox
         value=""
         onChange={(id) => changes.push(id)}
-        users={[user(UUID), user("ci-bot")]}
+        users={[user(UUID, null, "ci-bot"), user("ci-bot")]}
+        onQueryChange={() => {}}
       />,
     )
 
@@ -252,13 +253,16 @@ describe("UserComboBox", () => {
     const second = "22222222-2222-2222-2222-222222222222"
     // Two people, one name. A roster carries no uniqueness rule over
     // `full_name`, so this is ordinary rather than a corner case.
-    mockRoster([member(first, "Alex Smith"), member(second, "Alex Smith")])
     const changes: string[] = []
     renderBox(
       <UserComboBox
         value=""
         onChange={(id) => changes.push(id)}
-        users={[user(first), user(second)]}
+        users={[
+          user(first, null, "Alex Smith"),
+          user(second, null, "Alex Smith"),
+        ]}
+        onQueryChange={() => {}}
       />,
     )
 
@@ -276,13 +280,13 @@ describe("UserComboBox", () => {
   })
 
   it("does not turn a typed display name into the id it names", async () => {
-    mockRoster([member(UUID, "Alice Example")])
     const changes: string[] = []
     renderBox(
       <UserComboBox
         value=""
         onChange={(id) => changes.push(id)}
-        users={[user(UUID)]}
+        users={[user(UUID, null, "Alice Example")]}
+        onQueryChange={() => {}}
       />,
     )
 

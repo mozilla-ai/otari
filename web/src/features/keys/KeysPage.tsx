@@ -52,7 +52,7 @@ import {
   useRotateKey,
   useUpdateKey,
 } from "@/shared/api/apiKeys"
-import { useUsers } from "@/shared/api/users"
+import { useUserSearch, useUsers } from "@/shared/api/users"
 import { MissingGatewayAddressNotice } from "@/shared/components/access/MissingGatewayAddressNotice"
 import { formatDate } from "@/shared/helpers/format"
 import {
@@ -66,6 +66,7 @@ import {
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useDebounced } from "@/shared/hooks/useDebounced"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { KeyActionsMenu } from "./KeyActionsMenu"
 import { isVirtualUser, keyFingerprint, secretCaption } from "./secretCaption"
@@ -412,7 +413,6 @@ function CreateKeyDialog({
   // it can animate out, and `fetchAllUsers` walks up to 100 pages of 1000: left
   // on the deployment alone it ran that walk on every visit to the page. The
   // query's own `staleTime` makes a reopen free.
-  const users = useUsers(isDeploymentWide && isOpen)
   // Every key in the caller's organization, workspace filter deliberately unset:
   // it is one half of what says a user belongs here (see `organizationUsers`),
   // and the owner offered is the organization's rather than this workspace's,
@@ -422,9 +422,16 @@ function CreateKeyDialog({
   const organizationKeys = useKeys(undefined, isDeploymentWide && isOpen)
   // What the picker may offer: the deployment's user list narrowed to this
   // organization. An unfiltered one named every tenant's people (otari-ai#2108).
+  // The term the picker is being typed into, debounced on its way into the
+  // query key so a burst of keystrokes is one request (otari#1380).
+  const [ownerQuery, setOwnerQuery] = useState("")
+  const owners = useUserSearch(
+    useDebounced(ownerQuery),
+    50,
+    isDeploymentWide && isOpen,
+  )
   const ownerOptions = organizationUsers(
-    users.data ?? [],
-    memberLabels,
+    owners.data ?? [],
     organizationKeys.data ?? [],
   )
   const { selected: workspace, isLoading: workspaceLoading } =
@@ -632,6 +639,7 @@ function CreateKeyDialog({
           value={userId}
           onChange={setUserId}
           users={ownerOptions}
+          onQueryChange={setOwnerQuery}
         />
       ) : (
         <p className="text-caption">

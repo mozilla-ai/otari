@@ -1,7 +1,7 @@
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import String, and_, cast, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -9,6 +9,7 @@ from sqlmodel import col
 
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import OrganizationMember, Workspace
+from gateway.models.tenancy import User as TenancyUser
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
 
@@ -168,6 +169,100 @@ def _on_roster_of(organization_id: uuid.UUID | None) -> ColumnElement[bool]:
     if organization_id is not None:
         condition = condition.where(col(OrganizationMember.organization_id) == organization_id)
     return condition.exists()
+
+
+_LIKE_ESCAPE = "\\"
+
+
+def _contains_pattern(term: str) -> str:
+    """A case-folded ``LIKE`` pattern matching ``term`` anywhere.
+
+    The wildcards are escaped, so a picker somebody types ``100%`` into finds
+    the ids containing that text rather than every id.
+    """
+
+    escaped = term.lower()
+    for character in (_LIKE_ESCAPE, "%", "_"):
+        escaped = escaped.replace(character, _LIKE_ESCAPE + character)
+    return f"%{escaped}%"
+
+
+async def list_users_in_organization(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    skip: int = 0,
+    limit: int = 100,
+    search: str | None = None,
+) -> Sequence[User]:
+    """A page of the spend identities one organization can name.
+
+    ``search`` matches the id, the alias, and the roster name of the member
+    behind the id, which is the text a picker shows. Matching it here is what
+    lets a picker offer the matches out of everyone rather than out of the page
+    it happened to fetch (otari#1380).
+    """
+
+    conditions: list[ColumnElement[bool]] = [User.deleted_at.is_(None), in_organization(organization_id)]
+    if term := (search or "").strip():
+        pattern = _contains_pattern(term)
+        named = (
+            select(col(TenancyUser.id))
+            .where(
+                cast(col(TenancyUser.id), String) == User.user_id,
+                or_(
+                    func.lower(col(TenancyUser.full_name)).like(pattern, escape=_LIKE_ESCAPE),
+                    func.lower(col(TenancyUser.email)).like(pattern, escape=_LIKE_ESCAPE),
+                ),
+            )
+            .exists()
+        )
+        conditions.append(
+            or_(
+                func.lower(User.user_id).like(pattern, escape=_LIKE_ESCAPE),
+                func.lower(User.alias).like(pattern, escape=_LIKE_ESCAPE),
+                named,
+            )
+        )
+    rows = await db.execute(select(User).where(*conditions).order_by(User.user_id).offset(skip).limit(limit))
+    return rows.scalars().all()
+
+
+async def roster_names(db: AsyncSession, user_ids: Sequence[str]) -> dict[str, str]:
+    """The person behind each of these attribution ids, by id.
+
+    The two tables have not merged (otari-ai#1727): keys, budgets and usage
+    attach to the string-keyed ``users`` row, and a member is a UUID identity
+    whose id, rendered as a string, is that row's key. This is the join, done
+    once for a page rather than by reading the whole roster into the browser
+    (otari#1380).
+
+    Named the way the roster names them: the full name, else the sign-in
+    address, else nothing rather than a placeholder, since a caller that has no
+    name to show already knows what to print instead.
+    """
+
+    if not user_ids:
+        return {}
+    candidates = []
+    for raw in user_ids:
+        try:
+            candidates.append(uuid.UUID(raw))
+        # An id an operator chose, like ``ci-bot``, is not a member id and
+        # simply has no roster row to find.
+        except ValueError:
+            continue
+    if not candidates:
+        return {}
+
+    rows = (
+        await db.execute(
+            select(col(TenancyUser.id), col(TenancyUser.full_name), col(TenancyUser.email)).where(
+                col(TenancyUser.id).in_(candidates)
+            )
+        )
+    ).all()
+    return {str(identity): name for identity, full_name, email in rows if (name := full_name or email)}
 
 
 def in_organization(organization_id: uuid.UUID) -> ColumnElement[bool]:

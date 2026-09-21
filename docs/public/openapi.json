@@ -16137,6 +16137,18 @@
             "title": "Current Tokens",
             "type": "integer"
           },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The person behind this id, from the organization roster, where the identity is on one. Null for an id nobody claimed, such as one an operator chose.",
+            "title": "Display Name"
+          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
@@ -31782,6 +31794,25 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Narrow to users whose id, alias or roster name contains this text, case-insensitively.",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Narrow to users whose id, alias or roster name contains this text, case-insensitively.",
+              "title": "Search"
             }
           }
         ],

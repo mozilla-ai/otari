@@ -4,43 +4,18 @@ import userEvent from "@testing-library/user-event"
 import { type ReactElement, useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { OrganizationMember, User } from "@/client"
+import type { User } from "@/client"
 import { UserMultiSelect } from "@/features/users/UserMultiSelect"
-import { API_ROOT } from "@/shared/api/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap, organizationMember } from "@/tests/fixtures"
+import { bootstrap } from "@/tests/fixtures"
 
 // Only the fields the picker reads; the rest of User is irrelevant here.
-function user(user_id: string, alias: string | null = null): User {
-  return { user_id, alias } as User
-}
-
-function member(
-  attributionUserId: string,
-  fullName: string,
-): OrganizationMember {
-  return organizationMember({
-    organization_member_id: attributionUserId,
-    attribution_user_id: attributionUserId,
-    full_name: fullName,
-  })
-}
-
-// The transport, not the hook: the component's own query and surface gate run.
-function mockRoster(members: OrganizationMember[]) {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-    const isRoster = String(input).includes(
-      `${API_ROOT}/organizations/me/members`,
-    )
-    return new Response(
-      JSON.stringify(
-        isRoster
-          ? { data: members, count: members.length }
-          : { detail: "not mocked" },
-      ),
-      { status: isRoster ? 200 : 501 },
-    )
-  })
+function user(
+  user_id: string,
+  alias: string | null = null,
+  display_name: string | null = null,
+): User {
+  return { user_id, alias, display_name } as User
 }
 
 function renderPicker(ui: ReactElement) {
@@ -67,6 +42,7 @@ function Controlled({ users }: { users: User[] }) {
         value={value}
         onChange={setValue}
         users={users}
+        onQueryChange={() => {}}
       />
       <p>selected: {value.join(", ")}</p>
     </>
@@ -79,13 +55,16 @@ describe("UserMultiSelect", () => {
   })
 
   it("names a member by the roster, with their owner id as the second line", async () => {
-    mockRoster([member(UUID, "Alice Example")])
     renderPicker(
       <UserMultiSelect
         label="Applies to"
         value={[]}
         onChange={() => {}}
-        users={[user(UUID, "alice@example.com"), user("ci-bot")]}
+        onQueryChange={() => {}}
+        users={[
+          user(UUID, "alice@example.com", "Alice Example"),
+          user("ci-bot"),
+        ]}
       />,
     )
 
@@ -105,28 +84,29 @@ describe("UserMultiSelect", () => {
     expect(screen.getByRole("option", { name: "ci-bot" })).toBeInTheDocument()
   })
 
-  it("finds a member by the id they are billed under, not only by name", async () => {
-    mockRoster([member(UUID, "Alice Example")])
+  it("reports what is typed rather than filtering the rows it was given", async () => {
+    // The page fetches the matches, so a control that filtered here would offer
+    // the matches out of whatever page had already arrived (otari#1380).
+    const typed: string[] = []
     renderPicker(
       <UserMultiSelect
         label="Applies to"
         value={[]}
         onChange={() => {}}
-        users={[user(UUID), user("ci-bot")]}
+        onQueryChange={(query) => typed.push(query)}
+        users={[user(UUID, null, "Alice Example"), user("ci-bot")]}
       />,
     )
 
-    await userEvent.type(screen.getByLabelText("Applies to"), UUID)
+    await userEvent.type(screen.getByLabelText("Applies to"), "ali")
 
-    expect(
-      await screen.findByRole("option", { name: `Alice Example (${UUID})` }),
-    ).toBeInTheDocument()
-    expect(screen.queryByRole("option", { name: "ci-bot" })).toBeNull()
+    expect(typed.at(-1)).toBe("ali")
+    // Both rows stay: narrowing them is the server's answer, arriving next.
+    expect(screen.getByRole("option", { name: "ci-bot" })).toBeInTheDocument()
   })
 
   it("reports the owner id of the person picked, and chips them by name", async () => {
-    mockRoster([member(UUID, "Alice Example")])
-    renderPicker(<Controlled users={[user(UUID)]} />)
+    renderPicker(<Controlled users={[user(UUID, null, "Alice Example")]} />)
 
     await userEvent.click(screen.getByLabelText("Applies to"))
     await userEvent.click(

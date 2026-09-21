@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type { CreateUserRequest, UpdateUserRequest, User } from "@/client"
 import { apiFetch } from "@/shared/api/client"
 import { fetchAllRows } from "@/shared/api/paging"
@@ -12,6 +17,29 @@ export function useUsers(enabled = true) {
     queryKey: [USERS],
     queryFn: fetchAllUsers,
     staleTime: 60_000,
+    enabled,
+  })
+}
+
+/**
+ * The people a picker offers, matching what somebody typed.
+ *
+ * The term goes to the server, so the options are the matches out of everyone
+ * rather than out of whatever page was fetched (otari#1380). Bounded because a
+ * picker renders a handful of rows.
+ *
+ * Debounce the term before it gets here (`useDebounced`), or every keystroke is
+ * a request and the answers race.
+ */
+export function useUserSearch(search: string, limit = 50, enabled = true) {
+  return useQuery({
+    queryKey: [USERS, "search", search, limit],
+    queryFn: () =>
+      apiFetch<User[]>(
+        `/users?limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+      ),
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
     enabled,
   })
 }

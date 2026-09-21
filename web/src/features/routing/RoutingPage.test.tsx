@@ -73,9 +73,19 @@ const POLICIES: RoutingPolicyResponse[] = [
   ),
 ]
 
+// One of the three carries a roster name, so the same list exercises both
+// halves of the picker's labeling: a person the organization can name, and an
+// owner id nobody named, whose id is its name. The name rides on the row since
+// otari#1380 rather than being joined from a roster the picker fetched.
 const USERS = [
   { user_id: "alice", alias: "alice", spend: 0, is_blocked: false },
-  { user_id: "u-bob", alias: "bob", spend: 0, is_blocked: false },
+  {
+    user_id: "u-bob",
+    alias: "bob",
+    spend: 0,
+    is_blocked: false,
+    display_name: "Bob Builder",
+  },
   { user_id: "u-carol", alias: "carol", spend: 0, is_blocked: false },
 ]
 
@@ -333,7 +343,25 @@ function mockApi(
           ],
         })
       }
-      if (url.includes(`${API_ROOT}/users`)) return jsonResponse(USERS)
+      if (url.includes(`${API_ROOT}/users`)) {
+        // The route matches on id, alias and roster name (otari#1380), so the
+        // mock does too: a test that answered the whole list could not tell a
+        // server-side search from a filter in the browser.
+        const term = (
+          new URL(url, "http://localhost").searchParams.get("search") ?? ""
+        ).toLowerCase()
+        return jsonResponse(
+          USERS.filter((row) =>
+            [
+              row.user_id,
+              row.alias,
+              "display_name" in row ? row.display_name : "",
+            ]
+              .filter(Boolean)
+              .some((field) => String(field).toLowerCase().includes(term)),
+          ),
+        )
+      }
       if (url.includes(`${API_ROOT}/models`))
         return jsonResponse({ object: "list", data: [] })
       return jsonResponse([])
@@ -449,7 +477,11 @@ async function pickUsers(user: TestUser, queries: string[]) {
     // nobody.
     await user.clear(search)
     await user.type(search, query)
-    await user.click(await screen.findByRole("option"))
+    // Waited for by name, which is also what waits out the debounce: the term
+    // goes to the server now, so the list narrows a moment after the typing.
+    await user.click(
+      await screen.findByRole("option", { name: new RegExp(query, "i") }),
+    )
   }
   await user.keyboard("{Escape}")
 }

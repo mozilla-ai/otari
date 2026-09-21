@@ -47,7 +47,7 @@ import {
   useUpdateBudget,
 } from "@/shared/api/budgets"
 import { useOrganizationContext } from "@/shared/api/organizations"
-import { useUpdateUser, useUsers } from "@/shared/api/users"
+import { useUpdateUser, useUserSearch } from "@/shared/api/users"
 import {
   useAllWorkspaceBudgetDefaults,
   useWorkspaces,
@@ -57,6 +57,7 @@ import {
   resolveSelectedIds,
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
+import { useDebounced } from "@/shared/hooks/useDebounced"
 
 import {
   budgetLabel,
@@ -235,6 +236,7 @@ function BudgetForm({
   onSubmit,
   onClose,
   assignUsers,
+  onAssignSearch,
   assignedUserIds,
   assignmentNote,
   returnFocusRef,
@@ -262,6 +264,8 @@ function BudgetForm({
   // on both create and edit, because there is no per-person Users page: this is
   // the only place a budget is attached to a person.
   assignUsers?: User[]
+  /** Where the assignment picker reports what is being typed. */
+  onAssignSearch: (query: string) => void
   // Who already holds this budget, so edit opens with them selected rather than
   // reading as an empty assignment that would clear them on save.
   assignedUserIds?: string[]
@@ -375,6 +379,7 @@ function BudgetForm({
           description="Everyone selected is held to this budget, each with their own allowance rather than a shared pool."
           value={userIds}
           onChange={setUserIds}
+          onQueryChange={onAssignSearch}
           users={assignUsers}
         />
       ) : assignmentNote ? (
@@ -553,7 +558,11 @@ function isOrganizationOwned(budget: Budget): boolean {
  */
 function DeploymentBudgetsPage() {
   const budgets = useBudgets()
-  const users = useUsers()
+  // The term the assignment picker is typed into. Owned here because this is
+  // what fetches, so the server matches over everyone rather than over the page
+  // already fetched (otari#1380).
+  const [assignQuery, setAssignQuery] = useState("")
+  const users = useUserSearch(useDebounced(assignQuery))
   const workspaces = useWorkspaces()
   const workspaceIds = useMemo(
     () => (workspaces.data ?? []).map((workspace) => workspace.id),
@@ -915,6 +924,7 @@ function DeploymentBudgetsPage() {
         assignUsers={assignUsers}
         onAssignmentReset={() => setAssignmentError(undefined)}
         users={users.data ?? []}
+        onAssignSearch={setAssignQuery}
         onClose={() => {
           setAssignmentError(undefined)
           setPendingAssignments(undefined)
@@ -928,6 +938,7 @@ function DeploymentBudgetsPage() {
           key={editingBudget.budget_id}
           budget={editingBudget}
           users={users.data ?? []}
+          onAssignSearch={setAssignQuery}
           rosterReady={rosterReady}
           assignUsers={assignUsers}
           onAssignmentReset={() => {
@@ -1058,6 +1069,7 @@ function EditBudgetDialog({
   users,
   rosterReady,
   assignUsers,
+  onAssignSearch,
   onAssignmentReset,
   assignmentError,
   assigningUsers,
@@ -1071,6 +1083,8 @@ function EditBudgetDialog({
     userIds: string[],
     previousUserIds?: string[],
   ) => Promise<boolean>
+  /** Where the assignment picker reports what is being typed. */
+  onAssignSearch: (query: string) => void
   onAssignmentReset: () => void
   assignmentError: Error | undefined
   assigningUsers: boolean
@@ -1099,6 +1113,7 @@ function EditBudgetDialog({
       error={updateBudget.error ?? assignmentError}
       isPending={updateBudget.isPending || assigningUsers}
       assignUsers={rosterReady && !isOrganizationOwned(row) ? users : undefined}
+      onAssignSearch={onAssignSearch}
       assignmentNote={
         isOrganizationOwned(row)
           ? "This budget belongs to an organization, so people here cannot be held to it. Its limit and reset are still the deployment's to change."
@@ -1134,6 +1149,7 @@ function CreateBudgetDialog({
   onClose,
   users,
   assignUsers,
+  onAssignSearch,
   onAssignmentReset,
   assignmentError,
   assigningUsers,
@@ -1149,6 +1165,8 @@ function CreateBudgetDialog({
     userIds: string[],
     previousUserIds?: string[],
   ) => Promise<boolean>
+  /** Where the assignment picker reports what is being typed. */
+  onAssignSearch: (query: string) => void
   onAssignmentReset: () => void
   assignmentError: Error | undefined
   assigningUsers: boolean
@@ -1209,6 +1227,7 @@ function CreateBudgetDialog({
       isPending={createBudget.isPending || assigningUsers}
       returnFocusRef={returnFocusRef}
       assignUsers={users}
+      onAssignSearch={onAssignSearch}
       onSubmit={createAndAssign}
       onClose={onClose}
     />

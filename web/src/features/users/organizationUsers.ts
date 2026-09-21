@@ -11,8 +11,9 @@ import type { ApiKey, User } from "@/client"
  * (otari-ai#2108).
  *
  * A `users` row carries no organization, so this derives the scope from the two
- * joins that do exist: the roster names its members' attribution rows, and a key
- * names both its owner and the workspace, hence the organization, it lives in.
+ * joins that do exist: a row the roster names carries that name (`display_name`,
+ * otari#1380), and a key names both its owner and the workspace, hence the
+ * organization, it lives in.
  *
  * An id in neither is left out rather than shown. It belongs to another
  * organization, or to nobody who has used this one yet, and either way a picker
@@ -20,13 +21,12 @@ import type { ApiKey, User } from "@/client"
  */
 export function organizationUsers(
   users: User[],
-  memberLabels: ReadonlyMap<string, string>,
   organizationKeys: readonly Pick<ApiKey, "user_id">[],
 ): User[] {
   const owners = new Set(
     organizationKeys.flatMap((key) => (key.user_id ? [key.user_id] : [])),
   )
   return users.filter(
-    (user) => memberLabels.has(user.user_id) || owners.has(user.user_id),
+    (user) => Boolean(user.display_name) || owners.has(user.user_id),
   )
 }

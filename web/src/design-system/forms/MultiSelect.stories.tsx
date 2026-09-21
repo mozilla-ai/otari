@@ -153,3 +153,17 @@ export const NoOptions: Story = {
   },
   render: (args) => <Live {...args} />,
 }
+
+/**
+ * Matched by whoever fetches, not by the control.
+ *
+ * Passing `onQueryChange` says the caller is fetching its own options, so the
+ * control stops filtering and renders what it is handed. That is what lets a
+ * picker over a collection offer the matches out of everyone rather than out of
+ * the page it happened to have (otari#1380). Here the rows never narrow,
+ * because the story hands over a fixed list however much is typed.
+ */
+export const ServerMatched: Story = {
+  args: { autoFocus: true, onQueryChange: () => {} },
+  render: (args) => <Live {...args} />,
+}

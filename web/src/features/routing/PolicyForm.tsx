@@ -21,7 +21,6 @@ import { FieldAction } from "@/design-system/forms/FieldAction"
 import { ControlField } from "@/design-system/forms/FieldMessages"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
-import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { userOptionText } from "@/features/users/userOptions"
 import {
   useCreateAlias,
@@ -30,7 +29,8 @@ import {
   useSetRoutingPolicy,
 } from "@/shared/api/routing"
 import { useToolSettings } from "@/shared/api/tools"
-import { useUsers } from "@/shared/api/users"
+import { useUserSearch } from "@/shared/api/users"
+import { useDebounced } from "@/shared/hooks/useDebounced"
 
 import { ModeToggle } from "./ModeToggle"
 import {
@@ -124,13 +124,10 @@ function SectionRemove({
  *  than appearing there as the UUID the request plane bills.
  */
 function useUserLabel(users: User[]): (userId: string) => string {
-  const memberLabels = useMemberAttributionLabels()
   const byId = new Map(users.map((entry) => [entry.user_id, entry]))
   return (userId) => {
     const user = byId.get(userId)
-    return user === undefined
-      ? userId
-      : userOptionText(user, memberLabels).label
+    return user ? userOptionText(user).label : userId
   }
 }
 
@@ -213,7 +210,8 @@ export function PolicyForm({
   // bought the ~100ms exit fade. Out here the form is mounted whether or not the
   // dialog is, so this gate is the whole of what keeps a closed form from
   // asking for the roster.
-  const users = useUsers(isOpen && canScope)
+  const [userQuery, setUserQuery] = useState("")
+  const users = useUserSearch(useDebounced(userQuery), 50, isOpen && canScope)
   const labelForUser = useUserLabel(users.data ?? [])
 
   const [name, setName] = useState(existing?.name ?? "")
@@ -705,6 +703,7 @@ export function PolicyForm({
         <ScopePicker
           userIds={userIds}
           users={users.data ?? []}
+          onQueryChange={setUserQuery}
           onChange={setUserIds}
           // Any landed write settles it, whatever payload it went under. Not
           // keyed on the current name and spec the way `done` is: a policy

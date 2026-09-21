@@ -5,7 +5,8 @@ import { Dot } from "@/design-system/indicators/Dot"
 import { Meter } from "@/design-system/metrics/Meter"
 import { UserComboBox } from "@/features/users/UserComboBox"
 import { useRouterStatus } from "@/shared/api/routing"
-import { useUsers } from "@/shared/api/users"
+import { useUserSearch } from "@/shared/api/users"
+import { useDebounced } from "@/shared/hooks/useDebounced"
 
 /** Records against the seed count, as a bar plus the plain numbers.
  *
@@ -78,7 +79,8 @@ export function RouterReadiness({
   scopedUserId: string | null
   onClose: () => void
 }) {
-  const users = useUsers()
+  const [userQuery, setUserQuery] = useState("")
+  const users = useUserSearch(useDebounced(userQuery))
   // Empty rather than absent: the picker reports an empty string when it is
   // cleared, so "nobody chosen" already has a value of its own here.
   const [userId, setUserId] = useState(scopedUserId ?? "")
@@ -118,6 +120,7 @@ export function RouterReadiness({
               value={userId}
               onChange={setUserId}
               users={users.data ?? []}
+              onQueryChange={setUserQuery}
               placeholder="Pick a user…"
               description="Examples are one user's own prompts, so this policy warms once per caller rather than once overall."
               unknownHint={

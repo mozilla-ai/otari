@@ -15,11 +15,14 @@ import { UserMultiSelect } from "@/features/users/UserMultiSelect"
 export function ScopePicker({
   userIds,
   users,
+  onQueryChange,
   onChange,
   isSettled,
 }: {
   userIds: string[] | null
   users: User[]
+  /** Where the multi-select reports what is being typed; the page fetches. */
+  onQueryChange: (query: string) => void
   onChange: (userIds: string[] | null) => void
   /**
    * Whether a write under this name has already landed, which freezes the
@@ -79,6 +82,7 @@ export function ScopePicker({
               value={userIds}
               onChange={onChange}
               users={users}
+              onQueryChange={onQueryChange}
               description="One policy is written per person, each resolving only for them."
             />
           )}

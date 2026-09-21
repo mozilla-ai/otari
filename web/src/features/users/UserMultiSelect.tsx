@@ -2,7 +2,6 @@ import type { ReactNode } from "react"
 
 import type { User } from "@/client"
 import { MultiSelect } from "@/design-system/forms/MultiSelect"
-import { useMemberAttributionLabels } from "@/features/organization/attribution"
 
 import { userOptionText } from "./userOptions"
 
@@ -23,22 +22,27 @@ export function UserMultiSelect({
   value,
   onChange,
   users,
+  onQueryChange,
   label,
   description,
 }: {
   value: string[]
   onChange: (next: string[]) => void
   users: User[]
+  /**
+   * Where to report what is being typed. The page fetches the matches, so the
+   * server matches over everyone rather than over the page already fetched
+   * (otari#1380).
+   */
+  onQueryChange: (query: string) => void
   label: string
   description?: ReactNode
 }) {
-  const memberLabels = useMemberAttributionLabels()
-
   const options = users
     .filter((user) => !user.user_id.startsWith("apikey-"))
     .map((user) => ({
       id: user.user_id,
-      ...userOptionText(user, memberLabels),
+      ...userOptionText(user),
     }))
 
   return (
@@ -48,6 +52,7 @@ export function UserMultiSelect({
       options={options}
       value={value}
       onChange={onChange}
+      onQueryChange={onQueryChange}
       searchPlaceholder="Search people…"
       countNoun={{ one: "person assigned", other: "people assigned" }}
       emptyMessage="Nobody to assign yet. Add people under Members & roles and they can be assigned here."

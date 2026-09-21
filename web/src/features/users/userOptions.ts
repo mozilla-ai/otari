@@ -17,13 +17,14 @@ export interface UserOptionText {
  * Shared by the two user pickers rather than written in each: they sit in the
  * same forms, and somebody who reads as a name in one and as a UUID in the
  * other reads as two different people (otari-ai#2101).
+ *
+ * The name rides on the row (otari#1380). It used to come from a roster the
+ * picker read whole and joined by id, which is also what stopped the search
+ * moving to the server: a picker is typed into with the name it shows, and the
+ * server could not match a name it was not sending.
  */
-export function userOptionText(
-  user: User,
-  memberLabels: ReadonlyMap<string, string>,
-): UserOptionText {
-  const member = memberLabels.get(user.user_id)
-  if (member) return { label: member, hint: user.user_id }
+export function userOptionText(user: User): UserOptionText {
+  if (user.display_name) return { label: user.display_name, hint: user.user_id }
   // An id an operator chose, like `ci-bot`, is already its own name, so a hint
   // would only repeat the label.
   return {

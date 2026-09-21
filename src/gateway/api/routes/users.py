@@ -24,7 +24,11 @@ from gateway.models.budgets import Budget
 from gateway.models.money import as_float
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
-from gateway.repositories.users_repository import in_organization
+from gateway.repositories.users_repository import (
+    in_organization,
+    list_users_in_organization,
+    roster_names,
+)
 from gateway.services.budget_periods import budget_window
 from gateway.services.model_access import validate_allowed_models
 
@@ -56,6 +60,13 @@ class UserResponse(BaseModel):
 
     user_id: str
     alias: str | None
+    display_name: str | None = Field(
+        default=None,
+        description=(
+            "The person behind this id, from the organization roster, where the identity is on "
+            "one. Null for an id nobody claimed, such as one an operator chose."
+        ),
+    )
     spend: float
     reserved: float
     # The other two axes the attached budget can cap, carried for the same reason
@@ -75,10 +86,11 @@ class UserResponse(BaseModel):
     metadata: dict[str, Any]
 
     @classmethod
-    def from_model(cls, user: User) -> "UserResponse":
+    def from_model(cls, user: User, display_name: str | None = None) -> "UserResponse":
         return cls(
             user_id=user.user_id,
             alias=user.alias,
+            display_name=display_name,
             spend=float(user.spend),
             # In-flight budget held by accepted-but-not-yet-settled requests;
             # the effective committed amount is spend + reserved.
@@ -268,6 +280,16 @@ async def list_users(
     organization_id: CallerOrganization,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    search: Annotated[
+        str | None,
+        Query(
+            max_length=200,
+            description=(
+                "Narrow to users whose id, alias or roster name contains this text, "
+                "case-insensitively."
+            ),
+        ),
+    ] = None,
 ) -> list[UserResponse]:
     """List the users the caller's organization can name, with pagination.
 
@@ -277,15 +299,14 @@ async def list_users(
     ``default`` owner, or a user just created) is shared rather than hidden.
     See ``repositories.users_repository.in_organization``.
     """
-    result = await db.execute(
-        select(User)
-        .where(User.deleted_at.is_(None), in_organization(organization_id))
-        .offset(skip)
-        .limit(limit)
+    users = await list_users_in_organization(
+        db, organization_id=organization_id, skip=skip, limit=limit, search=search
     )
-    users = result.scalars().all()
+    # One join for the page rather than a roster read in the browser: the two
+    # tables have not merged, so the name behind an id lives elsewhere.
+    names = await roster_names(db, [user.user_id for user in users])
 
-    return [UserResponse.from_model(user) for user in users]
+    return [UserResponse.from_model(user, names.get(user.user_id)) for user in users]
 
 
 @router.get("/{user_id}")

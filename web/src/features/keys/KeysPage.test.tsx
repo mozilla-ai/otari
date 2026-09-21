@@ -1178,16 +1178,16 @@ describe("KeysPage", () => {
     const otherTenant = "44444444-4444-4444-4444-444444444444"
     mockApi({
       keys: [apiKey({ id: "key-1", key_name: "ci", user_id: "ci-bot" })],
+      // The roster name rides on the row (otari#1380), so a member is a row
+      // carrying one and the narrowing reads it rather than a roster it fetched.
       users: [
-        user({ user_id: member, alias: "alice@example.com" }),
+        user({
+          user_id: member,
+          alias: "alice@example.com",
+          display_name: "Alice Example",
+        }),
         user({ user_id: "ci-bot", alias: null }),
         user({ user_id: otherTenant, alias: "someone@other.example" }),
-      ],
-      members: [
-        organizationMember({
-          attribution_user_id: member,
-          full_name: "Alice Example",
-        }),
       ],
     })
     const usr = userEvent.setup()

@@ -53,6 +53,7 @@ export function MultiSelect({
   countNoun = { one: "selected", other: "selected" },
   maxVisible = DEFAULT_MAX_VISIBLE,
   autoFocus,
+  onQueryChange,
 }: {
   label: string
   description?: ReactNode
@@ -82,6 +83,14 @@ export function MultiSelect({
   maxVisible?: number
   /** A form's first field takes this; see feedback.md. */
   autoFocus?: boolean
+  /**
+   * Told what is being typed, for a caller that fetches its own options.
+   * Passing it also stops the filter below: the matching is then the server's,
+   * and matching again here would hide a row that arrived while the box moved
+   * on. Omitted, the control matches what it was given, which is right for a
+   * fixed set.
+   */
+  onQueryChange?: (query: string) => void
 }) {
   const [query, setQuery] = useState("")
   const [isOpen, setIsOpen] = useState(false)
@@ -121,14 +130,18 @@ export function MultiSelect({
 
   const needle = query.trim().toLowerCase()
   // Filtered, never re-ordered: a selected row keeps its place, so a second
-  // press lands on the row the first one did.
-  const reached = options.filter(
-    (option) =>
-      needle === "" ||
-      option.id.toLowerCase().includes(needle) ||
-      option.label.toLowerCase().includes(needle) ||
-      (option.hint?.toLowerCase().includes(needle) ?? false),
-  )
+  // press lands on the row the first one did. A caller that reports the query
+  // is fetching its own matches, so the options it hands over are the answer
+  // already.
+  const reached = onQueryChange
+    ? options
+    : options.filter(
+        (option) =>
+          needle === "" ||
+          option.id.toLowerCase().includes(needle) ||
+          option.label.toLowerCase().includes(needle) ||
+          (option.hint?.toLowerCase().includes(needle) ?? false),
+      )
   // Capped after the filter, never before: the query has to see every option,
   // and only the rendering is bounded.
   const matches = reached.slice(0, maxVisible)
@@ -262,6 +275,7 @@ export function MultiSelect({
             autoFocus={autoFocus}
             onChange={(event) => {
               setQuery(event.target.value)
+              onQueryChange?.(event.target.value)
               setActiveIndex(0)
               setIsOpen(true)
             }}

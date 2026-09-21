@@ -7905,9 +7905,15 @@
                   "disabled": true,
                   "key": "limit",
                   "value": ""
+                },
+                {
+                  "description": "Narrow to users whose id, alias or roster name contains this text, case-insensitively.",
+                  "disabled": true,
+                  "key": "search",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/users?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/users?skip=&limit=&search="
             }
           }
         },

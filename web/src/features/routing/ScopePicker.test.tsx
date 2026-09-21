@@ -44,6 +44,7 @@ function setup(overrides: Partial<Parameters<typeof ScopePicker>[0]> = {}): {
     <ScopePicker
       userIds={null}
       users={USERS}
+      onQueryChange={() => {}}
       onChange={onChange}
       isSettled={false}
       {...overrides}
@@ -78,6 +79,7 @@ describe("ScopePicker", () => {
       <ScopePicker
         userIds={null}
         users={USERS}
+        onQueryChange={() => {}}
         onChange={vi.fn()}
         isSettled={false}
       />,

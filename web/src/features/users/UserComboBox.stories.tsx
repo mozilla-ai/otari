@@ -28,7 +28,12 @@ const USERS = [
 const meta = {
   title: "Dashboard/Users/UserComboBox",
   component: UserComboBox,
-  args: { value: "", onChange: () => {}, users: USERS },
+  args: {
+    value: "",
+    onChange: () => {},
+    onQueryChange: () => {},
+    users: USERS,
+  },
 } satisfies Meta<typeof UserComboBox>
 
 export default meta

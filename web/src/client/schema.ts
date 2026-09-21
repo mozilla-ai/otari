@@ -12356,6 +12356,11 @@ export interface components {
             current_requests: number;
             /** Current Tokens */
             current_tokens: number;
+            /**
+             * Display Name
+             * @description The person behind this id, from the organization roster, where the identity is on one. Null for an id nobody claimed, such as one an operator chose.
+             */
+            display_name?: string | null;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
@@ -20016,6 +20021,8 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description Narrow to users whose id, alias or roster name contains this text, case-insensitively. */
+                search?: string | null;
             };
             header?: never;
             path?: never;
