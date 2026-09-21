@@ -193,6 +193,27 @@ describe("groupPlaygroundModels", () => {
     expect(groups[0]?.label).toBe("Anthropic")
   })
 
+  it("matches the displayed vendor, which the key may not contain", () => {
+    // A bare-slug id like "gpt-4o" carries no vendor, but "OpenAI" is what the
+    // group heading shows, so searching it must keep the group.
+    const groups = groupPlaygroundModels({
+      models: buildPlaygroundModels(
+        catalogResponse([
+          catalogModelSummary({
+            id: "gpt-4o",
+            vendor: "OpenAI",
+            selector: "gpt-4o",
+            selectors: ["prov:gpt-4o"],
+          }),
+        ]),
+      ),
+      pinnedKeys: [],
+      search: "openai",
+    })
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.models.map((model) => model.key)).toEqual(["gpt-4o"])
+  })
+
   it("drops a group with no match rather than rendering it empty", () => {
     expect(
       groupPlaygroundModels({ models, pinnedKeys: [], search: "nothing" }),

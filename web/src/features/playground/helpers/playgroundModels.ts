@@ -109,8 +109,15 @@ export function groupPlaygroundModels(params: {
 }): ModelGroup[] {
   const needle = params.search.trim().toLowerCase()
   const pinned = new Set(params.pinnedKeys)
+  // Everything a row displays is searchable: the vendor is a group heading and
+  // the key can differ from the label while the catalog is unindexed, so
+  // matching the key alone would drop a model somebody is looking right at.
   const matching = params.models.filter(
-    (model) => !needle || model.key.toLowerCase().includes(needle),
+    (model) =>
+      !needle ||
+      [model.key, model.label, model.vendor].some((value) =>
+        value.toLowerCase().includes(needle),
+      ),
   )
   const pinnedModels = matching.filter((model) => pinned.has(model.key))
   const byVendor = matching
