@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   Budget,
   BudgetResetLog,
@@ -9,6 +14,7 @@ import type {
   OrganizationBudget,
   OrganizationContext,
   OrganizationSpendCeiling,
+  OrganizationSpendCeilings,
   ScopedBudget,
   UpdateBudgetRequest,
   UpdateOrganizationBudget,
@@ -189,7 +195,19 @@ export function useOrganizationBudgets(enabled = true) {
   })
 }
 
-export function useOrganizationSpendCeilings(enabled = true) {
+/**
+ * One page of the organization's spend ceilings, with the total.
+ *
+ * Read whole until otari#1420: the Overview also read it, for a worst-case
+ * aggregate, and a second reader wanting every row is what kept this a walk.
+ * That reader moved to the summary endpoint in otari#1425, so the table is the
+ * only one left and can ask for the page it shows.
+ */
+export function useOrganizationSpendCeilings(
+  page: number,
+  pageSize: number,
+  enabled = true,
+) {
   const queryClient = useQueryClient()
   // The context the caller's `enabled` was read from, whatever it read off it.
   const context = useOrganizationContext().data
@@ -202,12 +220,18 @@ export function useOrganizationSpendCeilings(enabled = true) {
     // screen. `invalidateOrganizationSpend` matches on the head, so the extra
     // segment costs it nothing, and a context that names no organization keys
     // as `null` rather than taking the page down over a cache entry.
-    queryKey: [ORGANIZATION_SPEND_CEILINGS, context?.organization?.id ?? null],
+    queryKey: [
+      ORGANIZATION_SPEND_CEILINGS,
+      context?.organization?.id ?? null,
+      page,
+      pageSize,
+    ],
     queryFn: () =>
-      fetchAllPaged<OrganizationSpendCeiling>(
-        "/organizations/me/spend-ceilings",
+      apiFetch<OrganizationSpendCeilings>(
+        `/organizations/me/spend-ceilings?skip=${page * pageSize}&limit=${pageSize}`,
       ),
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
     // A callback, because this is the one read here that a *role* opens, and a
     // role moves under a mounted query. Switching organization invalidates
     // everything cached, and React Query resolves a plain `enabled` from the
