@@ -64,7 +64,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import verify_api_key_or_master_key
+from gateway.api.deps import extract_credential_token, verify_api_key_or_master_key
 from gateway.api.routes._attempts import walk_attempts
 from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
 from gateway.api.routes._platform import (
@@ -78,7 +78,6 @@ from gateway.api.routes._platform import (
     ResolvedRoute,
     SettledCost,
     _classify_upstream_error,
-    _extract_platform_user_token,
     _report_platform_usage,
     _resolve_platform_code_execution,
     _resolve_platform_credentials,
@@ -1733,7 +1732,7 @@ async def resolve_request_context(
         # ``run_platform_attempts`` to walk.
         if model in config.policy_names():
             raise adapter.error(400, policy_in_hybrid_mode_detail(model), ErrorKind.INVALID_REQUEST)
-        user_token = _extract_platform_user_token(raw_request)
+        user_token = extract_credential_token(raw_request)
         start_time = time.perf_counter()
         route = await _resolve_platform_credentials(
             config=config,

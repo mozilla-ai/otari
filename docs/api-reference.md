@@ -33,9 +33,9 @@ operations, a separately scoped endpoint serves it to the caller's own
 organization: `/api/v1/organizations/me/usage` for usage, and
 `/api/v1/organizations/me/keys` for a member's own API keys.
 
-In hybrid mode, the generation APIs and the `/api/v1/mcp` endpoints accept an
-otari.ai user token in the same header forms. Local API keys and management
-APIs are not used.
+In hybrid mode, the generation APIs and the `/api/v1/mcp` and `/api/v1/hooks`
+endpoints accept an otari.ai user token in the same header forms. Local API
+keys and management APIs are not used.
 
 ## Availability by mode
 

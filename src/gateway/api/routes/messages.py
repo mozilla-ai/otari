@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     ModelProviderPortDep,
+    extract_credential_token,
     get_config,
     get_db_if_needed,
     get_log_writer,
@@ -48,7 +49,6 @@ from gateway.api.routes._pipeline import (
 from gateway.api.routes._platform import (
     ResolvedAttempt,
     SettledCost,
-    _extract_platform_user_token,
     _resolve_platform_credentials,
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
@@ -888,7 +888,7 @@ async def count_message_tokens(
             # Resolve against the platform purely to authenticate the caller (same
             # as create_message); the routing plan is discarded since counting is
             # local. Without this, any non-empty bearer string would be accepted.
-            user_token = _extract_platform_user_token(raw_request)
+            user_token = extract_credential_token(raw_request)
             await _resolve_platform_credentials(
                 config=config,
                 user_token=user_token,

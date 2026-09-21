@@ -45,8 +45,7 @@ from gateway.agent_runtime.domain.types import (
     JudgeGate,
     JudgeVerdict,
 )
-from gateway.api.deps import get_config, get_db_if_needed, verify_api_key_or_master_key
-from gateway.api.routes._platform import _extract_platform_user_token
+from gateway.api.deps import extract_credential_token, get_config, get_db_if_needed, verify_api_key_or_master_key
 from gateway.core.config import GatewayConfig
 
 
@@ -67,14 +66,14 @@ async def verify_hook_caller(
     local database, exactly as ``POST /api/v1/usage/external-events`` does.
 
     Hybrid has no local tenancy to validate against, so it only requires a
-    bearer token to be present, the same thing the stateless MCP route does
-    there. That is weaker on purpose and it is all this endpoint needs: it
+    credential header to be present, the same thing the stateless MCP route
+    does there. That is weaker on purpose and it is all this endpoint needs: it
     reads no tenant data, writes nothing, bills nothing, and evaluates only
     the policy and evidence the caller sent in the same request. What a
     request can cost is bounded by the work budgets below, not by who sent it.
     """
     if config.is_hybrid_mode:
-        _extract_platform_user_token(request)
+        extract_credential_token(request)
         return
 
     if db is None:

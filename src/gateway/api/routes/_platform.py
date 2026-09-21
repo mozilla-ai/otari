@@ -22,12 +22,11 @@ from anthropic import APIConnectionError as _AnthropicAPIConnectionError
 from anthropic import APITimeoutError as _AnthropicAPITimeoutError
 from any_llm import LLMProvider
 from any_llm.types.completion import CompletionUsage
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, status
 from openai import APIConnectionError as _OpenAIAPIConnectionError
 from openai import APITimeoutError as _OpenAIAPITimeoutError
 from pydantic import BaseModel, Field, ValidationError
 
-from gateway.api.deps import _extract_bearer_token
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import (
     cache_read_tokens_of,
@@ -464,25 +463,6 @@ async def run_platform_attempts(
 
 
 # ---------- platform-side helpers ----------
-
-
-def _extract_platform_user_token(request: Request) -> str:
-    """Pull the user's platform token off the request headers.
-
-    Used in hybrid mode to forward the caller's identity to the platform's
-    resolve endpoint. Standalone mode uses ``verify_api_key_or_master_key``
-    instead. Both read the same headers via ``_extract_bearer_token``, so a
-    key authenticates the same way whichever mode a deployment runs in; only
-    who verifies the token differs (the platform here, the local database
-    there).
-    """
-    token = _extract_bearer_token(request).strip()
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authentication token",
-        )
-    return token
 
 
 def _split_model_selector(model_selector: str) -> tuple[str | None, str]:

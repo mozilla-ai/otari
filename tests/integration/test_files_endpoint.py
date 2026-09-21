@@ -102,7 +102,7 @@ def test_files_are_user_scoped(
     )
     # Match the fixture's auth scheme: the gateway requires a "Bearer " prefix on
     # every header form, including Otari-Key (see api_key_header / deps.py
-    # _extract_bearer_token), so reuse the fixture's header name with a Bearer value.
+    # extract_credential_token), so reuse the fixture's header name with a Bearer value.
     other_header = {next(iter(api_key_header)): f"Bearer {other.json()['key']}"}
 
     assert client.get(f"{API_ROOT}/files/{file_id}", headers=other_header).status_code == 404

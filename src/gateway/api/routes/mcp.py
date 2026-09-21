@@ -39,9 +39,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from gateway.api.deps import get_config, get_db_if_needed, verify_api_key_or_master_key
+from gateway.api.deps import extract_credential_token, get_config, get_db_if_needed, verify_api_key_or_master_key
 from gateway.api.routes._platform import (
-    _extract_platform_user_token,
     _resolve_platform_mcp_server,
 )
 
@@ -339,7 +338,7 @@ async def _authenticate(
     and leave them driving mutating MCP tools through the gateway.
     """
     if config.is_hybrid_mode:
-        return _Principal(user_token=_extract_platform_user_token(raw_request), workspace_id=None)
+        return _Principal(user_token=extract_credential_token(raw_request), workspace_id=None)
 
     if db is None:
         raise HTTPException(

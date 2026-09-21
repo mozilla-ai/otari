@@ -885,7 +885,7 @@ def test_falls_back_to_configured_master_key_and_localhost(
     result = CliRunner().invoke(gateway_cli.hook, [], input=json.dumps(payload))
     assert result.exit_code == 0, result.output
     assert captured["url"] == "http://localhost:8000/api/v1/hooks/check"
-    # The bare token, not a ``Bearer `` prefix: deps._extract_bearer_token
+    # The bare token, not a ``Bearer `` prefix: deps.extract_credential_token
     # tolerates the prefix for back-compat, but a header named for the key
     # carries the raw token.
     assert captured["headers"]["Otari-Key"] == "test-master-key"

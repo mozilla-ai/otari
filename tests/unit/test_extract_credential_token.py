@@ -1,6 +1,6 @@
-"""Unit tests for the gateway's Bearer-token extraction.
+"""Unit tests for the gateway credential-token extraction.
 
-These tests exercise ``_extract_bearer_token`` directly — a pure function over
+These tests exercise ``extract_credential_token`` directly — a pure function over
 ``Request.headers`` — so they cover all precedence and malformed-input branches
 without needing the full FastAPI stack or a database.
 """
@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from gateway.api.deps import _extract_bearer_token
+from gateway.api.deps import extract_credential_token
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER
 from gateway.metrics import REGISTRY
 
@@ -30,13 +30,13 @@ def _make_request(headers: dict[str, str]) -> Request:
 def test_canonical_header_returns_token() -> None:
     request = _make_request({API_KEY_HEADER: "Bearer token-canonical"})
 
-    assert _extract_bearer_token(request) == "token-canonical"
+    assert extract_credential_token(request) == "token-canonical"
 
 
 def test_authorization_header_returns_token() -> None:
     request = _make_request({"Authorization": "Bearer token-auth"})
 
-    assert _extract_bearer_token(request) == "token-auth"
+    assert extract_credential_token(request) == "token-auth"
 
 
 def test_canonical_takes_precedence_over_authorization() -> None:
@@ -47,7 +47,7 @@ def test_canonical_takes_precedence_over_authorization() -> None:
         }
     )
 
-    assert _extract_bearer_token(request) == "canonical-wins"
+    assert extract_credential_token(request) == "canonical-wins"
 
 
 @pytest.mark.parametrize("legacy_header", ["AnyLLM-Key", "X-AnyLLM-Key"])
@@ -57,7 +57,7 @@ def test_legacy_header_is_no_longer_honored(legacy_header: str) -> None:
     request = _make_request({legacy_header: "Bearer token-legacy"})
 
     with pytest.raises(HTTPException) as exc_info:
-        _extract_bearer_token(request)
+        extract_credential_token(request)
 
     assert exc_info.value.status_code == 401
     assert API_KEY_HEADER in exc_info.value.detail
@@ -68,7 +68,7 @@ def test_canonical_header_accepts_raw_token() -> None:
     # token is returned verbatim.
     request = _make_request({API_KEY_HEADER: "gw-raw-canonical"})
 
-    assert _extract_bearer_token(request) == "gw-raw-canonical"
+    assert extract_credential_token(request) == "gw-raw-canonical"
 
 
 def test_malformed_authorization_header_raises_401() -> None:
@@ -81,7 +81,7 @@ def test_malformed_authorization_header_raises_401() -> None:
     before = REGISTRY.get_sample_value("gateway_auth_failures_total", {"reason": "invalid_format"}) or 0.0
 
     with pytest.raises(HTTPException) as exc_info:
-        _extract_bearer_token(request)
+        extract_credential_token(request)
 
     assert exc_info.value.status_code == 401
     after = REGISTRY.get_sample_value("gateway_auth_failures_total", {"reason": "invalid_format"}) or 0.0
@@ -92,7 +92,7 @@ def test_missing_credentials_raises_401() -> None:
     request = _make_request({})
 
     with pytest.raises(HTTPException) as exc_info:
-        _extract_bearer_token(request)
+        extract_credential_token(request)
 
     assert exc_info.value.status_code == 401
     assert API_KEY_HEADER in exc_info.value.detail
@@ -106,7 +106,7 @@ def test_missing_credentials_raises_401() -> None:
 def test_x_api_key_header_returns_raw_token() -> None:
     request = _make_request({X_API_KEY_HEADER: "test-raw-token"})
 
-    assert _extract_bearer_token(request) == "test-raw-token"
+    assert extract_credential_token(request) == "test-raw-token"
 
 
 def test_authorization_takes_precedence_over_x_api_key() -> None:
@@ -117,7 +117,7 @@ def test_authorization_takes_precedence_over_x_api_key() -> None:
         }
     )
 
-    assert _extract_bearer_token(request) == "bearer-wins"
+    assert extract_credential_token(request) == "bearer-wins"
 
 
 def test_canonical_takes_precedence_over_x_api_key() -> None:
@@ -128,11 +128,43 @@ def test_canonical_takes_precedence_over_x_api_key() -> None:
         }
     )
 
-    assert _extract_bearer_token(request) == "canonical-wins"
+    assert extract_credential_token(request) == "canonical-wins"
 
 
 def test_x_api_key_without_bearer_prefix_succeeds() -> None:
     request = _make_request({X_API_KEY_HEADER: "test-raw-token-no-bearer-prefix"})
 
-    token = _extract_bearer_token(request)
+    token = extract_credential_token(request)
     assert token == "test-raw-token-no-bearer-prefix"
+
+
+# ---------------------------------------------------------------------------
+# Whitespace handling (shared by every mode)
+# ---------------------------------------------------------------------------
+
+
+def test_surrounding_whitespace_is_stripped() -> None:
+    request = _make_request({API_KEY_HEADER: " tk_padded "})
+
+    assert extract_credential_token(request) == "tk_padded"
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {API_KEY_HEADER: "   "},
+        {API_KEY_HEADER: "Bearer  "},
+        {"Authorization": "Bearer  "},
+        {X_API_KEY_HEADER: "   "},
+    ],
+)
+def test_whitespace_only_credential_is_missing(headers: dict[str, str]) -> None:
+    """A credential of spaces is answered as missing, not sent on to fail
+    verification as a token of whitespace."""
+    request = _make_request(headers)
+
+    with pytest.raises(HTTPException) as exc_info:
+        extract_credential_token(request)
+
+    assert exc_info.value.status_code == 401
+    assert API_KEY_HEADER in exc_info.value.detail
