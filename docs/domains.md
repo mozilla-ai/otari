@@ -296,6 +296,9 @@ and budgets, so it has no tables of its own and writes nothing.
 directly, and it takes the session instead of extending `BaseRepository`. The
 target shape has the overview service ask each domain's service for its data.
 
+The overview has no slot of its own in the order of work. Its queries move with
+each domain it reads, and budgets is the first.
+
 ### Shared
 
 Cross-cutting modules that several domains import. They stay where they are.
