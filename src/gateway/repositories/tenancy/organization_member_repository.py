@@ -147,6 +147,20 @@ class OrganizationMemberRepository(
         )
         return result.scalars().first()
 
+    async def get_organization_id(self, organization_member_id: uuid.UUID) -> uuid.UUID | None:
+        """Return the ID of the organization a membership belongs to, or None."""
+        result = await self.db.execute(
+            select(col(OrganizationMember.organization_id)).where(col(OrganizationMember.id) == organization_member_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_ids_by_organization(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
+        """Return the ID of every membership in an organization, whatever its status."""
+        result = await self.db.execute(
+            select(col(OrganizationMember.id)).where(col(OrganizationMember.organization_id) == organization_id)
+        )
+        return list(result.scalars().all())
+
     async def create_membership(
         self,
         *,
