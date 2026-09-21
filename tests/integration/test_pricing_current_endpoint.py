@@ -8,10 +8,13 @@ reading the collection (otari#1376).
 """
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
+from gateway.models.pricing import ModelPricing
 
 
 def _price(
@@ -113,6 +116,62 @@ def test_the_page_is_a_window_on_models_and_the_count_is_all_of_them(
     assert [row["model_key"] for row in first["data"]] == ["openai:m0", "openai:m1"]
     assert [row["model_key"] for row in second["data"]] == ["openai:m2", "openai:m3"]
     assert [row["model_key"] for row in last["data"]] == ["openai:m4"]
+
+
+def test_a_model_stored_under_both_spellings_is_reported_once(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """The legacy ``provider/model`` key is dropped where the canonical one exists.
+
+    A lookup resolves such a model to the ``provider:model`` row, so listing the
+    legacy one would name a rate nothing is metered at and count one model twice.
+    ``rates_in_force`` drops it too; the two have to agree. Written straight to
+    the table because ``POST /v1/pricing`` normalizes the key, which is why only
+    older rows carry the legacy form.
+    """
+
+    now = datetime.now(UTC)
+    _price(client, master_key_header, "openai:gpt-4o", rate=3, effective_at=now - timedelta(days=1))
+    db_session.add(
+        ModelPricing(
+            model_key="openai/gpt-4o",
+            effective_at=now - timedelta(days=1),
+            input_price_per_million=Decimal(99),
+            output_price_per_million=Decimal(99),
+        )
+    )
+    db_session.commit()
+
+    body = client.get(f"{API_ROOT}/pricing/current", headers=master_key_header).json()
+
+    assert body["count"] == 1
+    assert [row["model_key"] for row in body["data"]] == ["openai:gpt-4o"]
+
+
+def test_a_legacy_key_with_no_canonical_twin_is_still_listed(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """Dropping it would hide the only rate that model has."""
+
+    now = datetime.now(UTC)
+    db_session.add(
+        ModelPricing(
+            model_key="openai/gpt-4o",
+            effective_at=now - timedelta(days=1),
+            input_price_per_million=Decimal(5),
+            output_price_per_million=Decimal(5),
+        )
+    )
+    db_session.commit()
+
+    body = client.get(f"{API_ROOT}/pricing/current", headers=master_key_header).json()
+
+    assert body["count"] == 1
+    assert [row["model_key"] for row in body["data"]] == ["openai/gpt-4o"]
 
 
 def test_current_is_a_route_rather_than_a_model_key(
