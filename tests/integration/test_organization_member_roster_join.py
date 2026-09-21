@@ -11,7 +11,9 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.core.config import API_ROOT
 from gateway.models.budgets import Budget, ScopedBudget
@@ -21,6 +23,7 @@ from gateway.models.tenancy import (
     Organization,
     User,
     Workspace,
+    WorkspaceMember,
 )
 from gateway.models.users import User as ApiUser
 from gateway.repositories.tenancy import (
@@ -159,6 +162,92 @@ async def test_a_member_in_two_workspaces_holds_a_ceiling_in_each(async_db: Asyn
     row = _row_for(await _roster(async_db, owner), owner)
 
     assert [p.ceiling.max_budget for p in row.workspaces if p.ceiling] == [100, 50]
+
+
+@pytest.mark.asyncio
+async def test_a_suspended_workspace_membership_is_not_a_placement(async_db: AsyncSession) -> None:
+    """Somebody suspended in a workspace is no longer in it, and listing them
+    there would put them somewhere they cannot act. ``get_workspaces_for_user``
+    answers the same question the same way."""
+
+    organization = await _organization(async_db, slug="acme-join-suspended")
+    owner = await _member(async_db, organization, full_name="Owner", role="owner")
+    workspace = await _workspace(async_db, organization, name="Engineering", owner=owner)
+    membership = (
+        await async_db.execute(
+            select(WorkspaceMember).where(col(WorkspaceMember.workspace_id) == workspace.id)
+        )
+    ).scalars().one()
+    membership.status = "suspended"
+    async_db.add(membership)
+    await async_db.flush()
+
+    row = _row_for(await _roster(async_db, owner), owner)
+
+    assert row.workspaces == []
+
+
+@pytest.mark.asyncio
+async def test_a_ceiling_narrowed_to_one_provider_is_not_the_memberships(async_db: AsyncSession) -> None:
+    """A ceiling carrying a provider key caps that credential, not the
+    membership. The roster reports what the member may spend at all, so the
+    aggregate row is the one it wants, and reading either would make the figure
+    depend on which row the database returned first."""
+
+    organization = await _organization(async_db, slug="acme-join-narrowed")
+    owner = await _member(async_db, organization, full_name="Owner", role="owner")
+    await _workspace(async_db, organization, name="Engineering", owner=owner)
+    membership = (await _roster(async_db, owner)).data[0].workspaces[0].workspace_member_id
+    async_db.add(Budget(budget_id="b-narrow", name="One provider", max_budget=Decimal(5)))
+    async_db.add(
+        ScopedBudget(
+            id="sb-narrowed",
+            scope_type="workspace_member",
+            scope_id=str(membership),
+            budget_id="b-narrow",
+            provider_key_id="pk-1",
+        )
+    )
+    await async_db.flush()
+
+    row = _row_for(await _roster(async_db, owner), owner)
+
+    assert row.workspaces[0].ceiling is None
+
+
+@pytest.mark.asyncio
+async def test_the_aggregate_ceiling_wins_over_a_narrowed_one(async_db: AsyncSession) -> None:
+    """Both rows can exist at once, and only one of them is the member's cap."""
+
+    organization = await _organization(async_db, slug="acme-join-both")
+    owner = await _member(async_db, organization, full_name="Owner", role="owner")
+    await _workspace(async_db, organization, name="Engineering", owner=owner)
+    membership = (await _roster(async_db, owner)).data[0].workspaces[0].workspace_member_id
+    async_db.add(Budget(budget_id="b-all", name="Everything", max_budget=Decimal(100)))
+    async_db.add(Budget(budget_id="b-one", name="One provider", max_budget=Decimal(5)))
+    async_db.add(
+        ScopedBudget(
+            id="sb-all",
+            scope_type="workspace_member",
+            scope_id=str(membership),
+            budget_id="b-all",
+        )
+    )
+    async_db.add(
+        ScopedBudget(
+            id="sb-one",
+            scope_type="workspace_member",
+            scope_id=str(membership),
+            budget_id="b-one",
+            provider_key_id="pk-1",
+        )
+    )
+    await async_db.flush()
+
+    row = _row_for(await _roster(async_db, owner), owner)
+
+    assert row.workspaces[0].ceiling is not None
+    assert row.workspaces[0].ceiling.budget_id == "b-all"
 
 
 @pytest.mark.asyncio

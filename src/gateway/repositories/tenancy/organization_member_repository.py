@@ -362,6 +362,11 @@ class OrganizationMemberRepository(
                 .where(
                     col(Workspace.organization_id) == organization_id,
                     col(WorkspaceMember.user_id).in_(ids),
+                    # Active only, the way ``get_workspaces_for_user`` answers
+                    # the same question: a suspended membership is somebody who
+                    # is no longer in that workspace, and listing it would put
+                    # them somewhere they cannot act.
+                    col(WorkspaceMember.status) == "active",
                 )
                 .order_by(col(Workspace.name), col(Workspace.id))
             )
@@ -378,6 +383,11 @@ class OrganizationMemberRepository(
     ) -> dict[str, tuple[ScopedBudget, Budget]]:
         """The spend ceiling on each of these workspace memberships, by membership id.
 
+        The aggregate ceiling only, the one narrowed to no provider: a ceiling
+        carrying a ``provider_key_id`` caps one credential rather than the
+        membership, and the roster reports what the member may spend at all.
+        ``WorkspaceBudgetDefault`` is read the same way for the same reason.
+
         ``scoped_budgets.scope_id`` is text while a membership id is a UUID, so
         the ids are matched as strings here rather than cast in SQL, which the
         two engines spell differently.
@@ -391,7 +401,11 @@ class OrganizationMemberRepository(
             await self.db.execute(
                 select(ScopedBudget, Budget)
                 .join(Budget, ScopedBudget.budget_id == Budget.budget_id)
-                .where(ScopedBudget.scope_type == "workspace_member", ScopedBudget.scope_id.in_(keys))
+                .where(
+                    ScopedBudget.scope_type == "workspace_member",
+                    ScopedBudget.scope_id.in_(keys),
+                    ScopedBudget.provider_key_id.is_(None),
+                )
             )
         ).all()
         return {ceiling.scope_id: (ceiling, budget) for ceiling, budget in rows}

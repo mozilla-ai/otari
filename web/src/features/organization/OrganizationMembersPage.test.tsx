@@ -81,7 +81,10 @@ function mockApi(opts: {
     scopedBudgets.find(
       (budget) =>
         budget.scope_type === "workspace_member" &&
-        budget.scope_id === membershipId,
+        budget.scope_id === membershipId &&
+        // The aggregate one, as the route matches it: a ceiling carrying a
+        // provider key caps that credential rather than the membership.
+        budget.provider_key_id === null,
     ) ?? null
   const joined = (member: OrganizationMember): OrganizationMember => ({
     ...member,
