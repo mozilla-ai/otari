@@ -55,7 +55,7 @@ not the module beside it.
 
 ## The shape today
 
-Measured on `main` at `ecd07b13`, 2026-09-17, and updated by each domain change
+Measured on `main` at `cf2968c1`, 2026-09-21, and updated by each domain change
 since. A module "runs queries" when it imports a query builder (`select`,
 `update`, `delete` or `insert` from SQLAlchemy or SQLModel) and calls `execute`,
 `exec`, `scalar`, `scalars` or `get` on a session.
