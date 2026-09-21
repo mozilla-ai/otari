@@ -29,6 +29,7 @@ import {
   filterModels,
   MODALITIES,
   MODALITY_LABELS,
+  makerKeyOf,
   PRICE_OPTIONS,
   PRICING_OPTIONS,
   providerOptions,
@@ -39,6 +40,12 @@ import {
 } from "@/features/models/catalog"
 import { publicCatalogHref } from "@/features/models/publicCatalog"
 import { useCatalog } from "@/shared/api/models"
+import {
+  anyMakerMark,
+  anyProviderMark,
+  MakerMark,
+  ProviderMark,
+} from "@/shared/components/marks/BrandMark"
 import {
   formatContext,
   formatRate,
@@ -173,6 +180,16 @@ function FilterRail({
     key: K,
     value: CatalogFilters[K],
   ) => onChange({ ...filters, [key]: value })
+  const providers = providerOptions(models)
+  // Decided per list rather than per row: a rail where nothing resolves would
+  // be a column of identical tiles, which says nothing and indents every label.
+  const providersMarked = anyProviderMark(
+    providers.map((option) => option.value),
+  )
+  const vendors = vendorOptions(models)
+  const vendorsMarked = anyMakerMark(
+    vendors.flatMap((option) => (option.markKey ? [option.markKey] : [])),
+  )
   return (
     <div className="flex flex-col">
       <FilterGroup
@@ -234,7 +251,7 @@ function FilterRail({
         />
       </FilterGroup>
       <FilterGroup label="Providers" count={filters.providers.length}>
-        {providerOptions(models).map((option) => (
+        {providers.map((option) => (
           <Checkbox
             key={option.value}
             isSelected={filters.providers.includes(option.value)}
@@ -242,12 +259,19 @@ function FilterRail({
               set("providers", toggle(filters.providers, option.value, isOn))
             }
           >
-            {option.label}
+            {providersMarked ? (
+              <span className="flex items-center gap-2">
+                <ProviderMark providerId={option.value} label={option.label} />
+                {option.label}
+              </span>
+            ) : (
+              option.label
+            )}
           </Checkbox>
         ))}
       </FilterGroup>
       <FilterGroup label="Vendors" count={filters.vendors.length}>
-        {vendorOptions(models).map((option) => (
+        {vendors.map((option) => (
           <Checkbox
             key={option.value || "unknown"}
             isSelected={filters.vendors.includes(option.value)}
@@ -255,7 +279,25 @@ function FilterRail({
               set("vendors", toggle(filters.vendors, option.value, isOn))
             }
           >
-            {option.label}
+            {vendorsMarked ? (
+              <span className="flex items-center gap-2">
+                {/* The unknown bucket is not a company, so it takes no mark and
+                    no tile: an initial for "Unknown vendor" would name a vendor
+                    called U. It keeps the slot, which is what holds the column. */}
+                {option.markKey ? (
+                  <MakerMark
+                    vendorSlug={option.markKey}
+                    label={option.label}
+                    step={16}
+                  />
+                ) : (
+                  <span aria-hidden="true" className="size-4 shrink-0" />
+                )}
+                {option.label}
+              </span>
+            ) : (
+              option.label
+            )}
           </Checkbox>
         ))}
       </FilterGroup>
@@ -323,6 +365,7 @@ function ModelCard({
   publicView: boolean
 }) {
   const title = model.vendor ? `${model.vendor}: ${model.name}` : model.name
+  const makerKey = makerKeyOf(model)
   const titleClass =
     "text-heading text-link group-hover:text-link-hover break-words"
   const providers =
@@ -343,7 +386,12 @@ function ModelCard({
         <p className="line-clamp-2 text-sm text-muted">{model.description}</p>
       ) : null}
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption">
-        <span>by {model.vendor ?? "unknown vendor"}</span>
+        <span className="flex items-center gap-1.5">
+          {makerKey ? (
+            <MakerMark vendorSlug={makerKey} label={model.vendor ?? ""} />
+          ) : null}
+          by {model.vendor ?? "unknown vendor"}
+        </span>
         {model.release_date ? (
           <>
             <Sep />
@@ -408,11 +456,22 @@ const TABLE_COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
     cell: (row) => (
       <div className="flex min-w-0 flex-col">
         <span className="text-body break-words">{row.name}</span>
-        <span className="text-caption">
-          {row.vendor ?? "Unknown vendor"} ·{" "}
-          {row.provider_count === 1
-            ? "1 provider"
-            : `${row.provider_count} providers`}
+        <span className="flex items-center gap-1.5 text-caption">
+          {/* No slot held when the maker is unknown: the sub-line is prose on
+              one row of a table whose other rows carry a mark, and an empty box
+              in front of "Unknown vendor" reads as a mark that failed to load. */}
+          {makerKeyOf(row) === undefined ? null : (
+            <MakerMark
+              vendorSlug={makerKeyOf(row) ?? ""}
+              label={row.vendor ?? ""}
+            />
+          )}
+          <span>
+            {row.vendor ?? "Unknown vendor"} ·{" "}
+            {row.provider_count === 1
+              ? "1 provider"
+              : `${row.provider_count} providers`}
+          </span>
         </span>
       </div>
     ),

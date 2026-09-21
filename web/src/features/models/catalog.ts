@@ -341,14 +341,53 @@ export const SORT_OPTIONS: {
   },
 ]
 
-/** Vendors present, with the unknown bucket named, for the rail. */
+/**
+ * The vendor slug a row's catalog id carries, or `undefined` when it carries
+ * none.
+ *
+ * The gateway builds a model's id as `vendor_slug(vendor)/slug` and as the bare
+ * slug where no vendor could be named (`model_identity.CatalogIdentity`), so the
+ * prefix already is the normalized vendor and reading it off is what keeps a
+ * second copy of those rules out of this codebase. Both halves are required:
+ * `vendor` says a prefix was added, the separator says one is there to take.
+ *
+ * The prefix cannot contradict the vendor, which is what makes reading it safe:
+ * `id` is a property computed from `vendor` on the one identity, and the
+ * response sets both fields from that object. A row whose prefix named a
+ * different company would not be a mark keyed wrong, it would be a response the
+ * gateway cannot produce.
+ */
+export function makerKeyOf(
+  model: Pick<CatalogModelSummary, "id" | "vendor">,
+): string | undefined {
+  if (!model.vendor) return undefined
+  const separator = model.id.indexOf("/")
+  return separator > 0 ? model.id.slice(0, separator) : undefined
+}
+
+/**
+ * Vendors present, with the unknown bucket named, for the rail.
+ *
+ * `markKey` rides along because the filter carries the vendor's display string
+ * (it is what the URL and the filter match on) while a mark is keyed on the
+ * slug, and only a row knows both.
+ */
 export function vendorOptions(
   models: CatalogModelSummary[],
-): { value: string; label: string }[] {
-  const vendors = new Set(models.map((model) => model.vendor ?? ""))
-  return [...vendors]
-    .sort((a, b) => a.localeCompare(b))
-    .map((vendor) => ({ value: vendor, label: vendor || "Unknown vendor" }))
+): { value: string; label: string; markKey: string | undefined }[] {
+  const keys = new Map<string, string | undefined>()
+  for (const model of models) {
+    const vendor = model.vendor ?? ""
+    // First row wins, which is enough: a vendor string maps to one slug.
+    if (!keys.has(vendor)) keys.set(vendor, makerKeyOf(model))
+  }
+  return [...keys.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([vendor, markKey]) => ({
+      value: vendor,
+      label: vendor || "Unknown vendor",
+      markKey,
+    }))
 }
 
 /**

@@ -6,6 +6,7 @@ import {
   compareModels,
   EMPTY_FILTERS,
   filterModels,
+  makerKeyOf,
   priceSourceLabel,
   providerOptions,
   vendorOptions,
@@ -242,11 +243,35 @@ describe("compareModels", () => {
   })
 })
 
+describe("makerKeyOf", () => {
+  it("reads the vendor slug off the catalog id", () => {
+    // The gateway builds the id as `vendor_slug(vendor)/slug`, so the prefix is
+    // the normalized vendor. Taking it beats reimplementing those rules here:
+    // `Z.ai` normalizes to `z-ai`, which no obvious slug function would guess.
+    expect(makerKeyOf(GLM)).toBe("z-ai")
+  })
+
+  it("has no key for a model whose maker is unknown", () => {
+    // No vendor means the gateway added no prefix, so there is nothing to read.
+    expect(makerKeyOf(LOCAL)).toBeUndefined()
+  })
+
+  it("needs both halves before it trusts a prefix", () => {
+    // A vendor with no separator in the id is not a shape the gateway produces,
+    // so it yields nothing rather than a guess at where the slug ends.
+    expect(makerKeyOf({ id: "glm-5.3", vendor: "Z.ai" })).toBeUndefined()
+    // And a slash with no vendor is a model whose name simply has one in it.
+    expect(makerKeyOf({ id: "org/model", vendor: null })).toBeUndefined()
+  })
+})
+
 describe("options", () => {
   it("lists vendors with the unknown bucket named", () => {
+    // `markKey` is the vendor slug a mark is keyed on, carried alongside because
+    // the filter matches on the display string and only a row knows both.
     expect(vendorOptions([GLM, LOCAL])).toEqual([
-      { value: "", label: "Unknown vendor" },
-      { value: "Z.ai", label: "Z.ai" },
+      { value: "", label: "Unknown vendor", markKey: undefined },
+      { value: "Z.ai", label: "Z.ai", markKey: "z-ai" },
     ])
   })
 

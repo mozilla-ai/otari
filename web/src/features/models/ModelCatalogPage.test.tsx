@@ -212,6 +212,44 @@ describe("ModelCatalogPage", () => {
     expect(screen.getByText(/2 models across 2 providers/)).toBeInTheDocument()
   })
 
+  it("marks the maker on a card and in the table", async () => {
+    // The wiring, not the resolution: `brandMarks` pins which glyph a slug
+    // gets, and this pins that the page asks. Z.ai has a mark, so a card's
+    // meta line carries an <svg> beside "by Z.ai" and so does the table's
+    // sub-line under the same model.
+    mockApi()
+    renderPage(<ModelCatalogPage />)
+
+    const list = await screen.findByRole("list", { name: "Models" })
+    const byLine = within(list).getByText(/by Z\.ai/)
+    expect(byLine.querySelector("svg")).not.toBeNull()
+
+    await userEvent.click(screen.getByRole("radio", { name: "Table" }))
+    // `closest("span")` would return the sub-line itself; the mark is its
+    // sibling, so the assertion is on the parent.
+    const subLine = await screen.findByText(/Z\.ai · 2 providers/)
+    expect(subLine.parentElement?.querySelector("svg")).not.toBeNull()
+  })
+
+  it("marks the makers and the providers in the rail", async () => {
+    mockApi()
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+    await screen.findByRole("list", { name: "Models" })
+
+    // Both groups fold until something in them is chosen, and a hidden row is
+    // not in the accessibility tree.
+    await user.click(screen.getByRole("button", { name: "Vendors" }))
+    await user.click(screen.getByRole("button", { name: "Providers" }))
+
+    // Both rail lists resolve at least one mark on this seed, so both reserve
+    // the slot and every row in them carries one.
+    const vendors = screen.getByRole("checkbox", { name: /Z\.ai/ })
+    expect(vendors.closest("label")?.querySelector("svg")).not.toBeNull()
+    const provider = screen.getByRole("checkbox", { name: /Fireworks AI/ })
+    expect(provider.closest("label")?.querySelector("svg")).not.toBeNull()
+  })
+
   it("opens a model from the description inside its card", async () => {
     mockApi()
     renderPage(<ModelCatalogPage />)
