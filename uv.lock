@@ -1063,6 +1063,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+fsspec = [
+    { name = "fsspec" },
+]
 ocr = [
     { name = "numpy" },
     { name = "rapidocr-onnxruntime" },
@@ -1103,6 +1106,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "dnspython", specifier = ">=2.7.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "fsspec", marker = "extra == 'fsspec'", specifier = ">=2024.6.0" },
     { name = "genai-prices", specifier = ">=0.1.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "idna", specifier = ">=3.10" },
@@ -1126,7 +1130,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
     { name = "webauthn", specifier = ">=2.5.0" },
 ]
-provides-extras = ["ocr", "s3"]
+provides-extras = ["fsspec", "ocr", "s3"]
 
 [package.metadata.requires-dev]
 dev = [

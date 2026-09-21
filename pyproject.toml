@@ -108,6 +108,15 @@ ocr = [
 s3 = [
     "boto3>=1.42.0",
 ]
+# The generic files backend (`FsspecFileStore`): one URL reaches whichever
+# filesystem the operator has an fsspec implementation installed for. fsspec
+# is already in the tree through any-llm-sdk[all], but as with s3 the extra is
+# what build_file_store names and documents, so the backend does not depend on
+# that implementation detail. The protocol's own package (gcsfs, adlfs, s3fs,
+# paramiko, ...) is the operator's to install.
+fsspec = [
+    "fsspec>=2024.6.0",
+]
 
 [dependency-groups]
 dev = [
@@ -223,6 +232,11 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["trafilatura.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# fsspec ships no stubs; the file store drives it through a handful of calls.
+module = ["fsspec", "fsspec.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
