@@ -62,8 +62,8 @@ since. A module "runs queries" when it imports a query builder (`select`,
 
 | Measure | Count |
 | --- | --- |
-| Service modules | 108, of which 71 sit flat at the top of `services/` |
-| Service modules that run queries | 39, plus 2 that only call `session.get` |
+| Service modules | 111, of which 71 sit flat at the top of `services/` |
+| Service modules that run queries | 38, plus 2 that only call `session.get` |
 | Route modules | 73 |
 | Route modules that run queries | 17, plus 1 that only calls `session.get` |
 | Route modules that define Pydantic models inline | 41 |
