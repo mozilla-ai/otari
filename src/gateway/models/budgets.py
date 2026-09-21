@@ -338,7 +338,9 @@ class BudgetReservation(Base):
     user_reserved: Mapped[bool] = mapped_column(default=False, server_default=false())
     # The status is a plain string and not a database enum, so a new state needs no enum migration.
     # Its values are ``RESERVATION_STATUSES``.
-    status: Mapped[str] = mapped_column(default="active", server_default="active", nullable=False)
+    status: Mapped[str] = mapped_column(
+        default=RESERVATION_ACTIVE, server_default=RESERVATION_ACTIVE, nullable=False
+    )
     # After this instant a still-active row is treated as leaked and reclaimed.
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
