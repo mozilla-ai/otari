@@ -8,7 +8,7 @@ from typing import NamedTuple
 
 from genai_prices import Usage, calc_price
 from genai_prices.types import PriceCalculation, TieredPrices
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
@@ -600,6 +600,55 @@ async def rates_in_force(
     stored = {row.model_key for row in rows}
     in_force = [row for row in rows if _canonical_key_form(row.model_key) not in stored - {row.model_key}]
     return in_force[:limit]
+
+
+async def current_rates_page(
+    db: AsyncSession,
+    *,
+    skip: int,
+    limit: int,
+    as_of: datetime | None = None,
+) -> tuple[list[ModelPricing], int]:
+    """One page of each priced model's current rate, with the total model count.
+
+    :func:`rates_in_force` answers what settlement would pick, so a key whose
+    only row is scheduled for later has none. The catalog needs the wider view:
+    a rate an operator has queued is one the table has to show, so this falls
+    back to the earliest scheduled row where nothing has taken effect yet. The
+    two agree wherever a rate is live.
+    """
+
+    lookup_time = normalize_effective_at(as_of)
+    # One grouped pass rather than a join of a past and a future subquery: the
+    # group-wide MIN is the earliest row, and COALESCE only reaches it when no
+    # row has taken effect. A FULL OUTER JOIN would say the same thing and is
+    # not portable to the SQLite the OSS edition runs on.
+    chosen = (
+        select(
+            ModelPricing.model_key.label("model_key"),
+            func.coalesce(
+                func.max(case((ModelPricing.effective_at <= lookup_time, ModelPricing.effective_at))),
+                func.min(ModelPricing.effective_at),
+            ).label("effective_at"),
+        )
+        .group_by(ModelPricing.model_key)
+        .subquery()
+    )
+    # ``(model_key, effective_at)`` is the primary key, so the join keeps one row
+    # per model. Ordered by key so a page is stable between reads.
+    stmt = (
+        select(ModelPricing)
+        .join(
+            chosen,
+            (ModelPricing.model_key == chosen.c.model_key) & (ModelPricing.effective_at == chosen.c.effective_at),
+        )
+        .order_by(ModelPricing.model_key)
+        .offset(skip)
+        .limit(limit)
+    )
+    rows = list((await db.execute(stmt)).scalars())
+    count = await db.scalar(select(func.count(distinct(ModelPricing.model_key))))
+    return rows, count or 0
 
 
 async def find_model_pricing(

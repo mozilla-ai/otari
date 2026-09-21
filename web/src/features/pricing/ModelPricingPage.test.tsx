@@ -12,6 +12,7 @@ import type {
   PricingRefreshPreview,
   PricingResponse,
 } from "@/client"
+import { currentPricing } from "@/features/models/pricing"
 import { ModelPricingPage } from "@/features/pricing/ModelPricingPage"
 import { API_ROOT } from "@/shared/api/client"
 import { organizationContext } from "@/tests/fixtures"
@@ -114,6 +115,18 @@ function mockApi(
       if (url.includes(`${API_ROOT}/pricing/snapshots`))
         return jsonResponse(snapshots)
       if (url.includes(`${API_ROOT}/pricing/drift`)) return jsonResponse(drift)
+      // The gateway reduces the history to one row per key and pages it; the
+      // fixture stays history-shaped so the tests still describe what is stored.
+      if (url.includes(`${API_ROOT}/pricing/current`)) {
+        const live = currentPricing(pricing)
+        const params = new URL(url, "http://localhost").searchParams
+        const skip = Number(params.get("skip") ?? 0)
+        const limit = Number(params.get("limit") ?? 100)
+        return jsonResponse({
+          data: live.slice(skip, skip + limit),
+          count: live.length,
+        })
+      }
       // Before the bare /api/v1/pricing arm below and before the context one: the
       // organization's own overrides are a different surface from the catalog,
       // and they answer the paged tenancy shape rather than a list.
@@ -121,6 +134,19 @@ function mockApi(
         return jsonResponse({ data: [], count: 0 })
       }
       if (url.includes(`${API_ROOT}/settings`)) return jsonResponse(settings)
+      const one = url.match(new RegExp(`${API_ROOT}/pricing/(.+)$`))
+      if (one) {
+        const key = decodeURIComponent(one[1])
+        const live = currentPricing(pricing).find(
+          (row) => row.model_key === key,
+        )
+        return live
+          ? jsonResponse(live)
+          : jsonResponse(
+              { detail: `Pricing for model '${key}' not found` },
+              404,
+            )
+      }
       if (url.includes(`${API_ROOT}/pricing`)) return jsonResponse(pricing)
       if (url.includes(`${API_ROOT}/organizations/me`))
         return jsonResponse(context)
@@ -167,6 +193,59 @@ describe("ModelPricingPage", () => {
     expect(rows).toHaveLength(2)
     expect(within(table).getByText("$3.00")).toBeInTheDocument()
     expect(within(table).queryByText("$1.00")).toBeNull()
+  })
+
+  it("asks the server for a page rather than reading every price", async () => {
+    // The point of otari#1376: the table used to read the whole collection and
+    // slice it in the browser. What it renders now is what it asked for, so the
+    // request has to carry the window and the footer has to count the server's
+    // total rather than the rows on screen.
+    const fetch = mockApi({
+      pricing: Array.from({ length: 30 }, (_, index) =>
+        price({ model_key: `openai:model-${String(index).padStart(2, "0")}` }),
+      ),
+    })
+    renderPage(<ModelPricingPage />)
+
+    const table = await screen.findByRole("grid", { name: "Model prices" })
+    // One header row and a page of 25, not all 30.
+    await waitFor(() => {
+      expect(within(table).getAllByRole("row")).toHaveLength(26)
+    })
+    expect(
+      fetch.mock.calls.some(([input]) =>
+        String(input).includes("/pricing/current?skip=0&limit=25"),
+      ),
+    ).toBe(true)
+    // The count is the server's, so the footer is right about a total the page
+    // never fetched.
+    expect(await screen.findByText(/30/)).toBeInTheDocument()
+  })
+
+  it("pages the table without reading the rest of the collection", async () => {
+    const user = userEvent.setup()
+    const fetch = mockApi({
+      pricing: Array.from({ length: 30 }, (_, index) =>
+        price({ model_key: `openai:model-${String(index).padStart(2, "0")}` }),
+      ),
+    })
+    renderPage(<ModelPricingPage />)
+
+    await screen.findByRole("grid", { name: "Model prices" })
+    await user.click(screen.getByRole("button", { name: /next/i }))
+
+    await waitFor(() => {
+      expect(
+        fetch.mock.calls.some(([input]) =>
+          String(input).includes("/pricing/current?skip=25&limit=25"),
+        ),
+      ).toBe(true)
+    })
+    const table = await screen.findByRole("grid", { name: "Model prices" })
+    // The tail of the collection: five rows and the header.
+    await waitFor(() => {
+      expect(within(table).getAllByRole("row")).toHaveLength(6)
+    })
   })
 
   it("keeps a sub-cent rate legible instead of rounding it to nothing", async () => {

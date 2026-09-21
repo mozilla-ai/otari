@@ -209,6 +209,7 @@ POST /api/v1/pricing/refresh/reject                 # not yet wrapped
 GET /api/v1/pricing/refresh/pending                 # not yet wrapped
 GET /api/v1/pricing/snapshots                       # not yet wrapped
 GET /api/v1/pricing/drift                           # not yet wrapped
+GET /api/v1/pricing/current                         # dashboard's paged view of GET /api/v1/pricing; the SDK wraps the history read
 # Model catalog, grouped by model
 GET /api/v1/catalog/models                          # not yet wrapped
 GET /api/v1/catalog/models/{model_id}               # not yet wrapped

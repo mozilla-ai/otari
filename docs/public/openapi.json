@@ -4414,6 +4414,28 @@
         "title": "CreateUserRequest",
         "type": "object"
       },
+      "CurrentPricingPage": {
+        "description": "One page of current model prices, with the total number of priced models.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PricingResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "CurrentPricingPage",
+        "type": "object"
+      },
       "DeploymentAdminAccessPublic": {
         "description": "Whether the caller may reach the deployment administration surface.\n\nThe one endpoint in that surface that answers 200 for everybody, and\ndeliberately: the rest refuse with 404 so they do not confirm they exist,\nwhich leaves the dashboard nothing to gate its navigation on but a failed\nrequest. This says the same thing a caller could learn by trying, without\nthe try.",
         "properties": {
@@ -27022,6 +27044,71 @@
           }
         ],
         "summary": "Set Pricing",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/api/v1/pricing/current": {
+      "get": {
+        "description": "List the rate each priced model is metered at, one row per model key.\n\nListing prices answers the stored history, one row per ``effective_at``, so a\npage of that is a page of revisions rather than a page of models. This\nanswers one row per key: the newest rate that has taken effect, or the\nearliest scheduled rate for a key that has none yet. ``count`` is the number\nof priced models, so a caller can page without reading the collection to\nlearn how long it is.",
+        "operationId": "pricing-list_current_pricing",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPricingPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Current Pricing",
         "tags": [
           "pricing"
         ]

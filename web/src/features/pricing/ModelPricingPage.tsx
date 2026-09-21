@@ -8,6 +8,7 @@ import type {
   PricingResponse,
 } from "@/client"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { TablePagination } from "@/design-system/data/TablePagination"
 import { Dialog, DialogSection } from "@/design-system/feedback/Dialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
@@ -15,7 +16,6 @@ import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { currentPricing } from "@/features/models/pricing"
 import {
   type ManualRates,
   SetPriceDialog,
@@ -30,9 +30,10 @@ import { UNIT_LABELS } from "@/features/pricing/units"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useConfirmPricingRefresh,
+  useCurrentPricing,
+  useModelPricing,
   usePendingPricingRefresh,
   usePreviewPricingRefresh,
-  usePricing,
   usePricingDrift,
   usePricingSnapshots,
   useRejectPricingRefresh,
@@ -73,6 +74,8 @@ import { useUrlValue } from "@/shared/helpers/urlState"
 // - The **rate overrides** are the organization's own, and
 //   `organization_pricing_service` gates the writes on the same owner-or-admin
 //   role the card already asks about, so it needs nothing here.
+
+const DEFAULT_PAGE_SIZE = 25
 
 function PricingRefreshDialog({
   preview,
@@ -314,18 +317,21 @@ interface PriceRow {
 /**
  * One row per priced model, from the price that is in force today.
  *
- * `/pricing` returns the history, not the current state: a model repriced
- * three times has three rows, and only the newest one whose `effective_at` has
- * passed is what a request is metered at. `currentPricing` is the reduction
- * Models already uses, sorting included, so the two pages cannot disagree about
- * which rate is live.
+ * `/pricing/current` does the reduction the page used to do in the browser: the
+ * history holds one row per `effective_at`, and only the newest one that has
+ * taken effect is what a request is metered at. Reducing it here meant reading
+ * every revision of every model to render a screenful.
+ *
+ * `drift` is a separate operator-only read, capped at its own 200 rows, so the
+ * "vs default" column is populated for the models that read covers and blank
+ * beyond them. That cap is older than this page's paging and unchanged by it.
  */
 function currentRows(
-  all: PricingResponse[],
+  page: readonly PricingResponse[],
   drift: readonly PricingDriftRow[] = [],
 ): PriceRow[] {
   const byKey = new Map(drift.map((row) => [row.model_key, row]))
-  return currentPricing(all).map((live) => ({
+  return page.map((live) => ({
     modelKey: live.model_key,
     input: live.input_price_per_million,
     output: live.output_price_per_million,
@@ -464,7 +470,9 @@ const COLUMNS: DataTableColumn<PriceRow>[] = [
  * differently.
  */
 function PriceTable({ canPrice }: { canPrice: boolean }) {
-  const pricing = usePricing()
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const pricing = useCurrentPricing(page, pageSize)
   // Operator-only read, so it is gated on the same axis as the editor.
   const drift = usePricingDrift(canPrice)
   const navigate = useNavigate()
@@ -476,10 +484,14 @@ function PriceTable({ canPrice }: { canPrice: boolean }) {
   // Bumped on every open and used as the dialog's key: it seeds its draft on
   // mount and owns the refusal, so a remount is what clears both.
   const [customOpenCount, setCustomOpenCount] = useState(0)
-  const rows = pricing.data ? currentRows(pricing.data, drift.data ?? []) : []
-  const current = pricing.data
-    ? currentPricing(pricing.data).find((row) => row.model_key === editingKey)
-    : undefined
+  const live = pricing.data?.data ?? []
+  const rows = currentRows(live, drift.data ?? [])
+  // The editor opens on a key linked from Models, which need not be on the page
+  // being shown, so the row is read from the page where it is there and fetched
+  // by key where it is not.
+  const onPage = live.find((row) => row.model_key === editingKey)
+  const fetched = useModelPricing(editingKey && !onPage ? editingKey : null)
+  const current = onPage ?? fetched.data ?? undefined
 
   const edit = (modelKey: string | null) =>
     void navigate({
@@ -593,6 +605,18 @@ function PriceTable({ canPrice }: { canPrice: boolean }) {
           }
         />
       </TableScrollFrame>
+      <TablePagination
+        page={page}
+        pageSize={pageSize}
+        total={pricing.data?.count ?? null}
+        rowsOnPage={rows.length}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size)
+          setPage(0)
+        }}
+        isFetching={pricing.isFetching}
+      />
       {canPrice ? (
         <SetPriceDialog
           key={customOpenCount}

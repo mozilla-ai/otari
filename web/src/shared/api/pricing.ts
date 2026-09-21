@@ -1,7 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   AcceptedPricingSnapshot,
   CreateOrganizationPricingOverride,
+  CurrentPricingPage,
   OrganizationPricingOverride,
   PricingDriftRow,
   PricingRefreshPreview,
@@ -66,6 +72,50 @@ export function usePricingDrift(enabled = true) {
 }
 
 const fetchAllPricing = () => fetchAllRows<PricingResponse>("/pricing")
+
+/**
+ * The rate one model is metered at, or null where it has none.
+ *
+ * The price editor is reachable from Models with a key the price table is not
+ * showing, so it cannot resolve the row out of the page it happens to be on.
+ * A 404 is the ordinary answer for an unpriced key, not an error.
+ */
+export function useModelPricing(modelKey: string | null) {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: [PRICING, "one", modelKey],
+    queryFn: async (): Promise<PricingResponse | null> => {
+      try {
+        return await apiFetch<PricingResponse>(
+          `/pricing/${encodeURIComponent(modelKey ?? "")}`,
+        )
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) return null
+        throw error
+      }
+    },
+    enabled: Boolean(modelKey),
+  })
+}
+
+/**
+ * One page of the rate each model is metered at now.
+ *
+ * `/pricing` answers the stored history (one row per `effective_at`), so a page
+ * of it is a page of revisions rather than of models, and it carries no total to
+ * put under a table. `/pricing/current` answers one row per key with a count,
+ * which is what lets the table page instead of reading the collection.
+ */
+export function useCurrentPricing(page: number, pageSize: number) {
+  return useQuery({
+    queryKey: [PRICING, "current", page, pageSize],
+    queryFn: () =>
+      apiFetch<CurrentPricingPage>(
+        `/pricing/current?skip=${page * pageSize}&limit=${pageSize}`,
+      ),
+    placeholderData: keepPreviousData,
+  })
+}
 
 export function usePricing(enabled = true) {
   return useQuery({

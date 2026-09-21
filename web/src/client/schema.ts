@@ -3019,6 +3019,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pricing/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Current Pricing
+         * @description List the rate each priced model is metered at, one row per model key.
+         *
+         *     Listing prices answers the stored history, one row per ``effective_at``, so a
+         *     page of that is a page of revisions rather than a page of models. This
+         *     answers one row per key: the newest rate that has taken effect, or the
+         *     earliest scheduled rate for a key that has none yet. ``count`` is the number
+         *     of priced models, so a caller can page without reading the collection to
+         *     learn how long it is.
+         */
+        get: operations["pricing-list_current_pricing"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pricing/drift": {
         parameters: {
             query?: never;
@@ -7006,6 +7033,16 @@ export interface components {
              * @description Unique user identifier
              */
             user_id: string;
+        };
+        /**
+         * CurrentPricingPage
+         * @description One page of current model prices, with the total number of priced models.
+         */
+        CurrentPricingPage: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["PricingResponse"][];
         };
         /**
          * DeploymentAdminAccessPublic
@@ -17804,6 +17841,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PricingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "pricing-list_current_pricing": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrentPricingPage"];
                 };
             };
             /** @description Validation Error */

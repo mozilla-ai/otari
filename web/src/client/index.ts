@@ -265,6 +265,7 @@ export type DiscoverableModel = Schemas["DiscoverableModel"]
 export type DiscoverableProvider = Schemas["DiscoverableProvider"]
 export type DiscoverableModelsResponse = Schemas["DiscoverableModelsResponse"]
 export type PricingResponse = Schemas["PricingResponse"]
+export type CurrentPricingPage = Schemas["CurrentPricingPage"]
 export type PricingTier = Schemas["PricingTier"]
 
 // The catalog folded by model (`/v1/catalog`): one summary per model in the

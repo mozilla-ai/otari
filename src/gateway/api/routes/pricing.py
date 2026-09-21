@@ -28,6 +28,7 @@ from gateway.services.pricing_refresh_service import (
 )
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
+    current_rates_page,
     default_model_pricing,
     default_pricing_enabled,
     default_pricing_reference,
@@ -581,6 +582,35 @@ async def list_pricing(
     pricings = result.scalars().all()
 
     return [PricingResponse.from_model(pricing) for pricing in pricings]
+
+
+class CurrentPricingPage(BaseModel):
+    """One page of current model prices, with the total number of priced models."""
+
+    data: list[PricingResponse]
+    count: int
+
+
+# Declared above the ``{model_key:path}`` routes below, which would otherwise
+# match ``current`` as a model key.
+@catalog_router.get("/current")
+async def list_current_pricing(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+) -> CurrentPricingPage:
+    """List the rate each priced model is metered at, one row per model key.
+
+    Listing prices answers the stored history, one row per ``effective_at``, so a
+    page of that is a page of revisions rather than a page of models. This
+    answers one row per key: the newest rate that has taken effect, or the
+    earliest scheduled rate for a key that has none yet. ``count`` is the number
+    of priced models, so a caller can page without reading the collection to
+    learn how long it is.
+    """
+
+    rows, count = await current_rates_page(db, skip=skip, limit=limit)
+    return CurrentPricingPage(data=[PricingResponse.from_model(row) for row in rows], count=count)
 
 
 @catalog_router.get("/{model_key:path}/history")
