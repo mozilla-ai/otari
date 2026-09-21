@@ -230,19 +230,11 @@ export type CreateBudgetRequest = Schemas["CreateBudgetRequest"]
 export type UpdateBudgetRequest = Schemas["UpdateBudgetRequest"]
 export type BudgetResetLog = Schemas["BudgetResetLogResponse"]
 
-// A ceiling names a `Budget` and holds the counters for spending it. It is not a
-// variant of a budget: a budget is the only shape that maps a cap to an amount,
-// and the two differ in what they enforce against. A budget reached through
-// `User.budget_id` is checked against that person's own spend, so N people on one
-// budget each get the full amount. A budget reached through a ceiling is checked
-// against the ceiling's counters, so everyone the scope names shares one
-// allowance. `max_budget` and the cadence travel on a ceiling's wire shape but
-// are read off the budget, never stored on it.
-//
-// `provider_key_id` is the odd name here and it is the wire's, not ours: the
-// column holds a provider *instance* name (`openai`, or a configured instance),
-// which is what `scoped_budget_service` matches a request's resolved provider
-// against. Anything picking a value for it wants `ProviderInfo["instance"]`.
+// A ceiling names a `Budget` and holds the counters for spending it.
+// Everyone a ceiling's scope names shares one allowance, while each person on
+// a `User.budget_id` budget gets the full amount.
+// `provider_key_id` holds a provider instance name, so a value for it comes
+// from `ProviderInfo["instance"]`.
 export type ScopedBudget = Schemas["ScopedBudgetResponse"]
 export type CreateScopedBudgetRequest = Schemas["CreateScopedBudgetRequest"]
 export type UpdateScopedBudgetRequest = Schemas["UpdateScopedBudgetRequest"]
@@ -541,11 +533,9 @@ export type AcceptInvitationResult = Schemas["AcceptInvitationResultPublic"]
 export type PendingOrganizationInvitation =
   Schemas["PendingOrganizationInvitationPublic"]
 
-// A workspace-level template for a per-member `scoped_budgets` ceiling; see
-// `src/gateway/services/tenancy/workspace_budget_default_service.py`. The DTO
-// name is `WorkspaceMemberBudgetPolicy*` on the wire (kept recognizable
-// against otari-ai's own hosted equivalent); the dashboard's own name for the
-// concept is "budget default".
+// A "budget default" is a workspace-level template for a per-member
+// `scoped_budgets` ceiling.
+// Its wire name is `WorkspaceMemberBudgetPolicy*`.
 export type WorkspaceBudgetDefault =
   Schemas["WorkspaceMemberBudgetPolicyPublic"]
 export type CreateWorkspaceBudgetDefaultRequest =
