@@ -21216,7 +21216,7 @@
     },
     "/api/v1/files": {
       "get": {
-        "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.",
+        "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI listing supports purpose filtering, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.",
         "operationId": "files-list_files",
         "parameters": [
           {
@@ -21394,7 +21394,7 @@
         ]
       },
       "post": {
-        "description": "OpenAI-compatible file upload endpoint.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.",
+        "description": "OpenAI-compatible file upload endpoint.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uploads require purpose and return the OpenAI file metadata envelope. Hosted mode does not serve public file bytes.",
         "operationId": "files-create_file",
         "parameters": [
           {
@@ -21486,7 +21486,7 @@
     },
     "/api/v1/files/{file_id}": {
       "delete": {
-        "description": "Soft-delete a file's metadata and remove its bytes from the backend.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.",
+        "description": "Soft-delete a file's metadata and remove its bytes from the backend.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI deletion returns the OpenAI deletion envelope. Hosted mode does not serve public file bytes.",
         "operationId": "files-delete_file",
         "parameters": [
           {
@@ -21591,7 +21591,7 @@
         ]
       },
       "get": {
-        "description": "Retrieve metadata for a single file.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.",
+        "description": "Retrieve metadata for a single file.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI retrieval returns the OpenAI file metadata envelope. Hosted mode does not serve public file bytes.",
         "operationId": "files-get_file",
         "parameters": [
           {
@@ -21698,7 +21698,7 @@
     },
     "/api/v1/files/{file_id}/content": {
       "get": {
-        "description": "Download the raw bytes of a file, streamed rather than buffered whole.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. Hosted mode does not serve public file bytes.",
+        "description": "Download the raw bytes of a file, streamed rather than buffered whole.\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. X-Otari-Files-Provider selects anthropic (default) or openai. The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. Downloads return raw file bytes, not a JSON envelope. Hosted mode does not serve public file bytes.",
         "operationId": "files-get_file_content",
         "parameters": [
           {

@@ -82,6 +82,17 @@ def _merge_hybrid_files(spec: dict[str, Any]) -> None:
     hybrid.include_router(routes)
     native = hybrid.openapi()
     spec["components"]["schemas"].update(native.get("components", {}).get("schemas", {}))
+    openai_descriptions = {
+        (f"{API_ROOT}/files", "get"): (
+            "OpenAI listing supports purpose filtering, after/before pagination, and the OpenAI response envelope. "
+        ),
+        (f"{API_ROOT}/files", "post"): (
+            "OpenAI uploads require purpose and return the OpenAI file metadata envelope. "
+        ),
+        (f"{API_ROOT}/files/{{file_id}}", "get"): "OpenAI retrieval returns the OpenAI file metadata envelope. ",
+        (f"{API_ROOT}/files/{{file_id}}", "delete"): "OpenAI deletion returns the OpenAI deletion envelope. ",
+        (f"{API_ROOT}/files/{{file_id}}/content", "get"): "Downloads return raw file bytes, not a JSON envelope. ",
+    }
     for path, methods in native["paths"].items():
         for method, operation in methods.items():
             target = spec["paths"][path][method]
@@ -89,8 +100,8 @@ def _merge_hybrid_files(spec: dict[str, Any]) -> None:
                 "\n\nHybrid mode stores files at the authorized provider with uploader/workspace bindings. "
                 "X-Otari-Files-Provider selects anthropic (default) or openai. "
                 "The Anthropic envelope requires anthropic-version and rejects the legacy Files beta. "
-                "OpenAI uses purpose, after/before pagination, and the OpenAI response envelope. "
-                "Hosted mode does not serve public file bytes."
+                + openai_descriptions[(path, method)]
+                + "Hosted mode does not serve public file bytes."
             )
             schema = operation["responses"].get("200", {}).get("content", {}).get("application/json", {}).get("schema")
             if schema:
