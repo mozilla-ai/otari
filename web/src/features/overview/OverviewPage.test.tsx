@@ -92,6 +92,8 @@ function strip(over: Partial<AllocationHealth> = {}): AllocationHealth {
       name: "Monthly",
       spent: 50,
       allocated: 100,
+      scope_type: null,
+      scope_id: null,
     },
     ...over,
   }
@@ -526,6 +528,8 @@ describe("OverviewPage", () => {
             name: "team",
             spent: 25,
             allocated: 20,
+            scope_type: null,
+            scope_id: null,
           },
         }),
       },
@@ -559,7 +563,14 @@ describe("OverviewPage", () => {
       overview: {
         budgets: strip({
           over_count: 1,
-          worst: { budget_id: "team", name: "team", spent: 25, allocated: 20 },
+          worst: {
+            budget_id: "team",
+            name: "team",
+            spent: 25,
+            allocated: 20,
+            scope_type: null,
+            scope_id: null,
+          },
         }),
       },
     })
@@ -1082,6 +1093,8 @@ describe("the tenant Overview's budget signal", () => {
             name: "Staging cap",
             spent: 200,
             allocated: 250,
+            scope_type: null,
+            scope_id: null,
           },
         }),
       },
@@ -1119,6 +1132,8 @@ describe("the tenant Overview's budget signal", () => {
             name: "Deployment cap",
             spent: 300,
             allocated: 250,
+            scope_type: null,
+            scope_id: null,
           },
         }),
       },

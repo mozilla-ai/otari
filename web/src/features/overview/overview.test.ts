@@ -80,6 +80,8 @@ function health(over: Partial<AllocationHealth> = {}): AllocationHealth {
       name: "Monthly",
       spent: 50,
       allocated: 100,
+      scope_type: null,
+      scope_id: null,
     },
     ...over,
   }
@@ -143,6 +145,24 @@ describe("allocationStrip", () => {
     )
 
     expect(result.worst?.name).toBe("11111111")
+  })
+
+  it("names an unnamed row by what it caps, where it caps something", () => {
+    // A spend ceiling nobody named is named after its scope. Falling through to
+    // the id fingerprint here would put hex in the meter's accessible name.
+    const result = allocationStrip(
+      health({
+        worst: {
+          ...health().worst!,
+          name: null,
+          scope_type: "workspace",
+          scope_id: "ws-1",
+        },
+      }),
+      { ...LABELS, nameOf: () => "A workspace" },
+    )
+
+    expect(result.worst?.name).toBe("A workspace")
   })
 
   it("words the strip from the counts the server returned", () => {

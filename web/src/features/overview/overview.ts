@@ -2,6 +2,7 @@ import type {
   AllocationHealth,
   ProviderHealthResponse,
   UsageTotals,
+  WorstAllocation,
 } from "@/client"
 import { shortBudgetId } from "@/features/budgets/budgetLabel"
 
@@ -89,7 +90,16 @@ function noneToJudge(label: string): BudgetHealth {
  */
 export function allocationStrip(
   health: AllocationHealth | null | undefined,
-  labels: { none: string; noneCapped: string },
+  labels: {
+    none: string
+    noneCapped: string
+    /**
+     * What to call the worst row when nobody named it. A spend ceiling is named
+     * after what it caps ("A workspace"), which the id fingerprint below cannot
+     * say; a deployment budget has no scope and keeps the fingerprint.
+     */
+    nameOf?: (worst: WorstAllocation) => string
+  },
 ): BudgetHealth {
   if (!health || health.total_count === 0) return noneToJudge(labels.none)
   if (health.capped_count === 0 || !health.worst) {
@@ -110,9 +120,12 @@ export function allocationStrip(
     nearCount: health.near_count,
     cappedCount: health.capped_count,
     worst: {
-      // A row nobody named falls back to the id fingerprint the budgets list
-      // already shows, which is what the labeler did for an unnamed budget.
-      name: worst.name ?? shortBudgetId(worst.budget_id),
+      name:
+        worst.name ??
+        labels.nameOf?.(worst) ??
+        // The id fingerprint the budgets list already shows, which is what the
+        // labeler did for an unnamed budget.
+        shortBudgetId(worst.budget_id),
       spent: worst.spent,
       allocated: worst.allocated,
       // A zero allowance admits nothing, so anything spent against one is over

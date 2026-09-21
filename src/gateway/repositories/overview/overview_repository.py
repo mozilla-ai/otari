@@ -23,12 +23,20 @@ _ZERO = Decimal(0)
 
 @dataclass(frozen=True)
 class Allocation:
-    """One row with a finite cap: what it is called, spent, and may spend."""
+    """One row with a finite cap: what it is called, spent, and may spend.
+
+    ``scope_type`` and ``scope_id`` are a ceiling's and are None for a
+    deployment budget, which caps no scope. A ceiling nobody named is named on
+    screen after what it caps ("A workspace"), so the scope has to survive the
+    reduction or the row would fall back to an id fingerprint.
+    """
 
     name: str | None
     budget_id: str
     spent: float
     allocated: float
+    scope_type: str | None = None
+    scope_id: str | None = None
 
 
 class OverviewRepository:
@@ -139,6 +147,8 @@ class OverviewRepository:
                 budget_id=ceiling.budget_id,
                 spent=float(ceiling.current_spend) + float(ceiling.reserved_spend),
                 allocated=float(max_budget),
+                scope_type=ceiling.scope_type,
+                scope_id=ceiling.scope_id,
             )
             for ceiling, max_budget in rows
         ]

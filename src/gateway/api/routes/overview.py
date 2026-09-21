@@ -38,6 +38,10 @@ class WorstAllocationResponse(BaseModel):
     name: str | None = Field(description="The row's own name, or null where nobody gave it one.")
     spent: float
     allocated: float
+    scope_type: str | None = Field(
+        description="What a spend ceiling caps (workspace, org_member, api_token, ...); null for a budget."
+    )
+    scope_id: str | None = Field(description="The scope's id, so an unnamed ceiling can be named after it.")
 
 
 class AllocationHealthResponse(BaseModel):
@@ -80,6 +84,8 @@ def _health(health: AllocationHealth | None) -> AllocationHealthResponse | None:
                 name=health.worst.name,
                 spent=health.worst.spent,
                 allocated=health.worst.allocated,
+                scope_type=health.worst.scope_type,
+                scope_id=health.worst.scope_id,
             )
             if health.worst is not None
             else None

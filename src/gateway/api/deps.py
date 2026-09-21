@@ -37,6 +37,7 @@ from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
+from gateway.services.tenancy.workspace_service import WorkspaceService
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -751,6 +752,9 @@ def get_overview_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Overvi
         OverviewRepository(db),
         OrganizationService(db, membership_listener=None),
         DeploymentUserService(db),
+        # The listener is for writes; this service only reads, and the same
+        # pairing is what `routes/workspaces.py` builds.
+        WorkspaceService(db, membership_listener=WorkspaceBudgetDefaultService(db)),
     )
 
 

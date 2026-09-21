@@ -16,6 +16,7 @@ import { KpiCell } from "@/design-system/metrics/KpiCell"
 import { KpiStrip } from "@/design-system/metrics/KpiStrip"
 import { SpendMeter } from "@/design-system/metrics/SpendMeter"
 import { TrendChip } from "@/design-system/metrics/TrendChip"
+import { scopeLabel } from "@/features/budgets/organizationBudget"
 import { SetupGuide } from "@/features/onboarding/SetupGuide"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
 import {
@@ -396,6 +397,20 @@ function OrganizationOverview() {
   const ceilingHealth = allocationStrip(summary.data?.ceilings, {
     none: "No spend ceilings configured",
     noneCapped: "No ceiling caps spend",
+    // No workspace roster is loaded here, so a workspace ceiling reads as
+    // "A workspace", which is what the Spend page shows for an id it cannot
+    // resolve either.
+    nameOf: (worst) =>
+      worst.scope_type
+        ? scopeLabel(
+            { scope_type: worst.scope_type, scope_id: worst.scope_id ?? "" },
+            {
+              organizationName:
+                context.data?.organization.name ?? "This organization",
+              workspaces: [],
+            },
+          )
+        : worst.budget_id,
   })
 
   // Why the cell has no percentage to show, once the read has landed. The two

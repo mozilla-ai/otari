@@ -12965,6 +12965,16 @@ export interface components {
              * @description The row's own name, or null where nobody gave it one.
              */
             name: string | null;
+            /**
+             * Scope Id
+             * @description The scope's id, so an unnamed ceiling can be named after it.
+             */
+            scope_id: string | null;
+            /**
+             * Scope Type
+             * @description What a spend ceiling caps (workspace, org_member, api_token, ...); null for a budget.
+             */
+            scope_type: string | null;
             /** Spent */
             spent: number;
         };

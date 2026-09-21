@@ -34,6 +34,8 @@ from gateway.repositories.tenancy import (
 from gateway.services.overview.overview_service import OverviewService, judge
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
+from gateway.services.tenancy.workspace_service import WorkspaceService
 
 _ENDPOINT = f"{API_ROOT}/overview"
 
@@ -306,6 +308,7 @@ def _service(db: AsyncSession) -> OverviewService:
         OverviewRepository(db),
         OrganizationService(db, membership_listener=None),
         DeploymentUserService(db),
+        WorkspaceService(db, membership_listener=WorkspaceBudgetDefaultService(db)),
     )
 
 
@@ -360,6 +363,70 @@ async def test_a_workspace_of_another_organization_is_ignored_rather_than_refuse
 
     # Their workspace has one active member; ours is not scoped to it.
     assert summary.active_members == 0
+
+
+@pytest.mark.asyncio
+async def test_a_member_cannot_count_a_workspace_they_are_not_in(
+    async_db: AsyncSession,
+) -> None:
+    """Belonging to the organization is not enough, which is the rule the
+    workspace routes this replaces already applied.
+
+    An owner or admin sees every workspace in their organization; anybody else
+    only the ones they are an active member of. Without this a member could read
+    the key and member counts of a workspace they were never added to, by naming
+    its id.
+    """
+
+    organization = await _organization(async_db, slug="acme-visible")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    outsider = await _member(async_db, organization, role="member", full_name="Outsider")
+    workspace = await _workspace(async_db, organization, name="Private", owner=owner)
+    async_db.add(APIKey(id="sk-private", key_hash="h9", workspace_id=workspace.id, is_active=True))
+    await async_db.flush()
+
+    seen_by_owner = await _service(async_db).summary(identity=owner, workspace_id=workspace.id)
+    seen_by_outsider = await _service(async_db).summary(identity=outsider, workspace_id=workspace.id)
+
+    assert seen_by_owner.active_members == 1
+    # Not scoped to it at all, so the workspace's own roster never answers.
+    assert seen_by_outsider.active_members == 0
+
+
+@pytest.mark.asyncio
+async def test_a_ceiling_keeps_the_scope_it_caps(
+    async_db: AsyncSession,
+) -> None:
+    """A ceiling nobody named is named on screen after what it caps, so the
+    scope has to survive the reduction rather than the row falling back to an
+    id fingerprint."""
+
+    organization = await _organization(async_db, slug="acme-scope-kept")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    scope_id = str(uuid.uuid4())
+    async_db.add(
+        Budget(budget_id="b-unnamed", name="Cap", max_budget=Decimal(10), organization_id=organization.id)
+    )
+    async_db.add(
+        ScopedBudget(
+            id="sb-unnamed",
+            scope_type="workspace",
+            scope_id=scope_id,
+            budget_id="b-unnamed",
+            name=None,
+            current_spend=Decimal(9),
+            reserved_spend=Decimal(0),
+        )
+    )
+    await async_db.flush()
+
+    summary = await _service(async_db).summary(identity=owner, workspace_id=None)
+
+    assert summary.ceilings is not None
+    assert summary.ceilings.worst is not None
+    assert summary.ceilings.worst.name is None
+    assert summary.ceilings.worst.scope_type == "workspace"
+    assert summary.ceilings.worst.scope_id == scope_id
 
 
 @pytest.mark.asyncio

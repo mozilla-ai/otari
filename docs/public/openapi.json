@@ -17589,6 +17589,30 @@
             "description": "The row's own name, or null where nobody gave it one.",
             "title": "Name"
           },
+          "scope_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The scope's id, so an unnamed ceiling can be named after it.",
+            "title": "Scope Id"
+          },
+          "scope_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What a spend ceiling caps (workspace, org_member, api_token, ...); null for a budget.",
+            "title": "Scope Type"
+          },
           "spent": {
             "title": "Spent",
             "type": "number"
@@ -17598,7 +17622,9 @@
           "budget_id",
           "name",
           "spent",
-          "allocated"
+          "allocated",
+          "scope_type",
+          "scope_id"
         ],
         "title": "WorstAllocationResponse",
         "type": "object"

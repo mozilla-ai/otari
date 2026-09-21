@@ -18,8 +18,9 @@ from gateway.models.tenancy import Organization
 from gateway.models.tenancy import User as TenancyUser
 from gateway.repositories.overview.overview_repository import Allocation, OverviewRepository
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
-from gateway.services.tenancy.errors import NotAuthorizedError
+from gateway.services.tenancy.errors import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_service import WorkspaceService
 
 # Where a row stops being comfortable. The dashboard used the same fraction when
 # it did this scan itself; it is here now because the counts below are what it
@@ -35,6 +36,8 @@ class WorstAllocation:
     name: str | None
     spent: float
     allocated: float
+    scope_type: str | None
+    scope_id: str | None
 
 
 @dataclass(frozen=True)
@@ -88,6 +91,8 @@ def judge(rows: list[Allocation], *, total_count: int) -> AllocationHealth:
                 name=worst_row[0].name,
                 spent=worst_row[0].spent,
                 allocated=worst_row[0].allocated,
+                scope_type=worst_row[0].scope_type,
+                scope_id=worst_row[0].scope_id,
             )
             if worst_row is not None
             else None
@@ -103,10 +108,12 @@ class OverviewService:
         repository: OverviewRepository,
         organizations: OrganizationService,
         operators: DeploymentUserService,
+        workspaces: WorkspaceService,
     ):
         self._repository = repository
         self._organizations = organizations
         self._operators = operators
+        self._workspaces = workspaces
 
     async def summary(
         self,
@@ -125,12 +132,21 @@ class OverviewService:
 
         organization = await self._organizations.get_active_organization_for_user(identity)
         is_deployment_operator = await self._operators.has_administration_access(identity)
-        # A workspace the caller named has to belong to the organization they are
-        # acting in, or the counts would report another tenant's rail to anyone
-        # who guessed an id.
+        # A workspace the caller named has to be one they may see, which is the
+        # rule `services.tenancy.authorization` already states: an owner or admin
+        # sees every workspace in their organization, anyone else only the ones
+        # they are an active member of. Reusing it is what keeps these counts
+        # equal to the pages they link to, which resolve the same way.
+        #
+        # A workspace they may not see is treated as none given rather than
+        # refused, because the id comes from a switcher whose contents can go
+        # stale and a stale one should not fail the whole page.
         scope = workspace_id
-        if scope is not None and await self._repository.workspace_organization(scope) != organization.id:
-            scope = None
+        if scope is not None:
+            try:
+                await self._workspaces.workspace_in_active_organization(user=identity, workspace_id=scope)
+            except WorkspaceNotFoundError:
+                scope = None
 
         budgets = None
         if is_deployment_operator:
