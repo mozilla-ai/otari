@@ -101,17 +101,17 @@ def test_repository_importing_service_is_flagged(tmp_path: Path) -> None:
     file_path = _write(
         tmp_path,
         "gateway/repositories/users_repository.py",
-        "from gateway.services.budget_service import reserve\n",
+        "from gateway.services.budgets import reserve\n",
     )
     violations = check.check_file(file_path, tmp_path)
-    assert violations == [(1, "gateway.services.budget_service", "Forbidden import in Repositories")]
+    assert violations == [(1, "gateway.services.budgets", "Forbidden import in Repositories")]
 
 
 @pytest.mark.parametrize(
     "forbidden",
     [
         "gateway.api.deps",
-        "gateway.services.budget_periods",
+        "gateway.services.budgets",
         "gateway.repositories.base_repository",
         "gateway.exceptions.budget_exceptions",
         "gateway.container",
@@ -145,7 +145,7 @@ def test_api_route_may_import_repositories(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "forbidden",
-    ["gateway.api.deps", "gateway.services.budget_service", "gateway.adapters.billing_adapter"],
+    ["gateway.api.deps", "gateway.services.budgets", "gateway.adapters.billing_adapter"],
 )
 def test_port_may_not_import_a_caller_or_an_adapter(tmp_path: Path, forbidden: str) -> None:
     # A port is the interface its callers depend on, so it sits below them, and
@@ -172,7 +172,7 @@ def test_adapter_may_use_the_layers_below_it(tmp_path: Path) -> None:
     file_path = _write(
         tmp_path,
         "gateway/adapters/billing_adapter.py",
-        "from gateway.ports.billing_port import BillingPort\nfrom gateway.services.budget_service import reserve\n",
+        "from gateway.ports.billing_port import BillingPort\nfrom gateway.services.budgets import reserve\n",
     )
     assert check.check_file(file_path, tmp_path) == []
 
