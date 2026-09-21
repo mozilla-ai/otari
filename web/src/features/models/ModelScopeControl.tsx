@@ -9,18 +9,17 @@ import { useProviders } from "@/shared/api/providers"
 import { useAliases } from "@/shared/api/routing"
 
 // The per-key model access-list is a tri-state:
-//   null  -> "any"   (unrestricted, the default)
-//   []    -> "block" (deny all)
-//   list  -> "only"  (restrict to these entries)
+//   undefined -> "any"   (unrestricted, the default; `null` on the wire)
+//   []        -> "block" (deny all)
+//   list      -> "only"  (restrict to these entries)
 // A bare multi-select cannot tell "any" from "block" (both look empty), so the
 // mode is an explicit 3-way choice. "Only selected" with no entries is an
 // INCOMPLETE form (Save disabled), never a silent deny-all.
 type Mode = "any" | "only" | "block"
 
-function modeOf(value: string[] | null): Mode {
-  if (value === null) return "any"
-  if (value.length === 0) return "block"
-  return "only"
+function modeOf(allowedModels: string[] | undefined): Mode {
+  if (!allowedModels) return "any"
+  return allowedModels.length === 0 ? "block" : "only"
 }
 
 interface CatalogOption {
@@ -35,8 +34,9 @@ const MAX_VISIBLE = 50
 // The control is reused for two layers of the same allow-list grammar: a user's
 // default and a key's (narrower) override. The wording differs between them, so
 // the heading, help text, and the "any" mode label are parameterized. "any" means
-// null on the wire: unrestricted for a user, but "inherit the owner's default" for
-// a key (a key with no list of its own falls back to its user).
+// `null` on the wire, converted where it arrives: unrestricted for a user, but
+// "inherit the owner's default" for a key (a key with no list of its own falls
+// back to its user).
 export function ModelScopeControl({
   initial,
   onChange,
@@ -44,8 +44,8 @@ export function ModelScopeControl({
   description,
   anyLabel = "Any model",
 }: {
-  initial: string[] | null
-  onChange: (value: string[] | null, valid: boolean) => void
+  initial: string[] | undefined
+  onChange: (value: string[] | undefined, valid: boolean) => void
   title?: ReactNode
   description?: ReactNode
   anyLabel?: string
@@ -100,7 +100,7 @@ export function ModelScopeControl({
   }, [catalog, entries, query])
 
   const emit = (nextMode: Mode, nextEntries: string[]) => {
-    if (nextMode === "any") onChange(null, true)
+    if (nextMode === "any") onChange(undefined, true)
     else if (nextMode === "block") onChange([], true)
     else onChange(nextEntries, nextEntries.length > 0)
   }
@@ -244,11 +244,14 @@ export function ModelScopeControl({
 // A compact label describing a key's access, for the table row. Deliberately not
 // a count: an entry like `openai:*` is one entry but many models, so a number
 // would mislead. The exact entries are surfaced on hover / in the edit form.
-export function accessLabel(allowed: string[] | null): {
+export function accessLabel(allowedModels: string[] | undefined): {
   text: string
   tone: "muted" | "normal" | "danger"
 } {
-  if (allowed === null) return { text: "All models", tone: "muted" }
-  if (allowed.length === 0) return { text: "No models", tone: "danger" }
+  // Absent is "not restricted", which an empty list cannot say: `[]` is a real
+  // answer meaning no model at all. The wire spells absent `null`, so callers
+  // convert it where it arrives.
+  if (!allowedModels) return { text: "All models", tone: "muted" }
+  if (allowedModels.length === 0) return { text: "No models", tone: "danger" }
   return { text: "Selected models", tone: "normal" }
 }

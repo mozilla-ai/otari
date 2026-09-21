@@ -266,7 +266,7 @@ function OwnerAccessNote({ userId, users }: { userId: string; users: User[] }) {
       </p>
     )
   }
-  const { text } = accessLabel(owner.allowed_models)
+  const { text } = accessLabel(owner.allowed_models ?? undefined)
   const entries =
     owner.allowed_models && owner.allowed_models.length > 0
       ? owner.allowed_models.join(", ")
@@ -413,7 +413,9 @@ function CreateKeyDialog({
   const [expiresAt, setExpiresAt] = useState("")
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [userId, setUserId] = useState("")
-  const [allowedModels, setAllowedModels] = useState<string[] | null>(null)
+  const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
+    undefined,
+  )
   const [excludeFromBudget, setExcludeFromBudget] = useState(false)
   const [rejectUserMismatch, setRejectUserMismatch] = useState<boolean | null>(
     null,
@@ -474,7 +476,7 @@ function CreateKeyDialog({
     setExpiresAt("")
     setShowAdvanced(false)
     setUserId("")
-    setAllowedModels(null)
+    setAllowedModels(undefined)
     setExcludeFromBudget(false)
     setRejectUserMismatch(null)
     setScopeValid(true)
@@ -504,7 +506,7 @@ function CreateKeyDialog({
       // rather than left to the server's default.
       workspace_id: workspace?.workspace_id,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
-      allowed_models: allowedModels,
+      allowed_models: allowedModels ?? null,
       reject_user_mismatch: rejectUserMismatch,
     }
     // The member surface derives the owner and refuses a budget exemption, so
@@ -640,7 +642,7 @@ function CreateKeyDialog({
             anyLabel={
               isDeploymentWide ? "Inherit owner access" : "Inherit your access"
             }
-            initial={null}
+            initial={undefined}
             onChange={(value, isValid) => {
               setAllowedModels(value)
               setScopeValid(isValid)
@@ -724,8 +726,8 @@ function EditKeyForm({
   const users = useUsers(isDeploymentWide)
   const [keyName, setKeyName] = useState(apiKey.key_name ?? "")
   const [expiresAt, setExpiresAt] = useState(toDatetimeLocal(apiKey.expires_at))
-  const [allowedModels, setAllowedModels] = useState<string[] | null>(
-    apiKey.allowed_models,
+  const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
+    apiKey.allowed_models ?? undefined,
   )
   const [excludeFromBudget, setExcludeFromBudget] = useState(
     apiKey.exclude_from_budget,
@@ -748,7 +750,7 @@ function EditKeyForm({
     const shared = {
       key_name: keyName.trim() || null,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
-      allowed_models: allowedModels,
+      allowed_models: allowedModels ?? null,
       reject_user_mismatch: rejectUserMismatch,
     }
     // The member surface has no budget exemption to send (see CreateKeyDialog).
@@ -804,7 +806,7 @@ function EditKeyForm({
         anyLabel={
           isDeploymentWide ? "Inherit owner access" : "Inherit your access"
         }
-        initial={apiKey.allowed_models}
+        initial={apiKey.allowed_models ?? undefined}
         onChange={(value, isValid) => {
           setAllowedModels(value)
           setScopeValid(isValid)
@@ -875,7 +877,7 @@ function KeyMetaLine({
    */
   face?: string
 }) {
-  const { text, tone } = accessLabel(apiKey.allowed_models)
+  const { text, tone } = accessLabel(apiKey.allowed_models ?? undefined)
   // Surface the exact entries on hover; the count would mislead (a wildcard is many).
   const title =
     apiKey.allowed_models && apiKey.allowed_models.length > 0

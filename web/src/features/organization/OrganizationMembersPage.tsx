@@ -115,12 +115,15 @@ interface WorkspacePlacement {
   // case where one is about to be created.
   membershipId: string
   role: string
-  ceiling: MemberCeiling | null | undefined
+  // Widened rather than emptied: a ceiling is an object, so it has no empty
+  // value that does not read as a real one. The wire spells absent `null` and
+  // the mapping below converts it.
+  ceiling?: MemberCeiling
 }
 
 // The columns that read the gateway identity behind a membership rather than the
 // membership itself, and so are the deployment operator's. Filtered out for
-// everyone else; see where `operates` is resolved.
+// everyone else; see where `isOperator` is resolved.
 // Withheld from a caller who does not operate the deployment. "access" is no
 // longer a column of its own (it reads under the member's name now) and is
 // gated at that cell instead; the entry stays so the two places that withhold
@@ -505,7 +508,7 @@ function MemberEditor({
   budgets,
   defaultByWorkspace,
   placements,
-  operates,
+  isOperator,
   onClose,
 }: {
   member: OrganizationMember
@@ -517,21 +520,21 @@ function MemberEditor({
   defaultByWorkspace: ReadonlyMap<string, WorkspaceBudgetDefault>
   placements: WorkspacePlacement[]
   /**
-   * Whether this caller operates the deployment, which two halves of this form
+   * Whether this caller isOperator the deployment, which two halves of this form
    * need and the rest does not. Model access writes the gateway's own `users`
    * row and a workspace ceiling is a `scoped_budgets` row; both are
    * deployment-wide since #821, while placing somebody in a workspace is the
    * organization's own. Passed in rather than resolved here so the page asks the
    * question once and the form cannot come to a different answer.
    */
-  operates: boolean
+  isOperator: boolean
   onClose: () => void
 }) {
   const updateUser = useUpdateUser()
   const addMember = useAddWorkspaceMember()
   const removeMember = useRemoveWorkspaceMember()
   const updateRole = useUpdateWorkspaceMemberRole()
-  const scopedBudgets = useScopedBudgets(operates)
+  const scopedBudgets = useScopedBudgets(isOperator)
   const createCeiling = useCreateScopedBudget()
   const updateCeiling = useUpdateScopedBudget()
   const deleteCeiling = useDeleteScopedBudget()
@@ -546,7 +549,7 @@ function MemberEditor({
         return [
           workspace.id,
           {
-            member: placement !== undefined,
+            member: Boolean(placement),
             role: placement?.role ?? "member",
             // A budget, not a figure. Nothing outside the budgets page maps a
             // cap to an amount, so the period comes with it and there is no
@@ -559,8 +562,8 @@ function MemberEditor({
   }, [workspaces, placements])
 
   const [rows, setRows] = useState(initial)
-  const [allowedModels, setAllowedModels] = useState<string[] | null>(
-    spendRow?.allowed_models ?? null,
+  const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
+    spendRow?.allowed_models ?? undefined,
   )
   const [scopeValid, setScopeValid] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -613,7 +616,8 @@ function MemberEditor({
       if (spendRow && member.attribution_user_id) {
         await updateUser.mutateAsync({
           id: member.attribution_user_id,
-          body: { allowed_models: allowedModels },
+          // `null` is how the wire spells "not restricted".
+          body: { allowed_models: allowedModels ?? null },
         })
       }
 
@@ -624,7 +628,7 @@ function MemberEditor({
       // yet, so the create branch below never ran and the form closed reporting
       // success. That is the ordinary path through this page: the member is
       // already in the workspace and is being given a budget for the first time.
-      const membershipIds = new Map<string, string | null>(
+      const membershipIds = new Map<string, string>(
         placements.map((placement) => [
           placement.workspaceId,
           placement.membershipId,
@@ -670,7 +674,7 @@ function MemberEditor({
       // otari#838 exists to remove. There is nothing to write here either: the
       // Budget column is not rendered for them, so every `row.budgetId` is the
       // empty string it was seeded with.
-      if (operates) {
+      if (isOperator) {
         const fresh = await scopedBudgets.refetch()
         const ceilings = new Map(
           (fresh.data ?? [])
@@ -725,16 +729,16 @@ function MemberEditor({
       error={error}
     >
       {/* Withheld entirely from a caller who does not operate the deployment.
-          `spendRow` comes from `useUsers(operates)`, so for them it is always
+          `spendRow` comes from `useUsers(isOperator)`, so for them it is always
           undefined and the fallback below would report "no spend row yet" for a
           row that may well exist. That is the confusion the roster's own
           member cell is gated to avoid: a withheld read must not read as an
           absent gateway identity. */}
-      {!operates ? null : spendRow ? (
+      {!isOperator ? null : spendRow ? (
         <ModelScopeControl
           title="Model access (default for this member's keys)"
           description="The models this member's keys may list and call by default. A key can narrow this, but never exceed it."
-          initial={spendRow.allowed_models ?? null}
+          initial={spendRow.allowed_models ?? undefined}
           onChange={(value, isValid) => {
             setAllowedModels(value)
             setScopeValid(isValid)
@@ -763,7 +767,7 @@ function MemberEditor({
                     as the roster's own Spend column is. Their `row.budgetId` is
                     then the empty string it was seeded with, which is what lets
                     the save skip the scoped-budget writes entirely. */}
-                {operates ? (
+                {isOperator ? (
                   <th scope="col" className="py-1 font-medium">
                     Budget
                   </th>
@@ -797,7 +801,7 @@ function MemberEditor({
                         disabled={!row.member}
                       />
                     </td>
-                    {operates ? (
+                    {isOperator ? (
                       <td className="py-1.5">
                         <FilterSelect
                           ariaLabel={`Budget in ${workspace.name}`}
@@ -820,7 +824,7 @@ function MemberEditor({
         </div>
         {/* Gated with the Budget column it explains: "pick a different budget
             here" names a control this caller is not offered. */}
-        {operates ? (
+        {isOperator ? (
           <span className="text-xs text-muted">
             Each workspace holds its own allowance, so someone in two workspaces
             has two. The amount and the reset period belong to the budget, so
@@ -852,7 +856,7 @@ export function OrganizationMembersPage() {
   // (otari#838). What those reads feed is withheld with them rather than left
   // rendering an em dash, which on this table cannot be told apart from "this
   // member has no gateway identity yet".
-  const operates = isDeploymentOperator(context.data)
+  const isOperator = isDeploymentOperator(context.data)
   const updateUser = useUpdateUser()
   // The roster row carries where its member is and what they may spend there,
   // and the operator-only spend figures with it (otari#1381). The page used to
@@ -871,14 +875,14 @@ export function OrganizationMembersPage() {
   // member. Asked for when the editor opens rather than with the page, which is
   // the same rule `performance.md` states for mounting a modal: the table reads
   // one route, and these three follow only if somebody edits.
-  const isEditing = editingMember !== undefined
+  const isEditing = Boolean(editingMember)
   const workspaces = useWorkspaces(isEditing)
   const workspaceIds = useMemo(
     () => (workspaces.data ?? []).map((workspace) => workspace.id),
     [workspaces.data],
   )
   const workspaceDefaults = useAllWorkspaceBudgetDefaults(workspaceIds)
-  const budgets = useBudgets(operates && isEditing)
+  const budgets = useBudgets(isOperator && isEditing)
 
   const rows = useMemo(() => members.data?.data ?? [], [members.data])
 
@@ -900,7 +904,7 @@ export function OrganizationMembersPage() {
             workspaceName: placement.workspace_name,
             membershipId: placement.workspace_member_id,
             role: placement.role,
-            ceiling: placement.ceiling,
+            ceiling: placement.ceiling ?? undefined,
           })),
         ]),
       ),
@@ -940,15 +944,15 @@ export function OrganizationMembersPage() {
         // only thing distinguishing two people with the same display name.
         cell: (member) => {
           const spendRow = member.attribution ?? undefined
-          // Gated on `operates` here rather than by `DEPLOYMENT_WIDE_COLUMNS`,
+          // Gated on `isOperator` here rather than by `DEPLOYMENT_WIDE_COLUMNS`,
           // which withholds columns by id and so cannot reach a value living
           // inside the member cell. Without this a caller who does not operate
           // the deployment would be shown
           // every member's model-access ceiling under their name.
           const access =
-            operates && spendRow
-              ? accessLabel(spendRow.allowed_models ?? null)
-              : null
+            isOperator && spendRow
+              ? accessLabel(spendRow.allowed_models ?? undefined)
+              : undefined
           const email = member.email && member.full_name ? member.email : null
           return (
             <div className="flex flex-col gap-0.5">
@@ -1014,7 +1018,7 @@ export function OrganizationMembersPage() {
                     : `Role for ${memberLabel(member)}`
                 }
                 value={member.role}
-                disabled={blocked !== undefined || update.isPending}
+                disabled={Boolean(blocked) || update.isPending}
                 options={ROLE_OPTIONS}
                 onChange={(value) => {
                   const role = asMembershipRole(value)
@@ -1186,7 +1190,7 @@ export function OrganizationMembersPage() {
                     ? `Remove ${memberLabel(member)} (${blocked})`
                     : undefined
                 }
-                isDisabled={blocked !== undefined}
+                isDisabled={Boolean(blocked)}
                 onPress={() => setRemoving(member)}
               />
             </RowActionRow>
@@ -1195,7 +1199,7 @@ export function OrganizationMembersPage() {
       },
     ]
     return all.filter(
-      (column) => operates || !DEPLOYMENT_WIDE_COLUMNS.has(column.id),
+      (column) => isOperator || !DEPLOYMENT_WIDE_COLUMNS.has(column.id),
     )
   }, [
     activeContext,
@@ -1203,7 +1207,7 @@ export function OrganizationMembersPage() {
     update.isPending,
     update.mutate,
     manages,
-    operates,
+    isOperator,
     updateUser.isPending,
     updateUser.mutate,
     placementsByUser,
@@ -1236,9 +1240,9 @@ export function OrganizationMembersPage() {
             member's name and the Spend column, neither of which a caller who
             does not operate the deployment is shown, so they are only told to
             one. */}
-        {operates
-          ? "Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization (its workspaces, provider keys, guardrails, pricing and this roster) and read its usage in full, while members and viewers read the workspaces they belong to. No role set here reaches the deployment's own pages, such as Settings and Accounts, which belong to whoever operates the gateway. Budgets and API keys do not attach to this list; they attach to the gateway identity a member is linked to, which is what lets a key be issued to them by name. A member with no such link yet shows no access or spend, and cannot own a key until one exists."
-          : "Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization (its workspaces, provider keys, guardrails, pricing and this roster) and read its usage in full, while members and viewers read the workspaces they belong to. No role set here reaches the deployment's own pages, such as Settings and Accounts, which belong to whoever operates the gateway."}
+        {isOperator
+          ? "Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization (its workspaces, provider keys, guardrails, pricing and this roster) and read its usage in full, while members and viewers read the workspaces they belong to. No role set here reaches the deployment's own pages, such as Settings and Accounts, which belong to whoever isOperator the gateway. Budgets and API keys do not attach to this list; they attach to the gateway identity a member is linked to, which is what lets a key be issued to them by name. A member with no such link yet shows no access or spend, and cannot own a key until one exists."
+          : "Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization (its workspaces, provider keys, guardrails, pricing and this roster) and read its usage in full, while members and viewers read the workspaces they belong to. No role set here reaches the deployment's own pages, such as Settings and Accounts, which belong to whoever isOperator the gateway."}
       </PageIntro>
 
       {/* `remove.error`/`revoke.error` are deliberately absent: their confirm
@@ -1290,7 +1294,7 @@ export function OrganizationMembersPage() {
           key={memberRowKey(editingRow)}
           member={editingRow}
           spendRow={editingRow.attribution ?? undefined}
-          operates={operates}
+          isOperator={isOperator}
           workspaces={workspaces.data ?? []}
           budgets={budgets.data ?? []}
           defaultByWorkspace={defaultByWorkspace}

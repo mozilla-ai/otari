@@ -110,9 +110,17 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
 
 5. **TypeScript + React hygiene.** An absent value in your own types and props is the type's
    own empty value first (`""`, `[]`, `{}`), `undefined` only where no empty value can stand in
-   without colliding with a real one, and never `null` (the API layer mirrors the server JSON,
-   so convert at the boundary). A `null` a refactor merely moves is a finding against that
-   refactor. `unknown` plus a guard where a type is genuinely unknown, not `any`; a discriminated
+   without colliding with a real one **and the declaration says why**, and never `null` (the API
+   layer mirrors the server JSON, so convert at the boundary). A `null` a refactor merely moves
+   is a finding against that refactor. So is a type widened to carry the wire's spelling rather
+   than converting it: `X | null | undefined` on your own type is the tell, and it means one
+   absent value is now spelled two ways for every reader downstream. Prefer a falsy check or a
+   default over an explicit `=== undefined` where one reads the same (`Boolean(x)`, `!x`,
+   `array.length`); spell the comparison out only where a falsy value is a real answer, as a
+   `0` cap or an empty allow-list is. A boolean reads as a question in English (`isPending`,
+   `hasBudget`, `canRevokeKey`), and that covers a local, a prop and a boolean field of a hook's
+   return alike: a bare verb or noun phrase (`operates`, `ready`) reads as the thing rather than
+   as an answer about it. `unknown` plus a guard where a type is genuinely unknown, not `any`; a discriminated
    union rather than a bag of optionals; named exports and named imports, no barrel files;
    correct effect dependency arrays with cleanup; derive from props/query data rather than
    duplicating into state (copying a prop into `useState` and re-syncing it with an effect is

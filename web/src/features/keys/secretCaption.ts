@@ -32,7 +32,7 @@ export function secretCaption(
       : undefined
   return [
     owner ? `Owner ${owner}` : null,
-    accessLabel(result.allowed_models).text,
+    accessLabel(result.allowed_models ?? undefined).text,
     result.expires_at
       ? `expires ${formatDate(result.expires_at)}`
       : "never expires",

@@ -16,6 +16,16 @@ TypeScript runs in `strict` mode; `pnpm --dir web run typecheck` must pass. Reac
   the component tree. (`ApiError`-style third-party shapes that explicitly use `null` are the
   exception.) This applies to a `null` **carried over** by a refactor as much as to a new one:
   moving it is what puts it in your diff.
+
+  **Widening a type to carry the wire's spelling is the same mistake wearing a union.**
+  `ceiling: MemberCeiling | null | undefined` on your own interface is the tell: one absent
+  value is now spelled two ways, and every reader downstream handles both. Convert where the
+  value enters (`placement.ceiling ?? undefined`) and declare the field `ceiling?: MemberCeiling`.
+- **Prefer a falsy check or a default to an explicit comparison** where the two read the same.
+  `Boolean(x)`, `!x` and `array.length` say what `x !== undefined` says, with less to read.
+  Spell the comparison out only where a falsy value is a real answer and the short form would
+  swallow it: a `0` spend cap, an empty allow-list, an empty string somebody typed. That is the
+  falsy-zero trap the backend guide names, read from the other side.
 - **Named exports**, not default exports, for components/hooks/helpers, consistent names
   across imports, better tooling and tree-shaking. (`web/` already does this throughout.)
 - **Named imports**, not namespace imports (`import * as …`).

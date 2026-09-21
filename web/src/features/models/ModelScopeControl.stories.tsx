@@ -75,7 +75,7 @@ const API = {
 const meta = {
   title: "Dashboard/Models/ModelScopeControl",
   component: ModelScopeControl,
-  args: { initial: null, onChange: () => {} },
+  args: { initial: undefined, onChange: () => {} },
   parameters: { api: API, layout: "padded" },
 } satisfies Meta<typeof ModelScopeControl>
 
@@ -138,7 +138,7 @@ export const AsKeyOverride: Story = {
 export const ReportsValidity: Story = {
   render: (args) => {
     const [state, setState] = useState<{
-      value: string[] | null
+      value: string[] | undefined
       valid: boolean
     }>({ value: ["openai:gpt-4o-mini"], valid: true })
     return (
@@ -150,7 +150,7 @@ export const ReportsValidity: Story = {
         />
         <p className="text-caption">
           valid: {String(state.valid)}, value:{" "}
-          {state.value === null ? "any" : JSON.stringify(state.value)}
+          {state.value ? JSON.stringify(state.value) : "any"}
         </p>
       </div>
     )
@@ -165,9 +165,9 @@ export const ReportsValidity: Story = {
 export const AccessLabels: Story = {
   render: () => (
     <div className="flex w-[24rem] flex-col gap-2">
-      {[null, [], ["openai:gpt-4o-mini"], ["a", "b", "c", "d"]].map(
-        (allowed, index) => {
-          const label = accessLabel(allowed)
+      {[undefined, [], ["openai:gpt-4o-mini"], ["a", "b", "c", "d"]].map(
+        (allowedModels, index) => {
+          const label = accessLabel(allowedModels)
           const tone =
             label.tone === "danger"
               ? "text-danger"
@@ -177,7 +177,7 @@ export const AccessLabels: Story = {
           return (
             <div key={index} className="flex items-center justify-between">
               <span className="font-mono text-caption">
-                {allowed === null ? "null" : JSON.stringify(allowed)}
+                {allowedModels ? JSON.stringify(allowedModels) : "any"}
               </span>
               <span className={tone}>{label.text}</span>
             </div>

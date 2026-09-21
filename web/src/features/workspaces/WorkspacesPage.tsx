@@ -332,8 +332,8 @@ export function CreateWorkspaceForm({
   // the deployment having no budgets. Resolved here rather than passed in
   // because the workspace switcher offers this same form.
   const context = useOrganizationContext()
-  const operates = isDeploymentOperator(context.data)
-  const budgets = useBudgets(operates)
+  const isOperator = isDeploymentOperator(context.data)
+  const budgets = useBudgets(isOperator)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [budgetId, setBudgetId] = useState(NO_DEFAULT)
@@ -496,7 +496,7 @@ export function CreateWorkspaceForm({
           picker's options come from the operator-gated `/budgets` read, so
           offering it would be offering a control whose list is empty and whose
           save cannot succeed. */}
-      {operates ? (
+      {isOperator ? (
         <DefaultBudgetPicker
           budgets={budgets.data ?? []}
           value={budgetId}
@@ -524,9 +524,9 @@ function EditWorkspaceForm({
   // read itself is workspace-scoped and would answer, but this form only reads
   // it into those controls, so it is declined together with them.
   const context = useOrganizationContext()
-  const operates = isDeploymentOperator(context.data)
-  const budgets = useBudgets(operates)
-  const defaults = useWorkspaceBudgetDefaults(operates ? workspace.id : null)
+  const isOperator = isDeploymentOperator(context.data)
+  const budgets = useBudgets(isOperator)
+  const defaults = useWorkspaceBudgetDefaults(isOperator ? workspace.id : null)
   const createDefault = useCreateWorkspaceBudgetDefault()
   const updateDefault = useUpdateWorkspaceBudgetDefault()
   const deleteDefault = useDeleteWorkspaceBudgetDefault()
@@ -538,7 +538,7 @@ function EditWorkspaceForm({
   const narrowed = (defaults.data ?? []).filter(
     (row) => row.provider_key_id !== null,
   )
-  const providers = useProviders(operates)
+  const providers = useProviders(isOperator)
   const [name, setName] = useState(workspace.name)
   const [description, setDescription] = useState(workspace.description ?? "")
   const [budgetId, setBudgetId] = useState<string>()
@@ -562,7 +562,7 @@ function EditWorkspaceForm({
     // With the picker withheld, an untouched `selectedBudget` over an unfetched
     // defaults list would read as "none" and delete nothing, but say so rather
     // than lean on that coincidence.
-    if (!operates) return
+    if (!isOperator) return
     if (selectedBudget === NO_DEFAULT) {
       if (aggregate) {
         await deleteDefault.mutateAsync({
@@ -646,7 +646,7 @@ function EditWorkspaceForm({
           picker's options come from the operator-gated `/budgets` read, so
           offering it would be offering a control whose list is empty and whose
           save cannot succeed. */}
-      {operates ? (
+      {isOperator ? (
         <>
           <DefaultBudgetPicker
             budgets={budgets.data ?? []}
@@ -690,8 +690,8 @@ export function WorkspacesPage() {
   // unless the caller may read it, and the column it names is withheld with it
   // (the OrganizationMembersPage pattern, otari#838): without the names, every
   // cell could only echo a UUID fragment of the default's id.
-  const operates = isDeploymentOperator(context.data)
-  const budgets = useBudgets(operates)
+  const isOperator = isDeploymentOperator(context.data)
+  const budgets = useBudgets(isOperator)
   const remove = useDeleteWorkspace()
 
   const [creating, setCreating] = useState(false)
@@ -717,7 +717,7 @@ export function WorkspacesPage() {
   // workspace-scoped and would answer, but this page only reads it into the
   // withheld column below.
   const workspaceDefaults = useAllWorkspaceBudgetDefaults(
-    operates ? workspaceIds : [],
+    isOperator ? workspaceIds : [],
   )
   // The budget each workspace hands to its members, by workspace. Only the
   // aggregate default (no provider narrowing) is named: that is the one the
@@ -773,7 +773,7 @@ export function WorkspacesPage() {
   const showOnboarding = !workspaces.isLoading && rows.length === 0
 
   // The default-budget column is dropped, not emptied, for a caller who cannot
-  // read the budget names it shows; see the note on `operates` above.
+  // read the budget names it shows; see the note on `isOperator` above.
   const columns = useMemo<DataTableColumn<Workspace>[]>(() => {
     const all: DataTableColumn<Workspace>[] = [
       {
@@ -874,7 +874,7 @@ export function WorkspacesPage() {
       },
     ]
     return all.filter((column) => {
-      if (column.id === "default-budget") return operates
+      if (column.id === "default-budget") return isOperator
       if (column.id === "provider-keys") return manages && holdsProviderKeys
       return true
     })
@@ -882,7 +882,7 @@ export function WorkspacesPage() {
     manages,
     isOnlyWorkspace,
     defaultBudgetName,
-    operates,
+    isOperator,
     providerKeys.data,
     holdsProviderKeys,
   ])
