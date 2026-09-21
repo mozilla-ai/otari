@@ -16,26 +16,25 @@ operation into separately-durable pieces.
 
 from typing import Any, Generic, TypeVar
 
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import class_mapper
-from sqlmodel import SQLModel
 
 from gateway.core.unit_of_work import UnitOfWork, session_for
 
-ModelType = TypeVar("ModelType", bound=SQLModel)
-CreateSchemaType = TypeVar("CreateSchemaType", bound=SQLModel)
-UpdateSchemaType = TypeVar("UpdateSchemaType", bound=SQLModel)
+ModelType = TypeVar("ModelType")
+CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
+UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
 
 
 class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
-    """Common CRUD operations over one SQLModel table.
+    """Provide the common CRUD operations over one mapped table.
 
-    Repositories are pure data access: no business logic, no authorization, and
-    no commits (see the module docstring).
+    Repositories are pure data access: no business logic, no authorization, and no commits (see the module docstring).
 
     Type Parameters:
-        ModelType: The SQLModel table class.
+        ModelType: The mapped table class.
         CreateSchemaType: The schema describing a creation payload.
         UpdateSchemaType: The schema describing an update payload.
     """
@@ -45,7 +44,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
 
         Args:
             db: The active async session, or the unit of work whose blocks it runs in.
-            model_class: The SQLModel class for this repository.
+            model_class: The mapped class for this repository.
         """
         self._db = db
         self.model_class = model_class
