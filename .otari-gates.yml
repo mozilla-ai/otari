@@ -74,3 +74,21 @@ gates:
     message: >-
       You touched the CLI; run tests/unit/test_gateway_cli.py before
       finishing (see AGENTS.md, "Change Validation Checklist").
+
+  # Not a changed_path gate, for the same reason as the Postman one above:
+  # `uv add` is what writes this file, so forbidding any change to it would
+  # refuse the very command the rule asks for. `uv lock` is on the list
+  # because pyproject.toml also carries ruff, mypy and packaging config: a
+  # session that edited one of those has no dependency to add, and `uv lock`
+  # is the cheap proof that uv.lock still matches whatever it did change.
+  - id: pyproject-changed-needs-uv
+    type: command_if_changed
+    enforcement: required
+    when_changed: ["pyproject.toml"]
+    require: ["uv add", "uv remove", "uv lock"]
+    message: >-
+      pyproject.toml changed without uv. Add or drop a dependency with
+      `uv add` / `uv remove` (also `--group dev`, `--optional <extra>`)
+      rather than editing the list by hand, so uv.lock moves with it. If
+      you changed something else in the file, run `uv lock` to confirm the
+      lockfile is still in sync.
