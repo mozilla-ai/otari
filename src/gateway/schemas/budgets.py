@@ -7,7 +7,7 @@ Responses echo the stored string, so a row that holds an unknown value still rea
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
@@ -193,17 +193,8 @@ class UpdateScopedBudgetRequest(ScopedBudgetChanges):
     """Request model for updating a scoped budget."""
 
 
-class ScopedBudgetResponse(BaseModel):
-    """One scoped ceiling and its live counters.
-
-    Unlike ``/api/v1/budgets``, the counters are the row's own: a scoped ceiling is
-    enforced against ``current_spend + reserved_spend``, so there is no rollup
-    over users to compute.
-
-    Every limit, along with ``budget_duration_sec`` and ``reset_alignment``, is
-    read off the budget rather than stored here, and carried on the wire so a
-    caller can render a ceiling without fetching every budget to resolve one id.
-    """
+class ScopedCeilingFigures(BaseModel):
+    """One scoped ceiling: its identity, its live counters, and the limits and period of its budget."""
 
     id: str
     scope_type: str
@@ -227,32 +218,50 @@ class ScopedBudgetResponse(BaseModel):
     created_at: str
     updated_at: str
 
+    @staticmethod
+    def _figures_of(ceiling: ScopedBudget, budget: Budget) -> dict[str, Any]:
+        """Return the value of every field here, read from a ceiling and the budget it names."""
+        return {
+            "id": ceiling.id,
+            "scope_type": ceiling.scope_type,
+            "scope_id": ceiling.scope_id,
+            "provider_key_id": ceiling.provider_key_id,
+            "budget_id": ceiling.budget_id,
+            "name": ceiling.name,
+            "max_budget": as_float(budget.max_budget),
+            "current_spend": float(ceiling.current_spend),
+            "reserved_spend": float(ceiling.reserved_spend),
+            "token_limit": budget.token_limit,
+            "current_tokens": ceiling.current_tokens,
+            "reserved_tokens": ceiling.reserved_tokens,
+            "request_limit": budget.request_limit,
+            "current_requests": ceiling.current_requests,
+            "reserved_requests": ceiling.reserved_requests,
+            "budget_duration_sec": budget.budget_duration_sec,
+            "reset_alignment": budget.reset_alignment,
+            "period_start": ceiling.period_start.isoformat() if ceiling.period_start else None,
+            "period_end": ceiling.period_end.isoformat() if ceiling.period_end else None,
+            "created_at": ceiling.created_at.isoformat(),
+            "updated_at": ceiling.updated_at.isoformat(),
+        }
+
+
+class ScopedBudgetResponse(ScopedCeilingFigures):
+    """One scoped ceiling and its live counters.
+
+    Unlike ``/api/v1/budgets``, the counters are the row's own: a scoped ceiling is
+    enforced against ``current_spend + reserved_spend``, so there is no rollup
+    over users to compute.
+
+    Every limit, along with ``budget_duration_sec`` and ``reset_alignment``, is
+    read off the budget rather than stored here, and carried on the wire so a
+    caller can render a ceiling without fetching every budget to resolve one id.
+    """
+
     @classmethod
     def from_model(cls, budget: ScopedBudget, limit: Budget) -> ScopedBudgetResponse:
         """Create a ScopedBudgetResponse from a ceiling and the budget it names."""
-        return cls(
-            id=budget.id,
-            scope_type=budget.scope_type,
-            scope_id=budget.scope_id,
-            provider_key_id=budget.provider_key_id,
-            budget_id=budget.budget_id,
-            name=budget.name,
-            max_budget=as_float(limit.max_budget),
-            current_spend=float(budget.current_spend),
-            reserved_spend=float(budget.reserved_spend),
-            token_limit=limit.token_limit,
-            current_tokens=budget.current_tokens,
-            reserved_tokens=budget.reserved_tokens,
-            request_limit=limit.request_limit,
-            current_requests=budget.current_requests,
-            reserved_requests=budget.reserved_requests,
-            budget_duration_sec=limit.budget_duration_sec,
-            reset_alignment=limit.reset_alignment,
-            period_start=budget.period_start.isoformat() if budget.period_start else None,
-            period_end=budget.period_end.isoformat() if budget.period_end else None,
-            created_at=budget.created_at.isoformat(),
-            updated_at=budget.updated_at.isoformat(),
-        )
+        return cls(**cls._figures_of(budget, limit))
 
 
 class OrganizationBudgetRates(BaseModel):
@@ -394,7 +403,7 @@ class OrganizationScopedBudgetUpdate(ScopedBudgetChanges):
     """
 
 
-class OrganizationScopedBudgetPublic(BaseModel):
+class OrganizationScopedBudgetPublic(ScopedCeilingFigures):
     """One ceiling inside the organization, and the figures it enforces.
 
     The limit and the period are read through the budget rather than stored here,
@@ -403,29 +412,8 @@ class OrganizationScopedBudgetPublic(BaseModel):
     shape this deliberately mirrors.
     """
 
-    id: str
-    scope_type: str
-    scope_id: str
-    provider_key_id: str | None
-    budget_id: str
-    name: str | None
-    max_budget: float | None
-    current_spend: float
-    reserved_spend: float
-    token_limit: int | None
-    current_tokens: int
-    reserved_tokens: int
-    request_limit: int | None
-    current_requests: int
-    reserved_requests: int
-    budget_duration_sec: int | None
-    reset_alignment: str | None
-    period_start: str | None
-    period_end: str | None
     # This is False when the ceiling's budget belongs to another owner, so its figure cannot change here.
     manageable: bool
-    created_at: str
-    updated_at: str
 
     @classmethod
     def from_model(
@@ -435,30 +423,7 @@ class OrganizationScopedBudgetPublic(BaseModel):
         *,
         organization_id: uuid.UUID,
     ) -> OrganizationScopedBudgetPublic:
-        return cls(
-            id=ceiling.id,
-            scope_type=ceiling.scope_type,
-            scope_id=ceiling.scope_id,
-            provider_key_id=ceiling.provider_key_id,
-            budget_id=ceiling.budget_id,
-            name=ceiling.name,
-            max_budget=as_float(budget.max_budget),
-            current_spend=float(ceiling.current_spend),
-            reserved_spend=float(ceiling.reserved_spend),
-            token_limit=budget.token_limit,
-            current_tokens=ceiling.current_tokens,
-            reserved_tokens=ceiling.reserved_tokens,
-            request_limit=budget.request_limit,
-            current_requests=ceiling.current_requests,
-            reserved_requests=ceiling.reserved_requests,
-            budget_duration_sec=budget.budget_duration_sec,
-            reset_alignment=budget.reset_alignment,
-            period_start=ceiling.period_start.isoformat() if ceiling.period_start else None,
-            period_end=ceiling.period_end.isoformat() if ceiling.period_end else None,
-            manageable=budget.organization_id == organization_id,
-            created_at=ceiling.created_at.isoformat(),
-            updated_at=ceiling.updated_at.isoformat(),
-        )
+        return cls(**cls._figures_of(ceiling, budget), manageable=budget.organization_id == organization_id)
 
 
 class OrganizationScopedBudgetsPublic(BaseModel):

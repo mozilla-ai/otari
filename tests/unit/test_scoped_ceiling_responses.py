@@ -12,7 +12,7 @@ from gateway.schemas.budgets import (
     UpdateScopedBudgetRequest,
 )
 
-_COUNTER_FIELDS = [
+_SHARED_FIELDS = [
     "id",
     "scope_type",
     "scope_id",
@@ -32,6 +32,8 @@ _COUNTER_FIELDS = [
     "reset_alignment",
     "period_start",
     "period_end",
+    "created_at",
+    "updated_at",
 ]
 _OWNER = uuid.uuid4()
 
@@ -73,8 +75,8 @@ def test_the_published_field_order_is_fixed() -> None:
     deployment = ScopedBudgetResponse.model_json_schema()
     organization = OrganizationScopedBudgetPublic.model_json_schema()
 
-    assert list(deployment["properties"]) == [*_COUNTER_FIELDS, "created_at", "updated_at"]
-    assert list(organization["properties"]) == [*_COUNTER_FIELDS, "manageable", "created_at", "updated_at"]
+    assert list(deployment["properties"]) == _SHARED_FIELDS
+    assert list(organization["properties"]) == [*_SHARED_FIELDS, "manageable"]
     assert deployment["required"] == list(deployment["properties"])
     assert organization["required"] == list(organization["properties"])
 

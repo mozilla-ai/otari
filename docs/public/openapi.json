@@ -9757,9 +9757,9 @@
           "reset_alignment",
           "period_start",
           "period_end",
-          "manageable",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "manageable"
         ],
         "title": "OrganizationScopedBudgetPublic",
         "type": "object"
