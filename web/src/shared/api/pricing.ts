@@ -17,6 +17,7 @@ import type {
   UpdateOrganizationPricingOverride,
 } from "@/client"
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { fetchAllRows } from "@/shared/api/paging"
 import {
   CATALOG,
@@ -225,15 +226,37 @@ export function useOrganizationPricing(
   pageSize: number,
   enabled = true,
 ) {
+  const organization = useOrganizationContext()
+  const context = organization.data
   return useQuery({
-    queryKey: [ORGANIZATION_PRICING, page, pageSize],
+    // The organization is part of the key, not only of the request, which
+    // carries it implicitly: the server scopes this read by the session's
+    // active organization, so without it two organizations share one cache
+    // entry and the second reads the first's rows until its own land.
+    // `useOrganizationSpendCeilings` keys itself the same way and says more
+    // about why. `invalidateOrganizationPricing` matches on the head, so the
+    // extra segment costs it nothing.
+    queryKey: [
+      ORGANIZATION_PRICING,
+      context?.organization?.id ?? null,
+      page,
+      pageSize,
+    ],
     queryFn: () =>
       apiFetch<OrganizationPricingOverrides>(
         `/organizations/me/pricing?skip=${page * pageSize}&limit=${pageSize}`,
       ),
     staleTime: 60_000,
-    placeholderData: keepPreviousData,
-    enabled,
+    // Kept across a page change and dropped across an organization change, for
+    // the reason `useOrganizationSpendCeilings` gives.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === (context?.organization?.id ?? null)
+        ? previous
+        : undefined,
+    // Withheld until the context has settled, because the organization is part
+    // of the key: asking before it lands keys the read as `null` and then again
+    // under the organization, which is two requests for one page.
+    enabled: enabled && (organization.isSuccess || organization.isError),
   })
 }
 

@@ -1,9 +1,4 @@
-import {
-  keepPreviousData,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   Budget,
   BudgetResetLog,
@@ -231,7 +226,14 @@ export function useOrganizationSpendCeilings(
         `/organizations/me/spend-ceilings?skip=${page * pageSize}&limit=${pageSize}`,
       ),
     staleTime: 60_000,
-    placeholderData: keepPreviousData,
+    // Kept across a page change and dropped across an organization change.
+    // `keepPreviousData` alone answers the new organization's key with the old
+    // organization's rows until the fetch lands, which is one tenant's spend on
+    // another tenant's screen, briefly and for no reason.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === (context?.organization?.id ?? null)
+        ? previous
+        : undefined,
     // A callback, because this is the one read here that a *role* opens, and a
     // role moves under a mounted query. Switching organization invalidates
     // everything cached, and React Query resolves a plain `enabled` from the
