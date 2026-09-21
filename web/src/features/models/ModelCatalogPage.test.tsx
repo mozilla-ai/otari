@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -222,13 +222,17 @@ describe("ModelCatalogPage", () => {
 
     const list = await screen.findByRole("list", { name: "Models" })
     const byLine = within(list).getByText(/by Z\.ai/)
-    expect(byLine.querySelector("svg")).not.toBeNull()
+    // The geometry is on a lazy chunk, so the mark lands a microtask after the
+    // row. `waitFor` is the await; the reserved box is what renders until then.
+    await waitFor(() => expect(byLine.querySelector("svg")).not.toBeNull())
 
     await userEvent.click(screen.getByRole("radio", { name: "Table" }))
     // `closest("span")` would return the sub-line itself; the mark is its
     // sibling, so the assertion is on the parent.
     const subLine = await screen.findByText(/Z\.ai · 2 providers/)
-    expect(subLine.parentElement?.querySelector("svg")).not.toBeNull()
+    await waitFor(() =>
+      expect(subLine.parentElement?.querySelector("svg")).not.toBeNull(),
+    )
   })
 
   it("marks the makers and the providers in the rail", async () => {
@@ -245,9 +249,11 @@ describe("ModelCatalogPage", () => {
     // Both rail lists resolve at least one mark on this seed, so both reserve
     // the slot and every row in them carries one.
     const vendors = screen.getByRole("checkbox", { name: /Z\.ai/ })
-    expect(vendors.closest("label")?.querySelector("svg")).not.toBeNull()
     const provider = screen.getByRole("checkbox", { name: /Fireworks AI/ })
-    expect(provider.closest("label")?.querySelector("svg")).not.toBeNull()
+    await waitFor(() => {
+      expect(vendors.closest("label")?.querySelector("svg")).not.toBeNull()
+      expect(provider.closest("label")?.querySelector("svg")).not.toBeNull()
+    })
   })
 
   it("opens a model from the description inside its card", async () => {

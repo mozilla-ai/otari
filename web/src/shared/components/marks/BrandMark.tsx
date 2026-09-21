@@ -1,12 +1,29 @@
+import { lazy, Suspense } from "react"
+
 import { ProductMark } from "@/design-system/ProductMark"
 import {
+  hasMakerMark,
   hasProviderMark,
   isProductMarkProvider,
-  makerMark,
-  type ProviderMarkGlyph,
-  providerMark,
-} from "@/shared/helpers/brandMarks"
+} from "@/shared/helpers/brandMarkKeys"
 import { providerDisplayName } from "@/shared/helpers/providers"
+
+/**
+ * The geometry, fetched after paint.
+ *
+ * The path data for every mark is 70 kB, against ~3 kB for the list of which
+ * companies have one. Statically imported, every visitor to a page with a mark
+ * on it downloaded all of the art before the page painted, for the handful of
+ * providers a deployment actually has. So the question "is there a mark" stays
+ * synchronous, from `brandMarkKeys`, and only the drawing is deferred.
+ *
+ * The fallback is the reserved box at the mark's own size rather than `null`,
+ * because these sit above the fold: an empty box that becomes a mark does not
+ * move the row, where a box appearing from nothing would.
+ */
+const BrandMarkGlyph = lazy(
+  () => import("@/shared/components/marks/BrandMarkGlyph"),
+)
 
 /**
  * The two steps a mark is drawn at.
@@ -23,30 +40,24 @@ const BOX: Record<BrandMarkStep, string> = {
   14: "size-3.5",
 }
 
-/**
- * The geometry, drawn.
- *
- * Decorative, so it is hidden from the accessibility tree rather than labelled:
- * a mark is never shown without the name it belongs to, and a label here would
- * read the company out twice.
- */
-function Glyph({ glyph, box }: { glyph: ProviderMarkGlyph; box: string }) {
-  const shapes = glyph.shapes.map((shape) => (
-    <path key={shape.d} d={shape.d} fillOpacity={shape.fillOpacity} />
-  ))
+/** The mark's footprint, held while the geometry is in flight. */
+function Reserved({ box }: { box: string }) {
+  return <span aria-hidden="true" className={`${box} shrink-0`} />
+}
+
+function Glyph({
+  markKey,
+  kind,
+  box,
+}: {
+  markKey: string
+  kind: "provider" | "maker"
+  box: string
+}) {
   return (
-    <svg
-      viewBox={glyph.viewBox}
-      aria-hidden="true"
-      focusable="false"
-      className={`${box} shrink-0 fill-current`}
-    >
-      {glyph.transform === undefined ? (
-        shapes
-      ) : (
-        <g transform={glyph.transform}>{shapes}</g>
-      )}
-    </svg>
+    <Suspense fallback={<Reserved box={box} />}>
+      <BrandMarkGlyph markKey={markKey} kind={kind} box={box} />
+    </Suspense>
   )
 }
 
@@ -56,6 +67,9 @@ function Glyph({ glyph, box }: { glyph: ProviderMarkGlyph; box: string }) {
  * A tile rather than a blank, because a missing mark is the ordinary case and
  * not a fault. An operator names their own instances, and some ids have no mark
  * anyone would recognize.
+ *
+ * Stays in this module rather than the deferred one: a deployment with no
+ * marked providers should not fetch 70 kB of geometry to draw a letter.
  */
 function Lettermark({ label, box }: { label: string; box: string }) {
   return (
@@ -120,14 +134,12 @@ export function ProviderMark({
   if (isProductMarkProvider(providerId)) {
     return <ProductMark className={`${box} shrink-0`} />
   }
-
-  const glyph = providerMark(providerId)
-  if (glyph === undefined) {
+  if (!hasProviderMark(providerId)) {
     return (
       <Lettermark label={label ?? providerDisplayName(providerId)} box={box} />
     )
   }
-  return <Glyph glyph={glyph} box={box} />
+  return <Glyph markKey={providerId} kind="provider" box={box} />
 }
 
 /**
@@ -150,11 +162,10 @@ export function MakerMark({
   step?: BrandMarkStep
 }) {
   const box = BOX[step]
-  const glyph = makerMark(vendorSlug)
-  return glyph === undefined ? (
-    <Lettermark label={label} box={box} />
+  return hasMakerMark(vendorSlug) ? (
+    <Glyph markKey={vendorSlug} kind="maker" box={box} />
   ) : (
-    <Glyph glyph={glyph} box={box} />
+    <Lettermark label={label} box={box} />
   )
 }
 
@@ -171,5 +182,5 @@ export function anyProviderMark(providerIds: readonly string[]): boolean {
 
 /** The same question for a list of makers. */
 export function anyMakerMark(vendorSlugs: readonly string[]): boolean {
-  return vendorSlugs.some((slug) => makerMark(slug) !== undefined)
+  return vendorSlugs.some(hasMakerMark)
 }

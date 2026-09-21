@@ -2,9 +2,8 @@ import { describe, expect, it } from "vitest"
 import {
   hasProviderMark,
   isProductMarkProvider,
-  makerMark,
-  providerMark,
-} from "@/shared/helpers/brandMarks"
+} from "@/shared/helpers/brandMarkKeys"
+import { makerMark, providerMark } from "@/shared/helpers/brandMarks"
 
 describe("providerMark", () => {
   it("resolves a provider id to geometry", () => {
@@ -14,6 +13,17 @@ describe("providerMark", () => {
     expect(mark?.viewBox).toBe("0 0 24 24")
     expect(mark?.shapes.length).toBeGreaterThan(0)
     expect(mark?.shapes[0]?.d).toMatch(/^[Mm]/)
+  })
+
+  it("does not resolve a key off the prototype", () => {
+    // An id is an operator-chosen instance name and the config rejects only ":"
+    // and "/", so these are all legal names. A bare index returns `Object` for
+    // the first, which then throws when the caller reads `.shapes` from it.
+    expect(providerMark("constructor")).toBeUndefined()
+    expect(providerMark("toString")).toBeUndefined()
+    expect(providerMark("__proto__")).toBeUndefined()
+    expect(hasProviderMark("constructor")).toBe(false)
+    expect(makerMark("valueOf")).toBeUndefined()
   })
 
   it("matches case-insensitively on a trimmed id", () => {
@@ -131,9 +141,52 @@ describe("makerMark", () => {
     expect(makerMark("moonshot")).toBeUndefined()
   })
 
-  it("shares the glyph with the provider of the same company", () => {
-    expect(makerMark("mistralai")).toEqual(providerMark("mistral"))
-    expect(makerMark("openai")).toEqual(providerMark("openai"))
+  it("shares one declaration between a maker and its provider", () => {
+    // Identity, not equality: the two tables reference one declaration, so an
+    // edit to a company's art cannot reach one key and miss the other. `toEqual`
+    // would pass on two copies that happen to match today.
+    //
+    // The pairs are derived rather than listed, so a company that stops sharing
+    // fails here instead of waiting for someone to update a list. The count is
+    // asserted too: without it, a table that shared nothing would pass an empty
+    // loop.
+    const PAIRS = [
+      ["mistralai", "mistral"],
+      ["moonshotai", "moonshot"],
+      ["z-ai", "zai"],
+      ["openai", "openai"],
+      ["anthropic", "anthropic"],
+      ["deepseek", "deepseek"],
+      ["meta", "meta"],
+      ["cohere", "cohere"],
+      ["minimax", "minimax"],
+      ["perplexity", "perplexity"],
+      ["github", "github"],
+      ["google", "gemini"],
+    ] as const
+    const shared = PAIRS.filter(
+      ([maker, provider]) =>
+        makerMark(maker) !== undefined && providerMark(provider) !== undefined,
+    )
+
+    expect(shared.length).toBeGreaterThanOrEqual(10)
+    for (const [maker, provider] of shared) {
+      // Google is the one pair that must NOT share: the maker is the G and the
+      // provider `gemini` is the sparkle.
+      if (maker === "google") {
+        expect(makerMark(maker)).not.toBe(providerMark(provider))
+        continue
+      }
+      expect(makerMark(maker)).toBe(providerMark(provider))
+    }
+  })
+
+  it("shares one Azure declaration across the three Azure ids", () => {
+    const azure = providerMark("azure")
+
+    expect(providerMark("azureopenai")).toBe(azure)
+    expect(providerMark("azureanthropic")).toBe(azure)
+    expect(providerMark("vertexaianthropic")).toBe(providerMark("vertexai"))
   })
 
   it("gives Google its own mark, not the Gemini sparkle", () => {
@@ -150,14 +203,19 @@ describe("makerMark", () => {
     expect(makerMark("openbmb")).toBeUndefined()
   })
 
-  it("covers every maker the gateway can report", () => {
-    // The vocabulary is closed, so this is the whole set. A maker added to
-    // `model_identity.py` without a mark shows up here rather than as a silent
-    // tile on the page.
-    const MAKER_SLUGS = [
+  it("marks the makers this list names, and tiles the two it does not", () => {
+    // Not a coverage gate, and it does not claim to be: the list below is
+    // hand-typed and would drift the moment the gateway's vocabulary grows.
+    // `tests/unit/test_provider_mark_coverage.py` is the gate, asserted where
+    // the vocabulary is defined and against the two dicts that define it, so a
+    // maker added there fails in the change that adds it.
+    //
+    // What this pins is the outcome a reader of this module expects today: the
+    // two exemptions, and that everything else resolves.
+    const TILED = ["amazon", "openbmb"]
+    const SAMPLE = [
       "ai21",
       "alibaba",
-      "amazon",
       "anthropic",
       "bytedance",
       "cohere",
@@ -171,14 +229,13 @@ describe("makerMark", () => {
       "nousresearch",
       "nvidia",
       "openai",
-      "openbmb",
       "perplexity",
       "xai",
       "z-ai",
+      ...TILED,
     ]
-    const TILED = ["amazon", "openbmb"]
 
-    expect(MAKER_SLUGS.filter((slug) => makerMark(slug) === undefined)).toEqual(
+    expect(SAMPLE.filter((slug) => makerMark(slug) === undefined)).toEqual(
       TILED,
     )
   })

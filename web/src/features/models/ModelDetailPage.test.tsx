@@ -243,9 +243,12 @@ describe("ModelDetailPage", () => {
       name: "Offerings of GLM-5.3",
     })
     const rows = within(offerings).getAllByRole("row").slice(1)
-    for (const row of rows) {
-      expect(row.querySelector("svg")).not.toBeNull()
-    }
+    // Lazy geometry: the reserved box renders first and the mark follows.
+    await waitFor(() => {
+      for (const row of rows) {
+        expect(row.querySelector("svg")).not.toBeNull()
+      }
+    })
   })
 
   it("opens the drawer with the request to send, to the gateway's pick or a pinned provider", async () => {

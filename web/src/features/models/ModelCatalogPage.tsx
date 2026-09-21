@@ -453,28 +453,28 @@ const TABLE_COLUMNS: DataTableColumn<CatalogModelSummary>[] = [
     header: "Model",
     isRowHeader: true,
     allowsSorting: true,
-    cell: (row) => (
-      <div className="flex min-w-0 flex-col">
-        <span className="text-body break-words">{row.name}</span>
-        <span className="flex items-center gap-1.5 text-caption">
-          {/* No slot held when the maker is unknown: the sub-line is prose on
+    cell: (row) => {
+      const makerKey = makerKeyOf(row)
+      return (
+        <div className="flex min-w-0 flex-col">
+          <span className="text-body break-words">{row.name}</span>
+          <span className="flex items-center gap-1.5 text-caption">
+            {/* No slot held when the maker is unknown: the sub-line is prose on
               one row of a table whose other rows carry a mark, and an empty box
               in front of "Unknown vendor" reads as a mark that failed to load. */}
-          {makerKeyOf(row) === undefined ? null : (
-            <MakerMark
-              vendorSlug={makerKeyOf(row) ?? ""}
-              label={row.vendor ?? ""}
-            />
-          )}
-          <span>
-            {row.vendor ?? "Unknown vendor"} ·{" "}
-            {row.provider_count === 1
-              ? "1 provider"
-              : `${row.provider_count} providers`}
+            {makerKey === undefined ? null : (
+              <MakerMark vendorSlug={makerKey} label={row.vendor ?? ""} />
+            )}
+            <span>
+              {row.vendor ?? "Unknown vendor"} ·{" "}
+              {row.provider_count === 1
+                ? "1 provider"
+                : `${row.provider_count} providers`}
+            </span>
           </span>
-        </span>
-      </div>
-    ),
+        </div>
+      )
+    },
   },
   {
     id: "context",
