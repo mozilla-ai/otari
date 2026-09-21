@@ -2358,6 +2358,8 @@ class _FakeSandboxBackend:
         image: str | None = None,
         allowed_tools: frozenset[str] | None = None,
         tally: Any = None,
+        files: Any = None,
+        files_base_url: str | None = None,
     ) -> None:
         type(self).last_purpose_hint = purpose_hint
         type(self).last_image = image

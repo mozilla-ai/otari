@@ -724,6 +724,7 @@ export function workspaceCodeExecutionPolicy(
     exec_timeout_s: null,
     image: null,
     tools: null,
+    executor: null,
     created_at: null,
     updated_at: null,
     ...overrides,

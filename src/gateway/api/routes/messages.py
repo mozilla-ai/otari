@@ -3,7 +3,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any, Literal
 
-from any_llm import LLMProvider, amessages
+from any_llm import AnyLLM, LLMProvider, amessages
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.messages import (
     MessageDeltaEvent,
@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     ModelProviderPortDep,
+    build_sandbox_file_bridge,
     extract_credential_token,
     get_config,
     get_db_if_needed,
@@ -26,7 +27,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
-from gateway.api.routes._normalize import normalize_request_messages
+from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     DB_UNAVAILABLE_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
@@ -52,26 +53,30 @@ from gateway.api.routes._platform import (
     _resolve_platform_credentials,
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
-from gateway.api.routes._tools import _strip_gateway_fields
+from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.services.file_service import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_messages import (
     MAX_TOOL_ITERATIONS_CAP,
     MCP_ACTIVITY_ID_PREFIX,
     MCP_CLIENT_BETA,
+    SERVER_TOOL_USE_ID_PREFIX,
     WEB_SEARCH_TOOL_USE_ID_PREFIX,
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
+from gateway.types.code_execution import CodeExecutor
 
 router = APIRouter(tags=["messages"])
 
@@ -87,19 +92,64 @@ def _merge_anthropic_betas(body_betas: list[str] | None, raw_request: Request) -
     return list(dict.fromkeys(betas)) or None
 
 
-def _split_mcp_client_beta(kwargs: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-    """Consume the client capability without forwarding it to the model provider."""
+def _serves_messages_natively(dispatch_model: Any) -> bool:
+    """Whether the dispatched provider has an Anthropic Messages API of its own.
+
+    The same question any-llm asks before refusing ``betas``, asked the same
+    way: a provider that serves Messages natively overrides ``_amessages``,
+    while a bridged one inherits the base implementation that converts
+    Messages to Completions (and refuses what cannot survive the conversion).
+    ``SUPPORTS_MESSAGES`` does not answer it, being true for every provider the
+    bridge covers.
+
+    An unknown or unparseable selector answers yes, so nothing is stripped on a
+    guess; any-llm then refuses the beta itself, as it did before.
+
+    This reads a private any-llm attribute, which nothing public answers today
+    (``SUPPORTS_MESSAGES`` is true for every bridged provider). It is a shim in
+    the sense of CONTRIBUTING's "when the fix is upstream": the durable answer
+    is a public capability flag on the any-llm provider class, asked for in
+    https://github.com/mozilla-ai/any-llm/issues/1418, and this goes when that
+    lands. ``getattr`` keeps a renamed attribute from breaking a request; it
+    degrades to forwarding the betas, the pre-shim behavior.
+    """
+    if not isinstance(dispatch_model, str) or not dispatch_model:
+        return True
+    try:
+        provider, _ = AnyLLM.split_model_provider(dispatch_model)
+        native = getattr(AnyLLM.get_provider_class(provider), "_amessages", None)
+        return native is not getattr(AnyLLM, "_amessages", None)
+    except Exception:  # noqa: BLE001 - any-llm raises its own types for an unknown provider
+        return True
+
+
+def _split_client_betas(kwargs: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Take out the betas no provider should see, and say whether MCP's was among them.
+
+    Two never travel. The MCP client capability is the gateway's own, consumed
+    here. And every beta is dropped for a provider with no Messages API of its
+    own, where any-llm refuses the request outright: a beta names an Anthropic
+    feature that provider was never going to serve, so forwarding it would make
+    a request stop working purely because its model changed, which is the swap
+    `auto` exists to keep invisible.
+    """
     betas = kwargs.get("betas")
-    if not isinstance(betas, list) or MCP_CLIENT_BETA not in betas:
+    if not isinstance(betas, list) or not betas:
+        return kwargs, False
+
+    saw_mcp_beta = MCP_CLIENT_BETA in betas
+    provider_betas = (
+        [beta for beta in betas if beta != MCP_CLIENT_BETA] if _serves_messages_natively(kwargs.get("model")) else []
+    )
+    if provider_betas == betas:
         return kwargs, False
 
     provider_kwargs = {**kwargs}
-    provider_betas = [beta for beta in betas if beta != MCP_CLIENT_BETA]
     if provider_betas:
         provider_kwargs["betas"] = provider_betas
     else:
         provider_kwargs.pop("betas")
-    return provider_kwargs, True
+    return provider_kwargs, saw_mcp_beta
 
 
 class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc]
@@ -187,6 +237,46 @@ def _is_gateway_minted_result(block: Any) -> bool:
     return all(isinstance(hit, dict) and not hit.get("encrypted_content") for hit in hits)
 
 
+def _is_gateway_minted_code_execution_result(block: Any) -> bool:
+    """Whether a ``code_execution_tool_result`` block was minted by this gateway.
+
+    Provenance is the reserved ``server_tool_use`` id prefix, as for web search.
+    Anthropic's own results, which a caller echoes when the provider ran the
+    code, carry ``srvtoolu_`` ids and survive untouched.
+    """
+    if not isinstance(block, dict) or block.get("type") != "code_execution_tool_result":
+        return False
+    return str(block.get("tool_use_id") or "").startswith(SERVER_TOOL_USE_ID_PREFIX)
+
+
+def _code_execution_pair_as_text(use: dict[str, Any] | None, result: dict[str, Any]) -> dict[str, Any]:
+    """Fold a gateway-minted code-execution pair into one assistant ``text`` block.
+
+    Unlike a web-search pair, whose hits are already in the transcript, an
+    execution's output exists nowhere else, so dropping the pair would make the
+    model forget what its code printed on the previous turn. A ``tool_use`` /
+    ``tool_result`` rewrite is not available either: ``tool_result`` must open a
+    user turn, which would mean splitting the echoed assistant message. A text
+    block keeps the code and its output in the model's view in a shape every
+    provider accepts.
+    """
+    code = str(((use or {}).get("input") or {}).get("code") or "")
+    raw_content = result.get("content")
+    content: dict[str, Any] = raw_content if isinstance(raw_content, dict) else {}
+    parts = [f"[code executed]\n```\n{code}\n```"] if code else ["[code executed]"]
+    if content.get("type") == "code_execution_tool_result_error":
+        parts.append(f"error: {content.get('error_code') or 'unavailable'}")
+    else:
+        for label in ("stdout", "stderr"):
+            value = content.get(label)
+            if isinstance(value, str) and value:
+                parts.append(f"{label}:\n{value}")
+        return_code = content.get("return_code")
+        if isinstance(return_code, int) and return_code != 0:
+            parts.append(f"return_code: {return_code}")
+    return {"type": "text", "text": "\n".join(parts)}
+
+
 def _is_gateway_minted_mcp_block(block: Any) -> bool:
     """Whether ``block`` carries this gateway's reserved MCP activity prefix."""
     if not isinstance(block, dict):
@@ -215,6 +305,10 @@ def _strip_gateway_minted_blocks(messages: Any) -> Any:
     only alongside the result that answers it, matched by ``tool_use_id``, so a
     provider's pair is never split.
 
+    A gateway-minted code-execution pair is not dropped but folded into a text
+    block (:func:`_code_execution_pair_as_text`), because its output lives nowhere
+    else in the transcript.
+
     A message left with no content is dropped: an empty ``content`` array is rejected
     by the API, and a turn that held nothing but our pair has nothing left to say.
     """
@@ -237,8 +331,25 @@ def _strip_gateway_minted_blocks(messages: Any) -> Any:
             for block in content
             if _is_gateway_minted_mcp_block(block)
         }
-        kept_blocks = [block for block in content if not _is_minted_pair_member(block, minted_web_ids, minted_mcp_ids)]
-        if len(kept_blocks) == len(content):
+        minted_code_uses = {
+            block.get("id"): block
+            for block in content
+            if isinstance(block, dict)
+            and block.get("type") == "server_tool_use"
+            and block.get("name") == CODE_EXECUTION_TOOL_NAME
+            and str(block.get("id") or "").startswith(SERVER_TOOL_USE_ID_PREFIX)
+        }
+        kept_blocks: list[Any] = []
+        for block in content:
+            if _is_minted_pair_member(block, minted_web_ids, minted_mcp_ids):
+                continue
+            if _is_gateway_minted_code_execution_result(block):
+                kept_blocks.append(_code_execution_pair_as_text(minted_code_uses.get(block.get("tool_use_id")), block))
+                continue
+            if isinstance(block, dict) and block.get("id") in minted_code_uses:
+                continue
+            kept_blocks.append(block)
+        if kept_blocks == content:
             kept_messages.append(message)
             continue
         dropped += len(content) - len(kept_blocks)
@@ -481,11 +592,11 @@ class _MessagesAdapter:
         return isinstance(chunk, MessageDeltaEvent)
 
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
-        provider_kwargs, _ = _split_mcp_client_beta(kwargs)
+        provider_kwargs, _ = _split_client_betas(kwargs)
         return await amessages(**provider_kwargs)  # type: ignore[return-value]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
-        provider_kwargs, _ = _split_mcp_client_beta(kwargs)
+        provider_kwargs, _ = _split_client_betas(kwargs)
         return await amessages(**provider_kwargs)  # type: ignore[return-value]
 
     def prepare_stream_kwargs(
@@ -506,6 +617,7 @@ class _MessagesAdapter:
         on_first_response: Callable[[], None] | None = None,
         *,
         emit_native_web_search: bool = False,
+        emit_native_code_execution: bool = False,
         web_search_budget: WebSearchBudget | None = None,
     ) -> MessageResponse:
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
@@ -515,7 +627,9 @@ class _MessagesAdapter:
             extra["on_first_response"] = on_first_response
         if web_search_budget is not None:
             extra["web_search_budget"] = web_search_budget
-        provider_kwargs, _ = _split_mcp_client_beta(kwargs)
+        if emit_native_code_execution:
+            extra["emit_native_code_execution"] = True
+        provider_kwargs, _ = _split_client_betas(kwargs)
         return await anthropic_tool_loop(
             completion_kwargs=provider_kwargs,
             pool=pool,
@@ -531,14 +645,17 @@ class _MessagesAdapter:
         max_iterations: int,
         *,
         emit_native_web_search: bool = False,
+        emit_native_code_execution: bool = False,
         web_search_budget: WebSearchBudget | None = None,
     ) -> AsyncIterator[MessageStreamEvent]:
-        provider_kwargs, emit_native_mcp = _split_mcp_client_beta(kwargs)
+        provider_kwargs, emit_native_mcp = _split_client_betas(kwargs)
         extra: dict[str, Any] = {}
         if emit_native_mcp:
             extra["emit_native_mcp"] = True
         if web_search_budget is not None:
             extra["web_search_budget"] = web_search_budget
+        if emit_native_code_execution:
+            extra["emit_native_code_execution"] = True
         return anthropic_tool_loop_stream(
             completion_kwargs=provider_kwargs,
             pool=pool,
@@ -648,12 +765,17 @@ async def create_message(
     # independent of whether the current request enables the same tool again.
     request.messages = _strip_gateway_minted_blocks(request.messages)
 
+    # Uploads the normalizer found for the code-execution sandbox, handed to the
+    # sandbox session once the billed user and workspace are resolved.
+    sandbox_inputs: list[StagedFile] = []
+
     async def _normalize(
         user_id: str,
         provider: LLMProvider | None,
         model: str,
         instance: str | None,
         workspace_id: uuid.UUID | None,
+        workspace_executor: CodeExecutor | None,
     ) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Anthropic wire payload
         # before the cost estimate. Standalone only; no-op when the files
@@ -669,7 +791,16 @@ async def create_message(
             user_id=user_id,
             instance=instance,
             workspace_id=workspace_id,
+            sandbox_requested=sandbox_requested(
+                request.tools,
+                config=config,
+                provider=provider,
+                dialect=_ADAPTER.name,
+                code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+                workspace_executor=workspace_executor,
+            ),
         )
+        sandbox_inputs.extend(stats.sandbox_inputs)
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()
 
     try:
@@ -696,6 +827,7 @@ async def create_message(
                 request.messages, raw_request, has_tools=bool(request.tools)
             ),
             normalize_messages=_normalize,
+            tools=request.tools,
         )
     except HTTPException as exc:
         # The hybrid preamble (platform resolve / auth) raises format-agnostic
@@ -724,6 +856,15 @@ async def create_message(
         mcp_server_ids=request.mcp_server_ids,
         max_tool_iterations=request.max_tool_iterations,
         tools_header=request.tools_header,
+        code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+        sandbox_files=build_sandbox_file_bridge(
+            raw_request=raw_request,
+            config=config,
+            db=db,
+            user_id=ctx.user_id,
+            workspace_id=ctx.workspace_id,
+            inputs=sandbox_inputs,
+        ),
     )
 
     # Strip gateway-internal fields, convert any caller-supplied OpenAI-shaped
@@ -741,9 +882,10 @@ async def create_message(
         # ``container`` addresses Anthropic's own code-execution container, and
         # the gateway sandbox owns execution for this request, so the provider
         # would be asked to attach a container no tool call will reach.
-        # ``prepare_gateway_tools`` has already refused the one shape where a
-        # provider-native code-execution tool survives alongside the sandbox, so
-        # dropping it here cannot strand a container the provider would have used.
+        # ``prepare_gateway_tools`` either claimed the provider-native declaration
+        # or refused the request, so no provider tool survives alongside the
+        # sandbox and dropping it here cannot strand a container the provider
+        # would have used.
         request_fields.pop("container", None)
 
     # ------------------------------------------------------------------

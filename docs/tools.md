@@ -22,9 +22,11 @@ Unavailable but recognized tools remain in the response with
 
 ## Who runs a tool
 
-An `otari_*` type is executed by Otari. Other tool declarations are forwarded
-to the provider, including provider-native code interpreter and web-search
-types. Function tools remain the caller's responsibility.
+An `otari_*` type is executed by Otari. A provider-native web-search type is
+forwarded to the provider unless [interception](#web-search-interception) is on.
+A provider-native code-execution type is decided by the request's
+[executor](#code-execution-executor). Function tools remain the caller's
+responsibility.
 
 ### Web-search interception
 
@@ -120,6 +122,75 @@ Request it with:
 The sandbox speaks the [code-execution protocol](code-execution-protocol.md).
 A runnable example lives under `demo/code-exec/`.
 
+### Code-execution executor
+
+A request written for a provider's own sandbox keeps its provider's vocabulary:
+Anthropic's `{"type": "code_execution_20250825"}` on `/api/v1/messages`, OpenAI's
+`{"type": "code_interpreter"}` on `/api/v1/responses`, or the bare
+`{"type": "code_execution"}`. The **executor** decides who runs the code such a
+declaration asks for:
+
+| Executor | Who runs the code |
+| --- | --- |
+| `auto` (default) | The provider, when it runs that tool natively for the dispatched model and wire format; otherwise Otari's sandbox. |
+| `otari` | Always Otari's sandbox. |
+| `provider` | Always the provider; the declaration is forwarded untouched. |
+
+`auto` is what makes a model swap transparent. An Anthropic Messages request
+carrying `code_execution_20250825` runs natively against an Anthropic model, and
+the same request against an open model runs on the sandbox, with the same
+`server_tool_use` and `code_execution_tool_result` blocks coming back. An
+`anthropic-beta` header travels only as far as it can be honored: against a
+provider with no Messages API of its own it is dropped rather than refused,
+because a beta names an Anthropic feature that provider was never going to
+serve, and refusing it would make the request fail purely because its model
+changed. On
+Responses a claimed `code_interpreter` is answered with a `code_interpreter_call`
+item. Chat Completions has no native shape, so a claimed declaration there
+resolves inside the tool loop and only the final message is returned. Nothing
+runs natively on Chat Completions, and the bare `code_execution` form is no
+provider's, so under `auto` both always run on the sandbox.
+
+Three layers choose the executor. The workspace pin wins over both of the
+others; the header wins over the deployment default:
+
+1. The deployment default, `code_execution_executor` (`OTARI_CODE_EXECUTION_EXECUTOR`),
+   editable on the Tools page. Unset means `auto`.
+2. A [workspace policy](#per-workspace-code-policy) may pin `executor`. A pin is
+   a decision the request cannot argue with: a header that disagrees is refused
+   with 403.
+3. The `X-Otari-Code-Execution` header (`auto`, `otari` or `provider`) chooses per
+   request where the workspace has not pinned. A value outside that vocabulary
+   is a 400.
+
+With no `sandbox_url` there is nothing to bring the code to, so a provider
+declaration is always forwarded and no policy is read for it. Asking for `otari`
+without a sandbox is a 400. The explicit `otari_code_execution` type is always
+run by Otari, whatever the executor says. When a claimed declaration runs on the
+sandbox, an `otari_code_execution` entry beside it is folded in rather than
+refused; when the declaration stays with the provider, the two together are
+still refused, because one request cannot address two sandboxes.
+
+A gateway-run execution is described back in the caller's vocabulary with ids
+Otari reserves (`otari_srvtoolu_…`, `otari_ci_…`, `otari_cntr_…`). When a client
+echoes such a turn on its next request, a Messages pair is folded into a text
+block, and a Responses item into an assistant message, so the model keeps the
+code and its output; a provider's own items carry the provider's ids and pass through
+untouched. Uploaded files the request references are seeded into the sandbox and
+files the code produces come back as stored files, announced in Anthropic's
+`code_execution_output` entries by their `file_id`, and on Responses as an
+`image` output naming the URL Otari serves each produced image from (under
+`public_base_url` where it is set, otherwise under the address the request
+arrived on; any other produced file is listed and downloadable by id). A file the *provider's* own sandbox produced stays with the
+provider and is served by proxy under its own id. See
+[Files and code execution](files.md#files-and-code-execution). A sandbox
+session still lives for one request, so a `container` id from a previous turn
+addresses the provider's container, not the sandbox.
+
+In hybrid mode the control plane's policy is consulted only once the decision
+already points at the sandbox, so a declaration the provider serves natively is
+never turned into a 403 for a workspace the control plane has not enabled.
+
 ### Per-workspace code policy
 
 A workspace policy can disable code execution or narrow the deployment limits:
@@ -130,6 +201,7 @@ A workspace policy can disable code execution or narrow the deployment limits:
 - `default_purpose_hint`
 - allowed tool kinds
 - an allowed sandbox image
+- `executor`, the one field that is a choice rather than a narrowing (see above)
 
 Manage it under
 `/api/v1/workspaces/{workspace_id}/code-execution-policy` or from Tools. A policy

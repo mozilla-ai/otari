@@ -102,6 +102,7 @@ async def _normalize_with_vision(
     model: str,
     instance: str | None,
     workspace_id: uuid.UUID | None,
+    workspace_executor: object = None,
 ) -> tuple[int, CompletionUsage | None]:
     return 5000, _VISION_USAGE
 

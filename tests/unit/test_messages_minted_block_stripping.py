@@ -15,7 +15,11 @@ import pytest
 from gateway.api.routes._pipeline import ToolContext
 from gateway.api.routes.messages import _strip_gateway_minted_blocks
 from gateway.core.config import GatewayConfig
-from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, WEB_SEARCH_TOOL_USE_ID_PREFIX
+from gateway.services.mcp_loop_messages import (
+    MCP_ACTIVITY_ID_PREFIX,
+    SERVER_TOOL_USE_ID_PREFIX,
+    WEB_SEARCH_TOOL_USE_ID_PREFIX,
+)
 
 
 def test_strips_the_minted_pair_but_keeps_the_text() -> None:
@@ -392,3 +396,106 @@ def test_a_pre_prefix_gateway_pair_is_still_stripped() -> None:
     assert _strip_gateway_minted_blocks(messages) == [
         {"role": "assistant", "content": [{"type": "text", "text": "done"}]}
     ]
+
+
+# --- gateway-minted code execution is folded, not dropped --------------------------------
+
+
+def _code_pair(tool_use_id: str = f"{SERVER_TOOL_USE_ID_PREFIX}code") -> list[dict[str, Any]]:
+    return [
+        {"type": "server_tool_use", "id": tool_use_id, "name": "code_execution", "input": {"code": "print(6 * 7)"}},
+        {
+            "type": "code_execution_tool_result",
+            "tool_use_id": tool_use_id,
+            "content": {
+                "type": "code_execution_result",
+                "stdout": "42\n",
+                "stderr": "",
+                "return_code": 0,
+                "content": [],
+            },
+        },
+    ]
+
+
+def test_a_gateway_code_execution_pair_becomes_text_the_model_can_still_read() -> None:
+    """The output lives nowhere else in the transcript, so it is kept rather than stripped."""
+    messages: list[dict[str, Any]] = [
+        {"role": "assistant", "content": [*_code_pair(), {"type": "text", "text": "It is 42."}]}
+    ]
+
+    kept = _strip_gateway_minted_blocks(messages)[0]["content"]
+
+    assert [block["type"] for block in kept] == ["text", "text"]
+    assert "print(6 * 7)" in kept[0]["text"]
+    assert "stdout:\n42" in kept[0]["text"]
+    assert kept[1] == {"type": "text", "text": "It is 42."}
+
+
+def test_a_failed_gateway_execution_folds_its_error() -> None:
+    pair = _code_pair()
+    pair[1]["content"] = {"type": "code_execution_tool_result_error", "error_code": "unavailable"}
+    kept = _strip_gateway_minted_blocks([{"role": "assistant", "content": pair}])[0]["content"]
+
+    assert len(kept) == 1
+    assert "error: unavailable" in kept[0]["text"]
+
+
+def test_anthropics_own_code_execution_pair_survives() -> None:
+    """A ``srvtoolu_`` pair describes a run Anthropic did; it is echoed to Anthropic untouched."""
+    pair = _code_pair(tool_use_id="srvtoolu_theirs")
+    messages: list[dict[str, Any]] = [{"role": "assistant", "content": pair}]
+
+    assert _strip_gateway_minted_blocks(messages) == messages
+
+
+# ---- the Responses counterpart -------------------------------------------
+
+
+def test_a_gateway_interpreter_call_becomes_a_message_the_model_can_still_read() -> None:
+    from gateway.api.routes.responses import _strip_gateway_minted_items
+    from gateway.services.mcp_loop_responses import CODE_INTERPRETER_CALL_ID_PREFIX
+
+    items: list[dict[str, Any]] = [
+        {"role": "user", "content": "compute"},
+        {
+            "type": "code_interpreter_call",
+            "id": f"{CODE_INTERPRETER_CALL_ID_PREFIX}abc",
+            "code": "print(6 * 7)",
+            "container_id": "otari_cntr_1",
+            "outputs": [{"type": "logs", "logs": "42\n"}],
+            "status": "completed",
+        },
+        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "It is 42."}]},
+    ]
+
+    out = _strip_gateway_minted_items(items)
+
+    assert len(out) == 3
+    folded = out[1]
+    assert folded["type"] == "message" and folded["role"] == "assistant"
+    text = folded["content"][0]["text"]
+    assert "print(6 * 7)" in text
+    assert "42" in text
+    assert "status" not in text
+
+
+def test_a_failed_gateway_interpreter_call_folds_its_status() -> None:
+    from gateway.api.routes.responses import _strip_gateway_minted_items
+    from gateway.services.mcp_loop_responses import CODE_INTERPRETER_CALL_ID_PREFIX
+
+    item = {
+        "type": "code_interpreter_call",
+        "id": f"{CODE_INTERPRETER_CALL_ID_PREFIX}x",
+        "code": "1/0",
+        "status": "failed",
+    }
+    (folded,) = _strip_gateway_minted_items([item])
+    assert "status: failed" in folded["content"][0]["text"]
+
+
+def test_openais_own_interpreter_call_survives_untouched() -> None:
+    from gateway.api.routes.responses import _strip_gateway_minted_items
+
+    item = {"type": "code_interpreter_call", "id": "ci_123", "code": "x", "status": "completed"}
+    assert _strip_gateway_minted_items([item, {"type": "web_search_call", "id": "ws_1"}]) == [item]

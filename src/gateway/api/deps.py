@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
 from gateway.container import Container
-from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, create_session, get_db
 from gateway.core.feature import CoreFeature
 from gateway.core.unit_of_work import UnitOfWork
@@ -29,7 +29,9 @@ from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
+from gateway.services.file_service import StagedFile
 from gateway.services.file_store import FileStore
+from gateway.services.files import SandboxFileBridge
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.overview.overview_service import OverviewService
@@ -618,6 +620,38 @@ async def get_db_if_needed(
     async with aclosing(get_db()) as sessions:
         async for db in sessions:
             yield db
+
+
+def build_sandbox_file_bridge(
+    *,
+    raw_request: Request,
+    config: GatewayConfig,
+    db: AsyncSession | None,
+    user_id: str | None,
+    workspace_id: uuid.UUID | None,
+    inputs: list[StagedFile],
+) -> SandboxFileBridge | None:
+    """The file bridge a completion request's sandbox session gets, or ``None``.
+
+    Built by the route once the billed user and workspace are resolved, over the
+    request's own session. ``None`` in hybrid mode, which has no local database
+    or file store to hold what a run produces, and when files are disabled.
+    Produced files are announced under ``public_base_url`` where the deployment
+    knows its address, and otherwise under the one the request arrived on.
+    """
+    file_store = getattr(raw_request.app.state, "file_store", None)
+    if db is None or not config.files_enabled or file_store is None or user_id is None or workspace_id is None:
+        return None
+    base = (config.public_base_url or str(raw_request.base_url)).rstrip("/")
+    return SandboxFileBridge(
+        file_store=file_store,
+        config=config,
+        uow=UnitOfWork(db),
+        user_id=user_id,
+        workspace_id=workspace_id,
+        inputs=inputs,
+        base_url=f"{base}{API_ROOT}/files",
+    )
 
 
 def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork:

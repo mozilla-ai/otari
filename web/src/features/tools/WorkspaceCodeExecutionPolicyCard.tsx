@@ -43,6 +43,15 @@ type Stance = "default" | "allowed" | "blocked"
 // The sentinel for "no workspace image", which is a real choice and not an
 // absent one: the workspace runs whatever the deployment runs.
 const DEPLOYMENT_IMAGE = ""
+// The sentinel for "no workspace pin" on who runs a provider's code tool: the
+// deployment default, and the request's own header, decide.
+const DEPLOYMENT_EXECUTOR = ""
+const EXECUTOR_OPTIONS = [
+  { value: DEPLOYMENT_EXECUTOR, label: "Deployment default" },
+  { value: "auto", label: "Auto: provider when native, else here" },
+  { value: "otari", label: "Always here, on this sandbox" },
+  { value: "provider", label: "Always the provider" },
+]
 
 // The server's own ceilings (`workspace_code_execution_policy_service`): a value
 // above either could never take effect, so it is refused rather than stored.
@@ -75,6 +84,7 @@ export function WorkspaceCodeExecutionPolicyCard({
   const stanceSave = useAutosave()
   const imageSave = useAutosave()
   const toolsSave = useAutosave()
+  const executorSave = useAutosave()
   // One writer for the group: a PUT replaces the whole policy, so two rows
   // saving at once would each carry the other's pre-save value.
   const write = usePolicyWriter({
@@ -87,6 +97,7 @@ export function WorkspaceCodeExecutionPolicyCard({
       exec_timeout_s: stored.exec_timeout_s,
       image: stored.image,
       tools: stored.tools,
+      executor: stored.executor,
     }),
     put: (body: UpdateWorkspaceCodeExecutionPolicyRequest) =>
       setPolicy.mutateAsync({
@@ -266,6 +277,31 @@ export function WorkspaceCodeExecutionPolicyCard({
         parse={ceilingParser(MAX_EXEC_TIMEOUT_S, "seconds")}
         commit={(exec_timeout_s) => commitField({ exec_timeout_s })}
         disabled={narrowingDisabled}
+      />
+
+      <SettingRow
+        label="Who runs provider code tools"
+        help="For requests billed here that declare a provider's own code tool. A pin here overrides the deployment default and refuses a request header that disagrees. It decides nothing until the deployment has a sandbox backend."
+        error={executorSave.error}
+        control={
+          <FilterSelect
+            fullWidth
+            ariaLabel="Who runs provider code tools for this workspace"
+            value={policy?.executor ?? DEPLOYMENT_EXECUTOR}
+            onChange={(next) =>
+              void executorSave.run(() =>
+                commitField({
+                  executor:
+                    next === DEPLOYMENT_EXECUTOR
+                      ? null
+                      : (next as UpdateWorkspaceCodeExecutionPolicyRequest["executor"]),
+                }),
+              )
+            }
+            options={EXECUTOR_OPTIONS}
+            disabled={narrowingDisabled || executorSave.isSaving}
+          />
+        }
       />
 
       <SettingRow

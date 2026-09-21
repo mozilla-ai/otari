@@ -14,7 +14,7 @@ import { CONTROL_LANE } from "@/design-system/layout/SettingRow"
 import { ToolsGuardrailsPage } from "@/features/tools/ToolsGuardrailsPage"
 import { API_ROOT } from "@/shared/api/client"
 import { organizationContext } from "@/tests/fixtures"
-import { pickOption } from "@/tests/select"
+import { pickOption, selectTrigger } from "@/tests/select"
 
 const FIELDS: ToolSettingField[] = [
   {
@@ -72,6 +72,14 @@ const FIELDS: ToolSettingField[] = [
     type: "str",
     value: null,
     description: "Purpose hint.",
+  },
+  {
+    key: "code_execution_executor",
+    service: "sandbox",
+    type: "str",
+    value: null,
+    description: "Who runs a provider-native code-execution declaration.",
+    choices: ["auto", "otari", "provider"],
   },
   {
     key: "guardrails_url",
@@ -219,6 +227,10 @@ const MAX_RESULTS = named("Max results", "web_search_max_results")
 const EXTRACT = named("Extract page content", "web_search_extract")
 const INTERCEPT = named("Intercept provider web search", "web_search_intercept")
 const SANDBOX_URL = named("Backend URL", "sandbox_url")
+const EXECUTOR = named(
+  "Who runs provider code tools",
+  "code_execution_executor",
+)
 const GUARDRAILS_URL = named("Backend URL", "guardrails_url")
 
 /** The last PATCH body the page sent, parsed. */
@@ -520,6 +532,26 @@ describe("ToolsGuardrailsPage", () => {
 
     await waitFor(() =>
       expect(lastPatch(fetchMock)).toEqual({ web_search_intercept: true }),
+    )
+  })
+
+  it("offers a closed-vocabulary setting as a select and saves the chosen value", async () => {
+    const fetchMock = mockApi()
+    const user = userEvent.setup()
+    renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
+    await screen.findByLabelText(SANDBOX_URL)
+
+    expect(selectTrigger(EXECUTOR)).toHaveTextContent("Default (auto)")
+    // No sandbox URL in the fixture, so the row says the setting is inert.
+    expect(
+      screen.getByText(/Takes effect once a Backend URL is set/),
+    ).toBeInTheDocument()
+    await pickOption(user, EXECUTOR, "Always here, on this sandbox")
+
+    await waitFor(() =>
+      expect(lastPatch(fetchMock)).toEqual({
+        code_execution_executor: "otari",
+      }),
     )
   })
 

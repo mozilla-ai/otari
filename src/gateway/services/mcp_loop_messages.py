@@ -20,7 +20,16 @@ from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, cast, runtime_checkable
 
-from anthropic.types import ServerToolUseBlock, WebSearchResultBlock, WebSearchToolResultBlock, WebSearchToolResultError
+from anthropic.types import (
+    CodeExecutionOutputBlock,
+    CodeExecutionResultBlock,
+    CodeExecutionToolResultBlock,
+    CodeExecutionToolResultError,
+    ServerToolUseBlock,
+    WebSearchResultBlock,
+    WebSearchToolResultBlock,
+    WebSearchToolResultError,
+)
 from anthropic.types.beta import BetaMCPToolResultBlock, BetaMCPToolUseBlock
 from any_llm import amessages
 from any_llm.types.messages import (
@@ -37,6 +46,7 @@ from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     ToolBackend,
 )
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecution
 from gateway.services.tool_format import openai_to_anthropic_tools
 from gateway.services.tool_usage import is_tool_error
 from gateway.services.web_retrieval_backend import WEB_RETRIEVAL_RESULT_MAX_BYTES, WEB_SEARCH_TOOL_NAME
@@ -86,10 +96,12 @@ _PAGE_AGE_MAX_CHARS = 128
 # provider-native MCP blocks.
 MCP_ACTIVITY_ID_PREFIX = "otari_mcptoolu_"
 
-# The gateway's own ``server_tool_use`` ids for web search. Anthropic issues
-# ``srvtoolu_``-prefixed ids of its own, so a reserved prefix is what lets an echoed
-# transcript be told apart from one describing a search the provider really ran.
-WEB_SEARCH_TOOL_USE_ID_PREFIX = "otari_srvtoolu_"
+# The gateway's own ``server_tool_use`` ids, for web search and code execution
+# alike. Anthropic issues ``srvtoolu_``-prefixed ids of its own, so a reserved
+# prefix is what lets an echoed transcript be told apart from one describing a
+# call the provider really ran.
+SERVER_TOOL_USE_ID_PREFIX = "otari_srvtoolu_"
+WEB_SEARCH_TOOL_USE_ID_PREFIX = SERVER_TOOL_USE_ID_PREFIX
 
 # Anthropic beta capability a caller must declare before the Messages stream
 # includes the beta-only MCP activity block vocabulary.
@@ -218,14 +230,61 @@ def _max_uses_exceeded_result(
     return {"type": "tool_result", "tool_use_id": tool_use_id, "content": MAX_USES_EXCEEDED_ERROR}
 
 
-def _native_blocks_for_call(pool: ToolBackend, name: str, arguments: dict[str, Any]) -> list[Any]:
-    """Native blocks describing one completed gateway tool call, if it has any.
+def _native_code_execution_blocks(execution: CodeExecution) -> list[Any]:
+    """A ``server_tool_use`` / ``code_execution_tool_result`` pair for one gateway execution.
 
-    Only ``web_search`` does: a sandbox or MCP call has no Anthropic block that
-    would be honest to emit (``code_execution_tool_result`` would claim Anthropic's
-    own container ran the code), so those stay invisible, as they do on Responses.
+    Emitted for a caller that declared code execution in Anthropic's own
+    vocabulary and whose request the gateway's sandbox ran instead. The result
+    block is the contract's own shape, which mirrors Anthropic's, so a client
+    parsing Anthropic responses reads it with no translation. A call the backend
+    never answered is reported in the vocabulary's error shape rather than
+    dropped, because the model was told about the failure and the client should
+    see the same story.
     """
-    if name != WEB_SEARCH_TOOL_NAME:
+    tool_use_id = f"{SERVER_TOOL_USE_ID_PREFIX}{uuid.uuid4().hex}"
+    content: CodeExecutionResultBlock | CodeExecutionToolResultError
+    if execution.result is None:
+        content = CodeExecutionToolResultError(type="code_execution_tool_result_error", error_code="unavailable")
+    else:
+        result = execution.result.content
+        content = CodeExecutionResultBlock(
+            type="code_execution_result",
+            stdout=result.stdout,
+            stderr=result.stderr,
+            return_code=result.return_code if result.return_code is not None else 0,
+            # The ids are the ones ``/v1/files`` serves, not the sandbox's own: a
+            # produced file that was not stored has no id the caller could use.
+            content=[
+                CodeExecutionOutputBlock(type="code_execution_output", file_id=file_id)
+                for file_id in execution.file_ids.values()
+            ],
+        )
+    return [
+        ServerToolUseBlock(
+            id=tool_use_id,
+            name=cast('Literal["code_execution"]', CODE_EXECUTION_TOOL_NAME),
+            input={"code": execution.code},
+            type="server_tool_use",
+        ),
+        CodeExecutionToolResultBlock(tool_use_id=tool_use_id, type="code_execution_tool_result", content=content),
+    ]
+
+
+def _native_blocks_for_call(pool: ToolBackend, name: str, arguments: dict[str, Any], *, is_error: bool) -> list[Any]:
+    """Native blocks describing one gateway tool call, if its tool has any.
+
+    A web search contributes a pair only when it succeeded: a failed search has
+    nothing to cite. A code execution contributes one either way, because a
+    program that exited non-zero is a result the vocabulary can carry, and one
+    the backend never ran has an error shape of its own. An MCP call has no
+    Anthropic block that would be honest to emit and stays invisible.
+    """
+    if name == CODE_EXECUTION_TOOL_NAME:
+        take_executions = getattr(pool, "take_executions", None)
+        if take_executions is None:
+            return []
+        return [block for execution in take_executions() for block in _native_code_execution_blocks(execution)]
+    if is_error or name != WEB_SEARCH_TOOL_NAME:
         return []
     take_last_results = getattr(pool, "take_last_results", None)
     if take_last_results is None:
@@ -270,11 +329,10 @@ async def _execute_tool_uses(
     from ``BaseException`` and skip the ``Exception`` clause. Same idiom as
     :func:`gateway.services.mcp_loop._execute_mcp_calls`.
 
-    When ``native_blocks`` is given, each *successful* call appends the native
-    server-tool blocks describing it. A failed call contributes none: the model
-    still gets the ``[tool error]`` text, but there is no result to cite. Collecting
-    immediately after each awaited call is what makes the backend's single-slot
-    result buffer safe, since the calls run one at a time.
+    When ``native_blocks`` is given, each call appends the native server-tool
+    blocks describing it, per :func:`_native_blocks_for_call`. Collecting
+    immediately after each awaited call is what makes the backend's result buffer
+    safe, since the calls run one at a time.
     """
     out: list[dict[str, Any]] = []
     for block in blocks:
@@ -293,8 +351,8 @@ async def _execute_tool_uses(
         else:
             if capped and budget is not None:
                 budget.record(text)
-            if native_blocks is not None and not is_tool_error(text):
-                native_blocks.extend(_native_blocks_for_call(pool, block.name, arguments))
+        if native_blocks is not None:
+            native_blocks.extend(_native_blocks_for_call(pool, block.name, arguments, is_error=is_tool_error(text)))
         out.append({"type": "tool_result", "tool_use_id": block.id, "content": text})
     return out
 
@@ -533,8 +591,8 @@ async def _execute_stream_owned_events(
         )
         if capped and budget is not None:
             budget.record(text)
-        if not is_error and native_blocks is not None:
-            native_blocks.extend(_native_blocks_for_call(pool, name, parsed_input))
+        if native_blocks is not None:
+            native_blocks.extend(_native_blocks_for_call(pool, name, parsed_input, is_error=is_error))
         results.append({"type": "tool_result", "tool_use_id": spec["id"], "content": text})
 
         if activity_id is not None:
@@ -554,9 +612,9 @@ class _MessagesToolLoopStrategy:
     ``amessages`` is resolved as a module global at call time so tests can
     monkeypatch ``gateway.services.mcp_loop_messages.amessages``.
 
-    Native web-search and MCP activity emission are per-request capabilities,
-    so a request that wants either gets its own strategy instance rather than
-    sharing the module-level default one.
+    Native web-search, code-execution and MCP activity emission are per-request
+    capabilities, so a request that wants any gets its own strategy instance
+    rather than sharing the module-level default one.
     """
 
     transcript_key = "messages"
@@ -565,10 +623,12 @@ class _MessagesToolLoopStrategy:
         self,
         *,
         emit_native_web_search: bool = False,
+        emit_native_code_execution: bool = False,
         emit_native_mcp: bool = False,
         budget: WebSearchBudget | None = None,
     ) -> None:
         self._emit_native_web_search = emit_native_web_search
+        self._emit_native_code_execution = emit_native_code_execution
         self._emit_native_mcp = emit_native_mcp
         # Absent unless the caller capped the searches, so the shared instance in
         # ``_strategy_for`` stays free of per-request state.
@@ -576,7 +636,7 @@ class _MessagesToolLoopStrategy:
 
     def _native_sink(self, sink: list[Any]) -> list[Any] | None:
         """``sink`` when native emission is on, else ``None`` (collect nothing)."""
-        return sink if self._emit_native_web_search else None
+        return sink if self._emit_native_web_search or self._emit_native_code_execution else None
 
     def coerce_transcript(self, value: Any) -> list[Any]:
         return list(value or [])
@@ -933,6 +993,7 @@ def _strategy_for(
     budget: WebSearchBudget | None,
     *,
     emit_native_mcp: bool = False,
+    emit_native_code_execution: bool = False,
 ) -> _MessagesToolLoopStrategy:
     """The shared strategy, or a per-request one when any of the options is set.
 
@@ -940,10 +1001,11 @@ def _strategy_for(
     module-level instance; a request wanting neither native emission nor a cap has
     nothing per-request to hold and keeps reusing it.
     """
-    if not emit_native_web_search and not emit_native_mcp and budget is None:
+    if not emit_native_web_search and not emit_native_mcp and not emit_native_code_execution and budget is None:
         return _MESSAGES_STRATEGY
     return _MessagesToolLoopStrategy(
         emit_native_web_search=emit_native_web_search,
+        emit_native_code_execution=emit_native_code_execution,
         emit_native_mcp=emit_native_mcp,
         budget=budget,
     )
@@ -956,6 +1018,7 @@ async def anthropic_tool_loop(
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
     emit_native_web_search: bool = False,
+    emit_native_code_execution: bool = False,
     web_search_budget: WebSearchBudget | None = None,
 ) -> MessageResponse:
     """Non-streaming Anthropic Messages tool-use loop.
@@ -979,10 +1042,16 @@ async def anthropic_tool_loop(
     :func:`gateway.services._tool_loop.run_tool_loop`.
 
     With ``emit_native_web_search``, the returned content is prefixed with a
-    ``server_tool_use`` / ``web_search_tool_result`` pair per gateway-run search.
+    ``server_tool_use`` / ``web_search_tool_result`` pair per gateway-run search;
+    with ``emit_native_code_execution``, a ``server_tool_use`` /
+    ``code_execution_tool_result`` pair per gateway-run execution.
     """
     return await run_tool_loop(
-        strategy=_strategy_for(emit_native_web_search, web_search_budget),
+        strategy=_strategy_for(
+            emit_native_web_search,
+            web_search_budget,
+            emit_native_code_execution=emit_native_code_execution,
+        ),
         completion_kwargs=completion_kwargs,
         pool=pool,
         max_iterations=max_iterations,
@@ -996,6 +1065,7 @@ async def anthropic_tool_loop_stream(
     pool: ToolBackend,
     max_iterations: int,
     emit_native_web_search: bool = False,
+    emit_native_code_execution: bool = False,
     emit_native_mcp: bool = False,
     web_search_budget: WebSearchBudget | None = None,
 ) -> AsyncGenerator[MessageStreamEvent, None]:
@@ -1034,6 +1104,7 @@ async def anthropic_tool_loop_stream(
                 emit_native_web_search,
                 web_search_budget,
                 emit_native_mcp=emit_native_mcp,
+                emit_native_code_execution=emit_native_code_execution,
             ),
             completion_kwargs=completion_kwargs,
             pool=pool,

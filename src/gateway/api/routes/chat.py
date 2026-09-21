@@ -14,9 +14,15 @@ from fastapi.responses import StreamingResponse
 from pydantic import Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import ModelProviderPortDep, get_config, get_db_if_needed, get_log_writer
+from gateway.api.deps import (
+    ModelProviderPortDep,
+    build_sandbox_file_bridge,
+    get_config,
+    get_db_if_needed,
+    get_log_writer,
+)
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
-from gateway.api.routes._normalize import normalize_request_messages
+from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
     PROVIDER_ERROR_DETAIL,
@@ -38,7 +44,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
-from gateway.api.routes._tools import _strip_gateway_fields
+from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import GatewayUsage
 from gateway.core.usage_source import PLAYGROUND_USAGE_ENDPOINT
@@ -46,6 +52,7 @@ from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.services.file_service import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
     MAX_TOOL_ITERATIONS_CAP,
@@ -57,6 +64,7 @@ from gateway.services.mcp_loop import (
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
+from gateway.types.code_execution import CodeExecutor
 from gateway.types.session_principal import SessionPrincipal
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -263,11 +271,13 @@ class _ChatAdapter:
         on_first_response: Callable[[], None] | None = None,
         *,
         emit_native_web_search: bool = False,
+        emit_native_code_execution: bool = False,
         web_search_budget: WebSearchBudget | None = None,
     ) -> ChatCompletion:
-        # ``emit_native_web_search`` is accepted for interface parity and ignored:
-        # this format has no native vocabulary for a server-side tool call, so a
-        # gateway-run search stays invisible on the wire (see docs/tools.md).
+        # The two ``emit_native_*`` flags are accepted for interface parity and
+        # ignored: this format has no native vocabulary for a server-side tool
+        # call, so a gateway-run search or execution stays invisible on the wire
+        # (see docs/tools.md).
         # ``web_search_budget`` is not: the cap bounds what the caller is billed
         # for, which every format owes whether or not it can describe the search.
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
@@ -291,6 +301,7 @@ class _ChatAdapter:
         max_iterations: int,
         *,
         emit_native_web_search: bool = False,
+        emit_native_code_execution: bool = False,
         web_search_budget: WebSearchBudget | None = None,
     ) -> AsyncIterator[ChatCompletionChunk]:
         extra: dict[str, Any] = {}
@@ -441,12 +452,17 @@ async def run_chat_completion(
             detail="Invalid request: model is required",
         )
 
+    # Uploads the normalizer found for the code-execution sandbox, handed to the
+    # sandbox session once the billed user and workspace are resolved.
+    sandbox_inputs: list[StagedFile] = []
+
     async def _normalize(
         user_id: str,
         provider: LLMProvider | None,
         model: str,
         instance: str | None,
         workspace_id: uuid.UUID | None,
+        workspace_executor: CodeExecutor | None,
     ) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the wire payload (extract to
         # text for text-only models, inline for natively-capable ones) before
@@ -463,7 +479,16 @@ async def run_chat_completion(
             user_id=user_id,
             instance=instance,
             workspace_id=workspace_id,
+            sandbox_requested=sandbox_requested(
+                request.tools,
+                config=config,
+                provider=provider,
+                dialect=adapter.name,
+                code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+                workspace_executor=workspace_executor,
+            ),
         )
+        sandbox_inputs.extend(stats.sandbox_inputs)
         return len(str(request.messages)), stats.vision_usage()
 
     output_cap = _effective_output_cap(request.max_tokens, request.max_completion_tokens)
@@ -486,6 +511,7 @@ async def run_chat_completion(
             request.messages, raw_request, has_tools=bool(request.tools)
         ),
         normalize_messages=_normalize,
+        tools=request.tools,
     )
 
     tool_ctx = await prepare_gateway_tools(
@@ -499,6 +525,15 @@ async def run_chat_completion(
         mcp_server_ids=request.mcp_server_ids,
         max_tool_iterations=request.max_tool_iterations,
         tools_header=request.tools_header,
+        code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+        sandbox_files=build_sandbox_file_bridge(
+            raw_request=raw_request,
+            config=config,
+            db=db,
+            user_id=ctx.user_id,
+            workspace_id=ctx.workspace_id,
+            inputs=sandbox_inputs,
+        ),
     )
 
     request_fields = _strip_gateway_fields(

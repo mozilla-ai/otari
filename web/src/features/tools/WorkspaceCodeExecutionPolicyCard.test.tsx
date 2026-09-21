@@ -20,6 +20,7 @@ import { pickOption, selectTrigger } from "@/tests/select"
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 const STANCE = "Code execution for this workspace"
 const IMAGE = "Sandbox image for this workspace"
+const EXECUTOR = "Who runs provider code tools for this workspace"
 
 function mockApi({
   memberships = [{ workspace_id: ALPHA, name: "Alpha", role: "admin" }],
@@ -124,6 +125,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
       exec_timeout_s: null,
       image: null,
       tools: null,
+      executor: null,
     })
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
   })
@@ -143,6 +145,67 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     await user.tab()
 
     expect(await putBody(calls)).toMatchObject({ max_iterations: 4 })
+  })
+
+  it("offers the executor pin as a choice over the deployment default", async () => {
+    mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        executor: "otari",
+      }),
+    })
+    await renderLoaded()
+
+    expect(selectTrigger(EXECUTOR)).toHaveTextContent(
+      "Always here, on this sandbox",
+    )
+    await userEvent.setup().click(selectTrigger(EXECUTOR))
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent),
+    ).toEqual([
+      "Deployment default",
+      "Auto: provider when native, else here",
+      "Always here, on this sandbox",
+      "Always the provider",
+    ])
+  })
+
+  it("saves the executor pin", async () => {
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await pickOption(user, EXECUTOR, "Always the provider")
+    expect(await putBody(calls)).toMatchObject({
+      enabled: true,
+      executor: "provider",
+    })
+  })
+
+  it("clears the executor pin back to the deployment default as null, not an empty string", async () => {
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        executor: "provider",
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+    expect(selectTrigger(EXECUTOR)).toHaveTextContent("Always the provider")
+
+    await pickOption(user, EXECUTOR, "Deployment default")
+    // The service refuses "" (it is outside the vocabulary); null is the clear.
+    expect(await putBody(calls)).toMatchObject({ executor: null })
   })
 
   it("offers only the images the operator approved, plus the deployment default", async () => {

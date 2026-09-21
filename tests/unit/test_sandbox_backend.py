@@ -927,3 +927,503 @@ async def test_exec_503_preserves_retry_hint(monkeypatch: pytest.MonkeyPatch) ->
         with pytest.raises(SandboxUnavailableError) as caught:
             await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(42)"})
     assert caught.value.retry_after == "15"
+
+
+class _FakeFiles:
+    """A stand-in for ``SandboxFileBridge``: inputs to seed, outputs it was handed."""
+
+    def __init__(self, inputs: list[Any], *, max_output_bytes: int = 1 << 20, max_output_files: int = 20) -> None:
+        self.inputs = inputs
+        self.max_output_bytes = max_output_bytes
+        self.max_output_files = max_output_files
+        self.stored: list[tuple[str, bytes]] = []
+        # Streams the backend started and abandoned, as a store would see them.
+        self.abandoned: list[str] = []
+
+    async def read_input(self, staged: Any) -> bytes:
+        return b"a,b\n1,2\n"
+
+    async def store_output(self, filename: str, chunks: Any) -> str | None:
+        data = bytearray()
+        try:
+            async for chunk in chunks:
+                data.extend(chunk)
+        except BaseException:
+            self.abandoned.append(filename)
+            raise
+        if not data:
+            return None
+        self.stored.append((filename, bytes(data)))
+        return f"file-{len(self.stored)}"
+
+
+def _staged(file_id: str = "file-csv", filename: str = "data.csv") -> Any:
+    from gateway.services.file_service import StagedFile
+
+    return StagedFile(file_id, filename, "text/csv", f"x/{file_id}")
+
+
+@pytest.mark.asyncio
+async def test_staged_inputs_are_seeded_before_the_first_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/files"): httpx.Response(201, json={"path": "data.csv", "size": 8}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([_staged()])
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files):
+        pass
+
+    put = next(r for r in transport.captured if r.method == "POST" and r.url.path == "/sessions/s1/files")
+    body = put.read()
+    assert b'filename="data.csv"' in body
+    assert b"a,b\n1,2\n" in body
+    assert b'name="path"' in body
+
+
+@pytest.mark.asyncio
+async def test_refused_seed_is_terminal_and_releases_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/files"): httpx.Response(413, json={"error": "too large"}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    with pytest.raises(SandboxNotReachableError, match="file-csv"):
+        async with SandboxBackend(sandbox_url="http://sandbox:8080", files=_FakeFiles([_staged()])):
+            pass
+    assert ("DELETE", "/sessions/s1") in [(r.method, r.url.path) for r in transport.captured]
+
+
+@pytest.mark.asyncio
+async def test_produced_files_are_fetched_stored_and_named_with_file_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    result_block = {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {
+            "type": "code_execution_result",
+            "stdout": "saved\n",
+            "stderr": "",
+            "return_code": 0,
+            "content": [{"type": "code_execution_output", "file_id": "sbx-1", "filename": "chart.png"}],
+        },
+    }
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": result_block}),
+            ("GET", "/sessions/s1/files"): httpx.Response(200, content=b"\x89PNG"),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([])
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "plt.savefig('chart.png')"})
+
+    assert files.stored == [("chart.png", b"\x89PNG")]
+    assert "chart.png (file_id: file-1)" in result
+
+
+@pytest.mark.asyncio
+async def test_unfetchable_output_is_still_named_and_does_not_fail_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    result_block = {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {
+            "type": "code_execution_result",
+            "stdout": "ok\n",
+            "stderr": "",
+            "return_code": 0,
+            "content": [{"type": "code_execution_output", "file_id": "sbx-1", "filename": "out.csv"}],
+        },
+    }
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": result_block}),
+            ("GET", "/sessions/s1/files"): httpx.Response(404, json={"error": "gone"}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([])
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+
+    assert files.stored == []
+    assert "files: out.csv" in result
+    assert "file_id" not in result
+
+
+@pytest.mark.asyncio
+async def test_no_bridge_leaves_outputs_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
+    result_block = {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {
+            "type": "code_execution_result",
+            "stdout": "",
+            "stderr": "",
+            "return_code": 0,
+            "content": [{"type": "code_execution_output", "file_id": "sbx-1", "filename": "a.txt"}],
+        },
+    }
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": result_block}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+    assert result == "files: a.txt"
+    assert all(r.url.path != "/sessions/s1/files" for r in transport.captured)
+
+
+@pytest.mark.asyncio
+async def test_executions_are_kept_in_order_and_drained_by_take(monkeypatch: pytest.MonkeyPatch) -> None:
+    """What a loop minting native result blocks reads: the code and the structured result."""
+    result_block = {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {"type": "code_execution_result", "stdout": "1\n", "stderr": "", "return_code": 0, "content": []},
+    }
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": result_block}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        assert backend.container_id.startswith("otari_cntr_")
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(2)"})
+        executions = backend.take_executions()
+        assert [execution.code for execution in executions] == ["print(1)", "print(2)"]
+        assert executions[0].result is not None
+        assert executions[0].result.content.stdout == "1\n"
+        # Drained: a later round cannot claim an earlier round's executions.
+        assert backend.take_executions() == []
+
+
+@pytest.mark.asyncio
+async def test_an_exec_that_never_answered_is_kept_without_a_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(500),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        with pytest.raises(SandboxNotReachableError):
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
+        executions = backend.take_executions()
+
+    assert len(executions) == 1
+    assert executions[0].code == "print(1)"
+    assert executions[0].result is None
+
+
+@pytest.mark.asyncio
+async def test_an_execution_carries_the_stored_ids_of_the_files_it_produced(monkeypatch: pytest.MonkeyPatch) -> None:
+    """What a native block announces: the ``/v1/files`` id, never the sandbox's own."""
+    result_block = {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {
+            "type": "code_execution_result",
+            "stdout": "",
+            "stderr": "",
+            "return_code": 0,
+            "content": [{"type": "code_execution_output", "file_id": "sbx-1", "filename": "chart.png"}],
+        },
+    }
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": result_block}),
+            ("GET", "/sessions/s1/files"): httpx.Response(200, content=b"\x89PNG"),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=_FakeFiles([])) as backend:
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "plt.savefig('chart.png')"})
+        execution = backend.take_executions()[0]
+
+    assert execution.file_ids == {"chart.png": "file-1"}
+
+
+def _result_block_naming(filename: str) -> dict[str, Any]:
+    return {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {
+            "type": "code_execution_result",
+            "stdout": "",
+            "stderr": "",
+            "return_code": 0,
+            "content": [{"type": "code_execution_output", "file_id": "sbx-1", "filename": filename}],
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_output_declared_over_the_cap_is_refused_before_it_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _CountingStream(httpx.AsyncByteStream):
+        reads = 0
+
+        async def __aiter__(self) -> Any:
+            _CountingStream.reads += 1
+            yield b"x" * 64
+
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": _result_block_naming("big.bin")}),
+            ("GET", "/sessions/s1/files"): httpx.Response(
+                200, headers={"content-length": "64"}, stream=_CountingStream()
+            ),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([], max_output_bytes=16)
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+
+    assert files.stored == []
+    assert _CountingStream.reads == 0
+    assert "files: big.bin" in result
+
+
+@pytest.mark.asyncio
+async def test_an_output_that_grows_past_the_cap_is_abandoned_mid_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _EndlessStream(httpx.AsyncByteStream):
+        chunks = 0
+
+        async def __aiter__(self) -> Any:
+            while True:
+                _EndlessStream.chunks += 1
+                yield b"x" * 8
+
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": _result_block_naming("big.bin")}),
+            # No Content-Length: the cap has to hold on the bytes as they arrive.
+            ("GET", "/sessions/s1/files"): httpx.Response(200, stream=_EndlessStream()),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([], max_output_bytes=32)
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+
+    assert files.stored == []
+    # Read just past the cap and no further: 32 bytes is four chunks, the fifth trips it.
+    assert _EndlessStream.chunks == 5
+    assert "file_id" not in result
+
+
+def _empty_result_block(stdout: str = "saved\n") -> dict[str, Any]:
+    """A result block that names no files, as the reference container returns."""
+    return {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {"type": "code_execution_result", "stdout": stdout, "stderr": "", "return_code": 0, "content": []},
+    }
+
+
+def _listing(*entries: tuple[str, int, float]) -> dict[str, Any]:
+    return {"files": [{"path": p, "size_bytes": s, "mime_type": None, "modified_at": m} for p, s, m in entries]}
+
+
+_Handlers = dict[tuple[str, str], httpx.Response | list[httpx.Response]]
+
+
+class _SequenceTransport(httpx.AsyncBaseTransport):
+    """Like ``_MockTransport``, but a handler may be a list answered in order."""
+
+    def __init__(self, handlers: _Handlers) -> None:
+        self._handlers = handlers
+        self.captured: list[httpx.Request] = []
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.captured.append(request)
+        handler = self._handlers.get((request.method, request.url.path))
+        if handler is None:
+            return httpx.Response(404, json={"error": "no handler"})
+        if isinstance(handler, list):
+            return handler.pop(0) if len(handler) > 1 else handler[0]
+        return handler
+
+
+def _patched_sequence_client(handlers: _Handlers, monkeypatch: pytest.MonkeyPatch) -> _SequenceTransport:
+    transport = _SequenceTransport(handlers)
+    original_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: Any, **kwargs: Any) -> None:
+        kwargs["transport"] = transport
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+    return transport
+
+
+@pytest.mark.asyncio
+async def test_a_file_the_block_does_not_name_is_found_by_the_workspace_diff(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _patched_sequence_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/files"): httpx.Response(201, json={"path": "data.csv", "size": 8}),
+            # Listed once after seeding (the input only), once after the call (the output too).
+            ("GET", "/sessions/s1/files/list"): [
+                httpx.Response(200, json=_listing(("data.csv", 8, 1.0))),
+                httpx.Response(200, json=_listing(("data.csv", 8, 1.0), ("out.txt", 5, 2.0))),
+            ],
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": _empty_result_block()}),
+            ("GET", "/sessions/s1/files"): httpx.Response(200, content=b"hello"),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([_staged()])
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "open('out.txt','w').write('hello')"})
+        execution = backend.take_executions()[0]
+
+    # Only the new file was fetched: the unchanged seeded input was not re-read.
+    fetched = [
+        r.url.params.get("path") for r in transport.captured if r.method == "GET" and r.url.path.endswith("/files")
+    ]
+    assert fetched == ["out.txt"]
+    assert files.stored == [("out.txt", b"hello")]
+    assert "files: out.txt (file_id: file-1)" in result
+    assert execution.file_ids == {"out.txt": "file-1"}
+
+
+@pytest.mark.asyncio
+async def test_the_diff_moves_forward_so_a_later_call_collects_only_its_own_files(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patched_sequence_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("GET", "/sessions/s1/files/list"): [
+                httpx.Response(200, json=_listing()),
+                httpx.Response(200, json=_listing(("a.txt", 1, 1.0))),
+                # a.txt rewritten (new stamp) and b.txt new: both are this call's.
+                httpx.Response(200, json=_listing(("a.txt", 2, 3.0), ("b.txt", 1, 3.0))),
+            ],
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": _empty_result_block()}),
+            ("GET", "/sessions/s1/files"): httpx.Response(200, content=b"x"),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([])
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "one"})
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "two"})
+        first, second = backend.take_executions()
+
+    assert list(first.file_ids) == ["a.txt"]
+    assert sorted(second.file_ids) == ["a.txt", "b.txt"]
+
+
+@pytest.mark.asyncio
+async def test_a_backend_without_list_files_still_collects_what_the_block_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            # No /files/list handler: the mock answers 404, as a backend without the operation would.
+            ("POST", "/sessions/s1/exec"): httpx.Response(
+                200, json={"result_block": _result_block_naming("chart.png")}
+            ),
+            ("GET", "/sessions/s1/files"): httpx.Response(200, content=b"\x89PNG"),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([])
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+
+    assert files.stored == [("chart.png", b"\x89PNG")]
+    assert "chart.png (file_id: file-1)" in result
+
+
+@pytest.mark.asyncio
+async def test_a_call_stores_at_most_the_configured_number_of_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patched_sequence_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("GET", "/sessions/s1/files/list"): [
+                httpx.Response(200, json=_listing()),
+                httpx.Response(200, json=_listing(("a.txt", 1, 1.0), ("b.txt", 1, 1.0), ("c.txt", 1, 1.0))),
+            ],
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": _empty_result_block()}),
+            ("GET", "/sessions/s1/files"): httpx.Response(200, content=b"x"),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([], max_output_files=2)
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+
+    assert [name for name, _ in files.stored] == ["a.txt", "b.txt"]
+    # The third is still named, so the model and the caller know it exists.
+    assert "c.txt" in result
+    assert "c.txt (file_id" not in result
+
+
+@pytest.mark.asyncio
+async def test_a_call_stores_at_most_the_configured_bytes_across_its_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _TwentyBytes(httpx.AsyncByteStream):
+        async def __aiter__(self) -> Any:
+            yield b"x" * 10
+            yield b"y" * 10
+
+    _patched_sequence_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("GET", "/sessions/s1/files/list"): [
+                httpx.Response(200, json=_listing()),
+                httpx.Response(200, json=_listing(("a.bin", 20, 1.0), ("b.bin", 20, 1.0))),
+            ],
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": _empty_result_block()}),
+            # No Content-Length: the budget has to hold on the bytes as they arrive.
+            ("GET", "/sessions/s1/files"): httpx.Response(200, stream=_TwentyBytes()),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([], max_output_bytes=30)
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+
+    # The first file fits (20 of 30); the second runs past what is left and is
+    # abandoned mid-stream, which the store sees as a failed stream to clean up.
+    assert files.stored == [("a.bin", b"x" * 10 + b"y" * 10)]
+    assert files.abandoned == ["b.bin"]
+    assert "a.bin (file_id: file-1)" in result
+    assert "b.bin (file_id" not in result

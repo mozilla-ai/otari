@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from gateway.api.deps import get_config, verify_catalog_reader
-from gateway.api.routes._tools import Tool, web_search_declaration_forms
+from gateway.api.routes._tools import Tool, code_execution_declaration_forms, web_search_declaration_forms
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
 from gateway.core.surface import Surface
@@ -56,7 +56,8 @@ class ManagedTool(BaseModel):
         description=(
             "Every `tools[].type` this deployment currently routes to the tool. Always "
             "includes the canonical `otari_*` type; for web search it also includes the "
-            "provider-named keywords when interception is enabled."
+            "provider-named keywords when interception is enabled, and for code execution "
+            "the provider-named keywords unless the deployment's executor is `provider`."
         )
     )
     input_schema: dict[str, Any] = Field(
@@ -101,7 +102,9 @@ def _managed_tools(config: GatewayConfig) -> list[ManagedTool]:
             id=Tool.CODE_EXECUTION,
             description=code_execution["description"],
             available=sandbox_configured,
-            accepted_types=[str(Tool.CODE_EXECUTION)],
+            accepted_types=(
+                code_execution_declaration_forms(config) if sandbox_configured else [str(Tool.CODE_EXECUTION)]
+            ),
             input_schema=code_execution["parameters"],
             example={"type": Tool.CODE_EXECUTION},
         ),
