@@ -128,7 +128,7 @@ async def upload_file(request: Request, config: Config) -> AnthropicFileMetadata
     headers = envelope.headers(request)
     operation: Operation | None = None
     metadata: FileMetadata | None = None
-    started = False
+    started = committed = False
     try:
         async with asyncio.timeout(config.files_transfer_timeout_seconds):
             operation = await client.retry(
@@ -179,9 +179,12 @@ async def upload_file(request: Request, config: Config) -> AnthropicFileMetadata
                         },
                         FileMetadata,
                     )
+                    committed = True
                     return envelope.metadata(finalized)
     except BaseException as exc:
-        if operation is not None:
+        # Past finalize the binding is committed, so a failure here is only the
+        # response's; compensating would delete an upload that succeeded.
+        if operation is not None and not committed:
             await _compensate_upload(client, operation, metadata, headers, started, exc)
         if isinstance(exc, (FilesError, asyncio.CancelledError, TimeoutError)):
             raise

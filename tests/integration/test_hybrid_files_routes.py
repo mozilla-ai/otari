@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from gateway.api.deps import get_config
-from gateway.api.routes import hybrid_files
+from gateway.api.routes import _file_formats, hybrid_files
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.provider_files.client import PlatformFilesClient
 from gateway.services.provider_files.contracts import (
@@ -25,6 +25,7 @@ from gateway.services.provider_files.contracts import (
     ResolvedFile,
     WireModel,
 )
+from gateway.services.provider_files.transfers import receive_upload
 
 
 @pytest.fixture
@@ -158,6 +159,34 @@ def test_finalize_failure_compensates_without_exposing_id(
     assert events.count("finalize-failed") == 3
     assert "provider-delete" in events
     assert events[-1].endswith("/abandon")
+
+
+@pytest.mark.parametrize("failure", ["conversion", "context-exit"])
+def test_failure_after_finalize_does_not_compensate(
+    file_client: tuple[TestClient, list[str]], monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """Finalize commits the binding, so a later failure must not delete the upload."""
+    client, events = file_client
+    if failure == "conversion":
+
+        def convert(self: Any, value: Any) -> Any:
+            raise FilesError(502, "Provider returned invalid file metadata")
+
+        monkeypatch.setattr(_file_formats.AnthropicFilesFormat, "metadata", convert)
+    else:
+        original = receive_upload
+
+        @asynccontextmanager
+        async def leaky(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
+            async with original(*args, **kwargs) as value:
+                yield value
+            raise RuntimeError("upload context failed on exit")
+
+        monkeypatch.setattr(hybrid_files, "receive_upload", leaky)
+    response = client.post(API_ROOT + "/files", headers=HEADERS, files={"file": ("example.csv", b"data")})
+    assert response.status_code == 502, response.text
+    assert events[-1].endswith("/finalize")
+    assert "provider-delete" not in events
 
 
 @pytest.mark.parametrize("oversized", ["metadata", "content-length", None])
