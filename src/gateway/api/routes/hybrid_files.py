@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
 from starlette.types import Receive, Scope, Send
 
-from gateway.api.deps import _extract_bearer_token, get_config
+from gateway.api.deps import extract_credential_token, get_config
 from gateway.api.routes._file_formats import (
     AnthropicFileDeleted,
     AnthropicFileMetadata,
@@ -102,7 +102,7 @@ def files_client(request: Request, config: GatewayConfig) -> PlatformFilesClient
     if not config.files_enabled or not config.files_provider_native_enabled:
         raise FilesError(404, "Provider-native Files are not enabled")
     files_format(request)
-    token = _extract_bearer_token(request, config)
+    token = extract_credential_token(request)
     base = config.platform.get("base_url")
     if not base or not config.platform_token:
         raise FilesError(502, "Authorization service unavailable")
