@@ -78,6 +78,16 @@ class FilesRoute(APIRoute):
                         **exc.headers,
                     },
                 ) from None
+            except HTTPException as exc:
+                raise HTTPException(
+                    exc.status_code,
+                    exc.detail,
+                    headers={
+                        **{name.lower(): value for name, value in (exc.headers or {}).items()},
+                        "cache-control": "private, no-store",
+                        "x-otari-files-protocol": FILES_PROTOCOL_VERSION,
+                    },
+                ) from None
             except TimeoutError:
                 raise HTTPException(
                     504,
@@ -99,7 +109,7 @@ Config = Annotated[GatewayConfig, Depends(get_config)]
 
 
 def files_client(request: Request, config: GatewayConfig) -> PlatformFilesClient:
-    if not config.files_enabled or not config.files_provider_native_enabled:
+    if not config.files_provider_native_enabled:
         raise FilesError(404, "Provider-native Files are not enabled")
     files_format(request)
     token = extract_credential_token(request)
@@ -290,16 +300,17 @@ async def download_file(file_id: str, request: Request, config: Config) -> Respo
     stack = AsyncExitStack()
     deadline = asyncio.get_running_loop().time() + config.files_transfer_timeout_seconds
     try:
-        provider = await stack.enter_async_context(
-            provider_client(resolved.account, idle_timeout=config.files_idle_timeout_seconds)
-        )
-        async with asyncio.timeout(config.files_idle_timeout_seconds):
-            download = await stack.enter_async_context(
-                provider.adownload_file(file_id, max_retries=0, extra_headers=envelope.headers(request))
+        async with asyncio.timeout_at(deadline):
+            provider = await stack.enter_async_context(
+                provider_client(resolved.account, idle_timeout=config.files_idle_timeout_seconds)
             )
+            async with asyncio.timeout(config.files_idle_timeout_seconds):
+                download = await stack.enter_async_context(
+                    provider.adownload_file(file_id, max_retries=0, extra_headers=envelope.headers(request))
+                )
     except BaseException as exc:
         await stack.aclose()
-        if not isinstance(exc, Exception):
+        if isinstance(exc, TimeoutError) or not isinstance(exc, Exception):
             raise
         raise provider_error(exc) from None
     try:
@@ -351,6 +362,8 @@ async def delete_file(file_id: str, request: Request, config: Config) -> Anthrop
             provider_client(resolved.account) as provider,
         ):
             await provider.adelete_file(file_id, max_retries=0, extra_headers=envelope.headers(request))
+    except TimeoutError:
+        failure = FilesError(504, "File transfer timed out")
     except Exception as exc:
         failure = provider_error(exc)
         if failure.status_code == 404:

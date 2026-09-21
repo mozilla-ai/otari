@@ -162,7 +162,10 @@ class OpenAIFilesFormat:
         for key in ("created_at", "expires_at"):
             if data.get(key) is not None:
                 data[key] = int(data[key].timestamp())
-        return OpenAIFileMetadata.model_validate({**data, "object": "file"})
+        try:
+            return OpenAIFileMetadata.model_validate({**data, "object": "file"})
+        except ValidationError:
+            raise FilesError(502, "Provider returned invalid file metadata") from None
 
     def page(self, value: FilePage) -> OpenAIFilePage:
         return OpenAIFilePage(

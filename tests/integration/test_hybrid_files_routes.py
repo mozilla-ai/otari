@@ -1,5 +1,6 @@
 """Public Files routing is scoped, GA-only, and never exposes unfinalized IDs."""
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator, Generator
 from contextlib import asynccontextmanager
@@ -240,3 +241,158 @@ def test_oversized_download_is_refused_before_the_body(
     assert response.status_code == 413, response.text
     assert "provider-chunk" not in events
     assert ("provider-download" in events) == (oversized == "content-length")
+
+
+@pytest.mark.parametrize("path", ["/files", "/files/file_provider"])
+def test_invalid_openai_metadata_returns_fixed_error(
+    file_client: tuple[TestClient, list[str]], monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    client, _ = file_client
+    data = FileMetadata.model_validate({"id": "file_provider", "bytes": "private-invalid-value"})
+
+    async def post(self: object, path: str, body: dict[str, Any], result_type: type[Any]) -> Any:
+        if path == "list":
+            return FilePage(data=[data])
+        return ResolvedFile(metadata=data)
+
+    monkeypatch.setattr(PlatformFilesClient, "post", post)
+    response = client.get(
+        API_ROOT + path, headers={"Authorization": "Bearer caller-token", "X-Otari-Files-Provider": "openai"}
+    )
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Provider returned invalid file metadata"}
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["x-otari-files-protocol"] == "2"
+
+
+@pytest.mark.parametrize("authorization", [None, "Basic invalid", "Bearer "])
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("POST", "/files"),
+        ("GET", "/files"),
+        ("GET", "/files/file_provider"),
+        ("GET", "/files/file_provider/content"),
+        ("DELETE", "/files/file_provider"),
+    ],
+)
+def test_authentication_errors_include_files_headers(
+    file_client: tuple[TestClient, list[str]], method: str, path: str, authorization: str | None
+) -> None:
+    client, events = file_client
+    headers = {"anthropic-version": "2023-06-01"}
+    if authorization is not None:
+        headers["Authorization"] = authorization
+    response = client.request(method, API_ROOT + path, headers=headers)
+    assert response.status_code == 401
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["x-otari-files-protocol"] == "2"
+    assert not events
+
+
+@pytest.mark.parametrize("standalone_enabled", [False, True])
+@pytest.mark.parametrize("native_enabled", [False, True])
+def test_hybrid_files_only_uses_native_feature_flag(
+    file_client: tuple[TestClient, list[str]], standalone_enabled: bool, native_enabled: bool
+) -> None:
+    client, events = file_client
+    app: Any = client.app
+    config = app.dependency_overrides[get_config]()
+    app.dependency_overrides[get_config] = lambda: config.model_copy(
+        update={"files_enabled": standalone_enabled, "files_provider_native_enabled": native_enabled}
+    )
+    response = client.get(API_ROOT + "/files", headers=HEADERS)
+    assert response.status_code == (200 if native_enabled else 404)
+    assert events == (["list"] if native_enabled else [])
+
+
+@pytest.mark.parametrize("stage,budget", [("setup", "transfer"), ("download", "transfer"), ("download", "idle")])
+def test_download_setup_timeout_returns_504_and_closes_resources(
+    file_client: tuple[TestClient, list[str]], monkeypatch: pytest.MonkeyPatch, stage: str, budget: str
+) -> None:
+    client, events = file_client
+    app: Any = client.app
+    config = app.dependency_overrides[get_config]()
+    app.dependency_overrides[get_config] = lambda: config.model_copy(
+        update={
+            "files_transfer_timeout_seconds": 0.01 if budget == "transfer" else 1,
+            "files_idle_timeout_seconds": 0.01 if budget == "idle" else 1,
+        }
+    )
+
+    async def stall() -> None:
+        await asyncio.sleep(0.1)
+        raise RuntimeError("Transfer deadline did not interrupt provider setup")
+
+    class Provider:
+        @asynccontextmanager
+        async def adownload_file(self, file_id: str, **kwargs: Any) -> AsyncIterator[AsyncFileDownload]:
+            try:
+                await stall()
+                yield AsyncFileDownload(status_code=200, headers={}, chunks=aiter_bytes())
+            finally:
+                events.append("download-closed")
+
+    async def aiter_bytes() -> AsyncIterator[bytes]:
+        yield b"data"
+
+    @asynccontextmanager
+    async def provider(*args: Any, **kwargs: Any) -> AsyncIterator[Provider]:
+        try:
+            if stage == "setup":
+                await stall()
+            yield Provider()
+        finally:
+            events.append("provider-closed")
+
+    monkeypatch.setattr(hybrid_files, "provider_client", provider)
+    response = client.get(API_ROOT + "/files/file_provider/content", headers=HEADERS)
+    assert response.status_code == 504, response.text
+    assert response.json() == {"detail": "File transfer timed out"}
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["x-otari-files-protocol"] == "2"
+    assert events[-1] == "provider-closed"
+    assert ("download-closed" in events) == (stage == "download")
+
+
+@pytest.mark.parametrize("stage", ["setup", "delete"])
+def test_delete_timeout_reports_failed_cleanup_before_504(
+    file_client: tuple[TestClient, list[str]], monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    client, events = file_client
+    app: Any = client.app
+    config = app.dependency_overrides[get_config]()
+    app.dependency_overrides[get_config] = lambda: config.model_copy(update={"files_transfer_timeout_seconds": 0.01})
+    original = PlatformFilesClient.post
+
+    async def post(self: Any, path: str, body: dict[str, Any], result_type: type[Any]) -> Any:
+        if path.endswith("/cleanup-result"):
+            assert body == {"cleanup_token": "operation-token", "deleted": False}
+        return await original(self, path, body, result_type)
+
+    async def stall() -> None:
+        await asyncio.sleep(0.1)
+        raise RuntimeError("Transfer deadline did not interrupt provider deletion")
+
+    class Provider:
+        async def adelete_file(self, file_id: str, **kwargs: Any) -> None:
+            await stall()
+
+    @asynccontextmanager
+    async def provider(*args: Any, **kwargs: Any) -> AsyncIterator[Provider]:
+        try:
+            if stage == "setup":
+                await stall()
+            yield Provider()
+        finally:
+            events.append("provider-closed")
+
+    monkeypatch.setattr(PlatformFilesClient, "post", post)
+    monkeypatch.setattr(hybrid_files, "provider_client", provider)
+    response = client.delete(API_ROOT + "/files/file_provider", headers=HEADERS)
+    assert response.status_code == 504, response.text
+    assert response.json() == {"detail": "File transfer timed out"}
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["x-otari-files-protocol"] == "2"
+    assert events[-2] == "provider-closed"
+    assert events[-1].endswith("/cleanup-result")

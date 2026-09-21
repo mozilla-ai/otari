@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 
 from gateway.api.deps import get_config, get_unit_of_work
 from gateway.api.routes.provider_files import create_provider_files_router
@@ -148,3 +148,43 @@ async def test_authenticated_protocol_prepares_and_finalizes(
         async with service.uow:
             stored = await service.repo.get(uuid.UUID(prepared.json()["id"]))
         assert stored is not None and stored.user_id == scope.user_id and stored.workspace_id == scope.workspace_id
+
+
+@pytest.mark.parametrize("gateway_only", [False, True])
+async def test_authentication_http_errors_preserve_safe_headers(
+    files_setup: tuple[ProviderFileService, FileScope, FileAccount], gateway_only: bool
+) -> None:
+    service, _, _ = files_setup
+
+    async def authenticate(request: Request, uow: UnitOfWork) -> FileScope:
+        raise HTTPException(
+            401,
+            "Invalid authentication",
+            headers={
+                "WWW-Authenticate": "Bearer",
+                "Retry-After": "60",
+                "cache-control": "public",
+                "x-otari-files-protocol": "1",
+            },
+        )
+
+    async def authorize(scope: FileScope, body: OutputPrepare, uow: UnitOfWork) -> FileAccount:
+        pytest.fail("Rejected authentication must not reach authorization")
+
+    app = FastAPI()
+    app.dependency_overrides[get_unit_of_work] = lambda: service.uow
+    app.include_router(
+        create_provider_files_router(
+            authenticate=authenticate, authenticate_gateway=authenticate, authorize_attempt=authorize
+        ),
+        prefix=API_ROOT,
+    )
+    path = f"outputs/{uuid.uuid4()}/complete" if gateway_only else "uploads/prepare"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://control") as client:
+        response = await client.post(f"{API_ROOT}/gateway/files/{path}", json={})
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid authentication"}
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert response.headers["retry-after"] == "60"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["x-otari-files-protocol"] == "2"
