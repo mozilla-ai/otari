@@ -1,31 +1,10 @@
-"""The caller's organization's spend budgets and ceilings (not hybrid mode).
+"""The caller's organization's spend budgets and ceilings.
 
-Mounted by ``_register_core_routers`` for standalone **and hosted** deployments;
-only hybrid mode has no management API. Spelled out rather than the "standalone
-mode only" shorthand the neighbouring ``/api/v1/organizations/me`` routers use,
-because on this surface the shorthand would name the wrong audience: a hosted
-organization's admin is exactly who otari-ai#1943 added it for.
-
-Thin composition over `gateway.services.tenancy.organization_budget_service`:
-resolve the caller's identity, call the service, return its typed result. The
-role gate, the scope resolution and the cross-tenant rules live there, and the
-domain errors it raises carry their own statuses (see
-`gateway.services.tenancy.errors`), so nothing here catches them.
-
-Two routers in one module, as `routes/org_provider_keys.py` does, because they
-are one feature: a budget is the figure and a ceiling is where it applies, and
-splitting them across files would put the two halves of one page in two places.
-
-Scoped to ``/me`` for the same reason `routes/organizations.py` is: a request
-cannot name an organization at all, because the caller's identity already points
-at one, so there is no parameter that could be confused with an authorization
-decision.
-
-These sit *beside* ``/api/v1/budgets`` and ``/api/v1/scoped-budgets``, which stay the
-deployment's own surface behind ``require_deployment_operator``. The tables are
-shared; what differs is which rows a caller may reach. A budget with no
-``organization_id`` is the deployment's, and no route here lists, offers or
-repoints one.
+Both routers are mounted in standalone and hosted modes, and not in hybrid mode.
+A budget is the figure and a ceiling is where it applies, so both routers live in one module.
+The routes sit under ``/me``, because the caller's identity names the organization and no request parameter can.
+No route here catches a domain error, because each error carries its own status.
+A budget with no ``organization_id`` belongs to the deployment, and no route here lists, offers or repoints one.
 """
 
 from typing import Annotated

@@ -28,10 +28,7 @@ class User(Base):
     # 0.6619999999999999, and the drift accumulated across every reconcile until
     # the budget reset.
     spend: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0))
-    # In-flight budget held by requests that have passed the budget gate but
-    # whose actual cost is not yet known. The effective committed amount is
-    # ``spend + reserved``; reservations are reconciled into ``spend`` (actual
-    # cost) on success or released on failure. See gateway.services.budget_service.
+    # The committed amount is ``spend + reserved``, where ``reserved`` holds requests that have not settled.
     reserved: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0), server_default="0")
     # The token and request counters, gated by the same budget's ``token_limit``
     # and ``request_limit`` the way the pair above is gated by ``max_budget``.

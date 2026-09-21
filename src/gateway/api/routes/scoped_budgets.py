@@ -1,9 +1,8 @@
 """Manage the tenancy-scoped USD ceilings in ``scoped_budgets``.
 
-Standalone-mode only, and operator-gated on the router itself.
-Deliberately minimal: a scope's ceiling is created, listed, retimed and removed
-here, and everything about how one is enforced lives in
-``services/scoped_budget_service.py``.
+The router is mounted in standalone and hosted modes, and not in hybrid mode.
+It is operator-gated.
+These routes create, list, retime and remove a ceiling, and they enforce none.
 """
 
 import uuid

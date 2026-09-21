@@ -1,11 +1,8 @@
-"""Workspace per-member budget defaults (standalone mode only).
+"""Workspace per-member budget defaults.
 
-A default is a workspace-level template for the per-member ``scoped_budgets``
-ceiling; the materialized per-member rows live on the existing
-``/api/v1/scoped-budgets`` surface. Thin composition over
-`gateway.services.tenancy.workspace_budget_default_service`, following
-`routes/workspaces.py`'s own shape (master-key on the router, plus the
-caller's tenancy identity for the per-workspace role checks).
+A default is a workspace-level template for the per-member ``scoped_budgets`` ceiling.
+The router is mounted in standalone and hosted modes, and not in hybrid mode.
+The router requires the master key, and the caller's tenancy identity decides the per-workspace role checks.
 """
 
 import uuid

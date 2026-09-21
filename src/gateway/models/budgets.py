@@ -329,9 +329,8 @@ class BudgetReservation(Base):
     # ``estimate > 0`` because a zero-cost request on an enforced budget still
     # takes the hold, and the release has to match what the reserve did.
     user_reserved: Mapped[bool] = mapped_column(default=False, server_default=false())
-    # A plain string rather than a database enum, matching ``scoped_budgets.scope_type``:
-    # a new state should not need an enum migration. Values are the
-    # ``RESERVATION_*`` constants in gateway.services.budget_reservation_ledger.
+    # The status is a plain string and not a database enum, so a new state needs no enum migration.
+    # Its values are the ``RESERVATION_*`` constants in ``services/budgets/_ledger.py``.
     status: Mapped[str] = mapped_column(default="active", server_default="active", nullable=False)
     # After this instant a still-active row is treated as leaked and reclaimed.
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -373,22 +372,11 @@ class BudgetReservationScope(Base):
 class WorkspaceBudgetDefault(Base):
     """A workspace-level template for a per-member ``ScopedBudget``.
 
-    ``scoped_budgets`` holds concrete ceilings; this table has no counters of
-    its own and enforces nothing directly. It is **materialized**: creating one
-    on a workspace that already has members, or a member joining a workspace
-    that already has one, stages a ``ScopedBudget(scope_type="workspace_member",
-    scope_id=<member id>)`` row for each (see
-    ``services/tenancy/workspace_budget_default_service.py``). A member with an
-    existing ceiling for the same ``provider_key_id`` is left alone; a
-    member-specific override always wins over the template.
-
-    Same two-axis shape as ``ScopedBudget``: ``workspace_id`` is who the
-    template belongs to, ``provider_key_id`` optionally narrows it to one
-    provider instance (NULL applies to all of them). Unlike ``ScopedBudget``,
-    ``workspace_id`` is a real foreign key: a template has exactly one owner
-    and nothing else names it, so it is deleted with the workspace rather than
-    requiring the same explicit cleanup ``ScopedBudget`` needs (see
-    ``WorkspaceService._delete_scoped_budgets_for``).
+    This table has no counters and enforces nothing.
+    Each member of the workspace gets a ``ScopedBudget`` row made from the template.
+    A member's own ceiling for the same ``provider_key_id`` wins over the template.
+    ``provider_key_id`` narrows the template to one provider instance, and ``None`` applies it to all of them.
+    ``workspace_id`` is a foreign key, so a template is deleted with its workspace.
     """
 
     __tablename__ = "workspace_budget_defaults"
