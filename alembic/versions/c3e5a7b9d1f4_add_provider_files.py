@@ -80,7 +80,7 @@ def upgrade() -> None:
         sa.Column("deadline", sa.DateTime(timezone=True), nullable=False),
         sa.Column("state", sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
         sa.Column("reserved_files", sa.Integer(), nullable=False),
-        sa.Column("reserved_bytes", sa.Integer(), nullable=False),
+        sa.Column("reserved_bytes", sa.BigInteger(), nullable=False),
         sa.ForeignKeyConstraint(
             ["provider_account_generation_id"], ["provider_account_generations.id"], ondelete="RESTRICT"
         ),
@@ -121,7 +121,7 @@ def upgrade() -> None:
         sa.Column("encrypted_metadata", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
         sa.Column("purpose", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=True),
         sa.Column("provider_created_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("size_bytes", sa.Integer(), nullable=False),
+        sa.Column("size_bytes", sa.BigInteger(), nullable=False),
         sa.Column("downloadable", sa.Boolean(), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("provider_expires_at", sa.DateTime(timezone=True), nullable=True),

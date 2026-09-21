@@ -235,6 +235,16 @@ def test_settings_includes_full_config_view(tmp_path: Path) -> None:
     # Fields carry a group, description, and a display type.
     assert by_key["require_pricing"]["group"] == "Metering & budgets"
     assert by_key["require_pricing"]["description"]
+    for name in (
+        "files_transfer_timeout_seconds",
+        "files_idle_timeout_seconds",
+        "files_rate_limit_rpm",
+        "files_max_count",
+        "files_max_outstanding_bytes",
+        "files_temporary_capacity_bytes",
+        "files_operation_timeout_seconds",
+    ):
+        assert by_key[name]["description"], name
     assert by_key["port"]["type"] == "int"
     assert by_key["cors_allow_origins"]["type"] == "list"
     assert by_key["stream_missing_usage_policy"]["type"] == "str"

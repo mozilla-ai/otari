@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Index, UniqueConstraint
+from sqlalchemy import BigInteger, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, UtcDateTime
@@ -57,7 +57,7 @@ class ProviderFileBinding(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMi
     encrypted_metadata: str | None = None
     purpose: str | None = Field(default=None, max_length=255)
     provider_created_at: datetime | None = Field(default=None, sa_type=UtcDateTime)
-    size_bytes: int = 0
+    size_bytes: int = Field(default=0, sa_type=BigInteger)
     downloadable: bool = False
     expires_at: datetime = Field(sa_type=UtcDateTime)
     provider_expires_at: datetime | None = Field(default=None, sa_type=UtcDateTime)
@@ -89,7 +89,7 @@ class ProviderFileOutputOperation(SQLModel, PrimaryKeyMixin, CreatedAtMixin, tab
     deadline: datetime = Field(sa_type=UtcDateTime)
     state: str = Field(default="active", max_length=16)
     reserved_files: int
-    reserved_bytes: int
+    reserved_bytes: int = Field(sa_type=BigInteger)
 
 
 class ProviderFileRateWindow(SQLModel, table=True):

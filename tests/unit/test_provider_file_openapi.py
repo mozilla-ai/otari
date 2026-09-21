@@ -35,3 +35,11 @@ def test_public_file_contracts_are_published() -> None:
     assert {"after", "before", "order", "purpose", "page", "ids[]"} <= {
         parameter["name"] for parameter in listing["parameters"]
     }
+    upload_schema = paths[API_ROOT + "/files"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"]
+    body_schema = spec["components"]["schemas"][upload_schema["$ref"].split("/")[-1]]
+    assert body_schema["properties"]["expires_after[seconds]"] == {
+        "type": "integer",
+        "minimum": 3600,
+        "maximum": 2592000,
+        "description": "OpenAI hybrid retention, capped by the control-plane maximum.",
+    }

@@ -175,7 +175,8 @@ def _merge_hybrid_files(spec: dict[str, Any]) -> None:
     }
     properties["expires_after[seconds]"] = {
         "type": "integer",
-        "minimum": 1,
+        "minimum": 3600,
+        "maximum": 2592000,
         "description": "OpenAI hybrid retention, capped by the control-plane maximum.",
     }
 

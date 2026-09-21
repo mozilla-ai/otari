@@ -880,15 +880,41 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         default=False,
         description="Enable hybrid provider-native Files after provider and control-plane contract verification.",
     )
-    files_transfer_timeout_seconds: Annotated[int, Shown(SettingsGroup.FILES)] = Field(default=300, ge=1)
-    files_idle_timeout_seconds: Annotated[int, Shown(SettingsGroup.FILES)] = Field(default=30, ge=1)
-    files_rate_limit_rpm: Annotated[int, Shown(SettingsGroup.FILES)] = Field(default=60, ge=1)
-    files_max_count: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(default=None, ge=1)
-    files_max_outstanding_bytes: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(default=None, ge=1)
-    files_temporary_capacity_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
-        default=2 * 1024 * 1024 * 1024, ge=1
+    files_transfer_timeout_seconds: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=300,
+        ge=1,
+        description="Maximum total seconds allowed for each provider file upload or download transfer.",
     )
-    files_operation_timeout_seconds: Annotated[int, Shown(SettingsGroup.FILES)] = Field(default=600, ge=1)
+    files_idle_timeout_seconds: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=30,
+        ge=1,
+        description="Maximum seconds a provider file transfer may remain idle between chunks.",
+    )
+    files_rate_limit_rpm: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=60,
+        ge=1,
+        description="Maximum provider file operations per uploader and workspace per minute.",
+    )
+    files_max_count: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(
+        default=None,
+        ge=1,
+        description="Maximum active provider files per uploader and workspace; required in hosted mode.",
+    )
+    files_max_outstanding_bytes: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(
+        default=None,
+        ge=1,
+        description="Maximum bytes reserved or stored per uploader and workspace; required in hosted mode.",
+    )
+    files_temporary_capacity_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=2 * 1024 * 1024 * 1024,
+        ge=1,
+        description="Shared byte capacity for in-progress provider file uploads on this gateway.",
+    )
+    files_operation_timeout_seconds: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=600,
+        ge=1,
+        description="Seconds before an unfinished provider file operation expires and becomes eligible for cleanup.",
+    )
     files_diagnostic_retention_days: Annotated[int, Shown(SettingsGroup.FILES)] = Field(default=30, ge=1, le=365)
 
     @model_validator(mode="after")

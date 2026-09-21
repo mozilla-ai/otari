@@ -1796,7 +1796,8 @@
           },
           "expires_after[seconds]": {
             "description": "OpenAI hybrid retention, capped by the control-plane maximum.",
-            "minimum": 1,
+            "maximum": 2592000,
+            "minimum": 3600,
             "type": "integer"
           },
           "expires_in_seconds": {
