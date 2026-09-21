@@ -34,7 +34,8 @@ from gateway.services.batch_service import (
     get_batch_records,
     record_batch,
 )
-from gateway.services.budget_service import (
+from gateway.services.budgets import (
+    BudgetScopeRequest,
     reconcile_reservation,
     record_external_spend,
     refund_reservation,
@@ -44,7 +45,6 @@ from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import get_provider_kwargs, resolve_provider_selector
-from gateway.services.scoped_budget_service import BudgetScopeRequest
 from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,

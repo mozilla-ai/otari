@@ -23,8 +23,8 @@ from gateway.models.tenancy import (
     WorkspacesPublic,
     WorkspaceUpdate,
 )
+from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.tenancy import WorkspaceService
-from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
 # every handler here happens to take one today, and a future handler that did

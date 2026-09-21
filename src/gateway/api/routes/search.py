@@ -69,11 +69,10 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.usage import UsageLog
 from gateway.rate_limit import check_rate_limit
-from gateway.services.budget_service import reconcile_reservation, refund_reservation, reserve_budget
+from gateway.services.budgets import BudgetScopeRequest, reconcile_reservation, refund_reservation, reserve_budget
 from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.pricing_service import find_model_pricing, flat_request_cost
-from gateway.services.scoped_budget_service import BudgetScopeRequest
 from gateway.services.search_backend import (
     MAX_RESULTS_CAP,
     SearchHit,

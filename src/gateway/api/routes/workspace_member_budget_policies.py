@@ -22,7 +22,7 @@ from gateway.schemas.budgets import (
     WorkspaceMemberBudgetPolicyPublic,
     WorkspaceMemberBudgetPolicyUpdate,
 )
-from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
+from gateway.services.budgets import WorkspaceBudgetDefaultService
 
 # Auth is declared on the router, matching `routes/workspaces.py`: every
 # handler here needs the master key, and a future one that forgot the

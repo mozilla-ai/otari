@@ -55,8 +55,9 @@ from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
 from gateway.rate_limit import check_rate_limit
-from gateway.services.budget_service import (
+from gateway.services.budgets import (
     ZERO,
+    BudgetScopeRequest,
     ReservationHandle,
     reconcile_reservation,
     refund_reservation,
@@ -70,7 +71,6 @@ from gateway.services.pricing_service import (
     pricing_required_but_missing,
 )
 from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
-from gateway.services.scoped_budget_service import BudgetScopeRequest
 from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 

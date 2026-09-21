@@ -53,6 +53,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.tenancy import User as TenancyUser
 from gateway.rate_limit import RateLimiter
+from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.dashboard_session_service import (
     SESSION_COOKIE_NAME,
     apply_session_cookie,
@@ -68,7 +69,6 @@ from gateway.services.tenancy.errors import EmailNotVerifiedError, InvalidCreden
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import authenticate, operator_has_password
-from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 router = APIRouter(prefix="/auth/session", tags=["auth"])
 

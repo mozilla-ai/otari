@@ -29,7 +29,7 @@ from gateway.models.budgets import (
 )
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
 from gateway.schemas.budgets import CreateScopedBudgetRequest, ScopedBudgetResponse, UpdateScopedBudgetRequest
-from gateway.services.budget_periods import period_window
+from gateway.services.budgets import period_window
 
 # Auth is declared on the router, not repeated on each handler, following
 # `routes/organizations.py`: every handler here needs the master key, and a

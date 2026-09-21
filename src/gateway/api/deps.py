@@ -27,6 +27,7 @@ from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.repositories.overview.overview_repository import OverviewRepository
+from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
@@ -36,7 +37,6 @@ from gateway.services.routing import clear_router_backend_cache
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
-from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 from gateway.services.tenancy.workspace_service import WorkspaceService
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in

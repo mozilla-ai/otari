@@ -25,8 +25,8 @@ from gateway.models.tenancy import (
     InvitationPreviewPublic,
     ValidateInvitationRequest,
 )
+from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.tenancy import OrganizationService
-from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 router = APIRouter(prefix="/invitations", tags=["invitations"])
 

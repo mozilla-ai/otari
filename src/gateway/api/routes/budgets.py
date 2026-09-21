@@ -19,7 +19,7 @@ from gateway.schemas.budgets import (
     CreateBudgetRequest,
     UpdateBudgetRequest,
 )
-from gateway.services.budget_retiming import cadence_of, retime_ceilings_for_budget
+from gateway.services.budgets import cadence_of, retime_ceilings_for_budget
 
 router = APIRouter(
     prefix="/budgets",

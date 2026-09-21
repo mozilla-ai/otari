@@ -130,8 +130,9 @@ from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
-from gateway.services.budget_service import (
+from gateway.services.budgets import (
     ZERO,
+    BudgetScopeRequest,
     ReservationHandle,
     estimate_cost,
     estimate_tokens,
@@ -176,7 +177,6 @@ from gateway.services.sandbox_backend import (
     SandboxNotReachableError,
     SandboxUnavailableError,
 )
-from gateway.services.scoped_budget_service import BudgetScopeRequest
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
 from gateway.services.tenancy.errors import (
     WorkspaceMcpServerNotFoundError,

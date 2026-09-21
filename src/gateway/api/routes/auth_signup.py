@@ -26,6 +26,7 @@ from gateway.api.deps import GrowthSignalPortDep, get_config, get_db
 from gateway.api.routes._public_auth import mail_unavailable, throttle_public_auth
 from gateway.core.config import GatewayConfig
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH
+from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.user_service import (
@@ -33,7 +34,6 @@ from gateway.services.tenancy.user_service import (
     resend_verification_email,
     verify_email,
 )
-from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
