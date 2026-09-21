@@ -184,12 +184,14 @@ rejected instead of bypassing the budget.
 `pricing_refresh` decides what the gateway does with a newer genai-prices
 snapshot on its own:
 
-- `manual` (the default) never fetches. An operator checks for updates on
-  Providers and accepts or rejects what it finds.
+- `manual` (the default) never fetches. An operator checks for updates with
+  `POST /api/v1/pricing/refresh` and accepts or rejects what it finds with
+  `/refresh/confirm` or `/refresh/reject`. The dashboard has no page for this.
 - `review` fetches every `pricing_refresh_interval_seconds` (default one day,
-  minimum five minutes) and holds a changed snapshot for review. Providers
-  shows the pending update; nothing is metered differently until an operator
-  accepts it.
+  minimum five minutes) and holds a changed snapshot for review.
+  `GET /api/v1/pricing/refresh/pending` is what reads it; nothing is metered
+  differently until an operator accepts it. On a deployment with nobody to make
+  that call, prefer `auto`.
 - `auto` fetches on the same schedule and applies a changed snapshot at once.
 
 Rejecting a pending update means "not now": nothing remembers what was

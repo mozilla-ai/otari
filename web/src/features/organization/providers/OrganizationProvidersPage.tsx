@@ -28,9 +28,6 @@ import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { CatalogPolicy } from "@/features/pricing/CatalogPolicy"
-import { DeploymentPriceTable } from "@/features/pricing/DeploymentPriceTable"
-import { PricingRefreshSection } from "@/features/pricing/PricingRefreshSection"
 import {
   BYO_UNSUPPORTED_PROVIDERS,
   type CredentialFieldValues,
@@ -64,7 +61,7 @@ import { providerDisplayName } from "@/shared/helpers/providers"
 import { useUrlState } from "@/shared/helpers/urlState"
 
 import { PricingOverrideDialog } from "../PricingOverrideDialog"
-import { canManage, isDeploymentOperator } from "../roles"
+import { canManage } from "../roles"
 import { ProviderModelsPanel } from "./ProviderModelsPanel"
 
 // One page of overrides is enough to seed the editor and the overlap check: the
@@ -310,10 +307,6 @@ export function OrganizationProvidersPage() {
   // Not widened to `isDeploymentOperator`: the server gates these rows on the
   // organization role alone, and operating the deployment grants no role.
   const canEdit = canManage(context.data)
-  // The other authority axis, read once for the whole page: operating the
-  // deployment is not an organization role and confers none, so the two gate
-  // different bands and neither stands in for the other.
-  const isOperator = isDeploymentOperator(context.data)
   const keys = useOrgProviderKeys(canEdit)
   // Same gate the `/providers` page applies, for the same reason: without
   // `OTARI_SECRET_KEY` the gateway cannot encrypt a credential, so the write
@@ -683,19 +676,6 @@ export function OrganizationProvidersPage() {
           onSaved={() => url.patch({ override: "" })}
         />
       ) : null}
-
-      {/* The deployment's own price list, below the organization's own
-          providers. Both halves of it are the deployment's rather than this
-          tenant's, and the two that write are `require_deployment_operator`
-          server-side, so they are withheld from anyone else rather than fired
-          into a refusal banner. The table itself is readable by any session. */}
-      {isOperator ? (
-        <>
-          <CatalogPolicy />
-          <PricingRefreshSection />
-        </>
-      ) : null}
-      <DeploymentPriceTable canPrice={isOperator} />
     </div>
   )
 }

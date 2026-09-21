@@ -2566,55 +2566,6 @@ main {
 .otari-workspaces-table[data-scrolled="true"] .table__cell[data-key="name"] {
   border-right: 1px solid var(--color-control-border);
 }
-.otari-pricing-table .table__row .table__cell {
-  height: 3.25rem;
-  padding-block: 0;
-}
-.otari-pricing-table .table__column[data-key="input"],
-.otari-pricing-table .table__column[data-key="output"],
-.otari-pricing-table .table__column[data-key="cacheRead"] {
-  width: 8.125rem;
-  min-width: 8.125rem;
-  padding-inline: 0.625rem;
-}
-.otari-pricing-table .table__cell[data-key="input"],
-.otari-pricing-table .table__cell[data-key="output"],
-.otari-pricing-table .table__cell[data-key="cacheRead"] {
-  padding-inline: 0.625rem;
-}
-.otari-pricing-table .table__column[data-key="tiers"] {
-  width: 8.125rem;
-  min-width: 8.125rem;
-}
-.otari-pricing-table .table__column[data-key="updatedAt"] {
-  width: 8.125rem;
-  min-width: 8.125rem;
-}
-/* Deliberately unconstrained, and the only lane in either table that is.
-   Something has to absorb the width a table does not otherwise use. The model
-   key was doing it first, and the rates ended up 679px apart between this table
-   and the overrides one below, which is the same quantity twice at two places
-   on one screen. Handing it to the trailing data lane fixed that and cost
-   something else: `Updated` measured 985px, a date alone in an empty field with
-   a hit area to match, and the lane widths stopped matching the table below at
-   the point where the two tables' columns diverge. An empty lane can take any
-   width without lying about anything. */
-.otari-pricing-table .table__column[data-key="spacer"] {
-  min-width: 0;
-}
-.otari-pricing-table .table__column[data-key="modelKey"],
-.otari-pricing-table .table__cell[data-key="modelKey"] {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  background-color: var(--color-background);
-  width: 16.0625rem;
-  min-width: 16.0625rem;
-}
-.otari-pricing-table[data-scrolled="true"] .table__column[data-key="modelKey"],
-.otari-pricing-table[data-scrolled="true"] .table__cell[data-key="modelKey"] {
-  border-right: 1px solid var(--color-control-border);
-}
 .otari-provider-keys-table .table__row .table__cell {
   height: 3.625rem;
   padding-block: 0;

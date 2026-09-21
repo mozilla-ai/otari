@@ -84,15 +84,7 @@ function mockApi(opts: MockOpts = {}) {
         opts.catalog ?? [{ id: "anthropic", name: "Anthropic" }],
       )
     }
-    // The deployment price list, which this page now carries below the
-    // organization's own providers. Answered with a shape rather than left to
-    // the catch-all: the table reads three of these and each renders something.
-    if (url.includes(`${API_ROOT}/pricing/drift`)) {
-      return jsonResponse([])
-    }
-    if (url.includes(`${API_ROOT}/pricing`)) {
-      return jsonResponse({ count: 0, data: [] })
-    }
+    // Ahead of the context catch-all, because that path is a prefix of this one.
     if (url.includes(`${API_ROOT}/organizations/me/pricing`)) {
       return jsonResponse({ count: 0, data: [] })
     }
@@ -102,19 +94,15 @@ function mockApi(opts: MockOpts = {}) {
 }
 
 /**
- * Answer the deployment price bands normally, so a test about one of this page's
- * own reads failing is not also a test about that table failing.
+ * Answer the organization's own rate list, which the page reads to seed its rate
+ * editor and to refuse an overlapping period before sending one.
  *
- * The bands below the providers carry their own error banner, and an assertion
- * on "the alert" finds two once both are up. Whether that race lands is a matter
- * of which query settles first, which is exactly the kind of assertion that
- * passes alone and fails in a file.
+ * Answered explicitly rather than left to a catch-all, so a test about one of
+ * this page's *other* reads failing is not also a test about this one failing:
+ * a second error banner would make an assertion on "the alert" ambiguous, and
+ * whether that race lands depends on which query settles first.
  */
-function pricingBandsAnswer(url: string): Response | undefined {
-  if (url.includes(`${API_ROOT}/pricing/drift`)) return jsonResponse([])
-  if (url.includes(`${API_ROOT}/pricing`)) {
-    return jsonResponse({ count: 0, data: [] })
-  }
+function organizationRatesAnswer(url: string): Response | undefined {
   if (url.includes(`${API_ROOT}/organizations/me/pricing`)) {
     return jsonResponse({ count: 0, data: [] })
   }
@@ -763,7 +751,7 @@ describe("OrganizationProvidersPage", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
       return (
-        pricingBandsAnswer(url) ??
+        organizationRatesAnswer(url) ??
         (url.includes("/provider-keys")
           ? jsonResponse({ count: 0, data: [] })
           : jsonResponse({ detail: "Tenancy is unavailable" }, 500))
@@ -791,7 +779,7 @@ describe("OrganizationProvidersPage", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
       return (
-        pricingBandsAnswer(url) ??
+        organizationRatesAnswer(url) ??
         (url.includes("/provider-keys")
           ? jsonResponse({ detail: "Tenancy is unavailable" }, 500)
           : jsonResponse(organizationContext()))

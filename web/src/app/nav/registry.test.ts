@@ -113,11 +113,12 @@ describe("nav registry", () => {
     // /api/v1/organizations/me/keys. Removing a row from here is as
     // much a design decision as adding one.
     //
-    // Model pricing left it a third way (otari-ai#1943): the page behind it was
-    // never one answer. Its rate overrides are the organization's own and
-    // already management-gated, and its catalog read serves any session, so only
-    // two of its sections were ever the operator's and the page withholds those
-    // rather than the rail withholding the destination.
+    // Model pricing left it a third way, and then left the rail entirely. It was
+    // never one answer: its rate overrides were the organization's own and its
+    // catalog read served any session, so the page withheld its operator-only
+    // sections rather than the rail withholding the destination. Those sections
+    // are now gone and the rest folded into Providers, where an organization's
+    // models are offered, priced and switched together.
     //
     // Spend & budgets left it a fourth way, in the same issue: the route now
     // resolves to *two* pages, the deployment's for an operator and the
@@ -694,7 +695,7 @@ describe("composeNavItems", () => {
       label: "Cost & billing",
       items: [
         { to: "/budgets", label: "Spend & budgets", icon: FiBox },
-        { to: "/organization/pricing", label: "Model pricing", icon: FiBox },
+        { to: "/organization/usage", label: "Usage", icon: FiBox },
       ],
     },
     { id: "org-general", label: "General", items: [] },
@@ -719,7 +720,7 @@ describe("composeNavItems", () => {
     const composed = composeNavItems(base, [billing])
     expect(composed[0].items.map((item) => item.label)).toEqual([
       "Spend & budgets",
-      "Model pricing",
+      "Usage",
       "Billing",
     ])
     // The section keeps everything else it declared, heading included.
@@ -758,7 +759,7 @@ describe("composeNavItems", () => {
     ])
     expect(composed[0].items.map((item) => item.label)).toEqual([
       "Spend & budgets",
-      "Model pricing",
+      "Usage",
       "Billing",
       "Invoices",
     ])

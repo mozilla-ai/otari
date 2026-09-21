@@ -229,9 +229,10 @@ The dashboard's Models page is this catalog: one card per model, with a rail
 of filters beside it, and a page per model with its facts and every offering
 compared in a table. "Use this model" opens a drawer beside the table with
 the request to copy, sent to the gateway's pick or to a provider pinned by
-its selector. It is read-only; rates are set on Providers, which the offering
-rows link to: an operator lands on the deployment's price catalog there, and an
-organization admin on its own rate for that model. A metered rate that differs from the provider's
+its selector. It is read-only; an organization's own rate is set on Providers,
+which an offering on one of that organization's keys links to. An offering the
+deployment supplies the credential for says so instead, because its rate is the
+deployment price list's rather than a tenant's. A metered rate that differs from the provider's
 list price is marked with the list price.
 
 With `public_catalog: true` (see [Configuration](configuration.md)), the same

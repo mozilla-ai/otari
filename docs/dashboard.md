@@ -101,9 +101,12 @@ The organization view contains tenant-wide administration:
 - Spend and budgets
 - General: Providers, followed by Deployment providers and Org settings.
   Providers is the organization's own upstream credentials, the models each one
-  reaches, and what this organization pays for them. Deployment providers is the
-  process-wide credential list, which a deployment operator manages and which is
-  served to every organization; it appears in standalone mode only.
+  reaches, and what this organization pays for them: adding a key offers every
+  model the provider lists on it, each priced from the community defaults and
+  carrying a switch that decides whether the runtime serves it. Deployment
+  providers is the process-wide credential list, which a deployment operator
+  manages and which is served to every organization; it appears in standalone
+  mode only.
 
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the
@@ -113,16 +116,17 @@ What a page shows can also depend on who is signed in, not only on the
 deployment. Spend and budgets is the clearest case: an organization owner or
 admin manages their own organization's budgets and the spend ceilings holding
 them, while a deployment operator gets the deployment-wide budgets and the
-gateway users assigned to them. Providers splits the same way. Its upper half is
-the organization's, open to its owners and admins: the keys, the models each key
-offers, and the rate each model is billed at. Its lower half is the deployment's
-price catalog, kept to an operator, who also sees the update a scheduled
-genai-prices check has left for review, when the defaults were last accepted and
-by whom, and how far each stored rate sits from today's default. An organization
-may set its own rate for a model it supplies the provider key for; a model
-reached through one of the deployment's own provider instances is priced by the
-catalog, because the deployment holds that credential and settles its upstream
-bill.
+gateway users assigned to them.
+
+Providers answers to the organization role rather than to deployment authority.
+Its owners and admins manage the keys, the models each key offers, and the rate
+each model is billed at. An organization may set its own rate for a model it
+supplies the provider key for. A model reached through one of the deployment's
+own provider instances is not one of those: the deployment holds that credential
+and settles its upstream bill, so its rate is the deployment price list's, which
+is `/api/v1/pricing` and has no page of its own. The genai-prices defaults are
+likewise kept current through `/api/v1/pricing/refresh` rather than from the
+dashboard.
 
 Exact page names and availability can change with deployment mode and installed
 extensions. The running dashboard is the source of truth.

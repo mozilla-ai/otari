@@ -1,8 +1,15 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
-import { FiEdit2, FiPlus, FiRefreshCw, FiSlash } from "react-icons/fi"
+import {
+  FiEdit2,
+  FiPlus,
+  FiRefreshCw,
+  FiRotateCcw,
+  FiSlash,
+} from "react-icons/fi"
 
 import type { OrgProviderKey, OrgProviderModel } from "@/client"
+import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import {
@@ -23,6 +30,7 @@ import {
   useSetOrgProviderModelEnabled,
   useWithdrawOrgProviderModel,
 } from "@/shared/api/organizations"
+import { useDeleteOrganizationPricing } from "@/shared/api/pricing"
 import { formatRate } from "@/shared/helpers/format"
 
 import { OfferModelDialog } from "./OfferModelDialog"
@@ -77,6 +85,7 @@ export function ProviderModelsPanel({
   const models = useOrgProviderModels(providerKey.id, page, pageSize)
   const setEnabled = useSetOrgProviderModelEnabled(providerKey.id)
   const withdraw = useWithdrawOrgProviderModel(providerKey.id)
+  const clearRate = useDeleteOrganizationPricing()
   const refreshModels = useRefreshOrgProviderModels(providerKey.id)
   const refreshPricing = useRefreshOrgProviderModelPricing(providerKey.id)
 
@@ -174,6 +183,23 @@ export function ProviderModelsPanel({
               label="Set your rate"
               ariaLabel={`Set your rate for ${row.model}`}
             />
+            {/* Only where there is one to clear. Removing the organization's own
+                rate returns the model to whatever priced it before: the
+                deployment's list, or the community default a later refresh
+                re-seeds. */}
+            {row.price_source === "organization" && row.pricing_id ? (
+              <ConfirmRowAction
+                icon={FiRotateCcw}
+                label={`Use the default rate for ${row.model}`}
+                confirmLabel="Use default"
+                isPending={clearRate.isPending}
+                onConfirm={() =>
+                  clearRate.mutate(row.pricing_id as string, {
+                    onSuccess: clearOutcome,
+                  })
+                }
+              />
+            ) : null}
             {/* Quiet at rest. The confirm dialog is where this action states
                 its consequence, and a row wearing the danger ink before anyone
                 has armed it spends the color on a row that is fine. */}
@@ -248,6 +274,7 @@ export function ProviderModelsPanel({
         error={
           models.error ??
           setEnabled.error ??
+          clearRate.error ??
           refreshModels.error ??
           refreshPricing.error
         }

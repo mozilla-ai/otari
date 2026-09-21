@@ -34,6 +34,9 @@ function mockApi(opts: MockOpts = {}) {
     const method = (init?.method ?? "GET").toUpperCase()
     requests.push({ url, method })
 
+    if (url.includes("/organizations/me/pricing/")) {
+      return new Response(null, { status: 204 })
+    }
     if (url.includes("/models/refresh") || url.includes("/pricing/refresh")) {
       return jsonResponse(
         opts.refresh ?? { added: [], repriced: [], count: models.length },
@@ -249,6 +252,56 @@ describe("ProviderModelsPanel", () => {
     expect(onEditRate).toHaveBeenCalledWith(
       expect.objectContaining({ model: "gpt-4o" }),
     )
+  })
+
+  it("clears a rate the organization set, and offers that only where there is one", async () => {
+    // The action `RateOverridesCard` used to carry. Without it an admin could
+    // set a rate and never go back to the default, which is the state a seeded
+    // row is in and the one a refresh keeps current.
+    const requests = mockApi({
+      models: [
+        orgProviderModel({
+          id: "own",
+          model: "priced-by-us",
+          price_source: "organization",
+          pricing_id: "99999999-9999-9999-9999-999999999999",
+        }),
+        orgProviderModel({
+          id: "seeded",
+          model: "priced-by-default",
+          price_source: "default",
+          pricing_id: null,
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    await renderPanel()
+
+    await screen.findByRole("grid", { name: "Models on Production" })
+    expect(
+      screen.queryByRole("button", {
+        name: "Use the default rate for priced-by-default",
+      }),
+    ).toBeNull()
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Use the default rate for priced-by-us",
+      }),
+    )
+    await user.click(screen.getByRole("button", { name: "Use default" }))
+
+    await waitFor(() => {
+      expect(
+        requests.some(
+          (request) =>
+            request.method === "DELETE" &&
+            request.url.includes(
+              "/organizations/me/pricing/99999999-9999-9999-9999-999999999999",
+            ),
+        ),
+      ).toBe(true)
+    })
   })
 
   it("confirms before it stops offering a model, and says the rate survives", async () => {
