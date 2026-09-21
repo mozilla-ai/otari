@@ -62,14 +62,14 @@ since. A module "runs queries" when it imports a query builder (`select`,
 
 | Measure | Count |
 | --- | --- |
-| Service modules | 111, of which 71 sit flat at the top of `services/` |
+| Service modules | 111, of which 66 sit flat at the top of `services/` |
 | Service modules that run queries | 38, plus 2 that only call `session.get` |
 | Route modules | 73 |
 | Route modules that run queries | 17, plus 1 that only calls `session.get` |
 | Route modules that define Pydantic models inline | 40 |
 | Model modules | 19 |
 | Repository modules | 10: a base, `users_repository.py`, 7 under `tenancy/`, and `overview/overview_repository.py` |
-| Service packages per domain | 2: `services/tools/`, which holds the built-in tool registry and no service yet, and `services/overview/`. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
+| Service packages per domain | 3: `services/tools/`, which holds the built-in tool registry and no service yet, `services/overview/` and `services/budgets/`. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
 | Repository packages per domain | 1: `repositories/overview/`. `repositories/tenancy/` is an older subpackage |
 | Modules in `schemas/` | Two domain modules so far, `budgets.py` and `overview.py` |
 | Modules in `exceptions/` | The shared error bases in `_base.py`, which the package root re-exports, and one domain module so far, `budget_exceptions.py`. `services/tenancy/errors.py` holds the rest of the tenancy errors in 1,145 lines |
@@ -137,17 +137,14 @@ Ceilings, reservations, reset periods and per-member policies.
 
 - Routes: `budgets.py`, `scoped_budgets.py`, `organization_budgets.py`,
   `workspace_member_budget_policies.py`
-- Services: `budget_service.py`, `scoped_budget_service.py`,
-  `budget_periods.py`, `budget_reservation_ledger.py`, `budget_retiming.py`,
-  `tenancy/organization_budget_service.py`,
-  `tenancy/workspace_budget_default_service.py`
+- Services: `budgets/`
 - Schemas: `budgets.py`
 - Exceptions: `budget_exceptions.py`
 - Models: `budgets.py`
 
 `models/budgets.py` holds the scope and reset-alignment vocabularies, with the
 columns they name, and the schemas and services both import them from there.
-The reservation statuses still sit in `budget_reservation_ledger.py` and move
+The reservation statuses still sit in `services/budgets/_ledger.py` and move
 the same way.
 
 ### pricing

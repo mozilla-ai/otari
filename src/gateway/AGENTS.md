@@ -132,12 +132,12 @@ hold and settle all three: a limit added to `budgets` needs a counter and a hold
 on `users` and on `scoped_budgets`, or it binds through one reachability and is
 silently ignored through the other.
 
-`budget_service.reserve_budget` places the estimate before dispatch and the
+`reserve_budget` in `services/budgets/` places the estimate before dispatch and the
 shared settlement helpers reconcile or refund it. Scoped reservations use
 conditional updates in one total order and compensate earlier holds when a
 later ceiling refuses.
 
-`budget_reservation_ledger.py` gives each request's holds one identity.
+`services/budgets/_ledger.py` gives each request's holds one identity.
 Settlement claims that row before changing counters, making duplicate release a
 no-op. Write the ledger after the holds it records; a top-up grows the existing
 row rather than creating a second independently expiring hold.
