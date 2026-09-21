@@ -153,11 +153,7 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
 
 
 class WorkspaceMemberRepository:
-    """Repository for workspace membership rows.
-
-    Not a ``BaseRepository``: every access is keyed by the (workspace, user)
-    pair rather than by the row's own id, so none of the generic helpers apply.
-    """
+    """Repository for workspace membership rows."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -311,6 +307,22 @@ class WorkspaceMemberRepository:
         """Every membership ID in a workspace."""
         result = await self.db.execute(
             select(col(WorkspaceMember.id)).where(col(WorkspaceMember.workspace_id) == workspace_id)
+        )
+        return list(result.scalars().all())
+
+    async def get_workspace_id(self, workspace_member_id: uuid.UUID) -> uuid.UUID | None:
+        """Return the ID of the workspace a membership belongs to, or None."""
+        result = await self.db.execute(
+            select(col(WorkspaceMember.workspace_id)).where(col(WorkspaceMember.id) == workspace_member_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_ids_by_organization(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
+        """Return the ID of every membership in an organization's workspaces, whatever its status."""
+        result = await self.db.execute(
+            select(col(WorkspaceMember.id))
+            .join(Workspace, col(Workspace.id) == col(WorkspaceMember.workspace_id))
+            .where(col(Workspace.organization_id) == organization_id)
         )
         return list(result.scalars().all())
 
