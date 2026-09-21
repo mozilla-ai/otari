@@ -15,9 +15,7 @@ import {
 /** An indexed catalog of single-offering models: each id doubles as selector. */
 function catalog(...ids: string[]): CatalogResponse {
   return catalogResponse(
-    ids.map((id) =>
-      catalogModelSummary({ id, selector: id, selectors: [`prov:${id}`] }),
-    ),
+    ids.map((id) => catalogModelSummary({ id, selectors: [`prov:${id}`] })),
   )
 }
 
@@ -84,7 +82,6 @@ describe("buildPlaygroundModels", () => {
       catalogResponse([
         catalogModelSummary({
           id: "z-ai/glm",
-          selector: "z-ai/glm",
           selectors: ["fireworks:glm", "nebius:glm"],
         }),
       ]),

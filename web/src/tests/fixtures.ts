@@ -44,6 +44,9 @@ export function catalogModelSummary(
 ): CatalogModelSummary {
   return {
     name: overrides.id,
+    // The indexed catalog is the ordinary state, so it is the default; a test
+    // opts into the unindexed one by passing `selector: null` explicitly.
+    selector: overrides.id,
     vendor: null,
     capabilities: {
       reasoning: false,
