@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.provider_files import ProviderFileOutputOperation
-from gateway.models.provider_keys import OrgProviderKey, OrgProviderKeyUpdateRequest
+from gateway.models.provider_keys import OrgProviderKey, OrgProviderKeyUpdateRequest, WorkspaceProviderKeyOverride
 from gateway.models.tenancy import Organization
 from gateway.models.users import User
 from gateway.repositories.tenancy.provider_file_repository import ProviderFileRepository
@@ -179,6 +179,65 @@ async def test_account_resolution_rechecks_revoked_scope(
         await resolver.resolve(scope, account.generation_id)
     cleanup = await resolver.resolve(scope, account.generation_id, cleanup=True)
     assert cleanup.generation_id == account.generation_id
+
+
+@pytest.mark.parametrize("disabled", [False, True])
+async def test_account_resolution_rechecks_workspace_override_after_references(
+    async_db: AsyncSession,
+    files_setup: tuple[ProviderFileService, FileScope, FileAccount],
+    disabled: bool,
+) -> None:
+    files, scope, account = files_setup
+    repo = ProviderFileRepository(async_db)
+    generation = await repo.account(account.generation_id)
+    assert generation is not None
+    key_id = uuid.UUID(generation.credential_ref)
+    await repo.save(
+        OrgProviderKey(
+            id=key_id,
+            organization_id=scope.organization_id,
+            provider="anthropic",
+            name="Files",
+            encrypted_api_key=encrypt_secret("original-credential"),
+        )
+    )
+    await async_db.commit()
+    operation = await files.prepare(scope, account, PrepareUpload(operation_id=uuid.uuid4(), size_bytes=20))
+    data = metadata()
+    await files.finalize(scope, operation.id, data)
+    authorized_generation = await files.references(scope, [data.id])
+
+    # An override mutation commits between binding authorization and credential resolution.
+    await repo.lock_organization(scope.organization_id)
+    await repo.save(
+        WorkspaceProviderKeyOverride(
+            organization_id=scope.organization_id,
+            workspace_id=scope.workspace_id,
+            org_provider_key_id=key_id,
+            disabled=disabled,
+        )
+    )
+    if disabled:
+        await repo.revoke(
+            datetime.now(UTC),
+            "workspace_credential_disabled",
+            organization_id=scope.organization_id,
+            workspace_id=scope.workspace_id,
+            generation_id=authorized_generation,
+        )
+    await async_db.commit()
+
+    resolver = FileAccountResolver(files.uow)
+    if disabled:
+        with pytest.raises(FilesError, match="unavailable") as failure:
+            await resolver.resolve(scope, authorized_generation)
+        assert failure.value.status_code == 404
+    else:
+        resolved = await resolver.resolve(scope, authorized_generation)
+        assert resolved.api_key.get_secret_value() == "original-credential"
+    cleanup = await resolver.resolve(scope, authorized_generation, cleanup=True)
+    assert cleanup.generation_id == authorized_generation
+    assert cleanup.api_key.get_secret_value() == "original-credential"
 
 
 async def test_rejected_output_registration_commits_cleanup(

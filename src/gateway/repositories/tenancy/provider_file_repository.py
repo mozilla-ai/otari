@@ -52,6 +52,17 @@ class ProviderFileRepository(BaseRepository[ProviderFileBinding, SQLModel, SQLMo
     async def provider_key(self, key_id: uuid.UUID) -> OrgProviderKey | None:
         return await self.db.get(OrgProviderKey, key_id)
 
+    async def workspace_key_disabled(self, workspace_id: uuid.UUID, key_id: uuid.UUID) -> bool:
+        disabled = (
+            await self.db.execute(
+                select(col(WorkspaceProviderKeyOverride.disabled)).where(
+                    col(WorkspaceProviderKeyOverride.workspace_id) == workspace_id,
+                    col(WorkspaceProviderKeyOverride.org_provider_key_id) == key_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return disabled is True
+
     async def expire_bindings(self, organization_id: uuid.UUID, now: datetime, diagnostic_seconds: int) -> None:
         await self.db.execute(
             update(ProviderFileBinding)

@@ -93,6 +93,10 @@ class FileAccountResolver:
                     raise FilesError(404, "Provider account unavailable")
                 provider = row.provider
                 if row.credential_source == "organization_key":
+                    if not cleanup and await self.repo.workspace_key_disabled(
+                        scope.workspace_id, uuid.UUID(row.credential_ref)
+                    ):
+                        raise FilesError(404, "Provider account unavailable")
                     return await self.resolve_byo(generation_id, scope.organization_id, cleanup=cleanup)
             if resolve_hosted is None:
                 raise FilesError(404, "Provider account unavailable")
