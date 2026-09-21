@@ -154,6 +154,7 @@ def test_surrounding_whitespace_is_stripped() -> None:
     [
         {API_KEY_HEADER: "   "},
         {API_KEY_HEADER: "Bearer  "},
+        {"Authorization": "   "},
         {"Authorization": "Bearer  "},
         {X_API_KEY_HEADER: "   "},
     ],

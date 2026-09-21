@@ -148,7 +148,9 @@ def extract_credential_token(request: Request) -> str:
         auth_header = request.headers.get("Authorization")
         if auth_header:
             auth_header = auth_header.lstrip()
-            if not auth_header.startswith("Bearer "):
+            # A blank value is a missing credential, not a scheme violation;
+            # only a non-empty non-Bearer value is an invalid format.
+            if auth_header and not auth_header.startswith("Bearer "):
                 record_auth_failure("invalid_format")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
