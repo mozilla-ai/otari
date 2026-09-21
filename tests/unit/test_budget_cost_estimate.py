@@ -11,7 +11,7 @@ from typing import Any
 
 from gateway.models.budgets import MAX_COUNT_LIMIT, Budget
 from gateway.models.pricing import ModelPricing
-from gateway.services.budget_service import _blocked_axis, estimate_cost, estimate_tokens
+from gateway.services.budgets._reservations import _blocked_axis, estimate_cost, estimate_tokens
 
 
 def _micro_dollars(*terms: Decimal | int) -> Decimal:

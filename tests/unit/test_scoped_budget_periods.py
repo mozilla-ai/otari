@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from gateway.services.budget_periods import period_window
+from gateway.services.budgets import period_window
 
 
 def _at(text: str) -> datetime:

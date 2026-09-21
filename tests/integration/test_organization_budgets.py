@@ -54,8 +54,8 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetCreate,
     OrganizationScopedBudgetUpdate,
 )
+from gateway.services.budgets import OrganizationBudgetService
 from gateway.services.tenancy.errors import NotAuthorizedError, TenancyValidationError
-from gateway.services.tenancy.organization_budget_service import OrganizationBudgetService
 
 _BUDGETS = f"{API_ROOT}/organizations/me/budgets"
 _CEILINGS = f"{API_ROOT}/organizations/me/spend-ceilings"

@@ -56,7 +56,7 @@ from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, Settled
 from gateway.core.config import GatewayConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.rate_limit import RateLimitInfo
-from gateway.services.budget_service import ReservationHandle
+from gateway.services.budgets import ReservationHandle
 from gateway.services.tenancy.errors import WorkspaceMcpServerNotFoundError
 from gateway.services.tenancy.workspace_web_search_service import ResolvedWebSearchConfig
 from gateway.services.tool_usage import ToolUsageTally

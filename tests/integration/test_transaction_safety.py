@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.models.budgets import Budget
 from gateway.models.users import User
-from gateway.services.budget_service import _cas_reset_user_budget, _is_model_free
+from gateway.services.budgets._reservations import _cas_reset_user_budget, _is_model_free
 
 
 def test_create_user_rollback_on_commit_failure(
@@ -152,7 +152,10 @@ async def test_is_model_free_catches_unsupported_provider_error(async_db: AsyncS
 @pytest.mark.asyncio
 async def test_is_model_free_accepts_string_provider_from_any_llm(async_db: AsyncSession) -> None:
     """_is_model_free stays fail-closed when any-llm returns a registry-only string provider."""
-    with patch("gateway.services.budget_service.AnyLLM.split_model_provider", return_value=("registry-only", "model")):
+    with patch(
+        "gateway.services.budgets._reservations.AnyLLM.split_model_provider",
+        return_value=("registry-only", "model"),
+    ):
         result = await _is_model_free(async_db, "registry-only:model")
 
     assert result is False
@@ -163,7 +166,7 @@ async def test_is_model_free_uses_the_resolved_provider_instance(async_db: Async
     """Policies are named locally, while their selected targets may use instances."""
     pricing = SimpleNamespace(input_price_per_million=0, output_price_per_million=0)
     lookup = AsyncMock(return_value=pricing)
-    with patch("gateway.services.budget_service.find_model_pricing", lookup):
+    with patch("gateway.services.budgets._reservations.find_model_pricing", lookup):
         result = await _is_model_free(async_db, "Kimi-K3", pricing_provider="otari.ai")
 
     assert result is True
@@ -178,7 +181,7 @@ async def test_is_model_free_uses_the_resolved_provider_instance(async_db: Async
 async def test_is_model_free_catches_sqlalchemy_error(async_db: AsyncSession) -> None:
     """_is_model_free returns False on SQLAlchemy errors during pricing lookup."""
     with patch(
-        "gateway.services.budget_service.find_model_pricing",
+        "gateway.services.budgets._reservations.find_model_pricing",
         side_effect=OperationalError("db", {}, Exception("connection lost")),
     ):
         result = await _is_model_free(async_db, "openai:gpt-4o")
@@ -189,7 +192,7 @@ async def test_is_model_free_catches_sqlalchemy_error(async_db: AsyncSession) ->
 async def test_is_model_free_does_not_catch_unexpected_errors(async_db: AsyncSession) -> None:
     """_is_model_free does not swallow unexpected non-DB, non-ValueError exceptions."""
     with (
-        patch("gateway.services.budget_service.find_model_pricing", side_effect=RuntimeError("unexpected")),
+        patch("gateway.services.budgets._reservations.find_model_pricing", side_effect=RuntimeError("unexpected")),
         pytest.raises(RuntimeError, match="unexpected"),
     ):
         await _is_model_free(async_db, "openai:gpt-4o")

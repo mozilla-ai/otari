@@ -23,10 +23,10 @@ from gateway.models.tenancy import (
     WorkspaceMember,
 )
 from gateway.repositories.tenancy import UserRepository, WorkspaceMemberRepository
+from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
-from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 from .tenancy_helpers import create_budget, create_member, create_organization, create_workspace
 

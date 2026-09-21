@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import gateway.api.routes._pipeline as pipeline
 from gateway.core.config import GatewayConfig
-from gateway.services.budget_service import ReservationHandle
+from gateway.services.budgets import ReservationHandle
 from gateway.types.attempt import Attempt
 
 # Cost the stubbed estimator returns per (instance, model), standing in for the

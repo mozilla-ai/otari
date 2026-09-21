@@ -36,6 +36,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.schemas.budgets import WorkspaceMemberBudgetPolicyCreate, WorkspaceMemberBudgetPolicyUpdate
+from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.errors import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.services.tenancy.provisioning_service import (
@@ -43,7 +44,6 @@ from gateway.services.tenancy.provisioning_service import (
     DEFAULT_WORKSPACE_NAME,
     ensure_bootstrap_identity,
 )
-from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 from .tenancy_helpers import create_budget, create_member, create_organization, create_workspace
 

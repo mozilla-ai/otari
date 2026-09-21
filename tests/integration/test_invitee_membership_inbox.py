@@ -36,13 +36,13 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.errors import (
     InvitationAlreadyUsedError,
     InvitationExpiredError,
     InvitationNotFoundError,
 )
-from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 _TEST_CONFIG = GatewayConfig()
 

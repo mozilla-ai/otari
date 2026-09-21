@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_ROOT
-from gateway.services.budget_periods import period_window
+from gateway.services.budgets import period_window
 
 from .conftest import MODEL_NAME
 
@@ -174,7 +174,7 @@ def test_budget_actually_resets_when_duration_passes(
     user_data = user_response.json()
     assert user_data["spend"] == 0.0
 
-    with patch("gateway.services.budget_service.datetime") as mock_datetime_budget:
+    with patch("gateway.services.budgets._reservations.datetime") as mock_datetime_budget:
         mock_datetime_budget.now.return_value = initial_time
 
         with patch("gateway.api.routes._pipeline.datetime") as mock_datetime_chat:
@@ -199,7 +199,7 @@ def test_budget_actually_resets_when_duration_passes(
 
     time_after_reset = initial_time + timedelta(seconds=61)
 
-    with patch("gateway.services.budget_service.datetime") as mock_datetime_budget:
+    with patch("gateway.services.budgets._reservations.datetime") as mock_datetime_budget:
         mock_datetime_budget.now.return_value = time_after_reset
 
         with patch("gateway.api.routes._pipeline.datetime") as mock_datetime_chat:

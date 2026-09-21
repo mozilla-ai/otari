@@ -24,14 +24,14 @@ from gateway.models.budgets import Budget, ScopedBudget
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.users import User
-from gateway.services.budget_service import (
+from gateway.services.budgets import (
+    BudgetScopeRequest,
     ReservationHandle,
     increase_reservation,
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
 )
-from gateway.services.scoped_budget_service import BudgetScopeRequest
 
 from .conftest import _to_async_url
 

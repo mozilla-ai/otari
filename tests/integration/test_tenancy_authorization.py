@@ -34,6 +34,7 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.authorization import resolve_visible_workspace_scope
 from gateway.services.tenancy.errors import (
@@ -45,7 +46,6 @@ from gateway.services.tenancy.errors import (
     WorkspaceNotFoundError,
 )
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
-from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 _TEST_CONFIG = GatewayConfig()
 

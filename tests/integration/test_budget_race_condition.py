@@ -17,7 +17,7 @@ from gateway.models.budgets import MAX_COUNT_LIMIT, Budget
 from gateway.models.pricing import ModelPricing
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_active_user
-from gateway.services.budget_service import (
+from gateway.services.budgets import (
     estimate_cost,
     increase_reservation,
     reconcile_reservation,
@@ -46,7 +46,7 @@ async def test_reserve_budget_reads_user_without_locking(
     await async_db.commit()
 
     with patch(
-        "gateway.services.budget_service.get_active_user",
+        "gateway.services.budgets._reservations.get_active_user",
         wraps=get_active_user,
     ) as mock_get_active_user:
         handle = await reserve_budget(async_db, "race-user", 0.5, strategy="cas")

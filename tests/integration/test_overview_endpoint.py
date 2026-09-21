@@ -31,10 +31,10 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.overview.overview_service import OverviewService, judge
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 from gateway.services.tenancy.workspace_service import WorkspaceService
 
 _ENDPOINT = f"{API_ROOT}/overview"

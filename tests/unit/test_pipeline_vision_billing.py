@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import gateway.api.routes._pipeline as pipeline
 from gateway.api.routes import chat
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.services.budget_service import ReservationHandle, estimate_tokens
+from gateway.services.budgets import ReservationHandle, estimate_tokens
 
 _VISION_USAGE = CompletionUsage(prompt_tokens=200, completion_tokens=50, total_tokens=250)
 

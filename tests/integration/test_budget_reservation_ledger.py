@@ -25,8 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from gateway.models.budgets import Budget, BudgetReservation, BudgetReservationScope, ScopedBudget
 from gateway.models.users import User
-from gateway.services import budget_reservation_ledger as ledger
-from gateway.services.budget_service import (
+from gateway.services.budgets import _ledger as ledger
+from gateway.services.budgets import (
     increase_reservation,
     reconcile_reservation,
     refund_reservation,

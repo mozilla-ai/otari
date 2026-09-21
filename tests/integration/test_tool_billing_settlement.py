@@ -1,11 +1,7 @@
 """Settlement tests for gateway-run tool calls.
 
-The point of these is ``users.spend``, not the usage row. A tool charge that
-lands on the row but not in the spend ledger is the exact defect this feature
-exists to close: ``refund_reservation`` deliberately releases a hold *without*
-recording spend (``services/budget_service.py``), so every failure path that
-runs tool calls has to reconcile instead of refund. Asserting only the row would
-pass while the budget silently leaked.
+These tests assert ``users.spend`` and not only the usage row.
+``refund_reservation`` releases a hold without recording spend, so a failure path that ran tool calls must reconcile.
 """
 
 from __future__ import annotations
