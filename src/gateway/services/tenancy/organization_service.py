@@ -272,6 +272,10 @@ class OrganizationService:
         """Return whether an organization with this ID exists."""
         return await self.organizations.get(organization_id) is not None
 
+    async def get_organization_id_for_workspace(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        """Return the ID of the organization that owns a workspace, or None when the workspace does not exist."""
+        return await self.workspace_rows.get_organization_id(workspace_id)
+
     async def get_workspace_ids_in_organization(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
         """Return the ID of every workspace in an organization."""
         return await self.workspace_rows.get_ids_by_organization(organization_id)

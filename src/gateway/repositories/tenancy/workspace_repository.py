@@ -101,6 +101,13 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
         )
         return list(result.scalars().all())
 
+    async def get_organization_id(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
+        """Return the ID of the organization that owns a workspace, or None."""
+        result = await self.db.execute(
+            select(col(Workspace.organization_id)).where(col(Workspace.id) == workspace_id)
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_organization_and_name(self, organization_id: uuid.UUID, name: str) -> Workspace | None:
         """Return an organization's workspace with this name, or None."""
         result = await self.db.execute(
