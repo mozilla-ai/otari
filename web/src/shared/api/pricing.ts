@@ -9,6 +9,7 @@ import type {
   CreateOrganizationPricingOverride,
   CurrentPricingPage,
   OrganizationPricingOverride,
+  OrganizationPricingOverrides,
   PricingDriftRow,
   PricingRefreshPreview,
   PricingResponse,
@@ -16,7 +17,7 @@ import type {
   UpdateOrganizationPricingOverride,
 } from "@/client"
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
-import { fetchAllPaged, fetchAllRows } from "@/shared/api/paging"
+import { fetchAllRows } from "@/shared/api/paging"
 import {
   CATALOG,
   MODELS,
@@ -211,17 +212,27 @@ export function useRejectPricingRefresh() {
 // than offered.
 // ---------------------------------------------------------------------------
 
-export function useOrganizationPricing(enabled = true) {
+/**
+ * One page of the organization's rate overrides, with the total.
+ *
+ * The table grows a row per model per period, so reading it whole was a walk
+ * that got longer for the life of the organization (otari#1420). The endpoint
+ * answers the tenancy `{data, count}` envelope, so the page and the total both
+ * come from the server.
+ */
+export function useOrganizationPricing(
+  page: number,
+  pageSize: number,
+  enabled = true,
+) {
   return useQuery({
-    queryKey: [ORGANIZATION_PRICING],
-    // Paged through rather than read in one shot: the endpoint caps `limit`
-    // server-side and the table grows a row per model per period, so a long-lived
-    // organization would otherwise have its oldest overrides silently truncated.
-    // `fetchAllPaged` carries the same hard page cap the rest of the tenancy
-    // surface uses, so a backend that ignored `skip` cannot spin this.
+    queryKey: [ORGANIZATION_PRICING, page, pageSize],
     queryFn: () =>
-      fetchAllPaged<OrganizationPricingOverride>("/organizations/me/pricing"),
+      apiFetch<OrganizationPricingOverrides>(
+        `/organizations/me/pricing?skip=${page * pageSize}&limit=${pageSize}`,
+      ),
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
     enabled,
   })
 }

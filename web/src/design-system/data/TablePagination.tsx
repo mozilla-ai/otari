@@ -34,6 +34,14 @@ export interface TablePaginationProps {
   isFetching?: boolean
   /** With an unknown total, whether a next page is assumed to exist (usually rowsOnPage === pageSize). */
   hasNextFallback?: boolean
+  /**
+   * What this pager pages, lower case and plural ("rate overrides"), for the
+   * control labels. Two pagers on one page otherwise expose the same four
+   * accessible names with nothing to tell them apart, which `ModelPricingPage`
+   * does (the price table and the overrides card). Omitted where a page has
+   * only one, so the labels stay the shorter ones.
+   */
+  label?: string
 }
 
 export function TablePagination({
@@ -46,8 +54,13 @@ export function TablePagination({
   pageSizeOptions = PAGE_SIZE_OPTIONS,
   isFetching = false,
   hasNextFallback = false,
+  label,
 }: TablePaginationProps) {
   const sizeSelectId = useId()
+  // Comma-appended rather than woven in, so the first words stay identical
+  // across every pager and a screen-reader user hears the distinguishing part
+  // last rather than having to parse a different sentence each time.
+  const named = (control: string) => (label ? `${control}, ${label}` : control)
   const pageCount =
     total != null ? Math.max(1, Math.ceil(total / pageSize)) : null
   const isFirst = page === 0
@@ -110,7 +123,7 @@ export function TablePagination({
         </label>
         <FilterSelect
           id={sizeSelectId}
-          ariaLabel="Rows per page"
+          ariaLabel={named("Rows per page")}
           value={String(pageSize)}
           onChange={(value) => onPageSizeChange(Number.parseInt(value, 10))}
           options={pageSizeOptions.map((size) => ({
@@ -142,7 +155,7 @@ export function TablePagination({
           <Button
             size="sm"
             variant="ghost"
-            aria-label="First page"
+            aria-label={named("First page")}
             isDisabled={isFirst}
             onPress={() => onPageChange(0)}
           >
@@ -151,7 +164,7 @@ export function TablePagination({
           <Button
             size="sm"
             variant="ghost"
-            aria-label="Previous page"
+            aria-label={named("Previous page")}
             isDisabled={isFirst}
             onPress={() => onPageChange(page - 1)}
           >
@@ -159,7 +172,7 @@ export function TablePagination({
           </Button>
           <span className="inline-flex items-center gap-1 text-sm text-muted">
             <input
-              aria-label="Page number"
+              aria-label={named("Page number")}
               inputMode="numeric"
               value={pageText}
               onChange={(event) =>
@@ -186,7 +199,7 @@ export function TablePagination({
           <Button
             size="sm"
             variant="ghost"
-            aria-label="Next page"
+            aria-label={named("Next page")}
             isDisabled={isLast}
             onPress={() => onPageChange(page + 1)}
           >
@@ -195,7 +208,7 @@ export function TablePagination({
           <Button
             size="sm"
             variant="ghost"
-            aria-label="Last page"
+            aria-label={named("Last page")}
             isDisabled={pageCount == null || isLast}
             onPress={() => pageCount != null && onPageChange(pageCount - 1)}
           >

@@ -616,6 +616,7 @@ function PriceTable({ canPrice }: { canPrice: boolean }) {
           setPage(0)
         }}
         isFetching={pricing.isFetching}
+        label="model prices"
       />
       {canPrice ? (
         <SetPriceDialog

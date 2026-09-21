@@ -50,6 +50,16 @@ export const UnknownTotal: Story = {
   args: { total: null, hasNextFallback: true },
 }
 
+/**
+ * Named, for a page carrying more than one pager. The four controls and the
+ * rows select take the name as a suffix, so two pagers do not expose the same
+ * accessible names with nothing to tell them apart. `ModelPricingPage` is the
+ * case: the price table and the rate-overrides card sit on one page.
+ */
+export const Labeled: Story = {
+  args: { label: "rate overrides" },
+}
+
 export const Fetching: Story = {
   args: { page: 3, isFetching: true },
 }

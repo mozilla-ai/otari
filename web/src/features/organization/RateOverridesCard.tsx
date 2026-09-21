@@ -5,6 +5,7 @@ import { FiEdit2, FiTrash2 } from "react-icons/fi"
 import type { OrganizationPricingOverride } from "@/client"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { TablePagination } from "@/design-system/data/TablePagination"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
@@ -77,6 +78,8 @@ function rate(value: number | null | undefined): string {
   return formatRate(value)
 }
 
+const DEFAULT_PAGE_SIZE = 25
+
 function period(override: OrganizationPricingOverride): string {
   const from = formatDateTime(override.effective_from)
   if (!override.effective_to) return `From ${from}`
@@ -85,7 +88,9 @@ function period(override: OrganizationPricingOverride): string {
 
 export function RateOverridesCard() {
   const context = useOrganizationContext()
-  const overrides = useOrganizationPricing()
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const overrides = useOrganizationPricing(page, pageSize)
   const remove = useDeleteOrganizationPricing()
 
   const [isDialogOpen, setDialogOpen] = useState(false)
@@ -104,7 +109,20 @@ export function RateOverridesCard() {
   const catalog = useModels(canEdit)
   const managedPrefixes = deploymentManagedPrefixes(catalog.data?.data)
 
-  const rows = overrides.data ?? []
+  const rows = overrides.data?.data ?? []
+
+  // Deleting the last override on a page leaves that page empty while earlier
+  // pages still hold rows. Stepping back during render rather than in an
+  // effect, the way `TablePagination` adjusts its own page box: an effect
+  // paints the blank page once before correcting it.
+  if (
+    page > 0 &&
+    overrides.data &&
+    !overrides.isFetching &&
+    rows.length === 0
+  ) {
+    setPage(page - 1)
+  }
 
   // Why this row's rate is not this organization's to change, or undefined. A
   // row can predate the rule, so the table asks per row rather than assuming its
@@ -296,6 +314,19 @@ export function RateOverridesCard() {
           emptyContent="No override yet. Add one to bill this organization at its own rate for a model."
         />
       </TableScrollFrame>
+      <TablePagination
+        page={page}
+        pageSize={pageSize}
+        total={overrides.data?.count ?? null}
+        rowsOnPage={rows.length}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size)
+          setPage(0)
+        }}
+        isFetching={overrides.isFetching}
+        label="rate overrides"
+      />
 
       {/* Keyed on the open count, so each open remounts a blank form. */}
       <PricingOverrideDialog

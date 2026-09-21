@@ -232,7 +232,9 @@ describe("ModelPricingPage", () => {
     renderPage(<ModelPricingPage />)
 
     await screen.findByRole("grid", { name: "Model prices" })
-    await user.click(screen.getByRole("button", { name: /next/i }))
+    await user.click(
+      screen.getByRole("button", { name: "Next page, model prices" }),
+    )
 
     await waitFor(() => {
       expect(

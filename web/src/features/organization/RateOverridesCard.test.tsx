@@ -86,7 +86,15 @@ function mockApi({
     })
     if (url.includes(`${API_ROOT}/organizations/me/pricing`)) {
       if (method === "GET") {
-        return jsonResponse({ data: overrides, count: overrides.length })
+        // Honors the window, like the endpoint: a test that ignored it could
+        // not tell a paged read from a read of everything.
+        const params = new URL(url, "http://localhost").searchParams
+        const skip = Number(params.get("skip") ?? 0)
+        const limit = Number(params.get("limit") ?? 100)
+        return jsonResponse({
+          data: overrides.slice(skip, skip + limit),
+          count: overrides.length,
+        })
       }
       return jsonResponse(writeBody, writeStatus)
     }
@@ -125,6 +133,132 @@ afterEach(() => {
 })
 
 describe("RateOverridesCard", () => {
+  it("asks for a page rather than walking the overrides", async () => {
+    // otari#1420: this table grows a row per model per period, so reading it
+    // whole was a walk that lengthened for the life of the organization. The
+    // endpoint already answers the tenancy envelope, so the window and the
+    // total both come from the server.
+    const requests = mockApi({
+      overrides: Array.from({ length: 30 }, (_, index) =>
+        pricingOverride({
+          id: `11111111-1111-1111-1111-${String(index).padStart(12, "0")}`,
+          model_key: `openai:model-${String(index).padStart(2, "0")}`,
+        }),
+      ),
+    })
+
+    await renderPage()
+
+    const table = await screen.findByRole("grid", {
+      name: /rate overrides/i,
+    })
+    // A header row and a page of 25, not all 30.
+    await waitFor(() => {
+      expect(within(table).getAllByRole("row")).toHaveLength(26)
+    })
+    expect(
+      requests.some(
+        (request) =>
+          request.method === "GET" &&
+          request.url.includes("/organizations/me/pricing?skip=0&limit=25"),
+      ),
+    ).toBe(true)
+    // No second page was fetched to render the first.
+    expect(
+      requests.filter(
+        (request) =>
+          request.method === "GET" &&
+          request.url.includes("/organizations/me/pricing?"),
+      ),
+    ).toHaveLength(1)
+  })
+
+  it("pages without reading the rest of the overrides", async () => {
+    const user = userEvent.setup()
+    const requests = mockApi({
+      overrides: Array.from({ length: 30 }, (_, index) =>
+        pricingOverride({
+          id: `11111111-1111-1111-1111-${String(index).padStart(12, "0")}`,
+          model_key: `openai:model-${String(index).padStart(2, "0")}`,
+        }),
+      ),
+    })
+
+    await renderPage()
+    await screen.findByRole("grid", { name: /rate overrides/i })
+    await user.click(
+      screen.getByRole("button", { name: "Next page, rate overrides" }),
+    )
+
+    await waitFor(() => {
+      expect(
+        requests.some((request) =>
+          request.url.includes("/organizations/me/pricing?skip=25&limit=25"),
+        ),
+      ).toBe(true)
+    })
+    const table = await screen.findByRole("grid", { name: /rate overrides/i })
+    // The tail: five rows and the header.
+    await waitFor(() => {
+      expect(within(table).getAllByRole("row")).toHaveLength(6)
+    })
+  })
+
+  it("steps back when a delete empties the page being shown", async () => {
+    // The last row of the last page is the case: without the step-back the
+    // table sits on a page the collection no longer reaches, showing nothing
+    // while earlier pages still hold rows. The mock deletes for real, so the
+    // refetch after the invalidation is what the component actually sees.
+    const user = userEvent.setup()
+    const live = Array.from({ length: 26 }, (_, index) =>
+      pricingOverride({
+        id: `11111111-1111-1111-1111-${String(index).padStart(12, "0")}`,
+        model_key: `openai:model-${String(index).padStart(2, "0")}`,
+      }),
+    )
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input)
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (url.includes(`${API_ROOT}/organizations/me/pricing`)) {
+        if (method === "DELETE") {
+          const id = url.split("/").pop() ?? ""
+          live.splice(
+            live.findIndex((row) => row.id === id),
+            1,
+          )
+          return jsonResponse(null, 204)
+        }
+        const params = new URL(url, "http://localhost").searchParams
+        const skip = Number(params.get("skip") ?? 0)
+        const limit = Number(params.get("limit") ?? 100)
+        return jsonResponse({
+          data: live.slice(skip, skip + limit),
+          count: live.length,
+        })
+      }
+      if (url.endsWith(`${API_ROOT}/models`)) {
+        return jsonResponse({ object: "list", data: [] })
+      }
+      return jsonResponse(organizationContext())
+    })
+
+    await renderPage()
+    await screen.findByRole("grid", { name: /rate overrides/i })
+    await user.click(
+      screen.getByRole("button", { name: "Next page, rate overrides" }),
+    )
+    // Page two holds the twenty-sixth override on its own.
+    expect(await screen.findByText("openai:model-25")).toBeInTheDocument()
+
+    await user.click(await screen.findByRole("button", { name: /delete/i }))
+    await user.click(
+      await screen.findByRole("button", { name: /delete override/i }),
+    )
+
+    // Back on page one rather than stranded on an empty page two.
+    expect(await screen.findByText("openai:model-00")).toBeInTheDocument()
+  })
+
   it("lists the organization's overrides with their rates and period", async () => {
     mockApi({ overrides: [pricingOverride()] })
 
