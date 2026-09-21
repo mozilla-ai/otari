@@ -12,45 +12,43 @@ import {
   splitModelKey,
 } from "./playgroundModels"
 
-/** A grouped catalog of single-offering models, one per selector. */
-function catalog(...selectors: string[]): CatalogResponse {
+/** An indexed catalog of single-offering models: each id doubles as selector. */
+function catalog(...ids: string[]): CatalogResponse {
   return catalogResponse(
-    selectors.map((selector) =>
-      catalogModelSummary({ id: selector, selectors: [selector] }),
+    ids.map((id) =>
+      catalogModelSummary({ id, selector: id, selectors: [`prov:${id}`] }),
     ),
   )
 }
 
 describe("isChatModel", () => {
   it("keeps a chat model", () => {
-    expect(isChatModel("openai:gpt-4o")).toBe(true)
+    expect(isChatModel("moonshotai/kimi-k3")).toBe(true)
   })
 
   it("drops the ids that are unambiguously not chat", () => {
     for (const id of [
-      "openai:text-embedding-3-large",
-      "openai:whisper-1",
-      "openai:tts-1",
-      "openai:dall-e-3",
-      "cohere:rerank-v3",
-      "openai:omni-moderation-latest",
+      "text-embedding-3-large",
+      "openai/whisper-1",
+      "tts-1",
+      "dall-e-3",
+      "cohere/rerank-v3",
+      "omni-moderation-latest",
     ]) {
       expect(isChatModel(id)).toBe(false)
     }
   })
 
-  it("keeps an unfamiliar provider's models", () => {
+  it("keeps an unfamiliar vendor's models", () => {
     // It errs toward keeping: a chat model wrongly hidden cannot be used and
     // says nothing about why, which is worse than one confusing refusal.
-    expect(isChatModel("acme:model-7")).toBe(true)
+    expect(isChatModel("acme/model-7")).toBe(true)
   })
 
-  it("ignores the instance prefix, which says nothing about the model", () => {
-    // An operator naming an instance "guard" or "embeddings" must not hide
-    // that instance's whole chat catalog.
-    expect(isChatModel("guard:gpt-4o")).toBe(true)
-    expect(isChatModel("embeddings:claude")).toBe(true)
-    expect(isChatModel("guard:llama-guard-3")).toBe(false)
+  it("ignores the vendor prefix, which says nothing about the model", () => {
+    // A vendor named after a non-chat keyword must not hide its chat models.
+    expect(isChatModel("guard-ai/chat-1")).toBe(true)
+    expect(isChatModel("meta/llama-guard-3")).toBe(false)
   })
 })
 
@@ -69,47 +67,56 @@ describe("splitModelKey", () => {
 
 describe("buildPlaygroundModels", () => {
   it("keeps the catalog's own order", () => {
-    // The catalog arrives sorted by model name; re-sorting by selector would
-    // split offerings of one model away from each other.
-    const models = buildPlaygroundModels(
-      catalog("zeta:a", "alpha:b", "middle:c"),
-    )
+    // The catalog arrives sorted by model name; re-sorting by key would break
+    // that presentation.
+    const models = buildPlaygroundModels(catalog("zeta", "alpha", "middle"))
     expect(models.map((model) => model.key)).toEqual([
-      "zeta:a",
-      "alpha:b",
-      "middle:c",
+      "zeta",
+      "alpha",
+      "middle",
     ])
   })
 
-  it("offers every offering of a model the catalog folded", () => {
+  it("offers a folded model once, keyed by its model-level selector", () => {
     // The Models page shows one card for GLM with two providers; the picker
-    // shows both selectors, because that is what a request addresses.
+    // shows one row too, and the gateway picks the offering.
     const models = buildPlaygroundModels(
       catalogResponse([
         catalogModelSummary({
           id: "z-ai/glm",
+          selector: "z-ai/glm",
           selectors: ["fireworks:glm", "nebius:glm"],
         }),
       ]),
     )
-    expect(models.map((entry) => entry.key)).toEqual([
-      "fireworks:glm",
-      "nebius:glm",
-    ])
+    expect(models).toEqual([{ key: "z-ai/glm", vendor: "", label: "z-ai/glm" }])
   })
 
-  it("collapses a selector the catalog lists twice", () => {
-    expect(
-      buildPlaygroundModels(catalog("openai:gpt-4o", "openai:gpt-4o")),
-    ).toHaveLength(1)
+  it("falls back to the first offering while the catalog is unindexed", () => {
+    // `selector` is null until the gateway has indexed the catalog; the model
+    // must stay usable in the meantime.
+    const models = buildPlaygroundModels(
+      catalogResponse([
+        catalogModelSummary({
+          id: "z-ai/glm",
+          selector: null,
+          selectors: ["fireworks:glm", "nebius:glm"],
+        }),
+      ]),
+    )
+    expect(models.map((model) => model.key)).toEqual(["fireworks:glm"])
+  })
+
+  it("collapses a key the catalog lists twice", () => {
+    expect(buildPlaygroundModels(catalog("gpt-4o", "gpt-4o"))).toHaveLength(1)
   })
 
   it("drops the non-chat entries", () => {
     expect(
-      buildPlaygroundModels(
-        catalog("openai:gpt-4o", "openai:text-embedding-3-small"),
-      ).map((model) => model.key),
-    ).toEqual(["openai:gpt-4o"])
+      buildPlaygroundModels(catalog("gpt-4o", "text-embedding-3-small")).map(
+        (model) => model.key,
+      ),
+    ).toEqual(["gpt-4o"])
   })
 
   it("is empty before the catalog answers", () => {
@@ -119,27 +126,46 @@ describe("buildPlaygroundModels", () => {
 
 describe("groupPlaygroundModels", () => {
   const models = buildPlaygroundModels(
-    catalog("openai:gpt-4o", "openai:gpt-4o-mini", "anthropic:claude"),
+    catalogResponse([
+      catalogModelSummary({
+        id: "openai/gpt-4o",
+        vendor: "OpenAI",
+        selector: "openai/gpt-4o",
+        selectors: ["prov:gpt-4o"],
+      }),
+      catalogModelSummary({
+        id: "openai/gpt-4o-mini",
+        vendor: "OpenAI",
+        selector: "openai/gpt-4o-mini",
+        selectors: ["prov:gpt-4o-mini"],
+      }),
+      catalogModelSummary({
+        id: "anthropic/claude",
+        vendor: "Anthropic",
+        selector: "anthropic/claude",
+        selectors: ["prov:claude"],
+      }),
+    ]),
   )
 
-  it("groups by provider instance, in first-seen order", () => {
+  it("groups by vendor, in first-seen order", () => {
     const groups = groupPlaygroundModels({
       models,
       pinnedKeys: [],
       search: "",
     })
-    expect(groups.map((group) => group.label)).toEqual(["openai", "anthropic"])
+    expect(groups.map((group) => group.label)).toEqual(["OpenAI", "Anthropic"])
   })
 
   it("leads with the pinned group", () => {
     const groups = groupPlaygroundModels({
       models,
-      pinnedKeys: ["anthropic:claude"],
+      pinnedKeys: ["anthropic/claude"],
       search: "",
     })
     expect(groups[0]?.id).toBe(PINNED_GROUP_ID)
     expect(groups[0]?.models.map((model) => model.key)).toEqual([
-      "anthropic:claude",
+      "anthropic/claude",
     ])
   })
 
@@ -148,23 +174,23 @@ describe("groupPlaygroundModels", () => {
     // different model.
     const groups = groupPlaygroundModels({
       models,
-      pinnedKeys: ["anthropic:claude"],
+      pinnedKeys: ["anthropic/claude"],
       search: "",
     })
     const everyKey = groups.flatMap((group) =>
       group.models.map((model) => model.key),
     )
-    expect(everyKey.filter((key) => key === "anthropic:claude")).toHaveLength(1)
+    expect(everyKey.filter((key) => key === "anthropic/claude")).toHaveLength(1)
   })
 
-  it("matches the whole key, so a provider name narrows to its instance", () => {
+  it("matches the whole key, so a vendor slug narrows to its models", () => {
     const groups = groupPlaygroundModels({
       models,
       pinnedKeys: [],
       search: "anthropic",
     })
     expect(groups).toHaveLength(1)
-    expect(groups[0]?.label).toBe("anthropic")
+    expect(groups[0]?.label).toBe("Anthropic")
   })
 
   it("drops a group with no match rather than rendering it empty", () => {
@@ -173,7 +199,7 @@ describe("groupPlaygroundModels", () => {
     ).toEqual([])
   })
 
-  it("labels a bare model name's group rather than leaving it blank", () => {
+  it("labels an unknown vendor's group rather than leaving it blank", () => {
     const groups = groupPlaygroundModels({
       models: buildPlaygroundModels(catalog("gpt-4o")),
       pinnedKeys: [],
@@ -184,20 +210,18 @@ describe("groupPlaygroundModels", () => {
 })
 
 describe("pickInitialModel", () => {
-  const models = buildPlaygroundModels(
-    catalog("openai:gpt-4o", "anthropic:claude"),
-  )
+  const models = buildPlaygroundModels(catalog("gpt-4o", "anthropic/claude"))
 
   it("keeps the remembered model when it is still offered", () => {
-    expect(pickInitialModel("anthropic:claude", models)).toBe(
-      "anthropic:claude",
+    expect(pickInitialModel("anthropic/claude", models)).toBe(
+      "anthropic/claude",
     )
   })
 
   it("falls back when the remembered model has left the catalog", () => {
     // A revoked key or a new restriction, and a picker showing a model the
     // gateway would refuse is worse than one that moved on.
-    expect(pickInitialModel("gone:model", models)).toBe("openai:gpt-4o")
+    expect(pickInitialModel("gone/model", models)).toBe("gpt-4o")
   })
 
   it("is empty when there is nothing to pick", () => {

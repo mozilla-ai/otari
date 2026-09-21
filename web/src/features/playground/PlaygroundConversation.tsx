@@ -48,6 +48,7 @@ export function PlaygroundConversation({
         ] as const
       ).map(({ name, panel, setPanel, other }) => {
         const identity = splitModelKey(panel.model)
+        const vendor = models.find((model) => model.key === panel.model)?.vendor
         return (
           <section
             key={name}
@@ -87,10 +88,12 @@ export function PlaygroundConversation({
               />
             </div>
             <p className="pl-8 text-caption">
-              {identity.instance ||
-                (panel.model
-                  ? "Model alias"
-                  : `Any model other than ${name === "A" ? "B" : "A"}`)}
+              {panel.model
+                ? // The vendor, matching the picker's group heading; a key the
+                  // catalog no longer serves falls back to what the key itself
+                  // says.
+                  vendor || identity.instance || "Other"
+                : `Any model other than ${name === "A" ? "B" : "A"}`}
             </p>
             {panel.turns.length === 0 && !panel.isAwaitingFirstToken ? (
               <div className="flex min-h-40 flex-1 items-center justify-center py-12 pl-8 text-center text-body text-subtle">

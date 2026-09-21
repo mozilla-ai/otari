@@ -32,14 +32,23 @@ const RATING_ACKNOWLEDGEMENT_MS = 3000
 const WORKSPACE_ID = "44444444-4444-4444-4444-444444444444"
 
 const CATALOG: CatalogResponse = catalogResponse([
-  catalogModelSummary({ id: "gpt-4o", selectors: ["openai:gpt-4o"] }),
+  catalogModelSummary({
+    id: "gpt-4o",
+    vendor: "OpenAI",
+    selector: "gpt-4o",
+    selectors: ["openai:gpt-4o"],
+  }),
   catalogModelSummary({
     id: "claude-sonnet-4",
+    vendor: "Anthropic",
+    selector: "claude-sonnet-4",
     selectors: ["anthropic:claude-sonnet-4"],
   }),
   // Not a chat model: it must not reach the picker.
   catalogModelSummary({
     id: "text-embedding-3-small",
+    vendor: "OpenAI",
+    selector: "text-embedding-3-small",
     selectors: ["openai:text-embedding-3-small"],
   }),
 ])
@@ -307,13 +316,17 @@ afterEach(() => {
 })
 
 describe("the Playground before the first question", () => {
-  it("identifies the provider when model labels are shared", async () => {
+  it("offers the model, not its provider offerings", async () => {
+    // The Models page shows one entry for a model two providers serve, and the
+    // picker matches it: one row, keyed by the model-level selector.
     mockApi({
       catalog: {
         ...CATALOG,
         models: [
           catalogModelSummary({
             id: "gpt-4o",
+            vendor: "OpenAI",
+            selector: "gpt-4o",
             selectors: ["openai:gpt-4o", "backup:gpt-4o"],
           }),
           ...CATALOG.models.slice(1),
@@ -323,8 +336,11 @@ describe("the Playground before the first question", () => {
     renderPage()
     await screen.findByText("Try a prompt.")
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent(
-      "openai:gpt-4o",
+      "gpt-4o",
     )
+    await userEvent.click(screen.getByRole("button", { name: "Model" }))
+    expect(screen.queryByText("openai:gpt-4o")).not.toBeInTheDocument()
+    expect(screen.queryByText("backup:gpt-4o")).not.toBeInTheDocument()
   })
 
   it("filters comparison history from the shared History control", async () => {
@@ -405,7 +421,7 @@ describe("sending a question", () => {
       `/playground/chat/completions?workspace_id=${WORKSPACE_ID}`,
     )
     expect(JSON.parse(String(init?.body))).toMatchObject({
-      model: "openai:gpt-4o",
+      model: "gpt-4o",
       stream: true,
       messages: [{ role: "user", content: "hi" }],
     })
@@ -540,7 +556,7 @@ describe("retention consent", () => {
       )
       expect(save?.body).toMatchObject({
         workspace_id: WORKSPACE_ID,
-        model: "openai:gpt-4o",
+        model: "gpt-4o",
         title: "hi",
       })
     })
@@ -686,7 +702,7 @@ describe("comparing two models", () => {
       expect(rating?.body).toMatchObject({
         workspace_id: WORKSPACE_ID,
         user_question: "which?",
-        model_a: "openai:gpt-4o",
+        model_a: "gpt-4o",
         model_a_answer: "an answer",
         model_b_answer: "an answer",
         preference: "model_b",
@@ -952,7 +968,7 @@ describe("when a write fails", () => {
       id: "conv-1",
       workspace_id: WORKSPACE_ID,
       title: "How does OAuth work",
-      model: "openai:gpt-4o",
+      model: "gpt-4o",
       message_count: 2,
       created_at: "2026-01-01T00:00:00Z",
     }
@@ -1033,7 +1049,7 @@ describe("history", () => {
       id: "conv-1",
       workspace_id: WORKSPACE_ID,
       title: "How does OAuth work",
-      model: "anthropic:claude-sonnet-4",
+      model: "claude-sonnet-4",
       message_count: 2,
       created_at: "2026-01-01T00:00:00Z",
     }

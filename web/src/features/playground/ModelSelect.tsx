@@ -11,8 +11,7 @@ import {
 } from "./helpers/playgroundModels"
 
 /**
- * The model picker: searchable, grouped by provider instance, with pinned
- * models on top.
+ * The model picker: searchable, grouped by vendor, with pinned models on top.
  *
  * A `Popover` holding a search field and a list of buttons rather than the
  * shared `ComboBoxField`, and this is the one deliberate departure from "reach
@@ -21,9 +20,6 @@ import {
  * react-aria collection has no room for a control inside an option (pressing
  * anywhere in one selects it). The alternative was a pin control somewhere else
  * entirely, which is what makes pinning a model something nobody discovers.
- *
- * Search matches the whole key rather than the label, so typing a provider name
- * narrows to that instance and typing a model name finds it across instances.
  */
 export function ModelSelect({
   value,
@@ -36,7 +32,7 @@ export function ModelSelect({
   className = "",
   size = "md",
 }: {
-  /** The selected `instance:model` key, or "" for none. */
+  /** The selected model's selector, or "" for none. */
   value: string
   onChange: (key: string) => void
   models: readonly PlaygroundModel[]
@@ -54,13 +50,7 @@ export function ModelSelect({
 
   const unavailable = new Set(unavailableKeys ?? [])
   const pinned = new Set(pinnedKeys)
-  const selected = models.find((model) => model.key === value)
-  const isAmbiguous =
-    selected &&
-    models.some(
-      (model) => model.key !== value && model.label === selected.label,
-    )
-  const selectedLabel = isAmbiguous ? value : (selected?.label ?? "")
+  const selectedLabel = models.find((model) => model.key === value)?.label ?? ""
   const groups = groupPlaygroundModels({ models, pinnedKeys, search })
 
   const select = (key: string) => {
