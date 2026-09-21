@@ -117,7 +117,10 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    absent value is now spelled two ways for every reader downstream. Prefer a falsy check or a
    default over an explicit `=== undefined` where one reads the same (`Boolean(x)`, `!x`,
    `array.length`); spell the comparison out only where a falsy value is a real answer, as a
-   `0` cap or an empty allow-list is. A boolean reads as a question in English (`isPending`,
+   `0` cap or an empty allow-list is. A `boolean | null` or `boolean | undefined` is a finding
+   in itself: a boolean holds two answers, its empty value is `false`, and a nullable one is a
+   third state smuggled in as an absent value, so it wants a named union and a conversion at the
+   wire. A boolean reads as a question in English (`isPending`,
    `hasBudget`, `canRevokeKey`), and that covers a local, a prop and a boolean field of a hook's
    return alike: a bare verb or noun phrase (`operates`, `ready`) reads as the thing rather than
    as an answer about it. `unknown` plus a guard where a type is genuinely unknown, not `any`; a discriminated

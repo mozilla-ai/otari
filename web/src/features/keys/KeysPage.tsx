@@ -316,12 +316,34 @@ function BudgetExemptToggle({
 // Access-control adjacent: a three-way override of the deployment-wide
 // reject_user_mismatch, so it is a picker rather than a checkbox. Same shape as
 // the budget picker on the budgets page.
+/**
+ * Which of the three the key does about a mismatched `user` field.
+ *
+ * A named union rather than `boolean | null`: this is three answers, and a
+ * boolean holds two, so the third had to be smuggled in as an absent value that
+ * every reader then had to know meant "inherit". The wire still spells it
+ * `true`, `false` and `null`, converted at the two edges below.
+ */
+type UserMismatchChoice = "inherit" | "reject" | "accept"
+
+const userMismatchChoice = (
+  stored: boolean | null | undefined,
+): UserMismatchChoice =>
+  stored === null || stored === undefined
+    ? "inherit"
+    : stored
+      ? "reject"
+      : "accept"
+
+const storedUserMismatch = (choice: UserMismatchChoice): boolean | null =>
+  choice === "inherit" ? null : choice === "reject"
+
 function UserMismatchPicker({
   value,
   onChange,
 }: {
-  value: boolean | null
-  onChange: (value: boolean | null) => void
+  value: UserMismatchChoice
+  onChange: (value: UserMismatchChoice) => void
 }) {
   const selectId = "key-reject-user-mismatch"
   return (
@@ -335,10 +357,8 @@ function UserMismatchPicker({
       <FilterSelect
         id={selectId}
         ariaLabel="Mismatched user field"
-        value={value === null ? "inherit" : value ? "reject" : "accept"}
-        onChange={(next) =>
-          onChange(next === "inherit" ? null : next === "reject")
-        }
+        value={value}
+        onChange={(next) => onChange(next as UserMismatchChoice)}
         options={[
           { value: "inherit", label: "Use the deployment setting (default)" },
           { value: "reject", label: "Always reject (403)" },
@@ -417,9 +437,8 @@ function CreateKeyDialog({
     undefined,
   )
   const [excludeFromBudget, setExcludeFromBudget] = useState(false)
-  const [rejectUserMismatch, setRejectUserMismatch] = useState<boolean | null>(
-    null,
-  )
+  const [rejectUserMismatch, setRejectUserMismatch] =
+    useState<UserMismatchChoice>("inherit")
   const [scopeValid, setScopeValid] = useState(true)
   // The secret, once there is one. Its presence is the step: unset is the form.
   const [created, setCreated] = useState<CreateKeyResponse>()
@@ -478,7 +497,7 @@ function CreateKeyDialog({
     setUserId("")
     setAllowedModels(undefined)
     setExcludeFromBudget(false)
-    setRejectUserMismatch(null)
+    setRejectUserMismatch("inherit")
     setScopeValid(true)
     create.reset()
   }
@@ -507,7 +526,7 @@ function CreateKeyDialog({
       workspace_id: workspace?.workspace_id,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       allowed_models: allowedModels ?? null,
-      reject_user_mismatch: rejectUserMismatch,
+      reject_user_mismatch: storedUserMismatch(rejectUserMismatch),
     }
     // The member surface derives the owner and refuses a budget exemption, so
     // its body carries neither field rather than sending values it would ignore.
@@ -732,9 +751,10 @@ function EditKeyForm({
   const [excludeFromBudget, setExcludeFromBudget] = useState(
     apiKey.exclude_from_budget,
   )
-  const [rejectUserMismatch, setRejectUserMismatch] = useState<boolean | null>(
-    apiKey.reject_user_mismatch,
-  )
+  const [rejectUserMismatch, setRejectUserMismatch] =
+    useState<UserMismatchChoice>(
+      userMismatchChoice(apiKey.reject_user_mismatch),
+    )
   const [scopeValid, setScopeValid] = useState(true)
   const { isDirty } = useDirtySnapshot({
     keyName,
@@ -751,7 +771,7 @@ function EditKeyForm({
       key_name: keyName.trim() || null,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       allowed_models: allowedModels ?? null,
-      reject_user_mismatch: rejectUserMismatch,
+      reject_user_mismatch: storedUserMismatch(rejectUserMismatch),
     }
     // The member surface has no budget exemption to send (see CreateKeyDialog).
     const body: UpdateKeyRequest | UpdateOwnKeyRequest = isDeploymentWide

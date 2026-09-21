@@ -21,6 +21,14 @@ TypeScript runs in `strict` mode; `pnpm --dir web run typecheck` must pass. Reac
   `ceiling: MemberCeiling | null | undefined` on your own interface is the tell: one absent
   value is now spelled two ways, and every reader downstream handles both. Convert where the
   value enters (`placement.ceiling ?? undefined`) and declare the field `ceiling?: MemberCeiling`.
+- **A nullable boolean is a third state wearing two.** `boolean | null` and `boolean |
+  undefined` say there are three answers, so the absent one always turns out to mean something
+  (`"inherit the deployment setting"`, `"this tab has not changed it"`, `"no flash running"`),
+  and every reader has to be told which. A boolean's empty value is `false`, so an absent
+  boolean is `false`; where the third answer is real, name it in a union and convert at the wire
+  (`type UserMismatchChoice = "inherit" | "reject" | "accept"`, spelled `true`/`false`/`null` on
+  the way out). `passkeysOffered` in `useDeployment` and `flash` in `Checkbox` are the two left
+  in the tree.
 - **Prefer a falsy check or a default to an explicit comparison** where the two read the same.
   `Boolean(x)`, `!x` and `array.length` say what `x !== undefined` says, with less to read.
   Spell the comparison out only where a falsy value is a real answer and the short form would
