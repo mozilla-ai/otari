@@ -142,10 +142,9 @@ Ceilings, reservations, reset periods and per-member policies.
 - Exceptions: `budget_exceptions.py`
 - Models: `budgets.py`
 
-`models/budgets.py` holds the scope and reset-alignment vocabularies, with the
-columns they name, and the schemas and services both import them from there.
-The reservation statuses still sit in `services/budgets/_ledger.py` and move
-the same way.
+`models/budgets.py` holds the scope, reset-alignment and reservation-status
+vocabularies, with the columns they name, and the schemas and services import
+them from there.
 
 ### pricing
 
