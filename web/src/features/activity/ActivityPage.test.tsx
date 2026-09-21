@@ -177,7 +177,7 @@ describe("ActivityPage", () => {
     expect(within(row).getByText("Error")).toBeInTheDocument()
 
     await user.click(row)
-    // The dashboard is admin-only, so the stored error text is shown verbatim,
+    // The stored error text (already redacted by the gateway) is shown as is,
     // with the classifying HTTP status alongside the "Error" heading.
     expect(
       screen.getByText("provider exploded: quota exceeded"),

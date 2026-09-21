@@ -65,7 +65,9 @@ def redact_upstream_message(message: str) -> str:
     upstream message is not automatically the caller's to read: it can carry the
     gateway's own key, a self-hosted ``api_base``, or other topology. This masks
     those shapes and caps the length, leaving the part that says what was
-    actually wrong with the request.
+    actually wrong with the request. The same text is persisted on the usage row
+    (``UsageLog.error_message``), which every workspace member can read, so it
+    goes through here before it is stored as well as before it is returned.
 
     Redaction is the second line rather than the only one. Statuses where
     secrets concentrate (a rejected credential, a 5xx) never reach here at all,

@@ -22,11 +22,12 @@ import { DetailField } from "./DetailField"
 import { RoutingPlan } from "./RoutingPlan"
 
 // The detail panel for one request: the failure diagnostic plus the metadata
-// that does not fit the row. The dashboard is master-key admin-only, so the
-// stored `error_message` is shown verbatim; it is source-neutral by nature,
-// carrying either a fixed gateway rejection string (e.g. a model with no pricing
-// under `require_pricing`) or the raw upstream provider error, so the heading
-// stays "Error" rather than blaming the provider for every failure.
+// that does not fit the row. The stored `error_message` is shown as stored: the
+// gateway redacts upstream text before persisting it, so nothing here needs to.
+// It is source-neutral by nature, carrying either a fixed gateway rejection
+// string (e.g. a model with no pricing under `require_pricing`) or the upstream
+// provider error, so the heading stays "Error" rather than blaming the provider
+// for every failure.
 export function RequestDetail({
   entry,
   onPriceModel,

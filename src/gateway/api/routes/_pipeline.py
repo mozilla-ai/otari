@@ -3182,6 +3182,20 @@ def _ttft_ms(started_at: float | None, first_chunk_at: float | None) -> int | No
     return round((first_chunk_at - started_at) * 1000)
 
 
+def _stored_error_message(error: str | None) -> str | None:
+    """The error text a usage row may carry.
+
+    ``UsageLog.error_message`` is read by every member of the workspace, including
+    a viewer, through ``/api/v1/organizations/me/usage``, so the upstream text is
+    put through the same redaction the HTTP detail gets before it is persisted.
+    Redacting at write time rather than on the read path is what covers every
+    reader of the column at once. A gateway-generated reason passes unchanged.
+    """
+    if error is None:
+        return None
+    return _redacted_upstream_detail(error, PROVIDER_ERROR_DETAIL)
+
+
 async def log_usage(
     db: AsyncSession,
     log_writer: LogWriter,
@@ -3267,7 +3281,7 @@ async def log_usage(
         provider=provider,
         endpoint=endpoint,
         status=_row_status(error=error, attribution=attribution),
-        error_message=error,
+        error_message=_stored_error_message(error),
         status_code=status_code,
         latency_ms=latency_ms,
         ttft_ms=ttft_ms,
