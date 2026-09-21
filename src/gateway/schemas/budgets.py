@@ -7,6 +7,7 @@ Responses echo the stored string, so a row that holds an unknown value still rea
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +29,9 @@ _ALIGNMENT_DESCRIPTION = (
     "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way "
     "to express a calendar month. Mutually exclusive with budget_duration_sec"
 )
+
+# A blank value matches no provider instance, so a ceiling that stored one would never bind.
+_ProviderKeyId = Annotated[str | None, Field(min_length=1, max_length=255, pattern=r"^\S+$")]
 
 
 class CreateBudgetRequest(BaseModel):
@@ -162,11 +166,8 @@ class CreateScopedBudgetRequest(BaseModel):
         max_length=255,
         description="Id of the capped identity: an organization, workspace, membership row, or API key",
     )
-    provider_key_id: str | None = Field(
+    provider_key_id: _ProviderKeyId = Field(
         default=None,
-        min_length=1,
-        max_length=255,
-        pattern=r"^\S+$",
         description=(
             "Narrow the cap to one provider instance; omit or null to cap spend across every provider. "
             "A blank value would store a ceiling that never binds, so it is refused; this does not check "
@@ -364,11 +365,8 @@ class OrganizationScopedBudgetCreate(BaseModel):
             "a membership in either, or an API key in one"
         ),
     )
-    provider_key_id: str | None = Field(
+    provider_key_id: _ProviderKeyId = Field(
         default=None,
-        min_length=1,
-        max_length=255,
-        pattern=r"^\S+$",
         description=(
             "Narrow the cap to one provider instance; omit or null to cap spend across every provider. "
             "Must name a real instance: a blank value would store a ceiling that never binds"
@@ -475,11 +473,8 @@ class WorkspaceMemberBudgetPolicyCreate(BaseModel):
         max_length=255,
         description="The budget this workspace hands to every member",
     )
-    provider_key_id: str | None = Field(
+    provider_key_id: _ProviderKeyId = Field(
         default=None,
-        min_length=1,
-        max_length=255,
-        pattern=r"^\S+$",
         description=(
             "Narrow the default to one provider instance; omit or null to apply to every provider. "
             "Must name a real instance: a blank value would materialize ceilings that never bind"
