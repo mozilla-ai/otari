@@ -22,19 +22,19 @@ from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_active_user
-from gateway.services import budget_reservation_ledger as ledger
-from gateway.services.budget_periods import budget_window
-from gateway.services.pricing_service import find_model_pricing
-from gateway.services.provider_kwargs import provider_key
-from gateway.services.scoped_budget_service import (
+from gateway.services.budgets import _ledger as ledger
+from gateway.services.budgets._periods import budget_window
+from gateway.services.budgets._scoped_enforcement import (
     ApplicableBudget,
     BudgetScopeRequest,
     applicable_budgets,
     blocked_axis,
 )
-from gateway.services.scoped_budget_service import release as release_scoped
-from gateway.services.scoped_budget_service import reserve as reserve_scoped
-from gateway.services.scoped_budget_service import settle as settle_scoped
+from gateway.services.budgets._scoped_enforcement import release as release_scoped
+from gateway.services.budgets._scoped_enforcement import reserve as reserve_scoped
+from gateway.services.budgets._scoped_enforcement import settle as settle_scoped
+from gateway.services.pricing_service import find_model_pricing
+from gateway.services.provider_kwargs import provider_key
 from gateway.types.budget_state import BudgetState
 
 BUDGET_EXCEEDED = Counter(

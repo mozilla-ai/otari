@@ -11,7 +11,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.budgets import ScopedBudget
-from gateway.services.budget_periods import period_window
+from gateway.services.budgets._periods import period_window
 
 __all__ = ["cadence_of", "retime_ceilings_for_budget"]
 

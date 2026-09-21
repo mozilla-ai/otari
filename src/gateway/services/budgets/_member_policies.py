@@ -38,7 +38,7 @@ from gateway.schemas.budgets import (
     WorkspaceMemberBudgetPolicyPublic,
     WorkspaceMemberBudgetPolicyUpdate,
 )
-from gateway.services.budget_periods import period_window
+from gateway.services.budgets._periods import period_window
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 

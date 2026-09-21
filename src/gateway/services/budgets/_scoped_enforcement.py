@@ -53,7 +53,7 @@ from gateway.models.budgets import (
     ScopedBudget,
 )
 from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
-from gateway.services.budget_periods import period_window
+from gateway.services.budgets._periods import period_window
 from gateway.services.workspace_scope import resolve_workspace_id
 
 if TYPE_CHECKING:

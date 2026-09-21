@@ -59,14 +59,14 @@ from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.models.budgets import BudgetReservation, BudgetReservationScope
 from gateway.models.users import User
-from gateway.services.scoped_budget_service import release as release_scoped
+from gateway.services.budgets._scoped_enforcement import release as release_scoped
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from gateway.services.scoped_budget_service import ApplicableBudget
+    from gateway.services.budgets._scoped_enforcement import ApplicableBudget
 
 ZERO = Decimal(0)
 

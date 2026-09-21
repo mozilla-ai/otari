@@ -94,8 +94,8 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetsPublic,
     OrganizationScopedBudgetUpdate,
 )
-from gateway.services.budget_periods import period_window
-from gateway.services.budget_retiming import cadence_of, retime_ceilings_for_budget
+from gateway.services.budgets._periods import period_window
+from gateway.services.budgets._retiming import cadence_of, retime_ceilings_for_budget
 from gateway.services.tenancy.errors import TenancyValidationError
 from gateway.services.tenancy.organization_service import OrganizationService
 
