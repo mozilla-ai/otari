@@ -953,6 +953,7 @@ def get_organization_guardrail_definition_service(
         organizations=OrganizationService(db, membership_listener=None),
         uow=uow,
         build_state=organization_guardrail_runner.build_state,
+        rebuild=organization_guardrail_runner.rebuild_definition,
     )
 
 

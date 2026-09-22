@@ -325,9 +325,21 @@ async def rebuild_definition(uow: UnitOfWork, organization_id: uuid.UUID, defini
     guardrail on the worker that served the write rather than thirty seconds
     later. Every other worker converges on the refresher's tick, so the answer
     here is this worker's and is honest only about this worker.
+
+    Nothing here is raised at the caller. The write it follows has already
+    committed, so failing it would report a save that happened as one that did
+    not; an unreadable row answers `pending` and the refresher catches up. It is
+    the posture `routes/providers.py::_apply_write` takes after a credential
+    write, for the same reason.
     """
-    async with uow:
-        row = await OrganizationGuardrailDefinitionRepository(uow).get_in_organization(definition_id, organization_id)
+    try:
+        async with uow:
+            row = await OrganizationGuardrailDefinitionRepository(uow).get_in_organization(
+                definition_id, organization_id
+            )
+    except Exception:  # noqa: BLE001 - the write has committed; see the docstring
+        logger.warning("Could not reread definition %s to rebuild it; converges on the tick", definition_id)
+        return "pending"
 
     key = (organization_id, definition_id)
     if row is None or not row.enabled:

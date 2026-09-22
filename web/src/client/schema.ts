@@ -1943,6 +1943,10 @@ export interface paths {
          *     Organization owners and admins only. A stored vendor credential is never
          *     returned: each one comes back as ``***`` under its own name, which is what a
          *     form resubmits to keep it.
+         *
+         *     ``build_state`` answers for the worker that served this request, so a read
+         *     taken moments after a write may still report ``pending`` on a sibling that
+         *     has not caught up.
          */
         get: operations["organization-guardrail-definitions-list_organization_guardrail_definitions"];
         put?: never;
@@ -1960,6 +1964,12 @@ export interface paths {
          *
          *     A definition on its own changes no request. Mandate it through
          *     ``/api/v1/organizations/me/guardrails`` for it to run.
+         *
+         *     The definition is saved first and built second, so a guardrail this
+         *     deployment cannot construct is still stored and answers ``build_state:
+         *     "failed"`` rather than refusing the write. Why it failed is not reported: a
+         *     vendor library may put the arguments it was handed, which are your
+         *     credentials, into its own error message. The reason is in the gateway's log.
          */
         post: operations["organization-guardrail-definitions-create_organization_guardrail_definition"];
         delete?: never;
@@ -1996,6 +2006,11 @@ export interface paths {
          *     ``create_kwargs`` replaces the arguments whole when sent, an argument sent as
          *     ``***`` keeps the value stored under that name, and omitting the field
          *     entirely leaves the stored credentials untouched and unread.
+         *
+         *     The guardrail is rebuilt afterwards and the response reports the outcome in
+         *     ``build_state``, so repairing a credential shows the definition running
+         *     again in the same response, and ``enabled: false`` stops it here rather than
+         *     on the next refresh.
          */
         patch: operations["organization-guardrail-definitions-update_organization_guardrail_definition"];
         trace?: never;

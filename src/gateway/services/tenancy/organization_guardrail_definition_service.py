@@ -11,6 +11,11 @@ key: pick from a catalog, fill typed fields, paste the vendor credential.
 the runner's job (`organization_guardrail_runner`), and running one is
 `services/guardrails`'. What lands here is the store and its rules.
 
+**A write commits first and builds afterwards, never the other way round.** The
+row is the truth and the runner holds a copy of it, so a vendor that will not
+answer must not roll back a definition the form already accepted. What the build
+did is reported on the response instead.
+
 **It reports the build anyway, and does not import the runner to do it.** A read
 of a definition answers two questions at once, what was saved and whether it is
 running, and the second belongs to the runner. The runner already imports this
@@ -46,7 +51,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
@@ -233,6 +238,9 @@ GuardrailBuildState = Literal["built", "failed", "pending", "disabled"]
 # imported: see the module docstring. Typed to the runner's three answers, so a
 # fourth one added there has to be accounted for here rather than narrowed away.
 BuildStateOf = Callable[[uuid.UUID, uuid.UUID, datetime], Literal["built", "failed", "pending"]]
+RebuildDefinition = Callable[
+    [UnitOfWork, uuid.UUID, uuid.UUID], Awaitable[Literal["built", "failed", "pending"]]
+]
 
 
 class OrganizationGuardrailDefinitionPublic(BaseModel):
@@ -646,11 +654,28 @@ class OrganizationGuardrailDefinitionService:
         organizations: OrganizationService,
         uow: UnitOfWork,
         build_state: BuildStateOf,
+        rebuild: RebuildDefinition,
     ) -> None:
         self._definitions = definitions
         self._organizations = organizations
         self._uow = uow
         self._build_state = build_state
+        self._rebuild = rebuild
+
+    async def _rebuilt(self, definition: OrganizationGuardrailDefinition) -> GuardrailBuildState:
+        """Bring this worker in step with a row that just changed, and say what it holds.
+
+        Called after the block that wrote the row, never inside it. The row is
+        the truth and the runner is a copy of it, so a vendor that will not
+        answer must not roll back a definition the form already accepted; the
+        outcome is reported instead. That also keeps a vendor handshake out of
+        an open transaction.
+
+        A disabled row still goes through, because the point of the call is to
+        drop what this worker held rather than to build anything.
+        """
+        state = await self._rebuild(self._uow, definition.organization_id, definition.id)
+        return "disabled" if not definition.enabled else state
 
     def _state_of(self, definition: OrganizationGuardrailDefinition) -> GuardrailBuildState:
         """What to report about a row: the runner's answer, or that nobody asked it to build.
@@ -692,16 +717,19 @@ class OrganizationGuardrailDefinitionService:
             rows = await self._definitions.list_in_organization(
                 organization_id, skip=skip, limit=min(limit, _MAX_LIST_LIMIT)
             )
-            # Serialized inside the block. The commit that ends it expires every
-            # instance in the session, and reading an expired column afterwards
-            # is a lazy load in a place that cannot await one.
             data = [_public(row, build_state=self._state_of(row)) for row in rows]
         return OrganizationGuardrailDefinitionsPublic(data=data, count=total)
 
     async def create_definition(
         self, *, user: User, request: OrganizationGuardrailDefinitionCreate
     ) -> OrganizationGuardrailDefinitionPublic:
-        """Define a guardrail, encrypting its vendor credentials before they are stored."""
+        """Define a guardrail, encrypting its vendor credentials before they are stored.
+
+        The response reports whether it then built, which is the one moment an
+        admin is watching. A create returning 201 while the build is still
+        running would make "not built yet" and "will never build" the same
+        reading on the very next list.
+        """
         organization_id = await self._manageable_organization_id(user)
         spec = _definable_spec(request.guardrail_name)
         # A create has nothing stored to restore from, so a ``***`` here is a
@@ -724,12 +752,18 @@ class OrganizationGuardrailDefinitionService:
             )
             if not await self._definitions.add_unless_name_taken(definition):
                 raise OrganizationGuardrailDefinitionAlreadyExistsError(request.name)
-            return _public(definition, build_state=self._state_of(definition))
+
+        return _public(definition, build_state=await self._rebuilt(definition))
 
     async def update_definition(
         self, *, user: User, definition_id: uuid.UUID, request: OrganizationGuardrailDefinitionUpdate
     ) -> OrganizationGuardrailDefinitionPublic:
-        """Apply the fields this request set, leaving the rest as they were."""
+        """Apply the fields this request set, leaving the rest as they were.
+
+        Then rebuild, so an admin repairing a credential sees it running in the
+        same response, and so turning a definition off stops it here rather than
+        on the next tick.
+        """
         organization_id = await self._manageable_organization_id(user)
 
         async with self._uow:
@@ -767,7 +801,8 @@ class OrganizationGuardrailDefinitionService:
             attempted_name = definition.name
             if not await self._definitions.flush_unless_name_taken():
                 raise OrganizationGuardrailDefinitionAlreadyExistsError(attempted_name)
-            return _public(definition, build_state=self._state_of(definition))
+
+        return _public(definition, build_state=await self._rebuilt(definition))
 
     async def delete_definition(self, *, user: User, definition_id: uuid.UUID) -> None:
         """Drop a definition and the credentials it holds.
@@ -786,3 +821,8 @@ class OrganizationGuardrailDefinitionService:
                 raise OrganizationGuardrailDefinitionInUseError(
                     await self._definitions.mandating_profiles(definition_id)
                 )
+
+        # The row is gone, so this drops what the worker held rather than
+        # building anything. Without it the guardrail would keep running here
+        # until the next tick.
+        await self._rebuild(self._uow, organization_id, definition_id)

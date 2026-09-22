@@ -3586,7 +3586,7 @@
         {
           "name": "List Organization Guardrail Definitions",
           "request": {
-            "description": "List the guardrails the caller's organization has defined.\n\nOrganization owners and admins only. A stored vendor credential is never\nreturned: each one comes back as ``***`` under its own name, which is what a\nform resubmits to keep it.",
+            "description": "List the guardrails the caller's organization has defined.\n\nOrganization owners and admins only. A stored vendor credential is never\nreturned: each one comes back as ``***`` under its own name, which is what a\nform resubmits to keep it.\n\n``build_state`` answers for the worker that served this request, so a read\ntaken moments after a write may still report ``pending`` on a sibling that\nhas not caught up.",
             "header": [],
             "method": "GET",
             "url": {
@@ -3630,7 +3630,7 @@
               },
               "raw": "{\n  \"create_kwargs\": {\n    \"api_key\": \"lakera-...\",\n    \"endpoint\": \"https://api.lakera.ai\"\n  },\n  \"enabled\": true,\n  \"guardrail_name\": \"lakera_guard\",\n  \"name\": \"prod-lakera\"\n}"
             },
-            "description": "Define a guardrail this deployment will build and call itself. Organization owners and admins only.\n\n``guardrail_name`` must be one the built-in guardrail catalog lists\n(``GET /api/v1/tool-settings/guardrails/catalog``), and\n``create_kwargs`` must satisfy that guardrail's constructor as the catalog\ndescribes it: no argument it does not declare, nothing it types as a live\nobject rather than configuration, and every required argument no environment\nvariable can supply. Arguments the catalog marks secret are encrypted at\nrest.\n\nA definition on its own changes no request. Mandate it through\n``/api/v1/organizations/me/guardrails`` for it to run.",
+            "description": "Define a guardrail this deployment will build and call itself. Organization owners and admins only.\n\n``guardrail_name`` must be one the built-in guardrail catalog lists\n(``GET /api/v1/tool-settings/guardrails/catalog``), and\n``create_kwargs`` must satisfy that guardrail's constructor as the catalog\ndescribes it: no argument it does not declare, nothing it types as a live\nobject rather than configuration, and every required argument no environment\nvariable can supply. Arguments the catalog marks secret are encrypted at\nrest.\n\nA definition on its own changes no request. Mandate it through\n``/api/v1/organizations/me/guardrails`` for it to run.\n\nThe definition is saved first and built second, so a guardrail this\ndeployment cannot construct is still stored and answers ``build_state:\n\"failed\"`` rather than refusing the write. Why it failed is not reported: a\nvendor library may put the arguments it was handed, which are your\ncredentials, into its own error message. The reason is in the gateway's log.",
             "header": [
               {
                 "key": "Content-Type",
@@ -3665,7 +3665,7 @@
               },
               "raw": "{\n  \"create_kwargs\": {\n    \"api_key\": \"***\",\n    \"endpoint\": \"https://eu.api.lakera.ai\"\n  },\n  \"enabled\": false\n}"
             },
-            "description": "Change a definition's name, guardrail, build arguments, or enabled flag.\n\nOrganization owners and admins only. Omitted fields are left as they are.\n``create_kwargs`` replaces the arguments whole when sent, an argument sent as\n``***`` keeps the value stored under that name, and omitting the field\nentirely leaves the stored credentials untouched and unread.",
+            "description": "Change a definition's name, guardrail, build arguments, or enabled flag.\n\nOrganization owners and admins only. Omitted fields are left as they are.\n``create_kwargs`` replaces the arguments whole when sent, an argument sent as\n``***`` keeps the value stored under that name, and omitting the field\nentirely leaves the stored credentials untouched and unread.\n\nThe guardrail is rebuilt afterwards and the response reports the outcome in\n``build_state``, so repairing a credential shows the definition running\nagain in the same response, and ``enabled: false`` stops it here rather than\non the next refresh.",
             "header": [
               {
                 "key": "Content-Type",

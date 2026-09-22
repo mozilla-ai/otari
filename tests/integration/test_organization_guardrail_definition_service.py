@@ -16,7 +16,7 @@ and what a column ends up holding.
 import json
 import uuid
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, cast
 
 import pytest
@@ -88,6 +88,7 @@ def _service(db: AsyncSession) -> OrganizationGuardrailDefinitionService:
         organizations=OrganizationService(db, membership_listener=None),
         uow=uow,
         build_state=runner.build_state,
+        rebuild=runner.rebuild_definition,
     )
 
 
@@ -126,6 +127,23 @@ def _empty_runner() -> Iterator[None]:
     runner.reset_guardrail_runner()
     yield
     runner.reset_guardrail_runner()
+
+
+@pytest.fixture(autouse=True)
+def _stub_vendor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A write rebuilds, so every write here would otherwise construct a real vendor client.
+
+    Nothing in this module is about any-guardrail. The build is stubbed so the
+    suite neither depends on an upstream constructor nor pays for one, and the
+    cases that are about the build say so by replacing this.
+    """
+
+    class _Stub:
+        @staticmethod
+        def create(_guardrail_name: Any, **_kwargs: Any) -> Any:
+            return object()
+
+    monkeypatch.setattr(runner, 'AnyGuardrail', _Stub)
 
 
 def _hold(organization_id: uuid.UUID, definition: OrganizationGuardrailDefinitionPublic, *, guardrail: object) -> None:
@@ -639,18 +657,21 @@ async def test_an_address_nested_in_an_argument_is_checked_too(async_db: AsyncSe
 # --------------------------------------------------------------------------- #
 
 
-async def test_a_definition_nothing_has_built_yet_reads_as_pending(async_db: AsyncSession) -> None:
-    """The honest answer between the write and the build, and on a worker still catching up.
+async def test_a_worker_that_holds_nothing_reads_as_pending(async_db: AsyncSession) -> None:
+    """What every worker but the one that served the write says, until the tick reaches it.
 
     It must not read as `failed`, which is what an admin would act on, and it
     must not read as `built`, which would hide a mandate nothing is evaluating.
     """
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    await service.create_definition(user=owner, request=_create())
 
-    created = await _service(async_db).create_definition(user=owner, request=_create())
+    # Which is what a sibling worker is: it holds nothing for this row yet.
+    runner.reset_guardrail_runner()
 
-    assert created.build_state == "pending"
+    assert [entry.build_state for entry in (await service.list_definitions(user=owner)).data] == ["pending"]
 
 
 async def test_a_definition_this_worker_built_reads_as_built(async_db: AsyncSession) -> None:
@@ -679,22 +700,25 @@ async def test_a_definition_this_worker_could_not_build_reads_as_failed(async_db
 
 
 async def test_a_build_of_an_older_version_does_not_read_as_built(async_db: AsyncSession) -> None:
-    """A repaired row reports the repair, not the guardrail it replaced."""
+    """A guardrail built from arguments the row no longer has is not this row's health.
+
+    Reporting it as `built` would answer for a definition nobody is looking at,
+    which is the reading an admin acts on after repairing one.
+    """
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     service = _service(async_db)
     created = await service.create_definition(user=owner, request=_create())
-    _hold(organization.id, created, guardrail=object())
 
-    updated = await service.update_definition(
-        user=owner,
-        definition_id=created.id,
-        request=OrganizationGuardrailDefinitionUpdate(
-            create_kwargs={"api_key": "rotated", "endpoint": OTHER_ENDPOINT}
-        ),
+    # What a worker looks like mid-write: still holding the previous build.
+    held = runner._held[(organization.id, created.id)]
+    runner._held[(organization.id, created.id)] = runner._Held(
+        fingerprint=held.fingerprint - timedelta(seconds=1),
+        guardrail_name=held.guardrail_name,
+        guardrail=held.guardrail,
     )
 
-    assert updated.build_state == "pending"
+    assert [entry.build_state for entry in (await service.list_definitions(user=owner)).data] == ["pending"]
 
 
 async def test_a_disabled_definition_reads_as_disabled(async_db: AsyncSession) -> None:
@@ -718,6 +742,7 @@ async def test_another_organizations_build_is_not_reported_as_this_ones(async_db
     owner = await _member(async_db, mine, role="owner", full_name="Owner")
     service = _service(async_db)
     created = await service.create_definition(user=owner, request=_create())
+    runner.reset_guardrail_runner()
     _hold(theirs.id, created, guardrail=object())
 
     page = await service.list_definitions(user=owner)
@@ -740,3 +765,163 @@ async def test_a_row_whose_secrets_will_not_decrypt_still_reports_its_build(
 
     assert listed[0].secrets_decryptable is False
     assert listed[0].build_state == "failed"
+
+
+# --------------------------------------------------------------------------- #
+# What a write does about the build
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def vendor(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Stub any-guardrail with one that builds, returning the log of what it built."""
+    built: list[str] = []
+
+    class _Stub:
+        @staticmethod
+        def create(guardrail_name: Any, **_kwargs: Any) -> Any:
+            built.append(str(guardrail_name))
+            return object()
+
+    monkeypatch.setattr(runner, "AnyGuardrail", _Stub)
+    return built
+
+
+async def test_a_create_builds_the_definition_and_says_so(async_db: AsyncSession, vendor: list[str]) -> None:
+    """The moment the admin pressed Save is the moment to tell them it is running."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+
+    created = await _service(async_db).create_definition(user=owner, request=_create())
+
+    assert created.build_state == "built"
+    assert len(vendor) == 1
+    assert runner.handle(organization.id, created.id) is not None
+
+
+async def test_a_create_whose_build_fails_still_saves_and_reports_it(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The row is the truth and the runner is a copy of it.
+
+    "Saved successfully" and "saved successfully, and every mandate pointing
+    here now refuses requests" must not be the same response, and a vendor that
+    will not answer must not roll back a definition the form accepted.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+
+    class _Stub:
+        @staticmethod
+        def create(_guardrail_name: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError("vendor refused the key")
+
+    monkeypatch.setattr(runner, "AnyGuardrail", _Stub)
+    service = _service(async_db)
+
+    created = await service.create_definition(user=owner, request=_create())
+
+    assert created.build_state == "failed"
+    stored = (await service.list_definitions(user=owner)).data
+    assert [entry.id for entry in stored] == [created.id]
+
+
+async def test_a_patch_that_repairs_a_definition_reports_it_running_again(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The loop an admin is actually in: see `failed`, fix the key, see `built`."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+
+    working = False
+
+    class _Stub:
+        @staticmethod
+        def create(_guardrail_name: Any, **_kwargs: Any) -> Any:
+            if not working:
+                raise RuntimeError("vendor refused the key")
+            return object()
+
+    monkeypatch.setattr(runner, "AnyGuardrail", _Stub)
+    service = _service(async_db)
+    created = await service.create_definition(user=owner, request=_create())
+    assert created.build_state == "failed"
+
+    working = True
+    repaired = await service.update_definition(
+        user=owner,
+        definition_id=created.id,
+        request=OrganizationGuardrailDefinitionUpdate(
+            create_kwargs={"api_key": "the-right-key", "endpoint": VENDOR_ENDPOINT}
+        ),
+    )
+
+    assert repaired.build_state == "built"
+
+
+async def test_disabling_a_definition_stops_it_on_the_worker_that_served_the_write(
+    async_db: AsyncSession, vendor: list[str]
+) -> None:
+    """Thirty seconds late is not good enough for a kill switch on the worker you reached."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    created = await service.create_definition(user=owner, request=_create())
+    assert runner.handle(organization.id, created.id) is not None
+
+    updated = await service.update_definition(
+        user=owner, definition_id=created.id, request=OrganizationGuardrailDefinitionUpdate(enabled=False)
+    )
+
+    assert updated.build_state == "disabled"
+    assert runner.handle(organization.id, created.id) is None
+
+
+async def test_deleting_a_definition_drops_what_the_worker_held(
+    async_db: AsyncSession, vendor: list[str]
+) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    created = await service.create_definition(user=owner, request=_create())
+    assert runner.handle(organization.id, created.id) is not None
+
+    await service.delete_definition(user=owner, definition_id=created.id)
+
+    assert runner.handle(organization.id, created.id) is None
+
+
+async def test_a_patch_that_changed_nothing_does_not_dial_the_vendor_again(
+    async_db: AsyncSession, vendor: list[str]
+) -> None:
+    """The stamp only moves when a column does, so renaming nothing costs no handshake."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    created = await service.create_definition(user=owner, request=_create())
+    assert len(vendor) == 1
+
+    unchanged = await service.update_definition(
+        user=owner, definition_id=created.id, request=OrganizationGuardrailDefinitionUpdate()
+    )
+
+    assert unchanged.build_state == "built"
+    assert len(vendor) == 1
+
+
+async def test_a_rebuild_that_cannot_run_does_not_fail_the_write(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The write is committed by then, so reporting it as a 500 would be a lie."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+
+    async def _unavailable(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("the database went away")
+
+    service = _service(async_db)
+    monkeypatch.setattr(OrganizationGuardrailDefinitionRepository, "get_in_organization", _unavailable, raising=True)
+
+    created = await service.create_definition(user=owner, request=_create())
+
+    assert created.build_state == "pending"
