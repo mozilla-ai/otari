@@ -160,6 +160,7 @@ from gateway.services.code_execution import (
     SandboxContainerRegistry,
 )
 from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for
+from gateway.services.guardrails import InProcessGuardrail
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
@@ -202,6 +203,7 @@ from gateway.services.tenancy.errors import (
     WorkspaceWebSearchDomainsExcludedError,
 )
 from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
+from gateway.services.tenancy.organization_guardrail_runner import handle as guardrail_handle
 from gateway.services.tenancy.organization_guardrail_service import (
     ResolvedOrganizationGuardrail,
     resolve_organization_guardrails,
@@ -2593,6 +2595,29 @@ def merge_guardrail_layers(
     return EffectiveGuardrails(list(merged.values()), credentials, frozenset(mandated), in_process)
 
 
+def _in_process_guardrails(ctx: RequestContext, effective: EffectiveGuardrails) -> dict[str, InProcessGuardrail | None]:
+    """The guardrails this worker already holds for the profiles the merge marked.
+
+    One dictionary lookup per profile, with nothing awaited and nothing built:
+    the runner holds what it holds, and a definition it does not is ``None``
+    here. That value is what makes the profile unevaluable rather than a check
+    the deployment's guardrails service is asked for, which it has never heard
+    of.
+
+    An empty map where the organization is unknown is the true answer rather
+    than a fallback: an in-process entry can only come from
+    :func:`_resolve_organization_guardrails`, which refuses the request before
+    resolving anything when the organization is missing.
+    """
+    organization_id = ctx.organization_id
+    if organization_id is None:
+        return {}
+    return {
+        profile: guardrail_handle(organization_id, definition_id)
+        for profile, definition_id in effective.in_process.items()
+    }
+
+
 async def _resolve_organization_guardrails(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext
 ) -> list[ResolvedOrganizationGuardrail]:
@@ -2855,6 +2880,7 @@ async def prepare_gateway_tools(
             config=ctx.config,
             credentials=effective.credentials,
             mandated=effective.mandated,
+            in_process=_in_process_guardrails(ctx, effective),
         )
 
         # Checked per source, not over the merged list: see
