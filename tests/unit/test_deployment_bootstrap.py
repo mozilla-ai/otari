@@ -241,15 +241,42 @@ def test_open_signup_is_published_only_with_mail_to_carry_the_verification(tmp_p
 
 
 # A surface names its router's ``/api/v1/`` prefix, so the prefix is derived from the
-# name. One is nested rather than top-level and cannot be: the organization's own
-# provider keys hang off ``/api/v1/organizations``, and naming them ``organizations``
-# would collapse them into the roster surface, which is a different page with
-# different access. Listed here rather than in the surface tuple itself so the
-# tuple stays the plain list of names the dashboard gates on.
+# name. Three are nested rather than top-level and cannot be: they hang off
+# ``/api/v1/organizations``, and naming them ``organizations`` would collapse them
+# into the roster surface, which is a different page with different access. Listed
+# here rather than in the surface tuple itself so the tuple stays the plain list of
+# names the dashboard gates on.
+#
+# ``organization_guardrails`` covers two routers, the mandates and the definitions,
+# because one page shows both. A surface maps to one prefix here, so the mandates
+# are what it names and the definitions prefix is deliberately unmapped: what this
+# check is for is a surface whose API went away, and a name that reaches one
+# mounted route has not.
 SURFACE_ROUTE_PREFIXES = {
+    "organization_guardrails": f"{API_ROOT}/organizations/me/guardrails",
     "organization_providers": f"{API_ROOT}/organizations/me/provider-keys",
     "organization_usage": f"{API_ROOT}/organizations/me/usage",
 }
+
+
+def test_both_editions_publish_the_organization_guardrail_surface(tmp_path: Path) -> None:
+    """The row that lets an organization see its own guardrails at all.
+
+    Published by both, unlike ``providers``, which withholds itself from a hosted
+    deployment because ``provider_credentials`` is keyed on the instance name
+    alone. These rows are keyed on the organization, so a control plane is
+    exactly where they belong.
+
+    Both routers are asserted, because one name covers them and only one of the
+    two can be in the prefix map above.
+    """
+    assert "organization_guardrails" in STANDALONE_SURFACES
+    assert "organization_guardrails" in HOSTED_SURFACES
+
+    mounted = {getattr(route, "path", "") for route in create_app(_standalone(tmp_path)).routes}
+
+    assert any(path.startswith(f"{API_ROOT}/organizations/me/guardrails") for path in mounted)
+    assert any(path.startswith(f"{API_ROOT}/organizations/me/guardrail-definitions") for path in mounted)
 
 
 @pytest.mark.parametrize(

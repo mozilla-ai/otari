@@ -29,6 +29,8 @@ def test_the_surface_lists_are_spelled_out() -> None:
         "budgets",
         "keys",
         "models",
+        # Keyed on the organization on either edition, so neither withholds it.
+        "organization_guardrails",
         "organization_providers",
         "organizations",
         "playground",
@@ -46,6 +48,7 @@ def test_the_surface_lists_are_spelled_out() -> None:
         "budgets",
         "keys",
         "models",
+        "organization_guardrails",
         "organization_providers",
         "organization_usage",
         "organizations",

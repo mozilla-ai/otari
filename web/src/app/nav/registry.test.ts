@@ -326,29 +326,25 @@ describe("nav registry", () => {
   })
 
   it("gates every declared-but-unserved destination on a surface", () => {
-    // The organization rail draws two rows this gateway does not offer and still
-    // declares. Each is declared so the rail matches on a deployment that does
-    // serve them, and gated on a surface `STANDALONE_SURFACES` does not report
-    // so the row is absent here. Pinned as the whole set, because the failure
-    // mode is silent in both directions: a missing gate ships a link to a page
-    // that cannot work, and a gate on a surface the bootstrap *does* report
-    // hides a page that can. A typo in a surface name is silent the same way,
-    // since `NavItemBase.surface` is a bare string.
+    // The organization rail draws one row this gateway does not offer and still
+    // declares. It is declared so the rail matches on a deployment that does
+    // serve it, and gated on a surface `STANDALONE_SURFACES` does not report so
+    // the row is absent here. Pinned as the whole set, because the failure mode
+    // is silent in both directions: a missing gate ships a link to a page that
+    // cannot work, and a gate on a surface the bootstrap *does* report hides a
+    // page that can. A typo in a surface name is silent the same way, since
+    // `NavItemBase.surface` is a bare string.
     //
-    // Only the guardrail ceiling is an actual absence: no edition here serves
-    // that API. Usage is editorial, with the API mounted either way, about a
-    // question that only exists once tenants do (otari-ai#1963): standalone's
+    // Usage is editorial, with the API mounted either way, about a question
+    // that only exists once tenants do (otari-ai#1963): standalone's
     // organization is the deployment, so `/usage` already answers it whole.
     //
-    // Provider keys is not a third: `organization_providers` is published by
+    // Provider keys is not a second: `organization_providers` is published by
     // both topologies, because the page behind it is where an organization's
     // models are offered, priced and switched, which is a tenant's question on
     // either. Its row therefore renders here beside the process-global one,
     // which is why the two carry different labels.
-    const unserved = new Map([
-      ["/organization/guardrails", "organization_guardrails"],
-      ["/organization/usage", "organization_usage"],
-    ])
+    const unserved = new Map([["/organization/usage", "organization_usage"]])
     for (const [to, surface] of unserved) {
       expect(navItemForPath(to)?.surface).toBe(surface)
     }
@@ -359,6 +355,7 @@ describe("nav registry", () => {
       "budgets",
       "keys",
       "models",
+      "organization_guardrails",
       "organization_providers",
       "organizations",
       "pricing",
@@ -379,20 +376,22 @@ describe("nav registry", () => {
     expect(standalone).toContain(
       navItemForPath("/organization/provider-keys")?.surface,
     )
-    // The two are not one category past that point, so the other direction is
-    // asserted per row. Usage is served by a hosted deployment and withheld from
-    // standalone, which is what makes its row appear there; the guardrail
-    // ceiling has no endpoint on *either* edition and is declared for a
-    // deployment that does serve it, so it is absent from both lists.
-    //
-    // Read from the fixture the hosted-shell tests render with, which is what
-    // keeps that fixture honest: a surface added to the backend's
-    // HOSTED_SURFACES and not to the fixture leaves those tests quietly
-    // rendering a rail the product does not have, and fails here instead.
+    // The other direction, read from the fixture the hosted-shell tests render
+    // with, which is what keeps that fixture honest: a surface added to the
+    // backend's HOSTED_SURFACES and not to the fixture leaves those tests
+    // quietly rendering a rail the product does not have, and fails here
+    // instead.
     for (const surface of ["organization_providers", "organization_usage"]) {
       expect(HOSTED_SURFACES).toContain(surface)
     }
-    expect(HOSTED_SURFACES).not.toContain("organization_guardrails")
+    // The guardrail row is the one that used to be here and is not: its API was
+    // dark on both editions until the surface was published, and it is keyed on
+    // the organization, so neither edition withholds it.
+    expect(standalone).toContain("organization_guardrails")
+    expect(HOSTED_SURFACES).toContain("organization_guardrails")
+    expect(navItemForPath("/organization/guardrails")?.surface).toBe(
+      "organization_guardrails",
+    )
   })
 
   it("declares no destination an overlay owns", () => {

@@ -149,6 +149,7 @@ const STANDALONE_SURFACES = [
   "budgets",
   "keys",
   "models",
+  "organization_guardrails",
   "organization_providers",
   "organizations",
   "playground",

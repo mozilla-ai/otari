@@ -592,6 +592,7 @@ describe("AppShell surface gating", () => {
       "Members & roles",
       "Email domains",
       "Spend & budgets",
+      "Guardrails",
       "Providers",
       "Deployment providers",
       "Org settings",
@@ -604,13 +605,11 @@ describe("AppShell surface gating", () => {
       ),
     ).toBeNull()
     expect(screen.getByText("General")).toBeInTheDocument()
-    // The design's rail has two more rows (the organization's own Providers and
-    // Guardrails), and each is gated on a surface a standalone gateway does not
-    // report, so neither is here. The Gateway group is their worst case: its one
-    // row is gated, so the heading goes with it. Billing and Gateways are not
-    // missing rows but overlay-owned ones this registry no longer declares at
-    // all (otari#737).
-    expect(screen.queryByText("Gateway")).toBeNull()
+    // Guardrails is the organization's own, and its surface is published by
+    // both editions, so the Gateway group it is the only row of is drawn here.
+    // Billing and Gateways are not missing rows but overlay-owned ones this
+    // registry no longer declares at all (otari#737).
+    expect(screen.getByText("Gateway")).toBeInTheDocument()
   })
 
   it("puts the hosted deployment's own Providers row in that same place", async () => {
