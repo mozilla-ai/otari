@@ -23,6 +23,7 @@ from gateway.models.budgets import (
 )
 from gateway.models.tenancy import Organization, User
 from gateway.models.users import User as ApiUser
+from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import BudgetRepositories, BudgetRepository, ScopedBudgetRepository, ScopeIdSets
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -31,7 +32,9 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.budgets import OrganizationBudgetService
+from gateway.services.api_keys import ApiKeyService
+from gateway.services.budgets import BudgetService
+from gateway.services.tenancy.organization_service import OrganizationService
 
 pytestmark = pytest.mark.asyncio
 
@@ -243,8 +246,14 @@ async def test_list_in_scopes_matches_what_the_organization_surface_lists(async_
     expected = await _one_ceiling_per_scope(async_db, acme_budget, acme_scopes)
     await _one_ceiling_per_scope(async_db, globex_budget, globex_scopes)
     await async_db.commit()
-    surface = await OrganizationBudgetService(async_db).list_ceilings(user=acme_owner)
     uow = UnitOfWork(async_db)
+    service = BudgetService(
+        uow,
+        BudgetRepositories.on(uow),
+        OrganizationService(async_db, membership_listener=None),
+        ApiKeyService(ApiKeyRepository(uow)),
+    )
+    surface = await service.list_organization_ceilings(user=acme_owner)
 
     async with uow:
         ceilings = ScopedBudgetRepository(uow)

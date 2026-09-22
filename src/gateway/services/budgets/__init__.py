@@ -2,7 +2,6 @@
 
 from gateway.services.budgets._ledger import run_reservation_sweeper
 from gateway.services.budgets._member_policies import WorkspaceBudgetDefaultService
-from gateway.services.budgets._organization_surface import OrganizationBudgetService
 from gateway.services.budgets._periods import budget_window, period_window
 from gateway.services.budgets._reservations import (
     ZERO,
@@ -18,12 +17,13 @@ from gateway.services.budgets._reservations import (
 )
 from gateway.services.budgets._retiming import cadence_of, retime_ceilings_for_budget
 from gateway.services.budgets._scoped_enforcement import ApplicableBudget, BudgetScopeRequest, applicable_budgets
+from gateway.services.budgets._service import BudgetService
 
 __all__ = [
     "ZERO",
     "ApplicableBudget",
     "BudgetScopeRequest",
-    "OrganizationBudgetService",
+    "BudgetService",
     "ReservationHandle",
     "WorkspaceBudgetDefaultService",
     "applicable_budgets",

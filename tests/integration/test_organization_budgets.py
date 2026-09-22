@@ -498,10 +498,18 @@ def test_a_ceiling_may_not_name_a_deployment_budget(
 # operator identity, which is a superuser and an owner everywhere.
 # =============================================================================
 
+async def _seeded[Row](db: AsyncSession, row: Row) -> Row:
+    # A step that fails rolls the session back, which expires every attached row, so the tests hold detached ones.
+    await db.commit()
+    db.expunge(row)
+    return row
+
+
 async def _organization(db: AsyncSession, *, slug: str) -> Organization:
-    return await OrganizationRepository(db).create_organization(
+    organization = await OrganizationRepository(db).create_organization(
         name=slug.title(), slug=slug, created_by_user_id=None
     )
+    return await _seeded(db, organization)
 
 
 async def _member(db: AsyncSession, organization: Organization, *, role: str, full_name: str) -> User:
@@ -515,7 +523,7 @@ async def _member(db: AsyncSession, organization: Organization, *, role: str, fu
         user_id=user.id,
         role=role,
     )
-    return user
+    return await _seeded(db, user)
 
 
 async def _workspace(db: AsyncSession, organization: Organization, *, name: str, owner: User) -> Workspace:
@@ -525,7 +533,7 @@ async def _workspace(db: AsyncSession, organization: Organization, *, name: str,
         created_by_user_id=owner.id,
     )
     await WorkspaceMemberRepository(db).create(workspace_id=workspace.id, user_id=owner.id, role="owner")
-    return workspace
+    return await _seeded(db, workspace)
 
 
 def _create(**overrides: Any) -> OrganizationBudgetCreate:
