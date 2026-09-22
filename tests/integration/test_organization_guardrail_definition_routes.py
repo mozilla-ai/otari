@@ -12,12 +12,14 @@ why that case lives beside the service.
 """
 
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_ROOT
 from gateway.services.secret_box import generate_secret_key
+from gateway.services.tenancy import organization_guardrail_runner as runner
 
 
 @pytest.fixture
@@ -25,6 +27,26 @@ def _secret_key(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Not autouse, because one case below is about the key being absent."""
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     yield
+
+
+@pytest.fixture(autouse=True)
+def _empty_runner() -> Iterator[None]:
+    """A write builds now, and what it builds is process-global."""
+    runner.reset_guardrail_runner()
+    yield
+    runner.reset_guardrail_runner()
+
+
+@pytest.fixture(autouse=True)
+def _stub_vendor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nothing here is about any-guardrail, so no case constructs a real vendor client."""
+
+    class _Stub:
+        @staticmethod
+        def create(_guardrail_name: Any, **_kwargs: Any) -> Any:
+            return object()
+
+    monkeypatch.setattr(runner, "AnyGuardrail", _Stub)
 
 
 def test_the_surface_needs_a_credential(client: TestClient) -> None:
@@ -147,3 +169,79 @@ def test_storing_a_credential_without_a_secret_key_blames_the_deployment(
     )
     assert without_secret.status_code == 201, without_secret.text
     assert without_secret.json()["create_secrets"] == {}
+
+
+def test_a_definition_says_whether_it_is_running(
+    client: TestClient, master_key_header: dict[str, str], _secret_key: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The loop an admin is in, over the wire: saved and broken, then saved and running.
+
+    A definition that cannot be built still saves, because the row is the truth
+    and refusing the write would lose the arguments they just typed. What it
+    must not do is look identical to one that works: mandated with the default
+    `on_unavailable: block`, this one refuses every request in its scope.
+    """
+    working = False
+
+    class _Vendor:
+        @staticmethod
+        def create(_guardrail_name: Any, **_kwargs: Any) -> Any:
+            if not working:
+                raise RuntimeError("lakera rejected api_key=lakera-key")
+            return object()
+
+    monkeypatch.setattr(runner, "AnyGuardrail", _Vendor)
+
+    created = client.post(
+        f"{API_ROOT}/organizations/me/guardrail-definitions",
+        json={
+            "name": "prod-lakera",
+            "guardrail_name": "lakera_guard",
+            "create_kwargs": {"api_key": "lakera-key", "endpoint": "https://api.lakera.ai"},
+        },
+        headers=master_key_header,
+    )
+
+    assert created.status_code == 201, created.text
+    assert created.json()["build_state"] == "failed"
+    # The vendor echoed the credential it was handed. None of that is the
+    # caller's to read back, however much they would like to know why.
+    assert "lakera-key" not in created.text
+    assert "rejected" not in created.text
+
+    working = True
+    repaired = client.patch(
+        f"{API_ROOT}/organizations/me/guardrail-definitions/{created.json()['id']}",
+        json={"create_kwargs": {"api_key": "the-right-key", "endpoint": "https://api.lakera.ai"}},
+        headers=master_key_header,
+    )
+
+    assert repaired.status_code == 200
+    assert repaired.json()["build_state"] == "built"
+
+    listed = client.get(f"{API_ROOT}/organizations/me/guardrail-definitions", headers=master_key_header)
+    assert [entry["build_state"] for entry in listed.json()["data"]] == ["built"]
+
+
+def test_a_disabled_definition_says_so_rather_than_waiting_to_be_built(
+    client: TestClient, master_key_header: dict[str, str], _secret_key: None
+) -> None:
+    """`pending` would promise a build that is never coming."""
+    created = client.post(
+        f"{API_ROOT}/organizations/me/guardrail-definitions",
+        json={
+            "name": "prod-lakera",
+            "guardrail_name": "lakera_guard",
+            "create_kwargs": {"endpoint": "https://api.lakera.ai"},
+        },
+        headers=master_key_header,
+    )
+    assert created.json()["build_state"] == "built"
+
+    patched = client.patch(
+        f"{API_ROOT}/organizations/me/guardrail-definitions/{created.json()['id']}",
+        json={"enabled": False},
+        headers=master_key_header,
+    )
+
+    assert patched.json()["build_state"] == "disabled"
