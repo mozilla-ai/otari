@@ -146,9 +146,11 @@ weights in the process running it, and Otari does the first only. The second
 belongs in the guardrails service `guardrails_url` points at, which is what the
 `/profiles` half of this page describes, so the two catalogs divide on exactly
 that line. The rule is any-guardrail's own backend metadata rather than a list
-Otari keeps, and it counts a guardrail's alternate backends too: one that
-defaults to a local model and also answers over a hosted API is listed, because
-the hosted path is the one Otari would take.
+Otari keeps, and it reads the backend a guardrail defaults to. A guardrail that
+holds model weights and also offers a hosted API is not listed: that second path
+is chosen by an argument of any-guardrail's own factory, not by one of the
+guardrail's parameters, so a saved configuration has no field in which to ask
+for it and Otari would load the weights instead.
 
 The catalog reaches no service, so unlike the profiles read it has no
 unavailable state. It is on the operator gate, because it is the picker behind a

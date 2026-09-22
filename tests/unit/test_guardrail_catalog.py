@@ -285,9 +285,7 @@ def test_lists_only_the_guardrails_a_hosted_api_reaches() -> None:
     listed = {spec.guardrail_name for spec in build_builtin_guardrail_catalog().guardrails}
 
     assert listed == {
-        name.value
-        for name, metadata in GUARDRAIL_METADATA.items()
-        if BackendType.HOSTED_API in ({metadata.backend} | metadata.alternate_backends)
+        name.value for name, metadata in GUARDRAIL_METADATA.items() if metadata.backend is BackendType.HOSTED_API
     }
 
 
@@ -298,11 +296,22 @@ def test_omits_a_guardrail_that_would_load_model_weights() -> None:
     assert not listed & {"llama_guard", "prompt_guard", "injec_guard", "lettuce_detect"}
 
 
-def test_lists_a_local_guardrail_that_also_has_a_hosted_path() -> None:
-    """SusFactor is why the rule reads `alternate_backends` and not `backend` alone."""
+def test_omits_a_local_guardrail_that_also_declares_a_hosted_path() -> None:
+    """SusFactor declares one, and the rule still reads `backend` alone.
+
+    Upstream's hosted path is selected by `provider=`, an argument of
+    `AnyGuardrail.create` rather than a registered parameter, so a stored row
+    cannot ask for it and would build the local encoder this catalog exists to
+    keep out of the gateway process. Nothing here is a judgment on 0DIN's
+    guardrail itself; #568 is where that lives.
+    """
+    metadata = GUARDRAIL_METADATA[GuardrailName.SUSFACTOR]
+    assert BackendType.HOSTED_API in metadata.alternate_backends
+    assert metadata.backend is not BackendType.HOSTED_API
+
     listed = {spec.guardrail_name for spec in build_builtin_guardrail_catalog().guardrails}
 
-    assert "susfactor" in listed
+    assert "susfactor" not in listed
 
 
 def test_orders_the_catalog_for_a_picker() -> None:
@@ -424,13 +433,6 @@ def test_publishes_a_one_of_requirement_no_single_parameter_can_express() -> Non
 def test_leaves_requirement_groups_empty_for_a_guardrail_without_one() -> None:
     """The majority. An empty list must not read as "constraints unknown"."""
     assert _spec(build_builtin_guardrail_catalog(), "lakera_guard").requirement_groups == []
-
-
-def test_reports_a_second_way_to_run_the_same_guardrail() -> None:
-    """Susfactor also has a hosted path, which is the reason it is listed at all."""
-    spec = _spec(build_builtin_guardrail_catalog(), "susfactor")
-
-    assert spec.model_dump(mode="json")["alternate_backends"] == ["hosted_api"]
 
 
 def test_listing_the_catalog_never_loads_a_model_backend() -> None:

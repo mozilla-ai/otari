@@ -44,9 +44,9 @@ It is not every guardrail the library ships. A guardrail that works by holding
 model weights in the process running it is not one this gateway builds, so it is
 not one this catalog may offer; those belong in the guardrails service above, and
 the two catalogs divide on exactly that line. The rule is upstream's own backend
-taxonomy rather than a list kept here, and it reads ``alternate_backends`` beside
-``backend`` so a guardrail with a hosted path alongside a local default is
-reachable by the path that is a call rather than a download.
+taxonomy rather than a list kept here: a guardrail's ``backend``, which is the
+one this gateway would get, and not its ``alternate_backends``, which name paths
+nothing storable can select.
 """
 
 from __future__ import annotations
@@ -361,12 +361,14 @@ class BuiltInGuardrailCatalog(BaseModel):
 def _reachable_over_a_hosted_api(name: GuardrailName) -> bool:
     """Whether ``name`` runs as a call to a service rather than as a local model.
 
-    ``alternate_backends`` counts beside ``backend``: SusFactor defaults to a local
-    encoder and also answers over 0DIN's hosted API, and it is the hosted path this
-    gateway would take.
+    ``backend`` alone. A guardrail that defaults to a local model and lists a
+    hosted API among its ``alternate_backends`` reaches that second path through
+    ``AnyGuardrail.create``'s own ``provider`` argument, which is not in the
+    parameter registry and takes a constructed ``Provider`` rather than a name.
+    Stored configuration therefore has no field in which to ask for it, and the
+    row would build the local model this catalog exists to exclude.
     """
-    metadata = GUARDRAIL_METADATA[name]
-    return BackendType.HOSTED_API in ({metadata.backend} | metadata.alternate_backends)
+    return GUARDRAIL_METADATA[name].backend is BackendType.HOSTED_API
 
 
 def _builtin_spec(name: GuardrailName) -> BuiltInGuardrailSpec:

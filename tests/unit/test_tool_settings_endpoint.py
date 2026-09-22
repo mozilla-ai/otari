@@ -305,9 +305,10 @@ def test_guardrail_catalog_lists_what_this_gateway_can_run(tmp_path: Path) -> No
     listed = {row["guardrail_name"] for row in guardrails}
     # What this gateway can run is what it can reach over a hosted API. A
     # guardrail that would hold model weights here belongs in the service the
-    # profiles read beside this one describes.
-    assert {"lakera_guard", "susfactor"} <= listed
-    assert not listed & {"llama_guard", "injec_guard"}
+    # profiles read beside this one describes, and susfactor is one of those
+    # despite also declaring a hosted path it gives a stored row no way to pick.
+    assert "lakera_guard" in listed
+    assert not listed & {"llama_guard", "injec_guard", "susfactor"}
     lakera = next(row for row in guardrails if row["guardrail_name"] == "lakera_guard")
     # The create stage is what makes this worth serving: it carries the API key.
     assert any(row["name"] == "api_key" and row["secret"] for row in lakera["create_parameters"])
