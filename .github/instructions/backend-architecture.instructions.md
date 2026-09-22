@@ -63,7 +63,9 @@ same" as a reason.
   refuses that import anywhere else. Flag other code that reaches
   `session_for` without importing it by name.
 - A request gets its Unit of Work from `get_unit_of_work`, and a worker job
-  from `create_unit_of_work()` or `create_log_unit_of_work()`.
+  from `create_unit_of_work()` or `create_log_unit_of_work()`. The check refuses
+  a `UnitOfWork(...)` call outside those factories. Flag a second `create_unit_of_work()`
+  inside a scope that already has one. The check does not catch that case.
 - Code still in the old shape commits in its services. Do not flag a commit
   the PR does not add.
 

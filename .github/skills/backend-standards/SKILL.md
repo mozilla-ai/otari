@@ -137,7 +137,9 @@ commits move into blocks when the domain moves
 
 The boundary check refuses a `commit()` or `rollback()` call outside `core/unit_of_work.py`, except
 in the modules on `TRANSACTION_CONTROL_BASELINE`, which names that code. It also refuses an import
-of `session_for` outside `repositories/`.
+of `session_for` outside `repositories/`, and a `UnitOfWork(...)` call outside `get_unit_of_work`
+and the worker factories in `core/unit_of_work.py`, so nothing builds a second one over a session
+that already has one.
 
 ### Sources
 

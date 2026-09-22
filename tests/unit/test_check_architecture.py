@@ -679,3 +679,124 @@ def test_main_fails_on_a_commit_outside_the_unit_of_work(tmp_path: Path, monkeyp
         "async def save(db: object) -> None:\n    await db.commit()\n",
     )
     assert check.main() == 1
+
+
+_UNIT_OF_WORK_REMEDY = (
+    "a request takes one from get_unit_of_work and a worker job from "
+    "create_unit_of_work or create_log_unit_of_work"
+)
+_FACTORY_SOURCE = "def get_unit_of_work(db: object) -> UnitOfWork:\n    return UnitOfWork(db)\n"
+
+
+def test_the_request_factory_may_construct_a_unit_of_work(tmp_path: Path) -> None:
+    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    assert check.check_unit_of_work_construction(tmp_path) == []
+
+
+def test_the_unit_of_work_module_may_construct_one(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "gateway/core/unit_of_work.py",
+        "def create_unit_of_work(session: object) -> UnitOfWork:\n    return UnitOfWork(session)\n",
+    )
+    assert check.check_unit_of_work_construction(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "relative_path", ["gateway/api/routes/things.py", "gateway/services/thing_service.py", "gateway/api/deps.py"]
+)
+def test_constructing_a_unit_of_work_elsewhere_is_flagged(tmp_path: Path, relative_path: str) -> None:
+    _write(tmp_path, relative_path, "def build(db: object) -> UnitOfWork:\n    return UnitOfWork(db)\n")
+    assert check.check_unit_of_work_construction(tmp_path) == [
+        f"{relative_path}:2 constructs a UnitOfWork; {_UNIT_OF_WORK_REMEDY}"
+    ]
+
+
+def test_a_unit_of_work_reached_through_its_module_is_flagged(tmp_path: Path) -> None:
+    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(
+        tmp_path,
+        "gateway/services/thing_service.py",
+        "def build(db: object) -> object:\n    return unit_of_work.UnitOfWork(db)\n",
+    )
+    assert check.check_unit_of_work_construction(tmp_path) == [
+        f"gateway/services/thing_service.py:2 constructs a UnitOfWork; {_UNIT_OF_WORK_REMEDY}"
+    ]
+
+
+def test_naming_the_unit_of_work_as_a_type_is_not_a_construction(tmp_path: Path) -> None:
+    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(
+        tmp_path,
+        "gateway/services/thing_service.py",
+        "def save(uow: UnitOfWork | None) -> UnitOfWork | None:\n    return uow\n",
+    )
+    assert check.check_unit_of_work_construction(tmp_path) == []
+
+
+def test_main_fails_on_a_unit_of_work_built_outside_the_factory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, "src/gateway/services/__init__.py", "")
+    _write(tmp_path, "src/gateway/services/thing_service.py", "")
+    _write(tmp_path, "tests/__init__.py", "")
+    _point_main_at(tmp_path, monkeypatch)
+    monkeypatch.setattr(check, "FLAT_MODULE_BASELINE", ("gateway/services/thing_service.py",))
+    assert check.main() == 0
+    _write(
+        tmp_path,
+        "src/gateway/services/thing_service.py",
+        "def build(db: object) -> object:\n    return UnitOfWork(db)\n",
+    )
+    assert check.main() == 1
+
+
+def test_only_the_module_level_factory_is_exempt(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "gateway/api/deps.py",
+        "class Deps:\n"
+        "    def get_unit_of_work(self, db: object) -> UnitOfWork:\n"
+        "        return UnitOfWork(db)\n",
+    )
+    assert check.check_unit_of_work_construction(tmp_path) == [
+        f"gateway/api/deps.py:3 constructs a UnitOfWork; {_UNIT_OF_WORK_REMEDY}"
+    ]
+
+
+def test_renaming_the_unit_of_work_on_import_is_flagged(tmp_path: Path) -> None:
+    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(
+        tmp_path,
+        "gateway/services/thing_service.py",
+        "from gateway.core.unit_of_work import UnitOfWork as UoW\n\n\n"
+        "def build(db: object) -> UoW:\n    return UoW(db)\n",
+    )
+    assert check.check_unit_of_work_construction(tmp_path) == [
+        "gateway/services/thing_service.py:1 imports UnitOfWork as UoW; "
+        "the rule reads the name at the call site, so import it under its own name"
+    ]
+
+
+def test_importing_the_unit_of_work_under_its_own_name_is_clean(tmp_path: Path) -> None:
+    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(
+        tmp_path,
+        "gateway/services/thing_service.py",
+        "from gateway.core.unit_of_work import UnitOfWork\n\n\n"
+        "def save(uow: UnitOfWork) -> UnitOfWork:\n    return uow\n",
+    )
+    assert check.check_unit_of_work_construction(tmp_path) == []
+
+
+def test_renaming_the_unit_of_work_on_a_relative_import_is_flagged(tmp_path: Path) -> None:
+    _write(tmp_path, "gateway/api/deps.py", _FACTORY_SOURCE)
+    _write(
+        tmp_path,
+        "gateway/services/thing_service.py",
+        "from ..core.unit_of_work import UnitOfWork as UoW\n\n\ndef build(db: object) -> UoW:\n    return UoW(db)\n",
+    )
+    assert check.check_unit_of_work_construction(tmp_path) == [
+        "gateway/services/thing_service.py:1 imports UnitOfWork as UoW; "
+        "the rule reads the name at the call site, so import it under its own name"
+    ]

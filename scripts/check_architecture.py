@@ -34,6 +34,9 @@ Enforces:
 16. Schema boundaries: a schema does not import the API, service, repository or
     exception layer, or the composition root, so a request or response model
     carries no behavior from another layer.
+17. Unit of Work construction: only the request's factory builds one, outside
+    the module that defines it and holds the worker factories, so a scope has
+    exactly one and an inner block still joins the outer one.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -587,6 +590,91 @@ def check_transaction_control(src_root: Path) -> list[str]:
     return violations
 
 
+UNIT_OF_WORK_TYPE = "UnitOfWork"
+UNIT_OF_WORK_MODULE = "gateway.core.unit_of_work"
+UNIT_OF_WORK_FACTORY = "gateway/api/deps.py"
+UNIT_OF_WORK_FACTORY_FUNCTION = "get_unit_of_work"
+UNIT_OF_WORK_WORKER_FACTORIES = "create_unit_of_work or create_log_unit_of_work"
+
+
+def _called_name(func: ast.expr) -> str | None:
+    """Return the name being called, whether it was imported or reached through its module."""
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _unit_of_work_constructions(node: ast.AST) -> list[ast.Call]:
+    """Return each Unit of Work construction under a node, in source order."""
+    calls = (
+        call for call in ast.walk(node) if isinstance(call, ast.Call) and _called_name(call.func) == UNIT_OF_WORK_TYPE
+    )
+    return sorted(calls, key=lambda call: call.lineno)
+
+
+def _factory_constructions(tree: ast.Module) -> set[ast.Call]:
+    """Return the constructions inside the module-level function that is the request's factory."""
+    return {
+        call
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == UNIT_OF_WORK_FACTORY_FUNCTION
+        for call in _unit_of_work_constructions(node)
+    }
+
+
+def _renamed_unit_of_work_imports(tree: ast.Module, file_path: Path, src_root: Path) -> list[tuple[int, str]]:
+    """Return the line and new name of each import that renames the Unit of Work.
+
+    A relative import is resolved first, because it names the module by a path relative to its own package.
+    """
+    return sorted(
+        (node.lineno, alias.asname)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and (node.module if node.level == 0 else _resolve_relative(node, file_path, src_root)) == UNIT_OF_WORK_MODULE
+        for alias in node.names
+        if alias.name == UNIT_OF_WORK_TYPE and alias.asname is not None
+    )
+
+
+def check_unit_of_work_construction(src_root: Path) -> list[str]:
+    """Check that only the request's factory constructs a Unit of Work.
+
+    The module that defines the Unit of Work is exempt, because the worker factories live there.
+    A Unit of Work counts its open blocks on itself.
+    A second one over the same session therefore cannot see a block the first has open,
+    and the rule that an inner block joins the outer one no longer holds between them.
+    Renaming or moving the factory is caught as well, because its own construction then has no exemption.
+
+    Gotcha: the rule reads the name at the call site.
+    An import that renames the Unit of Work would hide a construction from it, so such an import is refused.
+    """
+    violations: list[str] = []
+    for py_file in sorted((src_root / "gateway").rglob("*.py")):
+        relative_path = py_file.relative_to(src_root).as_posix()
+        if relative_path == UNIT_OF_WORK or "__pycache__" in py_file.parts:
+            continue
+        try:
+            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        except SyntaxError:
+            continue  # check_file already reports an unparseable file.
+        allowed = _factory_constructions(tree) if relative_path == UNIT_OF_WORK_FACTORY else set()
+        violations.extend(
+            f"{relative_path}:{call.lineno} constructs a {UNIT_OF_WORK_TYPE}; a request takes one from "
+            f"{UNIT_OF_WORK_FACTORY_FUNCTION} and a worker job from {UNIT_OF_WORK_WORKER_FACTORIES}"
+            for call in _unit_of_work_constructions(tree)
+            if call not in allowed
+        )
+        violations.extend(
+            f"{relative_path}:{line} imports {UNIT_OF_WORK_TYPE} as {name}; the rule reads the name at the "
+            "call site, so import it under its own name"
+            for line, name in _renamed_unit_of_work_imports(tree, py_file, src_root)
+        )
+    return violations
+
+
 # Service modules are purpose-named (guardrails.py, url_safety.py, ...), so
 # there is no *_service.py naming rule to enforce.
 def check_naming_conventions(src_root: Path) -> list[str]:
@@ -759,6 +847,7 @@ def main() -> int:
     flat_module_violations = check_flat_modules(SRC_ROOT)
     database_violations = check_database_imports(SRC_ROOT)
     transaction_violations = check_transaction_control(SRC_ROOT)
+    unit_of_work_violations = check_unit_of_work_construction(SRC_ROOT)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -791,6 +880,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal transaction control violations: {len(transaction_violations)}")
 
+    if unit_of_work_violations:
+        print("\n❌ Unit of Work construction violations:\n")
+        for violation in unit_of_work_violations:
+            print(f"  {violation}")
+        print(f"\nTotal Unit of Work construction violations: {len(unit_of_work_violations)}")
+
     if flat_module_violations:
         print("\n❌ Flat module violations:\n")
         for violation in flat_module_violations:
@@ -803,6 +898,7 @@ def main() -> int:
         or package_violations
         or database_violations
         or transaction_violations
+        or unit_of_work_violations
         or flat_module_violations
     ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")
