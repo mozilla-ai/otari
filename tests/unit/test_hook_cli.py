@@ -2381,6 +2381,38 @@ def test_hook_run_check_verifier_caps_detail_length(tmp_path: Path) -> None:
     assert len(detail) == gateway_cli._HOOK_MAX_CHECK_DETAIL_LENGTH
 
 
+def test_check_passed_gates_run_concurrently_not_sequentially(tmp_path: Path) -> None:
+    """Five check_passed gates, each a real script sleeping ~0.3s, must finish in
+    well under 5 * 0.3s: `_hook_collect_check_verdicts` runs verifiers through a
+    `ThreadPoolExecutor` (`_HOOK_GATE_MAX_WORKERS`), not one after another. No
+    mocking: real scripts, run as real subprocesses, the same as the
+    `_hook_run_check_verifier` tests above.
+    """
+    gate_count = 5
+    per_gate_seconds = 0.3
+    for i in range(gate_count):
+        _write_verifier(tmp_path, f"v{i}.sh", f"sleep {per_gate_seconds}\nexit 0")
+    gates_yaml = "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n" + "".join(
+        f"  - id: g{i}\n    type: check_passed\n    enforcement: required\n"
+        f"    verifier: v{i}.sh\n    message: m{i}\n"
+        for i in range(gate_count)
+    )
+
+    start = time.monotonic()
+    results = gateway_cli._hook_collect_check_verdicts(gates_yaml, tmp_path / ".otari-gates.yml", tmp_path, [])
+    elapsed = time.monotonic() - start
+
+    assert [result["gate_id"] for result in results] == [f"g{i}" for i in range(gate_count)]
+    assert all(result["outcome"] == "pass" for result in results)
+    # gate_count * per_gate_seconds is the sleep time alone a fully
+    # sequential run could not possibly finish under, real subprocess
+    # spawn overhead on top of that not even counted; no fudge factor
+    # needed for this bound to be sound.
+    assert elapsed < gate_count * per_gate_seconds, (
+        f"took {elapsed:.2f}s for {gate_count} gates at {per_gate_seconds}s each -- looks sequential"
+    )
+
+
 _CHECK_GATES_YAML_TEMPLATE = (
     "schema_version: '1.0'\n"
     "policy:\n  id: test\n"

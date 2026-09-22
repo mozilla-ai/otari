@@ -180,3 +180,98 @@ gates:
       document. See AGENTS.md, "Repository Conventions": a docblock belongs
       immediately above the declaration it describes, and the way it stops
       doing so is an insertion beside it.
+
+  - id: no-committed-dashboard-bundle
+    type: changed_path
+    enforcement: required
+    forbidden:
+    - src/gateway/static/dashboard/**
+    message: 'AGENTS.md Generated Artifacts: the dashboard bundle (src/gateway/static/dashboard/)
+      is generated and not committed; do not commit changes under this path.'
+
+  - id: routes-changed-needs-sdk-manifest
+    type: command_if_changed
+    enforcement: required
+    when_changed: ["src/gateway/api/routes/**", "docs/public/openapi.json"]
+    require: ["tests/unit/test_sdk_endpoint_coverage.py", "make test-unit"]
+    message: >-
+      A new/changed route owes an entry in scripts/sdk_codegen/sdk-endpoints.txt
+      under [covered] or [excluded]; run tests/unit/test_sdk_endpoint_coverage.py
+      and fix any drift (see AGENTS.md, "Generated Artifacts").
+
+  - id: frontend-standards-changed-needs-coverage
+    type: command_if_changed
+    enforcement: required
+    when_changed:
+      [
+        ".github/skills/frontend-standards/**",
+        ".github/instructions/frontend-standards.instructions.md",
+        "scripts/rule_coverage/frontend-standards.txt",
+      ]
+    require: ["tests/unit/test_frontend_rule_coverage.py", "make test-unit"]
+    message: >-
+      A heading added to the frontend-standards skill or its instructions
+      counterpart owes a manifest line in scripts/rule_coverage/frontend-standards.txt;
+      run tests/unit/test_frontend_rule_coverage.py (see AGENTS.md, "Skills &
+      Scoped Instructions").
+
+  - id: code-execution-spec-changed-needs-contract-check
+    type: command_if_changed
+    enforcement: required
+    when_changed: ["docs/public/code-execution-openapi.yaml", "docs/code-execution-protocol.md"]
+    require: ["tests/unit/test_code_execution_contract.py", "make test-unit"]
+    message: >-
+      docs/public/code-execution-openapi.yaml (hand-maintained) and
+      docs/code-execution-protocol.md must stay in sync; run
+      tests/unit/test_code_execution_contract.py (see AGENTS.md, "Generated
+      Artifacts").
+
+  # Merged from two separately generated gates (no-em-dash-prose,
+  # use-us-english-spelling): both are the same AGENTS.md "Writing style"
+  # section, and each applicable judge gate still costs its own model call
+  # even though otari hook runs them concurrently (_hook_collect_judge_verdicts
+  # in cli.py). One rubric checking both is one call instead of two for a
+  # session touching the same files.
+  - id: writing-style-violations
+    type: judge
+    enforcement: advisory
+    when_changed: ["**/*.md", "src/gateway/**", "web/src/**"]
+    rubric: >-
+      Flag two things in prose (README, docs, doc comments, docstrings,
+      commit messages, PR descriptions, user-visible UI copy), per AGENTS.md
+      "Writing style": (1) an em dash (—) or a double hyphen (--) used as a
+      sentence separator, where a comma, semicolon, colon, parenthesis,
+      period, or rephrasing should be used instead; do not flag code, a CLI
+      flag like --all, or an en-dash numeric range like 3–4. (2) A
+      British/non-US spelling (e.g. 'behaviour', 'recognise', 'serialise',
+      'catalogue', 'labelled', 'licence', 'colour'); do not flag an
+      identifier/attribute borrowed from an external API (e.g.
+      aria-labelledby, asyncio.CancelledError, GitHub's 'cancelled' job
+      conclusion), a value that travels on the wire or into a database, or a
+      third-party product's own name.
+    message: 'AGENTS.md Writing style: avoid em dashes/double hyphens as prose separators,
+      and spell prose in US English (identifiers, wire values, and third-party names
+      borrowed from elsewhere keep their original spelling).'
+
+  - id: architecture-layer-rules-check
+    type: command_if_changed
+    enforcement: required
+    when_changed: ["src/gateway/**"]
+    require: ["make check-architecture", "make lint"]
+    message: >-
+      You touched src/gateway/; run `make check-architecture` (or `make lint`,
+      which includes it) and fix any reported import/layering violation
+      before finishing (see AGENTS.md, "Lint / Typecheck").
+
+  - id: no-leaked-secrets-in-logs-or-errors
+    type: judge
+    enforcement: advisory
+    when_changed: ["src/gateway/**"]
+    rubric: Flag any log statement, error message, or public-facing error response that
+      includes a secret, token, or raw API key, or that otherwise leaks internal details
+      (stack traces, internal file paths, header contents) to a client. The one-time bootstrap
+      key print is a deliberate, allowed exception; nothing else should log or return
+      a raw credential.
+    message: 'Possible secret/token/API-key leak in logs or an internal detail exposed
+      in a public error response (AGENTS.md § Repository Conventions: ''Preserve security-relevant
+      behavior ... never log secrets, tokens, or raw API keys'').'

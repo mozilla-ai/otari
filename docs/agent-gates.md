@@ -41,6 +41,10 @@ This is the first slice. It ships:
   all for a shell/apply_patch call it wraps in JS (openai/codex#23411, open
   upstream), so only `Stop`'s own Git-status fallback and transcript scan
   reach it today.
+- `otari gates generate`, which proposes a starting `.otari-gates.yml` from a
+  repo's own AGENTS.md/CLAUDE.md: one model call to draft candidate gates,
+  then an interactive accept/reject/edit pass over each one before it is
+  appended. See "Generating gates from AGENTS.md/CLAUDE.md" below.
 
 This is a hook protocol, not a local filesystem reader: Otari never opens a
 caller's repository itself. The caller (an agent hook today; a native
@@ -401,24 +405,28 @@ this is a local, otari-hook-only audit trail, never the rubric, diff,
 transcript, or model output, so counting matching lines is the source of
 truth for "how many times has this repo's judge gate actually run."
 
-Each `judge` gate costs one sequential model invocation, not a near-instant
-pattern match like the other three gate types, so `otari hook` evaluates at
-most 5 per `Stop` event (declaration order; the rest are skipped with a
-stderr message naming which) rather than letting one event's wall-clock grow
-without bound as a policy gains judge gates.
+Each `judge` gate costs one model invocation, not a near-instant pattern
+match like the other three gate types, so `otari hook` evaluates at most 5
+per `Stop` event (declaration order; the rest are skipped with a stderr
+message naming which) rather than letting one event's resource use grow
+without bound as a policy gains judge gates. Applicable gates run
+concurrently, not one after another (a bounded thread pool,
+`_HOOK_GATE_MAX_WORKERS` in `cli.py`, shared with `check_passed`'s own
+verifier runs below): N applicable gates cost close to one gate's own
+wall-clock, not N times it.
 
 A per-call timeout does not bound the total: 5 gates at up to 300s each,
 each with its own possible "prompt is too long" retry, is up to 3,000s of
-judge calls alone. Claude Code's own command-hook timeout defaults to 600s,
-past which it kills the hook and discards its output entirely, meaning the
-Hook Server never gets contacted at all for that `Stop` event, every gate in
-the policy going unevaluated, not just the slow judge gates. `otari hook`
-computes one elapsed-time budget (`_HOOK_JUDGE_TOTAL_BUDGET_SECONDS`,
-480s) shared across every judge gate and retry in one run, leaving margin
-under Claude Code's own 600s default for the git evidence collection and the
-`/hooks/check` request that still have to happen afterward; a gate whose
-turn comes up after the deadline has already passed reports `error` without
-attempting the call at all.
+judge calls if they ever ran one after another. Claude Code's own
+command-hook timeout defaults to 600s, past which it kills the hook and
+discards its output entirely, meaning the Hook Server never gets contacted
+at all for that `Stop` event, every gate in the policy going unevaluated,
+not just the slow judge gates. `otari hook` computes one elapsed-time budget
+(`_HOOK_JUDGE_TOTAL_BUDGET_SECONDS`, 480s) shared across every judge gate
+and retry in one run, leaving margin under Claude Code's own 600s default
+for the git evidence collection and the `/hooks/check` request that still
+have to happen afterward; a gate whose turn comes up after the deadline has
+already passed reports `error` without attempting the call at all.
 
 ### `check_passed` (available now)
 
@@ -544,9 +552,19 @@ than `judge`'s own per-call timeout, since a verifier script is expected to
 be fast and deterministic, not a model call), and `otari hook` evaluates at
 most `_HOOK_CHECK_MAX_GATES_PER_RUN` (20) check_passed gates per `Stop` event
 within one shared `_HOOK_CHECK_TOTAL_BUDGET_SECONDS` (60s) budget, the same
-shape `judge`'s own per-run cap and total budget take. A gate whose turn
-comes up after that budget is exhausted reports `error` without attempting
-the call at all, the same as a judge gate past its own deadline.
+shape `judge`'s own per-run cap and total budget take. Applicable verifiers
+run concurrently, the same bounded thread pool `judge` gates share (see
+above); a gate that has not started by the time that budget is exhausted
+reports `error` without attempting the call at all, the same as a judge gate
+past its own deadline.
+
+Concurrency is why a verifier should only ever *read* the working tree
+(`git status`/`git diff`, a file scan), the way both this repo's own
+verifiers below do: two or more applicable `check_passed` gates now run at
+the same time against the same tree, not one after another, so a verifier
+that writes to a fixed temporary path, or that mutates the tree itself
+(`git stash` and similar), can race against another verifier doing the same
+in a way it could not before gates ran concurrently.
 
 This repo dogfoods two. `no-leftover-conflict-markers` runs
 `.otari-gates/verifiers/no-conflict-markers.sh`, which fails when a tracked
@@ -586,6 +604,44 @@ hook` submits as its own evidence) and only scans files that actually
 changed, so an unrelated edit elsewhere in `web/src` is unaffected, at the
 cost of the same "if you touch a file, you inherit its pre-existing
 problems" trade a diff-scoped linter already makes.
+
+## Generating gates from AGENTS.md/CLAUDE.md
+
+Writing a `.otari-gates.yml` by hand means finding the rules worth checking
+in a repo's own AGENTS.md (or CLAUDE.md, when that is the only doc a repo
+has) and turning prose into the gate schema above. `otari gates generate`
+does the first pass: it resolves a locally installed model CLI (`claude -p`
+or `codex exec`, whichever is found on `PATH` first; no otari server, no
+otari credential, the same "evaluated locally by default" posture `otari
+hook` itself has), names it and asks the user to confirm before sending the
+doc anywhere, then asks it to propose gates for whichever rules look
+mechanically checkable.
+
+The proposals are then walked one at a time, the screen cleared between each
+so only the current candidate (colorized, and numbered "N of total") is on
+screen: it prints the candidate and asks `[y]es/[n]o/[e]dit/[q]uit`, a
+single keypress, no Enter needed, in a real interactive terminal (falling
+back to an ordinary Enter-terminated line where there is no controlling
+terminal to read a raw keypress from, e.g. piped/non-interactive stdin or a
+CI runner). Nothing is written for a skipped or declined proposal, and a
+proposal whose `id` already exists in the policy is skipped without asking.
+Every accepted gate, edited or not, is validated through the same
+`parse_policy` this document's own schema section describes before it is
+appended, so a hallucinated field, an invalid glob, or a `judge` gate
+proposed as `required` is caught in the terminal, not the first time the
+hook actually runs.
+
+It only ever appends: existing gates and their comments are left untouched
+(the new gate is spliced into the `gates:` sequence as raw text, not a
+round-tripped YAML dump that would drop them), and a repo with no
+`.otari-gates.yml` yet gets a starter `schema_version`/`policy` header
+scaffolded around the first accepted gate. `--source` names a different doc,
+`--gates-file` a different policy file, `--cli`/`--model`
+(`OTARI_GATES_GENERATE_CLI`/`OTARI_GATES_GENERATE_MODEL`) override which CLI
+backend and model make the one generation call. This is a one-shot proposal
+tool, not a sync: rerunning it after AGENTS.md changes proposes again from
+scratch and still asks about every candidate, including ones a prior run
+already declined.
 
 ## Calling the Hook Server
 

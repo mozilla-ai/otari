@@ -7,13 +7,16 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, NamedTuple, cast
+from typing import Any, Literal, NamedTuple, cast
 
 import click
 import uvicorn
+import yaml
 from uvicorn.config import logger
 
 from gateway.agent_runtime.domain.check import PolicyCheckError, run_policy_check
@@ -621,16 +624,25 @@ _HOOK_JUDGE_MAX_TRANSCRIPT_CHARS = 40_000
 # unrelated to prompt size. Chosen with real headroom over that.
 _HOOK_JUDGE_TIMEOUT_SECONDS = 300
 
-# Each judge gate costs one sequential model invocation, unlike the other gate
-# types (near-instant pattern matching), so an unbounded gate count means
-# unbounded wall-clock on a single Stop event: N gates at the timeout above
-# would be N * 300s in the worst case. Capped, with a visible truncation
-# message, the same "never let something scale unbounded and silently" rule
-# _bound_commands_for_submission and the evaluator's own work-estimate
-# budgets (agent_runtime.domain.check) already follow. Evaluated in
-# declaration order, so the same gates run first every time rather than an
-# arbitrary subset.
+# Each judge gate costs one model invocation, unlike the other gate types
+# (near-instant pattern matching), so an unbounded gate count means unbounded
+# resource use on a single Stop event: _hook_collect_judge_verdicts bounds
+# concurrency to _HOOK_GATE_MAX_WORKERS workers (see below), so N gates over
+# that count still queue in batches of the timeout above. Capped, with a
+# visible truncation message, the same "never let something scale unbounded
+# and silently" rule _bound_commands_for_submission and the evaluator's own
+# work-estimate budgets (agent_runtime.domain.check) already follow.
+# Evaluated in declaration order, so the same gates run first every time
+# rather than an arbitrary subset.
 _HOOK_JUDGE_MAX_GATES_PER_RUN = 5
+
+# Shared by _hook_collect_judge_verdicts and _hook_collect_check_verdicts: how
+# many of one run's applicable gates that function invokes at once. Independent
+# of either gate type's own per-run count cap above/below: those bound how many
+# gates a policy may apply at all (check_passed's own is 20), this bounds how
+# many of that count run at the same time, so one Stop event does not fork 20
+# subprocesses simultaneously.
+_HOOK_GATE_MAX_WORKERS = 8
 
 # A per-call cap does not bound the total: 5 gates at up to 300s each, each
 # with its own possible retry (_HOOK_JUDGE_PROMPT_TOO_LONG_MARKER), is up to
@@ -886,6 +898,17 @@ def _hook_judge_workdir() -> Path:
     return workdir
 
 
+# Guards _hook_log_judge_call's own read-modify-write (open, write, close)
+# against interleaving: _hook_collect_judge_verdicts invokes multiple gates'
+# judge calls concurrently (_HOOK_GATE_MAX_WORKERS), each logging through
+# this same function from its own worker thread. A single write() of one
+# short line happens to be atomic on a POSIX append-mode fd for anything
+# under the platform's own pipe-buffer size, but that is an OS-level
+# coincidence this module should not depend on, and does not hold the same
+# way on every platform this codebase supports (Windows included).
+_HOOK_JUDGE_LOG_LOCK = threading.Lock()
+
+
 def _hook_log_judge_call(repo_root: Path, gate_id: str, outcome: str, *, detail: str | None = None) -> None:
     """Append one line for a judge-gate model call this process actually attempted (or, in
     `--judge-dry-run`, would have attempted).
@@ -904,7 +927,7 @@ def _hook_log_judge_call(repo_root: Path, gate_id: str, outcome: str, *, detail:
         line = f"{datetime.now(UTC).isoformat()} repo={repo_root} gate={gate_id!r} outcome={outcome}"
         if detail:
             line += f" detail={detail!r}"
-        with log_path.open("a", encoding="utf-8") as log_file:
+        with _HOOK_JUDGE_LOG_LOCK, log_path.open("a", encoding="utf-8") as log_file:
             log_file.write(line + "\n")
     except OSError:
         pass
@@ -1236,7 +1259,8 @@ def _hook_collect_judge_verdicts(
     harness: str = "claude-code",
     judge_cli_override: tuple[str, ...] | None = None,
 ) -> list[dict[str, str]]:
-    """Run every applicable judge gate in the local policy, one model-CLI call each.
+    """Run every applicable judge gate in the local policy, one model-CLI call each,
+    up to `_HOOK_GATE_MAX_WORKERS` of them concurrently.
 
     Parses the policy locally with the same pure `domain.policy.parse_policy`
     `run_policy_check` itself uses below, purely to find which gates are
@@ -1273,6 +1297,19 @@ def _hook_collect_judge_verdicts(
     then that harness default. A gate or override naming more than one CLI is
     an ordered fallback list, resolved by `_hook_resolve_judge_cli`: the first
     entry whose own binary is on PATH is what actually gets invoked.
+
+    Gates run concurrently (a `ThreadPoolExecutor`, not `asyncio`: each
+    worker's own time is spent blocked inside `subprocess.run`, ordinary
+    blocking I/O a thread waits on fine, not a coroutine-friendly awaitable),
+    capped at `_HOOK_GATE_MAX_WORKERS` at once. `_hook_log_judge_call` is
+    safe to call from every worker thread (`_HOOK_JUDGE_LOG_LOCK`); nothing
+    else a worker touches is shared mutable state (`diff`/`transcript`/
+    `deadline` are read-only from every worker's own perspective, and
+    `_hook_judge_workdir()` is a directory each `claude -p`/`codex exec`
+    subprocess uses independently, not a file the workers write themselves).
+    The returned list keeps every gate's declaration order:
+    `ThreadPoolExecutor.map` yields results in the order its inputs were
+    given, not completion order.
     """
     try:
         spec = parse_policy(policy_yaml, source=str(gates_file))
@@ -1326,8 +1363,7 @@ def _hook_collect_judge_verdicts(
     # Code's own outer hook timeout.
     deadline = time.monotonic() + _HOOK_JUDGE_TOTAL_BUDGET_SECONDS
 
-    results = []
-    for gate in judge_gates:
+    def run_one(gate: JudgeGate) -> dict[str, str]:
         # Logged before the call, not after: a hung or killed model-CLI
         # invocation must still show up in the audit trail rather than
         # silently vanishing along with the process that would have logged
@@ -1351,8 +1387,10 @@ def _hook_collect_judge_verdicts(
                 dry_run=judge_dry_run,
             )
         _hook_log_judge_call(repo_root, gate.id, outcome, detail=reasoning if judge_dry_run else None)
-        results.append({"gate_id": gate.id, "outcome": outcome, "reasoning": reasoning})
-    return results
+        return {"gate_id": gate.id, "outcome": outcome, "reasoning": reasoning}
+
+    with ThreadPoolExecutor(max_workers=min(len(judge_gates), _HOOK_GATE_MAX_WORKERS)) as executor:
+        return list(executor.map(run_one, judge_gates))
 
 
 # A verifier script is expected to be fast and deterministic (a grep, a lint
@@ -1523,6 +1561,22 @@ def _hook_collect_check_verdicts(
     same local optimization `_hook_collect_judge_verdicts` already applies to
     a judge gate's own `when_changed`. A gate with no `when_changed` at all
     keeps its unconditional, every-Stop-event behavior.
+
+    Verifiers run concurrently too, the same `ThreadPoolExecutor`/
+    `_HOOK_GATE_MAX_WORKERS` shape `_hook_collect_judge_verdicts` uses and for
+    the same reason (see that function's own docstring); `_hook_run_check_verifier`
+    already runs each verifier in its own subprocess with its own timeout, so
+    nothing here needs a lock the way judge gates' shared audit log does.
+    This does shift a real assumption onto verifier authors, though: two or
+    more `check_passed` gates applicable to the same Stop event now run at
+    the same time against the same working tree, not one after another, so a
+    verifier that is not safe under that (one that writes to a fixed
+    temporary path another verifier might also use, or that mutates the
+    working tree itself rather than only reading it, e.g. `git stash`) can
+    now race in a way it could not before this build. `.otari-gates/verifiers/`
+    in this repo only ever reads the tree (`git status`/`git diff`, a file
+    scan), which is safe under concurrency for free; a verifier that needs to
+    write should not assume it is the only one running.
     """
     try:
         spec = parse_policy(policy_yaml, source=str(gates_file))
@@ -1552,11 +1606,12 @@ def _hook_collect_check_verdicts(
     # does not bound the total.
     deadline = time.monotonic() + _HOOK_CHECK_TOTAL_BUDGET_SECONDS
 
-    results = []
-    for gate in check_gates:
+    def run_one(gate: CheckPassedGate) -> dict[str, str]:
         outcome, detail = _hook_run_check_verifier(repo_root, gate.verifier, deadline=deadline)
-        results.append({"gate_id": gate.id, "outcome": outcome, "detail": detail})
-    return results
+        return {"gate_id": gate.id, "outcome": outcome, "detail": detail}
+
+    with ThreadPoolExecutor(max_workers=min(len(check_gates), _HOOK_GATE_MAX_WORKERS)) as executor:
+        return list(executor.map(run_one, check_gates))
 
 
 @cli.group(name="hook", invoke_without_command=True)
@@ -2221,6 +2276,492 @@ def hook_setup(harness: str, api_key: str | None) -> None:
     # PreToolUse-only install left both silently unreachable.
     stop_created = _merge_hook_entry(settings_path, "Stop", command)
     click.echo(f"{'Added' if stop_created else 'Updated'} the Stop hook in {settings_path}.")
+
+
+# otari's own doc, checked first; CLAUDE.md is a one-line @AGENTS.md import in
+# this repo (see AGENTS.md, top) and elsewhere it copies that pairing, so it
+# carries real content only when AGENTS.md itself is missing.
+_GATES_GENERATE_DEFAULT_SOURCE_NAMES = ("AGENTS.md", "CLAUDE.md")
+_GATES_GENERATE_DEFAULT_CLI_ORDER = ("claude", "codex")
+_GATES_GENERATE_TIMEOUT_SECONDS = 300
+# A developer-authored doc, not a data export; bounds a pathological input
+# (and an accidental binary) before it goes into a model prompt, the same
+# reasoning domain/policy.py's MAX_POLICY_BYTES applies to a policy body.
+_GATES_GENERATE_MAX_SOURCE_BYTES = 200 * 1024
+_GATES_GENERATE_MAX_PROPOSALS = 15
+
+_GATES_GENERATE_SCHEMA_REFERENCE = """A gate is one YAML mapping with these fields:
+
+Common to every gate: `id` (unique, short, kebab-case, at most 200 characters),
+`type`, `enforcement` (`required` or `advisory`), `message` (shown when it
+fails; should point back at the rule/section it came from).
+
+- changed_path: fails when a changed path matches one of `forbidden`, a list
+  of repo-relative POSIX globs (`*` within one path segment, at most one `**`
+  crossing segments per glob). Use for "this generated/forbidden file must
+  never be hand-edited".
+- command_match: fails when a run command matches one of `forbidden`, a list
+  of shell phrases (e.g. "npm install", "git push --force"), matched as a
+  contiguous token run, not a substring. Use for "use tool X, not tool Y".
+- command_if_changed: fails when a path matching `when_changed` (same glob
+  grammar as changed_path) changed but none of `require` (same phrase
+  grammar as command_match) ran. Use for "if this generated artifact
+  changed, its generator command must have run".
+- check_passed: a repo-local verifier script's own exit code decides the
+  outcome (0 pass, 1 fail, anything else error). Needs `verifier`, a
+  repo-relative path. Only propose this when the doc names, or clearly
+  implies, a script that already exists in the repo; never invent a path.
+- judge: a model verdict against a free-text `rubric`. `enforcement` MUST be
+  `advisory` (a required judge gate is invalid and will be rejected). Use
+  only for a genuinely subjective rule no mechanical check can express;
+  prefer one of the other four types whenever the rule is checkable
+  mechanically.
+
+Optional on command_if_changed/judge/check_passed: `when_changed` (same glob
+grammar as changed_path's `forbidden`) scopes when the gate applies; required
+for command_if_changed, optional (defaults to "always") for the other two.
+"""
+
+
+def _gates_generate_build_prompt(*, doc_name: str, doc_text: str, existing_ids: frozenset[str]) -> str:
+    existing_ids_text = ", ".join(sorted(existing_ids)) if existing_ids else "(none yet)"
+    return (
+        "You are proposing gates for an otari `.otari-gates.yml` policy: mechanical "
+        "rules a coding agent's own hook checks against its working tree and "
+        "commands before proceeding.\n\n"
+        f"{_GATES_GENERATE_SCHEMA_REFERENCE}\n"
+        f"Gate ids already used in this policy (never reuse one of these): {existing_ids_text}\n\n"
+        f"Read the following repo doc ({doc_name}) and propose gates only for rules "
+        "that are clear, specific, and checkable the way described above: an "
+        "instruction to never hand-edit a named generated file, a preference for one "
+        "command/tool over another, an 'if X changed, run Y' pairing, or (rarely, "
+        "advisory only) a genuinely subjective style rule. Do not propose a gate for "
+        "a rule that is vague, purely descriptive, or needs context this doc does not "
+        f"give (a concrete file path, command, or script path). Propose at most "
+        f"{_GATES_GENERATE_MAX_PROPOSALS} gates, clearest and most confidently "
+        "mechanical first.\n\n"
+        "Reply with ONLY a JSON array of gate objects: no markdown fence, no prose "
+        "before or after. An empty array `[]` is a fine answer if nothing in the doc "
+        "is a good fit.\n\n"
+        f"--- {doc_name} ---\n{doc_text}\n--- end of {doc_name} ---\n"
+    )
+
+
+def _gates_generate_run_cli(argv: list[str], prompt: str, *, label: str) -> str:
+    """Run one gate-generation CLI call; return its raw stdout.
+
+    A thin sibling of `_hook_run_judge_subprocess`, not a reuse of it: that
+    helper's own tail parses the fixed `{"outcome", "reasoning"}` shape a
+    judge gate's prompt demands, not the JSON array of gate proposals this
+    command's own prompt asks for. Runs from `_hook_judge_workdir()`, the
+    same isolated directory a judge gate's own model call uses and for the
+    same reason (see that function's own docstring): this repo's own
+    `.otari-gates.yml` can register `otari hook` on `Stop`, and running this
+    call from the repo it is reading would let that fire for this call too.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, resolved executable path
+            argv,
+            input=prompt,
+            cwd=_hook_judge_workdir(),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=_GATES_GENERATE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise click.ClickException(f"{label} did not respond within {_GATES_GENERATE_TIMEOUT_SECONDS}s.") from exc
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(f"Could not run {label}: {exc}") from exc
+
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise click.ClickException(f"{label} exited {result.returncode}: {detail[:2000]}")
+    return result.stdout
+
+
+def _gates_generate_call_claude_p(claude_path: str, model: str | None, prompt: str) -> str:
+    argv = [claude_path]
+    if model:
+        argv += ["--model", model]
+    argv += ["--tools", "", "--strict-mcp-config", "-p"]
+    return _gates_generate_run_cli(argv, prompt, label="claude -p")
+
+
+def _gates_generate_call_codex_exec(codex_path: str, model: str | None, prompt: str) -> str:
+    argv = [codex_path, "exec", "-"]
+    if model:
+        argv += ["--model", model]
+    # Same flags _hook_call_codex_exec uses, and for the same reasons (see
+    # that function's own docstring): --sandbox/--ask-for-approval bound what
+    # an attempted tool call could do against this call's own prompt (the doc
+    # text is as attacker-influenceable as a judge gate's diff/transcript),
+    # --skip-git-repo-check because _hook_judge_workdir() is a plain
+    # directory, and --ephemeral so this one-shot call leaves no rollout file
+    # there for a later judge gate's own transcript scan to ever mistake for
+    # real session evidence.
+    argv += [
+        "--sandbox",
+        "read-only",
+        "--ask-for-approval",
+        "never",
+        "--skip-git-repo-check",
+        "--ephemeral",
+        "--color",
+        "never",
+    ]
+    return _gates_generate_run_cli(argv, prompt, label="codex exec")
+
+
+def _gates_generate_call_cli(cli_name: str, cli_path: str, model: str | None, prompt: str) -> str:
+    if cli_name == "codex":
+        return _gates_generate_call_codex_exec(cli_path, model, prompt)
+    return _gates_generate_call_claude_p(cli_path, model, prompt)
+
+
+def _gates_generate_parse_response(raw: str) -> list[dict[str, Any]]:
+    text = _hook_strip_judge_code_fence(raw)
+    try:
+        parsed = json.loads(text)
+    except ValueError as exc:
+        raise click.ClickException(f"Model did not return valid JSON: {raw[:2000]!r}") from exc
+    if isinstance(parsed, dict) and isinstance(parsed.get("gates"), list):
+        parsed = parsed["gates"]
+    if not isinstance(parsed, list):
+        raise click.ClickException(f"Model did not return a JSON array of gate proposals: {raw[:2000]!r}")
+    return [item for item in parsed if isinstance(item, dict)][:_GATES_GENERATE_MAX_PROPOSALS]
+
+
+def _gates_generate_validate_gate(gate_dict: dict[str, Any]) -> None:
+    """Raise PolicyError unless `gate_dict` is a well-formed gate on its own.
+
+    Wraps it in a minimal policy skeleton and runs it through the exact
+    parser a submitted `.otari-gates.yml`/Hook Server request goes through
+    (`agent_runtime.domain.policy.parse_policy`), so a hallucinated field,
+    type, or a `judge` gate proposed as `required` is caught here, before
+    this ever gets appended to the real file, not the first time the hook
+    actually runs against it.
+    """
+    skeleton = {"schema_version": "1.0", "policy": {"id": "gates-generate/preview"}, "gates": [gate_dict]}
+    parse_policy(yaml.safe_dump(skeleton, sort_keys=False, allow_unicode=True), source="proposed gate")
+
+
+def _gates_generate_dump(gate_dict: dict[str, Any]) -> str:
+    return yaml.safe_dump(gate_dict, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+
+# Matches one "key: value" (or "key:" alone, before a nested block) line of
+# `_gates_generate_dump`'s own plain-block YAML output, to style the key
+# without having to reimplement a YAML emitter that colors as it writes.
+_GATES_GENERATE_DUMP_KEY_LINE = re.compile(r"^(\s*)([A-Za-z_][\w]*):(.*)$")
+
+
+def _gates_generate_describe_gate(gate_dict: dict[str, Any]) -> str:
+    """Render one gate for terminal display: each field's own key in bold cyan, a
+    list item (a `forbidden`/`when_changed`/`require` entry) dimmed, everything else as-is.
+
+    A long `rubric`/`message` string is one value PyYAML wraps across several
+    physical lines; only the first of those matches `_GATES_GENERATE_DUMP_KEY_LINE`
+    (it alone has "key:" at its start), so only a genuine list-item line
+    ("- entry", from `forbidden`/`when_changed`/`require`) is dimmed here.
+    Dimming every non-key line too, the first cut of this, made a single
+    wrapped value read as two different colors mid-sentence, its own
+    continuation lines mistaken for a lesser, list-item kind of line.
+    """
+    lines = []
+    for line in _gates_generate_dump(gate_dict).rstrip("\n").split("\n"):
+        key_match = _GATES_GENERATE_DUMP_KEY_LINE.match(line)
+        if key_match:
+            indent, key, rest = key_match.groups()
+            lines.append(f"{indent}{click.style(key, fg='cyan', bold=True)}:{rest}")
+        elif line.lstrip().startswith("- "):
+            lines.append(click.style(line, dim=True))
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _gates_generate_read_choice(message: str, choices: str, default: str) -> str:
+    """Print `message`, then read a single keypress (no Enter needed): a char in `choices`
+    (each lowercase, e.g. "yneq") returns immediately; Enter alone resolves to `default`;
+    anything else reprints `message` rather than guessing.
+
+    Falls back to an ordinary Enter-terminated line prompt when there is no
+    controlling terminal to read a raw keypress from (piped/non-interactive
+    stdin, no `/dev/tty`, some CI and sandboxed runners): `click.getchar()`'s
+    own fallback for a non-tty `stdin` opens `/dev/tty` directly, and that
+    raises a plain `OSError`, not one of click's own catchable exceptions,
+    when no such device exists at all.
+    """
+    while True:
+        click.echo(click.style(message, fg="cyan"), nl=False)
+        try:
+            raw = click.getchar(echo=True)
+            click.echo("")
+        except OSError:
+            # The message above is already on screen; read a plain line rather
+            # than let click.prompt print it a second time as its own prompt.
+            try:
+                raw = input()
+            except EOFError:
+                raw = ""
+        key = raw.strip().lower()
+        if key in ("", "\r", "\n"):
+            return default
+        if key[0] in choices:
+            return key[0]
+        click.secho(f"Press one of: {', '.join(choices)} (or Enter for {default!r}).", fg="red")
+
+
+def _gates_generate_render_list_item(gate_dict: dict[str, Any]) -> str:
+    """Render one accepted gate as an indented block-sequence item for `.otari-gates.yml`.
+
+    Deliberately plain block style throughout (PyYAML's own default), not
+    the inline `forbidden: [...]`/folded `message: >-` conventions this
+    repo's hand-written gates use: those are a human author's own
+    formatting choice, not something this command needs to reproduce to
+    stay valid and readable.
+    """
+    lines = _gates_generate_dump(gate_dict).rstrip("\n").split("\n")
+    rendered = [f"  - {lines[0]}", *(f"    {line}" for line in lines[1:])]
+    return "\n".join(rendered) + "\n"
+
+
+def _gates_generate_find_source(root: Path, explicit: Path | None) -> Path:
+    if explicit is not None:
+        return explicit
+    for name in _GATES_GENERATE_DEFAULT_SOURCE_NAMES:
+        candidate = root / name
+        if candidate.is_file():
+            return candidate
+    raise click.ClickException(f"No AGENTS.md or CLAUDE.md found in {root}. Pass --source to name a different file.")
+
+
+def _gates_generate_append(gates_file: Path, repo_name: str, gate_block: str) -> None:
+    """Append one already-validated gate block to `gates_file`'s `gates:` sequence.
+
+    Splices raw text rather than round-tripping the file through a YAML
+    dump, so every hand-written comment already in it (as in this repo's
+    own `.otari-gates.yml`) survives untouched. `schema_version`, `policy`,
+    and `gates` are a policy's only top-level keys
+    (domain/policy.py's `_TOP_LEVEL_FIELDS`), so the end of the `gates:`
+    sequence is wherever a following line returns to column 0; this appends
+    just before that line, or at end of file when nothing follows (the
+    common case, `gates:` declared last).
+
+    Known gap: this is a text heuristic, not a YAML parser, so it cannot
+    tell a real top-level key apart from a comment that a human wrote at
+    column 0 inside the `gates:` block itself (YAML permits either there).
+    Such a comment still leaves the file valid either way, no gate is ever
+    lost, but the new gate lands just before that comment rather than at
+    the true end of the sequence. Every hand-written comment in this repo's
+    own `.otari-gates.yml` is indented to its surrounding gate's own level
+    rather than column 0, which is why this has not come up in practice.
+    """
+    if not gates_file.is_file():
+        header = (
+            'schema_version: "1.0"\n'
+            "policy:\n"
+            f"  id: {repo_name}/gates\n"
+            "  description: Rules this repo checks on its own working tree.\n"
+            "\n"
+            "gates:\n"
+        )
+        gates_file.parent.mkdir(parents=True, exist_ok=True)
+        gates_file.write_text(header + gate_block, encoding="utf-8")
+        return
+
+    lines = gates_file.read_text(encoding="utf-8").splitlines(keepends=True)
+    gates_line_idx = next((i for i, line in enumerate(lines) if line.rstrip("\n") == "gates:"), None)
+    if gates_line_idx is None:
+        raise click.ClickException(f"Could not find a top-level 'gates:' key in {gates_file}.")
+
+    end_idx = len(lines)
+    for i in range(gates_line_idx + 1, len(lines)):
+        if lines[i].strip() == "":
+            continue
+        if not lines[i].startswith((" ", "\t")):
+            end_idx = i
+            break
+
+    new_lines = [*lines[:end_idx], "\n", *gate_block.splitlines(keepends=True), *lines[end_idx:]]
+    gates_file.write_text("".join(new_lines), encoding="utf-8")
+
+
+def _gates_generate_parse_edit(edited: str | None, *, fallback: dict[str, Any]) -> dict[str, Any]:
+    if edited is None:
+        click.echo("No changes made.")
+        return fallback
+    try:
+        parsed = yaml.safe_load(edited)
+    except yaml.YAMLError as exc:
+        click.echo(f"Edited text is not valid YAML ({exc}); keeping the previous version.")
+        return fallback
+    if not isinstance(parsed, dict):
+        click.echo("Edited gate must be a YAML mapping; keeping the previous version.")
+        return fallback
+    return parsed
+
+
+@cli.group(name="gates")
+def gates() -> None:
+    """Work with a repo's `.otari-gates.yml` policy."""
+
+
+@gates.command(name="generate")
+@click.option(
+    "--source",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Doc to read candidate rules from. Defaults to AGENTS.md, then CLAUDE.md, in the repo root.",
+)
+@click.option(
+    "--gates-file",
+    "gates_file_option",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Policy file to append accepted gates to. Defaults to .otari-gates.yml in the repo root.",
+)
+@click.option(
+    "--cli",
+    "cli_override",
+    callback=_parse_judge_cli,
+    default=None,
+    envvar="OTARI_GATES_GENERATE_CLI",
+    help=(
+        "Comma-separated, ordered CLI backend(s) to try (claude, codex). Defaults to claude, "
+        "then codex, whichever is found on PATH first."
+    ),
+)
+@click.option(
+    "--model",
+    default=None,
+    envvar="OTARI_GATES_GENERATE_MODEL",
+    help="Model the resolved CLI uses for its one generation call. Left unset uses that CLI's own default model.",
+)
+def gates_generate(
+    source: Path | None,
+    gates_file_option: Path | None,
+    cli_override: tuple[str, ...] | None,
+    model: str | None,
+) -> None:
+    """Propose `.otari-gates.yml` gates from a repo's own AGENTS.md/CLAUDE.md, one at a time.
+
+    Resolves a locally installed model CLI (`claude -p` or `codex exec`,
+    whichever is found on PATH first; no otari server, no otari credential)
+    and asks the user to confirm it before sending the doc anywhere. Walks
+    the proposals one at a time, screen cleared between each so only the
+    current candidate is on screen: shows it and asks
+    `[y]es/[n]o/[e]dit/[q]uit`, a single keypress, no Enter needed. A
+    rejected or skipped proposal is never written; a proposal whose id
+    already exists in the policy is skipped without asking. Every accepted
+    gate (edited or not) is validated the same way a submitted policy is
+    (`agent_runtime.domain.policy.parse_policy`) before it is appended, so a
+    hallucinated field or type is caught here, not the first time the hook
+    actually runs. See docs/agent-gates.md for the gate schema this asks the
+    model to stay inside.
+    """
+    root = _hook_find_repo_root(Path.cwd())
+    if root is None:
+        raise click.ClickException("Not inside a Git repository.")
+
+    source_path = _gates_generate_find_source(root, source)
+    source_text = source_path.read_text(encoding="utf-8")
+    if len(source_text.encode("utf-8")) > _GATES_GENERATE_MAX_SOURCE_BYTES:
+        raise click.ClickException(
+            f"{source_path} is larger than {_GATES_GENERATE_MAX_SOURCE_BYTES} bytes; "
+            "pass --source to point at a smaller/narrower doc."
+        )
+
+    target = gates_file_option if gates_file_option is not None else root / ".otari-gates.yml"
+    existing_ids: set[str] = set()
+    if target.is_file():
+        try:
+            existing_spec = parse_policy(target.read_text(encoding="utf-8"), source=str(target))
+        except PolicyError as exc:
+            raise click.ClickException(f"{target} does not currently parse: {exc}") from exc
+        existing_ids = {gate.id for gate in existing_spec.gates}
+
+    candidates = cli_override if cli_override is not None else _GATES_GENERATE_DEFAULT_CLI_ORDER
+    resolved = _hook_resolve_judge_cli(candidates)
+    if resolved is None:
+        raise click.ClickException(f"None of {', '.join(candidates)} was found on PATH. Install one, or pass --cli.")
+    cli_name, cli_path = resolved
+
+    try:
+        display_source = source_path.relative_to(root)
+    except ValueError:
+        display_source = source_path
+
+    if (
+        _gates_generate_read_choice(
+            f"Use {cli_name} ({cli_path}) to read {display_source} and propose gates? [Y/n]: ", "yn", "y"
+        )
+        == "n"
+    ):
+        raise click.Abort()
+
+    prompt = _gates_generate_build_prompt(
+        doc_name=str(display_source), doc_text=source_text, existing_ids=frozenset(existing_ids)
+    )
+    click.secho(f"Asking {cli_name} to propose gates from {display_source}...", dim=True)
+    raw_output = _gates_generate_call_cli(cli_name, cli_path, model, prompt)
+    proposals = _gates_generate_parse_response(raw_output)
+
+    if not proposals:
+        click.echo("No gate proposals came back.")
+        return
+
+    total = len(proposals)
+    accepted = 0
+    for index, raw_gate in enumerate(proposals, start=1):
+        current: Any = raw_gate
+        while True:
+            click.clear()
+            click.secho(f"Gate proposal {index} of {total}", fg="cyan", bold=True)
+            click.echo()
+
+            if not isinstance(current, dict):
+                click.secho("Skipping a proposal that is not a mapping.", fg="yellow")
+                break
+            gate_id = current.get("id")
+            if not isinstance(gate_id, str) or not gate_id:
+                click.secho("Skipping a proposal with no valid 'id'.", fg="yellow")
+                break
+            if gate_id in existing_ids:
+                click.secho(f"Skipping {gate_id!r}: already in {target.name}.", fg="yellow")
+                break
+
+            try:
+                _gates_generate_validate_gate(current)
+            except PolicyError as exc:
+                click.echo(_gates_generate_describe_gate(current))
+                click.echo()
+                click.secho(f"[{gate_id}] does not pass validation: {exc}", fg="red")
+                if _gates_generate_read_choice("Edit it and try again? [y/N]: ", "yn", "n") == "y":
+                    current = _gates_generate_parse_edit(click.edit(_gates_generate_dump(current)), fallback=current)
+                    continue
+                break
+
+            click.echo(_gates_generate_describe_gate(current))
+            click.echo()
+            choice = _gates_generate_read_choice("Add this gate? [y]es/[n]o/[e]dit/[q]uit: ", "yneq", "n")
+            if choice == "y":
+                _gates_generate_append(target, root.name, _gates_generate_render_list_item(current))
+                existing_ids.add(gate_id)
+                accepted += 1
+                click.secho(f"Added {gate_id!r} to {target}.", fg="green")
+                break
+            if choice == "e":
+                current = _gates_generate_parse_edit(click.edit(_gates_generate_dump(current)), fallback=current)
+                continue
+            if choice == "q":
+                click.secho(f"Stopped early. Added {accepted} gate(s) to {target}.", fg="yellow")
+                return
+            break
+
+    click.secho(f"Added {accepted} gate(s) to {target}.", fg="green" if accepted else None)
 
 
 @cli.group()
