@@ -60,6 +60,7 @@ from gateway.services.secret_box import (
 from gateway.services.tenancy.errors import (
     OrganizationGuardrailDefinitionAlreadyExistsError,
     OrganizationGuardrailDefinitionArgumentsError,
+    OrganizationGuardrailDefinitionInUseError,
     OrganizationGuardrailDefinitionLimitReachedError,
     OrganizationGuardrailDefinitionNotFoundError,
     OrganizationGuardrailNotBuildableError,
@@ -638,16 +639,17 @@ class OrganizationGuardrailDefinitionService:
     async def delete_definition(self, *, user: User, definition_id: uuid.UUID) -> None:
         """Drop a definition and the credentials it holds.
 
-        Use ``enabled: false`` instead to stop the guardrail while keeping both.
-
-        A mandate that named this definition would make the database refuse the
-        delete, the link being ``RESTRICT`` so that dropping a definition cannot
-        silently stop a guardrail running. Nothing can name one yet, and the
-        refusal a caller is owed belongs with the write that makes the link.
+        Use ``enabled: false`` instead to stop the guardrail while keeping both,
+        which is also the answer when a mandate still names it: the link is
+        ``RESTRICT`` so that dropping a definition cannot silently stop a
+        guardrail running, and the refusal names the mandates holding it.
         """
         organization_id = await self._manageable_organization_id(user)
         async with self._uow:
             definition = await self._definitions.get_in_organization(definition_id, organization_id)
             if definition is None:
                 raise OrganizationGuardrailDefinitionNotFoundError(definition_id)
-            await self._definitions.delete(definition)
+            if not await self._definitions.delete_unless_mandated(definition):
+                raise OrganizationGuardrailDefinitionInUseError(
+                    await self._definitions.mandating_profiles(definition_id)
+                )

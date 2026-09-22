@@ -1112,6 +1112,25 @@ class OrganizationGuardrailDefinitionArgumentsError(TenancyValidationError):
         super().__init__(reason)
 
 
+class OrganizationGuardrailDefinitionInUseError(TenancyConflictError):
+    """A mandate still names the definition the caller asked to drop.
+
+    The link is ``RESTRICT`` so that dropping a definition cannot silently stop
+    a guardrail running, and without this the database's refusal would reach the
+    caller as a 500. The profiles are named because clearing them is the
+    caller's next move and both surfaces belong to the same organization; the
+    list is read after the delete was refused, so a mandate removed in between
+    leaves it empty rather than making this a different answer.
+    """
+
+    def __init__(self, profiles: list[str]):
+        mandated = f" by {', '.join(profiles)}" if profiles else ""
+        super().__init__(
+            f"This guardrail definition is still mandated{mandated}; stop mandating it first, "
+            "or set enabled to false to switch it off everywhere at once"
+        )
+
+
 class SandboxToolsUnrunnableError(TenancyValidationError):
     """A code-execution policy's tool list names nothing this deployment serves.
 

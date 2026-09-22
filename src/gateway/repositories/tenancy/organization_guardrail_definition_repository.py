@@ -5,8 +5,9 @@ rather than SQLModel, so the ``sqlmodel.col()`` rule in this package's docstring
 does not reach it: a column reference here is a plain attribute and type-checks
 as one.
 
-Both writes report a lost unique name as a return value rather than letting
-``IntegrityError`` out. The service above is the layer that owns the answer a
+Every write here reports its refusal as a return value rather than letting
+``IntegrityError`` out: a name the organization already uses, or a definition a
+mandate still names. The service above is the layer that owns the answer a
 caller gets, and it may not import SQLAlchemy to recognize one.
 """
 
@@ -17,7 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.guardrails import OrganizationGuardrailDefinition
+from gateway.models.guardrails import OrganizationGuardrail, OrganizationGuardrailDefinition
 from gateway.repositories.base_repository import BaseRepository
 
 
@@ -105,3 +106,39 @@ class OrganizationGuardrailDefinitionRepository(BaseRepository[OrganizationGuard
         except IntegrityError:
             return False
         return True
+
+    async def delete_unless_mandated(self, definition: OrganizationGuardrailDefinition) -> bool:
+        """Drop the definition, answering False while a mandate still names it.
+
+        Through a SAVEPOINT for the same reason the two writes above use one, and
+        for one more: ``fk_organization_guardrails_definition`` is ``RESTRICT``,
+        so the DELETE itself raises and the service still has to read the
+        mandates it is about to name. Rolling back this statement alone is what
+        leaves the session able to answer that read.
+
+        A check before the delete would be a different guarantee, not a simpler
+        one: a mandate written in between would reach the DELETE anyway and
+        arrive as an unhandled ``IntegrityError``.
+        """
+        try:
+            async with self.db.begin_nested():
+                await self.db.delete(definition)
+                await self.db.flush()
+        except IntegrityError:
+            return False
+        return True
+
+    async def mandating_profiles(self, definition_id: uuid.UUID) -> list[str]:
+        """The profiles of the mandates that point at this definition.
+
+        A read of the neighbouring table, which is the pair's other half rather
+        than another aggregate: the delete above is refused *by* that table, and
+        the answer a caller can act on is which of its rows did it. Ordered so
+        the refusal message is stable.
+        """
+        result = await self.db.execute(
+            select(OrganizationGuardrail.profile)
+            .where(OrganizationGuardrail.definition_id == definition_id)
+            .order_by(OrganizationGuardrail.profile)
+        )
+        return list(result.scalars().all())

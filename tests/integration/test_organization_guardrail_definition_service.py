@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.guardrails import OrganizationGuardrailDefinition
+from gateway.models.guardrails import OrganizationGuardrail, OrganizationGuardrailDefinition
 from gateway.models.tenancy import Organization, User
 from gateway.repositories.tenancy import (
     OrganizationGuardrailDefinitionRepository,
@@ -35,6 +35,7 @@ from gateway.services.tenancy.errors import (
     NotAuthorizedError,
     OrganizationGuardrailDefinitionAlreadyExistsError,
     OrganizationGuardrailDefinitionArgumentsError,
+    OrganizationGuardrailDefinitionInUseError,
     OrganizationGuardrailDefinitionLimitReachedError,
     OrganizationGuardrailDefinitionNotFoundError,
     OrganizationGuardrailNotBuildableError,
@@ -114,6 +115,21 @@ async def _row(db: AsyncSession, definition_id: uuid.UUID) -> OrganizationGuardr
     ).scalar_one()
     await db.refresh(stored)
     return stored
+
+
+def _mandate(organization: Organization, *, profile: str, definition_id: uuid.UUID) -> OrganizationGuardrail:
+    """A mandate pointing at a definition, added with the session directly.
+
+    No write path sets ``definition_id`` yet, so the row is built here rather
+    than through `organization_guardrail_service`, the way
+    `test_organization_guardrail_definitions.py` builds one.
+    """
+    return OrganizationGuardrail(
+        organization_id=organization.id,
+        profile=profile,
+        definition_id=definition_id,
+        applies_to_all_workspaces=True,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -474,3 +490,48 @@ async def test_a_row_whose_credentials_cannot_be_read_still_lists(
     )
     assert repaired.secrets_decryptable is True
     assert repaired.create_secrets == {"api_key": "***"}
+
+
+# --------------------------------------------------------------------------- #
+# A definition a mandate still names
+# --------------------------------------------------------------------------- #
+
+
+async def test_deleting_a_definition_a_mandate_names_is_refused(async_db: AsyncSession) -> None:
+    """The database's RESTRICT reaches the caller as a conflict naming the mandate.
+
+    Unhandled it would be a 500, because the refusal arrives from the DELETE as
+    the same `IntegrityError` a duplicate name raises.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    created = await service.create_definition(user=owner, request=_create())
+    async_db.add(_mandate(organization, profile="prompt-injection", definition_id=created.id))
+    await async_db.commit()
+
+    with pytest.raises(OrganizationGuardrailDefinitionInUseError) as refused:
+        await service.delete_definition(user=owner, definition_id=created.id)
+    assert "prompt-injection" in str(refused.value)
+
+    # The refused DELETE was its own SAVEPOINT, so the service can still read
+    # the definition it just declined to drop.
+    await _after_a_refusal(async_db, owner)
+    assert [entry.id for entry in (await service.list_definitions(user=owner)).data] == [created.id]
+
+
+async def test_dropping_the_mandate_frees_the_definition(async_db: AsyncSession) -> None:
+    """The guard holds a reference and not the row, so removing it releases the definition."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    created = await service.create_definition(user=owner, request=_create())
+    mandate = _mandate(organization, profile="prompt-injection", definition_id=created.id)
+    async_db.add(mandate)
+    await async_db.commit()
+
+    await async_db.delete(mandate)
+    await async_db.commit()
+
+    await service.delete_definition(user=owner, definition_id=created.id)
+    assert (await service.list_definitions(user=owner)).data == []
