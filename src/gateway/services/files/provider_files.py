@@ -30,6 +30,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 import httpx
 from any_llm import LLMProvider
@@ -49,8 +50,8 @@ OPENAI_BASE = "https://api.openai.com/v1"
 ANTHROPIC_FILES_BETA = "files-api-2025-04-14"
 ANTHROPIC_VERSION = "2023-06-01"
 
-# How long to wait on the provider for one file's metadata or bytes.
-_TIMEOUT = httpx.Timeout(30.0, read=300.0)
+# How long to wait on the provider for a connection or for the next chunk.
+_TIMEOUT = httpx.Timeout(30.0)
 
 
 @dataclass(frozen=True)
@@ -158,24 +159,115 @@ def _credentials(
     return str(api_key), kwargs.get("api_base")
 
 
-def _request_for(record: FileObject, api_key: str, api_base: str | None) -> tuple[str, dict[str, str]]:
-    """The URL and headers that read ``record``'s bytes from its provider."""
-    if record.provider == LLMProvider.ANTHROPIC.value:
+def _anthropic_headers(api_key: str) -> dict[str, str]:
+    return {
+        "x-api-key": api_key,
+        "anthropic-version": ANTHROPIC_VERSION,
+        "anthropic-beta": ANTHROPIC_FILES_BETA,
+    }
+
+
+def _request_for(provider: str, file: ProviderFile, api_key: str, api_base: str | None) -> tuple[str, dict[str, str]]:
+    """The URL and headers that read ``file``'s bytes from ``provider``."""
+    file_id = quote(file.file_id, safe="")
+    if provider == LLMProvider.ANTHROPIC.value:
         base = (api_base or ANTHROPIC_FILES_BASE).rstrip("/")
-        headers = {
-            "x-api-key": api_key,
-            "anthropic-version": ANTHROPIC_VERSION,
-            "anthropic-beta": ANTHROPIC_FILES_BETA,
-        }
-        return f"{base}/files/{record.id}/content", headers
+        return f"{base}/files/{file_id}/content", _anthropic_headers(api_key)
     base = (api_base or OPENAI_BASE).rstrip("/")
-    # OpenAI keys a container file on its container as well as its id.
-    if not record.provider_container_id:
-        raise LookupError(f"{record.provider} file {record.id} names no container to read it from")
+    # OpenAI keys a container file on its container as well as its ID.
+    if not file.container_id:
+        raise LookupError(f"{provider} file {file.file_id} names no container to read it from")
     return (
-        f"{base}/containers/{record.provider_container_id}/files/{record.id}/content",
+        f"{base}/containers/{quote(file.container_id, safe='')}/files/{file_id}/content",
         {"Authorization": f"Bearer {api_key}"},
     )
+
+
+class FileOverBudgetError(Exception):
+    """A file ran past the bytes the reply may still store."""
+
+
+class ProviderFileUnavailableError(Exception):
+    """The provider cannot serve a file now: it refused, the connection failed, or the file names no container."""
+
+
+class ProviderFileClient:
+    """Reads back the files a provider instance's code produced, with that instance's credential."""
+
+    def __init__(self, *, provider: str, provider_instance: str, api_key: str, api_base: str | None) -> None:
+        self._provider = provider
+        self._provider_instance = provider_instance
+        self._api_key = api_key
+        self._api_base = api_base
+
+    @classmethod
+    def for_run(
+        cls, config: GatewayConfig, *, provider: str, provider_instance: str, workspace_id: uuid.UUID | None
+    ) -> ProviderFileClient:
+        """The client for the configured instance a run was dispatched through.
+
+        Raises ``LookupError`` when the deployment holds no credential for ``provider``.
+        """
+        api_key, api_base = _credentials(config, provider, provider_instance, workspace_id)
+        return cls(provider=provider, provider_instance=provider_instance, api_key=api_key, api_base=api_base)
+
+    @property
+    def provider(self) -> str:
+        return self._provider
+
+    @property
+    def provider_instance(self) -> str:
+        return self._provider_instance
+
+    async def get_filename(self, file_id: str) -> str | None:
+        """The file's name, from Anthropic's file metadata.
+
+        Anthropic's result block leaves the name out.
+        ``None`` for any other provider, or when the lookup fails.
+        """
+        if self._provider != LLMProvider.ANTHROPIC.value:
+            return None
+        base = (self._api_base or ANTHROPIC_FILES_BASE).rstrip("/")
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                response = await client.get(
+                    f"{base}/files/{quote(file_id, safe='')}", headers=_anthropic_headers(self._api_key)
+                )
+                response.raise_for_status()
+                metadata = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Could not read %s metadata for %s: %s", self._provider, file_id, exc)
+            return None
+        name = metadata.get("filename") if isinstance(metadata, dict) else None
+        return name if isinstance(name, str) and name else None
+
+    async def read(self, file: ProviderFile, *, budget_bytes: int) -> AsyncGenerator[bytes, None]:
+        """Stream one file's bytes, raising :class:`FileOverBudgetError` past ``budget_bytes``.
+
+        A declared size past the budget is refused before a byte is read, when the provider sends one.
+        Raises :class:`ProviderFileUnavailableError` when the provider cannot serve the file.
+        """
+        try:
+            url, headers = _request_for(self._provider, file, self._api_key, self._api_base)
+        except LookupError as exc:
+            raise ProviderFileUnavailableError(str(exc)) from exc
+        try:
+            async with (
+                httpx.AsyncClient(timeout=_TIMEOUT) as client,
+                client.stream("GET", url, headers=headers) as response,
+            ):
+                response.raise_for_status()
+                declared = response.headers.get("content-length", "")
+                if declared.isdigit() and int(declared) > budget_bytes:
+                    raise FileOverBudgetError
+                total = 0
+                async for chunk in response.aiter_bytes():
+                    total += len(chunk)
+                    if total > budget_bytes:
+                        raise FileOverBudgetError
+                    yield chunk
+        except httpx.HTTPError as exc:
+            raise ProviderFileUnavailableError(f"{self._provider} could not serve file {file.file_id}") from exc
 
 
 async def _fetch_filename(provider: str, file_id: str, api_key: str, api_base: str | None) -> str | None:
@@ -271,8 +363,10 @@ async def stream_provider_file(record: FileObject, config: GatewayConfig) -> Asy
     ``httpx.HTTPError`` when it refuses or fails, which the route maps to its
     own status; the provider's own message never reaches the caller.
     """
-    api_key, api_base = _credentials(config, str(record.provider), record.provider_instance, record.workspace_id)
-    url, headers = _request_for(record, api_key, api_base)
+    provider = str(record.provider)
+    api_key, api_base = _credentials(config, provider, record.provider_instance, record.workspace_id)
+    file = ProviderFile(file_id=record.id, container_id=record.provider_container_id)
+    url, headers = _request_for(provider, file, api_key, api_base)
     async with (
         httpx.AsyncClient(timeout=_TIMEOUT) as client,
         client.stream("GET", url, headers=headers) as response,
@@ -280,3 +374,4 @@ async def stream_provider_file(record: FileObject, config: GatewayConfig) -> Asy
         response.raise_for_status()
         async for chunk in response.aiter_bytes():
             yield chunk
+
