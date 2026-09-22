@@ -65,10 +65,18 @@ The five routes (`POST`/`GET /v1/files`, `GET`/`DELETE /v1/files/{id}`,
 `GET /v1/files/{id}/content`) share their paths and verbs with both vendors'
 Files APIs, so either official SDK works against Otari with only its base URL
 changed. The response shape follows the caller: a request carrying Anthropic's
-`anthropic-version` header, which its SDK sends on every call, gets Anthropic's
-`FileMetadata` (`type`, `size_bytes`, `mime_type`, `downloadable`, an RFC 3339
-`created_at`); everything else gets the OpenAI file object (`object`, `bytes`,
-`purpose`, an epoch `created_at`).
+`anthropic-version` header, which its SDK sends on every call, gets the
+`FileMetadata` of Anthropic's GA Files API (`type`, `size_bytes`, `mime_type`,
+`downloadable`, and RFC 3339 `created_at` and `expires_at`, with `expires_at`
+`null` for a file kept indefinitely); everything else gets the OpenAI file
+object (`object`, `bytes`, `purpose`, an epoch `created_at`).
+
+Otari serves Anthropic's GA shapes only. A request whose `anthropic-beta`
+header includes `files-api-2025-04-14` gets a 400, because that beta answers in
+different shapes. Anthropic's Python SDK before 1.2.0, and earlier releases of
+its other SDKs, send that header from `client.beta.files`, so call
+`client.files` instead (see Anthropic's
+[migration notes](https://platform.claude.com/docs/en/build-with-claude/files#migrate-from-files-api-2025-04-14)).
 
 Mind the base URL: Anthropic's SDK appends `/v1` itself, so it takes
 `http://localhost:8000/api`, while an OpenAI-compatible client takes
@@ -78,13 +86,21 @@ Mind the base URL: Anthropic's SDK appends `/v1` itself, so it takes
 ```python
 from anthropic import Anthropic
 client = Anthropic(base_url="http://localhost:8000/api", api_key="<your-api-key>")
-meta = client.beta.files.upload(file=("report.pdf", open("report.pdf", "rb"), "application/pdf"))
-client.beta.files.download(meta.id)  # Otari serves every stored file's bytes back
+meta = client.files.upload(file=("report.pdf", open("report.pdf", "rb"), "application/pdf"))
+client.files.download(meta.id)  # Otari serves every stored file's bytes back
 ```
 
-Listings are cursor-paged: `limit` (default 100, at most 1000), `after`
-(OpenAI) or `after_id` (Anthropic) naming the last file of the previous page,
-`order` (`desc` by default), and `has_more`, `first_id`, `last_id` on the page.
+Listings are cursor-paged, and each flavor pages with its own vendor's cursor.
+Both take `limit` (default 100, at most 1000).
+
+- OpenAI: `after` names the last file of the previous page, `order` is `desc`
+  by default, and the page carries `has_more`, `first_id` and `last_id`.
+- Anthropic: the page is `{data, next_page}`, and `next_page` goes back as
+  `page` to get the next one. To read up to 100 known files in one page, name
+  them with `ids[]`, which cannot be combined with `page` or `limit`; a file you
+  cannot see is left out. `after_id` and `before_id` get a 400.
+
+Unlike Anthropic, Otari leaves an expired file out of a listing.
 
 ## Files and code execution
 
