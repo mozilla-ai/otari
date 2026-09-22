@@ -115,6 +115,7 @@ async def test_a_build_is_handed_both_halves_of_the_stored_arguments(monkeypatch
 
     entry = await runner._build(definition)
 
+    assert entry is not None
     assert entry.guardrail is not None
     assert calls == [
         {
@@ -136,6 +137,7 @@ async def test_a_build_that_raises_is_recorded_rather_than_raised(monkeypatch: p
 
     entry = await runner._build(_definition())
 
+    assert entry is not None
     assert entry.guardrail is None
     assert entry.guardrail_name == "lakera_guard"
 
@@ -183,7 +185,27 @@ async def test_a_row_whose_secrets_will_not_decrypt_is_a_build_failure(monkeypat
 
     entry = await runner._build(definition)
 
+    assert entry is not None
     assert entry.guardrail is None
+
+
+@pytest.mark.asyncio
+async def test_a_build_that_outran_its_deadline_records_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A deadline says the answer did not arrive, not that the guardrail is broken.
+
+    Recording it as failed would be indistinguishable from a wrong credential,
+    and a failure is deliberately kept until the row changes, so a slow vendor
+    would take the definition out of service until somebody edited it.
+    """
+    monkeypatch.setattr(runner, "_BUILD_TIMEOUT_SECONDS", 0.05)
+
+    def _outlast_the_deadline(_name: GuardrailName, **_kwargs: Any) -> Any:
+        time.sleep(1.0)
+        return _Verdict()
+
+    _stub_any_guardrail(monkeypatch, create=_outlast_the_deadline)
+
+    assert await runner._build(_definition()) is None
 
 
 def test_only_a_missing_package_is_quoted_in_full() -> None:

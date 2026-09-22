@@ -122,6 +122,8 @@ class _Held:
     dropped so that a later read can say "saved, but not running" instead of
     leaving a mandated check silently unevaluated, and so the next tick does not
     retry a build that cannot work until the row changes.
+
+    A build that ran out of time is held as neither: see :func:`_build`.
     """
 
     fingerprint: datetime
@@ -295,26 +297,50 @@ async def refresh_guardrail_runner(uow: UnitOfWork) -> None:
     for row in rows:
         key = (row.organization_id, row.id)
         entry = _held.get(key)
-        rebuilt[key] = entry if entry is not None and entry.fingerprint == row.updated_at else await _build(row)
+        if entry is not None and entry.fingerprint == row.updated_at:
+            rebuilt[key] = entry
+            continue
+        # A build that did not finish is left out rather than recorded, which is
+        # what makes the next tick try it again. Dropping any older entry with
+        # it is deliberate: the row moved, so what this worker held was built
+        # from arguments the row no longer has.
+        built = await _build(row)
+        if built is not None:
+            rebuilt[key] = built
 
     _held.clear()
     _held.update(rebuilt)
     _loaded_at = time.monotonic()
 
 
-async def _build(definition: OrganizationGuardrailDefinition) -> _Held:
-    """Construct one definition's guardrail, recording a failure rather than raising.
+async def _build(definition: OrganizationGuardrailDefinition, *, seconds: float | None = None) -> _Held | None:
+    """Construct one definition's guardrail, or say what this worker learned instead.
 
-    One row this deployment cannot build must not cost the others theirs, and a
-    build failure is a state a later read reports rather than an error anyone is
-    waiting on.
+    One row this deployment cannot build must not cost the others theirs, so a
+    failure is returned as a state a later read reports rather than raised at
+    whoever asked for the refresh.
+
+    ``None`` is the third answer and not a failure: the build did not finish
+    inside its deadline, so nothing was learned about the definition. A failure
+    is held until the row changes, deliberately, so recording a deadline as one
+    would take the definition out of service until an admin edited it. The
+    caller leaves the entry unheld and tries again.
+
+    ``seconds`` overrides the deadline for a caller somebody is waiting on.
     """
     try:
         arguments = build_arguments(definition)
         guardrail = await _in_a_thread(
             lambda: AnyGuardrail.create(GuardrailName(definition.guardrail_name), **arguments),
-            seconds=_BUILD_TIMEOUT_SECONDS,
+            seconds=seconds if seconds is not None else _BUILD_TIMEOUT_SECONDS,
         )
+    except TimeoutError:
+        logger.warning(
+            "Guardrail %s for definition %s did not build within its deadline; will retry",
+            definition.guardrail_name,
+            definition.id,
+        )
+        return None
     except Exception as exc:  # noqa: BLE001 - see the module docstring: the message is never logged
         logger.warning(
             "Could not build guardrail %s for definition %s: %s",

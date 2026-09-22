@@ -12,6 +12,7 @@ question the test can actually ask.
 
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -187,6 +188,69 @@ async def test_one_row_that_will_not_build_does_not_cost_the_others_theirs(
     assert runner.build_state(organization.id, good.id) == "built"
     assert runner.build_state(organization.id, bad.id) == "failed"
     assert runner.handle(organization.id, bad.id) is None
+
+
+async def test_a_build_that_ran_out_of_time_is_tried_again_on_the_next_tick(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The distinction the deadline exists to make: unfinished is not failed.
+
+    A failed build is held until the row changes, so a timeout recorded as one
+    would take a definition out of service until an admin edited it for no
+    reason. Nothing is held, and the next tick tries again.
+    """
+    organization = await _organization(async_db, slug="slow-vendor")
+    await _definition(async_db, organization, name="lakera")
+
+    attempts = 0
+
+    def _outlast_the_deadline(guardrail_name: GuardrailName, **_kwargs: Any) -> Any:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            time.sleep(0.5)
+        return _Built()
+
+    class _Stub:
+        create = staticmethod(_outlast_the_deadline)
+
+    monkeypatch.setattr(runner, "AnyGuardrail", _Stub)
+    monkeypatch.setattr(runner, "_BUILD_TIMEOUT_SECONDS", 0.05)
+
+    await _refresh(async_db)
+    assert runner._held == {}
+
+    monkeypatch.setattr(runner, "_BUILD_TIMEOUT_SECONDS", 20.0)
+    await _refresh(async_db)
+
+    assert len(runner._held) == 1
+    assert next(iter(runner._held.values())).guardrail is not None
+
+
+async def test_a_build_that_failed_is_not_tried_again(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the same rule, so the retry above cannot quietly widen."""
+    organization = await _organization(async_db, slug="bad-credential")
+    await _definition(async_db, organization, name="lakera")
+
+    attempts = 0
+
+    def _explode(_guardrail_name: GuardrailName, **_kwargs: Any) -> Any:
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("vendor refused the key")
+
+    class _Stub:
+        create = staticmethod(_explode)
+
+    monkeypatch.setattr(runner, "AnyGuardrail", _Stub)
+
+    await _refresh(async_db)
+    await _refresh(async_db)
+
+    assert attempts == 1
+    assert next(iter(runner._held.values())).guardrail is None
 
 
 async def test_a_definition_this_worker_never_held_is_not_a_handle(async_db: AsyncSession) -> None:
