@@ -42,6 +42,10 @@ It walks:
 8. Provider-native web search is forwarded the same way (``web_search_intercept``
    is off by default): Anthropic's ``web_search_20250305`` on Messages, OpenAI's
    ``web_search_preview`` on Responses, each answered in its own result blocks.
+9. A streamed completion, which is how most callers actually read a model: the
+   gateway injects ``stream_options.include_usage`` so a cost can be settled, the
+   frames reach the caller as ``text/event-stream``, and the usage report carries
+   the ``ttft_ms`` that only a streamed attempt produces.
 
 Standard library only, and no dev dependencies, for the same reason as
 ``oss_edition_smoke.py``: CI runs it against ``uv sync --frozen --no-dev``, so a
@@ -129,6 +133,9 @@ MCP_TOOL = "smoke_lookup"
 MCP_RESULT = "hybrid-smoke-mcp-result"
 MCP_SERVER_ID = "8f2c1a1e-0000-4000-8000-000000000001"
 CODE_STDOUT = "hybrid-smoke-code-stdout"
+# Delivered before the first frame so the gateway's time-to-first-token is a
+# measurable number rather than a rounding artifact.
+STREAM_FIRST_FRAME_DELAY_SECONDS = 0.05
 
 RETRY_AFTER_SECONDS = "7"
 BROKE_DETAIL = "Wallet is empty"
@@ -511,7 +518,11 @@ class _ProviderHandler(_RecordingHandler):
             if item.headers.get("authorization") != f"Bearer {OPENAI_KEY}":
                 self._respond(401, {"error": {"message": "wrong OpenAI key"}})
                 return
-            self._respond(200, self._chat(body if isinstance(body, dict) else {}))
+            request_body = body if isinstance(body, dict) else {}
+            if request_body.get("stream"):
+                self._respond_sse(self._chat_stream(request_body))
+            else:
+                self._respond(200, self._chat(request_body))
         elif path == "/openai/v1/responses":
             item = self._record("responses", body)
             if item.headers.get("authorization") != f"Bearer {OPENAI_KEY}":
@@ -528,19 +539,26 @@ class _ProviderHandler(_RecordingHandler):
             self._respond(404, {"error": {"message": f"mock provider has no route {path}"}})
 
     @staticmethod
-    def _chat(body: dict[str, Any]) -> dict[str, Any]:
-        """One tool call on the first turn when a tool is offered, then the reply.
+    def _tool_call_for(body: dict[str, Any]) -> dict[str, str] | None:
+        """The tool this turn should call, or None to answer.
 
-        Decided from the request rather than from a counter, so the mock stays
-        correct however many requests interleave.
+        Decided from the request rather than a counter, so the mock stays correct
+        however many requests interleave, and shared by the streamed and buffered
+        forms so they cannot disagree about when a tool runs.
         """
-        tool_call: dict[str, Any] | None = None
-        if _last_role(body) != "tool":
-            names = _tool_names(body)
-            if "web_search" in names:
-                tool_call = {"name": "web_search", "arguments": json.dumps({"query": SEARCH_QUERY})}
-            elif MCP_TOOL in names:
-                tool_call = {"name": MCP_TOOL, "arguments": json.dumps({"term": "smoke"})}
+        if _last_role(body) == "tool":
+            return None
+        names = _tool_names(body)
+        if "web_search" in names:
+            return {"name": "web_search", "arguments": json.dumps({"query": SEARCH_QUERY})}
+        if MCP_TOOL in names:
+            return {"name": MCP_TOOL, "arguments": json.dumps({"term": "smoke"})}
+        return None
+
+    @classmethod
+    def _chat(cls, body: dict[str, Any]) -> dict[str, Any]:
+        """One tool call on the first turn when a tool is offered, then the reply."""
+        tool_call = cls._tool_call_for(body)
         if tool_call is not None:
             message: dict[str, Any] = {
                 "role": "assistant",
@@ -559,6 +577,79 @@ class _ProviderHandler(_RecordingHandler):
             "choices": [{"index": 0, "message": message, "finish_reason": finish}],
             "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
         }
+
+    def _respond_sse(self, frames: list[str]) -> None:
+        """Write SSE frames one at a time over a chunked response.
+
+        Chunked rather than one buffered body on purpose: a single write with a
+        Content-Length would let a gateway that accumulated the whole stream
+        still pass, which is the bug this leg exists to catch.
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+        time.sleep(STREAM_FIRST_FRAME_DELAY_SECONDS)
+        for frame in frames:
+            payload = f"data: {frame}\n\n".encode()
+            self.wfile.write(b"%X\r\n%s\r\n" % (len(payload), payload))
+            self.wfile.flush()
+        self.wfile.write(b"0\r\n\r\n")
+        self.wfile.flush()
+
+    @classmethod
+    def _chat_stream(cls, body: dict[str, Any]) -> list[str]:
+        """The streamed form of :meth:`_chat`, as OpenAI delivers it.
+
+        A tool call arrives split across fragments, with the name in the first
+        and the arguments in a later one, because that is what a real provider
+        sends and what the gateway's slot accumulator has to survive. Nothing
+        walks that branch yet: the leg that does is held back by otari#1504,
+        where a streamed hybrid tool loop truncates its own stream, and lands
+        with that fix.
+        """
+        base = {
+            "id": "chatcmpl-hybrid-smoke-stream",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": OPENAI_MODEL,
+        }
+
+        def chunk(delta: dict[str, Any], finish: str | None = None) -> str:
+            return json.dumps({**base, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
+
+        frames = [chunk({"role": "assistant"})]
+        tool_call = cls._tool_call_for(body)
+        if tool_call is not None:
+            frames.append(
+                chunk(
+                    {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_hybrid_smoke_stream",
+                                "type": "function",
+                                "function": {"name": tool_call["name"], "arguments": ""},
+                            }
+                        ]
+                    }
+                )
+            )
+            frames.append(chunk({"tool_calls": [{"index": 0, "function": {"arguments": tool_call["arguments"]}}]}))
+            frames.append(chunk({}, "tool_calls"))
+        else:
+            frames.extend(chunk({"content": piece}) for piece in (REPLY[: len(REPLY) // 2], REPLY[len(REPLY) // 2 :]))
+            frames.append(chunk({}, "stop"))
+        # The include_usage carrier: usage and no choices, which is the shape the
+        # gateway requires before it will settle a streamed cost.
+        frames.append(
+            json.dumps(
+                {**base, "choices": [], "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}}
+            )
+        )
+        frames.append("[DONE]")
+        return frames
 
     @staticmethod
     def _declared_types(body: dict[str, Any]) -> set[str]:
@@ -798,6 +889,37 @@ def _request(
             return response.status, _decode(response.read()), {k.lower(): v for k, v in response.headers.items()}
     except urllib.error.HTTPError as error:
         return error.code, _decode(error.read()), {k.lower(): v for k, v in error.headers.items()}
+
+
+def _stream_request(
+    url: str,
+    *,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+) -> tuple[int, dict[str, str], list[str], list[Any]]:
+    """POST and read a text/event-stream, returning its raw and decoded frames.
+
+    Frames are read as they arrive rather than after the body completes, which is
+    what makes this a check of streaming and not of a buffered response.
+    """
+    request = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST")
+    request.add_header("Content-Type", "application/json")
+    request.add_header("Accept", "text/event-stream")
+    for name, value in headers.items():
+        request.add_header(name, value)
+    raw: list[str] = []
+    try:
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            status = response.status
+            response_headers = {k.lower(): v for k, v in response.headers.items()}
+            for line in response:
+                text = line.decode("utf-8", errors="replace").strip()
+                if text.startswith("data:"):
+                    raw.append(text[len("data:") :].strip())
+    except urllib.error.HTTPError as error:
+        return error.code, {k.lower(): v for k, v in error.headers.items()}, [], [_decode(error.read())]
+    decoded = [json.loads(frame) for frame in raw if frame and frame != "[DONE]"]
+    return status, response_headers, raw, decoded
 
 
 def _decode(raw: bytes) -> Any:
@@ -1329,6 +1451,57 @@ def run_native_web_search(base_url: str, fakes: Fakes) -> None:
     log(f"Provider-native web search was forwarded on Messages and Responses {where}")
 
 
+def _streamed_content(frames: list[Any]) -> str:
+    """Assemble the assistant text from chat-completion chunks."""
+    out = []
+    for frame in frames:
+        for choice in frame.get("choices") or []:
+            piece = (choice.get("delta") or {}).get("content")
+            if isinstance(piece, str):
+                out.append(piece)
+    return "".join(out)
+
+
+def run_streaming_completion(base_url: str, fakes: Fakes) -> None:
+    """A streamed completion: real SSE out, include_usage in, ttft_ms reported.
+
+    ``ttft_ms`` is the assertion worth having here. It is computed from the first
+    chunk and sent only for a streamed attempt, so its presence is what separates
+    this path from the buffered one in the platform's own record.
+    """
+    before = len(fakes.control_plane.recorder.all("usage"))
+    chats_before = len(fakes.provider.recorder.all("chat"))
+    status, headers, raw, frames = _stream_request(
+        f"{base_url}{API_ROOT}/chat/completions",
+        headers={KEY_HEADER: USER_TOKEN_OK},
+        payload={
+            "model": f"openai:{fakes.openai_model}",
+            "messages": [{"role": "user", "content": f"Reply with exactly: {REPLY}"}],
+            "stream": True,
+        },
+    )
+    _expect(status, 200, f"POST {API_ROOT}/chat/completions with stream=true", frames)
+    _check("text/event-stream" in headers.get("content-type", ""), f"not an SSE response: {headers!r}")
+    _check(bool(raw) and raw[-1] == "[DONE]", f"the stream did not terminate with [DONE]: {raw[-3:]!r}")
+    fakes.note_dispatched(headers, "the streamed completion")
+    _check(bool(_streamed_content(frames).strip()), f"the streamed completion carried no text: {raw!r}")
+    if not fakes.live:
+        _check(REPLY == _streamed_content(frames), f"reassembled text is not the reply: {_streamed_content(frames)!r}")
+        sent = fakes.provider.recorder.all("chat")[chats_before:]
+        _check(len(sent) == 1, f"expected one provider call, got {len(sent)}")
+        _check(sent[0].body.get("stream") is True, "the gateway did not ask the provider to stream")
+        # Injected by the gateway, not by the caller: without it a streamed
+        # attempt reports no tokens and settles at no cost.
+        options = sent[0].body.get("stream_options") or {}
+        _check(options.get("include_usage") is True, f"include_usage was not injected: {options!r}")
+
+    report = fakes.control_plane.recorder.wait_for("usage", before + 1)[-1].body
+    _check(report.get("status") == "success", f"the streamed attempt was not reported successful: {report!r}")
+    ttft = report.get("ttft_ms")
+    _check(isinstance(ttft, int) and ttft > 0, f"the streamed usage report carries no ttft_ms: {report!r}")
+    log(f"A streamed completion delivered SSE, injected include_usage, and reported ttft_ms={ttft}")
+
+
 def check_every_attempt_was_reported(fakes: Fakes) -> None:
     """Exactly one usage report per dispatched attempt, and none for anything else.
 
@@ -1339,13 +1512,26 @@ def check_every_attempt_was_reported(fakes: Fakes) -> None:
     """
     expected = fakes.dispatched
     _check(len(set(expected)) == len(expected), f"two served responses shared an attempt id: {expected!r}")
-    reports = fakes.control_plane.recorder.wait_for("usage", len(expected))
-    time.sleep(0.5)  # a report for something that was not dispatched would arrive late
-    reports = fakes.control_plane.recorder.all("usage")
-    reported = [str(report.body.get("correlation_id")) for report in reports if isinstance(report.body, dict)]
+
+    def reported() -> list[str]:
+        return [
+            str(item.body.get("correlation_id"))
+            for item in fakes.control_plane.recorder.all("usage")
+            if isinstance(item.body, dict)
+        ]
+
+    # A streamed attempt reports only once its stream is fully closed, which is
+    # after the caller has its last frame, so this waits on the set rather than
+    # on a count and says which attempt is missing when it gives up.
+    deadline = time.monotonic() + REPORT_TIMEOUT_SECONDS
+    while sorted(reported()) != sorted(expected) and time.monotonic() < deadline:
+        time.sleep(0.2)
+    time.sleep(0.5)  # a report for something that was never dispatched would arrive late
+    missing = [attempt for attempt in expected if attempt not in reported()]
+    unexpected = [attempt for attempt in reported() if attempt not in expected]
     _check(
-        sorted(reported) == sorted(expected),
-        f"reported attempts {sorted(reported)} != dispatched {sorted(expected)}",
+        not missing and not unexpected,
+        f"usage reports do not match what was dispatched: missing {missing}, unexpected {unexpected}",
     )
     log(f"Every one of the {len(expected)} dispatched attempts was reported back, and nothing else was")
 
@@ -1359,6 +1545,7 @@ STEPS: tuple[Callable[[str, Fakes], None], ...] = (
     run_mcp,
     run_native_code_execution,
     run_native_web_search,
+    run_streaming_completion,
     lambda base_url, fakes: check_every_attempt_was_reported(fakes),
 )
 

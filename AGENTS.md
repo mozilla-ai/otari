@@ -92,7 +92,10 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   container instead of the source checkout, which `otari-docker-build.yml` does
   after its liveness check: the image pins `OTARI_HOST`/`OTARI_PORT` as env, and
   env beats a mounted config file, so an image that boots but cannot serve a
-  request fails only there. `--live` swaps the provider fake for the real OpenAI and
+  request fails only there. A streamed leg covers SSE end to end and the `ttft_ms`
+  only a streamed attempt reports; the streamed *tool loop* is held back by #1504,
+  where a hybrid stream that runs a gateway tool truncates and goes unbilled.
+  `--live` swaps the provider fake for the real OpenAI and
   Anthropic APIs (`OTARI_SMOKE_*_API_KEY`, Tavily optional) and runs from
   `otari-live-providers.yml` on pushes to `main`, the commit the otari.ai dev
   gateway deploys; it is not a PR gate, because forks carry no secrets and a real
