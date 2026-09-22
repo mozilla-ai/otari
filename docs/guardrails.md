@@ -253,9 +253,41 @@ guardrail Otari builds from the definition, never on both.
 **A definition's `name` is not a mandate's `profile`.** The name is what an
 organization recognizes a definition by, so the same guardrail can be defined
 twice under two names with different arguments; the profile is what a caller
-sends, and what the layer merge keys on. Nothing builds these guardrails yet, so
-a mandate pointing at one is still resolved as a profile and a definition on its
-own changes no request.
+sends, and what the layer merge keys on.
+
+### What Otari builds from a definition
+
+Otari builds every enabled definition when it starts, and rebuilds one whenever
+its row changes. A built guardrail is a vendor client held in memory by each
+worker, so a request that needs one never waits for a vendor handshake and
+never builds anything itself.
+
+A definition it does not hold is one that is disabled, one that was deleted, or
+one that would not build. Nothing is built lazily: a request cannot tell those
+three apart, and building while a request waits is what holding them ready
+avoids.
+
+Each worker re-reads the definitions about every thirty seconds and rebuilds
+only the rows that changed, so a write made on one worker reaches the others
+within that window. A guardrail whose arguments nobody touched is not rebuilt.
+
+**A build can fail, and a failed build is kept rather than retried.** A wrong
+credential, an endpoint the vendor rejects, or a `OTARI_SECRET_KEY` that can no
+longer read the stored secrets all end the same way: the definition is held as
+failed until its row changes. The reason goes to the gateway's log and names the
+guardrail class, the definition's id and the type of error, and nothing else. A
+vendor library may put the arguments it was handed into its own error message,
+and those arguments are the organization's credentials, so that message is never
+logged.
+
+One case an operator can fix, and the only one whose message is logged in full:
+`azure_content_safety` needs the `azure-ai-contentsafety` package, which is not
+among this gateway's dependencies. A definition of it saves and then fails to
+build, with an `ImportError` naming the package.
+
+Building a guardrail does not yet change what happens to a request. A mandate
+pointing at a definition is still resolved as a profile, and putting a built
+guardrail on the request path is the next step.
 
 ### Turning one off
 
@@ -265,9 +297,11 @@ keeps the arguments and credentials it took to set up. `enabled: false` on a
 **mandate** stops that one mandate, and leaves any other mandate on the same
 definition running.
 
-Once Otari builds these guardrails, a mandate whose definition is disabled
-counts as unevaluable, so `mode` and `on_unavailable` will decide what happens
-to the request, the same as an endpoint that cannot be reached.
+A disabled definition is dropped from what each worker holds on its next read,
+so nothing keeps its vendor client alive. Once a built guardrail reaches the
+request path, a mandate whose definition is disabled will count as unevaluable,
+so `mode` and `on_unavailable` will decide what happens to the request, the same
+as an endpoint that cannot be reached.
 
 Deleting a definition a mandate still names is refused rather than cascaded,
 because dropping it would silently stop a guardrail running. The refusal names
