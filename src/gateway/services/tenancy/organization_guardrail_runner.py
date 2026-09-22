@@ -440,8 +440,6 @@ def _safe_reason(exc: BaseException) -> str:
     `ImportError` is the exception. Its message is upstream's own constant install
     hint, it names the extra a deployment is missing rather than anything the
     organization supplied, and it is the one build failure an operator can fix.
-    Today it is what `azure_content_safety` raises, because
-    ``azure-ai-contentsafety`` is not among this gateway's dependencies.
     """
     return f"{type(exc).__name__}: {exc}" if isinstance(exc, ImportError) else type(exc).__name__
 

@@ -294,9 +294,10 @@ those arguments are the organization's credentials, so that message is never
 logged, and it is never in an API response either.
 
 One case an operator can fix, and the only one whose message is logged in full:
-`azure_content_safety` needs the `azure-ai-contentsafety` package, which is not
-among this gateway's dependencies. A definition of it saves and then fails to
-build, with an `ImportError` naming the package.
+a vendor SDK that is not installed. Otari depends on the SDK of every guardrail
+the catalog lists, so this happens only on an install that left them out, such
+as a plain `pip install` that skipped `any-guardrail`'s extras. A definition then
+saves and fails to build, with an `ImportError` naming the extra to install.
 
 ### Telling whether a definition is running
 
