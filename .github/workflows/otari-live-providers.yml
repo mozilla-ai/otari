@@ -1,0 +1,80 @@
+name: Otari Live Providers
+
+# The hybrid smoke (scripts/hybrid_edition_smoke.py) with real providers behind
+# the fake control plane: OpenAI, Anthropic and Tavily, keyed from repository
+# secrets (Tavily optional). The fake-provider run in otari-oss-edition.yml is the PR gate and
+# proves what the gateway sends; this one proves the other half the fakes can
+# only encode a belief about: that the pinned SDKs parse a real response, that a
+# real model drives the managed tool loop, and that the native code-execution
+# tools still exist under the names the gateway forwards.
+#
+# Runs on pushes to main because that is the commit the otari.ai dev gateway
+# deploys from (otari-ai's deploy_gateway_development.yaml answers the same
+# image publish), so a live failure here lands at the same moment as the deploy
+# it would explain. Not a pull_request trigger: fork PRs carry no secrets, each
+# run costs real money (the Responses code_interpreter leg starts a container),
+# and a real model is not deterministic enough to block a merge on.
+#
+# The whole job is skipped, and says so, when the secrets are absent, so a fork
+# of this repository does not see a failing workflow it cannot make pass.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/gateway/**'
+      - 'scripts/hybrid_edition_smoke.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/otari-live-providers.yml'
+  workflow_dispatch:
+  schedule:
+    # Weekly, so a provider-side change is noticed in a quiet week too.
+    - cron: '30 6 * * 1'
+
+# One live run at a time: two concurrent runs double the spend for no extra signal.
+concurrency:
+  group: otari-live-providers
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  live-providers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # `secrets` cannot be read in a job-level `if`, so the presence check is a
+      # step, and the keys are exposed to the step that needs them only.
+      HAS_KEYS: ${{ secrets.OTARI_SMOKE_OPENAI_API_KEY != '' && secrets.OTARI_SMOKE_ANTHROPIC_API_KEY != '' }}
+    steps:
+    - name: Say so when the keys are absent
+      if: env.HAS_KEYS != 'true'
+      run: echo "::notice::OTARI_SMOKE_*_API_KEY secrets are not set; the live provider smoke is skipped."
+
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      if: env.HAS_KEYS == 'true'
+      with:
+        persist-credentials: false
+
+    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      if: env.HAS_KEYS == 'true'
+      with:
+        python-version: "3.14"
+
+    - name: Install the OSS edition
+      if: env.HAS_KEYS == 'true'
+      run: uv sync --frozen --no-dev
+
+    - name: Boot the hybrid gateway and smoke it against live providers
+      if: env.HAS_KEYS == 'true'
+      env:
+        OTARI_SMOKE_OPENAI_API_KEY: ${{ secrets.OTARI_SMOKE_OPENAI_API_KEY }}
+        OTARI_SMOKE_ANTHROPIC_API_KEY: ${{ secrets.OTARI_SMOKE_ANTHROPIC_API_KEY }}
+        # Optional: managed search then runs against Tavily instead of the fake backend.
+        OTARI_SMOKE_TAVILY_API_KEY: ${{ secrets.OTARI_SMOKE_TAVILY_API_KEY }}
+        # Optional overrides; the script has defaults.
+        OTARI_SMOKE_OPENAI_MODEL: ${{ vars.OTARI_SMOKE_OPENAI_MODEL }}
+        OTARI_SMOKE_ANTHROPIC_MODEL: ${{ vars.OTARI_SMOKE_ANTHROPIC_MODEL }}
+      run: uv run --frozen --no-dev python scripts/hybrid_edition_smoke.py --live

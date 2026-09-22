@@ -82,7 +82,17 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   PostgreSQL as CI does. Keep it standard-library only and keep it running under
   `--no-dev`: that is what makes it able to catch a dev-only or enterprise-only
   import that reached an OSS code path, and a single third-party import in it
-  (httpx, pyyaml) gives that up.
+  (httpx, pyyaml) gives that up. `scripts/hybrid_edition_smoke.py` is its hybrid
+  sibling in the same workflow: the packaged CLI booted with a platform token
+  against standard-library fakes of the control plane, an OpenAI/Anthropic
+  provider and an MCP server, asserting on the requests the fakes recorded
+  (resolve bodies, tokens, usage reports) as well as the responses. Same rules:
+  standard library only, run under `--no-dev`, and no database, because a hybrid
+  gateway runs none. `--live` swaps the provider fake for the real OpenAI and
+  Anthropic APIs (`OTARI_SMOKE_*_API_KEY`, Tavily optional) and runs from
+  `otari-live-providers.yml` on pushes to `main`, the commit the otari.ai dev
+  gateway deploys; it is not a PR gate, because forks carry no secrets and a real
+  model is not deterministic enough to block a merge on.
 - Two tests assert the provider-error sanitization by making a real outbound call (`test_error_detail_leakage.py::test_provider_error_does_not_leak_details`, `test_streaming_error_event.py::test_streaming_creation_error_returns_http_error`). With no network egress the upstream fails differently and both report a status mismatch, so treat them as environment noise rather than a regression, and confirm a change against the rest of the suite.
 - `tests/integration/test_mcp_dependency_ceiling.py::test_mcp_constraint_resolves_to_an_importable_version` also needs network egress, to install `mcp` fresh from PyPI into a throwaway venv. Unlike the two above, a missing egress here does not look like a status mismatch: it fails hard after burning both `@pytest.mark.flaky` reruns. It also skips outright (not fails) when `uv` is not on `PATH`.
 - `tests/unit/test_url_safety.py` and `tests/unit/test_web_search_backend.py` need DNS, which is a third signature again: the code under test resolves a hostname to an IP to decide whether an address is safe, so with no resolver it gets the hostname back and the failure reads `ValueError: 'example.com' does not appear to be an IPv4 or IPv6 address`. Six tests across the two files, all passing where DNS is available. Nothing about the address checks is wrong; confirm with `python -c "import socket; socket.gethostbyname('example.com')"` before treating one as a regression.

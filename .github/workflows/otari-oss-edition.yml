@@ -41,6 +41,7 @@ on:
       - 'alembic/**'
       - 'alembic.ini'
       - 'scripts/oss_edition_smoke.py'
+      - 'scripts/hybrid_edition_smoke.py'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-oss-edition.yml'
@@ -52,6 +53,7 @@ on:
       - 'alembic/**'
       - 'alembic.ini'
       - 'scripts/oss_edition_smoke.py'
+      - 'scripts/hybrid_edition_smoke.py'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-oss-edition.yml'
@@ -129,3 +131,33 @@ jobs:
       run: >-
         uv run --frozen --no-dev python scripts/oss_edition_smoke.py
         --database-url postgresql://otari:otari@127.0.0.1:5432/otari
+
+  # The other edition the same build ships: a gateway attached to a control
+  # plane. The dev gateway at otari.ai deploys from main on every merge against
+  # a control plane pinned to an older release, so this is the one place a
+  # change to what the gateway *sends* over docs/hybrid-mode-protocol.md is
+  # checked before it is live. scripts/hybrid_edition_smoke.py boots the
+  # packaged CLI with a platform token against standard-library fakes of the
+  # control plane, an OpenAI/Anthropic provider and an MCP server, and asserts
+  # on the requests those fakes recorded as much as on the responses.
+  #
+  # No PostgreSQL: a hybrid gateway runs no database, and booting one here would
+  # hide a hybrid code path that quietly grew a database dependency.
+  hybrid-edition:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      with:
+        python-version: "3.14"
+
+    - name: Install the OSS edition
+      run: uv sync --frozen --no-dev
+
+    - name: Boot the hybrid gateway and smoke its tool paths
+      run: uv run --frozen --no-dev python scripts/hybrid_edition_smoke.py
