@@ -102,7 +102,7 @@ const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
     help: "For a request that declares a provider's own code tool (Anthropic code_execution, OpenAI code_interpreter). Auto keeps it with a provider that runs it natively and brings it here otherwise.",
     placeholder: "",
     defaultLabel: "Default (auto)",
-    choiceLabels: {
+    optionLabels: {
       auto: "Auto: provider when native, else here",
       otari: "Always here, on this sandbox",
       provider: "Always the provider",

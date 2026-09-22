@@ -59,7 +59,7 @@ export interface FieldCopy {
    * What each value of a closed-vocabulary field is called, keyed by the value
    * the backend lists in `options`. A value without an entry shows as itself.
    */
-  choiceLabels?: Record<string, string>
+  optionLabels?: Record<string, string>
 }
 
 function useDraft(committed: string) {
@@ -256,7 +256,7 @@ function BoolRow({
 // rather than a text box, because the write refuses anything outside the list
 // and a field that can only fail on save is worse than one that cannot be
 // mistyped. "Default" is a clear, like the tri-state boolean beside it.
-function ChoiceRow({
+function OptionRow({
   field,
   copy,
   commit,
@@ -297,9 +297,9 @@ function ChoiceRow({
           }
           options={[
             { value: "default", label: defaultLabel },
-            ...(field.options ?? []).map((choice) => ({
-              value: choice,
-              label: copy.choiceLabels?.[choice] ?? choice,
+            ...(field.options ?? []).map((option) => ({
+              value: option,
+              label: copy.optionLabels?.[option] ?? option,
             })),
           ]}
           disabled={disabled || save.isSaving}
@@ -422,7 +422,7 @@ export function ToolSettingRow({
           ? "On"
           : field.value === false
             ? "Off"
-            : (copy.choiceLabels?.[String(field.value)] ?? String(field.value))
+            : (copy.optionLabels?.[String(field.value)] ?? String(field.value))
     return (
       <SettingRow
         label={copy.label}
@@ -464,7 +464,7 @@ export function ToolSettingRow({
   }
   if (field.options && field.options.length > 0) {
     return (
-      <ChoiceRow
+      <OptionRow
         field={field}
         copy={copy}
         commit={commit}
