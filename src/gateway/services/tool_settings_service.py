@@ -298,6 +298,6 @@ def field_type(key: str) -> str:
 
 
 def get_field_options(key: str) -> list[str] | None:
-    """Return the allowed values of a ``str`` field, or ``None`` for free text."""
+    """Return the fixed values a field accepts, or ``None`` when it accepts any value of its type."""
     options = _TOOL_SPECS[key].options
     return list(options) if options is not None else None
