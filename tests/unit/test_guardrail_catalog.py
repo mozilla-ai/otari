@@ -374,6 +374,70 @@ def test_a_plain_secret_stays_storable() -> None:
     assert key.storable
 
 
+# Every non-secret json parameter a listed guardrail declares, classified by hand
+# as configuration somebody types into a form. ``storable`` cannot make this call:
+# it is derived as ``not (secret and json)``, so it catches a live SDK object only
+# where upstream also marked that object secret, and reads "storable" otherwise.
+# The two tests below are what makes the classification a decision rather than an
+# assumption, so a live object upstream adds fails here instead of much later as a
+# TypeError inside a vendor SDK. Both stages, because both maps are stored.
+_CONFIGURATION_JSON_PARAMETERS = frozenset(
+    {
+        ("alinia", "create", "detection_config"),
+        ("alinia", "create", "metadata"),
+        ("alinia", "create", "blocked_response"),
+        ("alinia", "validate", "context_documents"),
+        ("azure_content_safety", "create", "blocklist_names"),
+        ("azure_prompt_shields", "validate", "documents"),
+        ("lakera_guard", "create", "metadata"),
+        ("patronus", "create", "evaluators"),
+        ("patronus", "create", "tags"),
+        ("patronus", "validate", "retrieved_context"),
+        ("watsonx_guardian", "create", "detectors"),
+    }
+)
+
+
+def _declared_json_parameters(catalog: BuiltInGuardrailCatalog) -> set[tuple[str, str, str]]:
+    """Every non-secret json parameter ``catalog`` publishes, as (guardrail, stage, name)."""
+    return {
+        (spec.guardrail_name, stage, parameter.name)
+        for spec in catalog.guardrails
+        for stage, parameters in (("create", spec.create_parameters), ("validate", spec.validate_parameters))
+        for parameter in parameters
+        if parameter.type == "json" and not parameter.secret
+    }
+
+
+def test_classifies_every_json_parameter_a_listed_guardrail_declares() -> None:
+    """A json parameter is either configuration or a live object, and only a person can say which."""
+    declared = _declared_json_parameters(build_builtin_guardrail_catalog())
+
+    assert declared - _CONFIGURATION_JSON_PARAMETERS == set(), "not classified: configuration, or unstorable?"
+    assert _CONFIGURATION_JSON_PARAMETERS - declared == set(), "classified, but no listed guardrail declares it"
+
+
+def test_notices_a_json_parameter_nobody_has_classified() -> None:
+    """The guard above is worth having only if it fails, so here it is failing.
+
+    A plain string field for an ``onnxruntime.InferenceSession`` is the shape of
+    the mistake: nothing upstream publishes marks it as a live object.
+    """
+    spec = _spec(build_builtin_guardrail_catalog(), "lakera_guard")
+    planted = spec.model_copy(
+        update={
+            "create_parameters": [
+                *spec.create_parameters,
+                GuardrailParameterSpec(name="session", type="json", required=False),
+            ]
+        }
+    )
+
+    declared = _declared_json_parameters(BuiltInGuardrailCatalog(guardrails=[planted]))
+
+    assert declared - _CONFIGURATION_JSON_PARAMETERS == {("lakera_guard", "create", "session")}
+
+
 def test_carries_the_metadata_a_picker_groups_by() -> None:
     spec = _spec(build_builtin_guardrail_catalog(), "lakera_guard")
 
