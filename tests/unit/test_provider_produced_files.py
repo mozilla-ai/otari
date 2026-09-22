@@ -145,6 +145,27 @@ def test_a_streamed_responses_completion_names_its_files() -> None:
     assert produced_files_for("chat", response) == []
 
 
+def test_a_responses_stream_names_a_file_before_it_completes() -> None:
+    citation = {"type": "container_file_citation", "file_id": "cfile_1", "filename": "plot.png", "container_id": "c_1"}
+    part = SimpleNamespace(annotations=[citation])
+    expected = [ProviderFile(file_id="cfile_1", filename="plot.png", container_id="c_1")]
+
+    annotation_added = SimpleNamespace(type="response.output_text.annotation.added", annotation=citation)
+    part_done = SimpleNamespace(type="response.content_part.done", part=part)
+    item_done = SimpleNamespace(type="response.output_item.done", item=SimpleNamespace(content=[part]))
+
+    assert produced_files_for("responses", annotation_added) == expected
+    assert produced_files_for("responses", part_done) == expected
+    assert produced_files_for("responses", item_done) == expected
+
+
+def test_a_citation_field_that_is_not_text_is_dropped() -> None:
+    citation = SimpleNamespace(type="container_file_citation", file_id="cfile_1", filename=7, container_id=["c_1"])
+    event = SimpleNamespace(type="response.output_text.annotation.added", annotation=citation)
+
+    assert produced_files_for("responses", event) == [ProviderFile(file_id="cfile_1")]
+
+
 def test_a_configured_api_base_is_where_the_download_goes() -> None:
     url, _ = _request_for(
         "anthropic", ProviderFile(file_id="file_01abc"), "sk-ant-test", "https://anthropic.internal/v1/"

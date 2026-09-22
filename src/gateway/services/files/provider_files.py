@@ -1,33 +1,19 @@
-"""Files a provider's own sandbox produced, which Otari serves by proxy.
+"""Files a provider's own sandbox produced, and the client that reads them back.
 
 A provider-native code execution keeps what it wrote in the provider's
-container, and answers with the provider's file id. Nothing is copied here:
-the run is recorded as a ``file_objects`` row with no ``storage_ref``, naming
-the provider that holds the bytes, and ``GET /v1/files/{id}/content`` streams
-them from that provider on demand. So the same call serves a chart whichever
-sandbox drew it, and a caller swapping one model for another changes nothing
-but the model.
+container and answers with the provider's file ID. The provider does not keep
+it for long: OpenAI discards a container 20 minutes after its last use.
 
-The row is what makes that safe. A provider authenticates the deployment's own
-credential, which is coarser than a workspace-scoped API key, so without a
-record of who the run belonged to, any tenant knowing an id could read another
-tenant's output. Reads go through :func:`fetch_file`, which applies the same
-user and workspace predicate every other file gets.
-
-Ids stay the provider's throughout. Rewriting them into Otari's own would break
-a client that echoes the turn back, since the container reference it carries
-would name a file the provider never issued.
-
-The HTTP calls below are hand-rolled because any-llm has no files API; the
-request for one is https://github.com/mozilla-ai/any-llm/issues/1419, and the
-URLs and headers here move there when it lands.
+The HTTP calls below are hand-rolled because any-llm cannot read a container's
+files yet; the request for that is
+https://github.com/mozilla-ai/any-llm/issues/1419.
 """
 
 from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
@@ -36,10 +22,7 @@ import httpx
 from any_llm import LLMProvider
 
 from gateway.core.config import GatewayConfig, provider_credential_env_names
-from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
-from gateway.repositories.files import ProviderFileRow, existing_file_ids, record_provider_file_rows
-from gateway.services.file_service import CODE_EXECUTION_OUTPUT_PURPOSE, expiry_for, guess_mime_type
 from gateway.services.provider_kwargs import get_provider_kwargs
 
 if TYPE_CHECKING:
@@ -84,6 +67,33 @@ def anthropic_produced_files(result: Any) -> list[ProviderFile]:
     return _anthropic_files_in(list(getattr(result, "content", None) or []))
 
 
+def _field(obj: Any, name: str) -> Any:
+    """``obj``'s ``name``, whether a stream event carried it as an object or as a plain dict."""
+    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+
+
+def _cited_files(annotations: Iterable[Any]) -> list[ProviderFile]:
+    """The files the ``container_file_citation`` annotations among ``annotations`` name, each once."""
+    files: dict[str, ProviderFile] = {}
+    for note in annotations:
+        if _field(note, "type") != "container_file_citation":
+            continue
+        file_id = _field(note, "file_id")
+        if not isinstance(file_id, str) or not file_id or file_id in files:
+            continue
+        filename, container_id = _field(note, "filename"), _field(note, "container_id")
+        files[file_id] = ProviderFile(
+            file_id=file_id,
+            filename=filename if isinstance(filename, str) and filename else None,
+            container_id=container_id if isinstance(container_id, str) and container_id else None,
+        )
+    return list(files.values())
+
+
+def _annotations_in(parts: Any) -> list[Any]:
+    return [note for part in parts or [] for note in _field(part, "annotations") or []]
+
+
 def responses_produced_files(result: Any) -> list[ProviderFile]:
     """Provider file ids an OpenAI Responses reply cites from its container.
 
@@ -91,28 +101,16 @@ def responses_produced_files(result: Any) -> list[ProviderFile]:
     annotation on the message it wrote, which carries the container and the
     name as well as the id.
     """
-    files: dict[str, ProviderFile] = {}
-    for item in getattr(result, "output", None) or []:
-        for part in getattr(item, "content", None) or []:
-            for note in getattr(part, "annotations", None) or []:
-                if getattr(note, "type", None) != "container_file_citation":
-                    continue
-                file_id = getattr(note, "file_id", None)
-                if not isinstance(file_id, str) or not file_id or file_id in files:
-                    continue
-                files[file_id] = ProviderFile(
-                    file_id=file_id,
-                    filename=getattr(note, "filename", None),
-                    container_id=getattr(note, "container_id", None),
-                )
-    return list(files.values())
+    items = _field(result, "output") or []
+    return _cited_files(note for item in items for note in _annotations_in(_field(item, "content")))
 
 
 def produced_files_for(dialect: str, obj: Any) -> list[ProviderFile]:
     """Provider file ids in a completed reply, or in one streamed event, of ``dialect``.
 
     A Messages stream delivers a server tool result whole in its
-    ``content_block_start`` event; a Responses stream repeats the entire
+    ``content_block_start`` event. A Responses stream names a cited file in the
+    annotation, content part and output item events before it repeats the whole
     response on ``response.completed``. Anything else (a delta, a chat
     completion, which has no native code tool) names no file.
     """
@@ -122,8 +120,14 @@ def produced_files_for(dialect: str, obj: Any) -> list[ProviderFile]:
             return _anthropic_files_in([getattr(obj, "content_block", None)])
         return anthropic_produced_files(obj)
     if dialect == "responses":
+        if kind == "response.output_text.annotation.added":
+            return _cited_files([_field(obj, "annotation")])
+        if kind == "response.content_part.done":
+            return _cited_files(_annotations_in([_field(obj, "part")]))
+        if kind == "response.output_item.done":
+            return _cited_files(_annotations_in(_field(_field(obj, "item"), "content")))
         if kind == "response.completed":
-            return responses_produced_files(getattr(obj, "response", None))
+            return responses_produced_files(_field(obj, "response"))
         return responses_produced_files(obj)
     return []
 
@@ -270,92 +274,6 @@ class ProviderFileClient:
             raise ProviderFileUnavailableError(f"{self._provider} could not serve file {file.file_id}") from exc
 
 
-async def _fetch_filename(provider: str, file_id: str, api_key: str, api_base: str | None) -> str | None:
-    """Anthropic's metadata call, for the name its result block leaves out.
-
-    One small JSON read per produced file, so a listing and a download both
-    name the file the way the run did. A failure is not fatal: the id still
-    downloads, it is just announced under its own id.
-    """
-    if provider != LLMProvider.ANTHROPIC.value:
-        return None
-    base = (api_base or ANTHROPIC_FILES_BASE).rstrip("/")
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": ANTHROPIC_VERSION,
-        "anthropic-beta": ANTHROPIC_FILES_BETA,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            response = await client.get(f"{base}/files/{file_id}", headers=headers)
-            response.raise_for_status()
-            name = response.json().get("filename")
-    except (httpx.HTTPError, ValueError) as exc:
-        logger.warning("Could not read %s metadata for %s: %s", provider, file_id, exc)
-        return None
-    return name if isinstance(name, str) and name else None
-
-
-async def record_provider_files(
-    uow: UnitOfWork,
-    files: list[ProviderFile],
-    *,
-    provider: str,
-    user_id: str,
-    workspace_id: uuid.UUID,
-    config: GatewayConfig,
-    provider_instance: str | None = None,
-) -> None:
-    """Record what a provider's sandbox produced, so its ids serve from Otari's files API.
-
-    Never fatal: the caller has a completed response in hand, and a file it
-    cannot be handed later is a smaller failure than losing the answer. A file
-    id already recorded is left alone, so a conversation citing the same chart
-    twice keeps one row. An OpenAI file cited without its container is skipped,
-    since the download is keyed on the container and the row could never serve.
-    """
-    files = list({file.file_id: file for file in files}.values())
-    if provider == LLMProvider.OPENAI.value:
-        files = [file for file in files if file.container_id]
-    if not files or not serves_files(provider):
-        return
-    try:
-        api_key, api_base = _credentials(config, provider, provider_instance, workspace_id)
-    except (LookupError, ValueError) as exc:
-        logger.warning("Not recording %d %s file(s): %s", len(files), provider, exc)
-        return
-
-    try:
-        async with uow:
-            known = await existing_file_ids(uow, [file.file_id for file in files])
-        expires_at = expiry_for(config)
-        rows = []
-        for file in files:
-            if file.file_id in known:
-                continue
-            filename = file.filename or await _fetch_filename(provider, file.file_id, api_key, api_base)
-            rows.append(
-                ProviderFileRow(
-                    file_id=file.file_id,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                    filename=filename or file.file_id,
-                    mime_type=guess_mime_type(filename),
-                    purpose=CODE_EXECUTION_OUTPUT_PURPOSE,
-                    provider=provider,
-                    provider_instance=provider_instance,
-                    container_id=file.container_id,
-                    expires_at=expires_at,
-                )
-            )
-        if not rows:
-            return
-        async with uow:
-            await record_provider_file_rows(uow, rows)
-    except Exception as exc:  # noqa: BLE001 - a recording failure must not fail the response
-        logger.warning("Could not record %d %s file(s): %s", len(files), provider, exc)
-
-
 async def stream_provider_file(record: FileObject, config: GatewayConfig) -> AsyncGenerator[bytes, None]:
     """Stream a provider-held file's bytes, never holding the whole body.
 
@@ -374,4 +292,3 @@ async def stream_provider_file(record: FileObject, config: GatewayConfig) -> Asy
         response.raise_for_status()
         async for chunk in response.aiter_bytes():
             yield chunk
-

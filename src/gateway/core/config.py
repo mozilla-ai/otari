@@ -941,16 +941,18 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         default=20,
         ge=0,
         description=(
-            "Most files one code-execution call may have stored from its sandbox workspace. "
-            "Files past the count are named in the tool result but not stored."
+            "Most files one code-execution call may have stored from its sandbox workspace, "
+            "and most files one reply may have copied from a provider's own sandbox. "
+            "Files past the count are not stored."
         ),
     )
     files_output_max_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
         default=64 * 1024 * 1024,
         ge=1,
         description=(
-            "Total bytes one code-execution call may have stored from its sandbox workspace, across "
-            "all the files it produced. A file that would take the call past it is named but not stored."
+            "Total bytes one code-execution call may have stored from its sandbox workspace, or one reply "
+            "may have copied from a provider's own sandbox, across all the files produced. "
+            "A file that would go past it is not stored."
         ),
     )
     files_retention_hours: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(

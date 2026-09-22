@@ -267,8 +267,8 @@ files the code produces come back as stored files, announced in Anthropic's
 `code_execution_output` entries by their `file_id`, and on Responses as an
 `image` output naming the URL Otari serves each produced image from (under
 `public_base_url` where it is set, otherwise under the address the request
-arrived on; any other produced file is listed and downloadable by id). A file the *provider's* own sandbox produced stays with the
-provider and is served by proxy under its own id. See
+arrived on; any other produced file is listed and downloadable by id). A file the *provider's* own sandbox produced is copied
+into Otari's store under the provider's own ID. See
 [Files and code execution](files.md#files-and-code-execution). A sandbox
 session still lives for one request, so a `container` id from a previous turn
 addresses the provider's container, not the sandbox.

@@ -136,18 +136,11 @@ class FileObject(Base):
     mime_type: Mapped[str] = mapped_column()
     bytes: Mapped[int] = mapped_column()
     purpose: Mapped[str] = mapped_column(default="user_data")
-    # Null for a file whose bytes a provider holds; see ``provider`` below.
     storage_ref: Mapped[str | None] = mapped_column(nullable=True)
-    # Set when a provider's own sandbox produced the file, naming the any-llm
-    # provider whose files API serves its bytes. The row exists so the
-    # deployment knows who may read that id: the provider authenticates the
-    # deployment's credential, which is coarser than a workspace-scoped key.
+    # Set when a provider's own sandbox produced the file. The three provider
+    # columns record where it came from; nothing on the read path uses them.
     provider: Mapped[str | None] = mapped_column(nullable=True)
-    # The configured instance the run dispatched through, whose credential is
-    # the one that can read the file back; None means the provider's own entry.
     provider_instance: Mapped[str | None] = mapped_column(nullable=True)
-    # The provider's container, for a provider that keys a download on it
-    # (OpenAI does; Anthropic's files API takes the id alone).
     provider_container_id: Mapped[str | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True

@@ -9,7 +9,6 @@ from gateway.services.files.file_sweeper import SweepBatch, run_file_sweeper, sw
 from gateway.services.files.provider_files import (
     ProviderFile,
     produced_files_for,
-    record_provider_files,
     stream_provider_file,
 )
 from gateway.services.files.sandbox_bridge import SandboxFileBridge
@@ -19,7 +18,6 @@ __all__ = [
     "SandboxFileBridge",
     "SweepBatch",
     "produced_files_for",
-    "record_provider_files",
     "run_file_sweeper",
     "stream_provider_file",
     "sweep_files",

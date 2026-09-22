@@ -141,24 +141,29 @@ while an output that cannot be fetched is named without an id and the run stands
 ### A file the provider's own sandbox produced
 
 A declaration the [executor](tools.md#code-execution-executor) leaves with the
-provider runs in the provider's container, and the file it writes stays there,
-under the provider's own id. Otari copies nothing, and records a row saying
-whose that file is and which provider holds it, so
-`GET /v1/files/{id}/content` streams the bytes through on demand and the same
-download serves a chart whichever sandbox drew it. The row is also what keeps
-that safe: a provider authenticates the deployment's credential, which is
-coarser than a workspace-scoped key, so the user and workspace predicate every
-other file gets is applied here before anything is fetched.
+provider runs in the provider's container, and the provider names each file the
+code writes by an ID of its own. When the reply arrives, Otari copies each of
+those files into its store and keeps the provider's ID as the file's ID. The
+copy belongs to the user and workspace the request is billed to, like an
+upload. So `GET /v1/files/{id}/content` serves a chart whichever sandbox drew
+it, and still serves it after the provider has discarded its container. OpenAI
+discards a container 20 minutes after its last use.
 
-Three things follow from Otari not holding the bytes. A listing shows `0` for
-the size, because the provider does not say how many bytes there are until they
-are read. The provider's id is what travels, rather than one of Otari's, since
-rewriting it would break a client that echoes the turn back with a container
-reference the provider never issued. And such a file cannot be an *input* to a
-later request: a `file_id` block naming one is dropped, because there is
-nothing local to extract or seed a session with. Anthropic and OpenAI are the
-providers Otari can fetch back from; a native run on any other is announced by
-the provider and downloaded from it.
+The ID stays the provider's because a client that sends the turn back carries a
+container reference, and a rewritten ID would name a file the provider never
+issued. The copy is a stored file like any other: a listing shows its size, and
+a later request can name it in a `file_id` block.
+
+Otari copies a file before the caller sees its ID: before the reply returns,
+or, on a stream, before the event that names the file is sent. The cost is
+time: the reply, or the stream, waits for the download, for at most 60 seconds
+in all. One reply copies at most `files_output_max_files` files and
+`files_output_max_bytes` in total, the caps in the next paragraph.
+
+Some files are not copied: one past a cap or past the time limit, one the
+provider will not serve, and any file from a provider other than Anthropic or
+OpenAI. Such a file's ID still appears in the reply, and Otari answers 404 for
+it.
 
 One call may store at most `files_output_max_files` files and
 `files_output_max_bytes` in total (20 files and 64 MB by default, the latter also
@@ -225,10 +230,10 @@ See [config.example.yml](../config.example.yml) for the full list. Key knobs:
 - `files_enabled`, `files_backend`, `files_max_bytes`, `files_retention_hours`:
 upload storage (see [Storage backends](#storage-backends)).
 `files_output_max_files` and `files_output_max_bytes` bound what one
-code-execution call may store from its sandbox (see above). An expired file
-answers 404 at once, and the background sweep (`files_sweep_interval_sec`,
-hourly by default, `0` to disable) then reclaims its bytes and row along with
-those of deleted files.
+code-execution call may store from its sandbox, and what one reply may copy
+from a provider's (see above). An expired file answers 404 at once, and the
+background sweep (`files_sweep_interval_sec`, hourly by default, `0` to
+disable) then reclaims its bytes and row along with those of deleted files.
 - `file_understanding_enabled`: master switch for content normalization.
 - `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:
 how images are handled for text-only models. The describe model may be a local

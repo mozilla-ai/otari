@@ -118,7 +118,6 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.env import otari_env
 from gateway.core.metered_pricing import calculate_metered_cost
-from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import (
     cache_read_tokens_of,
     cache_tokens_in_prompt_of,
@@ -158,7 +157,7 @@ from gateway.services.code_execution import (
     ContainerNotFoundError,
     SandboxContainerRegistry,
 )
-from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for, record_provider_files
+from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
@@ -2243,8 +2242,9 @@ class ToolContext:
         self.config = config
         self.mcp_server_configs = mcp_server_configs
         self.use_sandbox = use_sandbox
-        # The uploads a sandbox session is seeded with and the store its outputs
-        # land in. None in hybrid mode and when files are disabled.
+        # The uploads a sandbox session is seeded with, and the store the outputs
+        # of Otari's or a provider's sandbox land in. None in hybrid mode and
+        # when files are disabled.
         self.sandbox_files = sandbox_files
         self.sandbox_tool_entry = sandbox_tool_entry
         # The adapter that runs this request's code, resolved from the container
@@ -3307,7 +3307,7 @@ async def prepare_gateway_tools(
             sandbox_max_iterations or MAX_TOOL_ITERATIONS_CAP,
         ),
         tools_header=tools_header,
-        sandbox_files=sandbox_files if use_sandbox else None,
+        sandbox_files=sandbox_files,
     )
 
 
@@ -3424,35 +3424,31 @@ def _implementation_for(ctx: RequestContext, instance: str) -> LLMProvider | Non
     return None
 
 
-async def _record_provider_files(ctx: RequestContext, files: list[ProviderFile], *, instance: Any) -> None:
-    """Record the files a provider's own sandbox produced for this request, so ``/v1/files`` serves them.
+async def _copy_provider_files(
+    ctx: RequestContext, files_bridge: SandboxFileBridge | None, files: list[ProviderFile], *, instance: Any
+) -> None:
+    """Copy the files a provider's own sandbox produced for this request into ``/v1/files``.
 
-    Standalone only, and only for a request billed to a user and workspace: the
-    row is what scopes a later download to them. ``instance`` is the configured
-    entry that served, whose credential is the one that can read the files back.
+    ``instance`` is the configured entry that served, whose credential is the one that can read the files.
     """
-    if ctx.db is None or not files or not ctx.user_id or ctx.workspace_id is None or not isinstance(instance, str):
+    if files_bridge is None or not files or not isinstance(instance, str):
         return
     provider = _implementation_for(ctx, instance)
     if provider is None:
         return
-    await record_provider_files(
-        UnitOfWork(ctx.db),
-        files,
-        provider=provider.value,
-        provider_instance=instance,
-        user_id=ctx.user_id,
-        workspace_id=ctx.workspace_id,
-        config=ctx.config,
-    )
+    await files_bridge.copy_provider_files(files, provider=provider.value, provider_instance=instance)
 
 
-async def _collecting_produced_files(
-    stream: AsyncIterator[ChunkT], dialect: str, sink: list[ProviderFile]
+async def _copying_produced_files(
+    stream: AsyncIterator[ChunkT], dialect: str, copy: Callable[[list[ProviderFile]], Awaitable[None]]
 ) -> AsyncIterator[ChunkT]:
-    """Forward ``stream`` unchanged, noting the provider-held files its events cite."""
+    """Forward ``stream`` unchanged, copying the provider-held files an event cites before that event goes on.
+
+    So the caller never sees a file ID before Otari holds the file's bytes.
+    """
     async for chunk in stream:
-        sink.extend(produced_files_for(dialect, chunk))
+        if files := produced_files_for(dialect, chunk):
+            await copy(files)
         yield chunk
 
 
@@ -4329,7 +4325,6 @@ def build_streaming_response(
     attribution: RoutingAttribution | None = None,
     tool_tally: ToolUsageTally | None = None,
     workspace_id: uuid.UUID | None = None,
-    on_settled: Callable[[], Awaitable[None]] | None = None,
     extra_headers: dict[str, str] | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
@@ -4351,10 +4346,6 @@ def build_streaming_response(
     * ``on_error``: report/log the failure and refund the reservation.
     * ``on_incomplete``: client disconnected mid-stream; refund so the
       reservation does not leak.
-
-    ``on_settled`` runs after a standalone stream has settled, complete or
-    without usage, for bookkeeping that needs the whole response to have
-    arrived (the files a provider's sandbox produced). Never on an error.
     """
     platform_active = platform_correlation_id is not None
     first_chunk_at: float | None = None
@@ -4401,8 +4392,6 @@ def build_streaming_response(
             await reconcile_reservation(
                 db, reservation, actual_cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
             )
-        if on_settled is not None:
-            await on_settled()
         return None
 
     async def _on_no_usage() -> None:
@@ -4427,8 +4416,6 @@ def build_streaming_response(
             if settlement is not None:
                 record_inline_cost_settlement("unattached")
             return
-        if on_settled is not None:
-            await on_settled()
         if db is None or log_writer is None or reservation is None:
             return
         policy = config.stream_missing_usage_policy
@@ -4770,12 +4757,13 @@ async def run_single_attempt_stream(
         logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)
         raise adapter.provider_error(exc) from exc
 
-    produced: list[ProviderFile] = []
-    if ctx.db is not None:
-        stream = _collecting_produced_files(stream, adapter.name, produced)
+    files_bridge = tool_ctx.sandbox_files
+    if files_bridge is not None:
 
-    async def _record_produced() -> None:
-        await _record_provider_files(ctx, produced, instance=provider)
+        async def _copy(files: list[ProviderFile]) -> None:
+            await _copy_provider_files(ctx, files_bridge, files, instance=provider)
+
+        stream = _copying_produced_files(stream, adapter.name, _copy)
 
     return build_streaming_response(
         adapter=adapter,
@@ -4785,7 +4773,6 @@ async def run_single_attempt_stream(
         config=ctx.config,
         db=ctx.db,
         extra_headers=_container_headers(tool_ctx.container_lease),
-        on_settled=_record_produced if ctx.db is not None else None,
         log_writer=ctx.log_writer,
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,
@@ -5456,7 +5443,9 @@ async def run_standalone_non_stream(
                 await reconcile_reservation(
                     ctx.db, ctx.reservation, actual_cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
                 )
-            await _record_provider_files(ctx, produced_files_for(adapter.name, result), instance=provider)
+            await _copy_provider_files(
+                ctx, tool_ctx.sandbox_files, produced_files_for(adapter.name, result), instance=provider
+            )
         if display_model is not None:
             relabel_model(result, display_model)
         return result

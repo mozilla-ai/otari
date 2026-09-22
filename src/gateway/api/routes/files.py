@@ -472,9 +472,7 @@ async def get_file_content(
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    if record.provider is not None:
-        # The bytes live in the provider's own container; Otari holds the row
-        # that says whose they are and streams them through.
+    if record.storage_ref is None and record.provider is not None:
         try:
             body = await _prime(stream_provider_file(record, config))
         except LookupError as exc:
