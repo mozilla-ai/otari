@@ -13,8 +13,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from gateway.core.database import create_session
-from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.repositories.code_execution import delete_container_rows, expired_container_ids
 
@@ -45,8 +44,7 @@ async def run_sandbox_container_sweeper(interval: float = SWEEP_INTERVAL_S, *, b
     while True:
         await asyncio.sleep(interval)
         try:
-            async with create_session() as db:
-                uow = UnitOfWork(db)
+            async with create_unit_of_work() as uow:
                 for _ in range(_MAX_SWEEP_PASSES):
                     async with uow:
                         dropped = await sweep_expired_containers(uow, batch_size=batch_size)

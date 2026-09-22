@@ -11,8 +11,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 
-from gateway.core.database import create_session
-from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.repositories.files import delete_file_rows, reclaimable_files
 from gateway.services.file_store import FileStore
@@ -80,8 +79,7 @@ async def run_file_sweeper(interval: float, file_store: FileStore, *, batch_size
     while True:
         await asyncio.sleep(interval)
         try:
-            async with create_session() as db:
-                uow = UnitOfWork(db)
+            async with create_unit_of_work() as uow:
                 cursor: tuple[datetime, str] | None = None
                 for _ in range(_MAX_SWEEP_PASSES):
                     async with uow:
