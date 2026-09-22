@@ -1,9 +1,4 @@
-"""Data access for the file rows the ``/v1/files`` API serves and reclaims.
-
-The sweep's two statements and the code-execution output insert live here
-rather than in the service that drives them, so the service orchestrates and
-this module is the only place the queries are spelled.
-"""
+"""Data access for the file rows the ``/v1/files`` API serves and reclaims."""
 
 from __future__ import annotations
 
@@ -31,6 +26,18 @@ class OutputFileRow:
     purpose: str
     storage_ref: str
     expires_at: datetime | None
+    # Set when a provider's own sandbox produced the file, naming where it came from.
+    provider: str | None = None
+    provider_instance: str | None = None
+    provider_container_id: str | None = None
+
+
+async def existing_file_ids(uow: UnitOfWork, file_ids: Collection[str]) -> set[str]:
+    """Which of ``file_ids`` already have a row, recorded or uploaded."""
+    if not file_ids:
+        return set()
+    result = await session_for(uow).execute(select(FileObject.id).where(FileObject.id.in_(list(file_ids))))
+    return set(result.scalars())
 
 
 async def record_output_file(uow: UnitOfWork, row: OutputFileRow) -> None:
@@ -46,6 +53,9 @@ async def record_output_file(uow: UnitOfWork, row: OutputFileRow) -> None:
             bytes=row.bytes,
             purpose=row.purpose,
             storage_ref=row.storage_ref,
+            provider=row.provider,
+            provider_instance=row.provider_instance,
+            provider_container_id=row.provider_container_id,
             created_at=datetime.now(UTC),
             expires_at=row.expires_at,
         )
