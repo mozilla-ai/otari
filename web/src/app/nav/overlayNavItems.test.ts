@@ -59,9 +59,11 @@ describe("a build that replaces the nav-item module", () => {
   })
 
   it("appends into a second organization section from the same list", () => {
+    // A section the base leaves empty still takes a row, which is why Gateway
+    // stays declared with nothing in it.
     expect(
       section(ORG_NAV_SECTIONS, "org-gateway")?.items.map((item) => item.label),
-    ).toEqual(["Guardrails", "Gateways"])
+    ).toEqual(["Gateways"])
   })
 
   it("appends into the workspace rail from that same list", () => {

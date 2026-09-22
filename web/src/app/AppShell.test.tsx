@@ -592,9 +592,9 @@ describe("AppShell surface gating", () => {
       "Members & roles",
       "Email domains",
       "Spend & budgets",
-      "Guardrails",
       "Providers",
       "Deployment providers",
+      "Guardrails",
       "Org settings",
     ])
     // Settings and Accounts are on the deployment rail now, not this one.
@@ -605,11 +605,10 @@ describe("AppShell surface gating", () => {
       ),
     ).toBeNull()
     expect(screen.getByText("General")).toBeInTheDocument()
-    // Guardrails is the organization's own, and its surface is published by
-    // both editions, so the Gateway group it is the only row of is drawn here.
-    // Billing and Gateways are not missing rows but overlay-owned ones this
-    // registry no longer declares at all (otari#737).
-    expect(screen.getByText("Gateway")).toBeInTheDocument()
+    // Guardrails sits in General, so the Gateway group holds nothing in this
+    // build and is not drawn. It stays declared for an overlay's Gateways, a
+    // row this registry does not declare at all (otari#737).
+    expect(screen.queryByText("Gateway")).toBeNull()
   })
 
   it("puts the hosted deployment's own Providers row in that same place", async () => {
@@ -628,14 +627,15 @@ describe("AppShell surface gating", () => {
       name: "Providers",
     })
     expect(providers).toHaveAttribute("href", "/organization/provider-keys")
-    // Above Org settings, which is the placement the move is about, and read
-    // off the rendered order rather than off the registry.
+    // Where the deployment's own row stands on standalone, with Guardrails then
+    // Org settings after it, read off the rendered order rather than off the
+    // registry.
     expect(
       within(sidebar)
         .getAllByRole("link")
         .map((link) => link.textContent)
-        .slice(-2),
-    ).toEqual(["Providers", "Org settings"])
+        .slice(-3),
+    ).toEqual(["Providers", "Guardrails", "Org settings"])
 
     const user = userEvent.setup()
     await user.click(providers)

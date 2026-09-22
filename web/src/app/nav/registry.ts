@@ -322,17 +322,11 @@ const ORGANIZATION_NAV_SECTIONS = [
   {
     id: "org-gateway",
     label: "Gateway",
-    items: [
-      // The organization's guardrail ceiling, which is not the workspace rail's
-      // `/tools/guardrails`: that page configures what this process refuses, and
-      // this one would cap what any workspace under the tenant may allow.
-      {
-        to: "/organization/guardrails",
-        label: "Guardrails",
-        surface: "organization_guardrails",
-        icon: FiShield,
-      },
-    ],
+    // Empty in this build, so the rail drops it, heading included. Declared
+    // anyway because it is an overlay seam: an overlay contributes Gateways into
+    // this section by its id (`overlayNavItems.ts`), and a section that is not
+    // declared has nothing for that row to join.
+    items: [],
   },
   {
     id: "org-general",
@@ -369,6 +363,15 @@ const ORGANIZATION_NAV_SECTIONS = [
         surface: "providers",
         icon: FiBox,
         operatorOnly: "refused",
+      },
+      // The organization's own guardrails and where each one runs. Not the
+      // workspace rail's `/tools/guardrails`, which sets the deployment's own
+      // guardrails service.
+      {
+        to: "/organization/guardrails",
+        label: "Guardrails",
+        surface: "organization_guardrails",
+        icon: FiShield,
       },
       {
         to: "/organization",

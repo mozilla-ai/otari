@@ -84,9 +84,9 @@ describe("nav registry", () => {
       "Members & roles",
       "Email domains",
       "Spend & budgets",
-      "Guardrails",
       "Providers",
       "Deployment providers",
+      "Guardrails",
       "Org settings",
       "Settings",
       "Accounts",
@@ -449,6 +449,7 @@ describe("nav registry", () => {
     expect(general?.items.map((item) => item.to)).toEqual([
       "/organization/provider-keys",
       "/providers",
+      "/organization/guardrails",
       "/organization",
     ])
     // The labels are the thing under test, because both rows render on a
@@ -457,6 +458,7 @@ describe("nav registry", () => {
     expect(general?.items.map((item) => item.label)).toEqual([
       "Providers",
       "Deployment providers",
+      "Guardrails",
       "Org settings",
     ])
   })
