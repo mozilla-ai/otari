@@ -512,6 +512,21 @@ def _stored_secrets(definition: OrganizationGuardrailDefinition) -> dict[str, An
     return dict(decoded)
 
 
+def build_arguments(definition: OrganizationGuardrailDefinition) -> dict[str, Any]:
+    """Every argument `AnyGuardrail.create` would be handed for this definition.
+
+    The split above keeps a credential out of the plain column; a build needs
+    both halves back. Exactly one function undoes it, so the runner that
+    constructs these guardrails decrypts through this rather than reaching for
+    the ciphertext itself.
+
+    Raises what the decryption raises, which the runner records as a build
+    failure like any other: a row whose secrets the current key cannot read is
+    a row this deployment cannot build.
+    """
+    return {**definition.create_kwargs, **_stored_secrets(definition)}
+
+
 def _readable_secrets(definition: OrganizationGuardrailDefinition) -> dict[str, Any]:
     """The decrypted secrets, translating an unreadable map into an answer a caller can act on.
 

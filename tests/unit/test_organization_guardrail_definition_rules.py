@@ -41,6 +41,7 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
     _split_by_secret_flag,
     _validate_argument_urls,
     _validate_arguments,
+    build_arguments,
 )
 
 
@@ -557,3 +558,28 @@ async def test_the_operators_own_override_reaches_this_check_too(monkeypatch: py
     """One flag governs every caller of the shared check, and that is worth pinning."""
     monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
     await _validate_argument_urls({"endpoint": "https://10.0.0.5/collect"})
+
+
+# --------------------------------------------------------------------------- #
+# The arguments a build would be handed
+# --------------------------------------------------------------------------- #
+
+
+def test_the_build_arguments_are_the_two_halves_put_back_together(monkeypatch: pytest.MonkeyPatch) -> None:
+    """What `AnyGuardrail.create` takes, which is the whole row and not either column.
+
+    The split exists so a credential never reaches the plain column. A build
+    needs both halves, so exactly one function undoes it, and the runner calls
+    that one rather than decrypting a second time on its own.
+    """
+    definition = _stored(monkeypatch, api_key="lakera-key")
+
+    assert build_arguments(definition) == {"endpoint": "https://api.lakera.ai", "api_key": "lakera-key"}
+
+
+def test_a_definition_with_no_secrets_still_yields_its_plain_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A row with nothing encrypted must not need a readable key to be built."""
+    definition = _stored(monkeypatch)
+    monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+
+    assert build_arguments(definition) == {"endpoint": "https://api.lakera.ai"}
