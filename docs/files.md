@@ -258,8 +258,8 @@ database either way.
   other two do not reach, such as GCS (`gcs://bucket/prefix`), Azure
   (`abfs://container/prefix`) or SFTP (`sftp://host/path`).
   `files_storage_options` holds the keyword arguments of the protocol's
-  implementation. It is an optional extra, `pip install otari[fsspec]`, like
-  `otari[s3]`; install the implementation package for the protocol as well
+  implementation. It is an optional extra, like `s3` (`uv sync --extra fsspec`
+  in a checkout); install the implementation package for the protocol as well
   (`gcsfs`, `adlfs`, `s3fs`, `paramiko`). Most read their standard credential
   environment variables on their own.
 
@@ -316,4 +316,4 @@ Text/office/PDF extraction uses [markitdown](https://github.com/microsoft/markit
 (MIT); scanned-PDF rasterization uses [pypdfium2](https://github.com/pypdfium2-team/pypdfium2)
 (Apache-2.0). Both are permissively licensed, deliberately avoiding AGPL PDF
 libraries since Otari is a network service. OCR is optional; install the
-`ocr` extra (`pip install gateway[ocr]`) to enable it.
+`ocr` extra (`uv sync --extra ocr` in a checkout) to enable it.

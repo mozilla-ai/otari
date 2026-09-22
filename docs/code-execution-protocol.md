@@ -413,7 +413,7 @@ way to plug in one Otari knows nothing about, in any language. A deployment
 that cannot run such a backend, a PaaS with no privileged containers for
 instance, has a second option: set `sandbox_provider` to a hosted provider and
 Otari drives it in its own process, over that provider's SDK rather than over
-this contract. `e2b` ships in the core (`pip install otari[e2b]`, then
+this contract. `e2b` ships in the core (`uv sync --extra e2b`, then
 `E2B_API_KEY`). Everything above the seam is the same either way, including the
 per-workspace policy, the usage tally, and seeding and collecting files, so the
 choice is about what you run, not about what a request can do. The seam itself
