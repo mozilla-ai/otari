@@ -62,9 +62,11 @@ function mockApi({
       return Response.json(mandates[0] ?? organizationGuardrail())
     }
     if (url.includes(`${API_ROOT}/tool-settings/guardrails/catalog`)) {
+      calls.push({ url, method, body })
       return Response.json(CATALOG)
     }
     if (url.includes(`${API_ROOT}/tool-settings/guardrails/profiles`)) {
+      calls.push({ url, method, body })
       return Response.json({ available: false, reason: "unset", profiles: [] })
     }
     if (url.includes(`${API_ROOT}/workspaces`)) {
@@ -105,7 +107,7 @@ afterEach(() => {
 })
 
 describe("OrganizationGuardrailsPage", () => {
-  it("withholds the tables and their reads from a member", async () => {
+  it("withholds the tables, and every guardrail and catalog read, from a member", async () => {
     const calls = mockApi({ role: "member" })
     renderPage()
 
