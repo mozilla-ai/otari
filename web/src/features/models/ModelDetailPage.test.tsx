@@ -304,10 +304,9 @@ describe("ModelDetailPage", () => {
   })
 
   it("gives a deployment operator its organization's own rate link", async () => {
-    // The gate used to exclude an operator from the override link, on the
-    // reading that they had an editor of their own. They do not any more, and on
-    // a standalone deployment the operator *is* the single organization's owner,
-    // so excluding them left the one caller who can set a rate without the link.
+    // On a standalone deployment the operator *is* the single organization's
+    // owner, so a gate that excluded them would leave the one caller who can set
+    // a rate without the link to set it.
     mockApi()
     GLM_DETAIL.offerings[0] = offering({ credential: "organization" })
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)

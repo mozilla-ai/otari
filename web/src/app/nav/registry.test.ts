@@ -116,9 +116,8 @@ describe("nav registry", () => {
     // Model pricing left it a third way, and then left the rail entirely. It was
     // never one answer: its rate overrides were the organization's own and its
     // catalog read served any session, so the page withheld its operator-only
-    // sections rather than the rail withholding the destination. Those sections
-    // are now gone and the rest folded into Providers, where an organization's
-    // models are offered, priced and switched together.
+    // sections rather than the rail withholding the destination. Rates live on
+    // Providers instead, beside the models they price.
     //
     // Spend & budgets left it a fourth way, in the same issue: the route now
     // resolves to *two* pages, the deployment's for an operator and the
@@ -341,12 +340,11 @@ describe("nav registry", () => {
     // question that only exists once tenants do (otari-ai#1963): standalone's
     // organization is the deployment, so `/usage` already answers it whole.
     //
-    // Provider keys used to be a third. It is not any more:
-    // `organization_providers` is published by both topologies, because the page
-    // behind it is where an organization's models are offered, priced and
-    // switched, which is a tenant's question on either. Its row therefore
-    // renders here, beside the process-global one, which is why the two no
-    // longer share a label.
+    // Provider keys is not a third: `organization_providers` is published by
+    // both topologies, because the page behind it is where an organization's
+    // models are offered, priced and switched, which is a tenant's question on
+    // either. Its row therefore renders here beside the process-global one,
+    // which is why the two carry different labels.
     const unserved = new Map([
       ["/organization/guardrails", "organization_guardrails"],
       ["/organization/usage", "organization_usage"],
@@ -454,9 +452,9 @@ describe("nav registry", () => {
       "/providers",
       "/organization",
     ])
-    // The labels are the thing under test now that both rows render on a
-    // standalone deployment: they used to share "Providers" on the
-    // understanding that exactly one of them ever did.
+    // The labels are the thing under test, because both rows render on a
+    // standalone deployment and a shared label would leave them
+    // indistinguishable.
     expect(general?.items.map((item) => item.label)).toEqual([
       "Providers",
       "Deployment providers",

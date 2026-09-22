@@ -12,10 +12,7 @@ import { Button } from "@/design-system/actions/Button"
 import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
-import {
-  PAGE_SIZE_OPTIONS,
-  TablePagination,
-} from "@/design-system/data/TablePagination"
+import { TablePagination } from "@/design-system/data/TablePagination"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
@@ -57,11 +54,12 @@ import { refreshOutcome } from "./refreshOutcome"
 /**
  * A rate cell. An absent rate is a dash, never a zero, which is a real price.
  *
- * One spelling for absent: the wire has the field optional *and* nullable, and
- * the call sites collapse that to `null` on the way in.
+ * One spelling for absent, and it is `undefined`: the wire has the field
+ * optional *and* nullable, and a rate has no empty value to use instead, since
+ * zero is a real price. The call sites convert at the boundary.
  */
-function rate(value: number | null) {
-  return value === null ? (
+function rate(value: number | undefined) {
+  return value === undefined ? (
     <span className="text-subtle">—</span>
   ) : (
     <span className="text-mono-caption tabular-nums">{formatRate(value)}</span>
@@ -86,14 +84,24 @@ export function ProviderModelsPanel({
   providerKey,
   canEdit,
   onEditRate,
+  page,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
 }: {
   providerKey: OrgProviderKey
   canEdit: boolean
   /** Opens the organization's rate editor on one model, on the page above. */
   onEditRate: (model: OrgProviderModel) => void
+  /**
+   * Which page of models is shown. Owned by the page above, which keeps it in
+   * the URL: an expanded panel is worth sharing, and so is where you were in it.
+   */
+  page: number
+  pageSize: number
+  onPageChange: (page: number) => void
+  onPageSizeChange: (size: number) => void
 }) {
-  const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0])
   const models = useOrgProviderModels(providerKey.id, page, pageSize)
   const setEnabled = useSetOrgProviderModelEnabled(providerKey.id)
   const withdraw = useWithdrawOrgProviderModel(providerKey.id)
@@ -137,25 +145,25 @@ export function ProviderModelsPanel({
       id: "input",
       header: "Input / 1M",
       align: "end",
-      cell: (row) => rate(row.input_price_per_million ?? null),
+      cell: (row) => rate(row.input_price_per_million ?? undefined),
     },
     {
       id: "output",
       header: "Output / 1M",
       align: "end",
-      cell: (row) => rate(row.output_price_per_million ?? null),
+      cell: (row) => rate(row.output_price_per_million ?? undefined),
     },
     {
       id: "cache_read",
       header: "Cache read",
       align: "end",
-      cell: (row) => rate(row.cache_read_price_per_million ?? null),
+      cell: (row) => rate(row.cache_read_price_per_million ?? undefined),
     },
     {
       id: "cache_write",
       header: "Cache write",
       align: "end",
-      cell: (row) => rate(row.cache_write_price_per_million ?? null),
+      cell: (row) => rate(row.cache_write_price_per_million ?? undefined),
     },
     {
       id: "source",
@@ -334,11 +342,8 @@ export function ProviderModelsPanel({
             pageSize={pageSize}
             total={models.data?.count ?? null}
             rowsOnPage={rows.length}
-            onPageChange={setPage}
-            onPageSizeChange={(size) => {
-              setPageSize(size)
-              setPage(0)
-            }}
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
             isFetching={models.isFetching}
             label={`Models on ${providerKey.name}`}
           />

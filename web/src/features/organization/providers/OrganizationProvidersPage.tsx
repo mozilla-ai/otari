@@ -17,6 +17,7 @@ import type {
 import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
+import { PAGE_SIZE_OPTIONS } from "@/design-system/data/TablePagination"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
@@ -72,16 +73,22 @@ const OVERRIDE_PAGE_SIZE = 200
 // The two URL-held pieces of page state: which key's models are open, and which
 // model's rate is being edited. `override` is the name the Models detail page
 // already links with, so it is a contract rather than a choice.
-const URL_DEFAULTS = { provider: "", override: "" }
+const URL_DEFAULTS = {
+  provider: "",
+  override: "",
+  models_page: "0",
+  models_size: String(PAGE_SIZE_OPTIONS[0]),
+}
 
 // The organization's own upstream credentials: one BYO key per provider that
 // every workspace under the tenant inherits.
 //
 // Not the workspace rail's `/providers`, which manages `provider_credentials`,
 // keyed on an instance name and therefore owned by the process rather than by
-// anyone in particular. The two pages look alike and are not the same thing, so
-// a deployment shows one or the other: `organization_providers` is reported by a
-// hosted deployment and `providers` by a standalone one
+// anyone in particular. The two pages look alike and are not the same thing.
+// A standalone deployment reports both surfaces and shows both pages, under
+// different labels; a hosted one reports `organization_providers` alone, since
+// one `provider_credentials` row would serve every tenant
 // (`STANDALONE_SURFACES` / `HOSTED_SURFACES` in
 // `src/gateway/api/routes/bootstrap.py`).
 //
@@ -327,17 +334,25 @@ export function OrganizationProvidersPage() {
   // contract the Models detail page links into.
   const url = useUrlState(URL_DEFAULTS)
   const expandedKeyId = url.get("provider")
+  // Snapped to an offered size, the way ActivityPage snaps its own: a
+  // hand-edited or stale `models_size` must not reach the API as a limit it
+  // never offers, or leave the rows-per-page select showing a value it does not.
+  const modelsPage = Math.max(0, url.getNumber("models_page"))
+  const modelsSize =
+    PAGE_SIZE_OPTIONS.find((size) => size === url.getNumber("models_size")) ??
+    PAGE_SIZE_OPTIONS[0]
   const ratingModelKey = url.get("override")
   // Narrowed to the model being edited, and read only while one is. Every
   // period of that model is what the editor needs, and the first page of the
   // whole table is not that: an organization with more overrides than fit in it
   // would open a create form over a rate that already exists, and the save
   // would earn the 409 the overlap check exists to prevent.
+  const isRating = ratingModelKey !== ""
   const overrides = useOrganizationPricing(
     0,
     OVERRIDE_PAGE_SIZE,
-    canEdit && ratingModelKey !== "",
-    ratingModelKey || undefined,
+    canEdit && isRating,
+    isRating ? ratingModelKey : undefined,
   )
 
   // Bumped on each open, and the create form is keyed on it, so the draft (the
@@ -471,6 +486,8 @@ export function OrganizationProvidersPage() {
                 onPress={() =>
                   url.patch({
                     provider: expandedKeyId === row.id ? "" : row.id,
+                    // A different provider's panel starts at its own first page.
+                    models_page: "0",
                   })
                 }
               />
@@ -636,6 +653,14 @@ export function OrganizationProvidersPage() {
                 onEditRate={(model) =>
                   url.patch({ override: `${row.provider}:${model.model}` })
                 }
+                page={modelsPage}
+                pageSize={modelsSize}
+                onPageChange={(next) =>
+                  url.patch({ models_page: String(next) })
+                }
+                onPageSizeChange={(size) =>
+                  url.patch({ models_size: String(size), models_page: "0" })
+                }
               />
             )}
           />
@@ -673,13 +698,18 @@ export function OrganizationProvidersPage() {
           rather than inside the panel because the panel lives in a table cell,
           and a dialog rendered from one closes with the row that opened it.
 
-          Not mounted until the rates are in hand. The editor reads its start
-          values once, when it mounts, and `?override=` is in the URL a render
-          before the read answering it settles: mounted on the first render it
-          seeds itself from nothing and keeps that, showing an admin an empty
-          form over a rate that exists and replacing it on save. A read that
+          Not mounted until *this model's* rates are in hand. The editor reads
+          its start values once, when it mounts, and `?override=` is in the URL a
+          render before the read answering it settles: mounted early it seeds
+          itself from nothing and keeps that, showing an admin an empty form over
+          a rate that exists and replacing it on save.
+
+          `isSuccess` alone is not that condition. The read is narrowed per model
+          and keeps the previous model's rows as placeholder data while the next
+          one is in flight, so opening a second model is a success carrying the
+          first model's answer, which holds no row for the second. A read that
           fails leaves it unmounted and says so in the banner above. */}
-      {canEdit && overrides.isSuccess ? (
+      {canEdit && overrides.isSuccess && !overrides.isPlaceholderData ? (
         <PricingOverrideDialog
           key={ratingModelKey}
           isOpen={ratingModelKey !== ""}

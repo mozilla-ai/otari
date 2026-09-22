@@ -343,13 +343,13 @@ export function ModelDetailView({
   publicView?: boolean
 }) {
   const organization = useOrganizationContext(!publicView)
-  // Operating the deployment is no longer a pricing authority here: rates are
-  // set per model on Providers, which answers to the organization role. It still
-  // decides the two hints below that point at deployment-wide pages.
+  // Not a pricing authority here: rates are set per model on Providers, which
+  // answers to the organization role. It decides the two hints below that point
+  // at deployment-wide pages.
   const isOperator = !publicView && isDeploymentOperator(organization.data)
-  // No longer excludes an operator. On a standalone deployment the operator is
-  // also the single organization's owner, and excluding them left the one caller
-  // who can set a rate without the link to set it.
+  // Includes an operator: on a standalone deployment they are also the single
+  // organization's owner, and excluding them would leave the one caller who can
+  // set a rate without the link to set it.
   const canOverride = !publicView && canManage(organization.data)
   const selected = useCatalogModel(modelId)
   const [quantization, setQuantization] = useState("all")

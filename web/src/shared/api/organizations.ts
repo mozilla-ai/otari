@@ -33,6 +33,7 @@ import type {
   UpdateOrganizationMemberRequest,
   UpdateOrganizationRequest,
   UpdateOrgProviderKeyRequest,
+  UpdateOrgProviderModelRequest,
 } from "@/client"
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
@@ -439,13 +440,13 @@ export function useAcceptInvitation() {
 /**
  * Refresh what one write to a provider key actually moved.
  *
- * Each flag is off by default because the blanket version was wrong in both
- * directions. Refetching every key's model list on every write is the cost the
- * separate root key exists to avoid (see `queryKeys.ts`): making a key default
- * or renaming one moves no model row, and a page with a panel open would refetch
- * it anyway. And no key write refreshed the catalog at all, while creating a key
- * offers its whole model list, archiving one withdraws what it served, restoring
- * one brings it back and deleting one takes its rows with it.
+ * Both flags default off, because both are expensive in their own way.
+ * Refetching every key's model list is what the separate root key exists to
+ * avoid (see `queryKeys.ts`), and only a write that moves a model row earns it.
+ * The catalog is the other: creating a key offers its whole model list,
+ * archiving one withdraws what it served, restoring one brings it back,
+ * deleting one takes its rows, and a re-entered credential makes an unusable key
+ * usable again.
  */
 function invalidateOrgProviderKeys(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -539,9 +540,11 @@ export function useUpdateOrgProviderKey() {
         { method: "PATCH", body: JSON.stringify(body) },
       ),
     onSuccess: () =>
-      // A rotated credential or a renamed key moves no offered row and nothing
-      // the catalog lists.
-      invalidateOrgProviderKeys(queryClient),
+      // No offered row moves, but the catalog can: a key whose credential will
+      // not decrypt is unusable, and an unusable key contributes nothing
+      // (`organization_model_access.key_is_usable`), so re-entering a working
+      // one puts its models back.
+      invalidateOrgProviderKeys(queryClient, { catalog: true }),
   })
 }
 
@@ -746,10 +749,13 @@ export function useOfferOrgProviderModel(keyId: string) {
 export function useSetOrgProviderModelEnabled(keyId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ modelId, enabled }: { modelId: string; enabled: boolean }) =>
+    mutationFn: ({
+      modelId,
+      ...body
+    }: { modelId: string } & UpdateOrgProviderModelRequest) =>
       apiFetch<OrgProviderModel>(
         `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models/${encodeURIComponent(modelId)}`,
-        { method: "PATCH", body: JSON.stringify({ enabled }) },
+        { method: "PATCH", body: JSON.stringify(body) },
       ),
     onSuccess: () => invalidateOrgProviderModels(queryClient, keyId),
   })

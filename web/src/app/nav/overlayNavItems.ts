@@ -12,8 +12,8 @@ import type { NavItemContribution } from "./types"
  * owns outright; these are the ones that belong *inside* a section the base owns
  * and among rows the base declares. Billing is the canonical case
  * (ARCHITECTURE.md's capability table makes it the overlay-only capability, and
- * it belongs under "Cost & billing" beside `/budgets` and
- * `/organization/usage`), with Gateways the same shape under the organization
+ * it belongs under "Cost & billing" beside `/budgets`,
+ * the one row that section carries), with Gateways the same shape under the organization
  * rail's "Gateway" heading. Contributing either as a section of its own would
  * put a second heading of that name on the rail; contributing it here puts the
  * row where the navigation design draws it, and neither costs an edit to a base

@@ -96,7 +96,12 @@ function mockApi(opts: MockOpts = {}) {
     }
     // Ahead of the context catch-all, because that path is a prefix of this one.
     if (url.includes(`${API_ROOT}/organizations/me/pricing`)) {
-      const overrides = opts.overrides ?? []
+      // Narrowed the way the server narrows it, so a test can open the editor on
+      // a second model and see what that model's own read answers.
+      const asked = new URL(url, "http://x").searchParams.get("model_key")
+      const overrides = (opts.overrides ?? []).filter(
+        (row) => asked === null || row.model_key === asked,
+      )
       return jsonResponse({ count: overrides.length, data: overrides })
     }
     return jsonResponse(opts.context ?? organizationContext())
@@ -819,12 +824,60 @@ describe("OrganizationProvidersPage", () => {
     )
 
     const dialog = await screen.findByRole("dialog")
-    // eslint-disable-next-line no-console
     expect(within(dialog).getByLabelText("Input, per 1M tokens")).toHaveValue(
       "2.5",
     )
     expect(within(dialog).getByLabelText("Output, per 1M tokens")).toHaveValue(
       "10",
+    )
+  })
+
+  it("reseeds the rate editor when it is opened on a second model", async () => {
+    // The rates query keeps the previous model's rows as placeholder data while
+    // the next model's read is in flight, so "the data has arrived" is true and
+    // wrong: the dialog remounts on the new model and seeds from the old one's
+    // answer, which holds no row for it. Blank fields over a rate that exists,
+    // the same failure the deep link had, reached by opening a second model.
+    const user = userEvent.setup()
+    mockApi({
+      keys: [orgProviderKey({ id: KEY_ID, name: "Production" })],
+      models: [
+        orgProviderModel({ id: "m1", model: "gpt-4o" }),
+        orgProviderModel({ id: "m2", model: "gpt-4o-mini" }),
+      ],
+      overrides: [
+        organizationPricingOverride(),
+        organizationPricingOverride({
+          id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          model_key: "openai:gpt-4o-mini",
+          input_price_per_million: 0.15,
+          output_price_per_million: 0.6,
+        }),
+      ],
+    })
+
+    await renderPage(
+      <OrganizationProvidersPage />,
+      `/organization/provider-keys?provider=${KEY_ID}&override=openai%3Agpt-4o`,
+    )
+    const first = await screen.findByRole("dialog")
+    expect(within(first).getByLabelText("Input, per 1M tokens")).toHaveValue(
+      "2.5",
+    )
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Set your rate for gpt-4o-mini",
+      }),
+    )
+
+    const second = await screen.findByRole("dialog")
+    await waitFor(() =>
+      expect(within(second).getByLabelText("Input, per 1M tokens")).toHaveValue(
+        "0.15",
+      ),
     )
   })
 
@@ -842,5 +895,71 @@ describe("OrganizationProvidersPage", () => {
     expect(
       await screen.findByRole("grid", { name: "Models on Production" }),
     ).toBeInTheDocument()
+  })
+  it("reports a rate list that could not be read instead of opening an empty editor", async () => {
+    // The editor is held shut until the rates land, so a read that never lands
+    // has to say so: silence plus no dialog reads as a link that did nothing.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes(`${API_ROOT}/organizations/me/pricing`)) {
+        return jsonResponse({ detail: "Pricing is unavailable" }, 500)
+      }
+      if (url.includes("/provider-keys")) {
+        return jsonResponse({ count: 0, data: [] })
+      }
+      return jsonResponse(organizationContext())
+    })
+
+    await renderPage(
+      <OrganizationProvidersPage />,
+      "/organization/provider-keys?override=openai%3Agpt-4o",
+    )
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Pricing is unavailable",
+    )
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
+  it("does not open the rate editor for a member who cannot manage the organization", async () => {
+    // The deep link is a URL anybody can type. Rates decide what every member is
+    // billed, so the editor answers to the same role the rest of the page does.
+    mockApi({
+      // Both flags, for the reason the keys test above gives.
+      context: organizationContext({
+        role: "member",
+        deployment_operator: false,
+      }),
+      overrides: [organizationPricingOverride()],
+    })
+
+    await renderPage(
+      <OrganizationProvidersPage />,
+      "/organization/provider-keys?override=openai%3Agpt-4o",
+    )
+
+    expect(
+      await screen.findByText(/Only organization owners and admins/),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+  it("reads the models page from the URL, so an expanded panel is shareable to the row", async () => {
+    // The page an expanded panel is on travels with the link, the way `provider`
+    // and `override` already do. Snapped to an offered size, so a stale or
+    // hand-edited `models_size` cannot reach the API as a limit it never offers.
+    const requests = mockApi({
+      keys: [orgProviderKey({ id: KEY_ID, name: "Production" })],
+      models: [orgProviderModel({ model: "gpt-4o" })],
+    })
+
+    await renderPage(
+      <OrganizationProvidersPage />,
+      `/organization/provider-keys?provider=${KEY_ID}&models_page=2&models_size=999`,
+    )
+    await screen.findByRole("grid", { name: "Models on Production" })
+
+    const read = requests.find((request) => request.url.includes("/models?"))
+    expect(read?.url).toContain("skip=50")
+    expect(read?.url).toContain("limit=25")
   })
 })

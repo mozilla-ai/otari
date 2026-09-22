@@ -143,7 +143,7 @@ export const NoExistingOverrides: Story = {
 // No `Pending` or `WithError` story: this dialog owns the create and replace
 // mutations (they live below the caller's key, so a refusal cannot greet the
 // next open), so neither state can be handed in as a prop. Both are asserted
-// where they are produced, in `OrganizationProvidersPage`'s tests.
+// where they are produced, in this component's own tests.
 
 /**
  * Driven from a trigger, so the overlap validation can be exercised: try

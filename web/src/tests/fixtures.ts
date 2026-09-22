@@ -169,10 +169,10 @@ const STANDALONE_SURFACES = [
 // the organization-wide Usage page appears, being a destination only where "my
 // organization" is narrower than "everything" (otari-ai#1963).
 //
-// `organization_providers` is no longer part of that difference. It is on the
-// standalone list above, because the page behind it is where an organization's
-// models are offered, priced and switched, which is a tenant's question whether
-// or not the deployment has more than one tenant.
+// `organization_providers` is not part of that difference: it is on the
+// standalone list above too, because the page behind it is where an
+// organization's models are offered, priced and switched, which is a tenant's
+// question whether or not the deployment has more than one tenant.
 const HOSTED_DROPS = new Set(["providers", "playground"])
 
 export const HOSTED_SURFACES = [

@@ -313,4 +313,41 @@ describe("PricingOverrideDialog", () => {
       expect(write?.body).not.toHaveProperty("model_key")
     })
   })
+  it("shows a refused save rather than closing over it", async () => {
+    // `RateOverridesCard` asserted this before the merge and took the assertion
+    // with it. The mutation lives inside this dialog, so a refusal has nowhere
+    // else to surface.
+    mockApi({
+      overrides: [],
+      writeStatus: 409,
+      writeBody: { detail: "A period already covers that instant" },
+    })
+    const user = userEvent.setup()
+
+    // Handed the selector, so the combobox never opens: this is about what a
+    // refusal does, not about picking a model.
+    await renderDialog([], { initialModelKey: "openai:gpt-4o" })
+
+    await user.type(await screen.findByLabelText(/input, per 1m tokens/i), "1")
+    await user.type(screen.getByLabelText(/output, per 1m tokens/i), "2")
+    await user.click(screen.getByRole("button", { name: /^add override$/i }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "A period already covers that instant",
+    )
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("puts focus in the first rate when editing, not on the frame's close", async () => {
+    // Editing a rate is a numeric change to a form already filled in, so the
+    // caret belongs where the change goes. The model key is fixed for an edit.
+    mockApi({ overrides: [] })
+    const stored = pricingOverride()
+
+    await renderDialog([stored], { editing: stored })
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(/input, per 1m tokens/i)).toHaveFocus(),
+    )
+  })
 })

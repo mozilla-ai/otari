@@ -338,14 +338,11 @@ const ORGANIZATION_NAV_SECTIONS = [
     id: "org-general",
     label: "General",
     items: [
-      // Two rows, and on a standalone deployment both of them render. That is
-      // new: `organization_providers` used to be the hosted replacement for
-      // `providers`, so the pair could share the label "Providers" on the
-      // understanding that a deployment reported one or the other. The
-      // organization row is now where an organization's models are offered,
-      // priced and switched, which is a tenant's question on either topology,
-      // so standalone publishes both surfaces and the labels have to tell them
-      // apart.
+      // Two rows, and on a standalone deployment both render, which is why they
+      // cannot share a label. The organization row is where an organization's
+      // models are offered, priced and switched, a tenant's question on either
+      // topology, so both surfaces are published there; hosted reports only the
+      // organization one.
       //
       // The organization's own row keeps the bare noun, because this rail is
       // already scoped to the organization and the row whose scope is *not* the

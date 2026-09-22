@@ -56,7 +56,18 @@ function mockApi(opts: MockOpts = {}) {
   return requests
 }
 
-function renderPanel(canEdit = true, onEditRate = vi.fn()) {
+// Pagination is the page's, kept in the URL, so the panel takes it as props.
+// Held here so a test that pages can read back what the panel asked for.
+function renderPanel(
+  canEdit = true,
+  onEditRate = vi.fn(),
+  pager: {
+    page?: number
+    pageSize?: number
+    onPageChange?: (page: number) => void
+    onPageSizeChange?: (size: number) => void
+  } = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -66,6 +77,10 @@ function renderPanel(canEdit = true, onEditRate = vi.fn()) {
         providerKey={KEY}
         canEdit={canEdit}
         onEditRate={onEditRate}
+        page={pager.page ?? 0}
+        pageSize={pager.pageSize ?? 25}
+        onPageChange={pager.onPageChange ?? vi.fn()}
+        onPageSizeChange={pager.onPageSizeChange ?? vi.fn()}
       />
     </QueryClientProvider>,
   )

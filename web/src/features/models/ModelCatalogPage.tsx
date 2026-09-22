@@ -60,7 +60,7 @@ import { useUrlValue } from "@/shared/helpers/urlState"
 // where its offerings are compared. Below `lg` the rail folds behind a
 // "Filters" button.
 //
-// Read-only for every caller. A price is set on Model pricing, which the model
+// Read-only for every caller. A price is set on Providers, which the model
 // page's links reach with the selector in hand, so the catalog cannot be used
 // to reprice anything by accident (otari-ai#2095, #2096).
 //
