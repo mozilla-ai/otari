@@ -15,7 +15,7 @@ import os
 import uuid
 from collections.abc import AsyncGenerator, Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import quote
 
 import httpx
@@ -24,9 +24,6 @@ from any_llm import LLMProvider
 from gateway.core.config import GatewayConfig, provider_credential_env_names
 from gateway.log_config import logger
 from gateway.services.provider_kwargs import get_provider_kwargs
-
-if TYPE_CHECKING:
-    from gateway.models.tools import FileObject
 
 ANTHROPIC_FILES_BASE = "https://api.anthropic.com/v1"
 OPENAI_BASE = "https://api.openai.com/v1"
@@ -273,22 +270,3 @@ class ProviderFileClient:
         except httpx.HTTPError as exc:
             raise ProviderFileUnavailableError(f"{self._provider} could not serve file {file.file_id}") from exc
 
-
-async def stream_provider_file(record: FileObject, config: GatewayConfig) -> AsyncGenerator[bytes, None]:
-    """Stream a provider-held file's bytes, never holding the whole body.
-
-    Raises ``LookupError`` when the provider cannot be credentialed and
-    ``httpx.HTTPError`` when it refuses or fails, which the route maps to its
-    own status; the provider's own message never reaches the caller.
-    """
-    provider = str(record.provider)
-    api_key, api_base = _credentials(config, provider, record.provider_instance, record.workspace_id)
-    file = ProviderFile(file_id=record.id, container_id=record.provider_container_id)
-    url, headers = _request_for(provider, file, api_key, api_base)
-    async with (
-        httpx.AsyncClient(timeout=_TIMEOUT) as client,
-        client.stream("GET", url, headers=headers) as response,
-    ):
-        response.raise_for_status()
-        async for chunk in response.aiter_bytes():
-            yield chunk

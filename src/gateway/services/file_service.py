@@ -68,11 +68,10 @@ async def fetch_file(
 async def read_file_bytes(file_store: FileStore, record: FileObject) -> bytes:
     """Load the raw bytes for ``record`` from the blob backend.
 
-    Raises ``FileNotFoundError`` for a row whose bytes a provider holds; those
-    are served by proxy on download and never read into a request here.
+    Raises ``FileNotFoundError`` for a row with no stored bytes.
     """
     if record.storage_ref is None:
-        raise FileNotFoundError(f"{record.id} is held by provider {record.provider!r}, not the blob store")
+        raise FileNotFoundError(f"{record.id} has no stored bytes")
     return await file_store.get(record.storage_ref)
 
 

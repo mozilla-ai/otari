@@ -28,7 +28,6 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
-import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import and_, or_, select
@@ -43,7 +42,6 @@ from gateway.models.api_keys import APIKey
 from gateway.models.tools import FileObject
 from gateway.services.file_service import expiry_for, fetch_file, guess_mime_type
 from gateway.services.file_store import FileStore
-from gateway.services.files.provider_files import stream_provider_file
 from gateway.services.workspace_scope import default_workspace_id
 
 _FILES_BETA = "files-api-2025-04-14"
@@ -472,35 +470,13 @@ async def get_file_content(
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    if record.storage_ref is None and record.provider is not None:
-        try:
-            body = await _prime(stream_provider_file(record, config))
-        except LookupError as exc:
-            logger.error("No credential to read %s file %s: %s", record.provider, file_id, exc)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to read file",
-            ) from exc
-        except httpx.HTTPError as exc:
-            logger.warning("Provider %s refused file %s: %s", record.provider, file_id, exc)
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="The provider holding this file could not serve it",
-            ) from exc
-        return StreamingResponse(
-            body,
-            media_type=record.mime_type,
-            headers={"Content-Disposition": _content_disposition(record.filename)},
-        )
-
     # No Content-Length: it would come from record.bytes (DB) while the body
     # comes from the storage backend (disk). If those ever diverge (partial
     # write, corruption), a length header derived from the DB value would be
     # wrong, and clients trust that header over what actually arrives. Chunked
     # transfer encoding doesn't need to declare a length up front.
     if record.storage_ref is None:
-        # Neither a blob of ours nor a provider's: nothing can be served.
-        logger.error("File %s has no storage ref and no provider", file_id)
+        logger.error("File %s has no stored bytes", file_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
     try:

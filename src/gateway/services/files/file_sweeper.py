@@ -54,7 +54,7 @@ async def sweep_files(
     reclaimed: list[str] = []
     for record in records:
         try:
-            # A provider-held row has no blob of ours; only the row is reclaimed.
+            # A row with no stored bytes has no blob to remove.
             if record.storage_ref is not None:
                 await file_store.delete(record.storage_ref)
         except FileNotFoundError:
