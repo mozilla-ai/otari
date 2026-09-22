@@ -22,9 +22,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.guardrails import OrganizationGuardrail, OrganizationGuardrailDefinition
 from gateway.models.tenancy import Organization
-from gateway.repositories.tenancy import OrganizationRepository
+from gateway.repositories.tenancy import OrganizationGuardrailDefinitionRepository, OrganizationRepository
 
 pytestmark = pytest.mark.asyncio
 
@@ -200,3 +201,30 @@ async def test_deleting_the_organization_removes_both(async_db: AsyncSession) ->
 
     assert (await async_db.execute(select(OrganizationGuardrailDefinition))).scalars().all() == []
     assert (await async_db.execute(select(OrganizationGuardrail))).scalars().all() == []
+
+
+async def test_every_enabled_definition_of_every_organization_in_one_read(async_db: AsyncSession) -> None:
+    """What a process-wide cache of built guardrails is filled from.
+
+    One query for the whole deployment rather than one per organization, the
+    posture `org_provider_key_service` already takes for provider keys. The
+    disabled row is left out here rather than filtered later, because the caller
+    holds vendor clients and a row it must not build is a row it must not read.
+    """
+    first = await _organization(async_db, slug="runner-one")
+    second = await _organization(async_db, slug="runner-two")
+    held = _definition(first, name="held")
+    disabled = _definition(first, name="off")
+    disabled.enabled = False
+    elsewhere = _definition(second, name="held")
+    async_db.add_all([held, disabled, elsewhere])
+    await async_db.flush()
+
+    uow = UnitOfWork(async_db)
+    async with uow:
+        rows = await OrganizationGuardrailDefinitionRepository(uow).list_enabled_in_every_organization()
+
+    found = {(row.organization_id, row.name) for row in rows}
+    assert (first.id, "held") in found
+    assert (second.id, "held") in found
+    assert (first.id, "off") not in found

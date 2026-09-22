@@ -60,6 +60,28 @@ class OrganizationGuardrailDefinitionRepository(BaseRepository[OrganizationGuard
         )
         return list(result.scalars().all())
 
+    async def list_enabled_in_every_organization(self) -> list[OrganizationGuardrailDefinition]:
+        """Every enabled definition on the deployment, for the runner's cache.
+
+        The one read here with no tenant predicate, and deliberately so: the
+        caller is a process-wide cache of built guardrails rather than an answer
+        to a request, and the scope a request is subject to is settled by the
+        mandate query it already runs. One read for the whole deployment, the
+        posture `org_provider_key_service` takes for provider keys, and bounded
+        the same way: `MAX_DEFINITIONS_PER_ORGANIZATION` caps each organization.
+
+        Disabled rows are left out in the query rather than skipped afterwards,
+        because what the caller does with a row is construct a vendor client.
+
+        Ordered so a test can assert the sequence, as the two reads above are.
+        """
+        result = await self.db.execute(
+            select(OrganizationGuardrailDefinition)
+            .where(OrganizationGuardrailDefinition.enabled.is_(True))
+            .order_by(OrganizationGuardrailDefinition.organization_id, OrganizationGuardrailDefinition.name)
+        )
+        return list(result.scalars().all())
+
     async def get_in_organization(
         self, definition_id: uuid.UUID, organization_id: uuid.UUID
     ) -> OrganizationGuardrailDefinition | None:
