@@ -20,17 +20,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CurrentIdentity,
-    ModelProviderPortDep,
+    OrgProviderModelServiceDep,
     get_config,
     get_db,
-    get_unit_of_work,
     verify_master_key,
 )
 from gateway.api.routes.organizations import Message
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
-from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.provider_keys import (
+from gateway.schemas.providers import (
     OrgProviderAvailableModelsPublic,
     OrgProviderKeyCreateRequest,
     OrgProviderKeyModelCreateRequest,
@@ -47,13 +45,7 @@ from gateway.models.provider_keys import (
     WorkspaceProviderModelRestrictionRequest,
     WorkspaceProviderModelRestrictionsPublic,
 )
-from gateway.repositories.pricing import OrganizationModelPricingRepository
-from gateway.repositories.tenancy import OrgProviderKeyModelRepository, OrgProviderKeyRepository
-from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.tenancy import OrgProviderKeyService
-from gateway.services.tenancy.org_provider_key_service import refresh_org_provider_cache
-from gateway.services.tenancy.org_provider_model_service import OrgProviderModelService
-from gateway.services.tenancy.organization_service import OrganizationService
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
 # see organizations.py/workspaces.py for the same note.
@@ -87,32 +79,6 @@ def get_org_provider_key_service(db: Annotated[AsyncSession, Depends(get_db)]) -
 
 OrgProviderKeyServiceDep = Annotated[OrgProviderKeyService, Depends(get_org_provider_key_service)]
 
-
-def get_org_provider_model_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-    model_provider: ModelProviderPortDep,
-) -> OrgProviderModelService:
-    """Build the offered-models service on the request's session and unit of work.
-
-    The service itself names neither the session nor SQLAlchemy, so its
-    repositories and its cache-refresh callable are assembled here. The unit of
-    work and the services built on the session are over the *same* session (see
-    ``deps.get_unit_of_work``), so a block's commit also settles what they staged.
-    """
-    return OrgProviderModelService(
-        uow,
-        organizations=OrganizationService(db, membership_listener=None),
-        org_pricing=OrganizationPricingService(db, config, model_provider=model_provider),
-        models=OrgProviderKeyModelRepository(uow),
-        pricing=OrganizationModelPricingRepository(uow),
-        keys=OrgProviderKeyRepository(db),
-        refresh_overlay=lambda: refresh_org_provider_cache(db),
-    )
-
-
-OrgProviderModelServiceDep = Annotated[OrgProviderModelService, Depends(get_org_provider_model_service)]
 
 DiscoveryTimeout = Annotated[GatewayConfig, Depends(get_config)]
 

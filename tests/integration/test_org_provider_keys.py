@@ -20,9 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import GatewayConfig
 from gateway.models.provider_keys import (
     OrgProviderKey,
-    OrgProviderKeyCreateRequest,
-    OrgProviderKeyUpdateRequest,
-    WorkspaceProviderKeyOverrideRequest,
 )
 from gateway.models.tenancy import Organization, User, Workspace
 from gateway.repositories.tenancy import (
@@ -33,6 +30,11 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceProviderKeyOverrideRepository,
     WorkspaceRepository,
+)
+from gateway.schemas.providers import (
+    OrgProviderKeyCreateRequest,
+    OrgProviderKeyUpdateRequest,
+    WorkspaceProviderKeyOverrideRequest,
 )
 from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.secret_box import encrypt_secret, generate_secret_key

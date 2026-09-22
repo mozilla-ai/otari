@@ -45,40 +45,35 @@ from decimal import Decimal
 
 from gateway.core.metered_pricing import quantize_rate
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.money import as_float, to_usd, to_usd_or_none
-from gateway.models.pricing import ModelPricing, OrganizationModelPricing, PriceSource
-from gateway.models.provider_keys import (
-    OrgProviderAvailableModelsPublic,
-    OrgProviderKey,
-    OrgProviderKeyModel,
-    OrgProviderKeyModelPublic,
-    OrgProviderKeyModelsPublic,
-    OrgProviderModelsRefreshPublic,
-)
-from gateway.models.tenancy import User
-from gateway.repositories.pricing import OrganizationModelPricingRepository
-from gateway.repositories.tenancy import (
-    OfferedModelConflict,
-    OrgProviderKeyModelRepository,
-    OrgProviderKeyRepository,
-)
-from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
-from gateway.services.organization_pricing_service import OrganizationPricingService
-from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
-from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
-from gateway.services.tenancy.errors import (
-    OrgProviderKeyNotFoundError,
+from gateway.exceptions.providers_exceptions import (
     OrgProviderLastModelError,
     OrgProviderModelAlreadyOfferedError,
     OrgProviderModelNameRequiredError,
     OrgProviderModelNotFoundError,
     OrgProviderModelUnpricedError,
 )
+from gateway.models.money import as_float, to_usd, to_usd_or_none
+from gateway.models.pricing import SEED_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
+from gateway.models.provider_keys import (
+    OrgProviderKey,
+    OrgProviderKeyModel,
+)
+from gateway.models.tenancy import User
+from gateway.repositories.pricing import OrganizationModelPricingRepository
+from gateway.repositories.providers import OfferedModelConflict, OrgProviderKeyModelRepository
+from gateway.repositories.tenancy import OrgProviderKeyRepository
+from gateway.schemas.providers import (
+    OrgProviderAvailableModelsPublic,
+    OrgProviderKeyModelPublic,
+    OrgProviderKeyModelsPublic,
+    OrgProviderModelsRefreshPublic,
+)
+from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
+from gateway.services.organization_pricing_service import OrganizationPricingService
+from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
+from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
+from gateway.services.tenancy.errors import OrgProviderKeyNotFoundError
 from gateway.services.tenancy.organization_service import OrganizationService
-
-# The origin marking a rate this surface copied from the community dataset, as
-# opposed to one somebody chose. See the module docstring.
-SEED_ORIGIN = "seed"
 
 # What a client is told about where a rate came from. The spellings are
 # ``models.pricing.PriceSource``, so the models panel and the Models page name

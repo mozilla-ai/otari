@@ -15,10 +15,6 @@ platform's own mypy config needs.
 """
 
 from gateway.repositories.tenancy.invitation_repository import InvitationRepository
-from gateway.repositories.tenancy.org_provider_key_model_repository import (
-    OfferedModelConflict,
-    OrgProviderKeyModelRepository,
-)
 from gateway.repositories.tenancy.org_provider_key_repository import (
     Candidate,
     OrgProviderKeyRepository,
@@ -35,8 +31,6 @@ from gateway.repositories.tenancy.workspace_repository import WorkspaceMemberRep
 __all__ = [
     "Candidate",
     "InvitationRepository",
-    "OfferedModelConflict",
-    "OrgProviderKeyModelRepository",
     "OrgProviderKeyRepository",
     "OrganizationDomainRepository",
     "OrganizationMemberRepository",

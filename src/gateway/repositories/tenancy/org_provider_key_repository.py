@@ -19,12 +19,14 @@ from sqlmodel import col
 
 from gateway.models.provider_keys import (
     OrgProviderKey,
-    OrgProviderKeyCreateRequest,
-    OrgProviderKeyUpdateRequest,
     WorkspaceProviderKeyOverride,
     WorkspaceProviderModelRestriction,
 )
 from gateway.repositories.base_repository import BaseRepository
+from gateway.schemas.providers import (
+    OrgProviderKeyCreateRequest,
+    OrgProviderKeyUpdateRequest,
+)
 
 # One (key, override) pair per candidate; the override is None when the
 # workspace has never departed from inheriting this key.

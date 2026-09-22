@@ -23,6 +23,10 @@ PRICING_UNITS: tuple[str, ...] = ("tokens", "requests", "images")
 # and a refresh leaves alone.
 PRICING_ORIGINS: tuple[str, ...] = ("config", "api", "migration", "seed")
 
+# The one origin a refresh may move. Named because three modules compare against
+# it and a bare "seed" in any of them reads as a different fact.
+SEED_ORIGIN = "seed"
+
 # Which rung of the ladder answered for a rate a reader is shown, in the order
 # ``pricing_service.find_model_pricing`` walks. One vocabulary, because the
 # Models page and the offered-models panel name the same rungs to the same

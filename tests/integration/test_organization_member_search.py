@@ -14,11 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
 from gateway.models.tenancy import Organization, User
-from gateway.repositories.tenancy import (
-    OrganizationMemberRepository,
-    OrganizationRepository,
-    UserRepository,
-)
+from gateway.repositories.tenancy import OrganizationMemberRepository, OrganizationRepository, UserRepository
 from gateway.services.tenancy.organization_service import OrganizationService
 
 _ENDPOINT = f"{API_ROOT}/organizations/me/members"

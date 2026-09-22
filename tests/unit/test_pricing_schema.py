@@ -41,7 +41,9 @@ def test_both_rate_surfaces_name_the_rungs_the_same_way() -> None:
     reach the browser as free strings unless something holds them together.
     """
     from gateway.models.pricing import PriceSource
-    from gateway.models.provider_keys import OrgProviderKeyModelPublic
+    from gateway.schemas.providers import (
+    OrgProviderKeyModelPublic,
+)
     from gateway.services.merged_catalog_service import ViewerPrice
 
     rungs = set(get_args(PriceSource))

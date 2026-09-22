@@ -30,11 +30,7 @@ from gateway.models.tenancy import (
     OrganizationMember,
     User,
 )
-from gateway.repositories.tenancy import (
-    OrganizationMemberRepository,
-    OrganizationRepository,
-    UserRepository,
-)
+from gateway.repositories.tenancy import OrganizationMemberRepository, OrganizationRepository, UserRepository
 from gateway.services.dashboard_session_service import (
     SESSION_COOKIE_NAME,
     create_dashboard_session,

@@ -23,41 +23,48 @@ from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.pricing import ModelPricing, OrganizationModelPricing
-from gateway.models.provider_keys import OrgProviderKeyCreateRequest, OrgProviderKeyModel
-from gateway.models.tenancy import Organization, User, Workspace
-from gateway.repositories.pricing import OrganizationModelPricingRepository
-from gateway.repositories.tenancy import (
-    OrganizationMemberRepository,
-    OrganizationRepository,
-    OrgProviderKeyModelRepository,
-    OrgProviderKeyRepository,
-    UserRepository,
-    WorkspaceMemberRepository,
-    WorkspaceRepository,
-)
-from gateway.services.model_discovery_service import ProviderDiscovery
-from gateway.services.organization_pricing_service import (
-    OrganizationPricingService,
-    PricingOverrideInput,
-)
-from gateway.services.secret_box import generate_secret_key
-from gateway.services.tenancy import OrgProviderKeyService
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    OrgProviderKeyNotFoundError,
+from gateway.exceptions.providers_exceptions import (
     OrgProviderLastModelError,
     OrgProviderModelAlreadyOfferedError,
     OrgProviderModelNameRequiredError,
     OrgProviderModelNotFoundError,
     OrgProviderModelUnpricedError,
 )
+from gateway.models.pricing import SEED_ORIGIN, ModelPricing, OrganizationModelPricing
+from gateway.models.provider_keys import (
+    OrgProviderKeyModel,
+)
+from gateway.models.tenancy import Organization, User, Workspace
+from gateway.repositories.pricing import OrganizationModelPricingRepository
+from gateway.repositories.providers import OrgProviderKeyModelRepository
+from gateway.repositories.tenancy import (
+    OrganizationMemberRepository,
+    OrganizationRepository,
+    OrgProviderKeyRepository,
+    UserRepository,
+    WorkspaceMemberRepository,
+    WorkspaceRepository,
+)
+from gateway.schemas.providers import (
+    OrgProviderKeyCreateRequest,
+)
+from gateway.services.model_discovery_service import ProviderDiscovery
+from gateway.services.organization_pricing_service import (
+    OrganizationPricingService,
+    PricingOverrideInput,
+)
+from gateway.services.providers import OrgProviderModelService
+from gateway.services.secret_box import generate_secret_key
+from gateway.services.tenancy import OrgProviderKeyService
+from gateway.services.tenancy.errors import (
+    NotAuthorizedError,
+    OrgProviderKeyNotFoundError,
+)
 from gateway.services.tenancy.org_provider_key_service import (
     cached_org_model_restriction,
     refresh_org_provider_cache,
     reset_org_provider_cache,
 )
-from gateway.services.tenancy.org_provider_model_service import SEED_ORIGIN, OrgProviderModelService
 from gateway.services.tenancy.organization_service import OrganizationService
 
 pytestmark = pytest.mark.asyncio
@@ -128,7 +135,7 @@ def _discovery(monkeypatch: pytest.MonkeyPatch, *models: str, error: str | None 
             error=error,
         )
 
-    monkeypatch.setattr("gateway.services.tenancy.org_provider_model_service.test_provider_credentials", _stub)
+    monkeypatch.setattr("gateway.services.providers._org_provider_model_service.test_provider_credentials", _stub)
 
 
 def _defaults(monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]]) -> None:
@@ -146,7 +153,7 @@ def _defaults(monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]]
             unit="tokens",
         )
 
-    monkeypatch.setattr("gateway.services.tenancy.org_provider_model_service.default_model_pricing", _stub)
+    monkeypatch.setattr("gateway.services.providers._org_provider_model_service.default_model_pricing", _stub)
 
 
 async def _key(db: AsyncSession, owner: User, *, provider: str = "openai", name: str = "primary") -> uuid.UUID:
@@ -312,7 +319,7 @@ async def test_the_unique_index_decides_a_racing_offer(
     await _service(async_db).add_model(user=owner, key_id=key_id, model="gpt-4o")
 
     monkeypatch.setattr(
-        "gateway.repositories.tenancy.OrgProviderKeyModelRepository.get_by_model",
+        "gateway.repositories.providers.OrgProviderKeyModelRepository.get_by_model",
         _none,
     )
 

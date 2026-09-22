@@ -11,8 +11,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from gateway.models.provider_keys import OrgProviderKey, WorkspaceProviderKeyOverride
+from gateway.models.provider_keys import (
+    OrgProviderKey,
+    WorkspaceProviderKeyOverride,
+)
 from gateway.repositories.tenancy.org_provider_key_repository import resolve_active_key
+from gateway.schemas.providers import OrgProviderKeyPublic
 from gateway.services.secret_box import SecretDecryptionError, encrypt_secret, generate_secret_key
 from gateway.services.tenancy import org_provider_key_service as store
 from gateway.services.tenancy.org_provider_key_service import cached_org_provider_kwargs, reset_org_provider_cache
@@ -161,11 +165,11 @@ def test_row_to_entry_raises_when_key_cannot_be_decrypted(monkeypatch: pytest.Mo
 
 
 # --------------------------------------------------------------------------- #
-# to_public: client_args never round-trips a credential-shaped field
+# from_row: client_args never round-trips a credential-shaped field
 # --------------------------------------------------------------------------- #
 
 
-def test_to_public_redacts_credential_shaped_client_arg_keys() -> None:
+def test_from_row_redacts_credential_shaped_client_arg_keys() -> None:
     """Bedrock's classic IAM shape genuinely needs `aws_access_key_id` /
     `aws_secret_access_key` inside `client_args` (see
     `services/bedrock_gateway_auth.py`), so the field cannot be rejected
@@ -181,7 +185,7 @@ def test_to_public_redacts_credential_shaped_client_arg_keys() -> None:
         "Authorization": "Bearer xyz",
     }
 
-    public = key.to_public(usable=True)
+    public = OrgProviderKeyPublic.from_row(key, usable=True)
 
     assert public.client_args == {
         "region_name": "us-east-1",
@@ -192,14 +196,14 @@ def test_to_public_redacts_credential_shaped_client_arg_keys() -> None:
     }
 
 
-def test_to_public_with_no_credential_shaped_keys_is_unchanged() -> None:
+def test_from_row_with_no_credential_shaped_keys_is_unchanged() -> None:
     key = _key(name="openai-primary")
     key.client_args = {"region_name": "us-east-1", "timeout": 30}
 
-    assert key.to_public(usable=True).client_args == {"region_name": "us-east-1", "timeout": 30}
+    assert OrgProviderKeyPublic.from_row(key, usable=True).client_args == {"region_name": "us-east-1", "timeout": 30}
 
 
-def test_to_public_client_args_none_stays_none() -> None:
+def test_from_row_client_args_none_stays_none() -> None:
     key = _key(name="plain")
     assert key.client_args is None
-    assert key.to_public(usable=True).client_args is None
+    assert OrgProviderKeyPublic.from_row(key, usable=True).client_args is None

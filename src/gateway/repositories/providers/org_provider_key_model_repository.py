@@ -19,10 +19,12 @@ from sqlmodel import col
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.provider_keys import (
     OrgProviderKeyModel,
+)
+from gateway.repositories.base_repository import BaseRepository
+from gateway.schemas.providers import (
     OrgProviderKeyModelCreateRequest,
     OrgProviderKeyModelUpdateRequest,
 )
-from gateway.repositories.base_repository import BaseRepository
 
 
 class OfferedModelConflict(Exception):

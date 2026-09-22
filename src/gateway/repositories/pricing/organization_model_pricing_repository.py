@@ -13,12 +13,13 @@ import uuid
 from collections.abc import Collection, Sequence
 from datetime import datetime
 
+from pydantic import BaseModel
 from sqlalchemy import and_, func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.core.unit_of_work import UnitOfWork, session_for
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.pricing import ModelPricing, OrganizationModelPricing
+from gateway.repositories.base_repository import BaseRepository
 
 # The bound `services.pricing_service` chunks its own key lookups at, for the
 # same reason: a key list long enough to exceed SQLite's default limit on bind
@@ -26,20 +27,16 @@ from gateway.models.pricing import ModelPricing, OrganizationModelPricing
 _KEY_CHUNK = 500
 
 
-class OrganizationModelPricingRepository:
-    """Repository for `organization_model_pricing` rows, and reads of `model_pricing`."""
+class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing, BaseModel, BaseModel]):
+    """Repository for `organization_model_pricing` rows, and reads of `model_pricing`.
+
+    The create and update parameters are unconstrained because this repository
+    exposes neither: a rate is written through `OrganizationPricingService`,
+    which owns the overlap rule that decides whether a period may exist at all.
+    """
 
     def __init__(self, uow: UnitOfWork):
-        self._uow = uow
-
-    @property
-    def db(self) -> AsyncSession:
-        """The session this repository's operations run on.
-
-        Raises:
-            OutsideUnitOfWorkError: no block of the unit of work is open.
-        """
-        return session_for(self._uow)
+        super().__init__(uow, OrganizationModelPricing)
 
     async def applicable_rows(
         self,

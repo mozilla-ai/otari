@@ -37,10 +37,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
-from gateway.models.provider_keys import OrgProviderKey
+from gateway.models.provider_keys import (
+    OrgProviderKey,
+)
 from gateway.models.tenancy import User, Workspace
 from gateway.ports.model_provider_port import ModelProviderPort
-from gateway.repositories.tenancy.org_provider_key_model_repository import OrgProviderKeyModelRepository
+from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy.org_provider_key_repository import (
     OrgProviderKeyRepository,
     WorkspaceProviderModelRestrictionRepository,

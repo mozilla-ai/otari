@@ -29,6 +29,9 @@ from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
+from gateway.repositories.pricing import OrganizationModelPricingRepository
+from gateway.repositories.providers import OrgProviderKeyModelRepository
+from gateway.repositories.tenancy import OrgProviderKeyRepository
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
@@ -37,10 +40,13 @@ from gateway.services.file_store import FileStore
 from gateway.services.files import SandboxFileBridge
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
+from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.overview.overview_service import OverviewService
+from gateway.services.providers import OrgProviderModelService
 from gateway.services.routing import clear_router_backend_cache
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
+from gateway.services.tenancy.org_provider_key_service import refresh_org_provider_cache
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_service import WorkspaceService
 
@@ -840,6 +846,33 @@ EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
 GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]
 IdentityProviderPortDep = Annotated[IdentityProviderPort, Depends(get_identity_provider_port)]
 ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_port)]
+
+
+def get_org_provider_model_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    model_provider: ModelProviderPortDep,
+) -> OrgProviderModelService:
+    """Build the offered-models service on the request's session and unit of work.
+
+    The service itself names neither the session nor SQLAlchemy, so its
+    repositories and its cache-refresh callable are assembled here. The unit of
+    work and the services built on the session are over the *same* session (see
+    ``deps.get_unit_of_work``), so a block's commit also settles what they staged.
+    """
+    return OrgProviderModelService(
+        uow,
+        organizations=OrganizationService(db, membership_listener=None),
+        org_pricing=OrganizationPricingService(db, config, model_provider=model_provider),
+        models=OrgProviderKeyModelRepository(uow),
+        pricing=OrganizationModelPricingRepository(uow),
+        keys=OrgProviderKeyRepository(db),
+        refresh_overlay=lambda: refresh_org_provider_cache(db),
+    )
+
+
+OrgProviderModelServiceDep = Annotated[OrgProviderModelService, Depends(get_org_provider_model_service)]
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
 
 
@@ -907,6 +940,7 @@ __all__ = [
     "GrowthSignalPortDep",
     "IdentityProviderPortDep",
     "ModelProviderPortDep",
+    "OrgProviderModelServiceDep",
     "TelemetryStoragePortDep",
     "get_config",
     "get_container",
