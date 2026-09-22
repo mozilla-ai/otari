@@ -9629,7 +9629,7 @@ export interface components {
             url?: string | null;
             /**
              * Validate Kwargs
-             * @description Extra kwargs forwarded to the guardrails service /validate call
+             * @description Extra kwargs for the check itself, sent to the guardrails service or handed to the guardrail this entry's definition builds
              */
             validate_kwargs?: {
                 [key: string]: unknown;
@@ -9820,7 +9820,7 @@ export interface components {
             url: string | null;
             /**
              * Validate Kwargs
-             * @description Extra kwargs forwarded to the guardrails service /validate call. A parameter whose name looks credential-shaped comes back as *** rather than its stored value; sending that *** back keeps what is stored
+             * @description Extra kwargs for the check itself, sent to the guardrails service or handed to the guardrail this entry's definition builds. A parameter whose name looks credential-shaped comes back as *** rather than its stored value; sending that *** back keeps what is stored
              */
             validate_kwargs: {
                 [key: string]: unknown;
