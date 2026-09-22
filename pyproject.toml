@@ -151,6 +151,9 @@ dev = [
     "pytest-timeout",
     "pytest-xdist>=3.6.1",
     "ruff>=0.15.9",
+    # The fsspec file store test reaches a real S3-compatible store through s3fs.
+    # Its aiobotocore dependency pins botocore, so it also bounds the boto3 this lock can take.
+    "s3fs>=2026.3.0",
     "testcontainers[postgres]>=4.0.0",
 ]
 
