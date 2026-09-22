@@ -110,6 +110,7 @@ def _ctx(
     return pipeline.RequestContext(
         config=GatewayConfig(),
         db=None,
+        uow=None,
         log_writer=cast(Any, object()),
         hybrid_mode=False,
         route=None,

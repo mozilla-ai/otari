@@ -22,6 +22,7 @@ from gateway.api.deps import (
     get_config,
     get_db_if_needed,
     get_log_writer,
+    get_unit_of_work_if_needed,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
@@ -48,6 +49,7 @@ from gateway.api.routes._platform import ResolvedAttempt, SettledCost
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.core.usage_source import PLAYGROUND_USAGE_ENDPOINT
 from gateway.log_config import logger
@@ -393,6 +395,7 @@ async def chat_completions(
     background_tasks: BackgroundTasks,
     request: ChatCompletionRequest,
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
@@ -414,6 +417,7 @@ async def chat_completions(
         background_tasks=background_tasks,
         request=request,
         db=db,
+        uow=uow,
         config=config,
         log_writer=log_writer,
         model_provider=model_provider,
@@ -428,6 +432,7 @@ async def run_chat_completion(
     background_tasks: BackgroundTasks,
     request: ChatCompletionRequest,
     db: AsyncSession | None,
+    uow: UnitOfWork | None,
     config: GatewayConfig,
     log_writer: LogWriter,
     model_provider: ModelProviderPort,
@@ -504,6 +509,7 @@ async def run_chat_completion(
         raw_request=raw_request,
         response=response,
         db=db,
+        uow=uow,
         config=config,
         log_writer=log_writer,
         model=request.model,

@@ -382,6 +382,7 @@ def _request_context(plan: Any) -> Any:
     return RequestContext(
         config=GatewayConfig(),
         db=None,
+        uow=None,
         # No settlement happens in these tests; the merge reads only `ctx.plan`.
         log_writer=cast(Any, None),
         hybrid_mode=False,

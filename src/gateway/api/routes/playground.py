@@ -68,12 +68,14 @@ from gateway.api.deps import (
     get_config,
     get_db,
     get_log_writer,
+    get_unit_of_work,
     verify_master_key,
 )
 from gateway.api.routes.chat import ChatCompletionRequest, run_chat_completion
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
 from gateway.core.surface import Surface
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.models.playground import (
     PlaygroundComparisonCreate,
@@ -174,6 +176,7 @@ async def playground_chat_completions(
     request: ChatCompletionRequest,
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
@@ -225,6 +228,7 @@ async def playground_chat_completions(
         background_tasks=background_tasks,
         request=request,
         db=db,
+        uow=uow,
         config=config,
         log_writer=log_writer,
         model_provider=model_provider,

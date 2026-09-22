@@ -118,6 +118,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.env import otari_env
 from gateway.core.metered_pricing import calculate_metered_cost
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import (
     cache_read_tokens_of,
     cache_tokens_in_prompt_of,
@@ -902,6 +903,7 @@ class RequestContext:
         *,
         config: GatewayConfig,
         db: AsyncSession | None,
+        uow: UnitOfWork | None,
         log_writer: LogWriter,
         hybrid_mode: bool,
         route: ResolvedRoute | None,
@@ -922,6 +924,9 @@ class RequestContext:
     ) -> None:
         self.config = config
         self.db = db
+        # The Unit of Work the route resolved, over the session the route holds.
+        # It is `None` where the request has none, which is every hybrid request.
+        self.uow = uow
         self.log_writer = log_writer
         self.hybrid_mode = hybrid_mode
         self.route = route
@@ -1689,6 +1694,7 @@ async def resolve_request_context(
     raw_request: Request,
     response: Response,
     db: AsyncSession | None,
+    uow: UnitOfWork | None,
     config: GatewayConfig,
     log_writer: LogWriter,
     model: str,
@@ -2175,6 +2181,7 @@ async def resolve_request_context(
     return RequestContext(
         config=config,
         db=db,
+        uow=uow,
         log_writer=log_writer,
         hybrid_mode=hybrid_mode,
         code_execution_policy=code_execution_policy,

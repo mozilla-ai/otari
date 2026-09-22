@@ -114,6 +114,7 @@ async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
         raw_request=request,
         response=Response(),
         db=cast(AsyncSession, object()),
+        uow=None,
         config=config,
         log_writer=cast(Any, object()),
         model="openai:gpt-4",

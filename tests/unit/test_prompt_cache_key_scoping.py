@@ -15,6 +15,7 @@ def _context(
     return RequestContext(
         config=GatewayConfig(),
         db=None,
+        uow=None,
         log_writer=cast(Any, None),
         hybrid_mode=route is not None,
         route=route,

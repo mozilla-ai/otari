@@ -26,6 +26,7 @@ from gateway.api.deps import (
     get_config,
     get_db_if_needed,
     get_log_writer,
+    get_unit_of_work_if_needed,
     verify_api_key_or_master_key,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
@@ -57,6 +58,7 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
@@ -750,6 +752,7 @@ async def create_message(
     background_tasks: BackgroundTasks,
     request: MessagesRequest,
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
@@ -819,6 +822,7 @@ async def create_message(
             raw_request=raw_request,
             response=response,
             db=db,
+            uow=uow,
             config=config,
             log_writer=log_writer,
             model=request.model,

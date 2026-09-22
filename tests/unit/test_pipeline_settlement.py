@@ -111,6 +111,7 @@ def _ctx(
     return RequestContext(
         config=config,
         db=db,
+        uow=None,
         log_writer=log_writer,
         hybrid_mode=hybrid_mode,
         route=None,
