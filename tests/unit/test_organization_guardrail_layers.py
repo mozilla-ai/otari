@@ -87,11 +87,11 @@ def test_no_layer_asked_for_anything_leaves_the_request_exactly_as_it_was() -> N
 
     unrouted = merge_guardrail_layers(_ctx(), caller, [])
     assert unrouted.configs is caller
-    assert unrouted.credentials == {} and unrouted.mandated == frozenset()
+    assert unrouted.credentials == {} and unrouted.mandated == frozenset() and unrouted.in_process == {}
 
     empty = merge_guardrail_layers(_ctx(), None, [])
     assert empty.configs is None
-    assert empty.credentials == {} and empty.mandated == frozenset()
+    assert empty.credentials == {} and empty.mandated == frozenset() and empty.in_process == {}
 
 
 def test_an_organization_guardrail_runs_when_the_caller_asked_for_nothing() -> None:
@@ -179,6 +179,66 @@ def test_a_credential_survives_a_policy_that_mandates_a_different_profile() -> N
     assert merged.configs is not None
     assert sorted(g.profile for g in merged.configs) == ["pii", "prompt-injection"]
     assert merged.credentials == {"prompt-injection": "s3cret"}
+
+
+def test_a_mandate_that_names_a_definition_says_which_one_after_the_merge() -> None:
+    """The merge is the last place the link exists, so it has to survive it.
+
+    A profile alone is not enough: the runner holds its guardrails under the
+    definition's id, because one definition mandated under three profiles is one
+    built vendor client.
+    """
+    definition_id = uuid.uuid4()
+
+    merged = merge_guardrail_layers(
+        _ctx(),
+        None,
+        [_organization(_guardrail("prompt-injection"), definition_id=definition_id)],
+    )
+
+    assert merged.in_process == {"prompt-injection": definition_id}
+    assert merged.configs is not None and merged.configs[0].url is None
+    assert merged.credentials == {}
+
+
+def test_a_remote_mandate_names_no_definition() -> None:
+    merged = merge_guardrail_layers(
+        _ctx(),
+        None,
+        [_organization(_guardrail("prompt-injection", url="https://org.example/guardrails"), credential="s3cret")],
+    )
+
+    assert merged.in_process == {}
+
+
+def test_the_policy_layer_takes_a_profile_off_the_in_process_path() -> None:
+    """The exact mirror of the credential drop beside it.
+
+    An operator who named a URL for a profile meant the check to go there, so
+    the organization's own definition stops serving it. Leaving the link in
+    place would run the check here and ignore the endpoint the outermost layer
+    just set.
+    """
+    merged = merge_guardrail_layers(
+        _ctx(_guardrail("prompt-injection", url="https://operator.example/guardrails")),
+        None,
+        [_organization(_guardrail("prompt-injection"), definition_id=uuid.uuid4())],
+    )
+
+    assert merged.in_process == {}
+    assert merged.configs is not None and merged.configs[0].url == "https://operator.example/guardrails"
+
+
+def test_a_definition_survives_a_policy_that_mandates_a_different_profile() -> None:
+    definition_id = uuid.uuid4()
+
+    merged = merge_guardrail_layers(
+        _ctx(_guardrail("pii")),
+        None,
+        [_organization(_guardrail("prompt-injection"), definition_id=definition_id)],
+    )
+
+    assert merged.in_process == {"prompt-injection": definition_id}
 
 
 def test_the_strictest_of_all_three_layers_wins() -> None:

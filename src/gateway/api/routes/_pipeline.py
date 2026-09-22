@@ -2521,16 +2521,23 @@ def _overlay_mandate(merged: dict[str, GuardrailConfig], mandated: Iterable[Guar
 class EffectiveGuardrails:
     """The guardrails a request runs, and what the runner needs to know about them.
 
-    Three fields rather than a list, because two of the three answer questions
-    the list cannot: which entries carry a credential, and which came from a
-    layer the caller does not control. The second decides how a URL that fails
-    its safety check is reported, so it has to survive the merge rather than be
-    re-derived from a config the merge has already flattened.
+    Four fields rather than a list, because three of the four answer questions
+    the list cannot: which entries carry a credential, which came from a layer
+    the caller does not control, and which are run by this process rather than
+    sent anywhere. The second decides how a URL that fails its safety check is
+    reported, so it has to survive the merge rather than be re-derived from a
+    config the merge has already flattened.
+
+    ``in_process`` maps a profile to the definition that serves it, and is its
+    own field for the reason ``mandated`` is: after the merge such an entry's
+    ``url`` is ``None``, which is exactly what a remote entry falling back to the
+    deployment's guardrails service looks like.
     """
 
     configs: list[GuardrailConfig] | None
     credentials: dict[str, str]
     mandated: frozenset[str]
+    in_process: dict[str, uuid.UUID]
 
 
 def merge_guardrail_layers(
@@ -2548,35 +2555,42 @@ def merge_guardrail_layers(
     same profile, the operator's entry owns the endpoint the check is sent to.
 
     That last point is also why a profile the policy layer claims loses its
-    organization credential here. The credential was stored for the endpoint the
-    organization named; once the policy's URL has replaced it, sending the
-    secret on would be sending it somewhere it was never meant for.
+    organization credential here, and its definition with it. The credential was
+    stored for the endpoint the organization named; once the policy's URL has
+    replaced it, sending the secret on would be sending it somewhere it was
+    never meant for. A definition goes the same way for the same reason: an
+    operator who named a URL meant the check to go there, not to be answered
+    here.
 
     Returns the caller's own list unchanged, `None` included, when no layer
-    mandated anything, alongside an empty credential map and an empty mandated
-    set: that is the shape `apply_input_guardrails` treats as "no guardrails
-    ran", and it is what keeps a deployment that configures nothing behaving
-    exactly as it did.
+    mandated anything, alongside an empty credential map, an empty mandated set
+    and no in-process entries: that is the shape `apply_input_guardrails` treats
+    as "no guardrails ran", and it is what keeps a deployment that configures
+    nothing behaving exactly as it did.
     """
     policy = ctx.plan.guardrails if ctx.plan is not None else []
     if not organization and not policy:
-        return EffectiveGuardrails(requested, {}, frozenset())
+        return EffectiveGuardrails(requested, {}, frozenset(), {})
 
     # Caller entries first, so a mandating layer of the same profile overwrites them.
     merged: dict[str, GuardrailConfig] = {guardrail.profile: guardrail for guardrail in requested or []}
     credentials: dict[str, str] = {}
     mandated: set[str] = set()
+    in_process: dict[str, uuid.UUID] = {}
     for entry in organization:
         _overlay_mandate(merged, (entry.config,))
         mandated.add(entry.config.profile)
         if entry.credential:
             credentials[entry.config.profile] = entry.credential
+        if entry.definition_id is not None:
+            in_process[entry.config.profile] = entry.definition_id
     if policy:
         _overlay_mandate(merged, policy)
         for guardrail in policy:
             mandated.add(guardrail.profile)
             credentials.pop(guardrail.profile, None)
-    return EffectiveGuardrails(list(merged.values()), credentials, frozenset(mandated))
+            in_process.pop(guardrail.profile, None)
+    return EffectiveGuardrails(list(merged.values()), credentials, frozenset(mandated), in_process)
 
 
 async def _resolve_organization_guardrails(
