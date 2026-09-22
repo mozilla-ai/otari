@@ -381,10 +381,17 @@ class ResolvedOrganizationGuardrail:
     would be one a caller could set, which would turn the guardrail list into a
     way to make this gateway send a secret to an endpoint of the caller's
     choosing.
+
+    ``definition_id`` is set when this organization runs the guardrail itself,
+    and it is the whole of what the request path needs: the runner holds the
+    built guardrail under that id, so nothing here reads the definition row or
+    decrypts anything it stores. An entry that names one carries no ``url`` and
+    no credential, which the write path enforces.
     """
 
     config: GuardrailConfig
     credential: str | None
+    definition_id: uuid.UUID | None
 
 
 async def resolve_organization_guardrails(
@@ -444,6 +451,7 @@ async def resolve_organization_guardrails(
                 validate_kwargs=row.validate_kwargs or {},
             ),
             credential=decrypt_secret(row.encrypted_credential) if row.encrypted_credential else None,
+            definition_id=row.definition_id,
         )
         for row in rows
     ]

@@ -670,6 +670,7 @@ async def test_only_the_scoped_workspace_resolves_the_entry(async_db: AsyncSessi
     assert [entry.config.profile for entry in in_scope] == ["prompt-injection"]
     assert in_scope[0].config.url == PUBLIC_URL
     assert in_scope[0].credential == "s3cret", "decrypted for the request path and nowhere else"
+    assert in_scope[0].definition_id is None, "a mandate naming an endpoint runs no definition of ours"
 
     assert (
         await resolve_organization_guardrails(async_db, organization_id=organization.id, workspace_id=other.id)
@@ -722,12 +723,12 @@ async def test_a_workspace_of_another_organization_resolves_nothing(async_db: As
     assert resolved == []
 
 
-async def test_a_linked_mandate_still_resolves_as_a_profile(async_db: AsyncSession) -> None:
-    """Nothing runs a definition yet, and the resolver is where that is visible.
+async def test_a_linked_mandate_resolves_with_the_definition_that_serves_it(async_db: AsyncSession) -> None:
+    """The request path learns which definition to run, and nothing else changes.
 
-    The row resolves exactly as a mandate naming a profile on the deployment's
-    guardrails service does. Reading the link and building the guardrail is a
-    later step; this asserts that this one did not start.
+    The link is what tells the two shapes apart after the merge, where an
+    in-process entry's empty `url` is otherwise indistinguishable from a remote
+    entry falling back to the deployment's guardrails service.
     """
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
@@ -742,5 +743,6 @@ async def test_a_linked_mandate_still_resolves_as_a_profile(async_db: AsyncSessi
         async_db, organization_id=organization.id, workspace_id=workspace.id
     )
     assert [entry.config.profile for entry in resolved] == ["prompt-injection"]
+    assert resolved[0].definition_id == definition.id
     assert resolved[0].config.url is None
-    assert resolved[0].credential is None
+    assert resolved[0].credential is None, "the build secrets are the runner's, and no bearer is sent anywhere"

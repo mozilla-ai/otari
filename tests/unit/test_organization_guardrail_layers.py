@@ -38,8 +38,13 @@ def _guardrail(
     return GuardrailConfig(profile=profile, mode=mode, on_unavailable=on_unavailable, url=url)
 
 
-def _organization(guardrail: GuardrailConfig, *, credential: str | None = None) -> ResolvedOrganizationGuardrail:
-    return ResolvedOrganizationGuardrail(config=guardrail, credential=credential)
+def _organization(
+    guardrail: GuardrailConfig,
+    *,
+    credential: str | None = None,
+    definition_id: uuid.UUID | None = None,
+) -> ResolvedOrganizationGuardrail:
+    return ResolvedOrganizationGuardrail(config=guardrail, credential=credential, definition_id=definition_id)
 
 
 def _ctx(*policy_guardrails: GuardrailConfig) -> RequestContext:
