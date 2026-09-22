@@ -42,6 +42,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.metered_pricing import quantize_rate
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import (
@@ -466,13 +467,17 @@ class OrgProviderModelService:
         error returned after it would send the admin into a retry that collides
         with the key they just made. A provider that will not say (no listing
         endpoint, unreachable, credential refused) is already answered rather
-        than raised, and anything else is logged against the key and leaves an
-        empty list the Refresh models button fills.
+        than raised, and a database failure is logged against the key and leaves
+        an empty list the Refresh models button fills.
         """
         key = await self.provider_keys.create_key_for_user(user=user, request=request)
         try:
             await self.refresh_models(user=user, key_id=key.id)
-        except Exception:
+        except DATABASE_ERRORS:
+            # The database is the only thing here that can fail the caller after
+            # the key is durable. The dial answers rather than raises, and an
+            # authorization or not-found error on a key this call just created
+            # would be a bug worth surfacing rather than swallowing.
             logger.exception("Offering the discovered models failed for new provider key %s", key.id)
         return key
 

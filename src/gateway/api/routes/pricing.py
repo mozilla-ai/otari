@@ -13,7 +13,7 @@ from gateway.api.deps import get_config, get_db, require_deployment_operator, ve
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.models.money import as_float, to_usd, to_usd_or_none
-from gateway.models.pricing import ModelPricing
+from gateway.models.pricing import API_ORIGIN, ModelPricing
 from gateway.models.pricing_schemas import PricingTier
 from gateway.services.alias_service import all_alias_names, resolve_effective_alias
 from gateway.services.policy_store import all_policy_names, resolve_effective_policy
@@ -536,7 +536,7 @@ async def set_pricing(
         pricing.cache_write_1h_price_per_million = cache_write_1h
         pricing.pricing_tiers = pricing_tiers
         pricing.unit = request.unit
-        pricing.origin = "api"
+        pricing.origin = API_ORIGIN
     else:
         pricing = ModelPricing(
             model_key=normalized_key,
@@ -548,7 +548,7 @@ async def set_pricing(
             cache_write_1h_price_per_million=cache_write_1h,
             pricing_tiers=pricing_tiers,
             unit=request.unit,
-            origin="api",
+            origin=API_ORIGIN,
         )
         db.add(pricing)
 

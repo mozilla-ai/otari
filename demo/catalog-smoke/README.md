@@ -27,7 +27,7 @@ end says the addresses, the password and the master key.
 
 | Sign in as | Standing | What to try |
 | --- | --- | --- |
-| `operator@otari.local` | Platform admin: the deployment's operator, owner of the default organization and of Acme | Settings; Deployment providers (add a real key); Providers, where a key's models arrive priced with a Serving switch and the catalog policy, "Check for price updates" and the deployment price list sit below them; Accounts; switch into Acme from the organization menu |
+| `operator@otari.local` | Platform admin: the deployment's operator, owner of the default organization and of Acme | Settings; Deployment providers (add a real key); Providers, where a key's models arrive priced, each with a Serving switch and a rate you can override; Accounts; switch into Acme from the organization menu |
 | `admin@acme.local` | Org admin of Acme | Providers shows the deployment's prices read-only and a rate on any of Acme's own offered models editable; a model page's rows say "Set your rate"; Members, Email domains, Spend & budgets |
 | `member@acme.local` | Member of Acme | Models at Acme's rates with nothing to edit; open a row for the selector and request; make an API key on API keys and send a request with it; Usage and Activity show only their own |
 

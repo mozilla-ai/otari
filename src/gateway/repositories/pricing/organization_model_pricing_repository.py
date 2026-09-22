@@ -129,6 +129,40 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
         if rows:
             self.db.add_all(rows)
 
+    async def page_for_organization(
+        self,
+        organization_id: uuid.UUID,
+        *,
+        model_key: str | None = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> tuple[list[OrganizationModelPricing], int]:
+        """One page of an organization's stored rates, and the total matching.
+
+        Ordered by key then newest period, so paging is stable. The count is the
+        total rather than the length of the page, because that is what tells a
+        caller whether to ask for another.
+        """
+        where = [col(OrganizationModelPricing.organization_id) == organization_id]
+        if model_key is not None:
+            where.append(col(OrganizationModelPricing.model_key) == model_key)
+        total = (
+            await self.db.execute(select(func.count()).select_from(OrganizationModelPricing).where(*where))
+        ).scalar_one()
+        rows = (
+            await self.db.execute(
+                select(OrganizationModelPricing)
+                .where(*where)
+                .order_by(
+                    col(OrganizationModelPricing.model_key),
+                    col(OrganizationModelPricing.effective_from).desc(),
+                )
+                .offset(skip)
+                .limit(limit)
+            )
+        ).scalars().all()
+        return list(rows), int(total)
+
     async def flush(self) -> None:
         """Push staged changes so the database's constraints answer before the commit."""
         await self.db.flush()

@@ -18,6 +18,7 @@ from decimal import Decimal
 import pytest
 from any_llm.types.model import Model
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -216,8 +217,8 @@ async def test_a_key_survives_the_offer_that_follows_it_failing(
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
 
-    async def _explode(**_: object) -> None:
-        raise RuntimeError("the dial blew up in a way nothing anticipated")
+    async def _explode(_self: OrgProviderModelService, **_: object) -> None:
+        raise OperationalError("SELECT 1", {}, Exception("the connection went away"))
 
     monkeypatch.setattr(OrgProviderModelService, "refresh_models", _explode)
 
@@ -227,6 +228,26 @@ async def test_a_key_survives_the_offer_that_follows_it_failing(
 
     assert key.name == "primary"
     assert await _offered(async_db, key.id) == {}
+
+
+async def test_an_unexpected_failure_after_the_create_is_not_swallowed(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the database may fail the offer quietly. Anything else on a key this
+    call just made is a bug, and a caught one is a bug nobody sees."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+
+    async def _explode(_self: OrgProviderModelService, **_: object) -> None:
+        raise RuntimeError("something nothing anticipated")
+
+    monkeypatch.setattr(OrgProviderModelService, "refresh_models", _explode)
+
+    with pytest.raises(RuntimeError):
+        await _service(async_db).add_provider_key(
+            user=owner,
+            request=OrgProviderKeyCreateRequest(provider="openai", name="primary", api_key="sk-live-1234"),
+        )
 
 
 async def test_a_refresh_offers_what_the_provider_lists_and_seeds_its_rates(

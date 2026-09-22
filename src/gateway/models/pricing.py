@@ -27,6 +27,11 @@ PRICING_ORIGINS: tuple[str, ...] = ("config", "api", "migration", "seed")
 # it and a bare "seed" in any of them reads as a different fact.
 SEED_ORIGIN = "seed"
 
+# What a rate somebody set through the API carries, which is what stops a
+# refresh moving it. Named for the same reason: the two are written in different
+# modules from the one that reads them back.
+API_ORIGIN = "api"
+
 # Which rung of the ladder answered for a rate a reader is shown, in the order
 # ``pricing_service.find_model_pricing`` walks. One vocabulary, because the
 # Models page and the offered-models panel name the same rungs to the same

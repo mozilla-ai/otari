@@ -41,13 +41,13 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.models.money import to_usd, to_usd_or_none
-from gateway.models.pricing import ModelPricing, OrganizationModelPricing, PriceSource
+from gateway.models.pricing import API_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.repositories.pricing import OrganizationModelPricingRepository
@@ -255,34 +255,29 @@ class OrganizationPricingService:
         """
         if await DeploymentUserService(self.db).has_administration_access(user):
             return
-        if await self.is_deployment_supplied(organization_id, model_key):
+        if model_key in await self.deployment_supplied_keys(organization_id, [model_key]):
             raise OrganizationPricingManagedModelError(model_key)
-
-    async def is_deployment_supplied(self, organization_id: uuid.UUID, model_key: str) -> bool:
-        """Whether the deployment, not the organization, pays the upstream bill for ``model_key``.
-
-        A ``config.providers`` instance always does.
-        A bare key does when a workspace lacks a usable BYO key and the port would serve it on a hosted credential.
-        A port refusal also counts, because the model still runs on a deployment-owned upstream.
-
-        Public because the question has a second asker with a different answer to
-        give: the offered-models surface skips seeding a rate for such a model
-        rather than refusing, since the model is still legitimately offered and
-        simply prices from the deployment's list instead.
-        """
-        byo = await self.provider_keys.get_byo_providers(organization_id=organization_id)
-        return await self._is_deployment_supplied(organization_id, model_key, byo)
 
     async def deployment_supplied_keys(
         self, organization_id: uuid.UUID, model_keys: Collection[str]
     ) -> set[str]:
         """Which of ``model_keys`` the deployment pays the upstream bill for.
 
-        The batch form. :meth:`is_deployment_supplied` resolves the organization's
-        BYO providers before it can ask the port, and that is one query, so asking
-        it per model makes a page of models a page of queries for an answer that
-        does not change between them. The port call stays per model, because
-        whether a hosted credential serves one is a question about that model.
+        A ``config.providers`` instance always does. A bare key does when a
+        workspace lacks a usable BYO key and the port would serve it on a hosted
+        credential, and a port refusal counts too, because the model still runs
+        on a deployment-owned upstream.
+
+        Asked in a batch because the organization's BYO providers have to be
+        resolved before the port can be asked at all, and that is one query for
+        an answer that does not change between models. The port call stays per
+        model: whether a hosted credential serves one is a question about that
+        model.
+
+        Two callers want different things from the same answer.
+        :meth:`raise_if_deployment_supplied` refuses an override for such a
+        model. The offered-models surface skips seeding a rate for one and offers
+        it anyway, since it prices from the deployment's list instead.
         """
         if not model_keys:
             return set()
@@ -392,23 +387,9 @@ class OrganizationPricingService:
         that is what tells a client whether to ask for another one.
         """
         organization_id = await self._readable_organization_id(user)
-        where = [OrganizationModelPricing.organization_id == organization_id]
-        if model_key is not None:
-            where.append(OrganizationModelPricing.model_key == model_key)
-        total = (
-            await self.db.execute(select(func.count()).select_from(OrganizationModelPricing).where(*where))
-        ).scalar_one()
-        stmt = (
-            select(OrganizationModelPricing)
-            .where(*where)
-            .order_by(
-                OrganizationModelPricing.model_key,
-                OrganizationModelPricing.effective_from.desc(),
-            )
-            .offset(skip)
-            .limit(limit)
+        return await self.rows.page_for_organization(
+            organization_id, model_key=model_key, skip=skip, limit=limit
         )
-        return list((await self.db.execute(stmt)).scalars().all()), total
 
     async def create_for_caller(
         self,
@@ -447,7 +428,7 @@ class OrganizationPricingService:
             effective_from=effective_from,
             effective_to=effective_to,
             unit=override.unit,
-            origin="api",
+            origin=API_ORIGIN,
         )
         self.db.add(row)
         await self._flush_or_conflict(organization_id, model_key, effective_from)
@@ -571,7 +552,7 @@ class OrganizationPricingService:
         # offered-models surface seeded carries ``seed`` and its refresh moves it
         # to each day's community default; leaving that marking on a rate an
         # admin has just set would have the next refresh overwrite it.
-        row.origin = "api"
+        row.origin = API_ORIGIN
         await self._flush_or_conflict(organization_id, row.model_key, effective_from, exclude_id=row.id)
         return row
 
