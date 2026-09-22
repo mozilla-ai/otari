@@ -70,6 +70,11 @@ chooses whether the caller asked for it or not. The two layers compose; they do
 not replace each other, and an organization that configures nothing leaves every
 request checked exactly as it was.
 
+In the dashboard this is **Organization**, then **Guardrails**: one table of the
+guardrails the organization has configured, and one of where each runs. It says
+there when a guardrail is not running, and whether the requests it covers are
+being refused or served unchecked.
+
 Entries are managed over `/api/v1/organizations/me/guardrails` (master key, and an
 organization owner or admin), and each one carries:
 
