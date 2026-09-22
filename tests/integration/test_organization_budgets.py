@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import (
     OrganizationBudgetHeldElsewhereError,
     OrganizationBudgetInUseError,
@@ -41,6 +42,8 @@ from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.users import User as ApiUser
+from gateway.repositories.api_keys import ApiKeyRepository
+from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -54,8 +57,10 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetCreate,
     OrganizationScopedBudgetUpdate,
 )
-from gateway.services.budgets import OrganizationBudgetService
+from gateway.services.api_keys import ApiKeyService
+from gateway.services.budgets import BudgetService
 from gateway.services.tenancy.errors import NotAuthorizedError, TenancyValidationError
+from gateway.services.tenancy.organization_service import OrganizationService
 
 _BUDGETS = f"{API_ROOT}/organizations/me/budgets"
 _CEILINGS = f"{API_ROOT}/organizations/me/spend-ceilings"
@@ -529,13 +534,23 @@ def _create(**overrides: Any) -> OrganizationBudgetCreate:
     return OrganizationBudgetCreate(**fields)
 
 
+def _service(async_db: AsyncSession) -> BudgetService:
+    uow = UnitOfWork(async_db)
+    return BudgetService(
+        uow,
+        BudgetRepositories.on(uow),
+        OrganizationService(async_db, membership_listener=None),
+        ApiKeyService(ApiKeyRepository(uow)),
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("role", ["owner", "admin"])
 async def test_a_management_role_may_define_a_budget(async_db: AsyncSession, role: str) -> None:
     organization = await _organization(async_db, slug=f"acme-write-{role}")
     identity = await _member(async_db, organization, role=role, full_name=f"{role} person")
 
-    created = await OrganizationBudgetService(async_db).create_budget(user=identity, request=_create())
+    created = await _service(async_db).create_organization_budget(user=identity, request=_create())
 
     assert created.organization_id == organization.id
     assert created.max_budget == 100.0
@@ -548,7 +563,7 @@ async def test_a_non_management_role_may_not_define_a_budget(async_db: AsyncSess
     identity = await _member(async_db, organization, role=role, full_name=f"{role} person")
 
     with pytest.raises(NotAuthorizedError):
-        await OrganizationBudgetService(async_db).create_budget(user=identity, request=_create())
+        await _service(async_db).create_organization_budget(user=identity, request=_create())
 
 
 @pytest.mark.asyncio
@@ -563,14 +578,14 @@ async def test_a_non_management_role_may_not_even_read_them(async_db: AsyncSessi
     organization = await _organization(async_db, slug=f"acme-read-{role}")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     reader = await _member(async_db, organization, role=role, full_name=f"{role} reader")
-    service = OrganizationBudgetService(async_db)
-    await service.create_budget(user=owner, request=_create())
+    service = _service(async_db)
+    await service.create_organization_budget(user=owner, request=_create())
 
     with pytest.raises(NotAuthorizedError):
-        await service.list_budgets(user=reader)
+        await service.list_organization_budgets(user=reader)
 
     with pytest.raises(NotAuthorizedError):
-        await service.list_ceilings(user=reader)
+        await service.list_organization_ceilings(user=reader)
 
 
 @pytest.mark.asyncio
@@ -585,21 +600,21 @@ async def test_an_admin_may_not_reach_another_organizations_budget(async_db: Asy
     their_owner = await _member(async_db, theirs, role="owner", full_name="Their owner")
     mine = await _organization(async_db, slug="acme-budget")
     my_admin = await _member(async_db, mine, role="admin", full_name="My admin")
-    service = OrganizationBudgetService(async_db)
-    their_budget = await service.create_budget(user=their_owner, request=_create())
+    service = _service(async_db)
+    their_budget = await service.create_organization_budget(user=their_owner, request=_create())
 
     with pytest.raises(OrganizationBudgetNotFoundError):
-        await service.update_budget(
+        await service.update_organization_budget(
             user=my_admin,
             budget_id=their_budget.budget_id,
             request=OrganizationBudgetUpdate(max_budget=1.0),
         )
 
     with pytest.raises(OrganizationBudgetNotFoundError):
-        await service.delete_budget(user=my_admin, budget_id=their_budget.budget_id)
+        await service.delete_organization_budget(user=my_admin, budget_id=their_budget.budget_id)
 
     # And it is not in their list either, which is the read half of the same rule.
-    assert (await service.list_budgets(user=my_admin)).count == 0
+    assert (await service.list_organization_budgets(user=my_admin)).count == 0
 
 
 @pytest.mark.asyncio
@@ -614,11 +629,11 @@ async def test_an_admin_may_not_cap_another_organizations_workspace(async_db: As
     their_workspace = await _workspace(async_db, theirs, name="Theirs", owner=their_owner)
     mine = await _organization(async_db, slug="acme-scope")
     my_admin = await _member(async_db, mine, role="admin", full_name="My admin")
-    service = OrganizationBudgetService(async_db)
-    my_budget = await service.create_budget(user=my_admin, request=_create())
+    service = _service(async_db)
+    my_budget = await service.create_organization_budget(user=my_admin, request=_create())
 
     with pytest.raises(OrganizationScopeNotFoundError):
-        await service.create_ceiling(
+        await service.create_organization_ceiling(
             user=my_admin,
             request=OrganizationScopedBudgetCreate(
                 scope_type="workspace",
@@ -655,7 +670,7 @@ async def test_every_scope_kind_resolves_to_its_organization(async_db: AsyncSess
     async_db.add(key)
     await async_db.flush()
 
-    service = OrganizationBudgetService(async_db)
+    service = _service(async_db)
     scopes = {
         "organization": str(organization.id),
         "workspace": str(workspace.id),
@@ -664,8 +679,8 @@ async def test_every_scope_kind_resolves_to_its_organization(async_db: AsyncSess
         "api_token": key.id,
     }
     for scope_type, scope_id in scopes.items():
-        budget = await service.create_budget(user=owner, request=_create(name=f"For {scope_type}"))
-        created = await service.create_ceiling(
+        budget = await service.create_organization_budget(user=owner, request=_create(name=f"For {scope_type}"))
+        created = await service.create_organization_ceiling(
             user=owner,
             request=OrganizationScopedBudgetCreate(
                 scope_type=scope_type,  # type: ignore[arg-type]
@@ -676,7 +691,7 @@ async def test_every_scope_kind_resolves_to_its_organization(async_db: AsyncSess
         assert created.scope_type == scope_type
         assert created.manageable is True
 
-    assert (await service.list_ceilings(user=owner)).count == len(scopes)
+    assert (await service.list_organization_ceilings(user=owner)).count == len(scopes)
 
 
 @pytest.mark.asyncio
@@ -689,12 +704,12 @@ async def test_giving_a_cadence_to_a_budget_that_had_none_retimes_its_ceilings(a
     """
     organization = await _organization(async_db, slug="acme-cadence-none")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    service = OrganizationBudgetService(async_db)
-    budget = await service.create_budget(
+    service = _service(async_db)
+    budget = await service.create_organization_budget(
         user=owner,
         request=_create(name="No reset", reset_alignment=None, max_budget=50.0),
     )
-    ceiling = await service.create_ceiling(
+    ceiling = await service.create_organization_ceiling(
         user=owner,
         request=OrganizationScopedBudgetCreate(
             scope_type="organization",
@@ -705,13 +720,13 @@ async def test_giving_a_cadence_to_a_budget_that_had_none_retimes_its_ceilings(a
     assert ceiling.period_start is None
     assert ceiling.period_end is None
 
-    await service.update_budget(
+    await service.update_organization_budget(
         user=owner,
         budget_id=budget.budget_id,
         request=OrganizationBudgetUpdate(reset_alignment="calendar_month"),
     )
 
-    retimed = (await service.list_ceilings(user=owner)).data[0]
+    retimed = (await service.list_organization_ceilings(user=owner)).data[0]
     assert retimed.period_start is not None
     assert retimed.period_end is not None
     assert retimed.reset_alignment == "calendar_month"
@@ -727,9 +742,9 @@ async def test_taking_a_cadence_away_clears_the_window(async_db: AsyncSession) -
     """
     organization = await _organization(async_db, slug="acme-cadence-drop")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    service = OrganizationBudgetService(async_db)
-    budget = await service.create_budget(user=owner, request=_create())
-    await service.create_ceiling(
+    service = _service(async_db)
+    budget = await service.create_organization_budget(user=owner, request=_create())
+    await service.create_organization_ceiling(
         user=owner,
         request=OrganizationScopedBudgetCreate(
             scope_type="organization",
@@ -738,13 +753,13 @@ async def test_taking_a_cadence_away_clears_the_window(async_db: AsyncSession) -
         ),
     )
 
-    await service.update_budget(
+    await service.update_organization_budget(
         user=owner,
         budget_id=budget.budget_id,
         request=OrganizationBudgetUpdate(reset_alignment=None),
     )
 
-    cleared = (await service.list_ceilings(user=owner)).data[0]
+    cleared = (await service.list_organization_ceilings(user=owner)).data[0]
     assert cleared.period_start is None
     assert cleared.period_end is None
 
@@ -759,9 +774,9 @@ async def test_retiming_keeps_the_spend_already_recorded(async_db: AsyncSession)
     """
     organization = await _organization(async_db, slug="acme-cadence-spend")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    service = OrganizationBudgetService(async_db)
-    budget = await service.create_budget(user=owner, request=_create())
-    created = await service.create_ceiling(
+    service = _service(async_db)
+    budget = await service.create_organization_budget(user=owner, request=_create())
+    created = await service.create_organization_ceiling(
         user=owner,
         request=OrganizationScopedBudgetCreate(
             scope_type="organization",
@@ -775,13 +790,13 @@ async def test_retiming_keeps_the_spend_already_recorded(async_db: AsyncSession)
     stored.reserved_spend = Decimal("1.25")
     await async_db.flush()
 
-    await service.update_budget(
+    await service.update_organization_budget(
         user=owner,
         budget_id=budget.budget_id,
         request=OrganizationBudgetUpdate(reset_alignment="calendar_day"),
     )
 
-    kept = (await service.list_ceilings(user=owner)).data[0]
+    kept = (await service.list_organization_ceilings(user=owner)).data[0]
     assert kept.current_spend == 7.5
     # Untouched, so a hold taken before the change still releases against the
     # counter it was taken from.
@@ -797,9 +812,9 @@ async def test_a_change_that_is_not_the_cadence_leaves_the_window_alone(async_db
     """
     organization = await _organization(async_db, slug="acme-cadence-stable")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    service = OrganizationBudgetService(async_db)
-    budget = await service.create_budget(user=owner, request=_create())
-    created = await service.create_ceiling(
+    service = _service(async_db)
+    budget = await service.create_organization_budget(user=owner, request=_create())
+    created = await service.create_organization_ceiling(
         user=owner,
         request=OrganizationScopedBudgetCreate(
             scope_type="organization",
@@ -808,13 +823,13 @@ async def test_a_change_that_is_not_the_cadence_leaves_the_window_alone(async_db
         ),
     )
 
-    await service.update_budget(
+    await service.update_organization_budget(
         user=owner,
         budget_id=budget.budget_id,
         request=OrganizationBudgetUpdate(name="Renamed", max_budget=999.0),
     )
 
-    unchanged = (await service.list_ceilings(user=owner)).data[0]
+    unchanged = (await service.list_organization_ceilings(user=owner)).data[0]
     assert unchanged.period_start == created.period_start
     assert unchanged.period_end == created.period_end
     # The figure did move, which is the whole point of naming a budget.
@@ -843,9 +858,9 @@ async def test_a_ceiling_on_a_deployment_budget_is_listed_but_not_manageable(asy
         )
     )
     await async_db.flush()
-    service = OrganizationBudgetService(async_db)
+    service = _service(async_db)
 
-    listed = await service.list_ceilings(user=owner)
+    listed = await service.list_organization_ceilings(user=owner)
 
     assert listed.count == 1
     assert listed.data[0].manageable is False
@@ -873,10 +888,10 @@ async def test_such_a_ceiling_can_be_moved_onto_the_organizations_own_budget(asy
     )
     async_db.add(ceiling)
     await async_db.flush()
-    service = OrganizationBudgetService(async_db)
-    mine = await service.create_budget(user=owner, request=_create())
+    service = _service(async_db)
+    mine = await service.create_organization_budget(user=owner, request=_create())
 
-    moved = await service.update_ceiling(
+    moved = await service.update_organization_ceiling(
         user=owner,
         ceiling_id=ceiling.id,
         request=OrganizationScopedBudgetUpdate(budget_id=mine.budget_id),
@@ -901,10 +916,10 @@ async def test_an_admin_may_not_repoint_a_ceiling_at_a_foreign_budget(async_db: 
     their_owner = await _member(async_db, theirs, role="owner", full_name="Their owner")
     mine = await _organization(async_db, slug="acme-repoint-refuse")
     my_owner = await _member(async_db, mine, role="owner", full_name="My owner")
-    service = OrganizationBudgetService(async_db)
-    their_budget = await service.create_budget(user=their_owner, request=_create())
-    my_budget = await service.create_budget(user=my_owner, request=_create())
-    ceiling = await service.create_ceiling(
+    service = _service(async_db)
+    their_budget = await service.create_organization_budget(user=their_owner, request=_create())
+    my_budget = await service.create_organization_budget(user=my_owner, request=_create())
+    ceiling = await service.create_organization_ceiling(
         user=my_owner,
         request=OrganizationScopedBudgetCreate(
             scope_type="organization",
@@ -914,7 +929,7 @@ async def test_an_admin_may_not_repoint_a_ceiling_at_a_foreign_budget(async_db: 
     )
 
     with pytest.raises(OrganizationBudgetNotFoundError):
-        await service.update_ceiling(
+        await service.update_organization_ceiling(
             user=my_owner,
             ceiling_id=ceiling.id,
             request=OrganizationScopedBudgetUpdate(budget_id=their_budget.budget_id),
@@ -927,9 +942,9 @@ async def test_an_admin_may_not_delete_another_organizations_ceiling(async_db: A
     their_owner = await _member(async_db, theirs, role="owner", full_name="Their owner")
     mine = await _organization(async_db, slug="acme-ceiling")
     my_admin = await _member(async_db, mine, role="admin", full_name="My admin")
-    service = OrganizationBudgetService(async_db)
-    their_budget = await service.create_budget(user=their_owner, request=_create())
-    theirs_ceiling = await service.create_ceiling(
+    service = _service(async_db)
+    their_budget = await service.create_organization_budget(user=their_owner, request=_create())
+    theirs_ceiling = await service.create_organization_ceiling(
         user=their_owner,
         request=OrganizationScopedBudgetCreate(
             scope_type="organization",
@@ -939,17 +954,17 @@ async def test_an_admin_may_not_delete_another_organizations_ceiling(async_db: A
     )
 
     with pytest.raises(OrganizationScopedBudgetNotFoundError):
-        await service.delete_ceiling(user=my_admin, ceiling_id=theirs_ceiling.id)
+        await service.delete_organization_ceiling(user=my_admin, ceiling_id=theirs_ceiling.id)
 
     with pytest.raises(OrganizationScopedBudgetNotFoundError):
-        await service.update_ceiling(
+        await service.update_organization_ceiling(
             user=my_admin,
             ceiling_id=theirs_ceiling.id,
             request=OrganizationScopedBudgetUpdate(name="mine now"),
         )
 
     # And it is not in their list, which is what the page would show.
-    assert (await service.list_ceilings(user=my_admin)).count == 0
+    assert (await service.list_organization_ceilings(user=my_admin)).count == 0
 
 
 @pytest.mark.asyncio
@@ -958,13 +973,13 @@ async def test_a_delete_is_refused_while_a_workspace_default_names_the_budget(as
     organization = await _organization(async_db, slug="acme-default-hold")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, organization, name="Engineering", owner=owner)
-    service = OrganizationBudgetService(async_db)
-    budget = await service.create_budget(user=owner, request=_create())
+    service = _service(async_db)
+    budget = await service.create_organization_budget(user=owner, request=_create())
     async_db.add(WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=budget.budget_id))
     await async_db.flush()
 
     with pytest.raises(OrganizationBudgetInUseError, match="workspace member default"):
-        await service.delete_budget(user=owner, budget_id=budget.budget_id)
+        await service.delete_organization_budget(user=owner, budget_id=budget.budget_id)
 
 
 @pytest.mark.asyncio
@@ -981,15 +996,15 @@ async def test_a_concurrent_duplicate_ceiling_is_a_conflict_not_a_crash(
     """
     organization = await _organization(async_db, slug="acme-race")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    service = OrganizationBudgetService(async_db)
-    budget = await service.create_budget(user=owner, request=_create())
+    service = _service(async_db)
+    budget = await service.create_organization_budget(user=owner, request=_create())
     request = OrganizationScopedBudgetCreate(
         scope_type="organization",
         scope_id=str(organization.id),
         budget_id=budget.budget_id,
     )
 
-    original = service._require_no_existing_ceiling
+    original = service._organization._require_no_existing_ceiling
 
     async def insert_the_winner(candidate: OrganizationScopedBudgetCreate) -> None:
         await original(candidate)
@@ -1006,10 +1021,10 @@ async def test_a_concurrent_duplicate_ceiling_is_a_conflict_not_a_crash(
     # Through `monkeypatch` rather than a bare assignment, which mypy refuses on
     # a bound method and which would leave the patch in place if the assertion
     # below raised.
-    monkeypatch.setattr(service, "_require_no_existing_ceiling", insert_the_winner)
+    monkeypatch.setattr(service._organization, "_require_no_existing_ceiling", insert_the_winner)
 
     with pytest.raises(OrganizationScopedBudgetAlreadyExistsError):
-        await service.create_ceiling(user=owner, request=request)
+        await service.create_organization_ceiling(user=owner, request=request)
 
 @pytest.mark.asyncio
 async def test_an_explicit_null_clears_the_cap_as_the_schema_says(async_db: AsyncSession) -> None:
@@ -1022,11 +1037,11 @@ async def test_an_explicit_null_clears_the_cap_as_the_schema_says(async_db: Asyn
     """
     organization = await _organization(async_db, slug="acme-clear-cap")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    service = OrganizationBudgetService(async_db)
-    budget = await service.create_budget(user=owner, request=_create(max_budget=100.0))
+    service = _service(async_db)
+    budget = await service.create_organization_budget(user=owner, request=_create(max_budget=100.0))
     assert budget.max_budget == 100.0
 
-    cleared = await service.update_budget(
+    cleared = await service.update_organization_budget(
         user=owner,
         budget_id=budget.budget_id,
         request=OrganizationBudgetUpdate(max_budget=None),
@@ -1034,7 +1049,7 @@ async def test_an_explicit_null_clears_the_cap_as_the_schema_says(async_db: Asyn
 
     assert cleared.max_budget is None
     # And an omitted field is still left alone, which is what makes it a patch.
-    renamed = await service.update_budget(
+    renamed = await service.update_organization_budget(
         user=owner,
         budget_id=budget.budget_id,
         request=OrganizationBudgetUpdate(name="Uncapped"),
@@ -1054,13 +1069,13 @@ async def test_a_delete_is_refused_while_a_gateway_user_holds_the_budget(async_d
     """
     organization = await _organization(async_db, slug="acme-user-hold")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    service = OrganizationBudgetService(async_db)
-    budget = await service.create_budget(user=owner, request=_create())
+    service = _service(async_db)
+    budget = await service.create_organization_budget(user=owner, request=_create())
     async_db.add(ApiUser(user_id="capped-user", budget_id=budget.budget_id))
     await async_db.flush()
 
     with pytest.raises(OrganizationBudgetHeldElsewhereError):
-        await service.delete_budget(user=owner, budget_id=budget.budget_id)
+        await service.delete_organization_budget(user=owner, budget_id=budget.budget_id)
 
 
 @pytest.mark.asyncio
@@ -1072,8 +1087,8 @@ async def test_a_delete_is_refused_while_a_reset_record_names_the_budget(async_d
     """
     organization = await _organization(async_db, slug="acme-reset-hold")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    service = OrganizationBudgetService(async_db)
-    budget = await service.create_budget(user=owner, request=_create())
+    service = _service(async_db)
+    budget = await service.create_organization_budget(user=owner, request=_create())
     async_db.add(ApiUser(user_id="detached-user", budget_id=None))
     await async_db.flush()
     async_db.add(
@@ -1090,7 +1105,7 @@ async def test_a_delete_is_refused_while_a_reset_record_names_the_budget(async_d
     # not a tenant's row to be told about, and its NOT NULL column makes the
     # ORM's null-out fail at the commit rather than being caught by a count.
     with pytest.raises(OrganizationBudgetHeldElsewhereError):
-        await service.delete_budget(user=owner, budget_id=budget.budget_id)
+        await service.delete_organization_budget(user=owner, budget_id=budget.budget_id)
 
 
 @pytest.mark.asyncio
@@ -1098,11 +1113,11 @@ async def test_a_scope_id_that_is_not_a_uuid_is_not_found_rather_than_a_crash(as
     """A typo and another tenant's row have to be the same answer, including a malformed id."""
     organization = await _organization(async_db, slug="acme-malformed")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    service = OrganizationBudgetService(async_db)
-    budget = await service.create_budget(user=owner, request=_create())
+    service = _service(async_db)
+    budget = await service.create_organization_budget(user=owner, request=_create())
 
     with pytest.raises(OrganizationScopeNotFoundError):
-        await service.create_ceiling(
+        await service.create_organization_ceiling(
             user=owner,
             request=OrganizationScopedBudgetCreate(
                 scope_type="workspace",
@@ -1121,9 +1136,9 @@ async def test_a_second_ceiling_narrowed_to_a_provider_is_allowed(async_db: Asyn
     """
     organization = await _organization(async_db, slug="acme-two-axes")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    service = OrganizationBudgetService(async_db)
-    budget = await service.create_budget(user=owner, request=_create())
-    await service.create_ceiling(
+    service = _service(async_db)
+    budget = await service.create_organization_budget(user=owner, request=_create())
+    await service.create_organization_ceiling(
         user=owner,
         request=OrganizationScopedBudgetCreate(
             scope_type="organization",
@@ -1132,7 +1147,7 @@ async def test_a_second_ceiling_narrowed_to_a_provider_is_allowed(async_db: Asyn
         ),
     )
 
-    narrowed = await service.create_ceiling(
+    narrowed = await service.create_organization_ceiling(
         user=owner,
         request=OrganizationScopedBudgetCreate(
             scope_type="organization",
@@ -1143,10 +1158,10 @@ async def test_a_second_ceiling_narrowed_to_a_provider_is_allowed(async_db: Asyn
     )
 
     assert narrowed.provider_key_id == "openai-eu"
-    assert (await service.list_ceilings(user=owner)).count == 2
+    assert (await service.list_organization_ceilings(user=owner)).count == 2
 
     with pytest.raises(OrganizationScopedBudgetAlreadyExistsError):
-        await service.create_ceiling(
+        await service.create_organization_ceiling(
             user=owner,
             request=OrganizationScopedBudgetCreate(
                 scope_type="organization",
@@ -1165,10 +1180,10 @@ async def test_an_unknown_scope_type_reaching_the_service_is_a_validation_error(
     this process is not held to the request schema.
     """
     organization = await _organization(async_db, slug="acme-bad-scope")
-    service = OrganizationBudgetService(async_db)
+    service = _service(async_db)
 
     with pytest.raises(TenancyValidationError):
-        await service._require_scope_in_organization(
+        await service._organization._require_scope_in_organization(
             organization=organization,
             scope_type="galaxy",
             scope_id=str(organization.id),
