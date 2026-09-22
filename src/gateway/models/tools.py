@@ -409,3 +409,36 @@ class WorkspaceWebSearchConfig(Base):
         onupdate=lambda: datetime.now(UTC),
         server_default=func.now(),
     )
+
+
+class SandboxContainer(Base):
+    """A code-execution sandbox held past the request that leased it, for the next one to resume.
+
+    The id is what a client sends back; ``provider_session_id`` is what the port
+    resumes. Bound to the user and workspace that leased it, which is what makes
+    a resume by anyone else an unknown id. Two clocks: ``expires_at`` moves
+    forward on every use and matches what the provider was told to hold the
+    sandbox for, ``hard_expires_at`` is set once and never moves.
+    """
+
+    __tablename__ = "sandbox_containers"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    # CASCADE rather than the RESTRICT its durable neighbors use: a lease is
+    # ephemeral, nothing depends on it, and blocking a workspace deletion until
+    # its hard clock runs out would be the only thing it ever did.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column()
+    provider_session_id: Mapped[str] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    hard_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # The claim one in-flight request holds, so a second cannot run code in the
+    # same workspace at the same time. Cleared when the request records its
+    # lease; the timestamp releases one a crashed gateway never gave back.
+    in_use_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+

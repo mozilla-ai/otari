@@ -12,6 +12,7 @@ import json
 import traceback
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -19,10 +20,12 @@ import httpx
 import pytest
 
 from gateway.adapters.code_execution_adapter import ProtocolCodeExecutionAdapter
+from gateway.services.code_execution import ContainerLease
 from gateway.services.sandbox_backend import (
     CODE_EXECUTION_TOOL_NAME,
     SandboxBackend,
     SandboxNotReachableError,
+    SandboxSessionGoneError,
     SandboxUnavailableError,
 )
 
@@ -1496,10 +1499,12 @@ class _RecordingPort:
         timeout_s: float,
         session_ttl_s: float,
         auth_token: str | None = None,
+        resume: str | None = None,
+        keep_alive_s: float | None = None,
     ) -> AsyncIterator[Any]:
-        del image, timeout_s, auth_token
+        del image, timeout_s, auth_token, resume, keep_alive_s
         self.session_ttl_s = session_ttl_s
-        yield SimpleNamespace(session_id="s-recording")
+        yield SimpleNamespace(session_id="s-recording", holds_across_requests=True, discard=lambda: None)
 
 
 @pytest.mark.asyncio
@@ -1525,3 +1530,234 @@ async def test_the_lease_is_capped_rather_than_asked_for_in_full() -> None:
         pass
 
     assert port.session_ttl_s == 3600.0
+
+
+# --- holding a session across requests --------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_kept_protocol_session_is_told_its_idle_timeout_and_not_destroyed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = _patched_async_client(
+        {("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1", "idle_timeout_seconds": 600})},
+        monkeypatch,
+    )
+    adapter = ProtocolCodeExecutionAdapter(SANDBOX_URL)
+    async with adapter.open_session(timeout_s=30, session_ttl_s=300, keep_alive_s=600) as session:
+        assert session.holds_across_requests
+    create = next(r for r in transport.captured if r.method == "POST")
+    # The contract's one lifetime hint, and the only way a kept session ends.
+    assert json.loads(create.content)["idle_timeout_seconds"] == 600
+    assert [r.method for r in transport.captured] == ["POST"], "a kept session must not be destroyed"
+
+
+@pytest.mark.asyncio
+async def test_a_backend_that_declines_the_idle_timeout_still_gets_its_session_destroyed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``idle_timeout_seconds`` is a hint, and the handle reports what was kept.
+
+    A backend that reports none will run no idle reclaim, so skipping the DELETE
+    would leak the session with nothing left to end it.
+    """
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    adapter = ProtocolCodeExecutionAdapter(SANDBOX_URL)
+    async with adapter.open_session(timeout_s=30, session_ttl_s=300, keep_alive_s=600) as session:
+        assert not session.holds_across_requests
+    assert [r.method for r in transport.captured] == ["POST", "DELETE"]
+
+
+@pytest.mark.asyncio
+async def test_a_session_nothing_can_resume_is_never_leased_a_container_id() -> None:
+    """The backend reports no container for a session the adapter will not hold."""
+
+    class _NonHoldingPort(_RecordingPort):
+        @asynccontextmanager
+        async def open_session(self, **kwargs: Any) -> AsyncIterator[Any]:
+            del kwargs
+            yield SimpleNamespace(session_id="s1", holds_across_requests=False, discard=lambda: None)
+
+    containers = _FakeContainers()
+    async with SandboxBackend(port=_NonHoldingPort(), containers=containers) as backend:
+        assert backend.lease is None
+    assert containers.recorded == []
+
+
+@pytest.mark.asyncio
+async def test_a_session_the_request_cannot_use_is_discarded_and_leaves_no_lease() -> None:
+    """A seed that fails releases the sandbox rather than holding one nobody was told about."""
+    discarded: list[bool] = []
+
+    class _DiscardablePort(_RecordingPort):
+        @asynccontextmanager
+        async def open_session(self, **kwargs: Any) -> AsyncIterator[Any]:
+            del kwargs
+            yield SimpleNamespace(
+                session_id="s1",
+                holds_across_requests=True,
+                discard=lambda: discarded.append(True),
+            )
+
+    class _FailingFiles(_FakeFiles):
+        async def read_input(self, staged: Any) -> bytes:
+            raise OSError("no such blob")
+
+    containers = _FakeContainers()
+    backend = SandboxBackend(port=_DiscardablePort(), containers=containers, files=_FailingFiles(inputs=[_staged()]))
+    with pytest.raises(SandboxNotReachableError):
+        async with backend:
+            pass  # pragma: no cover - enter raises
+
+    assert discarded == [True]
+    assert backend.lease is None
+    assert containers.recorded == []
+
+
+@pytest.mark.asyncio
+async def test_a_released_protocol_session_sends_the_body_it_always_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    async with _sandbox():
+        pass
+    create = next(r for r in transport.captured if r.method == "POST")
+    assert "idle_timeout_seconds" not in json.loads(create.content)
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_protocol_session_is_probed_not_created(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _patched_async_client(
+        {("GET", "/sessions/s-old/files/list"): httpx.Response(200, json={"files": []})},
+        monkeypatch,
+    )
+    adapter = ProtocolCodeExecutionAdapter(SANDBOX_URL)
+    async with adapter.open_session(timeout_s=30, session_ttl_s=300, resume="s-old", keep_alive_s=600) as session:
+        assert session.session_id == "s-old"
+    assert [(r.method, r.url.path) for r in transport.captured] == [("GET", "/sessions/s-old/files/list")]
+
+
+@pytest.mark.asyncio
+async def test_resuming_a_session_the_backend_reclaimed_is_gone(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patched_async_client(
+        {("GET", "/sessions/s-old/files/list"): httpx.Response(404, json={"detail": "no such session"})},
+        monkeypatch,
+    )
+    adapter = ProtocolCodeExecutionAdapter(SANDBOX_URL)
+    with pytest.raises(SandboxSessionGoneError):
+        async with adapter.open_session(timeout_s=30, session_ttl_s=300, resume="s-old"):
+            pass
+
+
+class _FakeContainers:
+    """A registry double: fixed clocks, and it remembers what was recorded."""
+
+    def __init__(self, idle_s: float = 600.0) -> None:
+        self.idle_s = idle_s
+        self.recorded: list[ContainerLease] = []
+        self.released: list[str] = []
+
+    def keep_alive_s(self, resumed: ContainerLease | None) -> float:
+        return self.idle_s
+
+    def lease(self, container_id: str, provider_session_id: str, *, resumed: ContainerLease | None) -> ContainerLease:
+        now = datetime.now(UTC)
+        return ContainerLease(
+            container_id=container_id,
+            provider="recording",
+            provider_session_id=provider_session_id,
+            expires_at=now + timedelta(seconds=self.idle_s),
+            hard_expires_at=resumed.hard_expires_at if resumed else now + timedelta(hours=1),
+        )
+
+    async def record(self, lease: ContainerLease) -> None:
+        self.recorded.append(lease)
+
+    async def release(self, container_id: str) -> None:
+        self.released.append(container_id)
+
+
+class _HoldingPort(_RecordingPort):
+    """Records the resume and keep-alive it was asked for too."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.resume: str | None = None
+        self.keep_alive_s: float | None = None
+
+    @asynccontextmanager
+    async def open_session(
+        self,
+        *,
+        image: str | None = None,
+        timeout_s: float,
+        session_ttl_s: float,
+        auth_token: str | None = None,
+        resume: str | None = None,
+        keep_alive_s: float | None = None,
+    ) -> AsyncIterator[Any]:
+        del image, timeout_s, auth_token
+        self.session_ttl_s = session_ttl_s
+        self.resume = resume
+        self.keep_alive_s = keep_alive_s
+        yield SimpleNamespace(
+            session_id=resume or "s-fresh",
+            holds_across_requests=keep_alive_s is not None,
+            discard=lambda: None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_lease_is_published_on_enter_and_recorded_on_exit() -> None:
+    port = _HoldingPort()
+    containers = _FakeContainers(idle_s=600.0)
+    noted: list[ContainerLease] = []
+    backend = SandboxBackend(port=port, containers=containers, on_lease=noted.append)
+
+    async with backend:
+        assert port.resume is None
+        assert port.keep_alive_s == 600.0
+        # Reported before any code runs, so a streamed response can carry it.
+        assert noted and noted[0].container_id == backend.container_id
+        assert noted[0].provider_session_id == "s-fresh"
+        assert containers.recorded == []
+    # Written after the port held the sandbox, never before.
+    assert [lease.container_id for lease in containers.recorded] == [backend.container_id]
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_lease_keeps_its_id_and_resumes_the_providers_session() -> None:
+    port = _HoldingPort()
+    containers = _FakeContainers()
+    now = datetime.now(UTC)
+    resumed = ContainerLease(
+        container_id="otari_cntr_deadbeef",
+        provider="recording",
+        provider_session_id="s-old",
+        expires_at=now + timedelta(minutes=5),
+        hard_expires_at=now + timedelta(minutes=30),
+    )
+    async with SandboxBackend(port=port, container=resumed, containers=containers) as backend:
+        assert backend.container_id == "otari_cntr_deadbeef"
+        assert port.resume == "s-old"
+    assert containers.recorded[0].container_id == "otari_cntr_deadbeef"
+    # The hard clock is the one the first lease set; a resume never restarts it.
+    assert containers.recorded[0].hard_expires_at == resumed.hard_expires_at
+
+
+@pytest.mark.asyncio
+async def test_without_a_registry_nothing_is_held_or_reported() -> None:
+    port = _HoldingPort()
+    async with SandboxBackend(port=port) as backend:
+        assert port.keep_alive_s is None
+        assert backend.lease is None

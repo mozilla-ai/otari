@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     CodeExecutionPortDep,
     ModelProviderPortDep,
+    build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
     get_db_if_needed,
@@ -532,6 +533,13 @@ async def run_chat_completion(
         tools_header=request.tools_header,
         code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
         code_execution_port=code_execution_port,
+        sandbox_containers=build_sandbox_container_registry(
+            config=config,
+            db=db,
+            user_id=ctx.user_id,
+            workspace_id=ctx.workspace_id,
+            port=code_execution_port,
+        ),
         sandbox_files=build_sandbox_file_bridge(
             raw_request=raw_request,
             config=config,

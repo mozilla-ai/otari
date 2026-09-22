@@ -217,8 +217,8 @@ retrieval, code execution and files.
   `tool_format.py`, `tool_usage.py`, `file_service.py`, `file_store.py`,
   `file_extractors.py`, `files/`, `tenancy/workspace_mcp_server_service.py`,
   `tenancy/workspace_web_search_service.py`,
-  `tenancy/workspace_code_execution_policy_service.py`
-- Repositories: `files/`
+  `tenancy/workspace_code_execution_policy_service.py`, `code_execution/`
+- Repositories: `files/`, `code_execution/`
 - Ports: `code_execution_port.py`
 - Adapters: `code_execution_adapter.py`, `e2b_code_execution_adapter.py`
 - Models: `tools.py`, `mcp.py`

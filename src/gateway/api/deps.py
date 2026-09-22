@@ -34,6 +34,7 @@ from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import OrgProviderKeyRepository
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
+from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.file_service import StagedFile
 from gateway.services.file_store import FileStore
@@ -660,6 +661,40 @@ def build_sandbox_file_bridge(
         workspace_id=workspace_id,
         inputs=inputs,
         base_url=f"{base}{API_ROOT}/files",
+    )
+
+
+def build_sandbox_container_registry(
+    *,
+    config: GatewayConfig,
+    db: AsyncSession | None,
+    user_id: str | None,
+    workspace_id: uuid.UUID | None,
+    port: CodeExecutionPort | None,
+) -> SandboxContainerRegistry | None:
+    """The registry a completion request's sandbox session is held in, or ``None``.
+
+    ``None`` is every case in which a sandbox cannot outlive its request: hybrid
+    mode, which has no local database to remember a lease in; a deployment with
+    no sandbox at all; and one that turned reuse off with a zero idle TTL. The
+    lease is scoped to the billed user and workspace, and to the adapter this
+    build runs, so a deployment that changes providers starts fresh.
+    """
+    if (
+        db is None
+        or user_id is None
+        or workspace_id is None
+        or port is None
+        or config.sandbox_container_idle_ttl_sec <= 0
+    ):
+        return None
+    return SandboxContainerRegistry(
+        uow=UnitOfWork(db),
+        user_id=user_id,
+        workspace_id=workspace_id,
+        provider=port.label,
+        idle_ttl_s=config.sandbox_container_idle_ttl_sec,
+        max_lifetime_s=config.sandbox_container_max_lifetime_sec,
     )
 
 

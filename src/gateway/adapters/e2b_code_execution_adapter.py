@@ -6,8 +6,9 @@ no privileged containers for instance, sets ``sandbox_provider: e2b`` and needs
 no sandbox service of its own.
 
 A session is one E2B sandbox and the session id is the sandbox's own, so this
-adapter holds no state between calls: any worker can serve any session, and a
-sandbox nothing releases is reclaimed by E2B's own lifetime timer.
+adapter holds no state between calls: any worker can serve any session, a kept
+sandbox is resumed by that id from any worker, and one nothing releases is
+reclaimed by E2B's own lifetime timer.
 
 The SDK is an optional extra (``otari[e2b]``) imported inside
 :meth:`E2BCodeExecutionAdapter.open_session`, so a deployment that does not use
@@ -31,6 +32,7 @@ from gateway.ports.code_execution_port import (
     OutputOverBudget,
     SandboxFileEntry,
     SandboxNotReachableError,
+    SandboxSessionGoneError,
     SandboxUnavailableError,
 )
 from gateway.types.code_execution import ResultBlock
@@ -68,6 +70,8 @@ class E2BCodeExecutionAdapter:
         timeout_s: float,
         session_ttl_s: float,
         auth_token: str | None = None,
+        resume: str | None = None,
+        keep_alive_s: float | None = None,
     ) -> AsyncIterator[CodeExecutionSession]:
         # ``auth_token`` is the caller's own bearer credential, which only means
         # something to a backend that authenticates the request. E2B
@@ -87,10 +91,20 @@ class E2BCodeExecutionAdapter:
             )
         sdk = _sdk()
         try:
-            sandbox = await sdk.AsyncSandbox.create(
-                timeout=int(session_ttl_s),
-                metadata={"otari": "code-execution"},
-            )
+            if resume is not None:
+                # ``timeout`` on connect only ever lengthens a running sandbox's
+                # life, so this request's lease is covered whatever was left of
+                # the last one, and a paused sandbox is resumed on the way.
+                sandbox = await sdk.AsyncSandbox.connect(resume, timeout=int(session_ttl_s))
+            else:
+                sandbox = await sdk.AsyncSandbox.create(
+                    timeout=int(session_ttl_s),
+                    metadata={"otari": "code-execution"},
+                )
+        except sdk.NotFoundException as exc:
+            if resume is None:
+                raise SandboxNotReachableError(f"failed to create an E2B sandbox: {exc}") from exc
+            raise SandboxSessionGoneError(f"E2B sandbox {resume} is gone") from exc
         except sdk.AuthenticationException as exc:
             # The deployment's own credential, so the message is for its
             # operator and never reaches the caller.
@@ -99,27 +113,46 @@ class E2BCodeExecutionAdapter:
         except (sdk.RateLimitException, sdk.ServiceBusyException, sdk.TimeoutException) as exc:
             raise SandboxUnavailableError(_RETRY_AFTER_S) from exc
         except sdk.SandboxException as exc:
-            raise SandboxNotReachableError(f"failed to create an E2B sandbox: {exc}") from exc
+            verb = "resume" if resume is not None else "create"
+            raise SandboxNotReachableError(f"failed to {verb} an E2B sandbox: {exc}") from exc
 
+        session = _E2BSession(sandbox, sdk, holds_across_requests=keep_alive_s is not None)
         try:
-            yield _E2BSession(sandbox, sdk)
+            yield session
         finally:
-            try:
-                await sandbox.kill()
-            except Exception:  # noqa: BLE001 - teardown is best effort; E2B reclaims on its own timer
-                logger.warning("E2B sandbox %s cleanup failed", sandbox.sandbox_id, exc_info=True)
+            if keep_alive_s is not None and session.holds_across_requests:
+                # Held for the next request; E2B reclaims it on this timer if
+                # none comes. A failure here leaves the timer the sandbox was
+                # created or connected with, which is never shorter than a request.
+                try:
+                    await sandbox.set_timeout(max(1, int(keep_alive_s)))
+                except Exception:  # noqa: BLE001 - best effort; the creation timeout still bounds it
+                    logger.warning("E2B sandbox %s could not be held for reuse", sandbox.sandbox_id, exc_info=True)
+            else:
+                try:
+                    await sandbox.kill()
+                except Exception:  # noqa: BLE001 - teardown is best effort; E2B reclaims on its own timer
+                    logger.warning("E2B sandbox %s cleanup failed", sandbox.sandbox_id, exc_info=True)
 
 
 class _E2BSession:
     """One E2B sandbox, answering the port's six operations."""
 
-    def __init__(self, sandbox: Any, sdk: Any) -> None:
+    def __init__(self, sandbox: Any, sdk: Any, *, holds_across_requests: bool = False) -> None:
         self._sandbox = sandbox
         self._sdk = sdk
+        self._holds = holds_across_requests
 
     @property
     def session_id(self) -> str:
         return str(self._sandbox.sandbox_id)
+
+    @property
+    def holds_across_requests(self) -> bool:
+        return self._holds
+
+    def discard(self) -> None:
+        self._holds = False
 
     def _absolute(self, path: str) -> str:
         """Resolve a workspace-relative path, refusing anything that leaves it.
@@ -208,9 +241,14 @@ class _E2BSession:
         absolute = self._absolute(path)
         # The SDK hands the file over whole, so the size is established before
         # the read rather than while it arrives: a run writes whatever it likes,
-        # and measuring afterwards would mean holding all of it first.
+        # and measuring afterwards would mean holding all of it first. A size
+        # the provider will not report is therefore refused rather than read on
+        # trust: the file is skipped, which is what an unfetchable one already is.
         size = await self._size_of(absolute)
-        if size is not None and size > budget_bytes:
+        if size is None:
+            msg = f"sandbox would not report the size of {path!r}, so it cannot be fetched within the budget"
+            raise SandboxNotReachableError(msg)
+        if size > budget_bytes:
             raise OutputOverBudget
         try:
             data = bytes(await self._sandbox.files.read(absolute, format="bytes"))

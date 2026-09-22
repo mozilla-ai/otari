@@ -19,7 +19,7 @@ import logging
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from functools import cached_property
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from pydantic import ValidationError
@@ -31,6 +31,7 @@ from gateway.ports.code_execution_port import (
     OutputOverBudget,
     SandboxFileEntry,
     SandboxNotReachableError,
+    SandboxSessionGoneError,
     SandboxUnavailableError,
 )
 from gateway.services.url_safety import redact_url_secrets
@@ -86,54 +87,124 @@ class ProtocolCodeExecutionAdapter:
         timeout_s: float,
         session_ttl_s: float,
         auth_token: str | None = None,
+        resume: str | None = None,
+        keep_alive_s: float | None = None,
     ) -> AsyncIterator[CodeExecutionSession]:
-        # A contract session lives until the DELETE below and the contract has no
-        # lifetime field, so there is nothing to tell the backend.
+        # A contract session lives until the DELETE below, unless it is kept: then
+        # the backend reclaims it on the idle timeout it was told at creation,
+        # which is the one lifetime hint the contract has.
         del session_ttl_s
         stack = AsyncExitStack()
         headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else None
         client = await stack.enter_async_context(httpx.AsyncClient(timeout=timeout_s, headers=headers))
         try:
-            payload = {"image": image} if image else {}
+            if resume is not None:
+                session_id = resume
+                await self._probe_session(client, session_id)
+                # A session that survived an earlier request is proof the backend
+                # holds them, and its idle clock is the one it was created with.
+                holds = keep_alive_s is not None
+            else:
+                session_id, accepted_idle_s = await self._create_session(client, image=image, keep_alive_s=keep_alive_s)
+                # ``idle_timeout_seconds`` is a hint the backend MAY ignore, and
+                # the handle reports what it actually kept. No value means no
+                # idle reclaim will come, so holding the session would leak it:
+                # the DELETE below is what ends it, exactly as before reuse.
+                holds = keep_alive_s is not None and accepted_idle_s is not None
+                if keep_alive_s is not None and not holds:
+                    logger.info(
+                        "sandbox backend did not accept an idle timeout; session %s will not be held for reuse",
+                        session_id,
+                    )
+        except BaseException:
+            await stack.aclose()
+            raise
+
+        session = _ProtocolSession(client, self._sandbox_url, session_id, timeout_s, holds_across_requests=holds)
+        try:
+            yield session
+        finally:
+            if not session.holds_across_requests:
+                try:
+                    await client.delete(f"{self._sandbox_url}/sessions/{session_id}")
+                except httpx.HTTPError:
+                    logger.warning("sandbox session %s cleanup failed", session_id, exc_info=True)
+            await stack.aclose()
+
+    async def _create_session(
+        self, client: httpx.AsyncClient, *, image: str | None, keep_alive_s: float | None
+    ) -> tuple[str, int | None]:
+        """Create a session: its id, and the idle timeout the backend says it kept."""
+        payload: dict[str, Any] = {"image": image} if image else {}
+        if keep_alive_s is not None:
+            # Sent only for a session that will be kept, so a deployment without
+            # reuse sends the body it always sent.
+            payload["idle_timeout_seconds"] = max(1, int(keep_alive_s))
+        try:
             response = await client.post(f"{self._sandbox_url}/sessions", json=payload)
             if response.status_code == 503:
                 raise SandboxUnavailableError(response.headers.get("Retry-After"))
             response.raise_for_status()
-            session_id = SessionHandle.model_validate(response.json()).session_id
+            handle = SessionHandle.model_validate(response.json())
+            return handle.session_id, handle.idle_timeout_seconds
         except SandboxUnavailableError:
-            await stack.aclose()
             raise
         except ValidationError as exc:
-            await stack.aclose()
             raise SandboxNotReachableError(
                 f"failed to create sandbox session at {self._safe_url}: {_contract_violation(exc)}"
             ) from None
         except (httpx.HTTPError, ValueError) as exc:
-            await stack.aclose()
             raise SandboxNotReachableError(f"failed to create sandbox session at {self._safe_url}: {exc}") from exc
 
+    async def _probe_session(self, client: httpx.AsyncClient, session_id: str) -> None:
+        """Confirm a session to resume still exists, through the one read the contract offers.
+
+        ``ListFiles`` is optional in the contract, so a backend without it answers
+        404 here too and cannot have its sessions resumed; the caller is told the
+        container is gone, which for that backend is the truth of every resume.
+        """
         try:
-            yield _ProtocolSession(client, self._sandbox_url, session_id, timeout_s)
-        finally:
-            try:
-                await client.delete(f"{self._sandbox_url}/sessions/{session_id}")
-            except httpx.HTTPError:
-                logger.warning("sandbox session %s cleanup failed", session_id, exc_info=True)
-            await stack.aclose()
+            response = await client.get(f"{self._sandbox_url}/sessions/{session_id}/files/list")
+        except httpx.HTTPError as exc:
+            raise SandboxNotReachableError(f"failed to reach sandbox session at {self._safe_url}: {exc}") from exc
+        if response.status_code == 404:
+            raise SandboxSessionGoneError(f"sandbox session {session_id} is gone")
+        if response.status_code == 503:
+            raise SandboxUnavailableError(response.headers.get("Retry-After"))
+        try:
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise SandboxNotReachableError(f"sandbox session {session_id} could not be resumed: {exc}") from exc
 
 
 class _ProtocolSession:
     """The six operations, against one session of a contract-speaking backend."""
 
-    def __init__(self, client: httpx.AsyncClient, sandbox_url: str, session_id: str, timeout_s: float) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        sandbox_url: str,
+        session_id: str,
+        timeout_s: float,
+        *,
+        holds_across_requests: bool = False,
+    ) -> None:
         self._client = client
         self._sandbox_url = sandbox_url
         self._session_id = session_id
         self._timeout_s = timeout_s
+        self._holds = holds_across_requests
 
     @property
     def session_id(self) -> str:
         return self._session_id
+
+    @property
+    def holds_across_requests(self) -> bool:
+        return self._holds
+
+    def discard(self) -> None:
+        self._holds = False
 
     @property
     def _base(self) -> str:

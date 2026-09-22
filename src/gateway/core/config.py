@@ -1078,6 +1078,24 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
             "only the otari[e2b] extra and E2B_API_KEY."
         ),
     )
+    sandbox_container_idle_ttl_sec: Annotated[int, Shown(SettingsGroup.TOOLS)] = Field(
+        default=600,
+        ge=0,
+        description=(
+            "How long a code-execution sandbox is held after its request ends, for a request that asked to "
+            "hold one by sending container: auto; the clock restarts on every use. A request that asks for "
+            "nothing is never held, whatever this says, so this is the lifetime rather than the switch. 0 "
+            "refuses to hold a sandbox at all, which is how a deployment behaved before container reuse existed."
+        ),
+    )
+    sandbox_container_max_lifetime_sec: Annotated[int, Shown(SettingsGroup.TOOLS)] = Field(
+        default=3600,
+        ge=60,
+        description=(
+            "The longest a resumed sandbox may live from its first lease, whatever the idle clock says, so "
+            "one conversation cannot hold a sandbox open on the provider indefinitely."
+        ),
+    )
     code_execution_executor: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(

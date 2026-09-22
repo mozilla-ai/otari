@@ -23,7 +23,12 @@ from gateway.adapters.code_execution_adapter import (
     verify_code_execution_ready,
 )
 from gateway.core.config import GatewayConfig
-from gateway.ports.code_execution_port import OutputOverBudget, SandboxNotReachableError, SandboxUnavailableError
+from gateway.ports.code_execution_port import (
+    OutputOverBudget,
+    SandboxNotReachableError,
+    SandboxSessionGoneError,
+    SandboxUnavailableError,
+)
 
 ROOT = e2b_adapter.WORKSPACE_ROOT
 
@@ -128,8 +133,16 @@ class _Sandbox:
     async def kill(self) -> None:
         self.killed = True
 
+    async def set_timeout(self, timeout: int) -> None:
+        self.held_for = timeout
 
-def _stub_sdk(sandbox: _Sandbox | None = None, *, create_error: Exception | None = None) -> Any:
+
+def _stub_sdk(
+    sandbox: _Sandbox | None = None,
+    *,
+    create_error: Exception | None = None,
+    connect_error: Exception | None = None,
+) -> Any:
     made = sandbox or _Sandbox()
 
     class _AsyncSandbox:
@@ -138,6 +151,13 @@ def _stub_sdk(sandbox: _Sandbox | None = None, *, create_error: Exception | None
             made.created_with = kwargs  # type: ignore[attr-defined]
             if create_error is not None:
                 raise create_error
+            return made
+
+        @staticmethod
+        async def connect(sandbox_id: str, **kwargs: Any) -> _Sandbox:
+            made.connected_with = (sandbox_id, kwargs)  # type: ignore[attr-defined]
+            if connect_error is not None:
+                raise connect_error
             return made
 
     class _Sdk:
@@ -300,6 +320,34 @@ async def test_a_produced_file_comes_back_and_respects_the_budget(monkeypatch: p
 
 
 @pytest.mark.asyncio
+async def test_a_file_whose_size_the_provider_will_not_report_is_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The SDK hands a file over whole, so an unknown size is refused, not read on trust.
+
+    Reading it to then measure it is the thing the size check exists to avoid:
+    what a run writes is untrusted and can be arbitrarily large.
+    """
+    sandbox = _Sandbox(tree={posixpath.join(ROOT, "chart.png"): b"\x89PNG bytes"})
+    sdk = _stub_sdk(sandbox)
+    reads: list[str] = []
+
+    async def _unlistable(path: str, depth: int = 1) -> list[_Entry]:
+        del path, depth
+        raise RuntimeError("listing is unavailable")
+
+    async def _recorded(path: str, format: str = "bytes") -> bytes:  # noqa: A002 - the SDK's own name
+        reads.append(path)
+        return b""
+
+    async with _adapter(monkeypatch, sdk).open_session(timeout_s=30, session_ttl_s=120) as session:
+        sandbox.files.list = _unlistable  # type: ignore[method-assign]
+        sandbox.files.read = _recorded  # type: ignore[method-assign]
+        with pytest.raises(SandboxNotReachableError):
+            async for _ in session.read_file("chart.png", budget_bytes=1000):
+                pass
+    assert reads == []
+
+
+@pytest.mark.asyncio
 async def test_a_path_that_leaves_the_workspace_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     sdk = _stub_sdk()
     async with _adapter(monkeypatch, sdk).open_session(timeout_s=30, session_ttl_s=120) as session:
@@ -404,3 +452,34 @@ def test_a_missing_sdk_names_the_extra_to_install(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setitem(sys.modules, "e2b", None)
     with pytest.raises(SandboxNotReachableError, match=r"pip install otari\[e2b\]"):
         e2b_adapter._sdk()
+
+
+@pytest.mark.asyncio
+async def test_a_kept_sandbox_is_held_for_the_idle_timeout_instead_of_killed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reuse across requests: the sandbox outlives the block, on E2B's own timer."""
+    sdk = _stub_sdk()
+    async with _adapter(monkeypatch, sdk).open_session(timeout_s=30, session_ttl_s=300, keep_alive_s=600):
+        pass
+    assert not sdk.made.killed
+    assert sdk.made.held_for == 600
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_sandbox_is_connected_by_id_and_not_created(monkeypatch: pytest.MonkeyPatch) -> None:
+    sdk = _stub_sdk()
+    async with _adapter(monkeypatch, sdk).open_session(timeout_s=30, session_ttl_s=300, resume="sbx_test") as session:
+        assert session.session_id == "sbx_test"
+    sandbox_id, kwargs = sdk.made.connected_with
+    assert sandbox_id == "sbx_test"
+    # This request's whole lease, so the sandbox outlasts every call it makes.
+    assert kwargs["timeout"] == 300
+    assert not hasattr(sdk.made, "created_with")
+
+
+@pytest.mark.asyncio
+async def test_resuming_a_sandbox_e2b_no_longer_has_is_gone_not_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The caller's id is stale, which is its 400 to fix, not a backend outage."""
+    sdk = _stub_sdk(connect_error=_NotFoundException("no such sandbox"))
+    with pytest.raises(SandboxSessionGoneError):
+        async with _adapter(monkeypatch, sdk).open_session(timeout_s=30, session_ttl_s=300, resume="sbx_gone"):
+            pass

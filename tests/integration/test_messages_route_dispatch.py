@@ -176,35 +176,22 @@ def test_container_reaches_plain_amessages_unchanged(
     assert captured["container"] == "container_01ABC"
 
 
-def test_container_is_dropped_when_the_gateway_runs_code_execution(
+def test_a_providers_container_is_refused_when_the_gateway_runs_code_execution(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``otari_code_execution`` means the sandbox runs the code, so Anthropic is
-    never asked to stand up a container this request could reach."""
+    """``otari_code_execution`` means the sandbox runs the code, so an id Anthropic
+    minted names a workspace this request cannot reach. It is refused in the words
+    an Anthropic client already treats as "drop the id and start over", rather
+    than the provider being asked to attach it or the caller being handed an
+    empty sandbox in place of its files. Nothing is leased for a refused request."""
+    from unittest.mock import MagicMock
+
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
-    forwarded: dict[str, Any] = {}
+    sandbox = MagicMock()
 
-    async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
-    ) -> MessageResponse:
-        forwarded.update(completion_kwargs)
-        return _text_response()
-
-    fake_backend = AsyncMock()
-    fake_backend.purpose_hints = lambda: []
-
-    with (
-        patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
-        patch(
-            "gateway.api.routes._pipeline.SandboxBackend",
-            return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=fake_backend),
-                __aexit__=AsyncMock(return_value=None),
-            ),
-        ),
-    ):
+    with patch("gateway.api.routes._pipeline.SandboxBackend", new=sandbox):
         resp = client.post(
             f"{API_ROOT}/messages",
             json={
@@ -217,8 +204,11 @@ def test_container_is_dropped_when_the_gateway_runs_code_execution(
             headers=api_key_header,
         )
 
-    assert resp.status_code == 200, resp.text
-    assert "container" not in forwarded
+    assert resp.status_code == 400, resp.text
+    error = resp.json()["detail"]["error"]
+    assert error["type"] == "invalid_request_error"
+    assert "has expired or does not exist" in error["message"]
+    sandbox.assert_not_called()
 
 
 def test_container_survives_provider_native_code_execution(

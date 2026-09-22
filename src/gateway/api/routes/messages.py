@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     CodeExecutionPortDep,
     ModelProviderPortDep,
+    build_sandbox_container_registry,
     build_sandbox_file_bridge,
     extract_credential_token,
     get_config,
@@ -60,6 +61,7 @@ from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.services.code_execution import ContainerLease
 from gateway.services.file_service import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
@@ -620,6 +622,7 @@ class _MessagesAdapter:
         emit_native_web_search: bool = False,
         emit_native_code_execution: bool = False,
         web_search_budget: WebSearchBudget | None = None,
+        container: ContainerLease | None = None,
     ) -> MessageResponse:
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
         # the platform-attempt path so test fakes can mirror each call shape.
@@ -630,6 +633,8 @@ class _MessagesAdapter:
             extra["web_search_budget"] = web_search_budget
         if emit_native_code_execution:
             extra["emit_native_code_execution"] = True
+        if container is not None:
+            extra["container"] = container
         provider_kwargs, _ = _split_client_betas(kwargs)
         return await anthropic_tool_loop(
             completion_kwargs=provider_kwargs,
@@ -648,6 +653,7 @@ class _MessagesAdapter:
         emit_native_web_search: bool = False,
         emit_native_code_execution: bool = False,
         web_search_budget: WebSearchBudget | None = None,
+        container: ContainerLease | None = None,
     ) -> AsyncIterator[MessageStreamEvent]:
         provider_kwargs, emit_native_mcp = _split_client_betas(kwargs)
         extra: dict[str, Any] = {}
@@ -657,6 +663,8 @@ class _MessagesAdapter:
             extra["web_search_budget"] = web_search_budget
         if emit_native_code_execution:
             extra["emit_native_code_execution"] = True
+        if container is not None:
+            extra["container"] = container
         return anthropic_tool_loop_stream(
             completion_kwargs=provider_kwargs,
             pool=pool,
@@ -860,6 +868,17 @@ async def create_message(
         tools_header=request.tools_header,
         code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
         code_execution_port=code_execution_port,
+        # Anthropic's own field, which is where an Anthropic SDK puts the id it
+        # read off the last response. Resolved at admission against this caller's
+        # leases; the provider never sees it when the sandbox runs the code.
+        container_id=request.container,
+        sandbox_containers=build_sandbox_container_registry(
+            config=config,
+            db=db,
+            user_id=ctx.user_id,
+            workspace_id=ctx.workspace_id,
+            port=code_execution_port,
+        ),
         sandbox_files=build_sandbox_file_bridge(
             raw_request=raw_request,
             config=config,
@@ -882,13 +901,13 @@ async def create_message(
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
     if tool_ctx.use_sandbox:
-        # ``container`` addresses Anthropic's own code-execution container, and
-        # the gateway sandbox owns execution for this request, so the provider
-        # would be asked to attach a container no tool call will reach.
-        # ``prepare_gateway_tools`` either claimed the provider-native declaration
-        # or refused the request, so no provider tool survives alongside the
-        # sandbox and dropping it here cannot strand a container the provider
-        # would have used.
+        # ``container`` is the gateway's to honor when the sandbox runs the code:
+        # admission has already resolved it against this caller's leases, or
+        # refused the request. Forwarding it would ask the provider to attach a
+        # container no tool call will reach. ``prepare_gateway_tools`` either
+        # claimed the provider-native declaration or refused the request, so no
+        # provider tool survives alongside the sandbox and dropping it here cannot
+        # strand a container the provider would have used.
         request_fields.pop("container", None)
 
     # ------------------------------------------------------------------

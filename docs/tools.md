@@ -126,6 +126,88 @@ one sets `sandbox_provider: e2b` instead and Otari runs the code on
 everything below is the same either way. A runnable example lives under
 `demo/code-exec/`.
 
+### Reusing a sandbox across requests
+
+Within one request, every code call the model makes shares one sandbox, so a
+run can build on the last one's variables and files. Across requests, nothing is
+held unless you ask: a request sends `container: "auto"` to say it wants a
+sandbox that outlives it, and the response comes back naming the one it got.
+Send that name on the next request and you get the same sandbox, with the
+workspace as the last run left it. A request that asks for nothing is served
+exactly as it was before any of this existed, and holds nothing, because a held
+sandbox costs the deployment for as long as it is held.
+
+This is the same contract as Anthropic's `container` and OpenAI's
+`code_interpreter` container:
+
+- On Messages, send `"container": "auto"` at the top level. The response carries
+  Anthropic's `container` object, `{"id": "otari_cntr_…", "expires_at": "…"}`,
+  on the final message and on the `message_start` event. Send the id back as the
+  same top-level field.
+- On Responses, send OpenAI's own `"container": {"type": "auto"}` on the
+  `code_interpreter` tool entry. Every `code_interpreter_call` item carries the
+  id as `container_id`; send it back as `"container": "otari_cntr_…"` on that
+  entry.
+- On every dialect, the response headers `X-Otari-Container-Id` and
+  `X-Otari-Container-Expires-At` name it, and the `otari_code_execution` tool
+  entry takes a `container` string, `"auto"` or an id.
+
+`sandbox_container_idle_ttl_sec` (600 by default) is how long a held sandbox
+lives, not whether one is held. Setting it to 0 refuses to hold one at all, so
+an operator can take the capability away whatever a request asks for.
+
+A resumed sandbox has the workspace the last run left, so files a run produced
+are still there under their names, and a request's uploads are seeded on top.
+The idle clock restarts on every use; a second, hard clock
+(`sandbox_container_max_lifetime_sec`, 3600 by default) starts at the first
+lease and never restarts, so one conversation cannot hold a sandbox open on the
+provider indefinitely.
+
+An id that is unknown, expired, another tenant's, or from a different sandbox
+provider is refused with a 400 whose detail reads `Container '…' has expired or
+does not exist.`, the phrasing clients of the provider APIs already treat as
+"drop the id and start over". A container id is bound to the user and workspace
+that leased it, and the refusal is the same for all four cases, so an id never
+reveals whether someone else's sandbox exists. The same 400 answers any
+container on a hybrid gateway, which has no local database to hold a lease in.
+
+A sandbox runs one request at a time. Naming a container another of your own
+requests is still using is a 409, not a 400: the id is good and a retry works,
+where a 400 would have a client throw a live sandbox away. Two requests sharing
+one workspace would interleave their code and each collect the other's files.
+
+A response carries a container only when the sandbox really will still be there.
+A `protocol` backend that declines the idle timeout Otari asks for is told to
+destroy the session at the end of the request, as it was before reuse existed,
+and the response names no container rather than one that is already gone.
+
+`container` is only the gateway's where the gateway runs the code. A request
+whose code execution the provider serves (see
+[Code-execution executor](#code-execution-executor)) keeps the provider's own
+`container` field, forwarded untouched, so an id they minted still resumes their
+container. A value only Otari could have named, `auto` or an `otari_cntr_…` id,
+is refused there rather than forwarded: it would reach the provider as a
+malformed id of theirs, and the error would name a word Otari told you to send.
+Sending an id Otari minted is the exception, because it names one sandbox and
+the files in it, which already says where the code runs: under `auto` it pins
+execution here rather than letting a model swap hand the request to the
+provider and take the sandbox away. So a client can keep a container across
+turns without also tracking which executor served each one. Only an id does
+this; `auto` names no sandbox. Anything that outranks a request still outranks
+it, so `Otari-Code-Execution: provider` and a workspace policy pinned to the
+provider both win, and the id is refused as above.
+
+`container: "auto"` is best-effort, unlike an id. A deployment that holds
+nothing, because an operator set the TTL to 0 or because it is a hybrid gateway
+with no local database to keep a lease in, serves the request exactly as it
+would have and reports no container. An id is a requirement rather than a wish,
+so the same deployment refuses it: the caller asked for specific files, and an
+empty sandbox in their place is the wrong answer.
+
+The provider's own timer does the reclaiming: the gateway tells it the idle
+timeout when the request ends, and a periodic sweep only drops the rows that
+named a sandbox nobody can resume any more.
+
 ### Code-execution executor
 
 A request written for a provider's own sandbox keeps its provider's vocabulary:
@@ -136,7 +218,7 @@ declaration asks for:
 
 | Executor | Who runs the code |
 | --- | --- |
-| `auto` (default) | The provider, when it runs that tool natively for the dispatched model and wire format; otherwise Otari's sandbox. |
+| `auto` (default) | The provider, when it runs that tool natively for the dispatched model and wire format; otherwise Otari's sandbox. A request naming a container Otari minted runs here, since the sandbox it names is here (see [Reusing a sandbox across requests](#reusing-a-sandbox-across-requests)). |
 | `otari` | Always Otari's sandbox. |
 | `provider` | Always the provider; the declaration is forwarded untouched. |
 

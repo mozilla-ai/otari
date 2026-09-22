@@ -31,6 +31,7 @@ from anthropic.types import (
     WebSearchToolResultError,
 )
 from anthropic.types.beta import BetaMCPToolResultBlock, BetaMCPToolUseBlock
+from anthropic.types.beta.beta_container import BetaContainer
 from any_llm import amessages
 from any_llm.types.messages import (
     BetaContextManagementResponse,
@@ -40,6 +41,7 @@ from any_llm.types.messages import (
 
 from gateway.log_config import logger
 from gateway.services._tool_loop import StreamAction, run_tool_loop, run_tool_loop_stream
+from gateway.services.code_execution import ContainerLease
 from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
@@ -626,6 +628,7 @@ class _MessagesToolLoopStrategy:
         emit_native_code_execution: bool = False,
         emit_native_mcp: bool = False,
         budget: WebSearchBudget | None = None,
+        container: ContainerLease | None = None,
     ) -> None:
         self._emit_native_web_search = emit_native_web_search
         self._emit_native_code_execution = emit_native_code_execution
@@ -633,6 +636,10 @@ class _MessagesToolLoopStrategy:
         # Absent unless the caller capped the searches, so the shared instance in
         # ``_strategy_for`` stays free of per-request state.
         self._budget = budget
+        # The sandbox this request holds, reported where Anthropic reports its
+        # own: on the message, so an SDK client reads it off the response and
+        # sends it back to resume the workspace.
+        self._container = container
 
     def _native_sink(self, sink: list[Any]) -> list[Any] | None:
         """``sink`` when native emission is on, else ``None`` (collect nothing)."""
@@ -663,6 +670,8 @@ class _MessagesToolLoopStrategy:
         _fold_usage(result, acc["input"], acc["output"])
         if result.usage is not None and acc["iterations"]:
             result.usage.iterations = acc["iterations"]
+        if self._container is not None:
+            result.container = _beta_container(self._container)
         # Prepend the native blocks for the searches this loop ran. The loop consumed
         # the model's own tool_use blocks, so without these a native client has no
         # way to know a search happened; they come first because they did.
@@ -784,6 +793,8 @@ class _MessagesToolLoopStrategy:
             if acc["started"]:
                 return StreamAction.DEFER, event
             acc["started"] = 1
+            if self._container is not None:
+                _attach_container(event, self._container)
             return StreamAction.FORWARD, event
 
         if event_type == "content_block_start":
@@ -988,26 +999,44 @@ class _MessagesToolLoopStrategy:
 _MESSAGES_STRATEGY = _MessagesToolLoopStrategy()
 
 
+def _beta_container(lease: ContainerLease) -> BetaContainer:
+    return BetaContainer(id=lease.container_id, expires_at=lease.expires_at)
+
+
+def _attach_container(event: Any, lease: ContainerLease) -> None:
+    """Put the held sandbox on a ``message_start``'s message, where Anthropic puts its own."""
+    message = getattr(event, "message", None)
+    if message is None:
+        return
+    try:
+        message.container = _beta_container(lease)
+    except (AttributeError, TypeError, ValueError):
+        logger.warning("Could not report the container on the message_start event")
+
+
 def _strategy_for(
     emit_native_web_search: bool,
     budget: WebSearchBudget | None,
     *,
     emit_native_mcp: bool = False,
     emit_native_code_execution: bool = False,
+    container: ContainerLease | None = None,
 ) -> _MessagesToolLoopStrategy:
     """The shared strategy, or a per-request one when any of the options is set.
 
     A capped request carries a per-request search budget, so it never reuses the
-    module-level instance; a request wanting neither native emission nor a cap has
-    nothing per-request to hold and keeps reusing it.
+    module-level instance; a request wanting neither native emission nor a cap
+    nor a container has nothing per-request to hold and keeps reusing it.
     """
-    if not emit_native_web_search and not emit_native_mcp and not emit_native_code_execution and budget is None:
+    per_request = emit_native_web_search or emit_native_mcp or emit_native_code_execution
+    if not per_request and budget is None and container is None:
         return _MESSAGES_STRATEGY
     return _MessagesToolLoopStrategy(
         emit_native_web_search=emit_native_web_search,
         emit_native_code_execution=emit_native_code_execution,
         emit_native_mcp=emit_native_mcp,
         budget=budget,
+        container=container,
     )
 
 
@@ -1020,6 +1049,7 @@ async def anthropic_tool_loop(
     emit_native_web_search: bool = False,
     emit_native_code_execution: bool = False,
     web_search_budget: WebSearchBudget | None = None,
+    container: ContainerLease | None = None,
 ) -> MessageResponse:
     """Non-streaming Anthropic Messages tool-use loop.
 
@@ -1044,13 +1074,15 @@ async def anthropic_tool_loop(
     With ``emit_native_web_search``, the returned content is prefixed with a
     ``server_tool_use`` / ``web_search_tool_result`` pair per gateway-run search;
     with ``emit_native_code_execution``, a ``server_tool_use`` /
-    ``code_execution_tool_result`` pair per gateway-run execution.
+    ``code_execution_tool_result`` pair per gateway-run execution. ``container``
+    is the sandbox the request holds, reported on the returned message.
     """
     return await run_tool_loop(
         strategy=_strategy_for(
             emit_native_web_search,
             web_search_budget,
             emit_native_code_execution=emit_native_code_execution,
+            container=container,
         ),
         completion_kwargs=completion_kwargs,
         pool=pool,
@@ -1068,6 +1100,7 @@ async def anthropic_tool_loop_stream(
     emit_native_code_execution: bool = False,
     emit_native_mcp: bool = False,
     web_search_budget: WebSearchBudget | None = None,
+    container: ContainerLease | None = None,
 ) -> AsyncGenerator[MessageStreamEvent, None]:
     """Streaming Anthropic Messages tool-use loop.
 
@@ -1105,6 +1138,7 @@ async def anthropic_tool_loop_stream(
                 web_search_budget,
                 emit_native_mcp=emit_native_mcp,
                 emit_native_code_execution=emit_native_code_execution,
+                container=container,
             ),
             completion_kwargs=completion_kwargs,
             pool=pool,

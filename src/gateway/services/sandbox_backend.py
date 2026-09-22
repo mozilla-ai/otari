@@ -9,12 +9,14 @@ to :mod:`gateway.ports.code_execution_port` and the adapters under it, so a
 container the operator runs and a hosted provider are the same to this module.
 The shapes a run returns are typed in :mod:`gateway.types.code_execution`.
 
-Session lifecycle is per-request: enter leases a session, exit releases it.
-State does not persist across separate chat-completion requests in this
-minimum-viable backend. A future stateful variant (per-conversation session
-affinity, warm pool, etc.) is the platform's problem; see
-``docs/sandbox-oss-platform-direction.md`` in the private platform repo for
-that picture.
+Session lifecycle: enter leases a session, exit releases it, unless a container
+registry (``services/code_execution``) is handed in and the adapter says the
+session really will outlive the block. Then exit asks the port to hold the
+sandbox and records the lease under the ``container_id`` the response carried,
+and a later request naming that id enters by resuming it, with the workspace as
+the last run left it. A backend that declines to hold a session is released as
+it always was, and no container id is reported for it. A warm pool is still
+nobody's problem here.
 
 This backend satisfies the same duck-typed protocol the MCP loop uses
 for tool dispatch (``openai_tools``, ``owns_tool``, ``purpose_hints``,
@@ -25,8 +27,7 @@ refactor to :func:`gateway.services.mcp_loop.mcp_tool_loop`.
 from __future__ import annotations
 
 import logging
-import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
@@ -38,8 +39,10 @@ from gateway.ports.code_execution_port import (
     CodeExecutionSession,
     OutputOverBudget,
     SandboxNotReachableError,
+    SandboxSessionGoneError,
     SandboxUnavailableError,
 )
+from gateway.services.code_execution import CONTAINER_ID_PREFIX, ContainerLease, SandboxContainers, new_container_id
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.types.code_execution import ResultBlock
 
@@ -62,15 +65,12 @@ __all__ = [
     "SandboxBackend",
     "SandboxFiles",
     "SandboxNotReachableError",
+    "SandboxSessionGoneError",
     "SandboxUnavailableError",
     "code_execution_tool_definition",
 ]
 
 CODE_EXECUTION_TOOL_NAME = "code_execution"
-# The gateway's own container ids. OpenAI issues ``cntr_``-prefixed ids and
-# Anthropic ``container_``-prefixed ones, so a reserved prefix is what lets an
-# echoed native item be told apart from one describing a provider's container.
-CONTAINER_ID_PREFIX = "otari_cntr_"
 # The code-execution tool kinds a policy may name, which is the vocabulary the
 # hosted ``CodeExecutionConfig.tools`` uses and the one the protocol's ``tool``
 # field carries on the wire. This backend serves the first of them and no more,
@@ -243,8 +243,20 @@ class SandboxBackend:
         tally: ToolUsageTally | None = None,
         files: SandboxFiles | None = None,
         files_base_url: str | None = None,
+        container: ContainerLease | None = None,
+        containers: SandboxContainers | None = None,
+        on_lease: Callable[[ContainerLease], None] | None = None,
     ) -> None:
         self._port = port
+        # The lease this request resumes, or None for a fresh sandbox, and the
+        # registry that holds the session past this request. Both None where
+        # reuse is off or there is no database to remember a lease in.
+        self._resume = container
+        self._containers = containers
+        self._on_lease = on_lease
+        # The lease this request holds once the session is open, for the route
+        # to report. Only set when a registry will hold the sandbox.
+        self.lease: ContainerLease | None = None
         # Where this deployment serves ``/v1/files`` from: a loop answering in
         # OpenAI's vocabulary needs a URL to announce a produced image with.
         # None outside a request (tests, direct use), which announces none.
@@ -293,26 +305,42 @@ class SandboxBackend:
         # The workspace as last listed, path -> (size, modified_at). What a call
         # produced is whatever differs from this afterwards; see ``_collect_outputs``.
         self._workspace: dict[str, tuple[int, float | None]] = {}
-        # Minted per backend, so per request: what a Responses caller sees as the
-        # ``container_id`` of every interpreter call this request ran.
-        self.container_id = f"{CONTAINER_ID_PREFIX}{uuid.uuid4().hex}"
+        # What a caller sees as the container behind this request: the id it
+        # resumed, else one minted here. Kept across resumes, so the same
+        # sandbox has one name for as long as it lives.
+        self.container_id = container.container_id if container is not None else new_container_id()
 
     async def __aenter__(self) -> SandboxBackend:
-        self._session = await self._stack.enter_async_context(
+        keep_alive_s = self._containers.keep_alive_s(self._resume) if self._containers is not None else None
+        session = await self._stack.enter_async_context(
             self._port.open_session(
                 image=self._image,
                 timeout_s=self._timeout_s,
                 session_ttl_s=self._session_ttl_s,
                 auth_token=self._auth_token,
+                resume=self._resume.provider_session_id if self._resume is not None else None,
+                keep_alive_s=keep_alive_s,
             )
         )
+        self._session = session
+        # Only where the adapter says the session really will outlive this block:
+        # a backend that declined to hold it releases on exit, and a container id
+        # promising a sandbox that is already gone is worse than none.
+        if self._containers is not None and session.holds_across_requests:
+            self.lease = self._containers.lease(self.container_id, session.session_id, resumed=self._resume)
+            if self._on_lease is not None:
+                self._on_lease(self.lease)
         try:
             await self._seed_inputs()
             if self._files is not None:
                 self._workspace = await self._list_workspace()
         except BaseException:
-            # The session exists but the request cannot run as asked; release it
-            # rather than leaving it to the backend's idle reclaim.
+            # The session exists but the request cannot run as asked, so it is
+            # released rather than held: no caller was told this container id,
+            # and holding it would bill the deployment for a sandbox nobody can
+            # reach. Dropping the lease is what keeps the row from being written.
+            session.discard()
+            self.lease = None
             await self.__aexit__(None, None, None)
             raise
         return self
@@ -437,10 +465,29 @@ class SandboxBackend:
         _exc: BaseException | None,
         _tb: TracebackType | None,
     ) -> None:
-        # Releasing the session is the port's; this unwinds the block it was
-        # entered in, which is what triggers that release.
+        # Releasing, or holding, the session is the port's; this unwinds the
+        # block it was entered in, which is what triggers either.
         self._session = None
         await self._stack.aclose()
+        if self._containers is None:
+            return
+        if self.lease is not None:
+            # Written after the hold, so a row never promises a sandbox the
+            # provider was not yet asked to keep. Recording is also what gives
+            # back the claim this request took at admission. A write that fails
+            # leaves the sandbox held but the id unresumable, which the
+            # provider's timer then cleans up; the run itself stands.
+            try:
+                await self._containers.record(self.lease)
+            except Exception:  # noqa: BLE001 - bookkeeping must not fail a completed run
+                logger.warning("could not record container lease %s", self.lease.container_id, exc_info=True)
+        elif self._resume is not None:
+            # Resumed and then not held: nothing will record a lease, so the
+            # claim has to be handed back here rather than waiting out its TTL.
+            try:
+                await self._containers.release(self._resume.container_id)
+            except Exception:  # noqa: BLE001 - the claim expires on its own either way
+                logger.warning("could not release container claim %s", self._resume.container_id, exc_info=True)
 
     # ----- duck-typed protocol the MCP loop uses on `pool` -----
 

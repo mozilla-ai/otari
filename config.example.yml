@@ -117,3 +117,8 @@ providers:
 # backend at sandbox_url, "e2b" runs them on E2B from this process and needs
 # the otari[e2b] extra plus E2B_API_KEY. See docs/tools.md.
 # sandbox_provider: protocol
+# How long a sandbox is held after its request so the next request can resume
+# it by container id, and the longest one may live from its first lease.
+# 0 releases every sandbox when its request ends.
+# sandbox_container_idle_ttl_sec: 600
+# sandbox_container_max_lifetime_sec: 3600

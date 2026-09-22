@@ -117,9 +117,17 @@ class _ContractModel(BaseModel):
 
 
 class SessionHandle(_ContractModel):
-    """A leased session. The gateway needs only the id to address it."""
+    """A leased session: the id that addresses it, and the idle timeout in force.
+
+    ``idle_timeout_seconds`` is what the backend actually kept, which may be
+    less than the hint ``CreateSession`` carried or absent entirely. Absent is
+    what tells the gateway the backend will not hold this session, so it is
+    destroyed at the end of the request rather than left to an idle reclaim
+    that may never come.
+    """
 
     session_id: str
+    idle_timeout_seconds: int | None = None
 
 
 class CodeExecutionFileRef(_ContractModel):

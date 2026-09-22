@@ -207,6 +207,17 @@ async def _started_worker_names(config: GatewayConfig, monkeypatch: pytest.Monke
     return [worker.name for _task, worker in workers], called
 
 
+def _full_config(**overrides: Any) -> GatewayConfig:
+    """A config every conditional worker starts under, so one that does not is the finding.
+
+    Each ``and no other`` assertion below compares against the whole registry,
+    which only means anything from a baseline that turns nothing off: a worker
+    gated on a setting this config leaves unset would look like a worker the
+    change under test dropped.
+    """
+    return GatewayConfig(master_key="sk-test-master", sandbox_url="http://sandbox:8080", **overrides)
+
+
 @pytest.mark.asyncio
 async def test_every_worker_looks_its_refresher_up_when_it_starts(monkeypatch: pytest.MonkeyPatch) -> None:
     """A registry entry must resolve its refresher in ``gateway.main``, not hold it.
@@ -215,7 +226,7 @@ async def test_every_worker_looks_its_refresher_up_when_it_starts(monkeypatch: p
     off the network. An entry holding the function object would keep calling the
     original, and the substitution would silently do nothing.
     """
-    names, called = await _started_worker_names(GatewayConfig(master_key="sk-test-master"), monkeypatch)
+    names, called = await _started_worker_names(_full_config(), monkeypatch)
 
     assert names == [worker.name for worker in _LIFESPAN_WORKERS]
     assert len(called) == len(_LIFESPAN_WORKERS)
@@ -226,7 +237,7 @@ async def test_the_reservation_sweeper_is_the_one_worker_a_setting_turns_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Sweeping is opt-out, and opting out must not drop any other worker."""
-    config = GatewayConfig(master_key="sk-test-master", budget_reservation_sweep_interval_sec=0)
+    config = _full_config(budget_reservation_sweep_interval_sec=0)
     names, _called = await _started_worker_names(config, monkeypatch)
 
     assert "budget reservation sweep" not in names
@@ -237,8 +248,8 @@ async def test_the_reservation_sweeper_is_the_one_worker_a_setting_turns_off(
 @pytest.mark.parametrize(
     "config",
     [
-        GatewayConfig(master_key="sk-test-master", files_sweep_interval_sec=0),
-        GatewayConfig(master_key="sk-test-master", files_enabled=False),
+        _full_config(files_sweep_interval_sec=0),
+        _full_config(files_enabled=False),
     ],
 )
 async def test_the_file_sweeper_stops_with_files_or_its_interval(
@@ -249,3 +260,21 @@ async def test_the_file_sweeper_stops_with_files_or_its_interval(
 
     assert "file retention sweep" not in names
     assert names == [worker.name for worker in _LIFESPAN_WORKERS if worker.name != "file retention sweep"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config",
+    [
+        GatewayConfig(master_key="sk-test-master"),
+        _full_config(sandbox_container_idle_ttl_sec=0),
+    ],
+)
+async def test_the_container_sweeper_stops_without_a_sandbox_or_without_reuse(
+    monkeypatch: pytest.MonkeyPatch, config: GatewayConfig
+) -> None:
+    """Nothing holds a sandbox past its request, so there are no rows to sweep."""
+    names, _called = await _started_worker_names(config, monkeypatch)
+
+    assert "sandbox container sweep" not in names
+    assert names == [worker.name for worker in _LIFESPAN_WORKERS if worker.name != "sandbox container sweep"]

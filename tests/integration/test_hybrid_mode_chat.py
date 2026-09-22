@@ -2361,6 +2361,9 @@ class _FakeSandboxBackend:
         tally: Any = None,
         files: Any = None,
         files_base_url: str | None = None,
+        container: Any = None,
+        containers: Any = None,
+        on_lease: Any = None,
     ) -> None:
         type(self).last_purpose_hint = purpose_hint
         type(self).last_image = image

@@ -31,6 +31,7 @@ from gateway.services.alias_service import load_aliases_at_startup, reset_alias_
 from gateway.services.bootstrap_service import bootstrap_first_api_key
 from gateway.services.budgets import run_reservation_sweeper
 from gateway.services.catalog_selectors import reset_selector_index
+from gateway.services.code_execution.container_sweeper import run_sandbox_container_sweeper
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.file_store import build_file_store
 from gateway.services.files import run_file_sweeper
@@ -175,6 +176,13 @@ def _start_file_sweeper(config: GatewayConfig) -> Coroutine[Any, Any, None] | No
     return run_file_sweeper(config.files_sweep_interval_sec, build_file_store(config))
 
 
+def _start_container_sweeper(config: GatewayConfig) -> Coroutine[Any, Any, None] | None:
+    """Return the sandbox container sweep, or None when no sandbox is held past its request."""
+    if not config.sandbox_configured() or config.sandbox_container_idle_ttl_sec <= 0:
+        return None
+    return run_sandbox_container_sweeper()
+
+
 # The periodic background workers a standalone deployment runs.
 # A new worker is one entry here.
 #
@@ -209,6 +217,9 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     # Same posture for uploaded files: expiry hides a file, this gives its
     # bytes back.
     _LifespanWorker("file retention sweep", _start_file_sweeper),
+    # The provider reclaims a held sandbox on its own timer; this drops the
+    # rows that named it once nobody can resume them.
+    _LifespanWorker("sandbox container sweep", _start_container_sweeper),
 )
 
 

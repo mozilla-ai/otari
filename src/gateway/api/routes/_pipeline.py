@@ -151,6 +151,13 @@ from gateway.services.budgets import (
     refund_reservation,
     reserve_budget,
 )
+from gateway.services.code_execution import (
+    CONTAINER_ID_PREFIX,
+    ContainerBusyError,
+    ContainerLease,
+    ContainerNotFoundError,
+    SandboxContainerRegistry,
+)
 from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for, record_provider_files
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
@@ -185,6 +192,7 @@ from gateway.services.sandbox_backend import (
     DEFAULT_EXEC_TIMEOUT_S,
     SandboxBackend,
     SandboxNotReachableError,
+    SandboxSessionGoneError,
     SandboxUnavailableError,
 )
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
@@ -402,6 +410,27 @@ SANDBOX_UNREACHABLE_DETAIL = (
     "Tools settings, or OTARI_SANDBOX_URL, and that the container is running."
 )
 SANDBOX_UNAVAILABLE_DETAIL = "code_execution sandbox temporarily unavailable. Retry later."
+# One detail for an unknown, expired, foreign or other-provider container, so an
+# id never reveals which. The phrasing is the one clients of Anthropic's and
+# OpenAI's containers already recognize as "drop the id and start over".
+CONTAINER_GONE_DETAIL_TEMPLATE = "Container '{container_id}' has expired or does not exist."
+# What a request sends to ask for a sandbox that outlives it, in place of an id
+# it does not have yet. OpenAI's own spelling on a ``code_interpreter`` entry is
+# the object ``{"type": "auto"}``, which means the same thing.
+CONTAINER_AUTO = "auto"
+CONTAINER_NOT_GATEWAY_RUN_DETAIL = (
+    "container names a sandbox this gateway holds, and the code execution for this request runs on the "
+    "provider, which cannot reach it. Drop the field, or send Otari-Code-Execution: otari to run the "
+    "code here."
+)
+CONTAINER_BUSY_DETAIL = (
+    "Container is in use by another request. A sandbox runs one request at a time; retry when it finishes."
+)
+# The id is echoed back so a client can tell which of several it should drop,
+# and it arrives from the request body as an unbounded string, so what is echoed
+# is clipped and stripped of anything that is not a plain printable character.
+# A real one is ``otari_cntr_`` and 32 hex digits.
+_CONTAINER_ID_ECHO_LIMIT = 64
 WEB_SEARCH_UNREACHABLE_DETAIL = (
     "web_search backend unreachable. Check the search URL in the dashboard's Tools "
     "settings, or OTARI_WEB_SEARCH_URL, and that the backend is running."
@@ -2196,6 +2225,8 @@ class ToolContext:
         sandbox_session_image: str | None = None,
         sandbox_allowed_tools: frozenset[str] | None = None,
         code_execution_executor: CodeExecutor | None = None,
+        sandbox_container_lease: ContainerLease | None = None,
+        sandbox_containers: SandboxContainerRegistry | None = None,
         use_web_search: bool,
         web_search_tool_entry: dict[str, Any] | None,
         web_search_url: str | None,
@@ -2230,6 +2261,13 @@ class ToolContext:
         # where the request's session is live, and read again at dispatch.
         self.sandbox_session_image = sandbox_session_image
         self.sandbox_allowed_tools = sandbox_allowed_tools
+        # The lease the request asked to resume, already checked against the
+        # caller at admission, and the registry that holds the session past the
+        # request. ``container_lease`` is what the request ends up holding, set
+        # by the backend when its session opens, and is what the response reports.
+        self.sandbox_container_lease = sandbox_container_lease
+        self.sandbox_containers = sandbox_containers
+        self.container_lease: ContainerLease | None = None
         # Who was decided to run the request's code-execution declaration, when it
         # made one: ``OTARI`` or ``PROVIDER``, never ``AUTO``. ``None`` when the
         # request declared no code execution at all.
@@ -2272,8 +2310,10 @@ class ToolContext:
             port=self.code_execution_port,
             purpose_hint=_resolve_sandbox_purpose_hint(self.sandbox_tool_entry, self.config),
             timeout_s=self.sandbox_timeout_s,
-            # The loop runs code at most once per round, so the iteration cap is
-            # what bounds a session's life: a leased sandbox must outlast them all.
+            # The tool loop's iteration cap, which is what the backend sizes the
+            # session lease from: it bounds rounds rather than calls, so the
+            # backend widens it (``_CALLS_PER_ROUND_ALLOWANCE``) rather than
+            # taking it as the number of executions a request can make.
             max_executions=self.max_tool_iterations,
             auth_token=self.sandbox_auth_token,
             image=self.sandbox_session_image,
@@ -2281,7 +2321,22 @@ class ToolContext:
             tally=self.tally,
             files=self.sandbox_files,
             files_base_url=self.sandbox_files.base_url if self.sandbox_files is not None else None,
+            container=self.sandbox_container_lease,
+            containers=self.sandbox_containers,
+            on_lease=self._note_container_lease,
         )
+
+    def _note_container_lease(self, lease: ContainerLease) -> None:
+        self.container_lease = lease
+
+    async def forget_container(self) -> None:
+        """Drop the lease this request tried to resume, once the provider said it is gone."""
+        if self.sandbox_containers is None or self.sandbox_container_lease is None:
+            return
+        try:
+            await self.sandbox_containers.forget(self.sandbox_container_lease.container_id)
+        except Exception:  # noqa: BLE001 - the next resume refuses it anyway
+            logger.warning("could not drop gone container %s", self.sandbox_container_lease.container_id, exc_info=True)
 
     @property
     def tools_extracted(self) -> bool:
@@ -2739,6 +2794,8 @@ async def prepare_gateway_tools(
     code_execution_header: str | None = None,
     sandbox_files: SandboxFileBridge | None = None,
     code_execution_port: CodeExecutionPort | None = None,
+    container_id: str | None = None,
+    sandbox_containers: SandboxContainerRegistry | None = None,
 ) -> ToolContext:
     """Guardrails, MCP server-id resolution, and gateway-tool extraction.
 
@@ -2847,6 +2904,30 @@ async def prepare_gateway_tools(
         if sandbox_tool_entry is not None and not sandbox_available:
             raise adapter.error(400, SANDBOX_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
 
+        # An id this gateway minted names one sandbox and the files in it, which
+        # is already a statement about where the code runs. ``auto`` follows the
+        # model, so without this a model swap between turns takes the sandbox
+        # away from a client that is replaying the id it was handed, which is how
+        # a conversation holding one is normally written. Only an id does this:
+        # ``auto`` names no sandbox, so it has nothing to pin to. Folded in as
+        # what the request asked for, so an explicit pin still wins over it, the
+        # header by being read first and a workspace policy through
+        # ``resolve_code_executor_preference``.
+        names_held_sandbox = any(
+            (_gateway_container_value(raw) or "").startswith(CONTAINER_ID_PREFIX)
+            for raw in (
+                container_id,
+                (sandbox_tool_entry or {}).get("container"),
+                (provider_code_entry or {}).get("container"),
+            )
+        )
+        # Only where there is a sandbox to pin to. With none configured no id
+        # was ever minted here, and implying the executor would answer a stale
+        # one with "the executor is not configured" rather than saying the
+        # container is not this deployment's to honor.
+        if names_held_sandbox and sandbox_available and requested_executor in (None, CodeExecutor.AUTO):
+            requested_executor = CodeExecutor.OTARI
+
         # Forwarded to the sandbox backend as `Authorization: Bearer`. Only set in
         # hybrid mode when the backend IS the platform (its URL is under the
         # platform base URL the gateway already trusts this token with for resolve):
@@ -2863,6 +2944,7 @@ async def prepare_gateway_tools(
         sandbox_allowed_tools: frozenset[str] | None = None
         code_execution_executor: CodeExecutor | None = None
         code_execution_policy: ResolvedCodeExecutionPolicy | None = None
+        sandbox_container_lease: ContainerLease | None = None
         use_sandbox = False
 
         # With no sandbox configured there is nothing to bring a provider's keyword
@@ -2979,6 +3061,58 @@ async def prepare_gateway_tools(
                     if code_execution_policy.image not in ctx.config.pinnable_sandbox_images():
                         raise adapter.error(403, SANDBOX_IMAGE_NOT_ALLOWED_DETAIL, ErrorKind.PERMISSION)
                     sandbox_session_image = code_execution_policy.image
+
+        # Whether this request's sandbox outlives it, and which one it runs in.
+        # Holding one costs the deployment for as long as it is held, so a
+        # request that says nothing gets the sandbox released with it, which is
+        # how every request behaved before reuse existed. ``auto`` asks for one
+        # to be held; an id asks for that one back.
+        sandbox_containers = sandbox_containers if use_sandbox else None
+        if use_sandbox:
+            requested_container = _requested_container(container_id) or _requested_container(
+                (sandbox_tool_entry or {}).get("container")
+            )
+            if requested_container is None:
+                # Nothing asked for, so nothing is held and no container is
+                # reported, whatever the deployment would have allowed.
+                sandbox_containers = None
+            elif requested_container != CONTAINER_AUTO:
+                # An id names a specific sandbox and its files, so a deployment
+                # that cannot honor it (hybrid mode, or reuse turned off) refuses
+                # rather than quietly handing over an empty one in its place.
+                # Resolved here, against this caller's own leases, so a request
+                # naming a sandbox it cannot have is refused before any lease.
+                gone = adapter.error(
+                    400,
+                    CONTAINER_GONE_DETAIL_TEMPLATE.format(container_id=_echoable_container_id(requested_container)),
+                    ErrorKind.INVALID_REQUEST,
+                )
+                if sandbox_containers is None:
+                    raise gone
+                try:
+                    sandbox_container_lease = await sandbox_containers.resolve(requested_container)
+                except ContainerNotFoundError:
+                    raise gone from None
+                except ContainerBusyError:
+                    # The id is good and the caller owns it: a retry works, where
+                    # the gone detail would have them throw a live sandbox away.
+                    raise adapter.error(409, CONTAINER_BUSY_DETAIL, ErrorKind.INVALID_REQUEST) from None
+            # ``auto`` against a deployment that holds nothing is best-effort, not
+            # an error: the run is exactly what it would have been, and the
+            # response names no container rather than one already gone.
+        else:
+            # The mirror of the id the sandbox path refuses. This request's code
+            # is the provider's to run, so ``container`` is theirs to read, and a
+            # value only this gateway could have named means nothing to them:
+            # forwarding it buys the caller a provider error about a word the
+            # gateway told them to send. Which executor serves a request can
+            # change under a client between turns (``auto`` follows the model),
+            # so this is reachable without them doing anything differently.
+            stray = _gateway_container_value(container_id) or _gateway_container_value(
+                (provider_code_entry or {}).get("container")
+            )
+            if stray is not None:
+                raise adapter.error(400, CONTAINER_NOT_GATEWAY_RUN_DETAIL, ErrorKind.INVALID_REQUEST)
 
         web_search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
         # Interception (claiming the provider-named web_search keywords) is opt-in and
@@ -3156,6 +3290,8 @@ async def prepare_gateway_tools(
         sandbox_session_image=sandbox_session_image,
         sandbox_allowed_tools=sandbox_allowed_tools,
         code_execution_executor=code_execution_executor,
+        sandbox_container_lease=sandbox_container_lease,
+        sandbox_containers=sandbox_containers,
         use_web_search=use_web_search,
         web_search_tool_entry=web_search_tool_entry,
         web_search_url=web_search_url,
@@ -3891,6 +4027,82 @@ def _loop_options(tool_ctx: ToolContext) -> dict[str, Any]:
     return options
 
 
+def _requested_container(value: Any) -> str | None:
+    """What a ``container`` field asks for: an id to resume, ``auto``, or nothing.
+
+    ``auto`` is how a request asks for a sandbox that outlives it, and is what
+    OpenAI's ``{"type": "auto"}`` object already means on a ``code_interpreter``
+    entry; the string spelling is for the dialects with no object form, which is
+    Anthropic's top-level field and the gateway's own entry. An id asks for that
+    sandbox back. Absent, which is every request written before this existed,
+    asks for neither and gets the sandbox released with the request.
+    """
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        return CONTAINER_AUTO if cleaned.lower() == CONTAINER_AUTO else cleaned
+    if isinstance(value, dict):
+        nested = value.get("id")
+        if isinstance(nested, str) and nested.strip():
+            return nested.strip()
+        kind = value.get("type")
+        return CONTAINER_AUTO if isinstance(kind, str) and kind.strip().lower() == CONTAINER_AUTO else None
+    return None
+
+
+def _gateway_container_value(raw: Any) -> str | None:
+    """A ``container`` value only this gateway could have named, or ``None``.
+
+    Which is an id it minted, or its own ``auto`` spelling. Deliberately string
+    only: the object form is the provider's own (OpenAI's ``{"type": "auto"}``
+    on a ``code_interpreter`` entry), which means something upstream and must
+    reach it untouched. A provider's own id is not ours either, and passes.
+    """
+    if not isinstance(raw, str):
+        return None
+    cleaned = raw.strip()
+    if cleaned.lower() == CONTAINER_AUTO or cleaned.startswith(CONTAINER_ID_PREFIX):
+        return cleaned
+    return None
+
+
+def _echoable_container_id(value: str) -> str:
+    """The caller's container id, safe to put in an error body.
+
+    Printable ASCII only and bounded: the field is a bare string on the wire, so
+    without this a megabyte of anything the caller likes comes back in the 400.
+    """
+    cleaned = "".join(char for char in value if char.isascii() and char.isprintable())
+    if len(cleaned) > _CONTAINER_ID_ECHO_LIMIT:
+        return cleaned[:_CONTAINER_ID_ECHO_LIMIT] + "…"
+    return cleaned
+
+
+def _container_loop_option(adapter: FormatAdapter[Any, Any], backend: Any) -> dict[str, Any]:
+    """The lease the Messages loop reports on its response, presence-encoded like the rest.
+
+    Only the Messages dialect has a field for it, Anthropic's ``container``. The
+    Responses items already carry the id, and every dialect gets the headers.
+    """
+    lease = getattr(backend, "lease", None)
+    # An isinstance check rather than a None check: a test double stands in for
+    # the backend here, and an attribute it never defined is not a lease.
+    if not isinstance(lease, ContainerLease) or adapter.name != "messages":
+        return {}
+    return {"container": lease}
+
+
+def _container_headers(lease: ContainerLease | None) -> dict[str, str]:
+    """The response headers that name the held sandbox, for dialects with no field for it."""
+    if lease is None:
+        return {}
+    return {
+        "X-Otari-Container-Id": lease.container_id,
+        "X-Otari-Container-Expires-At": lease.expires_at.isoformat(),
+    }
+
+
 def _sandbox_loop_options(adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext) -> dict[str, Any]:
     """Sandbox-loop kwargs, presence-encoded like :func:`_loop_options`.
 
@@ -3932,6 +4144,7 @@ async def dispatch_non_stream(
                 tool_ctx.max_tool_iterations,
                 on_first_response,
                 **_sandbox_loop_options(adapter, tool_ctx),
+                **_container_loop_option(adapter, backend),
             )
 
     assert tool_ctx.use_web_search or tool_ctx.use_web_fetch
@@ -3979,6 +4192,7 @@ async def _eager_backend_stream(
             emit_native_web_search=tool_ctx.emit_native_web_search,
             **_loop_options(tool_ctx),
             **(_sandbox_loop_options(adapter, tool_ctx) if tool_ctx.use_sandbox else {}),
+            **(_container_loop_option(adapter, backend) if tool_ctx.use_sandbox else {}),
         ):
             yield event
     finally:
@@ -4116,6 +4330,7 @@ def build_streaming_response(
     tool_tally: ToolUsageTally | None = None,
     workspace_id: uuid.UUID | None = None,
     on_settled: Callable[[], Awaitable[None]] | None = None,
+    extra_headers: dict[str, str] | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -4365,6 +4580,8 @@ def build_streaming_response(
         headers["X-Correlation-ID"] = platform_correlation_id
     if platform_request_id:
         headers["X-Otari-Request-ID"] = platform_request_id
+    if extra_headers:
+        headers.update(extra_headers)
 
     return StreamingResponse(
         streaming_generator(
@@ -4539,7 +4756,9 @@ async def run_single_attempt_stream(
     except SandboxNotReachableError as exc:
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
         await release_reservation(ctx)
-        raise _sandbox_error(adapter, exc) from exc
+        if isinstance(exc, SandboxSessionGoneError):
+            await tool_ctx.forget_container()
+        raise _sandbox_error(adapter, exc, tool_ctx=tool_ctx) from exc
     except WebSearchNotReachableError as exc:
         logger.error("Web search backend unreachable for %s:%s: %s", provider, model, exc)
         await release_reservation(ctx)
@@ -4565,6 +4784,7 @@ async def run_single_attempt_stream(
         model=model,
         config=ctx.config,
         db=ctx.db,
+        extra_headers=_container_headers(tool_ctx.container_lease),
         on_settled=_record_produced if ctx.db is not None else None,
         log_writer=ctx.log_writer,
         api_key_id=ctx.api_key_id,
@@ -4819,7 +5039,16 @@ async def _stream_with_stack_cleanup(
         await backend_stack.aclose()
 
 
-def _sandbox_error(adapter: FormatAdapter[Any, Any], exc: SandboxNotReachableError) -> HTTPException:
+def _sandbox_error(
+    adapter: FormatAdapter[Any, Any], exc: SandboxNotReachableError, *, tool_ctx: ToolContext | None = None
+) -> HTTPException:
+    if isinstance(exc, SandboxSessionGoneError) and tool_ctx is not None and tool_ctx.sandbox_container_lease:
+        # The provider was asked for the container the caller named and no
+        # longer has it: the caller's id is stale, which is a request to fix,
+        # not a backend outage to retry.
+        container_id = tool_ctx.sandbox_container_lease.container_id
+        detail = CONTAINER_GONE_DETAIL_TEMPLATE.format(container_id=container_id)
+        return adapter.error(400, detail, ErrorKind.INVALID_REQUEST)
     if isinstance(exc, SandboxUnavailableError):
         headers = {"Retry-After": exc.retry_after} if exc.retry_after is not None else None
         return adapter.error(503, SANDBOX_UNAVAILABLE_DETAIL, ErrorKind.API, headers)
@@ -5199,6 +5428,8 @@ async def run_standalone_non_stream(
         if ctx.rate_limit_info:
             for key, value in rate_limit_headers(ctx.rate_limit_info).items():
                 response.headers[key] = value
+        for key, value in _container_headers(tool_ctx.container_lease).items():
+            response.headers[key] = value
         if ctx.db is not None:
             usage_data = adapter.extract_usage(result)
             actual_cost: Decimal | None = None
@@ -5253,7 +5484,9 @@ async def run_standalone_non_stream(
         # sandbox container being down.
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, e)
         await release_reservation(ctx)
-        raise _sandbox_error(adapter, e) from e
+        if isinstance(e, SandboxSessionGoneError):
+            await tool_ctx.forget_container()
+        raise _sandbox_error(adapter, e, tool_ctx=tool_ctx) from e
     except WebSearchNotReachableError as e:
         logger.error("Web search backend unreachable for %s:%s: %s", provider, model, e)
         await release_reservation(ctx)

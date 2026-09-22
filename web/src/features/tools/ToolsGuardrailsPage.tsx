@@ -86,6 +86,18 @@ const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
     placeholder: "protocol",
     isMachineReadable: true,
   },
+  sandbox_container_idle_ttl_sec: {
+    label: "Hold a sandbox for (seconds)",
+    help: "How long a sandbox stays resumable after a request that asked to hold one. Requests that do not ask are never held. 0 holds nothing at all.",
+    placeholder: "600",
+    isMachineReadable: true,
+  },
+  sandbox_container_max_lifetime_sec: {
+    label: "Longest sandbox life (seconds)",
+    help: "The most a resumed sandbox may live from its first lease, whatever the idle clock says.",
+    placeholder: "3600",
+    isMachineReadable: true,
+  },
   sandbox_url: {
     label: "Backend URL",
     help: "Where the protocol provider runs code. While unset, otari_code_execution requests are rejected with 400 unless sandbox_provider names a hosted one.",

@@ -39,6 +39,7 @@ __all__ = [
     "OutputOverBudget",
     "SandboxFileEntry",
     "SandboxNotReachableError",
+    "SandboxSessionGoneError",
     "SandboxUnavailableError",
 ]
 
@@ -63,6 +64,15 @@ class SandboxUnavailableError(SandboxNotReachableError):
             if retry_after and retry_after.isascii() and retry_after.isdigit() and len(retry_after) <= 6
             else None
         )
+
+
+class SandboxSessionGoneError(SandboxNotReachableError):
+    """A session asked to be resumed no longer exists at the provider.
+
+    Distinct from unreachable in what it tells the caller: the provider
+    answered, and its answer is that the lease has lapsed, so the container the
+    caller named is gone rather than the backend being down.
+    """
 
 
 class OutputOverBudget(Exception):
@@ -91,11 +101,32 @@ class SandboxFileEntry:
 
 
 class CodeExecutionSession(Protocol):
-    """One live sandbox, for the length of one request."""
+    """One live sandbox: one request's, or held across several when kept alive."""
 
     @property
     def session_id(self) -> str:
         """The backend's own id for this session, for logging and tracing."""
+        ...
+
+    @property
+    def holds_across_requests(self) -> bool:
+        """Whether this session really will outlive the block it was opened in.
+
+        ``keep_alive_s`` asks; this answers. An adapter whose provider holds the
+        session on a timer of its own says yes, and one whose backend declined
+        the hint, or was never asked, says no. The caller records a resumable
+        lease only where it is true, so a container id is never handed out for a
+        sandbox that will be gone by the next request.
+        """
+        ...
+
+    def discard(self) -> None:
+        """Release this session when the block exits, whatever ``keep_alive_s`` asked.
+
+        For the request that leased a sandbox and then could not use it: holding
+        it would bill the deployment for a sandbox no caller was told about.
+        Idempotent, and never raises; the release itself happens on exit.
+        """
         ...
 
     async def execute(self, code: str, *, timeout_s: float) -> ResultBlock:
@@ -143,8 +174,10 @@ class CodeExecutionPort(Protocol):
         timeout_s: float,
         session_ttl_s: float,
         auth_token: str | None = None,
+        resume: str | None = None,
+        keep_alive_s: float | None = None,
     ) -> AbstractAsyncContextManager[CodeExecutionSession]:
-        """Lease a sandbox for the duration of the block, releasing it on exit.
+        """Lease a sandbox for the duration of the block.
 
         ``timeout_s`` is the budget for one :meth:`CodeExecutionSession.execute`;
         ``session_ttl_s`` is how long the whole lease may need to live, which is
@@ -153,6 +186,19 @@ class CodeExecutionPort(Protocol):
         once, so a provider that reclaims on a timer of its own must be told the
         second number and never the first. An adapter whose sessions end only
         when this block exits ignores it.
+
+        ``resume`` is the ``session_id`` an earlier lease reported, and asks for
+        that sandbox back rather than a new one: the adapter reconnects, and
+        raises :class:`SandboxSessionGoneError` when the provider no longer has
+        it. ``keep_alive_s`` asks that the sandbox outlive this block: instead
+        of releasing it on exit, the adapter tells the provider to hold it that
+        long idle, so a later block can ``resume`` it. ``None``, the default,
+        releases on exit, which is what every lease did before reuse existed.
+        Asking is not the same as getting: an adapter whose backend declines to
+        hold the session reports so through
+        :attr:`CodeExecutionSession.holds_across_requests` and releases on exit
+        anyway. The caller records the id it will resume by; the adapter keeps
+        nothing.
 
         ``image`` is the workspace's pinned image or the deployment's, in the
         vocabulary of the published protocol (a container image reference). An

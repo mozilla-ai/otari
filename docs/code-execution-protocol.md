@@ -147,6 +147,34 @@ that are never released (an abandoned client, a crashed one), which is why the
 lifetime bounds on the handle exist. Releasing a session that does not exist is
 not an error worth distinguishing: it is already in the desired state.
 
+### Sessions held across requests
+
+Otari may hold a session past the request that created it, so a later request
+can resume the same workspace (see [Built-in tools](tools.md#reusing-a-sandbox-across-requests)).
+It does so only for a request that asked, by sending `container: "auto"` or an
+id; a request that asks for nothing gets `DestroySession` at the end of it, as
+every request did before this existed.
+For such a session it sends `idle_timeout_seconds` on `CreateSession`, equal to
+how long it will hold the session, and the `SessionHandle` is what decides
+whether it is held. A handle reporting an `idle_timeout_seconds` is the backend
+saying an idle reclaim will come, so Otari skips `DestroySession` and lets that
+reclaim end the session. A handle reporting none means no reclaim is coming, so
+Otari destroys the session at the end of the request exactly as it always has
+and reports no container to the caller. A backend that does not want to hold
+sessions therefore needs to do nothing at all, and one that wants a shorter
+lease than the hint asked for clamps it and reports what it kept.
+
+On resume, Otari confirms the session still exists with `ListFiles` before
+running anything, and treats a 404 as the session being gone. A backend that
+does not implement `ListFiles` answers 404 there too, so its sessions cannot be
+resumed; Otari then tells the caller its container is gone, which for that
+backend is the truth of every resume.
+
+One request at a time runs in a held session. A second request naming a
+container the first is still using is refused with a 409 rather than admitted,
+because two sharing one workspace would interleave their code and each collect
+the other's files.
+
 ### ListFiles, GetFile, and PutFile
 
 Enumerate, read, and write files under the session's workspace, so a client can
