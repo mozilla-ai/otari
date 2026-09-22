@@ -250,9 +250,11 @@ splits inside tools, behind the registry interface, not into a new domain.
 Guardrails that run on a request, and an organization's guardrail
 configuration.
 
-- Routes: `organization_guardrails.py`
+- Routes: `organization_guardrails.py`, `organization_guardrail_definitions.py`
 - Services: `guardrails.py`, `guardrail_catalog.py`,
-  `tenancy/organization_guardrail_service.py`
+  `tenancy/organization_guardrail_service.py`,
+  `tenancy/organization_guardrail_definition_service.py`
+- Repositories: `tenancy/organization_guardrail_definition_repository.py`
 - Models: `guardrails.py`
 
 ### agent-gates

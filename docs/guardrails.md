@@ -161,6 +161,79 @@ on every deployment of the same build, and a parameter's environment variable
 is named without saying whether it is set. The profiles read keeps the stricter
 gate, because that one dials the deployment's own guardrails service.
 
+### Defining a guardrail on an organization
+
+The catalog above is a picker, and
+`/api/v1/organizations/me/guardrail-definitions` is where what it picks is
+saved. A definition names one of the catalog's guardrails and the arguments to
+build it with, so an organization can define a check rather than only name a
+profile some service already serves. Master key, and an organization owner or
+admin, the same audience as the mandates.
+
+| Field | Meaning |
+| --- | --- |
+| `name` | The organization's own label. One definition per name per organization. |
+| `guardrail_name` | The guardrail to build, as the catalog names it. |
+| `create_kwargs` | The constructor arguments. Both halves of the form go here, and the catalog's own `secret` flag decides which of them are credentials. |
+| `enabled` | `false` stops the guardrail everywhere it is mandated, in one write, without losing the arguments it took to set up. |
+
+```bash
+curl -X POST http://localhost:8000/api/v1/organizations/me/guardrail-definitions \
+  -H "Authorization: Bearer <master-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "prod-lakera",
+    "guardrail_name": "lakera_guard",
+    "create_kwargs": {"api_key": "lakera-...", "endpoint": "https://api.lakera.ai"}
+  }'
+```
+
+A read gives the plain arguments back as they were stored and each credential as
+its name alone:
+
+```json
+{ "name": "prod-lakera",
+  "guardrail_name": "lakera_guard",
+  "create_kwargs": { "endpoint": "https://api.lakera.ai" },
+  "create_secrets": { "api_key": "***" },
+  "secrets_decryptable": true,
+  "enabled": true }
+```
+
+`create_kwargs` comes back in clear deliberately: the credentials were already
+taken out of it by flag, and a form has to round-trip an endpoint or a project
+id. Sending a `***` back keeps the value stored under that name, a new value
+rotates it, and a credential left out of a sent map is cleared, so editing the
+endpoint of an entry does not overwrite the key you were never shown. Omitting
+`create_kwargs` altogether leaves both columns untouched and reads neither,
+which is what lets an admin on a deployment whose `OTARI_SECRET_KEY` has moved
+still turn the guardrail off and repair it by typing the credential again. Such
+a row reports `secrets_decryptable: false` and an empty `create_secrets` rather
+than failing the whole listing.
+
+What may be defined is the catalog's answer and not a list Otari keeps, so the
+set the form offers and the set the store accepts cannot disagree. A definition
+is refused when its guardrail is not one this deployment can build, when an
+argument is not one that guardrail declares, when an argument is a live object
+rather than configuration (Bedrock's `boto3_session` and watsonx's `api_client`
+are the two, and the message names the arguments to use instead), and when a
+required argument that no environment variable can supply is missing. Whether a
+variable is *set* is never consulted: the process that writes the row is not
+always the process that builds the guardrail, and the row may outlive both.
+
+Two guardrails the catalog lists cannot be defined this way. `bedrock_guardrails`
+needs both AWS keys, because without them boto3 falls back to the instance role
+of the host Otari runs on, which is the operator's identity rather than the
+organization's. And `any_llm` is refused outright: it takes no credential of its
+own, so it would judge text by calling an LLM on whatever key the deployment's
+environment holds, with nothing metering the call and nothing refunding it.
+
+**A definition's `name` is not a mandate's `profile`.** The name is what an
+organization recognizes a definition by, so the same guardrail can be defined
+twice under two names with different arguments; the profile is what a caller
+sends, and what the layer merge keys on. Nothing points a mandate at a
+definition yet, so a definition on its own changes no request.
+
 ### How the layers compose
 
 Three layers can name a guardrail: the caller's request, the caller's
