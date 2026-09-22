@@ -308,7 +308,7 @@ export function OrganizationProvidersPage() {
   // One predicate for the whole page now that the list read is
   // organization-management-gated on the server too (otari-ai#1944): a member
   // cannot see these rows, not only leave them alone. Withheld rather than
-  // fired and refused, the way `OrganizationGuardrailsCard` gates its own read
+  // fired and refused, the way `OrganizationGuardrailsPage` gates its own reads
   // and WorkspacesPage withholds the operator-only budget ones.
   //
   // Not widened to `isDeploymentOperator`: the server gates these rows on the

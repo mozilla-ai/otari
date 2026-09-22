@@ -13,7 +13,9 @@ import type {
 import { CONTROL_LANE } from "@/design-system/layout/SettingRow"
 import { ToolsGuardrailsPage } from "@/features/tools/ToolsGuardrailsPage"
 import { API_ROOT } from "@/shared/api/client"
-import { organizationContext } from "@/tests/fixtures"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap, organizationContext } from "@/tests/fixtures"
+import { renderWithRouter } from "@/tests/router"
 import { pickOption, selectTrigger } from "@/tests/select"
 
 const FIELDS: ToolSettingField[] = [
@@ -145,11 +147,24 @@ const TOOLS: ToolsResponse = {
   ],
 }
 
+// A deployment that does not publish the organization guardrails page, so the
+// link to it (a router `Link`) is absent and these tests need no router. The
+// one test about that link renders with both, below.
+const WITHOUT_ORGANIZATION_GUARDRAILS = bootstrap({
+  surfaces: bootstrap().surfaces.filter(
+    (surface) => surface !== "organization_guardrails",
+  ),
+})
+
 function renderWithClient(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+  return render(
+    <DeploymentProvider value={WITHOUT_ORGANIZATION_GUARDRAILS}>
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    </DeploymentProvider>,
+  )
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -244,6 +259,25 @@ function lastPatch(fetchMock: ReturnType<typeof mockApi>) {
 describe("ToolsGuardrailsPage", () => {
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it("points the organization's guardrails at their own page, where it is served", async () => {
+    mockApi()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    await renderWithRouter(
+      <DeploymentProvider value={bootstrap()}>
+        <QueryClientProvider client={client}>
+          <ToolsGuardrailsPage only="guardrails" />
+        </QueryClientProvider>
+      </DeploymentProvider>,
+      { url: "/tools/guardrails" },
+    )
+
+    expect(
+      await screen.findByRole("link", { name: "Guardrails" }),
+    ).toHaveAttribute("href", "/organization/guardrails")
   })
 
   it("renders every service's groups and effective values", async () => {
