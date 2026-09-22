@@ -90,12 +90,19 @@ from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 
 # What one organization may mandate. Every guardrail in scope for a workspace is
 # one more call the request waits on before the provider is reached, and
-# `run_input_guardrails` awaits them one after another with a 30s timeout each,
-# so the number is a fan-out bound and *not* the latency bound an earlier
-# comment here claimed: entries that fail open (monitor, or block with
-# `on_unavailable="monitor"`) each spend their timeout before the next one
-# starts. A fail-closed entry raises on the first failure, so the bad case needs
-# a scope full of observing entries pointed at something unreachable.
+# `run_input_guardrails` awaits them one after another, so the number is a
+# fan-out bound and *not* the latency bound an earlier comment here claimed:
+# entries that fail open (monitor, or block with `on_unavailable="monitor"`)
+# each spend their whole deadline before the next one starts. A fail-closed
+# entry raises on the first failure, so the bad case needs a scope full of
+# observing entries pointed at something unreachable.
+#
+# How long that deadline is depends on the shape of the row, which is why no
+# single number belongs in the sentence above. A remote entry gets the
+# guardrails service's 30 seconds. A definition this gateway builds and runs
+# itself gets the runner's 10, and spends them holding one of
+# `guardrail_thread_pool_size` threads, a second bound that is across the
+# worker rather than within one request.
 #
 # Chosen to sit near the 8 a single request may carry in its own `guardrails`
 # field, since that is the fan-out this path was already built to absorb. The
