@@ -1303,6 +1303,7 @@ def test_a_blocking_policy_guardrail_refuses_the_request(guarded_client: TestCli
         default_url: str | None,
         credentials: Any = None,
         mandated: Any = None,
+        in_process: Any = None,
     ) -> Any:
         from gateway.services.guardrails import GuardrailResult, GuardrailVerdict
 
