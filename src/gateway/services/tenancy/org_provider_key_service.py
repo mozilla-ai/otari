@@ -56,12 +56,12 @@ from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.models.provider_keys import (
     OrgProviderKey,
-    OrgProviderKeyModel,
     WorkspaceProviderKeyOverride,
     WorkspaceProviderModelRestriction,
 )
 from gateway.models.secret_fields import restore_redacted_values
 from gateway.models.tenancy import User, Workspace
+from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import (
     Candidate,
     OrgProviderKeyRepository,
@@ -228,22 +228,6 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     )
     overrides = (await db.execute(select(WorkspaceProviderKeyOverride))).scalars().all()
     restrictions = (await db.execute(select(WorkspaceProviderModelRestriction))).scalars().all()
-    # Three columns rather than whole rows, and only for keys that are still
-    # live. This is the table of the five that grows with an organization's
-    # catalog rather than with its workspaces, so one adopted provider adds more
-    # rows here than the rest of this refresh reads put together.
-    offered_models = (
-        await db.execute(
-            select(
-                col(OrgProviderKeyModel.org_provider_key_id),
-                col(OrgProviderKeyModel.model),
-                col(OrgProviderKeyModel.enabled),
-            )
-            .join(OrgProviderKey, col(OrgProviderKeyModel.org_provider_key_id) == col(OrgProviderKey.id))
-            .where(col(OrgProviderKey.archived_at).is_(None))
-        )
-    ).all()
-
     keys_by_org_provider: dict[tuple[uuid.UUID, str], list[OrgProviderKey]] = defaultdict(list)
     providers_by_org: dict[uuid.UUID, set[str]] = defaultdict(set)
     for key in keys:
@@ -256,14 +240,13 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     for restriction in restrictions:
         models_by_workspace_key[(restriction.workspace_id, restriction.org_provider_key_id)].append(restriction.model)
 
-    # Keyed on every key that offers a row, not only on the ones offering a
-    # *served* row: a key whose every model is switched off has to read as an
-    # empty allow-list rather than as an absent one.
-    enabled_models_by_key: dict[uuid.UUID, list[str]] = {}
-    for key_id, model, enabled in offered_models:
-        served = enabled_models_by_key.setdefault(key_id, [])
-        if enabled:
-            served.append(model)
+    # Asked for the live keys only, and keyed on every key that offers a row
+    # rather than on the ones offering a *served* row: a key whose every model is
+    # switched off has to read as an empty allow-list, not an absent one. The
+    # repository is what draws that distinction; see its docstring.
+    enabled_models_by_key = await OrgProviderKeyModelRepository(db).enabled_models_for_keys(
+        [key.id for key in keys]
+    )
 
     new_cache: dict[tuple[uuid.UUID, str], dict[str, Any]] = {}
     new_restrictions: dict[tuple[uuid.UUID, str], list[str]] = {}
