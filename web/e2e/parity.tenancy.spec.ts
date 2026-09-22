@@ -11,6 +11,8 @@ test.describe.configure({ mode: "serial" })
 
 const WORKSPACE = "parity-workspace"
 const RENAMED_WORKSPACE = "parity-workspace-renamed"
+const GUARDRAIL = "parity-lakera"
+const PROFILE = "parity-injection"
 // What provisioning names the bootstrap identity (OPERATOR_FULL_NAME in
 // provisioning_service.py). It has no email address, which is the point: a
 // standalone operator is a label, not a sign-in.
@@ -49,6 +51,12 @@ async function rename(page: Page, to: string): Promise<void> {
 
 function memberRow(page: Page, name: string | RegExp): Locator {
   return tableRows(page, "Organization members").filter({
+    has: page.getByRole("rowheader", { name }),
+  })
+}
+
+function guardrailRow(page: Page, table: string, name: string): Locator {
+  return tableRows(page, table).filter({
     has: page.getByRole("rowheader", { name }),
   })
 }
@@ -251,6 +259,68 @@ test.describe("standalone tenancy", () => {
     const dialog = page.getByRole("dialog", { name: "New workspace member" })
     await expect(dialog.getByText(/already in this workspace/)).toBeVisible()
     await dialog.getByRole("button", { name: "Cancel" }).click()
+  })
+
+  test("defines a guardrail, mandates it, edits the mandate, and removes both", async ({
+    page,
+  }) => {
+    await login(page)
+    await openOrganization(page)
+    await openPage(page, "Guardrails", "Guardrails")
+
+    await page.getByRole("button", { name: "Set up guardrail" }).click()
+    const setUp = page.getByRole("dialog", { name: "New guardrail" })
+    await pickOption(
+      page,
+      "What do you want checked?",
+      "Prompt injection",
+      setUp,
+    )
+    await pickOption(page, "Which guardrail?", "Lakera Guard · Lakera", setUp)
+    await setUp.getByLabel("Name").fill(GUARDRAIL)
+    // No vendor is called here: whether the guardrail builds is not what this
+    // flow checks, and CI has no Lakera account.
+    await setUp.getByLabel("Api key").fill("parity-not-a-real-key")
+    await setUp.getByRole("button", { name: "Set up guardrail" }).click()
+    await expect(setUp).toBeHidden()
+    const defined = guardrailRow(
+      page,
+      "Guardrails you have configured",
+      GUARDRAIL,
+    )
+    await expect(defined).toContainText("Api key set")
+
+    // Mandated nowhere: no workspace is chosen, so a guardrail that did not
+    // build cannot refuse another spec's requests while it exists.
+    await page.getByRole("button", { name: "Mandate a guardrail" }).click()
+    const mandate = page.getByRole("dialog", { name: "Mandated guardrail" })
+    await pickOption(page, "Guardrail", GUARDRAIL, mandate)
+    await mandate.getByLabel("Profile a caller sends").fill(PROFILE)
+    await mandate.getByRole("button", { name: "Mandate a guardrail" }).click()
+    await expect(mandate).toBeHidden()
+    const mandated = guardrailRow(page, "Where they run", PROFILE)
+    await expect(mandated).toContainText(GUARDRAIL)
+
+    // An edit of the mandate touches no secret, so the key stays set without
+    // being typed again.
+    await mandated.getByRole("button", { name: `Edit ${PROFILE}` }).click()
+    const edit = page.getByRole("dialog", { name: "Mandated guardrail" })
+    await pickOption(page, "Mode", "Block", edit)
+    await edit.getByRole("button", { name: "Save mandate" }).click()
+    await expect(edit).toBeHidden()
+    await expect(mandated).toContainText("Block")
+    await expect(defined).toContainText("Api key set")
+
+    // Leave the organization as this spec found it: the mandate first, since
+    // the definition cannot go while one still names it.
+    await mandated.getByRole("button", { name: `Remove ${PROFILE}` }).click()
+    await page.getByRole("button", { name: "Remove permanently" }).click()
+    await expect(guardrailRow(page, "Where they run", PROFILE)).toHaveCount(0)
+    await defined.getByRole("button", { name: `Remove ${GUARDRAIL}` }).click()
+    await page.getByRole("button", { name: "Remove permanently" }).click()
+    await expect(
+      guardrailRow(page, "Guardrails you have configured", GUARDRAIL),
+    ).toHaveCount(0)
   })
 
   test("leaves creating and switching to the scope switcher, and offers no delete", async ({
