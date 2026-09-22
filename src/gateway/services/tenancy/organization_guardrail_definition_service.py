@@ -8,9 +8,16 @@ profile some service already serves, and it does that the way it adds a provider
 key: pick from a catalog, fill typed fields, paste the vendor credential.
 
 **This module only writes the rows.** Building each one into a vendor client is
-the runner's job (`organization_guardrail_runner`), and putting a built
-guardrail on the request path is a later step still. What lands here is the
-store and its rules.
+the runner's job (`organization_guardrail_runner`), and running one is
+`services/guardrails`'. What lands here is the store and its rules.
+
+**It reports the build anyway, and does not import the runner to do it.** A read
+of a definition answers two questions at once, what was saved and whether it is
+running, and the second belongs to the runner. The runner already imports this
+module, for the one function that undoes the secret split, so importing it back
+would close a cycle. The composition root passes the two functions in instead
+(`api/deps.py`), which is also what lets a test say what a worker holds without
+one.
 
 **Almost every rule is read off the catalog.** A list of guardrails, arguments
 or credentials written in this module could only ever drift from the picker it
@@ -39,8 +46,9 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Iterator
-from typing import Annotated, Any
+from collections.abc import Callable, Iterator
+from datetime import datetime
+from typing import Annotated, Any, Literal
 
 from any_guardrail.base import GuardrailName
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -216,6 +224,17 @@ class OrganizationGuardrailDefinitionUpdate(BaseModel):
         return self
 
 
+# What a worker holds for one version of one definition. The first three are the
+# runner's to answer; `disabled` is this module's, because a definition that is
+# switched off is never handed to the runner at all.
+GuardrailBuildState = Literal["built", "failed", "pending", "disabled"]
+
+# What the store needs from whatever builds these rows, passed in rather than
+# imported: see the module docstring. Typed to the runner's three answers, so a
+# fourth one added there has to be accounted for here rather than narrowed away.
+BuildStateOf = Callable[[uuid.UUID, uuid.UUID, datetime], Literal["built", "failed", "pending"]]
+
+
 class OrganizationGuardrailDefinitionPublic(BaseModel):
     """The API-facing shape. Carries the names of the stored secrets and none of their values."""
 
@@ -244,6 +263,19 @@ class OrganizationGuardrailDefinitionPublic(BaseModel):
         ),
     )
     enabled: bool
+    build_state: GuardrailBuildState = Field(
+        description=(
+            "Whether the worker that answered this request holds a guardrail built from this "
+            "version of the definition. built means it does and the check runs; failed means "
+            "that worker tried these exact arguments and could not build them, so every mandate "
+            "pointing here is unevaluable; pending means it holds nothing for this version yet, "
+            "which is the answer right after a write and on any worker that has not caught up "
+            "within the refresh interval; disabled means the definition is switched off and "
+            "nothing is built on purpose. It answers for one worker, so two reads can disagree "
+            "while a write propagates. Why a build failed is never reported here: the reason is "
+            "in the gateway's log"
+        ),
+    )
     created_at: str
     updated_at: str
 
@@ -254,6 +286,7 @@ class OrganizationGuardrailDefinitionPublic(BaseModel):
         *,
         secret_names: list[str],
         secrets_decryptable: bool,
+        build_state: GuardrailBuildState,
     ) -> OrganizationGuardrailDefinitionPublic:
         return cls(
             id=definition.id,
@@ -264,6 +297,7 @@ class OrganizationGuardrailDefinitionPublic(BaseModel):
             create_secrets=dict.fromkeys(secret_names, REDACTED_VALUE),
             secrets_decryptable=secrets_decryptable,
             enabled=definition.enabled,
+            build_state=build_state,
             created_at=definition.created_at.isoformat(),
             updated_at=definition.updated_at.isoformat(),
         )
@@ -579,7 +613,9 @@ def _arguments_after(
     return restore_redacted_values(request.create_kwargs, stored) or {}
 
 
-def _public(definition: OrganizationGuardrailDefinition) -> OrganizationGuardrailDefinitionPublic:
+def _public(
+    definition: OrganizationGuardrailDefinition, *, build_state: GuardrailBuildState
+) -> OrganizationGuardrailDefinitionPublic:
     """The read shape, reporting an unreadable secret map rather than failing the listing.
 
     The `routes/providers.py::_is_decryptable` posture: one row nobody can
@@ -588,9 +624,11 @@ def _public(definition: OrganizationGuardrailDefinition) -> OrganizationGuardrai
     try:
         secrets = _stored_secrets(definition)
     except (SecretBoxUnavailableError, SecretDecryptionError, json.JSONDecodeError):
-        return OrganizationGuardrailDefinitionPublic.from_model(definition, secret_names=[], secrets_decryptable=False)
+        return OrganizationGuardrailDefinitionPublic.from_model(
+            definition, secret_names=[], secrets_decryptable=False, build_state=build_state
+        )
     return OrganizationGuardrailDefinitionPublic.from_model(
-        definition, secret_names=sorted(secrets), secrets_decryptable=True
+        definition, secret_names=sorted(secrets), secrets_decryptable=True, build_state=build_state
     )
 
 
@@ -607,10 +645,24 @@ class OrganizationGuardrailDefinitionService:
         definitions: OrganizationGuardrailDefinitionRepository,
         organizations: OrganizationService,
         uow: UnitOfWork,
+        build_state: BuildStateOf,
     ) -> None:
         self._definitions = definitions
         self._organizations = organizations
         self._uow = uow
+        self._build_state = build_state
+
+    def _state_of(self, definition: OrganizationGuardrailDefinition) -> GuardrailBuildState:
+        """What to report about a row: the runner's answer, or that nobody asked it to build.
+
+        A disabled definition is never handed to the runner, so the runner would
+        say `pending` about it forever. `enabled` next to it already says why,
+        but a page drawing one health marker should not have to read two fields
+        to avoid promising a build that is not coming.
+        """
+        if not definition.enabled:
+            return "disabled"
+        return self._build_state(definition.organization_id, definition.id, definition.updated_at)
 
     async def _manageable_organization_id(self, user: User) -> uuid.UUID:
         """The caller's organization, having checked they may manage its guardrails.
@@ -643,7 +695,7 @@ class OrganizationGuardrailDefinitionService:
             # Serialized inside the block. The commit that ends it expires every
             # instance in the session, and reading an expired column afterwards
             # is a lazy load in a place that cannot await one.
-            data = [_public(row) for row in rows]
+            data = [_public(row, build_state=self._state_of(row)) for row in rows]
         return OrganizationGuardrailDefinitionsPublic(data=data, count=total)
 
     async def create_definition(
@@ -672,7 +724,7 @@ class OrganizationGuardrailDefinitionService:
             )
             if not await self._definitions.add_unless_name_taken(definition):
                 raise OrganizationGuardrailDefinitionAlreadyExistsError(request.name)
-            return _public(definition)
+            return _public(definition, build_state=self._state_of(definition))
 
     async def update_definition(
         self, *, user: User, definition_id: uuid.UUID, request: OrganizationGuardrailDefinitionUpdate
@@ -715,7 +767,7 @@ class OrganizationGuardrailDefinitionService:
             attempted_name = definition.name
             if not await self._definitions.flush_unless_name_taken():
                 raise OrganizationGuardrailDefinitionAlreadyExistsError(attempted_name)
-            return _public(definition)
+            return _public(definition, build_state=self._state_of(definition))
 
     async def delete_definition(self, *, user: User, definition_id: uuid.UUID) -> None:
         """Drop a definition and the credentials it holds.

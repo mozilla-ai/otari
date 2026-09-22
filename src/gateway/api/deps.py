@@ -45,7 +45,7 @@ from gateway.services.organization_pricing_service import OrganizationPricingSer
 from gateway.services.overview.overview_service import OverviewService
 from gateway.services.providers import OrgProviderModelService
 from gateway.services.routing import clear_router_backend_cache
-from gateway.services.tenancy import OrganizationService
+from gateway.services.tenancy import OrganizationService, organization_guardrail_runner
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
 from gateway.services.tenancy.organization_guardrail_definition_service import (
@@ -942,11 +942,17 @@ def get_organization_guardrail_definition_service(
     opens; `OrganizationService` is still in the old shape and takes a session,
     and both are the request's one session, so a block commits what the gate
     read.
+
+    The runner is wired in here rather than imported by the service, because the
+    runner imports the service for the function that undoes the secret split and
+    the pair would otherwise form a cycle. This is the composition root, which
+    is where that join belongs anyway.
     """
     return OrganizationGuardrailDefinitionService(
         definitions=OrganizationGuardrailDefinitionRepository(uow),
         organizations=OrganizationService(db, membership_listener=None),
         uow=uow,
+        build_state=organization_guardrail_runner.build_state,
     )
 
 

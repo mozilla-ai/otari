@@ -9692,6 +9692,12 @@ export interface components {
          */
         OrganizationGuardrailDefinitionPublic: {
             /**
+             * Build State
+             * @description Whether the worker that answered this request holds a guardrail built from this version of the definition. built means it does and the check runs; failed means that worker tried these exact arguments and could not build them, so every mandate pointing here is unevaluable; pending means it holds nothing for this version yet, which is the answer right after a write and on any worker that has not caught up within the refresh interval; disabled means the definition is switched off and nothing is built on purpose. It answers for one worker, so two reads can disagree while a write propagates. Why a build failed is never reported here: the reason is in the gateway's log
+             * @enum {string}
+             */
+            build_state: "built" | "failed" | "pending" | "disabled";
+            /**
              * Create Kwargs
              * @description The constructor arguments the catalog does not mark secret, as they were stored. Returned in clear: the secrets were taken out of this map by flag, and a form has to round-trip an endpoint or a project id
              */

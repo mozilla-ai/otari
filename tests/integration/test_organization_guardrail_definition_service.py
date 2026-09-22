@@ -16,6 +16,8 @@ and what a column ends up holding.
 import json
 import uuid
 from collections.abc import Iterator
+from datetime import datetime
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import select
@@ -31,6 +33,7 @@ from gateway.repositories.tenancy import (
     UserRepository,
 )
 from gateway.services.secret_box import decrypt_secret, generate_secret_key
+from gateway.services.tenancy import organization_guardrail_runner as runner
 from gateway.services.tenancy.errors import (
     NotAuthorizedError,
     OrganizationGuardrailDefinitionAlreadyExistsError,
@@ -45,6 +48,7 @@ from gateway.services.tenancy.errors import (
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     MAX_DEFINITIONS_PER_ORGANIZATION,
     OrganizationGuardrailDefinitionCreate,
+    OrganizationGuardrailDefinitionPublic,
     OrganizationGuardrailDefinitionService,
     OrganizationGuardrailDefinitionUpdate,
 )
@@ -83,6 +87,7 @@ def _service(db: AsyncSession) -> OrganizationGuardrailDefinitionService:
         definitions=OrganizationGuardrailDefinitionRepository(uow),
         organizations=OrganizationService(db, membership_listener=None),
         uow=uow,
+        build_state=runner.build_state,
     )
 
 
@@ -113,6 +118,27 @@ def _create(**overrides: object) -> OrganizationGuardrailDefinitionCreate:
 def _secret_key(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     yield
+
+
+@pytest.fixture(autouse=True)
+def _empty_runner() -> Iterator[None]:
+    """The runner is process-global, so a held entry would outlive its test."""
+    runner.reset_guardrail_runner()
+    yield
+    runner.reset_guardrail_runner()
+
+
+def _hold(organization_id: uuid.UUID, definition: OrganizationGuardrailDefinitionPublic, *, guardrail: object) -> None:
+    """Say what this worker holds, without building anything.
+
+    ``guardrail=None`` is a build that failed, which is the state the read has
+    to report and the one no test can produce by dialing a vendor.
+    """
+    runner._held[(organization_id, definition.id)] = runner._Held(
+        fingerprint=datetime.fromisoformat(definition.updated_at),
+        guardrail_name=definition.guardrail_name,
+        guardrail=cast(Any, guardrail),
+    )
 
 
 async def _row(db: AsyncSession, definition_id: uuid.UUID) -> OrganizationGuardrailDefinition:
@@ -606,3 +632,111 @@ async def test_an_address_nested_in_an_argument_is_checked_too(async_db: AsyncSe
 
     assert "detection_config.webhook" in str(refused.value)
     assert (await service.list_definitions(user=owner)).count == 0
+
+
+# --------------------------------------------------------------------------- #
+# What a read says about the build
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_definition_nothing_has_built_yet_reads_as_pending(async_db: AsyncSession) -> None:
+    """The honest answer between the write and the build, and on a worker still catching up.
+
+    It must not read as `failed`, which is what an admin would act on, and it
+    must not read as `built`, which would hide a mandate nothing is evaluating.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+
+    created = await _service(async_db).create_definition(user=owner, request=_create())
+
+    assert created.build_state == "pending"
+
+
+async def test_a_definition_this_worker_built_reads_as_built(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    created = await service.create_definition(user=owner, request=_create())
+    _hold(organization.id, created, guardrail=object())
+
+    page = await service.list_definitions(user=owner)
+
+    assert [entry.build_state for entry in page.data] == ["built"]
+
+
+async def test_a_definition_this_worker_could_not_build_reads_as_failed(async_db: AsyncSession) -> None:
+    """The reading this field exists for: saved, and not running."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    created = await service.create_definition(user=owner, request=_create())
+    _hold(organization.id, created, guardrail=None)
+
+    page = await service.list_definitions(user=owner)
+
+    assert [entry.build_state for entry in page.data] == ["failed"]
+
+
+async def test_a_build_of_an_older_version_does_not_read_as_built(async_db: AsyncSession) -> None:
+    """A repaired row reports the repair, not the guardrail it replaced."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    created = await service.create_definition(user=owner, request=_create())
+    _hold(organization.id, created, guardrail=object())
+
+    updated = await service.update_definition(
+        user=owner,
+        definition_id=created.id,
+        request=OrganizationGuardrailDefinitionUpdate(
+            create_kwargs={"api_key": "rotated", "endpoint": OTHER_ENDPOINT}
+        ),
+    )
+
+    assert updated.build_state == "pending"
+
+
+async def test_a_disabled_definition_reads_as_disabled(async_db: AsyncSession) -> None:
+    """Nothing is built for it on purpose, so `pending` would promise a build that is not coming."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    created = await service.create_definition(user=owner, request=_create())
+
+    updated = await service.update_definition(
+        user=owner, definition_id=created.id, request=OrganizationGuardrailDefinitionUpdate(enabled=False)
+    )
+
+    assert updated.build_state == "disabled"
+
+
+async def test_another_organizations_build_is_not_reported_as_this_ones(async_db: AsyncSession) -> None:
+    """The state is keyed on the pair, so two organizations cannot read each other's health."""
+    mine = await _organization(async_db, slug="mine")
+    theirs = await _organization(async_db, slug="theirs")
+    owner = await _member(async_db, mine, role="owner", full_name="Owner")
+    service = _service(async_db)
+    created = await service.create_definition(user=owner, request=_create())
+    _hold(theirs.id, created, guardrail=object())
+
+    page = await service.list_definitions(user=owner)
+
+    assert [entry.build_state for entry in page.data] == ["pending"]
+
+
+async def test_a_row_whose_secrets_will_not_decrypt_still_reports_its_build(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two independent failures, and a listing reports both rather than dropping the row."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    created = await service.create_definition(user=owner, request=_create())
+    _hold(organization.id, created, guardrail=None)
+
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    listed = (await service.list_definitions(user=owner)).data
+
+    assert listed[0].secrets_decryptable is False
+    assert listed[0].build_state == "failed"
