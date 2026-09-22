@@ -69,8 +69,10 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         Raises:
             BudgetStillReferencedError: the database refused the delete because a row still names the budget.
         """
+        # A failed flush expires the row, so the ID is read before it.
+        budget_id = budget.budget_id
         await self.db.delete(budget)
         try:
             await self.db.flush()
         except IntegrityError:
-            raise BudgetStillReferencedError(budget.budget_id) from None
+            raise BudgetStillReferencedError(budget_id) from None
