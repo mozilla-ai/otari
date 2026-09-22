@@ -115,7 +115,7 @@ class WorkspaceCodeExecutionPolicyUpdate(BaseModel):
             "Who runs a provider-native code-execution declaration for this workspace: 'auto' (the "
             "provider when it runs the tool natively for the model, else this gateway's sandbox), "
             "'otari' or 'provider'. Pins over the deployment default and over the request's "
-            "X-Otari-Code-Execution header; null leaves both in charge"
+            "Otari-Code-Execution header; null leaves both in charge"
         ),
     )
 

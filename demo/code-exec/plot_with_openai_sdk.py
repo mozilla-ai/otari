@@ -8,7 +8,7 @@ The counterpart to `plot_with_anthropic_sdk.py`, on the Responses API:
 
 The first runs `code_interpreter` on OpenAI's own container, because the `auto`
 executor leaves a declaration with a provider that serves it natively. The
-second sends `X-Otari-Code-Execution: otari`, so the same request runs on
+second sends `Otari-Code-Execution: otari`, so the same request runs on
 Otari's sandbox instead. Both come back as a `code_interpreter_call` item, and
 either way the chart downloads from Otari's files API: one Otari's sandbox
 produced it stored, and one OpenAI's produced it streams back from OpenAI's
@@ -23,7 +23,7 @@ script, or Chat Completions, for a nebius model.
 Environment:
     OTARI_URL        default http://localhost:8000
     OTARI_KEY        the gateway's master key or an API key (default demo-master-key)
-    QA_EXECUTOR      `auto` (default), `otari` or `provider`, sent as X-Otari-Code-Execution
+    QA_EXECUTOR      `auto` (default), `otari` or `provider`, sent as Otari-Code-Execution
     QA_USER          the user a master-key request bills (default plot-roundtrip)
     QA_OUT_DIR       where to write the plots (default demo/code-exec/plots)
 """
@@ -104,7 +104,7 @@ def main(model: str) -> int:
         # A master-key request must say who it bills; an API key ignores this
         # in favor of its own user.
         user=USER,
-        extra_headers={"X-Otari-Code-Execution": EXECUTOR},
+        extra_headers={"Otari-Code-Execution": EXECUTOR},
     )
 
     # Otari's own ids mark a gateway-run execution; the provider's are its own.

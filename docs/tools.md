@@ -159,7 +159,7 @@ others; the header wins over the deployment default:
 2. A [workspace policy](#per-workspace-code-policy) may pin `executor`. A pin is
    a decision the request cannot argue with: a header that disagrees is refused
    with 403.
-3. The `X-Otari-Code-Execution` header (`auto`, `otari` or `provider`) chooses per
+3. The `Otari-Code-Execution` header (`auto`, `otari` or `provider`) chooses per
    request where the workspace has not pinned. A value outside that vocabulary
    is a 400.
 

@@ -96,6 +96,7 @@ from gateway.api.routes._platform import (
 )
 from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.api.routes._tools import (
+    CODE_EXECUTION_HEADER,
     _build_web_retrieval_backend,
     _extract_code_execution_tool,
     _extract_web_fetch_tool,
@@ -331,9 +332,9 @@ CODE_EXECUTOR_NOT_CONFIGURED_DETAIL = (
     "code execution was asked to run on this gateway but no sandbox is configured. "
     "Set OTARI_SANDBOX_URL on the gateway, or let the provider run it."
 )
-CODE_EXECUTION_HEADER_INVALID_DETAIL = "X-Otari-Code-Execution must be one of auto, otari, provider"
+CODE_EXECUTION_HEADER_INVALID_DETAIL = f"{CODE_EXECUTION_HEADER} must be one of auto, otari, provider"
 CODE_EXECUTOR_PINNED_DETAIL = (
-    "this workspace's code-execution policy decides who runs code; the X-Otari-Code-Execution "
+    f"this workspace's code-execution policy decides who runs code; the {CODE_EXECUTION_HEADER} "
     "header cannot choose otherwise"
 )
 SANDBOX_MCP_CONFLICT_DETAIL = (

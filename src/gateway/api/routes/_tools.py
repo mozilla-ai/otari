@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 # A header rather than a body field so the body stays the untouched payload a
 # provider's own SDK sends; every SDK can add a default header without a code
 # change. One of ``CodeExecutor``'s values, case-insensitive.
-CODE_EXECUTION_HEADER = "X-Otari-Code-Execution"
+CODE_EXECUTION_HEADER = "Otari-Code-Execution"
 
 
 class Tool(StrEnum):

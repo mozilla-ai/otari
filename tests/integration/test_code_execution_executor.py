@@ -26,7 +26,7 @@ _OPENAI = "openai:gpt-4o-mini"
 _DATED = {"type": "code_execution_20250825", "name": "code_execution"}
 _BARE = {"type": "code_execution"}
 _INTERPRETER = {"type": "code_interpreter"}
-_HEADER = "X-Otari-Code-Execution"
+_HEADER = "Otari-Code-Execution"
 
 
 def _text_response(text: str = "ok") -> MessageResponse:

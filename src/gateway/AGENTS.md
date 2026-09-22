@@ -163,7 +163,7 @@ An `otari_*` tool type always runs in the gateway. A provider-native web-search
 type passes through unless `web_search_intercept` is on. A provider-native
 code-execution type is decided by the executor (`types/code_execution.py`,
 resolved in `api/routes/_tools.py`): a workspace pin wins over everything, the
-`X-Otari-Code-Execution` header wins over the deployment default, and `auto`
+`Otari-Code-Execution` header wins over the deployment default, and `auto`
 claims a declaration only when the dispatched provider does not run it
 natively. The workspace policy is read once, in the request preamble, and
 reused at admission; the same decision says whether a referenced upload is

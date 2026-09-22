@@ -12948,7 +12948,7 @@ export interface components {
              * @description Ceiling on one execution's runtime in seconds; only ever lowers the effective limit, so at most 60
              */
             exec_timeout_s?: number | null;
-            /** @description Who runs a provider-native code-execution declaration for this workspace: 'auto' (the provider when it runs the tool natively for the model, else this gateway's sandbox), 'otari' or 'provider'. Pins over the deployment default and over the request's X-Otari-Code-Execution header; null leaves both in charge */
+            /** @description Who runs a provider-native code-execution declaration for this workspace: 'auto' (the provider when it runs the tool natively for the model, else this gateway's sandbox), 'otari' or 'provider'. Pins over the deployment default and over the request's Otari-Code-Execution header; null leaves both in charge */
             executor?: components["schemas"]["CodeExecutor"] | null;
             /**
              * Image
