@@ -38,6 +38,7 @@ from gateway.services.tenancy.errors import (
     OrganizationGuardrailDefinitionInUseError,
     OrganizationGuardrailDefinitionLimitReachedError,
     OrganizationGuardrailDefinitionNotFoundError,
+    OrganizationGuardrailDefinitionUnsafeUrlError,
     OrganizationGuardrailNotBuildableError,
     OrganizationGuardrailNotDefinableError,
 )
@@ -50,6 +51,14 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
 from gateway.services.tenancy.organization_service import OrganizationService
 
 pytestmark = pytest.mark.asyncio
+
+# The write path checks every stored address, so a fixture's endpoint has to be
+# one that passes without a resolver: an IP literal in the public range
+# example.com has used for years, the convention
+# `test_organization_guardrail_definitions.py` already follows and
+# `test_organization_guardrails.py` explains.
+VENDOR_ENDPOINT = "https://93.184.216.34/v2"
+OTHER_ENDPOINT = "https://93.184.216.35/v2"
 
 
 async def _organization(db: AsyncSession, *, slug: str = "acme") -> Organization:
@@ -94,7 +103,7 @@ def _create(**overrides: object) -> OrganizationGuardrailDefinitionCreate:
     fields: dict[str, object] = {
         "name": "prod-lakera",
         "guardrail_name": "lakera_guard",
-        "create_kwargs": {"api_key": "lakera-key", "endpoint": "https://api.lakera.ai"},
+        "create_kwargs": {"api_key": "lakera-key", "endpoint": VENDOR_ENDPOINT},
     }
     fields.update(overrides)
     return OrganizationGuardrailDefinitionCreate(**fields)  # type: ignore[arg-type]
@@ -146,7 +155,7 @@ async def test_crud_round_trip(async_db: AsyncSession) -> None:
     assert created.organization_id == organization.id
     assert created.guardrail_name == "lakera_guard"
     assert created.enabled is True
-    assert created.create_kwargs == {"endpoint": "https://api.lakera.ai"}
+    assert created.create_kwargs == {"endpoint": VENDOR_ENDPOINT}
     assert created.create_secrets == {"api_key": "***"}
     assert created.secrets_decryptable is True
 
@@ -337,7 +346,7 @@ async def test_a_refused_edit_leaves_the_row_as_it_was(async_db: AsyncSession) -
 
     listed = (await service.list_definitions(user=owner)).data
     assert [entry.name for entry in listed] == ["prod-lakera"]
-    assert listed[0].create_kwargs == {"endpoint": "https://api.lakera.ai"}
+    assert listed[0].create_kwargs == {"endpoint": VENDOR_ENDPOINT}
 
 
 # --------------------------------------------------------------------------- #
@@ -354,7 +363,7 @@ async def test_a_credential_reaches_only_the_encrypted_column(async_db: AsyncSes
     created = await service.create_definition(user=owner, request=_create())
 
     stored = await _row(async_db, created.id)
-    assert stored.create_kwargs == {"endpoint": "https://api.lakera.ai"}
+    assert stored.create_kwargs == {"endpoint": VENDOR_ENDPOINT}
     assert stored.encrypted_create_secrets is not None
     assert "lakera-key" not in stored.encrypted_create_secrets
     assert json.loads(decrypt_secret(stored.encrypted_create_secrets)) == {"api_key": "lakera-key"}
@@ -368,7 +377,7 @@ async def test_a_definition_with_no_secret_stores_no_ciphertext(async_db: AsyncS
 
     created = await service.create_definition(
         user=owner,
-        request=_create(create_kwargs={"endpoint": "https://api.lakera.ai"}),
+        request=_create(create_kwargs={"endpoint": VENDOR_ENDPOINT}),
     )
 
     assert created.create_secrets == {}
@@ -404,11 +413,9 @@ async def test_a_mask_keeps_the_credential_and_a_value_rotates_it(async_db: Asyn
     kept = await service.update_definition(
         user=owner,
         definition_id=created.id,
-        request=OrganizationGuardrailDefinitionUpdate(
-            create_kwargs={"api_key": "***", "endpoint": "https://eu.api.lakera.ai"}
-        ),
+        request=OrganizationGuardrailDefinitionUpdate(create_kwargs={"api_key": "***", "endpoint": OTHER_ENDPOINT}),
     )
-    assert kept.create_kwargs == {"endpoint": "https://eu.api.lakera.ai"}
+    assert kept.create_kwargs == {"endpoint": OTHER_ENDPOINT}
     stored = await _row(async_db, created.id)
     assert stored.encrypted_create_secrets is not None
     assert json.loads(decrypt_secret(stored.encrypted_create_secrets)) == {"api_key": "lakera-key"}
@@ -450,11 +457,11 @@ async def test_changing_the_guardrail_re_splits_the_stored_arguments(async_db: A
         definition_id=created.id,
         request=OrganizationGuardrailDefinitionUpdate(
             guardrail_name="openai_moderation",
-            create_kwargs={"api_key": "***", "base_url": "https://api.openai.com/v1"},
+            create_kwargs={"api_key": "***", "base_url": OTHER_ENDPOINT},
         ),
     )
     assert switched.guardrail_name == "openai_moderation"
-    assert switched.create_kwargs == {"base_url": "https://api.openai.com/v1"}
+    assert switched.create_kwargs == {"base_url": OTHER_ENDPOINT}
     stored = await _row(async_db, created.id)
     assert stored.encrypted_create_secrets is not None
     assert json.loads(decrypt_secret(stored.encrypted_create_secrets)) == {"api_key": "lakera-key"}
@@ -479,13 +486,13 @@ async def test_a_row_whose_credentials_cannot_be_read_still_lists(
     listed = (await service.list_definitions(user=owner)).data
     assert [entry.secrets_decryptable for entry in listed] == [False]
     assert listed[0].create_secrets == {}
-    assert listed[0].create_kwargs == {"endpoint": "https://api.lakera.ai"}
+    assert listed[0].create_kwargs == {"endpoint": VENDOR_ENDPOINT}
 
     repaired = await service.update_definition(
         user=owner,
         definition_id=created.id,
         request=OrganizationGuardrailDefinitionUpdate(
-            create_kwargs={"api_key": "retyped", "endpoint": "https://api.lakera.ai"}
+            create_kwargs={"api_key": "retyped", "endpoint": VENDOR_ENDPOINT}
         ),
     )
     assert repaired.secrets_decryptable is True
@@ -535,3 +542,67 @@ async def test_dropping_the_mandate_frees_the_definition(async_db: AsyncSession)
 
     await service.delete_definition(user=owner, definition_id=created.id)
     assert (await service.list_definitions(user=owner)).data == []
+
+
+# --------------------------------------------------------------------------- #
+# The endpoints a definition may name
+# --------------------------------------------------------------------------- #
+
+
+async def test_refuses_an_endpoint_this_gateway_must_not_dial(async_db: AsyncSession) -> None:
+    """The rule is unit-tested; what this asserts is that the write path runs it."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+
+    with pytest.raises(OrganizationGuardrailDefinitionUnsafeUrlError) as refused:
+        await service.create_definition(
+            user=owner,
+            request=_create(create_kwargs={"api_key": "lakera-key", "endpoint": "https://169.254.169.254/latest/"}),
+        )
+
+    assert "endpoint" in str(refused.value)
+    assert (await service.list_definitions(user=owner)).count == 0
+
+
+async def test_refuses_an_edit_that_turns_the_endpoint_inward(async_db: AsyncSession) -> None:
+    """The stored endpoint and the stored credential both survive the refusal."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    created = await service.create_definition(user=owner, request=_create())
+
+    with pytest.raises(OrganizationGuardrailDefinitionUnsafeUrlError):
+        await service.update_definition(
+            user=owner,
+            definition_id=created.id,
+            request=OrganizationGuardrailDefinitionUpdate(
+                create_kwargs={"api_key": "***", "endpoint": "https://10.0.0.5/v2"}
+            ),
+        )
+    await _after_a_refusal(async_db, owner)
+
+    stored = await _row(async_db, created.id)
+    assert stored.create_kwargs == {"endpoint": VENDOR_ENDPOINT}
+    assert stored.encrypted_create_secrets is not None
+    assert json.loads(decrypt_secret(stored.encrypted_create_secrets)) == {"api_key": "lakera-key"}
+
+
+async def test_an_address_nested_in_an_argument_is_checked_too(async_db: AsyncSession) -> None:
+    """Alinia's ``detection_config`` is a real argument that holds a whole object."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+
+    with pytest.raises(OrganizationGuardrailDefinitionUnsafeUrlError) as refused:
+        await service.create_definition(
+            user=owner,
+            request=_create(
+                name="prod-alinia",
+                guardrail_name="alinia",
+                create_kwargs={"detection_config": {"webhook": "http://10.0.0.5/collect"}},
+            ),
+        )
+
+    assert "detection_config.webhook" in str(refused.value)
+    assert (await service.list_definitions(user=owner)).count == 0

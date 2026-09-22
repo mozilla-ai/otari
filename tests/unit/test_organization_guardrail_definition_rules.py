@@ -1,8 +1,10 @@
 """The rules a stored guardrail definition has to pass, and the plain/secret split.
 
-Every rule but one is read off `build_builtin_guardrail_catalog`, so most cases
+Almost every rule is read off `build_builtin_guardrail_catalog`, so most cases
 here name a real guardrail and assert against the installed any-guardrail rather
-than a fixture. Two rules refuse nothing today, and those are exercised against a
+than a fixture. The two that are not are the Bedrock key pair and the address
+check, which reads the value of an argument because upstream types every URL as
+a plain string. Two rules refuse nothing today, and those are exercised against a
 hand-built spec: the point of writing them was the release that arrives with the
 shape, so a test that only asserted "nothing is refused" would pass with the rule
 deleted.
@@ -26,6 +28,7 @@ from gateway.services.guardrail_catalog import (
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy.errors import (
     OrganizationGuardrailDefinitionArgumentsError,
+    OrganizationGuardrailDefinitionUnsafeUrlError,
     OrganizationGuardrailNotBuildableError,
     OrganizationGuardrailNotDefinableError,
 )
@@ -33,8 +36,10 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionUpdate,
     _arguments_after,
     _definable_spec,
+    _dialable_urls,
     _refuse_unconfigurable,
     _split_by_secret_flag,
+    _validate_argument_urls,
     _validate_arguments,
 )
 
@@ -457,3 +462,98 @@ def test_an_unreadable_secret_map_asks_for_the_credentials_rather_than_failing(
 
     assert "OTARI_SECRET_KEY" in str(refused.value)
     assert "create_kwargs" in str(refused.value)
+
+
+# --------------------------------------------------------------------------- #
+# The endpoints a definition may name
+#
+# Every address here is an IP literal, in the public range example.com has used
+# for years, so the check under test runs no resolver: a suite that needs DNS to
+# agree with it fails for reasons that have nothing to do with the rule.
+# --------------------------------------------------------------------------- #
+
+
+def test_an_address_is_recognized_by_its_value_wherever_it_sits() -> None:
+    """Nested too, because two real build arguments are containers.
+
+    `alinia.detection_config` is a dict and `patronus.evaluators` a list, so a
+    scan of the top level alone would walk past an address inside either.
+    """
+    found = dict(
+        _dialable_urls(
+            {
+                "endpoint": "https://93.184.216.34",
+                "detection_config": {"sink": "https://93.184.216.35/report"},
+                "evaluators": [{"callback": "http://93.184.216.36"}],
+                "api_key": "lakera-key",
+                "project_id": "proj-1",
+                "retries": 3,
+                "enabled": True,
+            }
+        )
+    )
+
+    assert found == {
+        "endpoint": "https://93.184.216.34",
+        "detection_config.sink": "https://93.184.216.35/report",
+        "evaluators[0].callback": "http://93.184.216.36",
+    }
+
+
+def test_a_value_with_no_scheme_in_it_is_not_an_address() -> None:
+    """Including the mask, which is why the update path needs no special case."""
+    assert list(_dialable_urls({"api_key": "***", "project_id": "proj-1", "space_id": ""})) == []
+
+
+@pytest.mark.asyncio
+async def test_accepts_a_public_endpoint() -> None:
+    await _validate_argument_urls({"endpoint": "https://93.184.216.34/v2", "api_key": "lakera-key"})
+
+
+@pytest.mark.asyncio
+async def test_refuses_an_endpoint_inside_the_network_this_gateway_runs_in() -> None:
+    with pytest.raises(OrganizationGuardrailDefinitionUnsafeUrlError) as refused:
+        await _validate_argument_urls({"endpoint": "https://169.254.169.254/latest/meta-data/"})
+
+    assert "endpoint" in str(refused.value)
+    assert "link-local" in str(refused.value)
+
+
+@pytest.mark.asyncio
+async def test_refuses_an_endpoint_that_would_carry_a_credential_in_clear() -> None:
+    with pytest.raises(OrganizationGuardrailDefinitionUnsafeUrlError) as refused:
+        await _validate_argument_urls({"endpoint": "http://93.184.216.34/v2"})
+
+    assert "https" in str(refused.value)
+
+
+@pytest.mark.asyncio
+async def test_refuses_a_scheme_this_gateway_would_not_dial() -> None:
+    with pytest.raises(OrganizationGuardrailDefinitionUnsafeUrlError):
+        await _validate_argument_urls({"endpoint": "file://etc/passwd"})
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_names_the_nested_argument_it_came_from() -> None:
+    """The path, not just the top-level name, because that is what a form has to fix."""
+    with pytest.raises(OrganizationGuardrailDefinitionUnsafeUrlError) as refused:
+        await _validate_argument_urls({"detection_config": {"sink": "https://10.0.0.5/collect"}})
+
+    assert "detection_config.sink" in str(refused.value)
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_carries_the_host_and_not_the_url() -> None:
+    """An endpoint can hold a credential in its userinfo, and the answer is public."""
+    with pytest.raises(OrganizationGuardrailDefinitionUnsafeUrlError) as refused:
+        await _validate_argument_urls({"endpoint": "https://user:pa55word@10.0.0.5/collect"})
+
+    assert "pa55word" not in str(refused.value)
+    assert "10.0.0.5" in str(refused.value)
+
+
+@pytest.mark.asyncio
+async def test_the_operators_own_override_reaches_this_check_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One flag governs every caller of the shared check, and that is worth pinning."""
+    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
+    await _validate_argument_urls({"endpoint": "https://10.0.0.5/collect"})

@@ -1133,6 +1133,21 @@ class OrganizationGuardrailDefinitionArgumentsError(TenancyValidationError):
         super().__init__(reason)
 
 
+class OrganizationGuardrailDefinitionUnsafeUrlError(TenancyValidationError):
+    """A build argument names an address this gateway must not dial.
+
+    Named after the argument it came from, because a guardrail can take several
+    and the caller has to know which field to fix. The reason is carried
+    verbatim, as `OrganizationGuardrailDefinitionArgumentsError` explains, and it
+    is a reason that names the host and the range it resolved into rather than
+    the URL: an endpoint can carry a credential in its userinfo, and this answer
+    goes back over the API.
+    """
+
+    def __init__(self, argument: str, reason: str):
+        super().__init__(f"'{argument}' is not an address this gateway may dial: {reason}")
+
+
 class OrganizationGuardrailDefinitionInUseError(TenancyConflictError):
     """A mandate still names the definition the caller asked to drop.
 

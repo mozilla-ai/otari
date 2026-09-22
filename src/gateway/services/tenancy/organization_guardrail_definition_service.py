@@ -10,12 +10,14 @@ key: pick from a catalog, fill typed fields, paste the vendor credential.
 **Nothing runs these rows yet.** Building the guardrail and putting it on the
 request path are later steps. What lands here is the store and its rules.
 
-**Every rule but one is read off the catalog.** A list of guardrails, arguments
+**Almost every rule is read off the catalog.** A list of guardrails, arguments
 or credentials written in this module could only ever drift from the picker it
 exists to accept, and the drift would surface as a row the form offered and
 nothing can build. So `builtin_guardrail_spec` is the single derivation, and the
-one hand-written rule (`_refuse_bedrock_without_keys`) says at its own site why
-the catalog cannot give it.
+two rules it cannot give say at their own sites why: whose credentials a Bedrock
+row would spend (`_refuse_bedrock_without_keys`), and which stored values are
+addresses this gateway would dial (`_dialable_urls`, which reads the value
+because upstream types every URL as a plain string).
 
 **Secrets are split by the catalog's ``secret`` flag**, not by the shape of a
 name: the plain values go to ``create_kwargs`` and every secret into one
@@ -35,6 +37,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Iterator
 from typing import Annotated, Any
 
 from any_guardrail.base import GuardrailName
@@ -63,11 +66,13 @@ from gateway.services.tenancy.errors import (
     OrganizationGuardrailDefinitionInUseError,
     OrganizationGuardrailDefinitionLimitReachedError,
     OrganizationGuardrailDefinitionNotFoundError,
+    OrganizationGuardrailDefinitionUnsafeUrlError,
     OrganizationGuardrailNotBuildableError,
     OrganizationGuardrailNotDefinableError,
     SecretBoxUnavailableTenancyError,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 
 # What one organization may define. A different bound from
 # `MAX_GUARDRAILS_PER_ORGANIZATION` next door and bounding something else: that
@@ -89,6 +94,14 @@ _MAX_LIST_LIMIT = 1000
 # means that fallback, and the catalog states what upstream declares, so the rule
 # lives at the store that has an opinion about whose credentials are being spent.
 _BEDROCK_KEY_PAIR = ("aws_access_key_id", "aws_secret_access_key")
+
+# What makes a stored value an address rather than a word. Seven of the eight
+# definable guardrails take one, under three spellings already (`endpoint`,
+# `base_url`, `url`), so a list of argument names here would go stale the next
+# time upstream invents a fourth, and it could be wrong in both directions. A
+# value carrying a scheme can only ever be too generous, and too generous means
+# one string checked that nobody would have dialed.
+_SCHEME_MARKER = "://"
 
 
 class OrganizationGuardrailDefinitionCreate(BaseModel):
@@ -413,6 +426,48 @@ def _refuse_bedrock_without_keys(spec: BuiltInGuardrailSpec, arguments: dict[str
         )
 
 
+def _dialable_urls(value: Any, label: str = "") -> Iterator[tuple[str, str]]:
+    """Every address under ``value``, each with the argument path it was found at.
+
+    Walks into dicts and lists because ``create_kwargs`` is JSON and two real
+    build arguments are containers (`alinia.detection_config` is a dict,
+    `patronus.evaluators` a list), so a scan of the top level alone would walk
+    past an address inside either. The path is what makes a refusal name the
+    field a form has to fix.
+    """
+    if isinstance(value, str):
+        if _SCHEME_MARKER in value:
+            yield label, value
+    elif isinstance(value, dict):
+        for key, nested in value.items():
+            yield from _dialable_urls(nested, f"{label}.{key}" if label else str(key))
+    elif isinstance(value, list):
+        for index, nested in enumerate(value):
+            yield from _dialable_urls(nested, f"{label}[{index}]")
+
+
+async def _validate_argument_urls(arguments: dict[str, Any]) -> None:
+    """Refuse a build argument naming an address this gateway must not dial.
+
+    At the write and not per check, which is the opposite of the remote mandate
+    next door (`organization_guardrail_service._validate_url` says why it does
+    both): a later step builds a vendor client from these arguments and hands it
+    the socket, so there is no per-request moment here to re-check in, and a DNS
+    lookup per definition per request would buy nothing that owning the socket
+    would let us act on.
+
+    ``has_authorization_token=True`` always, which is what refuses plain
+    ``http``: a definition holds the vendor's credential beside its endpoint,
+    and nothing in the guardrail's schema says which secret pairs with which
+    URL, so every address here is treated as one a credential travels to.
+    """
+    for argument, url in _dialable_urls(arguments):
+        try:
+            await validate_mcp_url(url, has_authorization_token=True, label="guardrail endpoint")
+        except UnsafeURLError as exc:
+            raise OrganizationGuardrailDefinitionUnsafeUrlError(argument, str(exc)) from exc
+
+
 def _split_by_secret_flag(
     spec: BuiltInGuardrailSpec, arguments: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -583,6 +638,7 @@ class OrganizationGuardrailDefinitionService:
         # A create has nothing stored to restore from, so a ``***`` here is a
         # literal the caller typed and stays one.
         _validate_arguments(spec, request.create_kwargs)
+        await _validate_argument_urls(request.create_kwargs)
         plain, secrets = _split_by_secret_flag(spec, request.create_kwargs)
 
         async with self._uow:
@@ -617,6 +673,14 @@ class OrganizationGuardrailDefinitionService:
             if arguments is not None:
                 spec = _definable_spec(guardrail_name)
                 _validate_arguments(spec, arguments)
+                # Inside the block, which holds a snapshot open across a DNS
+                # lookup. Deliberate: the arguments to check are the ones this
+                # request leaves the row with, and those are merged from the
+                # stored columns, so checking outside would mean a second
+                # transaction and a re-read with a window between them. No row
+                # is locked here, and an admin write is not the path that pays
+                # for a held snapshot.
+                await _validate_argument_urls(arguments)
                 plain, secrets = _split_by_secret_flag(spec, arguments)
                 definition.create_kwargs = plain
                 definition.encrypted_create_secrets = _encrypted_secrets(secrets)

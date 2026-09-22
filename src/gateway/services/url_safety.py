@@ -1,12 +1,18 @@
 """URL safety checks for outbound HTTP fetches the gateway makes on behalf of a request.
 
-Three call sites with overlapping but not identical threat models:
+Four call sites with overlapping but not identical threat models:
 
 * **MCP server endpoints** (:func:`validate_mcp_url`) — URL comes from the
   request body. We block private/link-local/reserved IPs to prevent SSRF.
   Loopback is allowed by default (useful for same-host sidecar deployments)
   and gated by ``OTARI_MCP_ALLOW_LOOPBACK``. Also enforces TLS when a
   bearer token is supplied.
+
+* **Guardrail definition endpoints** (:func:`validate_mcp_url` again, with a
+  label of its own) — an organization admin writes them into a stored
+  definition and a later step builds a vendor client from them, so the same
+  private/link-local block applies. TLS is enforced unconditionally there,
+  a definition holding a vendor credential beside its endpoint.
 
 * **Web-search result URLs** (:func:`validate_outbound_fetch_url`) — URL
   comes from a third-party search engine via the configured search backend.
