@@ -285,9 +285,38 @@ One case an operator can fix, and the only one whose message is logged in full:
 among this gateway's dependencies. A definition of it saves and then fails to
 build, with an `ImportError` naming the package.
 
-Building a guardrail does not yet change what happens to a request. A mandate
-pointing at a definition is still resolved as a profile, and putting a built
-guardrail on the request path is the next step.
+### What a request does with one
+
+A mandate that names a definition is checked by the guardrail this worker holds,
+in this process. Nothing about the check leaves the gateway: no request to the
+guardrails service, and no second network hop beyond the one the vendor client
+makes itself. A mandate that names a `url` instead is posted to that service
+exactly as before, and a deployment that mandates neither is untouched.
+
+Everything a verdict does is the same either way. A flagged check in `block` mode
+answers 403 `guardrail_violation`; in `monitor` mode the request is served and the
+verdict travels back in the `X-Otari-Guardrails` header. The mandate's
+`validate_kwargs` reach the guardrail as they reach the service, so one policy
+field means one thing.
+
+**A definition this worker does not hold makes the check unevaluable**, and
+`mode` and `on_unavailable` decide from there: `block` with `on_unavailable:
+block` refuses the request with a 502, and anything else serves it and records
+the check as inconclusive. That covers a definition that is disabled, one that
+was deleted, one that failed to build, and the thirty second window after a write
+in which a sibling worker has not caught up. The request is never quietly sent to
+the deployment's guardrails service instead, which has never heard of that
+profile.
+
+The caller is told the profile and nothing else. The definition's id, the vendor's
+own words and the reason a build failed all stay in the gateway's log, for the
+same reason a remote endpoint stays out of a 502 body: none of it is the caller's
+to see or to fix.
+
+One case where a definition stops serving a profile: a [routing
+policy](routing.md) that mandates the same profile with a `url`. The operator's
+layer is the outermost one, so it owns where that check is sent, and the
+organization's definition steps aside.
 
 ### Turning one off
 
@@ -298,10 +327,9 @@ keeps the arguments and credentials it took to set up. `enabled: false` on a
 definition running.
 
 A disabled definition is dropped from what each worker holds on its next read,
-so nothing keeps its vendor client alive. Once a built guardrail reaches the
-request path, a mandate whose definition is disabled will count as unevaluable,
-so `mode` and `on_unavailable` will decide what happens to the request, the same
-as an endpoint that cannot be reached.
+so nothing keeps its vendor client alive, and a mandate still pointing at it
+becomes unevaluable: `mode` and `on_unavailable` decide what happens to the
+request, the same as an endpoint that cannot be reached.
 
 Deleting a definition a mandate still names is refused rather than cascaded,
 because dropping it would silently stop a guardrail running. The refusal names

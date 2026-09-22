@@ -191,7 +191,11 @@ class OrganizationGuardrailCreate(BaseModel):
         description="What a block-mode entry does when the guardrails service cannot be reached at all",
     )
     validate_kwargs: dict[str, Any] | None = Field(
-        default=None, description="Extra kwargs forwarded to the guardrails service /validate call"
+        default=None,
+        description=(
+            "Extra kwargs for the check itself, sent to the guardrails service or handed to the "
+            "guardrail this entry's definition builds"
+        ),
     )
     enabled: bool = Field(default=True, description="False stops the guardrail everywhere without discarding it")
     applies_to_all_workspaces: bool = Field(
@@ -326,9 +330,10 @@ class OrganizationGuardrailPublic(BaseModel):
     on_unavailable: str
     validate_kwargs: dict[str, Any] | None = Field(
         description=(
-            "Extra kwargs forwarded to the guardrails service /validate call. A parameter whose "
-            "name looks credential-shaped comes back as *** rather than its stored value; sending "
-            "that *** back keeps what is stored"
+            "Extra kwargs for the check itself, sent to the guardrails service or handed to the "
+            "guardrail this entry's definition builds. A parameter whose name looks "
+            "credential-shaped comes back as *** rather than its stored value; sending that *** "
+            "back keeps what is stored"
         ),
     )
     enabled: bool

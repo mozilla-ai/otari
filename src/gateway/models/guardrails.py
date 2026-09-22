@@ -77,8 +77,10 @@ class GuardrailConfig(BaseModel):
     availability."""
 
     validate_kwargs: dict[str, Any] = Field(default_factory=dict)
-    """Extra kwargs forwarded to the guardrails service ``/validate`` call,
-    merged on top of the profile's own ``validate_kwargs`` server-side."""
+    """Extra kwargs for the check itself. Forwarded to the guardrails service
+    ``/validate`` call, where they merge on top of the profile's own
+    ``validate_kwargs`` server-side, or handed to a guardrail this gateway holds
+    when an organization's definition serves the profile."""
 
 
 class OrganizationGuardrailDefinition(Base):
@@ -106,8 +108,8 @@ class OrganizationGuardrailDefinition(Base):
     could not be reached from ``HOSTED_SURFACES`` at all (#818).
 
     The runner builds these rows and holds the vendor clients ready
-    (``services/tenancy/organization_guardrail_runner``). Putting a built
-    guardrail on the request path lands on top of that.
+    (``services/tenancy/organization_guardrail_runner``), and a mandate pointing
+    at one runs it in this process rather than posting the check anywhere.
     """
 
     __tablename__ = "organization_guardrail_definitions"
