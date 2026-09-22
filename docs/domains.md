@@ -16,7 +16,7 @@ with underscores (`api_keys`).
 | --- | --- | --- | --- |
 | Routes | `api/routes/<domain>.py` | Parse the request, call one service, return a schema | Run a query, hold business rules, define schemas inline |
 | Services | `services/<domain>/`, whose `__init__.py` exports the one service and the types its public methods use | Use cases: business rules and orchestration | Run a query, hold the session, touch HTTP, import another domain's repositories |
-| Repositories | `repositories/<domain>/`, with modules that end in `_repository.py` | Every query, over `BaseRepository`; flush, never commit | Hold business rules, commit |
+| Repositories | `repositories/<domain>/`, with modules that end in `_repository.py`, and the bundle a service receives in `<domain>_repositories.py` | Every query, over `BaseRepository`; flush, never commit | Hold business rules, commit |
 | Schemas | `schemas/<domain>.py` | Pydantic request and response models, and their mapping from ORM rows | Anything else |
 | Exceptions | `exceptions/<domain>_exceptions.py` | The domain's error classes, each with its HTTP status | Handle errors |
 | Models | `models/<domain>.py` | ORM tables, and the closed vocabulary of each string column that has one | Hold logic |

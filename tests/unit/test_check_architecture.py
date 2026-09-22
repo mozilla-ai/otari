@@ -253,9 +253,13 @@ def test_shared_types_may_import_third_party(tmp_path: Path) -> None:
 def test_repository_naming_convention(tmp_path: Path) -> None:
     _write(tmp_path, "gateway/repositories/__init__.py", "")
     _write(tmp_path, "gateway/repositories/users_repository.py", "")
+    _write(tmp_path, "gateway/repositories/budgets/budget_repositories.py", "")
     _write(tmp_path, "gateway/repositories/helpers.py", "")
     violations = check.check_naming_conventions(tmp_path)
-    assert violations == ["Repository file gateway/repositories/helpers.py must end with '_repository.py'"]
+    assert violations == [
+        "Repository file gateway/repositories/helpers.py must end with '_repository.py'"
+        " or, for a bundle of repositories, '_repositories.py'"
+    ]
 
 
 def test_service_importing_the_overlay_is_flagged(tmp_path: Path) -> None:

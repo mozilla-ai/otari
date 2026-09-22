@@ -593,7 +593,10 @@ def check_transaction_control(src_root: Path) -> list[str]:
 # Service modules are purpose-named (guardrails.py, url_safety.py, ...), so
 # there is no *_service.py naming rule to enforce.
 def check_naming_conventions(src_root: Path) -> list[str]:
-    """Check that repository modules follow the *_repository.py convention."""
+    """Check that repository modules follow the *_repository.py convention.
+
+    A module that bundles a domain's repositories ends in _repositories.py instead.
+    """
     violations: list[str] = []
     repositories_path = src_root / "gateway" / "repositories"
     if not repositories_path.is_dir():
@@ -601,8 +604,11 @@ def check_naming_conventions(src_root: Path) -> list[str]:
     for repository_file in sorted(repositories_path.rglob("*.py")):
         if repository_file.name == "__init__.py":
             continue
-        if not repository_file.name.endswith("_repository.py"):
-            violations.append(f"Repository file {repository_file.relative_to(src_root)} must end with '_repository.py'")
+        if not repository_file.name.endswith(("_repository.py", "_repositories.py")):
+            violations.append(
+                f"Repository file {repository_file.relative_to(src_root)} must end with '_repository.py'"
+                " or, for a bundle of repositories, '_repositories.py'"
+            )
     return violations
 
 
