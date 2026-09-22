@@ -708,6 +708,20 @@ def get_unit_of_work(db: Annotated[AsyncSession, Depends(get_db)]) -> UnitOfWork
     return UnitOfWork(db)
 
 
+def get_unit_of_work_if_needed(
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+) -> UnitOfWork | None:
+    """Return the request's Unit of Work in standalone mode, otherwise ``None``.
+
+    The counterpart of ``get_db_if_needed``, for a route that serves both modes.
+    It is over the session that dependency yields.
+
+    NOTE: a route must take its session from ``get_db_if_needed`` as well.
+    ``get_db`` opens a session of its own, so a route that mixes the two gets two sessions and two Units of Work.
+    """
+    return None if db is None else get_unit_of_work(db)
+
+
 async def get_current_identity(
     db: Annotated[AsyncSession, Depends(get_db)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
