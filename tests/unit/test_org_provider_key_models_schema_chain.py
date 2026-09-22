@@ -25,7 +25,7 @@ import gateway.models  # noqa: F401  (registers every table on the shared metada
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _OFFERED_MODELS_REVISION = "b4d7f1a9c2e6"
-_BEFORE_OFFERED_MODELS = "d5f8b2a4c6e9"
+_BEFORE_OFFERED_MODELS = "f2a6c81d9b47"
 
 _TABLE = "org_provider_key_models"
 _INDEX = "ix_org_provider_key_models_org_provider_key_id"

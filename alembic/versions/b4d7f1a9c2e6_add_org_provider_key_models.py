@@ -18,7 +18,7 @@ deployment.
 Brand new, so a single forward migration with no expand/backfill/contract.
 
 Revision ID: b4d7f1a9c2e6
-Revises: d5f8b2a4c6e9
+Revises: f2a6c81d9b47
 Create Date: 2026-09-21 00:00:00.000000
 """
 
@@ -28,7 +28,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b4d7f1a9c2e6"
-down_revision: str | Sequence[str] | None = "d5f8b2a4c6e9"
+down_revision: str | Sequence[str] | None = "f2a6c81d9b47"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
