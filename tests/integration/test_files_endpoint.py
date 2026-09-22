@@ -14,16 +14,19 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
+import httpx
 import pytest
+from anthropic import Anthropic, BadRequestError
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, API_VERSION
 from gateway.models.tools import FileObject
 from gateway.services.file_extractors import ExtractionResult
 from gateway.services.file_store import LocalDirFileStore
@@ -506,6 +509,8 @@ def test_anthropic_sdk_headers_get_anthropic_shapes(
     assert meta["mime_type"] == "application/pdf"
     assert meta["downloadable"] is True
     assert meta["created_at"].endswith("Z")
+    assert "expires_at" in meta
+    assert meta["expires_at"] is None
     assert "object" not in meta and "bytes" not in meta
 
     got = client.get(f"{API_ROOT}/files/{meta['id']}", headers=headers)
@@ -515,9 +520,9 @@ def test_anthropic_sdk_headers_get_anthropic_shapes(
     listed = client.get(f"{API_ROOT}/files", headers=headers)
     assert listed.status_code == 200
     page = listed.json()
-    assert "object" not in page
-    assert page["has_more"] is False
-    assert page["first_id"] == page["last_id"] == meta["id"]
+    assert set(page) == {"data", "next_page"}
+    assert page["next_page"] is None
+    assert [f["id"] for f in page["data"]] == [meta["id"]]
 
     # The same file, read with OpenAI's headers, is the OpenAI object.
     assert client.get(f"{API_ROOT}/files/{meta['id']}", headers=api_key_header).json()["object"] == "file"
@@ -551,15 +556,10 @@ def test_list_is_cursor_paged(client: TestClient, api_key_header: dict[str, str]
     assert sorted(seen) == sorted(ids)
     assert len(set(seen)) == 3
 
-    # Anthropic's cursor name, ascending, walks the same set the other way.
-    asc = client.get(
-        f"{API_ROOT}/files", headers={**api_key_header, **_ANTHROPIC}, params={"limit": 3, "order": "asc"}
-    ).json()
+    asc = client.get(f"{API_ROOT}/files", headers=api_key_header, params={"limit": 3, "order": "asc"}).json()
     assert [f["id"] for f in asc["data"]] == list(reversed(seen))
     tail = client.get(
-        f"{API_ROOT}/files",
-        headers={**api_key_header, **_ANTHROPIC},
-        params={"after_id": asc["data"][0]["id"], "order": "asc"},
+        f"{API_ROOT}/files", headers=api_key_header, params={"after": asc["data"][0]["id"], "order": "asc"}
     ).json()
     assert [f["id"] for f in tail["data"]] == [f["id"] for f in asc["data"][1:]]
 
@@ -576,6 +576,176 @@ def test_list_is_cursor_paged(client: TestClient, api_key_header: dict[str, str]
     # A cursor the caller never owned answers like a direct read of it would.
     assert client.get(f"{API_ROOT}/files", headers=api_key_header, params={"after": "file-nope"}).status_code == 404
     assert client.get(f"{API_ROOT}/files", headers=api_key_header, params={"limit": 0}).status_code == 422
+
+
+def _upload_text_files(client: TestClient, headers: dict[str, str], count: int) -> list[str]:
+    return [
+        client.post(f"{API_ROOT}/files", headers=headers, files={"file": (f"{n}.txt", b"x", "text/plain")}).json()["id"]
+        for n in range(count)
+    ]
+
+
+def test_anthropic_listing_pages_with_next_page(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+) -> None:
+    headers = {**api_key_header, **_ANTHROPIC}
+    ids = _upload_text_files(client, headers, 3)
+
+    first = client.get(f"{API_ROOT}/files", headers=headers, params={"limit": 2}).json()
+    assert set(first) == {"data", "next_page"}
+    assert len(first["data"]) == 2
+    assert first["next_page"].startswith("page_")
+
+    second = client.get(f"{API_ROOT}/files", headers=headers, params={"limit": 2, "page": first["next_page"]}).json()
+    assert second["next_page"] is None
+    assert sorted(f["id"] for f in first["data"] + second["data"]) == sorted(ids)
+
+    # A token is opaque, so a file ID or a token this gateway never issued is a bad request.
+    # page_AA decodes to a NUL character, which must not reach the database.
+    for page in ("page_nope", "page_é", "page_AA", ids[0]):
+        refused = client.get(f"{API_ROOT}/files", headers=headers, params={"page": page})
+        assert refused.status_code == 400, refused.text
+
+    # A token issued to another user names a file this caller cannot see.
+    other = client.post(
+        f"{API_ROOT}/keys", json={"key_name": "other", "user_id": "other-user"}, headers=master_key_header
+    )
+    other_headers = {next(iter(api_key_header)): f"Bearer {other.json()['key']}", **_ANTHROPIC}
+    _upload_text_files(client, other_headers, 2)
+    foreign = client.get(f"{API_ROOT}/files", headers=other_headers, params={"limit": 1}).json()["next_page"]
+    assert client.get(f"{API_ROOT}/files", headers=headers, params={"page": foreign}).status_code == 400
+
+
+def test_anthropic_listing_reads_named_ids_in_one_page(
+    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None
+) -> None:
+    headers = {**api_key_header, **_ANTHROPIC}
+    first, _, third = _upload_text_files(client, headers, 3)
+
+    named = client.get(
+        f"{API_ROOT}/files", headers=headers, params={"ids[]": [first, third, "file-missing", first]}
+    ).json()
+    assert named["next_page"] is None
+    assert sorted(f["id"] for f in named["data"]) == sorted([first, third])
+
+    # The cap counts distinct IDs.
+    repeated = client.get(f"{API_ROOT}/files", headers=headers, params={"ids[]": [first] * 150})
+    assert repeated.status_code == 200, repeated.text
+    assert [f["id"] for f in repeated.json()["data"]] == [first]
+
+    # An ID with a NUL names no file, so it is left out like any other miss.
+    with_nul = client.get(f"{API_ROOT}/files", headers=headers, params={"ids[]": [first, "file-\x00"]})
+    assert with_nul.status_code == 200, with_nul.text
+    assert [f["id"] for f in with_nul.json()["data"]] == [first]
+
+    for extra in ({"limit": 1}, {"page": "page_x"}):
+        mixed = client.get(f"{API_ROOT}/files", headers=headers, params={"ids[]": [first], **extra})
+        assert mixed.status_code == 400, mixed.text
+
+    too_many = client.get(f"{API_ROOT}/files", headers=headers, params={"ids[]": [f"file-{n}" for n in range(101)]})
+    assert too_many.status_code == 400, too_many.text
+
+
+@pytest.mark.parametrize("cursor", ["after_id", "before_id"])
+def test_anthropic_listing_refuses_the_beta_cursors(
+    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None, cursor: str
+) -> None:
+    (file_id,) = _upload_text_files(client, api_key_header, 1)
+    refused = client.get(f"{API_ROOT}/files", headers={**api_key_header, **_ANTHROPIC}, params={cursor: file_id})
+    assert refused.status_code == 400
+    assert "page" in refused.json()["detail"]
+
+
+_FILES_BETA = "files-api-2025-04-14"
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/files"),
+        ("GET", "/files"),
+        ("GET", "/files/file-any"),
+        ("GET", "/files/file-any/content"),
+        ("DELETE", "/files/file-any"),
+    ],
+)
+@pytest.mark.parametrize("anthropic_version", [True, False])
+def test_the_files_beta_header_is_refused(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    method: str,
+    path: str,
+    anthropic_version: bool,
+) -> None:
+    headers = {**api_key_header, "anthropic-beta": f"code-execution-2025-08-25, {_FILES_BETA}"}
+    if anthropic_version:
+        headers.update(_ANTHROPIC)
+    upload = {"file": ("a.txt", b"x", "text/plain")} if method == "POST" else None
+
+    refused = client.request(method, f"{API_ROOT}{path}", headers=headers, files=upload)
+
+    assert refused.status_code == 400
+    assert _FILES_BETA in refused.json()["detail"]
+
+
+def test_other_anthropic_betas_are_served(
+    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None
+) -> None:
+    headers = {**api_key_header, **_ANTHROPIC, "anthropic-beta": "code-execution-2025-08-25"}
+    listed = client.get(f"{API_ROOT}/files", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert set(listed.json()) == {"data", "next_page"}
+
+
+@pytest.fixture
+def anthropic_sdk(client: TestClient, api_key_obj: dict[str, Any]) -> Generator[Anthropic]:
+    """Anthropic's SDK, sending its requests through the test app.
+
+    Gotcha: the SDK accepts only an ``httpx.Client``, and ``TestClient`` is built on ``httpx2``.
+    """
+
+    def forward(request: httpx.Request) -> httpx.Response:
+        sent = client.request(
+            request.method, str(request.url), headers=request.headers.multi_items(), content=request.read()
+        )
+        return httpx.Response(sent.status_code, headers=sent.headers.multi_items(), content=sent.content)
+
+    with Anthropic(
+        base_url=f"{client.base_url}{API_ROOT.removesuffix(f'/{API_VERSION}')}",
+        api_key=api_key_obj["key"],
+        http_client=httpx.Client(transport=httpx.MockTransport(forward)),
+        max_retries=0,
+    ) as sdk:
+        yield sdk
+
+
+def test_anthropic_sdk_files_client_pages_and_reads_expires_at(
+    anthropic_sdk: Anthropic, tmp_file_store: None, db_session: Session
+) -> None:
+    uploaded = [anthropic_sdk.files.upload(file=(f"{n}.txt", b"x", "text/plain")).id for n in range(3)]
+
+    first = anthropic_sdk.files.list(limit=2)
+    assert len(first.data) == 2
+    assert first.has_next_page()
+    assert sorted(f.id for f in anthropic_sdk.files.list(limit=2)) == sorted(uploaded)
+
+    expires_at = datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)
+    record = db_session.get(FileObject, uploaded[0])
+    assert record is not None
+    record.expires_at = expires_at
+    db_session.commit()
+    assert anthropic_sdk.files.retrieve_metadata(uploaded[0]).expires_at == expires_at
+    assert anthropic_sdk.files.retrieve_metadata(uploaded[1]).expires_at is None
+
+    assert anthropic_sdk.files.download(uploaded[1]).read() == b"x"
+    assert anthropic_sdk.files.delete(uploaded[1]).type == "file_deleted"
+
+    with pytest.raises(BadRequestError, match=_FILES_BETA):
+        anthropic_sdk.beta.files.list(betas=[_FILES_BETA])
 
 
 def test_sweep_reclaims_expired_and_deleted_files(
