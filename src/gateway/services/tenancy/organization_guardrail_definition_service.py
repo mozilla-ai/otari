@@ -7,8 +7,10 @@ construct it with. So an organization can define a check rather than only name a
 profile some service already serves, and it does that the way it adds a provider
 key: pick from a catalog, fill typed fields, paste the vendor credential.
 
-**Nothing runs these rows yet.** Building the guardrail and putting it on the
-request path are later steps. What lands here is the store and its rules.
+**This module only writes the rows.** Building each one into a vendor client is
+the runner's job (`organization_guardrail_runner`), and putting a built
+guardrail on the request path is a later step still. What lands here is the
+store and its rules.
 
 **Almost every rule is read off the catalog.** A list of guardrails, arguments
 or credentials written in this module could only ever drift from the picker it

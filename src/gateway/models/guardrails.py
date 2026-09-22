@@ -105,8 +105,9 @@ class OrganizationGuardrailDefinition(Base):
     Organization-keyed, not deployment-global. A row that served every tenant
     could not be reached from ``HOSTED_SURFACES`` at all (#818).
 
-    Nothing reads these rows yet: validation, encryption, the runner and the
-    request path all land on top of this.
+    The runner builds these rows and holds the vendor clients ready
+    (``services/tenancy/organization_guardrail_runner``). Putting a built
+    guardrail on the request path lands on top of that.
     """
 
     __tablename__ = "organization_guardrail_definitions"
