@@ -24,6 +24,7 @@ import pytest
 from any_guardrail import GuardrailName, GuardrailOutput
 
 from gateway.log_config import logger as gateway_logger
+from gateway.main import _LIFESPAN_WORKERS
 from gateway.models.guardrails import OrganizationGuardrailDefinition
 from gateway.services.guardrails import GuardrailsNotReachableError
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
@@ -336,3 +337,73 @@ async def test_a_check_that_outruns_its_deadline_gives_the_caller_an_answer(
         await held.check("hello")
 
     assert "TimeoutError" in str(refused.value)
+
+
+# --------------------------------------------------------------------------- #
+# Boot and shutdown
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_a_load_that_fails_does_not_stop_the_boot(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An organization's guardrails are additive, so booting with none held beats not booting.
+
+    The posture `load_org_provider_keys_at_startup` already takes, and the reason
+    it is worth pinning: the read this wraps reaches the database and then a
+    vendor, so it has two ways to fail that have nothing to do with whether this
+    gateway can serve a request.
+    """
+
+    async def _explode() -> None:
+        raise RuntimeError("database is unhappy")
+
+    monkeypatch.setattr(runner, "_refresh_on_a_session_of_its_own", _explode)
+
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.ERROR, logger="gateway")
+    try:
+        await runner.load_guardrail_runner_at_startup()
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    assert "continuing with none held" in caplog.text
+    assert runner.handle(ORGANIZATION_ID, uuid.uuid4()) is None
+
+
+@pytest.mark.asyncio
+async def test_a_load_starts_from_nothing_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second boot of the same process must not inherit the first one's clients.
+
+    The test suite boots one app object many times, which is exactly the shape
+    that would carry a stale vendor client from one test into the next.
+    """
+    stale = _definition()
+    _hold(stale, _Verdict())
+
+    async def _nothing() -> None:
+        return None
+
+    monkeypatch.setattr(runner, "_refresh_on_a_session_of_its_own", _nothing)
+
+    await runner.load_guardrail_runner_at_startup()
+
+    assert runner.build_state(ORGANIZATION_ID, stale.id) is None
+
+
+def test_the_shutdown_that_drops_the_guardrails_also_drops_the_threads() -> None:
+    """The pool is this module's own, so nothing else will ever give it back."""
+    pool = runner._thread_pool()
+
+    runner.reset_guardrail_runner()
+
+    assert runner._threads is None
+    assert runner._thread_pool() is not pool
+
+
+def test_the_lifespan_registry_knows_how_to_stop_it() -> None:
+    """A worker registered without its reset would leak threads at every shutdown."""
+    resets = [worker.reset for worker in _LIFESPAN_WORKERS if worker.name == "organization guardrail"]
+
+    assert resets == [runner.reset_guardrail_runner]

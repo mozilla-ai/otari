@@ -84,6 +84,11 @@ from gateway.services.tenancy.org_provider_key_service import (
     reset_org_provider_cache,
     run_org_provider_refresher,
 )
+from gateway.services.tenancy.organization_guardrail_runner import (
+    load_guardrail_runner_at_startup,
+    reset_guardrail_runner,
+    run_guardrail_runner_refresher,
+)
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
 from gateway.version import __version__
 
@@ -198,6 +203,14 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
         "organization provider key",
         lambda _config: run_org_provider_refresher(),
         reset_org_provider_cache,
+    ),
+    # Not a cache of rows like its neighbours: this holds constructed vendor
+    # clients, so its tick rebuilds only what a write moved and its reset gives
+    # the threads back as well as dropping what was built.
+    _LifespanWorker(
+        "organization guardrail",
+        lambda _config: run_guardrail_runner_refresher(),
+        reset_guardrail_runner,
     ),
     _LifespanWorker("search tool", lambda config: run_search_tool_refresher(config), reset_search_tool_cache),
     _LifespanWorker("price snapshot", lambda _config: run_price_snapshot_refresher()),
@@ -509,6 +522,12 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 await warn_if_router_candidates_lack_pricing(config, session)
                 await load_aliases_at_startup(session)
                 await load_policies_at_startup(session)
+            # After the session above and not inside it: the runner reads through
+            # a repository, which reaches the database only through a Unit of
+            # Work of its own. It builds each stored definition into a vendor
+            # client here so the first request to need one does not wait for a
+            # vendor handshake.
+            await load_guardrail_runner_at_startup()
             log_writer = create_log_writer(config.log_writer_strategy)
             app.state.file_store = build_file_store(config)
             workers = _start_lifespan_workers(config)
