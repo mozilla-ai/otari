@@ -325,22 +325,25 @@ def test_guardrail_catalog_requires_master_key(tmp_path: Path) -> None:
         )
 
 
-def test_guardrail_catalog_is_an_operator_read(tmp_path: Path) -> None:
-    """The reader router is what a member reaches, and this is not a member's to read.
+def test_guardrail_catalog_is_a_catalog_read(tmp_path: Path) -> None:
+    """Three routers, and each of these two reads is on the one its caller reaches.
 
-    It is the picker behind a write that stores a vendor credential
-    deployment-wide. The profiles read beside it stays on the reader, because a
+    The built-in catalog is the picker an organization's own guardrail form
+    fills from, so an owner or admin reaches it without operator standing. The
+    profiles read stays on the reader, because it dials ``guardrails_url`` and a
     profile name is what a caller sends.
     """
     # Router paths, so without API_ROOT: the prefix is added where they mount.
-    catalog = "/tool-settings/guardrails/catalog"
+    builtin = "/tool-settings/guardrails/catalog"
     profiles = "/tool-settings/guardrails/profiles"
     operator = {route.path for route in tool_settings.operator_router.routes}  # type: ignore[attr-defined]
     reader = {route.path for route in tool_settings.reader_router.routes}  # type: ignore[attr-defined]
+    catalog = {route.path for route in tool_settings.catalog_router.routes}  # type: ignore[attr-defined]
 
-    assert catalog in operator
-    assert catalog not in reader
+    assert builtin in catalog
+    assert not {builtin} & (operator | reader)
     assert profiles in reader
+    assert profiles not in catalog
 
 
 def test_the_executor_is_an_operator_setting_with_a_closed_vocabulary(tmp_path: Path) -> None:

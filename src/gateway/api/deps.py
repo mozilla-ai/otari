@@ -555,19 +555,22 @@ async def verify_catalog_reader(
 
     The narrow exception to the rule above, for the catalog reads that describe
     the deployment rather than act on it: ``GET /api/v1/models``, ``GET /api/v1/pricing``,
-    ``GET /api/v1/tools`` and ``GET /api/v1/providers/catalog`` (with their by-id
-    variants). The dashboard's Models and Pricing pages are built on these, so a
-    session has to reach them; they call no provider, write nothing, and bill
-    nothing, so reaching them deployment-wide costs a signed-in caller's own
-    organization nothing.
+    ``GET /api/v1/tools``, ``GET /api/v1/providers/catalog`` (with their by-id
+    variants) and ``GET /api/v1/tool-settings/guardrails/catalog``. The
+    dashboard's Models and Pricing pages are built on these, so a session has to
+    reach them; they call no provider, write nothing, and bill nothing, so
+    reaching them deployment-wide costs a signed-in caller's own organization
+    nothing.
 
-    The provider catalog is the one of these a *tenant* rather than an operator
-    needs: it names the providers any-llm knows, which the organization
-    provider-key form offers as the BYO choices, so an owner or admin who reaches
-    no operator route still has to read it.
+    The two catalogs are the reads a *tenant* rather than an operator needs. One
+    names the providers any-llm knows, which the organization provider-key form
+    offers as the BYO choices; the other names the guardrails any-guardrail
+    reaches over a hosted API, which the organization guardrail form offers the
+    same way. An owner or admin who reaches no operator route still has to read
+    both.
 
     Split out rather than left as a branch inside the other dependency so that
-    adding a route to this plane defaults to refusing the cookie. The four
+    adding a route to this plane defaults to refusing the cookie. The five
     routers that serve these reads declare it on the router for the same reason,
     so admitting a session is spelled where the route is mounted rather than in
     one route's decorator.

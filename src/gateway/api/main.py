@@ -258,12 +258,14 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig, enabled_featur
     api.include_router(settings.router)
     api.include_router(mail.router)
     api.include_router(maintenance_mode.router)
-    # Both prefixed /tool-settings, split by who may call them: the reader is
-    # the one route a tenant may reach, narrowed inside the handler
-    # (otari-ai#1969). Operator first, matching the pair above, though neither
-    # router here ends with a catch-all for the other to sit behind.
+    # All three prefixed /tool-settings, split by who may call them: the reader
+    # narrows what it returns inside the handler (otari-ai#1969), and the catalog
+    # is the built-in guardrail picker an organization's own form reads. Operator
+    # first, matching the pair above, though none of these ends with a catch-all
+    # for the others to sit behind.
     api.include_router(tool_settings.operator_router)
     api.include_router(tool_settings.reader_router)
+    api.include_router(tool_settings.catalog_router)
     api.include_router(search_tools.router)
     api.include_router(tools.router)
     # Enabled features, mounted as core routes: no capability gate, because a

@@ -4258,17 +4258,18 @@ export interface paths {
          *     Reaches no service, so there is no unavailable state to report: the answer is
          *     a property of the installed ``any_guardrail``, not of any deployment's state.
          *
-         *     On the operator router rather than the reader beside it, because it is the
-         *     input to a write that stores a vendor credential deployment-wide. The rows
-         *     carry secret constructor arguments and name the environment variables this
-         *     deployment would otherwise read them from, so this describes how the
-         *     deployment is credentialed rather than what a request will have done to it. A
-         *     profile *name* is the one thing a caller needs, and the profiles read next
-         *     door is where the set of those is published.
+         *     On the catalog router rather than the operator one beside it, because the
+         *     form this feeds belongs to an organization and is filled by an owner or
+         *     admin, who reaches no operator route. So it is readable without
+         *     deployment-wide standing, by a dashboard session and by any API key alike.
+         *     What it publishes carries no deployment state to withhold: the same bytes on
+         *     every deployment of the same build, and a parameter's environment variable is
+         *     a name, never whether that name is set.
          *
-         *     Not on ``verify_catalog_reader`` either: that plane is a closed set of three
-         *     deployment-describing reads a data-plane key may make, and this is a
-         *     management read, not one of them.
+         *     The profiles read next door keeps the stricter gate, and the difference is
+         *     reach rather than audience. That one dials ``guardrails_url``, so admitting a
+         *     key there would let a workspace credential probe the deployment's own
+         *     service. This one dials nothing.
          */
         get: operations["tool-settings-list_builtin_guardrails"];
         put?: never;

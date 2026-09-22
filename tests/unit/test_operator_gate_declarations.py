@@ -79,15 +79,19 @@ _DEPLOYMENT_WIDE_ROUTERS: list[tuple[str, APIRouter]] = [
 
 # The routers a caller reaches without operator standing, and the dependency
 # each admits them with instead. Listed so the gate can be asserted *off* them:
-# putting it on the whole of `models.py`, `pricing.py`, `providers.py` or
-# `usage.py` is the plausible wrong fix, and it would take the dashboard's
-# Models and Pricing pages, the organization provider-key form's list of BYO
-# providers, and a data-plane gateway's usage report with it.
+# putting it on the whole of `models.py`, `pricing.py`, `providers.py`,
+# `tool_settings.py` or `usage.py` is the plausible wrong fix, and it would take
+# the dashboard's Models and Pricing pages, the organization forms' lists of BYO
+# providers and of built-in guardrails, and a data-plane gateway's usage report
+# with it. An entry here is not enforced by the totality case below, which sees
+# only that a router declares some gate in `_ROUTER_LEVEL_GATES`; a router split
+# off the operator one has to be added by hand.
 _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("catalog", catalog.router, verify_catalog_reader_or_public),
     ("models.catalog", models.catalog_router, verify_catalog_reader),
     ("pricing.catalog", pricing.catalog_router, verify_catalog_reader),
     ("providers.catalog", providers.catalog_router, verify_catalog_reader),
+    ("tool_settings.catalog", tool_settings.catalog_router, verify_catalog_reader),
     ("tool_settings.reader", tool_settings.reader_router, verify_master_key),
     ("tools", tools.router, verify_catalog_reader),
     ("usage.ingest", usage.ingest_router, verify_api_key_or_master_key),

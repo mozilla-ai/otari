@@ -39,7 +39,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, get_session_identity, require_deployment_operator, verify_master_key
+from gateway.api.deps import (
+    get_config,
+    get_db,
+    get_session_identity,
+    require_deployment_operator,
+    verify_catalog_reader,
+    verify_master_key,
+)
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.tenancy import User as TenancyUser
@@ -66,8 +73,8 @@ from gateway.services.tool_settings_service import (
 )
 from gateway.services.url_safety import redact_url_secrets
 
-# Two routers, because one route here must not carry the operator gate, which is
-# the split #895 made for ``models.py``, ``pricing.py`` and ``usage.py``: a
+# Three routers, because two routes here must not carry the operator gate, which
+# is the split #895 made for ``models.py``, ``pricing.py`` and ``usage.py``: a
 # router-level dependency always runs, so a route cannot opt out of one in place.
 # The reader declares ``verify_master_key`` and then decides how much to return
 # from the caller's standing, exactly as the tenant-scoped routers do.
@@ -80,6 +87,16 @@ reader_router = APIRouter(
     prefix="/tool-settings",
     tags=["tool-settings"],
     dependencies=[Depends(verify_master_key)],
+)
+# The built-in catalog, which describes the installed ``any_guardrail`` rather
+# than anything this deployment configured. A tenant reaches it: the organization
+# guardrail form is the picker's other caller, and it is owners and admins who
+# fill it, never an operator. Gated like the other catalog reads so admitting a
+# session is spelled at the router (see ``deps.verify_catalog_reader``).
+catalog_router = APIRouter(
+    prefix="/tool-settings",
+    tags=["tool-settings"],
+    dependencies=[Depends(verify_catalog_reader)],
 )
 
 # Derived from each field's declared type rather than from ``SERVICE_URL_FIELD``,
@@ -229,7 +246,7 @@ async def list_guardrail_profiles(
     return await fetch_guardrail_catalog(cast("str | None", effective_value(config, GUARDRAILS_URL)))
 
 
-@operator_router.get("/guardrails/catalog")
+@catalog_router.get("/guardrails/catalog")
 async def list_builtin_guardrails() -> BuiltInGuardrailCatalog:
     """List the guardrails this gateway can run itself, for the form that defines one.
 
@@ -248,17 +265,18 @@ async def list_builtin_guardrails() -> BuiltInGuardrailCatalog:
     Reaches no service, so there is no unavailable state to report: the answer is
     a property of the installed ``any_guardrail``, not of any deployment's state.
 
-    On the operator router rather than the reader beside it, because it is the
-    input to a write that stores a vendor credential deployment-wide. The rows
-    carry secret constructor arguments and name the environment variables this
-    deployment would otherwise read them from, so this describes how the
-    deployment is credentialed rather than what a request will have done to it. A
-    profile *name* is the one thing a caller needs, and the profiles read next
-    door is where the set of those is published.
+    On the catalog router rather than the operator one beside it, because the
+    form this feeds belongs to an organization and is filled by an owner or
+    admin, who reaches no operator route. So it is readable without
+    deployment-wide standing, by a dashboard session and by any API key alike.
+    What it publishes carries no deployment state to withhold: the same bytes on
+    every deployment of the same build, and a parameter's environment variable is
+    a name, never whether that name is set.
 
-    Not on ``verify_catalog_reader`` either: that plane is a closed set of three
-    deployment-describing reads a data-plane key may make, and this is a
-    management read, not one of them.
+    The profiles read next door keeps the stricter gate, and the difference is
+    reach rather than audience. That one dials ``guardrails_url``, so admitting a
+    key there would let a workspace credential probe the deployment's own
+    service. This one dials nothing.
     """
     return build_builtin_guardrail_catalog()
 

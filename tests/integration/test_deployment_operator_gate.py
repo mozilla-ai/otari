@@ -89,11 +89,15 @@ _DATA_PLANE_PROBES: list[tuple[str, str]] = [
 
 # The exception, and the reason the data-plane dependency was split rather than
 # just tightened: these describe the deployment instead of acting on it, and the
-# dashboard's Models and Pricing pages are built on them.
+# dashboard's Models and Pricing pages are built on them. The built-in guardrail
+# catalog joins them because it describes the installed any-guardrail and dials
+# nothing; the profiles read beside it does dial the deployment's own guardrails
+# service, so that one is not here.
 _CATALOG_PROBES: list[tuple[str, str]] = [
     ("GET", f"{API_ROOT}/models"),
     ("GET", f"{API_ROOT}/pricing"),
     ("GET", f"{API_ROOT}/tools"),
+    ("GET", f"{API_ROOT}/tool-settings/guardrails/catalog"),
 ]
 
 # Routers that resolve the caller and check their standing themselves. A plain
