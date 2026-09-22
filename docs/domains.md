@@ -68,9 +68,9 @@ since. A module "runs queries" when it imports a query builder (`select`,
 | Route modules that run queries | 17, plus 1 that only calls `session.get` |
 | Route modules that define Pydantic models inline | 40 |
 | Model modules | 19 |
-| Repository modules | 11: a base, `users_repository.py`, 7 under `tenancy/`, `overview/overview_repository.py` and `api_keys/api_key_repository.py` |
+| Repository modules | 16: a base, `users_repository.py`, 7 under `tenancy/`, `overview/overview_repository.py`, `api_keys/api_key_repository.py`, 2 under `files/` and 3 under `budgets/` |
 | Service packages per domain | 4: `services/tools/`, which holds the built-in tool registry and no service yet, `services/overview/`, `services/budgets/` and `services/api_keys/`. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
-| Repository packages per domain | 2: `repositories/overview/` and `repositories/api_keys/`. `repositories/tenancy/` is an older subpackage |
+| Repository packages per domain | 4: `repositories/overview/`, `repositories/api_keys/`, `repositories/files/` and `repositories/budgets/`. `repositories/tenancy/` is an older subpackage |
 | Modules in `schemas/` | Two domain modules so far, `budgets.py` and `overview.py` |
 | Modules in `exceptions/` | The shared error bases in `_base.py`, which the package root re-exports, and one domain module so far, `budget_exceptions.py`. `services/tenancy/errors.py` holds the rest of the tenancy errors in 1,145 lines |
 
@@ -139,6 +139,7 @@ Ceilings, reservations, reset periods and per-member policies.
 - Routes: `budgets.py`, `scoped_budgets.py`, `organization_budgets.py`,
   `workspace_member_budget_policies.py`
 - Services: `budgets/`
+- Repositories: `budgets/`
 - Schemas: `budgets.py`
 - Exceptions: `budget_exceptions.py`
 - Models: `budgets.py`
