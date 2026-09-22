@@ -429,6 +429,14 @@ export type GuardrailProfileSpec = Schemas["GuardrailProfileSpec"]
 export type GuardrailParameterSpec = Schemas["GuardrailParameterSpec"]
 export type GuardrailParameterType = GuardrailParameterSpec["type"]
 
+// The guardrails this gateway can build itself, as the installed any-guardrail
+// library describes them. A property of the deployment, not of a service; see
+// `build_builtin_guardrail_catalog` in the same module.
+export type BuiltInGuardrailCatalog = Schemas["BuiltInGuardrailCatalog"]
+export type BuiltInGuardrailSpec = Schemas["BuiltInGuardrailSpec"]
+export type GuardrailCategory = Schemas["GuardrailCategory"]
+export type RequirementGroup = Schemas["RequirementGroup"]
+
 // ---------------------------------------------------------------------------
 // Search tools
 // ---------------------------------------------------------------------------
@@ -610,6 +618,18 @@ export type CreateOrganizationGuardrailRequest = Defaulted<
 >
 export type UpdateOrganizationGuardrailRequest =
   Schemas["OrganizationGuardrailUpdate"]
+// A guardrail the organization defined for Otari to build and run itself. A
+// mandate points at one through `definition_id`; see
+// `src/gateway/services/tenancy/organization_guardrail_definition_service.py`.
+export type OrganizationGuardrailDefinition =
+  Schemas["OrganizationGuardrailDefinitionPublic"]
+export type GuardrailBuildState = OrganizationGuardrailDefinition["build_state"]
+export type CreateOrganizationGuardrailDefinitionRequest = Defaulted<
+  Schemas["OrganizationGuardrailDefinitionCreate"],
+  "enabled"
+>
+export type UpdateOrganizationGuardrailDefinitionRequest =
+  Schemas["OrganizationGuardrailDefinitionUpdate"]
 
 // The MCP servers a workspace has registered, which a request names by id in
 // `mcp_server_ids`; see

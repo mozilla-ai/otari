@@ -33,6 +33,11 @@ export const SEARCH_PROVIDERS = "search-providers"
 // remote service's answer, so a settings save that changes that URL invalidates
 // it, while every other tool-settings write must not re-dial the sidecar.
 export const GUARDRAIL_PROFILES = "guardrail-profiles"
+// The guardrails this gateway can build itself. Kept apart from
+// GUARDRAIL_PROFILES for the opposite reason: this one is a property of the
+// installed library and moves only on a redeploy, so pointing `guardrails_url`
+// at another service must not invalidate it.
+export const BUILTIN_GUARDRAIL_CATALOG = "builtin-guardrail-catalog"
 // Both carry the surface they were read from and the workspace they were scoped
 // to as trailing key segments, so the deployment-wide list and its tenant-scoped
 // sibling share a head that one invalidation covers. See `useRoutingScope`.
@@ -77,6 +82,10 @@ export const ORGANIZATION_PRICING = "organization-pricing"
 export const ORGANIZATION_BUDGETS = "organization-budgets"
 export const ORGANIZATION_SPEND_CEILINGS = "organization-spend-ceilings"
 export const ORGANIZATION_GUARDRAILS = "organization-guardrails"
+// What each guardrail is, apart from where it runs. No mandate field changes
+// when a definition does, so a definition write leaves the mandates alone.
+export const ORGANIZATION_GUARDRAIL_DEFINITIONS =
+  "organization-guardrail-definitions"
 // The organization's own upstream provider credentials. Its own key for the
 // reason the two above have one: this is read by one page, and a credential
 // edit has no business refetching the organization context every page reads.
