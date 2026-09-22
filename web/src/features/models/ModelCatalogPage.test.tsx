@@ -191,6 +191,51 @@ function renderPage(ui: ReactElement, url = "/models") {
 }
 
 describe("ModelCatalogPage", () => {
+  it("defaults both views to Mistral first and newest releases first", async () => {
+    const models = [
+      { ...GLM, release_date: "2026-09-01" },
+      { ...KIMI, release_date: "2026-08-01" },
+      {
+        ...GLM,
+        id: "mistralai/older",
+        vendor: "Mistral AI",
+        name: "Older Mistral",
+        release_date: "2025-01-01",
+      },
+      {
+        ...GLM,
+        id: "mistralai/newer",
+        vendor: "Mistral AI",
+        name: "Newer Mistral",
+        release_date: "2026-01-01",
+      },
+    ]
+    mockApi({ catalog: { ...CATALOG, count: models.length, models } })
+    renderPage(<ModelCatalogPage />)
+    const list = await screen.findByRole("list", { name: "Models" })
+    expect(
+      within(list)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("aria-label")),
+    ).toEqual([
+      "Mistral AI: Newer Mistral",
+      "Mistral AI: Older Mistral",
+      "Z.ai: GLM-5.3",
+      "Moonshot AI: Kimi K2.6",
+    ])
+    await userEvent.click(screen.getByRole("radio", { name: "Table" }))
+    const grid = await screen.findByRole("grid", { name: "Models" })
+    const rows = within(grid).getAllByRole("row").slice(1)
+    for (const [index, name] of [
+      "Newer Mistral",
+      "Older Mistral",
+      "GLM-5.3",
+      "Kimi K2.6",
+    ].entries()) {
+      expect(rows[index]).toHaveTextContent(name)
+    }
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
     localStorage.clear()

@@ -592,7 +592,7 @@ export function ModelCatalogView({
   const [tableSort, setTableSort] = useState<{
     column: CatalogSortColumn
     direction: "asc" | "desc"
-  }>({ column: "name", direction: "asc" })
+  }>({ column: "released", direction: "desc" })
 
   const models = catalog.data?.models ?? []
   const sortChoice =

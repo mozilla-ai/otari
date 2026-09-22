@@ -218,6 +218,53 @@ describe("filterModels, the price and release filters", () => {
 })
 
 describe("compareModels", () => {
+  it("lists Mistral first, newest first within each group and undated last", () => {
+    const rows = [
+      model({ id: "openai/new", release_date: "2026-09-01" }),
+      model({
+        id: "mistralai/old",
+        vendor: "Mistral AI",
+        release_date: "2025-01-01",
+      }),
+      model({ id: "unknown" }),
+      model({ id: "mistralai/undated", vendor: "Mistral AI" }),
+      model({
+        id: "mistralai/new",
+        vendor: "Mistral AI",
+        release_date: "2026-01-01",
+        providers: ["nebius"],
+      }),
+      model({
+        id: "other/old",
+        release_date: "2024-01-01",
+        providers: ["mistral"],
+      }),
+    ]
+    expect(
+      [...rows].sort(compareModels("released", "desc")).map((row) => row.id),
+    ).toEqual([
+      "mistralai/new",
+      "mistralai/old",
+      "mistralai/undated",
+      "openai/new",
+      "other/old",
+      "unknown",
+    ])
+    expect(
+      [...rows].sort(compareModels("name", "asc")).map((row) => row.id),
+    ).toEqual([
+      "mistralai/new",
+      "mistralai/old",
+      "mistralai/undated",
+      "openai/new",
+      "other/old",
+      "unknown",
+    ])
+    expect([...rows].sort(compareModels("released", "asc"))[0]?.id).toBe(
+      "other/old",
+    )
+  })
+
   it("puts an unpriced model last whichever way the price sorts", () => {
     const asc = [LOCAL, KIMI, GLM].sort(compareModels("input", "asc"))
     expect(asc.map((m) => m.id)).toEqual([

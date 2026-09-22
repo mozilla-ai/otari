@@ -296,6 +296,12 @@ export function compareModels(
     return model.provider_count
   }
   return (a, b) => {
+    if (column === "released" && direction === "desc") {
+      const priority =
+        Number(makerKeyOf(b) === "mistralai") -
+        Number(makerKeyOf(a) === "mistralai")
+      if (priority) return priority
+    }
     const av = pick(a)
     const bv = pick(b)
     if (av == null && bv == null) return byName(a, b)
@@ -313,7 +319,12 @@ export const SORT_OPTIONS: {
   column: CatalogSortColumn
   direction: "asc" | "desc"
 }[] = [
-  { value: "newest", label: "Newest", column: "released", direction: "desc" },
+  {
+    value: "newest",
+    label: "Newest (Mistral first)",
+    column: "released",
+    direction: "desc",
+  },
   { value: "name", label: "Name", column: "name", direction: "asc" },
   {
     value: "price-asc",
