@@ -11,6 +11,7 @@ import asyncio
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
+from typing import NamedTuple
 
 import pytest
 from sqlalchemy import select
@@ -22,8 +23,10 @@ from sqlmodel import col
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.budget_exceptions import OrganizationScopeNotFoundError
 from gateway.models.api_keys import APIKey
-from gateway.models.budgets import ScopedBudget
+from gateway.models.budgets import SCOPE_WORKSPACE, SCOPE_WORKSPACE_MEMBER, ScopedBudget, ScopeType
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberUpdateRequest,  # noqa: E402
@@ -34,7 +37,10 @@ from gateway.models.tenancy import (
     WorkspaceAssignmentRequest,
     WorkspaceCreate,
     WorkspaceMember,
+    WorkspacePublic,
 )
+from gateway.repositories.api_keys import ApiKeyRepository
+from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     InvitationRepository,
     OrganizationMemberRepository,
@@ -43,8 +49,13 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.schemas.budgets import WorkspaceMemberBudgetPolicyCreate
-from gateway.services.budgets import WorkspaceBudgetDefaultService
+from gateway.schemas.budgets import (
+    OrganizationBudgetCreate,
+    OrganizationScopedBudgetCreate,
+    WorkspaceMemberBudgetPolicyCreate,
+)
+from gateway.services.api_keys import ApiKeyService
+from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
 from gateway.services.password_service import verify_password_async
 from gateway.services.tenancy import OrganizationService, WorkspaceService, user_service
 from gateway.services.tenancy.errors import (
@@ -81,12 +92,12 @@ KEY_FORMAT = DefaultApiKeyFormatAdapter(None)
 
 _RACERS = 4
 
-# How long the delete waits for a join that has reached the workspace lock.
-# Paid in full on every passing run, because the join blocks there until the delete commits.
-# It only has to cover the join's insert and commit when nothing holds the lock, which is fast.
-_JOIN_WINDOW = 0.25
+# How long the delete waits for the writer racing it, once that writer has reached its checkpoint.
+# Paid in full on every passing run, because the writer blocks on the workspace lock until the delete commits.
+# It only has to cover the writer's insert and commit when nothing holds the lock, which is fast.
+_WRITER_WINDOW = 0.25
 
-# Bounds a join that never reaches the lock. A healthy run never waits this long.
+# Bounds a writer that never reaches its checkpoint. A healthy run never waits this long.
 _CHECKPOINT_TIMEOUT = 5.0
 
 
@@ -429,15 +440,15 @@ async def test_concurrent_deletes_cannot_remove_the_last_workspace(
 
 
 class _PausingListener:
-    """Delegates to the real listener, then holds the delete open until the join settles.
+    """Delegates to the real listener, then holds the delete open until the racing writer settles.
 
-    The orphan only appears when the join commits between the delete's membership
-    snapshot and the row delete, so that interleaving is pinned rather than raced for.
+    The orphan only appears when that writer commits between the delete's ceiling
+    sweep and the row delete, so that interleaving is pinned rather than raced for.
     """
 
-    def __init__(self, inner: WorkspaceBudgetDefaultService, let_the_join_run: Callable[[], Awaitable[None]]) -> None:
+    def __init__(self, inner: WorkspaceBudgetDefaultService, let_the_writer_run: Callable[[], Awaitable[None]]) -> None:
         self._inner = inner
-        self._let_the_join_run = let_the_join_run
+        self._let_the_writer_run = let_the_writer_run
 
     async def member_joined(self, member: WorkspaceMember) -> None:
         await self._inner.member_joined(member)
@@ -447,7 +458,7 @@ class _PausingListener:
 
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         await self._inner.workspace_deleted(workspace_id, member_ids)
-        await self._let_the_join_run()
+        await self._let_the_writer_run()
 
 
 async def test_a_join_during_a_workspace_delete_leaves_no_orphaned_ceiling(
@@ -508,7 +519,7 @@ async def test_a_join_during_a_workspace_delete_leaves_no_orphaned_ceiling(
         swept.set()
         # The window opens only once the join is at the lock, so its setup time cannot use it up.
         await asyncio.wait_for(at_lock.wait(), timeout=_CHECKPOINT_TIMEOUT)
-        await asyncio.wait({joining}, timeout=_JOIN_WINDOW)
+        await asyncio.wait({joining}, timeout=_WRITER_WINDOW)
 
     async with sessions() as session:
         actor = await UserRepository(session).get(owner.id)
@@ -529,6 +540,137 @@ async def test_a_join_during_a_workspace_delete_leaves_no_orphaned_ceiling(
         str(member_id) for member_id in (await async_db.execute(select(col(WorkspaceMember.id)))).scalars().all()
     }
     assert [ceiling.scope_id for ceiling in ceilings if ceiling.scope_id not in memberships] == []
+
+
+def _budget_service(db: AsyncSession, organizations: OrganizationService | None = None) -> BudgetService:
+    uow = UnitOfWork(db)
+    return BudgetService(
+        uow,
+        BudgetRepositories.on(uow),
+        organizations or OrganizationService(db, membership_listener=None),
+        ApiKeyService(ApiKeyRepository(uow)),
+    )
+
+
+class _RaceOutcome(NamedTuple):
+    """What the producer returned, and whether it was still running when the delete's window closed."""
+
+    produced: object
+    contended: bool
+
+
+async def _race_a_workspace_delete(
+    *,
+    owner: User,
+    workspace_id: uuid.UUID,
+    sessions: async_sessionmaker[AsyncSession],
+    produce: Callable[[AsyncSession, asyncio.Event], Awaitable[object]],
+) -> _RaceOutcome:
+    """Delete the workspace while ``produce`` runs on a session of its own.
+
+    The delete pauses after its ceiling sweep, which is the window an orphan needs.
+    ``produce`` sets the event it is passed immediately before the call under test, so the
+    pause covers that call alone and not the setup around it.
+    ``contended`` is false when the producer finished inside the pause, which is what a
+    producer that takes no lock does.
+    """
+    swept = asyncio.Event()
+    at_checkpoint = asyncio.Event()
+    finished_early = False
+
+    async def race() -> object:
+        await swept.wait()
+        async with sessions() as session:
+            # The first statement pays the connection cost, which must not come out of the window.
+            await session.execute(select(1))
+            try:
+                return await produce(session, at_checkpoint)
+            except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+                return exc
+
+    racing = asyncio.create_task(race())
+
+    async def let_the_producer_run() -> None:
+        nonlocal finished_early
+        swept.set()
+        await asyncio.wait_for(at_checkpoint.wait(), timeout=_CHECKPOINT_TIMEOUT)
+        done, _ = await asyncio.wait({racing}, timeout=_WRITER_WINDOW)
+        finished_early = bool(done)
+
+    try:
+        async with sessions() as session:
+            actor = await UserRepository(session).get(owner.id)
+            assert actor is not None
+            deleter = WorkspaceService(
+                session,
+                membership_listener=_PausingListener(WorkspaceBudgetDefaultService(session), let_the_producer_run),
+            )
+            await deleter.delete_workspace(user=actor, workspace_id=workspace_id)
+    finally:
+        # Awaited even when the delete raised, so a real failure is not buried under a
+        # task whose exception was never retrieved.
+        produced = await racing
+    return _RaceOutcome(produced=produced, contended=not finished_early)
+
+
+async def _seed_a_workspace_to_delete(db: AsyncSession) -> tuple[User, WorkspacePublic, WorkspaceMember]:
+    """An owner, the workspace a test deletes, a second one so the delete is allowed, and the owner's membership."""
+    _, owner = await _seed_owner(db)
+    workspaces = WorkspaceService(db, membership_listener=WorkspaceBudgetDefaultService(db))
+    target = await workspaces.create_workspace(user=owner, workspace_create=WorkspaceCreate(name="Target"))
+    await workspaces.create_workspace(user=owner, workspace_create=WorkspaceCreate(name="Survivor"))
+    membership = await WorkspaceMemberRepository(db).get_by_workspace_and_user(target.id, owner.id)
+    assert membership is not None
+    return owner, target, membership
+
+
+@pytest.mark.parametrize("scope_type", [SCOPE_WORKSPACE, SCOPE_WORKSPACE_MEMBER])
+async def test_an_organization_ceiling_created_during_a_workspace_delete_leaves_no_orphan(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    scope_type: ScopeType,
+) -> None:
+    """A ceiling must not outlive the workspace or membership it caps.
+
+    Creating one checks the scope exists and then inserts, so a deletion committing
+    between the two leaves a ceiling that nothing sweeps and no page lists.
+    """
+    owner, target, membership = await _seed_a_workspace_to_delete(async_db)
+    budget = await _budget_service(async_db).create_organization_budget(
+        user=owner,
+        request=OrganizationBudgetCreate(name="Cap", max_budget=10.0),
+    )
+    await async_db.commit()
+
+    scope_id = str(target.id if scope_type == SCOPE_WORKSPACE else membership.id)
+
+    async def create(session: AsyncSession, ready: asyncio.Event) -> object:
+        actor = await UserRepository(session).get(owner.id)
+        assert actor is not None
+        creator = _budget_service(session)
+        ready.set()
+        return await creator.create_organization_ceiling(
+            user=actor,
+            request=OrganizationScopedBudgetCreate(
+                scope_type=scope_type,
+                scope_id=scope_id,
+                budget_id=budget.budget_id,
+            ),
+        )
+
+    race = await _race_a_workspace_delete(
+        owner=owner,
+        workspace_id=target.id,
+        sessions=sessions,
+        produce=create,
+    )
+
+    gone = {str(target.id), str(membership.id)}
+    ceilings = (await async_db.execute(select(ScopedBudget))).scalars().all()
+    assert [ceiling.scope_id for ceiling in ceilings if ceiling.scope_id in gone] == []
+    # The negative above would pass on a create that never contended. These say it did.
+    assert race.contended
+    assert isinstance(race.produced, OrganizationScopeNotFoundError)
 
 
 async def test_concurrent_invites_to_a_suspended_membership_produce_one_pending_invitation(
