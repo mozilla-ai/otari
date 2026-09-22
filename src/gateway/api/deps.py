@@ -895,6 +895,17 @@ def get_overview_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Overvi
 OverviewServiceDep = Annotated[OverviewService, Depends(get_overview_service)]
 
 
+def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationService:
+    """Build the request's organization service.
+
+    It reads only. A membership write needs the listener this pairing leaves unset.
+    """
+    return OrganizationService(db, membership_listener=None)
+
+
+OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
+
+
 def get_budget_service(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     db: Annotated[AsyncSession, Depends(get_db)],

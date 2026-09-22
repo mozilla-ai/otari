@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_db, require_deployment_operator
+from gateway.api.deps import OrganizationServiceDep, get_db, require_deployment_operator
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import (
     SCOPE_API_TOKEN,
@@ -28,7 +28,7 @@ from gateway.models.budgets import (
 )
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
 from gateway.schemas.budgets import CreateScopedBudgetRequest, ScopedBudgetResponse, UpdateScopedBudgetRequest
-from gateway.services.budgets import period_window
+from gateway.services.budgets import lock_workspace_for_scope, period_window
 
 # Auth is declared on the router, not repeated on each handler, following
 # `routes/organizations.py`: every handler here needs the master key, and a
@@ -84,7 +84,9 @@ async def _require_scope_exists(db: AsyncSession, scope_type: ScopeType, scope_i
                 detail=f"{subject} '{scope_id}' not found",
             ) from None
 
-    found = await db.get(model, identifier)
+    # ``populate_existing`` so a row already in the identity map is re-read. Under the
+    # workspace lock taken before this, a cached row could predate the lock.
+    found = await db.get(model, identifier, populate_existing=True)
     if found is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -111,12 +113,16 @@ async def _require_budget(db: AsyncSession, budget_id: str) -> Budget:
 async def create_scoped_budget(
     request: CreateScopedBudgetRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organizations: OrganizationServiceDep,
 ) -> ScopedBudgetResponse:
     """Create a scoped budget.
 
     Answers 404 when the scope names nothing, rather than creating a ceiling
     that can never bind.
     """
+    # The lock precedes the check, so a concurrent workspace deletion cannot
+    # commit between the check and the insert.
+    await lock_workspace_for_scope(organizations, request.scope_type, request.scope_id)
     await _require_scope_exists(db, request.scope_type, request.scope_id)
     limit = await _require_budget(db, request.budget_id)
     # The window opens now rather than on first spend, so a period-limited ceiling
