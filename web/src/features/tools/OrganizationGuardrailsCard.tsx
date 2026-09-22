@@ -8,23 +8,19 @@ import { Button } from "@/design-system/actions/Button"
 import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
-import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
-import { Field } from "@/design-system/forms/Field"
 import { INPUT_CLASS } from "@/design-system/forms/inputClass"
-import { SecretField } from "@/design-system/forms/SecretField"
-import { Select } from "@/design-system/forms/Select"
-import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Badge } from "@/design-system/indicators/Badge"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { DefinitionDialog } from "@/features/guardrails/DefinitionDialog"
 import { GuardrailParametersSection } from "@/features/guardrails/GuardrailParametersSection"
-import { GuardrailProfileField } from "@/features/guardrails/GuardrailProfileField"
 import {
   findProfile,
   parameterSpecs,
   profileIdentity,
 } from "@/features/guardrails/guardrailParameters"
+import { MandateDialog } from "@/features/guardrails/MandateDialog"
 import { useGuardrailParameterForm } from "@/features/guardrails/useGuardrailParameterForm"
 import {
   SELECT_SLOT,
@@ -32,9 +28,12 @@ import {
   WorkspaceScope,
 } from "@/features/guardrails/WorkspaceScope"
 import { canManage } from "@/features/organization/roles"
+import {
+  useBuiltInGuardrailCatalog,
+  useOrganizationGuardrailDefinitions,
+} from "@/shared/api/guardrails"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
-  useCreateOrganizationGuardrail,
   useDeleteOrganizationGuardrail,
   useGuardrailProfiles,
   useOrganizationGuardrails,
@@ -341,156 +340,6 @@ function GuardrailRow({
   )
 }
 
-function AddGuardrailDialog({
-  isOpen,
-  onClose,
-  catalog,
-  catalogPending,
-  workspaces,
-  onSaved,
-}: {
-  isOpen: boolean
-  onClose: () => void
-  catalog: GuardrailCatalog | undefined
-  catalogPending: boolean
-  workspaces: readonly Workspace[]
-  onSaved: (message: string) => void
-}) {
-  const create = useCreateOrganizationGuardrail()
-  const [profile, setProfile] = useState("")
-  const [mode, setMode] = useState<Mode>("monitor")
-  const [url, setUrl] = useState("")
-  const [credential, setCredential] = useState("")
-  const [everywhere, setEverywhere] = useState(false)
-  const [scope, setScope] = useState<string[]>([])
-  const specs = parameterSpecs(catalog, profile)
-  // An empty picker describes nothing, but its panel should not open on that
-  // account: there is no profile yet for a raw parameter to belong to.
-  const describedProfile =
-    profile === "" || findProfile(catalog, profile) !== undefined
-  // Nothing stored yet, so the fields start blank and re-seed whenever the
-  // picker moves to another profile the catalog describes, whether or not that
-  // profile's schema differs from the one left behind.
-  const parameters = useGuardrailParameterForm(
-    specs,
-    undefined,
-    profileIdentity(catalog, profile),
-  )
-
-  // Everything the operator can change, in one snapshot: a field added to this
-  // form would otherwise have to be remembered in a second place, and the
-  // parameters are the half most easily forgotten.
-  const { isDirty } = useDirtySnapshot({
-    profile,
-    mode,
-    url,
-    credential,
-    everywhere,
-    scope,
-    values: parameters.values,
-    extraJson: parameters.extraJson,
-  })
-
-  const submit = () => {
-    const named = profile.trim()
-    if (!parameters.check()) return
-    create.mutate(
-      {
-        profile: named,
-        mode,
-        url: url.trim() === "" ? null : url.trim(),
-        credential: credential === "" ? null : credential,
-        validate_kwargs: parameters.build(),
-        applies_to_all_workspaces: everywhere,
-        workspace_ids: everywhere ? [] : scope,
-      },
-      {
-        onSuccess: () => {
-          onSaved(`${named} added`)
-          onClose()
-        },
-      },
-    )
-  }
-
-  return (
-    <FormDialog
-      isOpen={isOpen}
-      onOpenChange={(open) => {
-        if (!open) onClose()
-      }}
-      // `lg`, unlike the search-tool dialog beside it: the parameters section
-      // is a variable-length list of controls plus a raw-JSON escape hatch,
-      // which the small frame has no room for.
-      size="lg"
-      title="Mandated guardrail"
-      submitLabel="Mandate a guardrail"
-      onSubmit={submit}
-      isPending={create.isPending}
-      isSubmitDisabled={profile.trim() === ""}
-      isDirty={isDirty}
-      error={create.error}
-    >
-      <GuardrailProfileField
-        catalog={catalog}
-        isPending={catalogPending}
-        value={profile}
-        onChange={setProfile}
-      />
-      <Select
-        label="Mode"
-        value={mode}
-        onChange={(next) => setMode(next as Mode)}
-        options={MODE_OPTIONS}
-        description="A caller can tighten a mandated guardrail but never weaken it."
-      />
-      <Field
-        label="Endpoint"
-        value={url}
-        onChange={setUrl}
-        placeholder="blank uses the guardrails URL above"
-        shouldReserveMessage={false}
-      />
-      <SecretField
-        label="Credential"
-        value={credential}
-        onChange={setCredential}
-        description="Needs an https endpoint of its own, since the URL above may be a plain-http sidecar, and OTARI_SECRET_KEY set on the gateway."
-      />
-      <WorkspaceScope
-        scopeName={profile || "New guardrail"}
-        variant="form"
-        appliesEverywhere={everywhere}
-        selected={scope}
-        workspaces={workspaces}
-        onEverywhere={setEverywhere}
-        onToggle={(workspaceId) =>
-          setScope((current) =>
-            current.includes(workspaceId)
-              ? current.filter((id) => id !== workspaceId)
-              : [...current, workspaceId],
-          )
-        }
-      />
-      <GuardrailParametersSection
-        // See the row above: the picker moving to a profile the catalog cannot
-        // describe has to open the editor that is then the only place its
-        // parameters can go.
-        key={`${describedProfile}:${specs.length}`}
-        specs={specs}
-        scopeName={profile === "" ? "the new guardrail" : profile}
-        values={parameters.values}
-        errors={parameters.issues}
-        extraJson={parameters.extraJson}
-        extraJsonError={parameters.rawError}
-        isDescribed={describedProfile}
-        onChange={parameters.setValue}
-        onExtraJsonChange={parameters.setExtraJson}
-      />
-    </FormDialog>
-  )
-}
-
 export function OrganizationGuardrailsCard({
   onSaved,
 }: {
@@ -506,16 +355,19 @@ export function OrganizationGuardrailsCard({
   // Behind the same gate for the same reason the entries are: nothing here is
   // asked for over a form the caller cannot use.
   const catalog = useGuardrailProfiles(manages)
+  const builtInCatalog = useBuiltInGuardrailCatalog(manages)
+  const definitions = useOrganizationGuardrailDefinitions(manages)
   const workspaces = useWorkspaces()
-  const [adding, setAdding] = useState(false)
+  const [open, setOpen] = useState<"" | "mandate" | "definition">("")
   // Bumped on every open and used as the dialog's key, so the draft is cleared
   // on the way in rather than on the way out.
   const [openCount, setOpenCount] = useState(0)
-  const openAdd = () => {
+  const openDialog = (which: "mandate" | "definition") => {
     setOpenCount((count) => count + 1)
-    setAdding(true)
+    setOpen(which)
   }
   const entries = guardrails.data ?? []
+  const defined = definitions.data ?? []
   const known = workspaces.data ?? []
 
   return (
@@ -526,17 +378,32 @@ export function OrganizationGuardrailsCard({
 
           Keyed on the open count, so each open remounts a blank form. */}
       {manages ? (
-        <AddGuardrailDialog
-          key={openCount}
-          isOpen={adding}
-          onClose={() => setAdding(false)}
-          catalog={catalog.data}
+        <MandateDialog
+          key={`mandate-${openCount}`}
+          isOpen={open === "mandate"}
+          onClose={() => setOpen("")}
+          definitions={defined}
           // `isFetched` rather than `isPending`: an errored query returns to
-          // pending when its observers remount, which would leave the picker
-          // stuck reading a service that already answered.
-          catalogPending={!catalog.isFetched}
+          // pending when its observers remount, which would leave the control
+          // stuck waiting on a read that already answered.
+          isDefinitionsSettled={definitions.isFetched}
+          builtInCatalog={builtInCatalog.data}
+          remoteCatalog={catalog.data}
+          isRemoteCatalogPending={!catalog.isFetched}
           workspaces={known}
+          onSetUpDefinition={() => openDialog("definition")}
           onSaved={onSaved}
+        />
+      ) : null}
+      {manages ? (
+        <DefinitionDialog
+          key={`definition-${openCount}`}
+          isOpen={open === "definition"}
+          onClose={() => setOpen("")}
+          catalog={builtInCatalog.data}
+          isCatalogPending={!builtInCatalog.isFetched}
+          takenNames={defined.map((row) => row.name)}
+          onSaved={(saved) => onSaved(`${saved.name} set up`)}
         />
       ) : null}
       <SettingsGroup
@@ -545,9 +412,14 @@ export function OrganizationGuardrailsCard({
         description="Guardrails that run on every request from the workspaces below, whether the caller asked for them or not. They compose with the deployment settings above rather than replacing them: an entry with no endpoint of its own is sent to the guardrails URL set there, and an organization that mandates nothing leaves every request checked exactly as it is today."
         action={
           manages ? (
-            <Button variant="primary" onPress={openAdd}>
-              Mandate a guardrail
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="ghost" onPress={() => openDialog("definition")}>
+                Set up guardrail
+              </Button>
+              <Button variant="primary" onPress={() => openDialog("mandate")}>
+                Mandate a guardrail
+              </Button>
+            </div>
           ) : null
         }
       >

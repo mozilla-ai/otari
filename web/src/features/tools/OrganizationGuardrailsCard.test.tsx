@@ -116,6 +116,14 @@ function mockApi({
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     const method = init?.method ?? "GET"
+    // No definitions, so the mandate dialog opens on "your own service", which
+    // is the shape these tests drive.
+    if (url.includes("/organizations/me/guardrail-definitions")) {
+      return Response.json({ data: [], count: 0 })
+    }
+    if (url.includes(`${API_ROOT}/tool-settings/guardrails/catalog`)) {
+      return Response.json({ guardrails: [] })
+    }
     if (url.includes("/organizations/me/guardrails")) {
       calls.push({
         url,
@@ -195,6 +203,27 @@ describe("OrganizationGuardrailsCard", () => {
 
     expect(
       await screen.findByText(/No organization guardrails/),
+    ).toBeInTheDocument()
+  })
+
+  it("opens the definition dialog from the card, and from an empty mandate dialog", async () => {
+    mockApi()
+    renderCard()
+
+    await openDialog()
+    // No definitions yet, so the dialog says why only one shape is open,
+    // beside the way to make the other.
+    await waitFor(() =>
+      expect(selectTrigger("Runs on")).toHaveAccessibleDescription(
+        /not set up a guardrail yet/,
+      ),
+    )
+    await userEvent.click(
+      inDialog().getByRole("button", { name: "Set up a guardrail" }),
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: "New guardrail" }),
     ).toBeInTheDocument()
   })
 
