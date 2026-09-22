@@ -12,6 +12,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
 from fastapi.testclient import TestClient
 from openai.types.responses import Response, ResponseUsage
@@ -38,6 +39,17 @@ def _text_response(text: str = "ok") -> MessageResponse:
         stop_reason=cast(Any, "end_turn"),
         stop_sequence=None,
         usage=MessageUsage(input_tokens=5, output_tokens=2),
+    )
+
+
+def _chat_response() -> ChatCompletion:
+    return ChatCompletion(
+        id="chatcmpl-test",
+        object="chat.completion",
+        created=0,
+        model="gpt-4o-mini",
+        choices=[Choice(index=0, message=ChatCompletionMessage(role="assistant", content="ok"), finish_reason="stop")],
+        usage=CompletionUsage(prompt_tokens=5, completion_tokens=2, total_tokens=7),
     )
 
 
@@ -107,6 +119,33 @@ def _post_messages(client: TestClient, headers: dict[str, str], body: dict[str, 
         patch("gateway.api.routes._pipeline.SandboxBackend", new=fake_sandbox),
     ):
         response = client.post(f"{API_ROOT}/messages", json=body, headers=headers)
+    return response, seen
+
+
+def _post_chat(client: TestClient, headers: dict[str, str], body: dict[str, Any]) -> tuple[Any, _Seen]:
+    seen = _Seen()
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        seen.provider_kwargs = kwargs
+        return _chat_response()
+
+    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int, **extra: Any) -> ChatCompletion:
+        seen.loop_kwargs = completion_kwargs
+        seen.loop_extra = extra
+        return _chat_response()
+
+    def fake_sandbox(**kwargs: Any) -> Any:
+        seen.backend_kwargs = kwargs
+        backend = AsyncMock()
+        backend.purpose_hints = lambda: []
+        return AsyncMock(__aenter__=AsyncMock(return_value=backend), __aexit__=AsyncMock(return_value=None))
+
+    with (
+        patch("gateway.api.routes.chat.acompletion", new=fake_acompletion),
+        patch("gateway.api.routes.chat.mcp_tool_loop", new=fake_loop),
+        patch("gateway.api.routes._pipeline.SandboxBackend", new=fake_sandbox),
+    ):
+        response = client.post(f"{API_ROOT}/chat/completions", json=body, headers=headers)
     return response, seen
 
 
@@ -251,6 +290,23 @@ def test_the_header_can_leave_a_claimed_keyword_with_the_provider(
 
     assert response.status_code == 200, response.text
     assert seen.forwarded_tool_types == {"code_execution"}
+
+
+def test_chat_completions_can_leave_a_claimed_keyword_with_the_provider(
+    client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No keyword is native on Chat Completions, so only the header keeps one with the provider."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+
+    response, seen = _post_chat(
+        client,
+        {**api_key_header, _HEADER: "provider"},
+        {"model": _OPENAI, "messages": [{"role": "user", "content": "compute"}], "tools": [_BARE]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert seen.forwarded_tool_types == {"code_execution"}
+    assert seen.loop_kwargs is None
 
 
 def test_a_header_outside_the_vocabulary_is_refused(
