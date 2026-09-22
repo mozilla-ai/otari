@@ -198,7 +198,8 @@ its name alone:
   "create_kwargs": { "endpoint": "https://api.lakera.ai" },
   "create_secrets": { "api_key": "***" },
   "secrets_decryptable": true,
-  "enabled": true }
+  "enabled": true,
+  "build_state": "built" }
 ```
 
 `create_kwargs` comes back in clear deliberately: the credentials were already
@@ -257,33 +258,66 @@ sends, and what the layer merge keys on.
 
 ### What Otari builds from a definition
 
-Otari builds every enabled definition when it starts, and rebuilds one whenever
-its row changes. A built guardrail is a vendor client held in memory by each
-worker, so a request that needs one never waits for a vendor handshake and
-never builds anything itself.
+Otari builds every enabled definition when it starts. A built guardrail is a
+vendor client held in memory by each worker, so a request that needs one never
+waits for a vendor handshake and never builds anything itself.
 
 A definition it does not hold is one that is disabled, one that was deleted, or
 one that would not build. Nothing is built lazily: a request cannot tell those
 three apart, and building while a request waits is what holding them ready
 avoids.
 
-Each worker re-reads the definitions about every thirty seconds and rebuilds
-only the rows that changed, so a write made on one worker reaches the others
-within that window. A guardrail whose arguments nobody touched is not rebuilt.
+**A write rebuilds the definition it wrote**, on the worker that served it, and
+answers with the outcome. The row is saved first and built second, so a
+guardrail this deployment cannot construct is still stored: losing the arguments
+an admin just typed would be the worse failure, and the response says what
+happened instead. Turning a definition off stops it on that worker in the same
+write rather than up to thirty seconds later.
+
+Every *other* worker catches up on its own clock. Each re-reads the definitions
+about every thirty seconds and rebuilds only the rows that changed, so a
+guardrail whose arguments nobody touched is not rebuilt, and a write made on one
+worker reaches the rest within that window.
 
 **A build can fail, and a failed build is kept rather than retried.** A wrong
 credential, an endpoint the vendor rejects, or a `OTARI_SECRET_KEY` that can no
 longer read the stored secrets all end the same way: the definition is held as
-failed until its row changes. The reason goes to the gateway's log and names the
-guardrail class, the definition's id and the type of error, and nothing else. A
-vendor library may put the arguments it was handed into its own error message,
-and those arguments are the organization's credentials, so that message is never
-logged.
+failed until its row changes. Trying again could not help, and a check that
+quietly stopped being evaluated is worse than one reported as broken. A build
+that merely ran out of time is the exception and is tried again, because nothing
+was learned about the definition either way.
+
+The reason a build failed goes to the gateway's log and names the guardrail
+class, the definition's id and the type of error, and nothing else. A vendor
+library may put the arguments it was handed into its own error message, and
+those arguments are the organization's credentials, so that message is never
+logged, and it is never in an API response either.
 
 One case an operator can fix, and the only one whose message is logged in full:
 `azure_content_safety` needs the `azure-ai-contentsafety` package, which is not
 among this gateway's dependencies. A definition of it saves and then fails to
 build, with an `ImportError` naming the package.
+
+### Telling whether a definition is running
+
+A read of a definition carries `build_state`:
+
+| Value | Meaning |
+| --- | --- |
+| `built` | The guardrail is constructed from the arguments you are looking at, and mandates pointing at it are being evaluated. |
+| `failed` | This exact version was tried and would not build. Every mandate pointing at it is unevaluable, which with the default `on_unavailable: block` means those requests are refused. |
+| `pending` | Nothing is held for this version yet. Normal right after a write on a worker that did not serve it, and normal for a few seconds if the build is still running. |
+| `disabled` | `enabled` is `false`, so nothing is built on purpose. |
+
+**It answers for the worker that served your request.** There is no
+deployment-wide answer here: with several workers or replicas, a read taken
+seconds after a write can say `pending` on one and `built` on the next, and both
+are true. Treat a lasting `pending` as worth a second look rather than as a
+failure, and `failed` as the one to act on.
+
+This is the field that keeps `enabled: true` honest. Without it a definition
+with a mistyped credential saves, reports nothing wrong, and refuses every
+request in the scope of any mandate that names it.
 
 ### What a request does with one
 
@@ -326,10 +360,11 @@ keeps the arguments and credentials it took to set up. `enabled: false` on a
 **mandate** stops that one mandate, and leaves any other mandate on the same
 definition running.
 
-A disabled definition is dropped from what each worker holds on its next read,
-so nothing keeps its vendor client alive, and a mandate still pointing at it
-becomes unevaluable: `mode` and `on_unavailable` decide what happens to the
-request, the same as an endpoint that cannot be reached.
+A disabled definition is dropped immediately on the worker that served the
+write, and on every other worker at its next read, so nothing keeps its vendor
+client alive. It then reads as `build_state: "disabled"`, and a mandate still
+pointing at it becomes unevaluable: `mode` and `on_unavailable` decide what
+happens to the request, the same as an endpoint that cannot be reached.
 
 Deleting a definition a mandate still names is refused rather than cascaded,
 because dropping it would silently stop a guardrail running. The refusal names
