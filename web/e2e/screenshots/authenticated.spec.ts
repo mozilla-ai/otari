@@ -216,6 +216,17 @@ test.describe("organization rail", () => {
     await captureScreenshot(page, "organization-provider-models")
   })
 
+  test("organization guardrails", async ({ page }) => {
+    // Both tables empty on a fresh gateway, which is the first view an admin
+    // gets and the one whose empty states have to read right.
+    await login(page)
+    await gotoRoute(page, "/organization/guardrails")
+    await expect(
+      page.getByRole("heading", { name: /^guardrails$/i }).first(),
+    ).toBeVisible()
+    await captureScreenshot(page, "organization-guardrails")
+  })
+
   test("organization usage", async ({ page }) => {
     // This gateway is standalone, whose bootstrap does not report the
     // organization_usage surface (its organization is the deployment, so /usage
