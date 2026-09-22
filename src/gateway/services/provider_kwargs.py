@@ -14,8 +14,9 @@ selector is resolved against (``alias_service``, ``policy_store``), which
 applies to every selector shape. Separately, it selects **whose
 organization-scoped provider keys** may supply credentials (otari-ai#1748,
 otari#643): a second, disjoint credential source, consulted only for a *bare*
-``provider:model``/``provider/model`` selector, i.e. one with no matching
-``config.providers`` instance. An ``instance:model`` selector always draws its
+``provider:model`` selector, i.e. one with no matching ``config.providers``
+instance, and which organization's own offerings the catalog spellings below
+may resolve to. An ``instance:model`` selector always draws its
 credentials from ``config.providers`` exactly as before and never touches
 organization-scoped keys, by construction: the two addressing schemes occupy
 disjoint selector shapes rather than one layering over the other. See
@@ -337,13 +338,13 @@ def resolve_provider_selector(
         # it properly; everywhere else it surfaces as an unknown model.
         alias = resolve_static_policy_target(config, model_selector, user_id, workspace_id=workspace_id)
     if alias is None:
-        # The catalog's own spellings: ``instance:<cleaned id>`` for one
-        # offering, or a bare slug for the model's cheapest. Consulted last and
-        # only for a selector that names no offering already, so nothing a
-        # caller sends verbatim is ever rewritten. Relabeled like an alias:
-        # the caller sees the spelling they sent, and pricing keys on the
-        # target.
-        alias = resolve_catalog_selector(model_selector)
+        # The catalog's own spellings: a catalog id for the model's cheapest
+        # offering, or ``instance:<catalog id>`` to pin the instance. Consulted last and only
+        # for a selector that names no offering already, so nothing a caller
+        # sends verbatim is ever rewritten; the workspace picks which
+        # organization's own offerings may answer. Relabeled like an alias: the
+        # caller sees the spelling they sent, and pricing keys on the target.
+        alias = resolve_catalog_selector(model_selector, workspace_id=workspace_id)
     selector = alias if alias is not None else model_selector
 
     split = split_selector(selector)

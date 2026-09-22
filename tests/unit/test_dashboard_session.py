@@ -135,9 +135,7 @@ def test_sign_out_without_a_session_is_a_no_op(tmp_path: Path) -> None:
         assert client.delete(f"{API_ROOT}/auth/session").status_code == 204
 
 
-def test_sign_out_clears_the_cookie_even_when_revocation_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_sign_out_clears_the_cookie_even_when_revocation_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A DB failure during revocation must not leave the browser holding a live
     # cookie: sign-out stays best-effort (204 + cookie cleared) and the
     # unrevoked session dies on its TTL.
@@ -151,7 +149,7 @@ def test_sign_out_clears_the_cookie_even_when_revocation_fails(
         assert response.status_code == 204
         set_cookie = response.headers.get("set-cookie", "")
         assert SESSION_COOKIE_NAME in set_cookie
-        assert 'expires=' in set_cookie.lower() or "max-age=0" in set_cookie.lower()
+        assert "expires=" in set_cookie.lower() or "max-age=0" in set_cookie.lower()
 
 
 def test_expired_sessions_stop_authenticating(tmp_path: Path) -> None:
@@ -531,9 +529,7 @@ def test_reactivating_the_identity_does_not_restore_its_old_sessions(tmp_path: P
         assert client.get(f"{API_ROOT}/settings").status_code == 401
 
 
-def test_a_failed_revocation_still_answers_401_rather_than_503(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_failed_revocation_still_answers_401_rather_than_503(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The cleanup is best-effort, and a failed one must not change the answer.
 
     A deactivated identity's sessions are deleted on the read that refuses
@@ -565,9 +561,7 @@ def test_a_failed_revocation_still_answers_401_rather_than_503(
         assert client.get(f"{API_ROOT}/settings").status_code == 401
 
 
-def test_a_failed_revocation_leaves_the_request_session_alone(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_failed_revocation_leaves_the_request_session_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The revocation writes on its own session, not the caller's.
 
     ``_bump_last_used_at`` is the precedent: a best-effort write on the auth

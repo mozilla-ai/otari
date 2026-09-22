@@ -493,9 +493,7 @@ def test_apostrophe_in_a_trailing_comment_no_longer_evades_the_gate() -> None:
 
 def test_unmatched_quote_inside_a_comment_does_not_crash_or_evade() -> None:
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(
-        gate, CommandEvidence(commands=('npm install # a comment with a stray " quote',))
-    )
+    result = evaluate_command_match(gate, CommandEvidence(commands=('npm install # a comment with a stray " quote',)))
     assert result.outcome is Outcome.FAIL
 
 

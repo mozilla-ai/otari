@@ -276,9 +276,7 @@ def test_delete_nonexistent_api_key(client: TestClient, master_key_header: dict[
     assert response.status_code == 404
 
 
-def test_rotate_api_key_returns_new_working_key_same_id(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_rotate_api_key_returns_new_working_key_same_id(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Rotating a key returns a new secret for the same id, and the new key authenticates."""
     create_response = client.post(
         f"{API_ROOT}/keys",
@@ -317,9 +315,7 @@ def test_rotate_api_key_returns_new_working_key_same_id(
     assert response.status_code == 200
 
 
-def test_rotate_api_key_old_secret_stops_working(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_rotate_api_key_old_secret_stops_working(client: TestClient, master_key_header: dict[str, str]) -> None:
     """After rotation the previous secret no longer authenticates."""
     create_response = client.post(
         f"{API_ROOT}/keys",
@@ -350,9 +346,7 @@ def test_rotate_api_key_old_secret_stops_working(
     assert after.status_code == 401
 
 
-def test_rotate_api_key_resets_last_used_at(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_rotate_api_key_resets_last_used_at(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Rotation clears last_used_at since the new secret has never been used."""
     create_response = client.post(
         f"{API_ROOT}/keys",
@@ -379,9 +373,7 @@ def test_rotate_nonexistent_api_key(client: TestClient, master_key_header: dict[
     assert response.status_code == 404
 
 
-def test_rotate_api_key_without_master_key_fails(
-    client: TestClient, api_key_obj: dict[str, Any]
-) -> None:
+def test_rotate_api_key_without_master_key_fails(client: TestClient, api_key_obj: dict[str, Any]) -> None:
     """Rotation without master key authentication is rejected."""
     response = client.post(f"{API_ROOT}/keys/{api_key_obj['id']}/rotate")
 

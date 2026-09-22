@@ -257,9 +257,7 @@ async def test_a_caller_ceiling_reaches_the_provider(provider: str) -> None:
     payload = TAVILY_OK if provider == "tavily" else BRAVE_OK
     client, recorder = _client(httpx.Response(200, json=payload))
     async with client:
-        await provider_search(
-            provider=provider, api_key="k", query="q", options={"max_results": 15}, client=client
-        )
+        await provider_search(provider=provider, api_key="k", query="q", options={"max_results": 15}, client=client)
 
     request = recorder.requests[0]
     asked = json.loads(request.content)["max_results"] if provider == "tavily" else request.url.params["count"]

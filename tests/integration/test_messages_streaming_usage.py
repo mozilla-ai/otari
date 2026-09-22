@@ -151,9 +151,7 @@ async def _stream_with_compaction_usage(**_kwargs: Any) -> AsyncIterator[Message
     return _gen()
 
 
-def _poll_usage_row(
-    make_session: Callable[[], Session], user_id: str, *, timeout: float = 3.0
-) -> UsageLog | None:
+def _poll_usage_row(make_session: Callable[[], Session], user_id: str, *, timeout: float = 3.0) -> UsageLog | None:
     deadline = time.time() + timeout
     while True:
         db = make_session()

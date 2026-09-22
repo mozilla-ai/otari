@@ -246,9 +246,7 @@ def test_orphaned_gateway_mcp_result_is_stripped() -> None:
         }
     ]
 
-    assert _strip_gateway_minted_blocks(messages)[0]["content"] == [
-        {"type": "text", "text": "answer"}
-    ]
+    assert _strip_gateway_minted_blocks(messages)[0]["content"] == [{"type": "text", "text": "answer"}]
 
 
 def test_provider_signed_blocks_survive() -> None:

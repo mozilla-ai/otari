@@ -74,8 +74,9 @@ async def test_refresh_requires_confirmation_before_changing_active_prices(monke
     confirmation_session.get.return_value = None
 
     assert await pricing_refresh_service.confirm_price_refresh(confirmation_session) is True
-    assert pricing_refresh_service._snapshot_prices(get_snapshot(), preview.fetched_at)[model_key] == (
-        pricing_refresh_service._snapshot_prices(latest_snapshot, preview.fetched_at)[model_key]
+    assert (
+        pricing_refresh_service._snapshot_prices(get_snapshot(), preview.fetched_at)[model_key]
+        == (pricing_refresh_service._snapshot_prices(latest_snapshot, preview.fetched_at)[model_key])
     )
     # The accepted snapshot, and the history row that says who accepted it.
     added = [call.args[0] for call in confirmation_session.add.call_args_list]

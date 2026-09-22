@@ -140,7 +140,6 @@ def test_a_contributed_route_is_matched_before_a_mode_stub() -> None:
     assert stubs, "no mode stub was mounted, so this check would hold vacuously"
     assert served, "nothing else was mounted, so this check would hold vacuously"
     assert min(stubs) > max(served), (
-        "a mode stub is mounted ahead of a route the deployment actually serves, "
-        "so the stub will answer for it"
+        "a mode stub is mounted ahead of a route the deployment actually serves, so the stub will answer for it"
     )
     assert probe < min(stubs), "the stub is ahead of a contributed route, so it will answer for it"

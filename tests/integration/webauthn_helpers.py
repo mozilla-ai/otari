@@ -113,12 +113,7 @@ class SoftwareAuthenticator:
         """
         client_data = self._client_data(ceremony_type="webauthn.create", challenge=challenge, origin=origin)
         cose_key = self._cose_key()
-        attested = (
-            _AAGUID
-            + struct.pack(">H", len(self.credential_id))
-            + self.credential_id
-            + cose_key
-        )
+        attested = _AAGUID + struct.pack(">H", len(self.credential_id)) + self.credential_id + cose_key
         auth_data = (
             self._rp_id_hash(rp_id)
             + bytes([FLAG_UP | FLAG_UV | FLAG_BE | FLAG_BS | FLAG_AT])

@@ -187,9 +187,7 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
         if url.endswith("/gateway/provider-keys/resolve"):
             return httpx.Response(
                 200,
-                json=_resolve_payload(
-                    [_attempt(0, attempt_id, "claude-3-5-sonnet-20241022", "sk-platform-key")]
-                ),
+                json=_resolve_payload([_attempt(0, attempt_id, "claude-3-5-sonnet-20241022", "sk-platform-key")]),
             )
         usage_reports.append(body)
         return httpx.Response(
@@ -828,9 +826,7 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
         if url.endswith("/gateway/provider-keys/resolve"):
             return httpx.Response(
                 200,
-                json=_resolve_payload(
-                    [_attempt(0, attempt_id, "claude-3-5-sonnet-20241022", "sk-platform")]
-                ),
+                json=_resolve_payload([_attempt(0, attempt_id, "claude-3-5-sonnet-20241022", "sk-platform")]),
             )
         usage_reports.append(body)
         return httpx.Response(
@@ -1149,6 +1145,7 @@ def test_hybrid_mode_preamble_rejection_uses_anthropic_envelope_and_keeps_retry_
     detail = response.json()["detail"]
     assert detail["type"] == "error"
     assert detail["error"]["type"] == "rate_limit_error"
+
 
 def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     platform_client: TestClient,

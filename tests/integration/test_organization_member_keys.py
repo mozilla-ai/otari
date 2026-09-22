@@ -233,9 +233,7 @@ def test_a_member_creates_a_key_in_a_workspace_they_belong_to(client: TestClient
     assert row["workspace_id"] == str(world.workspaces["alpha_one"])
 
 
-def test_a_member_cannot_mint_into_a_sibling_workspace_they_do_not_belong_to(
-    client: TestClient, world: _World
-) -> None:
+def test_a_member_cannot_mint_into_a_sibling_workspace_they_do_not_belong_to(client: TestClient, world: _World) -> None:
     """Alpha two is their organization's, so scoping to the organization alone would pass everything but this."""
     code, body = _create(
         client,
@@ -268,9 +266,7 @@ def test_an_owner_may_mint_into_any_workspace_of_their_organization(client: Test
     assert body["user_id"] == str(world.users["alpha_owner"])
 
 
-def test_an_omitted_workspace_means_the_default_one_the_caller_belongs_to(
-    client: TestClient, world: _World
-) -> None:
+def test_an_omitted_workspace_means_the_default_one_the_caller_belongs_to(client: TestClient, world: _World) -> None:
     code, body = _create(client, world, "alpha_member", {"key_name": "defaulted"})
     assert code == status.HTTP_200_OK, body
 

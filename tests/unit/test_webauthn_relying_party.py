@@ -123,9 +123,7 @@ def test_which_origins_a_relying_party_id_covers(rp_id: str, origin: str, covere
         ("https://otari.example.com:8443/", "otari.example.com"),
     ],
 )
-def test_an_id_that_is_not_a_bare_domain_is_refused_with_the_right_suggestion(
-    written: str, suggested: str
-) -> None:
+def test_an_id_that_is_not_a_bare_domain_is_refused_with_the_right_suggestion(written: str, suggested: str) -> None:
     """The refusal has to name the value to use, or it is a puzzle rather than a fix."""
     config = _config(public_base_url="https://example.com", webauthn_rp_id=written)
     with pytest.raises(ValueError, match="bare domain") as refusal:

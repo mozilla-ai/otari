@@ -42,8 +42,8 @@ def test_both_rate_surfaces_name_the_rungs_the_same_way() -> None:
     """
     from gateway.models.pricing import PriceSource
     from gateway.schemas.providers import (
-    OrgProviderKeyModelPublic,
-)
+        OrgProviderKeyModelPublic,
+    )
     from gateway.services.merged_catalog_service import ViewerPrice
 
     rungs = set(get_args(PriceSource))

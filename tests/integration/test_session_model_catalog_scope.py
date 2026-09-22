@@ -88,13 +88,9 @@ def _identity(
     session.add(user)
     session.commit()
     session.refresh(user)
-    session.add(
-        OrganizationMember(organization_id=organization_id, user_id=user.id, role=role, status="active")
-    )
+    session.add(OrganizationMember(organization_id=organization_id, user_id=user.id, role=role, status="active"))
     for workspace_id in workspace_ids:
-        session.add(
-            WorkspaceMember(workspace_id=workspace_id, user_id=user.id, role="member", status="active")
-        )
+        session.add(WorkspaceMember(workspace_id=workspace_id, user_id=user.id, role="member", status="active"))
     token = f"otari-sess-{email}"
     session.add(
         DashboardSession(
@@ -203,9 +199,7 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
                 organization_id=beta.id,
                 workspace_ids=(beta_one.id,),
             ),
-            "orphan": _unmembered_identity(
-                session, email="orphan@nowhere.test", organization_id=beta.id
-            ),
+            "orphan": _unmembered_identity(session, email="orphan@nowhere.test", organization_id=beta.id),
             "superuser": _identity(
                 session,
                 email="root@alpha.test",
@@ -265,9 +259,7 @@ def test_an_admin_is_answered_from_the_organizations_providers_not_one_workspace
     assert _catalog_as(client, world, "alpha_owner") == {_OPENAI_MODEL, _OPENAI_OTHER}
 
 
-def test_a_member_of_no_workspace_sees_no_byo_models_rather_than_a_refusal(
-    client: TestClient, world: _World
-) -> None:
+def test_a_member_of_no_workspace_sees_no_byo_models_rather_than_a_refusal(client: TestClient, world: _World) -> None:
     """Nothing was refused; no workspace of theirs holds a key yet."""
     assert _catalog_as(client, world, "alpha_newcomer") == set()
 
@@ -431,9 +423,7 @@ def test_a_single_model_read_agrees_with_the_listing(client: TestClient, world: 
         client.cookies.clear()
 
 
-def test_an_identity_with_no_live_membership_is_answered_rather_than_refused(
-    client: TestClient, world: _World
-) -> None:
+def test_an_identity_with_no_live_membership_is_answered_rather_than_refused(client: TestClient, world: _World) -> None:
     """A catalog read is not one of the routes whose whole question is "which organization".
 
     The pointer is not the authority, so this caller reaches no organization's
@@ -711,3 +701,74 @@ def test_an_identity_with_no_live_membership_is_not_shown_hosted_models(client: 
     bind_model_provider(client, port)
     assert _catalog_as(client, world, "orphan") == set()
     assert port.asked_for == []
+
+
+def test_an_offered_model_resolves_by_its_catalog_spellings_for_its_organization_alone(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    world: _World,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """A BYO offering is reached by the catalog id and by the pinned spelling.
+
+    Nebius spells DeepSeek's model ``deepseek-ai/DeepSeek-V4.1-Flash``, and
+    nothing on the deployment serves it. Once alpha offers it on its own nebius
+    key, alpha's callers reach it by every catalog spelling and resolution lands
+    on the raw id the key's allow-list and pricing are keyed on; beta's callers
+    and the deployment's own view are left alone, so a tenant's key never decides
+    where another tenant's selector goes.
+    """
+    from typing import cast
+
+    from fastapi import FastAPI
+
+    from gateway.services import catalog_selectors as selectors
+    from gateway.services.provider_kwargs import resolve_provider_selector
+
+    raw = "nebius:deepseek-ai/DeepSeek-V4.1-Flash"
+    session = db_session_factory()
+    try:
+        nebius = _byo_key(session, organization_id=world.alpha, provider="nebius")
+        session.add(
+            OrgProviderKeyModel(
+                organization_id=world.alpha,
+                org_provider_key_id=nebius,
+                model="deepseek-ai/DeepSeek-V4.1-Flash",
+                enabled=True,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    config = cast(FastAPI, client.app).state.config
+    try:
+        rebuilt = client.post(f"{API_ROOT}/catalog/selectors/refresh", headers=master_key_header)
+        assert rebuilt.status_code == status.HTTP_200_OK, rebuilt.text
+        alpha_workspace = world.workspaces["alpha_one"]
+        for spelling in ("deepseek/deepseek-v4.1-flash", "nebius:deepseek/deepseek-v4.1-flash"):
+            resolved = resolve_provider_selector(config, spelling, workspace_id=alpha_workspace)
+            assert (resolved.instance, resolved.model, resolved.alias) == (
+                "nebius",
+                "deepseek-ai/DeepSeek-V4.1-Flash",
+                spelling,
+            ), spelling
+            assert selectors.resolve_catalog_selector(spelling, workspace_id=world.workspaces["beta_one"]) is None
+            assert selectors.resolve_catalog_selector(spelling) is None
+        # The raw selector is never rewritten, for anyone.
+        assert selectors.resolve_catalog_selector(raw, workspace_id=alpha_workspace) is None
+
+        # The catalog tells alpha's admin the spellings in force, and the id resolves for them.
+        client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_owner"])
+        try:
+            detail = client.get(f"{API_ROOT}/catalog/models/deepseek/deepseek-v4.1-flash")
+            assert detail.status_code == status.HTTP_200_OK, detail.text
+            body = detail.json()
+            assert body["selector"] == "deepseek/deepseek-v4.1-flash"
+            assert body["resolves_to"] == raw
+            offering = next(row for row in body["offerings"] if row["selector"] == raw)
+            assert offering["short_selector"] == "nebius:deepseek/deepseek-v4.1-flash"
+        finally:
+            client.cookies.clear()
+    finally:
+        selectors.reset_selector_index()

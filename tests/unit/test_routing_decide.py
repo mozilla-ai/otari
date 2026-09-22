@@ -91,9 +91,7 @@ def test_a_router_entry_needs_at_least_two_candidates() -> None:
 
 def test_candidates_are_rejected_on_a_static_entry() -> None:
     with pytest.raises(ValidationError, match="only applies to a `router` entry"):
-        PolicySpec.model_validate(
-            {"select": [{"default": "openai:gpt-5", "candidates": ["openai:gpt-5-mini"]}]}
-        )
+        PolicySpec.model_validate({"select": [{"default": "openai:gpt-5", "candidates": ["openai:gpt-5-mini"]}]})
 
 
 def test_duplicate_candidates_are_refused() -> None:
@@ -198,9 +196,7 @@ async def test_an_unknown_backend_warns_once_per_policy(
     # It names what will serve instead, which is the question an operator has next.
     assert "openai:gpt-5" in warnings[0]
 
-    await decide_ordering(
-        config, unknown, policy_name="second", user_id="u", allowlist=None, signal=_signal()
-    )
+    await decide_ordering(config, unknown, policy_name="second", user_id="u", allowlist=None, signal=_signal())
     assert len(router_warnings()) == 2
 
 
@@ -244,26 +240,22 @@ class _Recorder:
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
     backend = _Recorder()
-    monkeypatch.setattr(
-        "gateway.services.routing.decide.get_router_backend", lambda config, name: backend
-    )
+    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda config, name: backend)
     return backend
 
 
 @pytest.mark.asyncio
 async def test_a_policy_without_a_router_is_not_asked(config: GatewayConfig) -> None:
     static = PolicySpec.model_validate({"select": [{"default": "openai:gpt-5"}]})
-    assert await decide_ordering(
-        config, static, policy_name="fast", user_id="u", allowlist=None, signal=_signal()
-    ) is None
+    assert (
+        await decide_ordering(config, static, policy_name="fast", user_id="u", allowlist=None, signal=_signal()) is None
+    )
 
 
 @pytest.mark.asyncio
 async def test_a_surface_with_no_request_is_not_asked(config: GatewayConfig, recorder: _Recorder) -> None:
     # `explain` and the model catalog have no prompt to route on.
-    assert await decide_ordering(
-        config, _spec(), policy_name="smart", user_id="u", allowlist=None, signal=None
-    ) is None
+    assert await decide_ordering(config, _spec(), policy_name="smart", user_id="u", allowlist=None, signal=None) is None
     assert recorder.seen is None
 
 
@@ -280,9 +272,7 @@ async def test_the_caller_opt_out_declines_without_asking(config: GatewayConfig,
 
 
 @pytest.mark.asyncio
-async def test_the_pool_is_filtered_before_the_backend_sees_it(
-    config: GatewayConfig, recorder: _Recorder
-) -> None:
+async def test_the_pool_is_filtered_before_the_backend_sees_it(config: GatewayConfig, recorder: _Recorder) -> None:
     # A router that picked a forbidden model would have its choice dropped by the
     # compiler and serve something else, which reads as the router misbehaving.
     ordering = await decide_ordering(
@@ -345,9 +335,7 @@ async def test_a_backend_that_raises_declines_rather_than_failing_the_request(
         async def rank(self, ctx: RoutingContext) -> RoutingDecision:
             raise RuntimeError("the examples table is on fire")
 
-    monkeypatch.setattr(
-        "gateway.services.routing.decide.get_router_backend", lambda config, name: _Broken()
-    )
+    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda config, name: _Broken())
 
     ordering = await decide_ordering(
         config, _spec(), policy_name="smart", user_id="u", allowlist=None, signal=_signal()

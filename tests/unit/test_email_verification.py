@@ -120,9 +120,7 @@ def test_an_expired_token_is_refused(tmp_path: Path, caplog: pytest.LogCaptureFi
         assert response.status_code == 400
 
 
-def test_a_token_is_refused_once_the_identity_is_deactivated(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_a_token_is_refused_once_the_identity_is_deactivated(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """A live token must not outlive the account it was issued to.
 
     Matches ``authenticate``'s own ``is_active`` check: deactivating someone
@@ -160,9 +158,7 @@ def test_resend_for_an_address_that_never_signed_up_sends_nothing(
         assert "mail:console" not in text_seen
 
 
-def test_resend_for_an_already_verified_address_sends_nothing(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_resend_for_an_already_verified_address_sends_nothing(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     with _client(tmp_path) as client:
         token = _signed_up(client, caplog, email="grace@example.com")
         assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
@@ -173,9 +169,7 @@ def test_resend_for_an_already_verified_address_sends_nothing(
         assert "mail:console" not in text_seen
 
 
-def test_resend_for_a_deactivated_identity_sends_nothing(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_resend_for_a_deactivated_identity_sends_nothing(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Deactivation closes this road too, the same as the redemption it would lead to."""
     with _client(tmp_path) as client:
         _signed_up(client, caplog, email="ada@example.com")
@@ -224,9 +218,7 @@ def test_resend_without_mail_configured_is_refused(tmp_path: Path, caplog: pytes
 
 
 def test_repeated_resend_calls_get_throttled(tmp_path: Path) -> None:
-    with TestClient(
-        create_app(_config(tmp_path, dashboard_login_rate_limit_per_minute=2))
-    ) as client:
+    with TestClient(create_app(_config(tmp_path, dashboard_login_rate_limit_per_minute=2))) as client:
         for _ in range(2):
             response = client.post(f"{API_ROOT}/auth/resend-verification", json={"email": "nobody@example.com"})
             assert response.status_code == 200

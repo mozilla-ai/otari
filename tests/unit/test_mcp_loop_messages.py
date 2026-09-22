@@ -947,11 +947,7 @@ async def test_stream_hides_mcp_activity_without_beta_but_still_executes(
         )
     ]
 
-    starts = [
-        cast(Any, event).content_block
-        for event in events
-        if event.type == "content_block_start"
-    ]
+    starts = [cast(Any, event).content_block for event in events if event.type == "content_block_start"]
     assert [block.type for block in starts] == ["text"]
     assert pool.calls == [("fetch_url", {"url": "https://example.test"})]
 
@@ -1025,9 +1021,7 @@ async def test_stream_mcp_exception_emits_error_without_logging_detail(
     model_result = provider_calls[1]["messages"][-1]["content"][0]
     assert model_result["content"] == "[tool error] MCP tool execution failed"
     assert "credential-detail-do-not-log" not in str(provider_calls[1]["messages"])
-    assert logged_warnings == [
-        ("Gateway tool %s execution failed: %s", "fetch_url", "RuntimeError")
-    ]
+    assert logged_warnings == [("Gateway tool %s execution failed: %s", "fetch_url", "RuntimeError")]
     assert "credential-detail-do-not-log" not in str(logged_warnings)
     assert "do-not-log" not in str(logged_warnings)
 
@@ -2141,9 +2135,7 @@ class _FakeSandboxPool(_FakePool):
         if self._fail:
             self._executions.append(CodeExecution(code=code, result=None))
             raise RuntimeError("sandbox down")
-        self._executions.append(
-            CodeExecution(code=code, result=self._result, file_ids={"chart.png": "file-stored-1"})
-        )
+        self._executions.append(CodeExecution(code=code, result=self._result, file_ids={"chart.png": "file-stored-1"}))
         return self._results["code_execution"]
 
     def take_executions(self) -> list[CodeExecution]:

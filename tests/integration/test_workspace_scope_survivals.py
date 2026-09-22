@@ -47,9 +47,7 @@ def _make_workspace(client: TestClient, headers: dict[str, str], name: str) -> s
     return str(created.json()["id"])
 
 
-def _key_header(
-    client: TestClient, master: dict[str, str], template: dict[str, str], **body: Any
-) -> dict[str, str]:
+def _key_header(client: TestClient, master: dict[str, str], template: dict[str, str], **body: Any) -> dict[str, str]:
     """Mint a key and return an auth header for it.
 
     The gateway requires a "Bearer " prefix on every header form, so the header
@@ -65,9 +63,7 @@ def _key_header(
 # ---------------------------------------------------------------------------
 
 
-def test_two_workspaces_can_each_define_the_same_alias(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_two_workspaces_can_each_define_the_same_alias(client: TestClient, master_key_header: dict[str, str]) -> None:
     """The row the pre-widening constraint refused outright.
 
     Storing both was a 409 while the resolution cache was keyed on name alone,
@@ -153,9 +149,7 @@ def test_deleting_an_alias_in_the_wrong_workspace_is_a_404(
 ) -> None:
     """The error path of the scoped delete: right name, wrong tenant."""
     platform = _make_workspace(client, master_key_header, "Platform team")
-    client.post(
-        ALIASES, json={"name": "fast", "target": "anthropic:claude-haiku-4"}, headers=master_key_header
-    )
+    client.post(ALIASES, json={"name": "fast", "target": "anthropic:claude-haiku-4"}, headers=master_key_header)
 
     missing = client.delete(f"{ALIASES}/fast?workspace_id={platform}", headers=master_key_header)
 
@@ -190,9 +184,7 @@ def _policy(target: str) -> dict[str, Any]:
     return {"select": [{"default": target}]}
 
 
-def test_two_workspaces_can_each_define_the_same_policy(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_two_workspaces_can_each_define_the_same_policy(client: TestClient, master_key_header: dict[str, str]) -> None:
     default = _default_workspace(client, master_key_header)
     platform = _make_workspace(client, master_key_header, "Platform team")
 
@@ -277,9 +269,7 @@ def test_a_file_is_stamped_with_the_uploading_keys_workspace(
 ) -> None:
     """Read off the key, never a header: the caller controls one and not the other."""
     platform = _make_workspace(client, master_key_header, "Platform team")
-    scoped = _key_header(
-        client, master_key_header, api_key_header, workspace_id=platform, user_id="ada"
-    )
+    scoped = _key_header(client, master_key_header, api_key_header, workspace_id=platform, user_id="ada")
 
     uploaded = client.post(f"{API_ROOT}/files", headers=scoped, files={"file": ("a.txt", b"hi", "text/plain")})
     assert uploaded.status_code == status.HTTP_200_OK, uploaded.text
@@ -304,9 +294,9 @@ def test_the_same_user_cannot_reach_their_file_from_another_workspace(
     there = _key_header(client, master_key_header, api_key_header, workspace_id=platform, user_id="ada")
     here = _key_header(client, master_key_header, api_key_header, user_id="ada", key_name="here")
 
-    file_id = client.post(
-        f"{API_ROOT}/files", headers=there, files={"file": ("a.txt", b"hi", "text/plain")}
-    ).json()["id"]
+    file_id = client.post(f"{API_ROOT}/files", headers=there, files={"file": ("a.txt", b"hi", "text/plain")}).json()[
+        "id"
+    ]
 
     assert client.get(f"{API_ROOT}/files/{file_id}", headers=here).status_code == status.HTTP_404_NOT_FOUND
     assert client.get(f"{API_ROOT}/files/{file_id}/content", headers=here).status_code == status.HTTP_404_NOT_FOUND

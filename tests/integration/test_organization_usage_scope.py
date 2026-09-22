@@ -512,9 +512,7 @@ def test_the_context_agrees_with_the_admin_access_endpoint(client: TestClient, w
         assert context["deployment_operator"] is access["granted"], who
 
 
-def test_every_response_carrying_the_context_carries_the_operator_answer(
-    client: TestClient, world: _World
-) -> None:
+def test_every_response_carrying_the_context_carries_the_operator_answer(client: TestClient, world: _World) -> None:
     """`POST /me/switch` and `PATCH /me` return the shape too, not just `GET /me`.
 
     The dashboard keeps whichever context it saw last, so a write answering a

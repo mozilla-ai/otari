@@ -95,7 +95,6 @@ async def _one_ceiling_per_scope(db: AsyncSession, budget: Budget, scopes: Scope
     return [ceiling.id for ceiling in ceilings]
 
 
-
 async def test_get_by_id_and_organization_answers_only_the_owners_budget(async_db: AsyncSession) -> None:
     acme = await _organization(async_db, slug="acme")
     globex = await _organization(async_db, slug="globex")
@@ -213,7 +212,6 @@ async def test_remove_raises_while_a_reset_record_names_the_budget(async_db: Asy
     with pytest.raises(BudgetStillReferencedError):
         async with uow:
             await BudgetRepository(uow).remove(budget)
-
 
 
 async def test_count_for_budget_and_count_for_budgets(async_db: AsyncSession) -> None:
@@ -365,7 +363,6 @@ async def test_retime_for_budget_rewrites_the_window_and_keeps_the_counters(asyn
         only_first = ScopeIdSets((), ("ws-1",), (), (), ())
         rows = await ScopedBudgetRepository(uow).list_in_scopes(only_first, skip=0, limit=10)
         assert (rows[0][0].period_start, rows[0][0].period_end) == (None, None)
-
 
 
 async def test_on_builds_every_repository_on_the_unit_of_work(async_db: AsyncSession) -> None:

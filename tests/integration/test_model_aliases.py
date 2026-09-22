@@ -466,9 +466,7 @@ async def test_streaming_response_model_echoes_alias(client: TestClient) -> None
             object="chat.completion.chunk",
             created=0,
             model="claude-opus-4",  # what the provider streams back
-            choices=[
-                ChunkChoice(index=0, delta=ChoiceDelta(role="assistant", content="hi"), finish_reason="stop")
-            ],
+            choices=[ChunkChoice(index=0, delta=ChoiceDelta(role="assistant", content="hi"), finish_reason="stop")],
             usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
         )
 

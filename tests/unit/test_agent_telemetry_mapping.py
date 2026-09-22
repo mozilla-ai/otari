@@ -13,9 +13,7 @@ _POINT_TS = datetime(2026, 8, 12, 9, 0, tzinfo=UTC)
 _SERIES_START = datetime(2026, 8, 12, 8, 0, tzinfo=UTC)
 
 
-def _metric(
-    name: str, value: float = 3.0, temporality: str = "cumulative", **attrs: object
-) -> TelemetryRecord | None:
+def _metric(name: str, value: float = 3.0, temporality: str = "cumulative", **attrs: object) -> TelemetryRecord | None:
     return map_metric_point(
         name,
         value,

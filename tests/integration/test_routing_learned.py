@@ -116,9 +116,7 @@ def learned_config(postgres_url: str) -> GatewayConfig:
         pricing={
             "openai:gpt-5-nano": PricingConfig(input_price_per_million=0.5, output_price_per_million=1.5),
             "openai:gpt-5": PricingConfig(input_price_per_million=2.5, output_price_per_million=10.0),
-            "anthropic:claude-haiku-4-5": PricingConfig(
-                input_price_per_million=1.0, output_price_per_million=4.0
-            ),
+            "anthropic:claude-haiku-4-5": PricingConfig(input_price_per_million=1.0, output_price_per_million=4.0),
         },
         routing=RoutingConfig.model_validate(
             {
@@ -393,9 +391,7 @@ def test_the_router_never_dispatches_a_candidate_the_key_forbids(client: TestCli
     assert key.status_code == 200, key.text
     token = key.json()["key"]
 
-    resp, calls = _chat(
-        client, "smart", "what is 2 plus 2", headers={API_KEY_HEADER: f"Bearer {token}"}
-    )
+    resp, calls = _chat(client, "smart", "what is 2 plus 2", headers={API_KEY_HEADER: f"Bearer {token}"})
 
     assert resp.status_code == 200, resp.text
     assert calls == [STRONG]
@@ -511,15 +507,11 @@ def test_a_task_partition_warms_on_its_own(client: TestClient) -> None:
     assert default_calls == [CHEAP]  # untagged examples are in the default pool too
     assert default_pool.status_code == 200
 
-    other_task, other_calls = _chat(
-        client, "smart", "what is 2 plus 2", headers={"Otari-Router-Task": "support"}
-    )
+    other_task, other_calls = _chat(client, "smart", "what is 2 plus 2", headers={"Otari-Router-Task": "support"})
     assert other_calls == [STRONG]  # the "support" partition is empty, so it declines
     assert other_task.status_code == 200
 
-    same_task, same_calls = _chat(
-        client, "smart", "what is 2 plus 2", headers={"Otari-Router-Task": "math"}
-    )
+    same_task, same_calls = _chat(client, "smart", "what is 2 plus 2", headers={"Otari-Router-Task": "math"})
     assert same_calls == [CHEAP]
     assert same_task.status_code == 200
 
@@ -645,9 +637,7 @@ def test_rank_allows_teaching_before_any_learned_policy_exists(client: TestClien
     # Only resolvability is enforced when the user resolves no learned policy:
     # teaching a pool before writing the policy that reads it is a legitimate order
     # of operations, and refusing it would make the API demand a sequence.
-    scoped = client.post(
-        f"{API_ROOT}/users", json={"user_id": "policyless"}, headers=HEADERS
-    )
+    scoped = client.post(f"{API_ROOT}/users", json={"user_id": "policyless"}, headers=HEADERS)
     assert scoped.status_code == 200, scoped.text
     with patch("gateway.services.policy_store.effective_policies", return_value={}):
         resp = client.post(
@@ -736,8 +726,7 @@ def test_eviction_keeps_the_store_bounded_without_a_giant_in_list(
                 json={
                     "user_id": USER,
                     "examples": [
-                        {"prompt": f"what is {n} plus {n}", "scores": {CHEAP: 1.0, STRONG: 1.0}}
-                        for n in range(6)
+                        {"prompt": f"what is {n} plus {n}", "scores": {CHEAP: 1.0, STRONG: 1.0}} for n in range(6)
                     ],
                 },
                 headers=HEADERS,
@@ -752,9 +741,7 @@ def test_eviction_keeps_the_store_bounded_without_a_giant_in_list(
 
 
 def test_rank_rejects_an_empty_batch(client: TestClient) -> None:
-    resp = client.post(
-        f"{API_ROOT}/routing/preferences/rank", json={"user_id": USER, "examples": []}, headers=HEADERS
-    )
+    resp = client.post(f"{API_ROOT}/routing/preferences/rank", json={"user_id": USER, "examples": []}, headers=HEADERS)
     assert resp.status_code == 422
 
 
@@ -870,13 +857,7 @@ def test_a_learned_policy_is_refused_in_hybrid_mode(monkeypatch: pytest.MonkeyPa
         mode="hybrid",
         platform={"base_url": "http://platform.test/api/v1"},
         routing=RoutingConfig.model_validate(
-            {
-                "policies": {
-                    "smart": {
-                        "select": [{"router": "knn", "candidates": [CHEAP, STRONG]}, {"default": STRONG}]
-                    }
-                }
-            }
+            {"policies": {"smart": {"select": [{"router": "knn", "candidates": [CHEAP, STRONG]}, {"default": STRONG}]}}}
         ),
     )
     app = create_app(config)

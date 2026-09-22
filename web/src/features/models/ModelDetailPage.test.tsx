@@ -82,7 +82,7 @@ const KIMI: CatalogModelSummary = {
 function offering(overrides: Partial<CatalogOffering>): CatalogOffering {
   return {
     selector: "nebius:zai-org/GLM-5.3",
-    short_selector: "nebius:glm-5.3",
+    short_selector: "nebius:z-ai/glm-5.3",
     provider: "nebius",
     provider_type: "nebius",
     credential: "deployment",
@@ -112,7 +112,7 @@ const GLM_DETAIL: CatalogModelDetail = {
     offering({}),
     offering({
       selector: "fireworks:accounts/fireworks/models/glm-5p3",
-      short_selector: "fireworks:glm-5p3",
+      short_selector: "fireworks:z-ai/glm-5.3",
       provider: "fireworks",
       provider_type: "fireworks",
       context_window: 131_072,
@@ -280,7 +280,7 @@ describe("ModelDetailPage", () => {
     await waitFor(() =>
       expect(
         (within(drawer).getByLabelText("cURL") as HTMLTextAreaElement).value,
-      ).toContain('"model": "fireworks:glm-5p3"'),
+      ).toContain('"model": "fireworks:z-ai/glm-5.3"'),
     )
   })
 

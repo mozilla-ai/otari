@@ -194,6 +194,7 @@ def test_every_gated_router_has_a_stub_standing_in_for_it(postgres_url: str) -> 
     that one is mounted in both modes and so never shows up in the difference.
     The half it does catch is the half that fails quietly.
     """
+
     def mounted(mode: str) -> set[str]:
         app = create_app(_config(postgres_url, mode))
         return {route.path for route in app.routes if hasattr(route, "path")}

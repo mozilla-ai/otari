@@ -40,11 +40,7 @@ def _sample_spec() -> dict[str, Any]:
                 "post": {
                     "tags": ["keys"],
                     "responses": {
-                        "200": {
-                            "content": {
-                                "application/json": {"schema": {"$ref": "#/components/schemas/KeyInfo"}}
-                            }
-                        }
+                        "200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/KeyInfo"}}}}
                     },
                 }
             },
@@ -52,9 +48,7 @@ def _sample_spec() -> dict[str, Any]:
                 "post": {
                     "tags": ["chat"],
                     "requestBody": {
-                        "content": {
-                            "application/json": {"schema": {"$ref": "#/components/schemas/ChatRequest"}}
-                        }
+                        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ChatRequest"}}}
                     },
                 }
             },
@@ -130,9 +124,7 @@ def test_postprocess_go_gofmts_generated_payload(tmp_path: Path) -> None:
     assert "return 1" in formatted
 
 
-def test_postprocess_go_skips_gracefully_without_gofmt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_postprocess_go_skips_gracefully_without_gofmt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # When gofmt is absent, postprocess must warn and skip rather than crash.
     monkeypatch.setattr(generate.shutil, "which", lambda _name: None)
     src = tmp_path / "thing.go"
@@ -305,9 +297,9 @@ def test_sanitize_freeform_object_arrays_names_union_array_items() -> None:
     props = schemas["MessagesRequest"]["properties"]
     for field in ("system", "tools"):
         array_variant = next(v for v in props[field]["anyOf"] if v.get("type") == "array")
-        assert array_variant["items"] == {
-            "$ref": f"#/components/schemas/{generate._FREE_FORM_OBJECT}"
-        }, f"{field} array items should reference the shared free-form object schema"
+        assert array_variant["items"] == {"$ref": f"#/components/schemas/{generate._FREE_FORM_OBJECT}"}, (
+            f"{field} array items should reference the shared free-form object schema"
+        )
 
 
 def test_sanitize_freeform_object_collapses_empty_union_member() -> None:
@@ -338,11 +330,7 @@ def test_sanitize_freeform_object_leaves_typed_union_members() -> None:
     # A union of concrete members has nothing to collapse: no FreeFormObject is
     # introduced and the members are untouched.
     spec = {
-        "components": {
-            "schemas": {
-                "Typed": {"anyOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}]}
-            }
-        }
+        "components": {"schemas": {"Typed": {"anyOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}]}}}
     }
     out = generate.sanitize_freeform_object_arrays(spec)
     assert generate._FREE_FORM_OBJECT not in out["components"]["schemas"]
@@ -424,9 +412,7 @@ def test_sanitize_freeform_object_arrays_is_noop_without_freeform_unions() -> No
 
 
 def test_control_plane_tags_are_typed_management_only() -> None:
-    assert generate.CONTROL_PLANE_TAGS == frozenset(
-        {"keys", "users", "budgets", "pricing", "usage"}
-    )
+    assert generate.CONTROL_PLANE_TAGS == frozenset({"keys", "users", "budgets", "pricing", "usage"})
     # Excluded on purpose: proxy/inference surfaces and batches, all of which are
     # untyped in the spec (so generation would regress them).
     for excluded in ("chat", "responses", "embeddings", "batches"):
@@ -464,9 +450,7 @@ def _fake_rust_crate(dest: Path) -> None:
     (meta / "VERSION").write_text("7.0.0\n")
 
 
-def test_rust_inline_module_reduces_crate_to_module(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_rust_inline_module_reduces_crate_to_module(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Format is exercised separately; stub it so this test is deterministic and
     # does not depend on rustfmt being installed.
     monkeypatch.setattr(generate, "_rustfmt_tree", lambda _dest: None)
@@ -499,9 +483,7 @@ def test_rust_inline_module_reduces_crate_to_module(
     assert not (dest / ".openapi-generator").exists()
 
 
-def test_rust_inline_module_without_lib_rs_falls_back(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_rust_inline_module_without_lib_rs_falls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A partial payload with no lib.rs must still yield a usable mod.rs.
     monkeypatch.setattr(generate, "_rustfmt_tree", lambda _dest: None)
     dest = tmp_path / "rust"
@@ -515,9 +497,7 @@ def test_rust_inline_module_without_lib_rs_falls_back(
     assert "pub mod models;" in text
 
 
-def test_rust_inline_module_is_idempotent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_rust_inline_module_is_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Re-running into the same out-dir (a fresh generator payload dropped beside
     # the previous inlined output) must overwrite, not nest (no apis/apis/).
     monkeypatch.setattr(generate, "_rustfmt_tree", lambda _dest: None)
@@ -536,9 +516,7 @@ def test_rust_inline_module_is_idempotent(
     assert not (dest / "src").exists()
 
 
-def test_rust_inline_module_skips_rustfmt_gracefully(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_rust_inline_module_skips_rustfmt_gracefully(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # When rustfmt is absent, the transform still runs and only formatting is
     # skipped (with a warning), mirroring the go/gofmt path.
     monkeypatch.setattr(generate.shutil, "which", lambda _name: None)

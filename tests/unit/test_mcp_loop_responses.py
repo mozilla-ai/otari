@@ -228,9 +228,7 @@ async def test_loop_executes_owned_function_call_and_completes(monkeypatch: pyte
     assert "function_call" in types
     assert "function_call_output" in types
     output_item = next(
-        item
-        for item in second_input
-        if isinstance(item, dict) and item.get("type") == "function_call_output"
+        item for item in second_input if isinstance(item, dict) and item.get("type") == "function_call_output"
     )
     assert output_item["call_id"] == "call_1"
     assert output_item["output"] == "ok"
@@ -418,9 +416,7 @@ async def test_loop_mixed_calls_executes_owned_and_returns_only_foreign(
     )
     assert pool.calls == [("fetch_url", {})]
     remaining_call_ids = [
-        getattr(item, "call_id", None)
-        for item in out.output
-        if getattr(item, "type", None) == "function_call"
+        getattr(item, "call_id", None) for item in out.output if getattr(item, "type", None) == "function_call"
     ]
     assert remaining_call_ids == ["foreign_id"]
 
@@ -479,9 +475,7 @@ async def test_loop_tool_failure_appears_as_function_call_output(monkeypatch: py
     )
     second_input = captured_inputs[1]
     output_item = next(
-        item
-        for item in second_input
-        if isinstance(item, dict) and item.get("type") == "function_call_output"
+        item for item in second_input if isinstance(item, dict) and item.get("type") == "function_call_output"
     )
     assert "tool error" in output_item["output"]
     assert "upstream down" in output_item["output"]
@@ -754,8 +748,7 @@ async def test_stream_max_uses_announces_only_the_search_that_ran(
     announced = [
         event
         for event in events
-        if event.type == "response.output_item.added"
-        and getattr(event.item, "type", None) == "web_search_call"
+        if event.type == "response.output_item.added" and getattr(event.item, "type", None) == "web_search_call"
     ]
     assert len(announced) == 1, "a refused search must not be announced as a completed one"
     assert announced[0].item.id == "c1"
@@ -862,11 +855,10 @@ async def test_stream_replays_and_returns_compaction_from_hidden_iteration(
         "function_call_output",
     ]
     assert replay[0]["encrypted_content"] == "opaque-cmp_1"
-    assert [
-        event.type
-        for event in events
-        if getattr(getattr(event, "item", None), "type", None) == "compaction"
-    ] == ["response.output_item.added", "response.output_item.done"]
+    assert [event.type for event in events if getattr(getattr(event, "item", None), "type", None) == "compaction"] == [
+        "response.output_item.added",
+        "response.output_item.done",
+    ]
     completed = next(event for event in events if event.type == "response.completed")
     assert [getattr(item, "type", None) for item in completed.response.output] == ["compaction"]
     assert isinstance(completed.response.output[0], ResponseCompactionItem)
@@ -993,9 +985,7 @@ async def test_stream_announces_gateway_search_as_native_web_search_call(
     ]
 
     web_search_items = [
-        getattr(e, "item")
-        for e in events
-        if getattr(getattr(e, "item", None), "type", None) == "web_search_call"
+        getattr(e, "item") for e in events if getattr(getattr(e, "item", None), "type", None) == "web_search_call"
     ]
     # One added + one done event, carrying the same item.
     assert len(web_search_items) == 2
@@ -1331,9 +1321,7 @@ async def test_stream_announces_the_execution_as_a_code_interpreter_call(monkeyp
 
     assert pool.calls == [("code_execution", {"code": "print(1)"})]
     items = [
-        getattr(e, "item")
-        for e in events
-        if getattr(getattr(e, "item", None), "type", None) == "code_interpreter_call"
+        getattr(e, "item") for e in events if getattr(getattr(e, "item", None), "type", None) == "code_interpreter_call"
     ]
     # One added and one done event, both carrying the complete item.
     assert len(items) == 2

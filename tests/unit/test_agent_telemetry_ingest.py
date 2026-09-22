@@ -65,9 +65,7 @@ async def test_ingest_rejects_an_export_from_a_soft_deleted_user() -> None:
     storage = _storage(IngestResult())
     api_key = APIKey(id="key-1", user_id="alice", key_hash="h")
 
-    result = await ingest(
-        _db(None), [_record("dedup-0")], api_key=api_key, storage=cast(TelemetryStoragePort, storage)
-    )
+    result = await ingest(_db(None), [_record("dedup-0")], api_key=api_key, storage=cast(TelemetryStoragePort, storage))
 
     assert (result.accepted, result.rejected) == (0, 1)
     storage.record.assert_not_awaited()

@@ -131,6 +131,7 @@ class TestLifecycleWorkspaceId:
 _WORKSPACE = uuid.UUID("00000000-0000-4000-8000-00000000d3fa")
 _OTHER_WORKSPACE = uuid.UUID("00000000-0000-4000-8000-0000000007e5")
 
+
 class TestAuthorizeRecord:
     """`_authorize_record` runs *before* the batch's originating-organization
     credential is used to call the provider (see `_lifecycle_workspace_id`),

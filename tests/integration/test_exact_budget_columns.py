@@ -49,9 +49,7 @@ def test_a_budget_cap_above_the_column_ceiling_is_refused(
     )
 
 
-def test_the_only_cap_surface_is_the_one_that_is_bounded(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_the_only_cap_surface_is_the_one_that_is_bounded(client: TestClient, master_key_header: dict[str, str]) -> None:
     """A scoped ceiling names a budget rather than carrying its own limit, so
     the bound on ``/api/v1/budgets`` is the whole of the guard. Asserted rather than
     assumed: a future surface that reintroduced a cap field would need bounding

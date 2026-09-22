@@ -475,8 +475,10 @@ async def test_a_join_during_a_workspace_delete_leaves_no_orphaned_ceiling(
 
     # A positive control: the final assertion is a negative, and would pass on nothing at all.
     materialized = (
-        await async_db.execute(select(ScopedBudget).where(ScopedBudget.scope_type == "workspace_member"))
-    ).scalars().all()
+        (await async_db.execute(select(ScopedBudget).where(ScopedBudget.scope_type == "workspace_member")))
+        .scalars()
+        .all()
+    )
     assert len(materialized) == 1, "the default must have given the owner a ceiling before the delete"
 
     swept = asyncio.Event()
@@ -519,8 +521,10 @@ async def test_a_join_during_a_workspace_delete_leaves_no_orphaned_ceiling(
     await joining
 
     ceilings = (
-        await async_db.execute(select(ScopedBudget).where(ScopedBudget.scope_type == "workspace_member"))
-    ).scalars().all()
+        (await async_db.execute(select(ScopedBudget).where(ScopedBudget.scope_type == "workspace_member")))
+        .scalars()
+        .all()
+    )
     memberships = {
         str(member_id) for member_id in (await async_db.execute(select(col(WorkspaceMember.id)))).scalars().all()
     }

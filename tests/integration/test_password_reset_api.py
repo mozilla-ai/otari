@@ -47,11 +47,14 @@ def _extract_token(text: str) -> str:
 def _claimed_and_verified(
     client: TestClient, master_key_header: dict[str, str], caplog: pytest.LogCaptureFixture, *, email: str
 ) -> None:
-    assert client.post(
-        f"{API_ROOT}/organizations/me/members",
-        json={"email": email, "role": "member"},
-        headers=master_key_header,
-    ).status_code == 201
+    assert (
+        client.post(
+            f"{API_ROOT}/organizations/me/members",
+            json={"email": email, "role": "member"},
+            headers=master_key_header,
+        ).status_code
+        == 201
+    )
 
     signup = _with_logs(
         caplog, lambda: client.post(f"{API_ROOT}/auth/signup", json={"email": email, "password": PASSWORD})

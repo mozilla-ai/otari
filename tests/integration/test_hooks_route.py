@@ -413,7 +413,7 @@ def test_command_match_work_estimate_charges_a_shared_phrase_per_gate(
     """
     shared_phrase = " ".join(["a"] * 20)
     gates_yaml = "".join(
-        f'  - id: g{i}\n    type: command_match\n    enforcement: required\n'
+        f"  - id: g{i}\n    type: command_match\n    enforcement: required\n"
         f'    forbidden: ["{shared_phrase}"]\n    message: m\n'
         for i in range(50)
     )
@@ -818,9 +818,7 @@ def test_command_if_changed_oversized_workload_is_rejected(
     assert "match operations" in response.json()["detail"]
 
 
-def test_command_if_changed_defers_call_scoped_evidence(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_command_if_changed_defers_call_scoped_evidence(client: TestClient, master_key_header: dict[str, str]) -> None:
     """The default scope is one tool call, which cannot answer this gate.
 
     A PreToolUse call submits the path it is about to edit and its own
@@ -877,7 +875,6 @@ def test_command_match_does_not_judge_session_scoped_evidence(
     remaining check of the session over one command already run, with nothing
     left that could clear it.
     """
-
 
     def outcome_for(scope: str) -> str:
         response = client.post(
@@ -1058,9 +1055,7 @@ def test_judge_gate_with_when_changed_is_unknown_when_change_evidence_was_not_su
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _WHEN_CHANGED_JUDGE_POLICY,
-            "judge_results": [
-                {"gate_id": "follows-error-handling-pattern", "outcome": "pass", "reasoning": "fine"}
-            ],
+            "judge_results": [{"gate_id": "follows-error-handling-pattern", "outcome": "pass", "reasoning": "fine"}],
         },
         headers=master_key_header,
     )

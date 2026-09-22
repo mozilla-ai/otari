@@ -1094,10 +1094,13 @@ def test_adding_and_removing_a_workspace_member(
     )
     assert removed.status_code == 200, removed.text
     # Idempotent: removing a member who is already gone still succeeds.
-    assert client.delete(
-        f"{API_ROOT}/workspaces/{workspace['id']}/members/{user_id}",
-        headers=master_key_header,
-    ).status_code == 200
+    assert (
+        client.delete(
+            f"{API_ROOT}/workspaces/{workspace['id']}/members/{user_id}",
+            headers=master_key_header,
+        ).status_code
+        == 200
+    )
 
 
 def test_adding_the_same_member_twice_conflicts(

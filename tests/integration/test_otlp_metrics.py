@@ -43,9 +43,7 @@ def _agent_telemetry_inserts() -> Iterator[list[str]]:
     """
     statements: list[str] = []
 
-    def record(
-        conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, executemany: bool
-    ) -> None:
+    def record(conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, executemany: bool) -> None:
         if statement.lstrip().upper().startswith("INSERT INTO AGENT_TELEMETRY"):
             statements.append(statement)
 
@@ -250,9 +248,7 @@ def test_metrics_export_rejects_too_many_data_points(
         number_point(_POINT + index, 1, start=_START, **{"session.id": f"s-{index}"})
         for index in range(_MAX_METRIC_DATA_POINTS + 1)
     ]
-    response = client.post(
-        _PATH, json=metrics_export(sum_metric("claude_code.commit.count", *points)), headers=headers
-    )
+    response = client.post(_PATH, json=metrics_export(sum_metric("claude_code.commit.count", *points)), headers=headers)
 
     assert response.status_code == 413, response.text
     assert db_session.query(AgentTelemetry).count() == 0
@@ -284,9 +280,7 @@ def test_metrics_export_rejects_malformed_bodies(client: TestClient, master_key_
     )
     assert garbage.status_code == 400
 
-    not_json = client.post(
-        _PATH, content=b"{not json", headers={**key_headers, "Content-Type": "application/json"}
-    )
+    not_json = client.post(_PATH, content=b"{not json", headers={**key_headers, "Content-Type": "application/json"})
     assert not_json.status_code == 400
 
     unsupported = client.post(_PATH, content=b"hi", headers={**key_headers, "Content-Type": "text/plain"})

@@ -95,9 +95,7 @@ def _wire(
     async def _embed(text: str) -> list[float]:
         return list(query)
 
-    async def _load(
-        user_id: str, task_id: str | None, workspace_id: uuid.UUID | None = None
-    ) -> list[RoutingMemory]:
+    async def _load(user_id: str, task_id: str | None, workspace_id: uuid.UUID | None = None) -> list[RoutingMemory]:
         # `total` pads the record count without inventing neighbors, which is how
         # the seed gate and the sparse-neighborhood gate are tested separately.
         padding = [] if total is None else [_both_good()] * max(0, total - len(records))
@@ -618,9 +616,7 @@ async def test_an_aliased_candidate_matches_the_scores_taught_in_its_workspace(
     records = [_mem({"openai:gpt-3.5-turbo": 1.0}), _mem({"openai:gpt-3.5-turbo": 1.0})]
     _wire(backend, records, prices={_ALIAS: 1.0, STRONG: 10.0})
 
-    decision = await backend.rank(
-        _ctx(candidates=(_ALIAS, STRONG), default=STRONG, workspace_id=_WORKSPACE)
-    )
+    decision = await backend.rank(_ctx(candidates=(_ALIAS, STRONG), default=STRONG, workspace_id=_WORKSPACE))
 
     assert decision.ordered_models[0] == _ALIAS
     assert "no neighbor scored any candidate" not in decision.rationale

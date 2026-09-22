@@ -552,7 +552,7 @@ def test_a_price_aimed_at_a_user_scoped_policy_is_refused_without_naming_candida
 
 
 def test_a_static_policy_resolves_on_a_non_completion_endpoint(client: TestClient) -> None:
-    """"An alias is a one-target policy" has to be true everywhere, not just on
+    """ "An alias is a one-target policy" has to be true everywhere, not just on
     the completion routes, or the two concepts are not actually the same thing.
     """
     _create_user(client)
@@ -1011,12 +1011,9 @@ def test_policy_management_requires_the_master_key(client: TestClient) -> None:
     # Only an operator may decide which models a name reaches; otherwise a caller
     # could widen their own access by writing a policy.
     assert client.get(f"{API_ROOT}/routing/policies", headers=caller).status_code in (401, 403)
-    assert (
-        client.post(
-            f"{API_ROOT}/routing/policies", json={"name": "sneaky", "spec": _spec("openai:gpt-5-mini")}, headers=caller
-        ).status_code
-        in (401, 403)
-    )
+    assert client.post(
+        f"{API_ROOT}/routing/policies", json={"name": "sneaky", "spec": _spec("openai:gpt-5-mini")}, headers=caller
+    ).status_code in (401, 403)
 
 
 # ---------------------------------------------------------------------------
@@ -1232,9 +1229,7 @@ def guarded_client(routing_config: GatewayConfig) -> Generator[TestClient]:
                     "policies": {
                         "guarded": {
                             "select": [{"default": "openai:gpt-5-mini"}],
-                            "guardrails": [
-                                {"profile": "prompt-injection", "mode": "block", "on_unavailable": "block"}
-                            ],
+                            "guardrails": [{"profile": "prompt-injection", "mode": "block", "on_unavailable": "block"}],
                         }
                     }
                 }

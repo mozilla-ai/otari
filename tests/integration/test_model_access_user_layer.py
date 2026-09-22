@@ -48,9 +48,7 @@ def _seed_pricing(client: TestClient, headers: dict[str, str], model_key: str) -
 # --- user write API --------------------------------------------------------
 
 
-def test_user_allowed_models_round_trips_and_validates(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_user_allowed_models_round_trips_and_validates(client: TestClient, master_key_header: dict[str, str]) -> None:
     created = client.post(
         f"{API_ROOT}/users",
         json={"user_id": "u-rt", "allowed_models": ["openai:*", "openai:*"]},
@@ -113,9 +111,7 @@ def test_key_inherits_user_default_at_inference(client: TestClient, master_key_h
     assert "not permitted" in str(resp.json())
 
 
-def test_unrestricted_user_leaves_inheriting_key_open(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_unrestricted_user_leaves_inheriting_key_open(client: TestClient, master_key_header: dict[str, str]) -> None:
     _seed_pricing(client, master_key_header, ALLOWED)
     _seed_pricing(client, master_key_header, DENIED)
     _make_user(client, master_key_header, "u-open", None)
@@ -128,9 +124,7 @@ def test_unrestricted_user_leaves_inheriting_key_open(
 # --- narrow-only: subset-on-write for keys ---------------------------------
 
 
-def test_key_narrower_than_user_default_is_accepted(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_key_narrower_than_user_default_is_accepted(client: TestClient, master_key_header: dict[str, str]) -> None:
     _make_user(client, master_key_header, "u-narrow", ["openai:*"])
     resp = client.post(
         f"{API_ROOT}/keys",

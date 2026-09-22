@@ -433,7 +433,7 @@ def test_prices_compare_at_the_tier_a_request_size_settles_at(
 def test_the_catalog_names_the_short_spellings_the_gateway_accepts(
     priced: TestClient, master_header: dict[str, str]
 ) -> None:
-    """After the index is built, a row says its short selector and the model says its slug resolves."""
+    """After the index is built, a row says its pinned spelling and the model says its id resolves."""
     from typing import cast
 
     from fastapi import FastAPI
@@ -449,16 +449,20 @@ def test_the_catalog_names_the_short_spellings_the_gateway_accepts(
         assert rebuilt.json()["models"] >= 1
         detail = _get(priced, f"{API_ROOT}/catalog/models/z-ai/glm-5.3", headers=master_header)
         by_selector = {offering["selector"]: offering for offering in detail["offerings"]}
-        assert by_selector[_NEBIUS_GLM]["short_selector"] == "nebius:glm-5.3"
-        assert by_selector[_FIREWORKS_GLM]["short_selector"] == "fireworks:glm-5.3"
+        assert by_selector[_NEBIUS_GLM]["short_selector"] == "nebius:z-ai/glm-5.3"
+        assert by_selector[_FIREWORKS_GLM]["short_selector"] == "fireworks:z-ai/glm-5.3"
         # Nebius is the cheaper of the two, so the slug lands there.
         assert detail["selector"] == "z-ai/glm-5.3"
         assert detail["resolves_to"] == _NEBIUS_GLM
 
         resolved = resolve_provider_selector(config, "z-ai/glm-5.3")
         assert (resolved.instance, resolved.model, resolved.alias) == ("nebius", "zai-org/GLM-5.3", "z-ai/glm-5.3")
-        short = resolve_provider_selector(config, "fireworks:glm-5.3")
-        assert short.model == "accounts/fireworks/models/glm-5p3"
+        pinned = resolve_provider_selector(config, "fireworks:z-ai/glm-5.3")
+        assert (pinned.instance, pinned.model, pinned.alias) == (
+            "fireworks",
+            "accounts/fireworks/models/glm-5p3",
+            "fireworks:z-ai/glm-5.3",
+        )
     finally:
         selectors.reset_selector_index()
 

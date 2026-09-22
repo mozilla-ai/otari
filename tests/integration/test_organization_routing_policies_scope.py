@@ -220,9 +220,7 @@ def test_a_member_reads_only_the_workspaces_they_belong_to(client: TestClient, w
     assert listed.isdisjoint(_BETA_POLICIES)
 
 
-def test_a_member_of_no_workspace_reads_no_stored_rows_rather_than_a_refusal(
-    client: TestClient, world: _World
-) -> None:
+def test_a_member_of_no_workspace_reads_no_stored_rows_rather_than_a_refusal(client: TestClient, world: _World) -> None:
     """Nothing was refused; no stored policy is theirs to see yet."""
     code, body = _as(client, world, "alpha_newcomer")
     assert code == status.HTTP_200_OK, body

@@ -240,9 +240,7 @@ def test_moderations_logs_usage(
     usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200
     logs = usage_resp.json()
-    moderation_logs = [
-        log for log in logs if log["endpoint"] == "/v1/moderations" and log["status"] == "success"
-    ]
+    moderation_logs = [log for log in logs if log["endpoint"] == "/v1/moderations" and log["status"] == "success"]
     assert len(moderation_logs) >= 1
     latest = moderation_logs[-1]
     assert latest["prompt_tokens"] is None
@@ -348,9 +346,7 @@ def test_moderations_cost_tracked_with_pricing(
 
     usage_resp = client.get(f"{API_ROOT}/users/{user_id}/usage", headers=master_key_header)
     logs = usage_resp.json()
-    moderation_logs = [
-        log for log in logs if log["endpoint"] == "/v1/moderations" and log["status"] == "success"
-    ]
+    moderation_logs = [log for log in logs if log["endpoint"] == "/v1/moderations" and log["status"] == "success"]
     assert len(moderation_logs) >= 1
     latest = moderation_logs[-1]
     assert latest["cost"] is not None

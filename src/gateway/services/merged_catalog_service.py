@@ -186,9 +186,7 @@ def model_from_pricing(pricing: ModelPricing) -> ModelObject:
     )
 
 
-def alias_model(
-    config: GatewayConfig, alias: str, target: str, pricing_lookup: dict[str, ModelPricing]
-) -> ModelObject:
+def alias_model(config: GatewayConfig, alias: str, target: str, pricing_lookup: dict[str, ModelPricing]) -> ModelObject:
     """Build a ModelObject for an alias, from config.yml or from storage.
 
     The alias id is what the caller sees; pricing is looked up from the resolved
@@ -203,9 +201,7 @@ def alias_model(
         id=alias,
         created=0,
         owned_by=ALIAS_OWNED_BY,
-        pricing=pricing_info(pricing)
-        if pricing
-        else None,
+        pricing=pricing_info(pricing) if pricing else None,
         pricing_source="configured" if pricing else "none",
         # From the resolved target, like pricing: an alias's display name is not a
         # model the dataset knows. Exposing the window does not reveal the target.
@@ -417,6 +413,7 @@ async def catalog_scope(
     session_identity: TenancyUser | None,
     anonymous: bool = False,
     model_provider: ModelProviderPort | None,
+    include_offered: bool = True,
 ) -> CatalogScope:
     """Returns what this caller may be shown, by how they authenticated.
 
@@ -425,6 +422,9 @@ async def catalog_scope(
     Any other session gets what its organization can reach,
     and the workspace-scoped rows only for workspaces it may see.
     A visitor to the public catalog gets the configured instances alone.
+    ``include_offered=False`` leaves out the organization's offered models, for
+    the deployment-wide view the selector index is built from, which reads every
+    organization's offerings separately.
     """
     # A visitor, while the catalog is public: the deployment's configured
     # instances and nothing that belongs to a tenant. Not a member of anything,
@@ -448,14 +448,14 @@ async def catalog_scope(
                 allowlist=None,
                 reads_workspace_layer=True,
                 deployment_supplied_providers=frozenset(),
-                offered_keys=await _operator_offered_keys(db, session_identity),
+                offered_keys=await _operator_offered_keys(db, session_identity) if include_offered else frozenset(),
             )
         scope = await resolve_session_catalog_scope(db, config, user=session_identity, model_provider=model_provider)
         return CatalogScope(
             allowlist=scope.allowlist,
             reads_workspace_layer=scope.reads_default_workspace,
             deployment_supplied_providers=scope.deployment_supplied_providers,
-            offered_keys=scope.offered_keys,
+            offered_keys=scope.offered_keys if include_offered else frozenset(),
         )
     api_key, is_master_key = auth
     # An API key's hosted models stay unflagged, because this does not resolve the key's organization.
@@ -468,7 +468,9 @@ async def catalog_scope(
         # key names its own workspace, and what that workspace's organization
         # offers is what it may be shown.
         offered_keys=(
-            await resolve_default_workspace_offered_keys(db)
+            frozenset()
+            if not include_offered
+            else await resolve_default_workspace_offered_keys(db)
             if is_master_key
             else await resolve_workspace_offered_keys(db, api_key.workspace_id if api_key else None)
         ),
@@ -501,6 +503,7 @@ async def build_merged_catalog(
     anonymous: bool = False,
     cached_only: bool = False,
     model_provider: ModelProviderPort | None,
+    include_offered: bool = True,
 ) -> MergedCatalog:
     """Merge discovery, stored prices, defaults, aliases and policies for one caller.
 
@@ -510,7 +513,9 @@ async def build_merged_catalog(
     ``cached_only`` builds the view without dialing any provider, for a caller
     that runs off the request path; see :func:`discover_all_models`.
 
-    Passing ``None`` as ``model_provider`` lists no hosted providers.
+    Passing ``None`` as ``model_provider`` lists no hosted providers, and
+    ``include_offered=False`` leaves out the caller's organization's offered
+    models; both are what the selector index's deployment-wide build wants.
     """
     # Aliases are scoped, so the catalog is too: a caller sees their workspace's
     # aliases and the configured ones, plus their own user-scoped layer, never
@@ -523,7 +528,13 @@ async def build_merged_catalog(
     # are filtered: it decides whether the workspace-scoped rows may be read at
     # all, which no filter over targets can decide afterwards.
     scope = await catalog_scope(
-        db, config, auth=auth, session_identity=session_identity, anonymous=anonymous, model_provider=model_provider
+        db,
+        config,
+        auth=auth,
+        session_identity=session_identity,
+        anonymous=anonymous,
+        model_provider=model_provider,
+        include_offered=include_offered,
     )
     pricing_map = await get_pricing_map(db, provider_filter=provider)
     # Snapshot before phase 1 mutates ``pricing_map`` (it pops matched keys), so
@@ -599,9 +610,7 @@ async def build_merged_catalog(
                 id=model_key,
                 created=created_timestamp(model),
                 owned_by=provider_name,
-                pricing=pricing_info(pricing)
-                if pricing
-                else None,
+                pricing=pricing_info(pricing) if pricing else None,
                 pricing_source="configured" if pricing else "none",
                 context_window=context_window_for_key(model_key),
             )
@@ -708,8 +717,6 @@ async def build_merged_catalog(
         dynamic_policies=dynamic_policies,
         discovered_keys=discovered_keys,
     )
-
-
 
 
 class ViewerPrice(NamedTuple):

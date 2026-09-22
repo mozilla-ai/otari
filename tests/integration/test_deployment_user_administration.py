@@ -149,9 +149,7 @@ def test_the_list_carries_every_identity_with_its_organizations(
     # Never signed in, which is null rather than a timestamp: the column exists
     # so this stays distinguishable from "signed in before the sessions expired".
     assert member["last_sign_in_at"] is None
-    assert [organization["organization_id"] for organization in member["organizations"]] == [
-        str(organization_id)
-    ]
+    assert [organization["organization_id"] for organization in member["organizations"]] == [str(organization_id)]
     assert member["organizations"][0]["role"] == "member"
     assert member["organizations"][0]["status"] == "active"
 
@@ -239,9 +237,7 @@ def test_deactivating_an_account_ends_its_dashboard_sessions(
     assert response.json()["is_active"] is False
     session = db_session_factory()
     try:
-        remaining = (
-            session.query(DashboardSession).filter(col(DashboardSession.user_id) == member_id).count()
-        )
+        remaining = session.query(DashboardSession).filter(col(DashboardSession.user_id) == member_id).count()
     finally:
         session.close()
     # Ended now rather than refused the next time the cookie is presented, so

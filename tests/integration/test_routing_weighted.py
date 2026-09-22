@@ -257,9 +257,7 @@ def test_the_split_never_dispatches_a_candidate_the_key_forbids(client: TestClie
     key = resp.json()["key"]
 
     for _ in range(8):
-        served, calls = _chat(
-            client, "balanced", headers={API_KEY_HEADER: f"Bearer {key}"}
-        )
+        served, calls = _chat(client, "balanced", headers={API_KEY_HEADER: f"Bearer {key}"})
         assert served.status_code == 200, served.text
         assert calls[0] == LIGHT
 

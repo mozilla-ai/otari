@@ -477,9 +477,7 @@ def test_search_is_not_registered_in_hybrid_mode(monkeypatch: pytest.MonkeyPatch
         reset_db()
 
 
-def test_search_is_tracked_while_its_provider_call_runs(
-    client: TestClient, api_key_header: dict[str, str]
-) -> None:
+def test_search_is_tracked_while_its_provider_call_runs(client: TestClient, api_key_header: dict[str, str]) -> None:
     """A search is registered in flight during its provider call and gone after.
 
     A search provider can take as long as a local model, so the live view has to

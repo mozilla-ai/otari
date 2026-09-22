@@ -163,9 +163,7 @@ def test_the_history_keeps_only_the_newest_snapshots(
         refresh.reset_price_refresh_state()
 
 
-def test_drift_puts_a_stored_rate_beside_todays_default(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_drift_puts_a_stored_rate_beside_todays_default(client: TestClient, master_key_header: dict[str, str]) -> None:
     turned_on = client.patch(f"{API_ROOT}/settings", json={"default_pricing": True}, headers=master_key_header)
     assert turned_on.status_code == 200, turned_on.text
     try:

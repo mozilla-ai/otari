@@ -175,9 +175,7 @@ def test_summing_settled_costs_is_exact(test_db: Session) -> None:
         (Decimal("0.0000025"), Decimal("0.000003")),
     ],
 )
-def test_a_cost_below_the_column_scale_settles_half_up(
-    test_db: Session, written: Decimal, stored: Decimal
-) -> None:
+def test_a_cost_below_the_column_scale_settles_half_up(test_db: Session, written: Decimal, stored: Decimal) -> None:
     """What lands in the column when an amount has more precision than it holds.
 
     This pins the rule, not who applies it. PostgreSQL rounds a numeric tie away
@@ -237,9 +235,7 @@ def test_the_rate_checks_still_refuse_a_negative_rate_after_the_conversion(test_
     test_db.flush()
 
 
-def test_the_migration_round_trips_on_postgresql_with_rows_in_the_table(
-    test_db: Session, postgres_url: str
-) -> None:
+def test_the_migration_round_trips_on_postgresql_with_rows_in_the_table(test_db: Session, postgres_url: str) -> None:
     """Downgrade and upgrade again, with data, on the engine CI actually migrates.
 
     The SQLite half of the chain is covered by

@@ -1119,9 +1119,7 @@ def test_stop_event_parses_a_verdict_wrapped_in_a_markdown_code_fence(
     ]
 
 
-def test_stop_event_reports_error_when_claude_is_not_on_path(
-    monkeypatch: pytest.MonkeyPatch, judge_repo: Path
-) -> None:
+def test_stop_event_reports_error_when_claude_is_not_on_path(monkeypatch: pytest.MonkeyPatch, judge_repo: Path) -> None:
     monkeypatch.setattr(subprocess, "run", _git_status_and_diff_run())
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
@@ -1691,9 +1689,7 @@ def test_stop_event_with_a_non_utf8_diff_still_blocks_a_required_gate(
     assert sorted(captured["json"]["changed_paths"]) == [".otari-gates.yml", "CHANGELOG.md", "src/gateway/latin.py"]
 
 
-def test_a_policy_with_no_judge_gates_submits_no_judge_results(
-    monkeypatch: pytest.MonkeyPatch, repo: Path
-) -> None:
+def test_a_policy_with_no_judge_gates_submits_no_judge_results(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     """`repo`'s policy (`_GATES_YAML`) declares no gates at all, so no `claude`
     call should ever be attempted.
     """
@@ -1722,9 +1718,7 @@ def test_a_policy_with_no_judge_gates_submits_no_judge_results(
     assert captured["json"]["judge_results"] == []
 
 
-def test_stop_event_caps_the_number_of_judge_gates_evaluated(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_stop_event_caps_the_number_of_judge_gates_evaluated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Each judge gate costs one sequential model call, unlike the other gate
 
     types' near-instant pattern matching, so an unbounded gate count would mean
@@ -1735,8 +1729,7 @@ def test_stop_event_caps_the_number_of_judge_gates_evaluated(
     (tmp_path / ".git").mkdir()
     gate_count = gateway_cli._HOOK_JUDGE_MAX_GATES_PER_RUN + 2
     gates_yaml = "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n" + "".join(
-        f"  - id: judge-{i}\n    type: judge\n    enforcement: advisory\n"
-        f"    rubric: r{i}\n    message: m{i}\n"
+        f"  - id: judge-{i}\n    type: judge\n    enforcement: advisory\n    rubric: r{i}\n    message: m{i}\n"
         for i in range(gate_count)
     )
     (tmp_path / ".otari-gates.yml").write_text(gates_yaml, encoding="utf-8")
@@ -1958,9 +1951,7 @@ def test_advisory_only_failure_warns_without_blocking(monkeypatch: pytest.Monkey
     assert "advisory" in stdout_payload["systemMessage"].lower()
 
 
-def test_advisory_warning_includes_the_judge_models_own_reasoning(
-    monkeypatch: pytest.MonkeyPatch, repo: Path
-) -> None:
+def test_advisory_warning_includes_the_judge_models_own_reasoning(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     """`message` is the gate's own fixed policy text, the same for every failure;
 
     `detail` is what a judge model actually found (`evaluate_judge`'s own
@@ -2110,18 +2101,14 @@ def _write_verifier(tmp_path: Path, name: str, body: str) -> Path:
 def test_hook_run_check_verifier_passes_on_real_exit_zero(tmp_path: Path) -> None:
     """No mocking: a real script, run as a real subprocess, exiting 0."""
     _write_verifier(tmp_path, "v.sh", "exit 0")
-    outcome, detail = gateway_cli._hook_run_check_verifier(
-        tmp_path, "v.sh", deadline=time.monotonic() + 10
-    )
+    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
     assert outcome == "pass"
     assert detail == ""
 
 
 def test_hook_run_check_verifier_fails_on_real_exit_one_and_captures_stdout(tmp_path: Path) -> None:
     _write_verifier(tmp_path, "v.sh", 'echo "conflicted.txt:2"\nexit 1')
-    outcome, detail = gateway_cli._hook_run_check_verifier(
-        tmp_path, "v.sh", deadline=time.monotonic() + 10
-    )
+    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
     assert outcome == "fail"
     assert detail == "conflicted.txt:2\n"
 
@@ -2129,9 +2116,7 @@ def test_hook_run_check_verifier_fails_on_real_exit_one_and_captures_stdout(tmp_
 @pytest.mark.parametrize("exit_code", [2, 7, 255])
 def test_hook_run_check_verifier_errors_on_other_exit_codes(tmp_path: Path, exit_code: int) -> None:
     _write_verifier(tmp_path, "v.sh", f"exit {exit_code}")
-    outcome, _detail = gateway_cli._hook_run_check_verifier(
-        tmp_path, "v.sh", deadline=time.monotonic() + 10
-    )
+    outcome, _detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
     assert outcome == "error"
 
 
@@ -2303,9 +2288,7 @@ def test_stop_event_submits_a_check_verdict_from_the_verifier_script(
     ]
 
 
-def test_stop_event_submits_a_failing_check_verdict_and_blocks(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_stop_event_submits_a_failing_check_verdict_and_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     _write_verifier(tmp_path, "verify.sh", 'echo "conflicted.txt:2"\nexit 1')
     (tmp_path / ".otari-gates.yml").write_text(

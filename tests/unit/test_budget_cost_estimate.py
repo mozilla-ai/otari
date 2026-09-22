@@ -158,9 +158,7 @@ def test_estimate_tokens_is_clamped_by_the_reserve_path_not_here() -> None:
     an enormous figure reaches here honestly and ``reserve_budget`` clamps it to
     ``MAX_COUNT_LIMIT`` before it can be added to a BIGINT counter.
     """
-    asked = estimate_tokens(
-        prompt_chars=0, max_output_tokens=10**18, default_output_tokens=4_096
-    )
+    asked = estimate_tokens(prompt_chars=0, max_output_tokens=10**18, default_output_tokens=4_096)
 
     assert asked == 10**18
     assert min(asked, MAX_COUNT_LIMIT) == MAX_COUNT_LIMIT

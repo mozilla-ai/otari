@@ -37,9 +37,7 @@ def test_config_override_wins_with_provider_model_key() -> None:
 def test_config_override_accepts_colon_separator() -> None:
     # Users write model selectors and pricing keys with a colon, so the colon
     # form must match too — not just the slash form.
-    config = GatewayConfig(
-        model_capabilities={"ollama:qwen2-vl": ModelCapabilityConfig(supports_image=True)}
-    )
+    config = GatewayConfig(model_capabilities={"ollama:qwen2-vl": ModelCapabilityConfig(supports_image=True)})
     caps = resolve_capabilities(config, LLMProvider.OLLAMA, "qwen2-vl")
     assert caps.source == "config"
     assert caps.image is True

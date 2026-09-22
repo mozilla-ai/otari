@@ -124,8 +124,12 @@ export function UseModelDrawer({
                           per 1M in
                         </>
                       ) : null}
-                      . Pick a provider to pin one instead; its selector is what
-                      you send then.
+                      . Pick a provider to pin one instead and send its
+                      selector, which is the provider and this id:{" "}
+                      <code className="text-mono-caption">
+                        provider:{model.id}
+                      </code>
+                      .
                     </>
                   ) : (
                     <>

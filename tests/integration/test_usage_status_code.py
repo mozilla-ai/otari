@@ -51,9 +51,7 @@ def _upstream_succeeds() -> Iterator[None]:
         object="chat.completion",
         created=0,
         model=_MODEL,
-        choices=[
-            Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hi"), finish_reason="stop")
-        ],
+        choices=[Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hi"), finish_reason="stop")],
         usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
     )
     with patch("gateway.api.routes.chat.acompletion", new_callable=AsyncMock, return_value=response):
@@ -191,9 +189,7 @@ def test_status_code_filters_the_list_and_the_count(
     assert len(rows) == 2
     assert {row["status_code"] for row in rows} == {429}
 
-    count = client.get(
-        f"{API_ROOT}/usage/count", params={"status_code": 429}, headers=master_key_header
-    ).json()
+    count = client.get(f"{API_ROOT}/usage/count", params={"status_code": 429}, headers=master_key_header).json()
     assert count["total"] == 2
 
 
@@ -268,9 +264,7 @@ def test_summary_taxonomy_excludes_successful_requests(
 
     summary = client.get(f"{API_ROOT}/usage/summary", headers=master_key_header).json()
     assert summary["totals"]["request_count"] == 2
-    assert summary["errors_by_status_code"] == [
-        {"status_code": 429, "error_class": "rate_limit", "requests": 1}
-    ]
+    assert summary["errors_by_status_code"] == [{"status_code": 429, "error_class": "rate_limit", "requests": 1}]
 
 
 def test_bare_status_code_filter_returns_only_failures(
@@ -372,9 +366,7 @@ def test_batch_create_failure_records_the_upstream_status(
     assert rows[0]["status_code"] == 503
     # And it reaches the taxonomy as a provider fault rather than as "unknown".
     summary = client.get(f"{API_ROOT}/usage/summary", headers=master_key_header).json()
-    assert summary["errors_by_status_code"] == [
-        {"status_code": 503, "error_class": "provider_error", "requests": 1}
-    ]
+    assert summary["errors_by_status_code"] == [{"status_code": 503, "error_class": "provider_error", "requests": 1}]
 
 
 def _one_error_row(client: TestClient, master_key_header: dict[str, str]) -> dict[str, Any]:
@@ -489,9 +481,7 @@ def test_passthrough_allow_list_rejection_records_its_403(
 ) -> None:
     """The pass-through allow-list gate refunds and then records its 403."""
     _make_user(client, master_key_header, "scoped-embedder")
-    key = _make_key(
-        client, master_key_header, "scoped-embed", user_id="scoped-embedder", allowed_models=["cohere:*"]
-    )
+    key = _make_key(client, master_key_header, "scoped-embed", user_id="scoped-embedder", allowed_models=["cohere:*"])
 
     assert _embeddings(client, key, "openai:text-embedding-3-small") == 403
 

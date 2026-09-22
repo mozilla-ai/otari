@@ -66,9 +66,7 @@ def _send_rerank(
     )
 
 
-def _send_images(
-    client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:dall-e-3"
-) -> Response:
+def _send_images(client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:dall-e-3") -> Response:
     return client.post(
         f"{API_ROOT}/images/generations",
         json={"model": model, "prompt": "a red bicycle", "user": user_id},
@@ -87,9 +85,7 @@ def _send_transcription(
     )
 
 
-def _send_speech(
-    client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:tts-1"
-) -> Response:
+def _send_speech(client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:tts-1") -> Response:
     return client.post(
         f"{API_ROOT}/audio/speech",
         json={"model": model, "input": "hello world", "voice": "alloy", "user": user_id},

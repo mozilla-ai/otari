@@ -170,9 +170,7 @@ def test_accepting_mints_the_attribution_user_so_the_member_can_own_a_key(
     ``attribution_user_id`` and no key of their own possible.
     """
     result = _invite(client, master_key_header, email="nadia@example.com")
-    accept = client.post(
-        f"{API_ROOT}/invitations/accept", json={"token": _token_from(result["accept_link"])}
-    )
+    accept = client.post(f"{API_ROOT}/invitations/accept", json={"token": _token_from(result["accept_link"])})
     assert accept.status_code == 200, accept.text
 
     row = _roster_row(client, master_key_header, "nadia@example.com")
@@ -202,12 +200,8 @@ def test_a_workspace_deleted_after_invite_but_before_accept_still_lets_the_invit
     active member missing just that one grant, which an operator can restore
     from the workspace roster once they notice.
     """
-    created = client.post(
-        f"{API_ROOT}/workspaces", json={"name": "Temporary"}, headers=master_key_header
-    ).json()
-    kept = client.post(
-        f"{API_ROOT}/workspaces", json={"name": "Kept"}, headers=master_key_header
-    ).json()
+    created = client.post(f"{API_ROOT}/workspaces", json={"name": "Temporary"}, headers=master_key_header).json()
+    kept = client.post(f"{API_ROOT}/workspaces", json={"name": "Kept"}, headers=master_key_header).json()
 
     result = _invite(
         client,

@@ -142,10 +142,7 @@ def test_an_insert_written_before_these_columns_still_works(
 
     with engine.begin() as connection:
         connection.execute(
-            text(
-                "INSERT INTO budgets (budget_id, max_budget, created_at, updated_at) "
-                "VALUES ('b2', 5.0, :n, :n)"
-            ),
+            text("INSERT INTO budgets (budget_id, max_budget, created_at, updated_at) VALUES ('b2', 5.0, :n, :n)"),
             {"n": _NOW},
         )
         connection.execute(

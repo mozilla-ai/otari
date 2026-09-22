@@ -43,9 +43,7 @@ def test_manifest_is_well_formed(manifest: tuple[set[str], set[str]]) -> None:
     assert not overlap, f"endpoints listed in both sections: {overlap}"
 
 
-def test_spec_endpoints_are_accounted_for(
-    manifest: tuple[set[str], set[str]], endpoints: set[str]
-) -> None:
+def test_spec_endpoints_are_accounted_for(manifest: tuple[set[str], set[str]], endpoints: set[str]) -> None:
     covered, excluded = manifest
     missing = em.unaccounted(endpoints, covered, excluded)
     assert not missing, (
@@ -57,9 +55,7 @@ def test_spec_endpoints_are_accounted_for(
     )
 
 
-def test_manifest_has_no_stale_entries(
-    manifest: tuple[set[str], set[str]], endpoints: set[str]
-) -> None:
+def test_manifest_has_no_stale_entries(manifest: tuple[set[str], set[str]], endpoints: set[str]) -> None:
     """A manifest entry the spec no longer exposes is a leftover, not a deferral.
 
     Unlike the old per-SDK check, the manifest and the spec are in the same

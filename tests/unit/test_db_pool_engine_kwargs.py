@@ -73,9 +73,7 @@ def test_timeouts_are_individually_disablable() -> None:
 def test_existing_server_settings_are_preserved() -> None:
     # A deployment that already passes server settings through its URL keeps
     # them, and its own statement_timeout wins over the configured default.
-    connect_args: dict[str, Any] = {
-        "server_settings": {"application_name": "otari", "statement_timeout": "5000"}
-    }
+    connect_args: dict[str, Any] = {"server_settings": {"application_name": "otari", "statement_timeout": "5000"}}
     args = engine_kwargs(GatewayConfig(), connect_args=connect_args, is_sqlite=False)["connect_args"]
     assert args["server_settings"]["application_name"] == "otari"
     assert args["server_settings"]["statement_timeout"] == "5000"
@@ -86,9 +84,7 @@ def test_the_callers_connect_args_are_never_mutated() -> None:
     # reference by the time the second is built.
     connect_args: dict[str, Any] = {"ssl": "require"}
     first = engine_kwargs(GatewayConfig(), connect_args=connect_args, is_sqlite=False)
-    second = engine_kwargs(
-        GatewayConfig(), connect_args=connect_args, is_sqlite=False, pool_size=5, max_overflow=0
-    )
+    second = engine_kwargs(GatewayConfig(), connect_args=connect_args, is_sqlite=False, pool_size=5, max_overflow=0)
     assert connect_args == {"ssl": "require"}
     assert first["connect_args"] is not second["connect_args"]
     assert first["connect_args"] is not connect_args
@@ -107,8 +103,6 @@ def test_secondary_pool_overrides_the_request_pool_sizes() -> None:
     # What the usage-log writer's engine asks for: a few reserved connections
     # and no overflow, so metering cannot be starved by request traffic and
     # cannot burst against it either.
-    kwargs = engine_kwargs(
-        GatewayConfig(), connect_args={}, is_sqlite=False, pool_size=5, max_overflow=0
-    )
+    kwargs = engine_kwargs(GatewayConfig(), connect_args={}, is_sqlite=False, pool_size=5, max_overflow=0)
     assert kwargs["pool_size"] == 5
     assert kwargs["max_overflow"] == 0

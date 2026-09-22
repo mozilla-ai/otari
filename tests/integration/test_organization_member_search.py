@@ -21,9 +21,7 @@ _ENDPOINT = f"{API_ROOT}/organizations/me/members"
 
 
 async def _organization(db: AsyncSession, *, slug: str) -> Organization:
-    return await OrganizationRepository(db).create_organization(
-        name=slug.title(), slug=slug, created_by_user_id=None
-    )
+    return await OrganizationRepository(db).create_organization(name=slug.title(), slug=slug, created_by_user_id=None)
 
 
 async def _member(
@@ -120,9 +118,7 @@ async def test_a_match_past_the_first_page_is_still_found(async_db: AsyncSession
     await _member(async_db, organization, full_name="Zzz Grace Hopper")
 
     unsearched = await _service(async_db).list_active_organization_members_for_user(user=caller, limit=10)
-    searched = await _service(async_db).list_active_organization_members_for_user(
-        user=caller, limit=10, search="grace"
-    )
+    searched = await _service(async_db).list_active_organization_members_for_user(user=caller, limit=10, search="grace")
 
     assert not any("Grace" in (row.full_name or "") for row in unsearched.data)
     assert [row.full_name for row in searched.data] == ["Zzz Grace Hopper"]

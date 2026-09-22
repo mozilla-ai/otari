@@ -209,9 +209,7 @@ async def test_creating_a_server_locks_the_workspace(async_db: AsyncSession, mon
         await original(self, workspace_id)
 
     monkeypatch.setattr(WorkspaceRepository, "lock", recording_lock)
-    await WorkspaceMcpServerService(async_db).create_server(
-        user=owner, workspace_id=workspace.id, request=_create()
-    )
+    await WorkspaceMcpServerService(async_db).create_server(user=owner, workspace_id=workspace.id, request=_create())
 
     assert locked == [workspace.id]
 
@@ -562,9 +560,7 @@ async def test_resolve_skips_a_disabled_server(async_db: AsyncSession) -> None:
     workspace = await _workspace(async_db, organization, owner=owner)
     service = WorkspaceMcpServerService(async_db)
 
-    created = await service.create_server(
-        user=owner, workspace_id=workspace.id, request=_create(enabled=False)
-    )
+    created = await service.create_server(user=owner, workspace_id=workspace.id, request=_create(enabled=False))
 
     assert await resolve_workspace_mcp_servers(async_db, workspace_id=workspace.id, server_ids=[created.id]) == []
 

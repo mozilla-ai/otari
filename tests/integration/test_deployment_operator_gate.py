@@ -153,9 +153,7 @@ def _session_for(
         session.add(user)
         session.commit()
         session.refresh(user)
-        session.add(
-            OrganizationMember(organization_id=organization_id, user_id=user.id, role=role, status="active")
-        )
+        session.add(OrganizationMember(organization_id=organization_id, user_id=user.id, role=role, status="active"))
         token = f"otari-sess-{email}"
         session.add(
             DashboardSession(

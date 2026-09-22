@@ -189,7 +189,6 @@ def test_passkeys_ready_turns_on_with_an_address_alone(tmp_path: Path) -> None:
         assert "passkey" not in answered["sign_in_methods"]
 
 
-
 def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Path) -> None:
     """What the dashboard gates a mail-dependent affordance on.
 
@@ -283,7 +282,6 @@ def test_every_surface_names_a_route_the_gateway_mounts(
         assert any(path.startswith(prefix) for path in mounted), f"surface {surface!r} names no mounted /api/v1/ route"
 
 
-
 def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_one(tmp_path: Path) -> None:
     """The whole point of the hosted surface set, in the rows that differ.
 
@@ -327,7 +325,6 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     }
 
 
-
 def test_hosted_publishes_the_playground_once_it_knows_its_data_plane(tmp_path: Path) -> None:
     """The other half of the row above, and the only surface configuration decides.
 
@@ -350,6 +347,7 @@ def test_hosted_publishes_the_playground_once_it_knows_its_data_plane(tmp_path: 
         "providers",
     }
 
+
 def test_hosted_answers_everything_below_the_edition_the_way_standalone_does(tmp_path: Path) -> None:
     """Hosted mode is standalone's multi-tenant sibling, not a third data plane.
 
@@ -370,7 +368,6 @@ def test_hosted_answers_everything_below_the_edition_the_way_standalone_does(tmp
 
     differ = {key for key in standalone if standalone[key] != hosted[key]}
     assert differ == {"deployment_type", "surfaces"}
-
 
 
 def test_hosted_mode_refuses_a_platform_token(tmp_path: Path) -> None:
@@ -426,7 +423,6 @@ def test_hybrid_bootstrap_leaks_no_secret(monkeypatch: pytest.MonkeyPatch) -> No
     assert PLATFORM_TOKEN not in body
 
 
-
 def test_management_url_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
     """An operator on a staging platform links at that platform, not otari.ai."""
     monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
@@ -436,7 +432,6 @@ def test_management_url_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None
         response = client.get(f"{API_ROOT}/bootstrap")
 
     assert response.json()["management_url"] == "https://staging.otari.example/"
-
 
 
 @pytest.mark.parametrize("configured", ["javascript:alert(1)", "otari.ai", ""])
@@ -459,7 +454,6 @@ def test_a_management_url_that_is_not_an_http_link_fails_at_startup(
             assert client.get(f"{API_ROOT}/bootstrap").json()["management_url"] == "https://otari.ai"
 
 
-
 def test_a_deployment_with_no_docs_url_points_at_the_bundled_guide(tmp_path: Path) -> None:
     """Null is the answer the dashboard reads as "use the bundled guide", not a missing field."""
     app = create_app(_standalone(tmp_path))
@@ -468,7 +462,6 @@ def test_a_deployment_with_no_docs_url_points_at_the_bundled_guide(tmp_path: Pat
         response = client.get(f"{API_ROOT}/bootstrap")
 
     assert response.json()["docs_url"] is None
-
 
 
 def test_docs_url_is_published_to_a_standalone_dashboard(tmp_path: Path) -> None:
@@ -486,7 +479,6 @@ def test_docs_url_is_published_to_a_standalone_dashboard(tmp_path: Path) -> None
     assert response.json()["docs_url"] == "https://docs.otari.ai/en/"
 
 
-
 def test_a_hybrid_gateway_carries_the_hosted_docs_link_too(monkeypatch: pytest.MonkeyPatch) -> None:
     """The setting is deployment-wide, not standalone-only.
 
@@ -500,7 +492,6 @@ def test_a_hybrid_gateway_carries_the_hosted_docs_link_too(monkeypatch: pytest.M
         response = client.get(f"{API_ROOT}/bootstrap")
 
     assert response.json()["docs_url"] == "https://docs.otari.ai/en/"
-
 
 
 def test_docs_url_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -544,7 +535,6 @@ def test_a_deployment_with_no_legal_urls_leaves_the_account_menu_as_it_was(tmp_p
     assert body["privacy_url"] is None
 
 
-
 def test_a_hosted_deployment_publishes_the_legal_pages_on_its_own_site(tmp_path: Path) -> None:
     """otari-ai#1945: the privacy notice needs a home the composed dashboard can reach.
 
@@ -569,7 +559,6 @@ def test_a_hosted_deployment_publishes_the_legal_pages_on_its_own_site(tmp_path:
     assert body["privacy_url"] == "https://otari.ai/privacy"
 
 
-
 def test_a_hybrid_gateway_carries_its_own_legal_pages_too(monkeypatch: pytest.MonkeyPatch) -> None:
     """Deployment-wide, like ``docs_url``: whoever runs the gateway may have terms of their own."""
     monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
@@ -580,7 +569,6 @@ def test_a_hybrid_gateway_carries_its_own_legal_pages_too(monkeypatch: pytest.Mo
 
     assert body["terms_url"] == "https://otari.ai/terms"
     assert body["privacy_url"] == "https://otari.ai/privacy"
-
 
 
 @pytest.mark.parametrize("field", ["terms_url", "privacy_url"])
@@ -646,7 +634,6 @@ def test_the_unauthenticated_bootstrap_cannot_publish_a_legal_page_credential(tm
 
     for field in ('"terms_url"', '"privacy_url"'):
         assert "@" not in body.split(field)[1].split(",")[0]
-
 
 
 def test_a_hosted_control_plane_publishes_where_its_data_plane_is(tmp_path: Path) -> None:

@@ -128,9 +128,7 @@ def test_web_search_extracts_otari_web_search() -> None:
 
 
 def test_web_fetch_extracts_only_the_canonical_type() -> None:
-    entry, remaining = _extract_web_fetch_tool(
-        [{"type": "otari_web_fetch"}, {"type": "web_fetch_20250910"}]
-    )
+    entry, remaining = _extract_web_fetch_tool([{"type": "otari_web_fetch"}, {"type": "web_fetch_20250910"}])
     assert entry == {"type": "otari_web_fetch"}
     assert remaining == [{"type": "web_fetch_20250910"}]
 

@@ -301,12 +301,8 @@ def test_every_by_id_route_refuses_another_organizations_user(
 
 def test_the_same_routes_still_serve_the_callers_own_user(client: TestClient, world: _World) -> None:
     """The control: 404 has to mean out of scope, not broken."""
-    assert (
-        _request(client, world, "alpha_operator", "GET", f"{API_ROOT}/users/{ALPHA_KEYED}") == status.HTTP_200_OK
-    )
-    assert (
-        _request(client, world, "beta_operator", "GET", f"{API_ROOT}/users/{BETA_KEYED}") == status.HTTP_200_OK
-    )
+    assert _request(client, world, "alpha_operator", "GET", f"{API_ROOT}/users/{ALPHA_KEYED}") == status.HTTP_200_OK
+    assert _request(client, world, "beta_operator", "GET", f"{API_ROOT}/users/{BETA_KEYED}") == status.HTTP_200_OK
 
 
 # =============================================================================

@@ -161,9 +161,9 @@ class CatalogOffering(BaseModel):
     short_selector: str | None = Field(
         default=None,
         description=(
-            "A shorter spelling the gateway also accepts: the instance with the model's cleaned id "
-            "(`fireworks:gpt-oss-120b`). Null where two offerings on the instance would share it, or "
-            "until the gateway has indexed the catalog."
+            "The pinned spelling the gateway also accepts for this offering: the instance with the model's catalog "
+            "id (`fireworks:openai/gpt-oss-120b`), which pins the instance and reaches the model's cheapest offering "
+            "on it. Null for a dearer sibling on the same instance, or until the gateway has indexed the catalog."
         ),
     )
     provider: str = Field(description="The provider instance the selector names.")
@@ -212,7 +212,8 @@ class CatalogModelSummary(BaseModel):
     selector: str | None = Field(
         default=None,
         description=(
-            "The id as a selector: send it as `model` and the model's cheapest offering answers. "
+            "The id as a selector: send it as `model` and the model's cheapest offering the caller can reach "
+            "answers, the vendor's own provider first where it serves the model. "
             "Null until the gateway has indexed the catalog."
         ),
     )
@@ -394,7 +395,7 @@ class SelectorIndexResponse(BaseModel):
     """What the rebuilt index knows."""
 
     offerings: int = Field(description="Selectors the deployment serves.")
-    short_selectors: int = Field(description="Offerings with an unambiguous short spelling.")
+    pinned_selectors: int = Field(description="Pinned spellings, one per instance a model is offered on.")
     models: int = Field(description="Slugs that resolve to an offering.")
 
 
@@ -407,7 +408,7 @@ async def refresh_selector_index(
     await rebuild_selector_index(db, config, fetch=True)
     index = current_selector_index()
     return SelectorIndexResponse(
-        offerings=len(index.full), short_selectors=len(index.short), models=len(index.models)
+        offerings=len(index.full), pinned_selectors=len(index.pinned), models=len(index.models)
     )
 
 
@@ -445,7 +446,7 @@ async def _group(
         offerings[obj.id] = _Offering(
             wire=CatalogOffering(
                 selector=obj.id,
-                short_selector=short_selector_for(obj.id),
+                short_selector=short_selector_for(obj.id, organization_id=organization_id),
                 provider=instance,
                 provider_type=provider_type,
                 credential=_get_credential(config, instance, deployment_managed=obj.deployment_managed),
@@ -522,7 +523,13 @@ def _rates_at_context(pricing: ModelPricingInfo, at_context: int | None) -> tupl
     return (float(rates.input_price_per_million), float(rates.output_price_per_million))
 
 
-def _summary(identity: ModelIdentity, members: list[_Offering], at_context: int | None = None) -> CatalogModelSummary:
+def _summary(
+    identity: ModelIdentity,
+    members: list[_Offering],
+    at_context: int | None = None,
+    *,
+    organization_id: uuid.UUID | None = None,
+) -> CatalogModelSummary:
     """Fold a group's offerings into the model they are offerings of.
 
     A limit is the largest any offering serves, because the model can do that
@@ -538,7 +545,7 @@ def _summary(identity: ModelIdentity, members: list[_Offering], at_context: int 
     winners = [entry for entry in described if entry.name and entry.name.rsplit("/", 1)[-1] == identity.name]
     contexts = [member.wire.context_window for member in members if member.wire.context_window is not None]
     outputs = [member.wire.max_output_tokens for member in members if member.wire.max_output_tokens is not None]
-    resolves_to = model_selector_for_slug(identity.id)
+    resolves_to = model_selector_for_slug(identity.id, organization_id=organization_id)
     return CatalogModelSummary(
         id=identity.id,
         selector=identity.id if resolves_to is not None else None,
@@ -683,7 +690,12 @@ async def list_catalog(
     merged = await _merged_for(db, config, caller, session_identity, model_provider)
     grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity)
     models = [
-        _summary(identity, [grouped.offerings[selector] for selector in identity.selectors], at_context)
+        _summary(
+            identity,
+            [grouped.offerings[selector] for selector in identity.selectors],
+            at_context,
+            organization_id=grouped.organization_id,
+        )
         for identity in grouped.identities.values()
     ]
     matched = sorted(
@@ -728,7 +740,7 @@ async def get_catalog_model(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{model_id}' not found")
 
     members = [grouped.offerings[selector] for selector in identity.selectors]
-    summary = _summary(identity, members)
+    summary = _summary(identity, members, organization_id=grouped.organization_id)
     # The cheapest offering first, unpriced ones last, so the comparison the
     # page exists for is the order the rows arrive in.
     offerings = sorted(

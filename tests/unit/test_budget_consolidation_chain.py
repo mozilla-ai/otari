@@ -153,9 +153,13 @@ def test_a_default_and_the_ceilings_it_materialized_land_on_one_budget(
         default_budget = connection.execute(
             text("SELECT budget_id FROM workspace_budget_defaults WHERE id = 'd1'")
         ).scalar_one()
-        materialized = connection.execute(
-            text("SELECT budget_id FROM scoped_budgets WHERE scope_type = 'workspace_member' ORDER BY id")
-        ).scalars().all()
+        materialized = (
+            connection.execute(
+                text("SELECT budget_id FROM scoped_budgets WHERE scope_type = 'workspace_member' ORDER BY id")
+            )
+            .scalars()
+            .all()
+        )
         stray = connection.execute(text("SELECT budget_id FROM scoped_budgets WHERE id = 'sb-org'")).scalar_one()
         budgets = connection.execute(
             text("SELECT budget_id, name, max_budget, budget_duration_sec, reset_alignment FROM budgets")

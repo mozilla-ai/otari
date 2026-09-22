@@ -2507,7 +2507,7 @@
                 "type": "null"
               }
             ],
-            "description": "The id as a selector: send it as `model` and the model's cheapest offering answers. Null until the gateway has indexed the catalog.",
+            "description": "The id as a selector: send it as `model` and the model's cheapest offering the caller can reach answers, the vendor's own provider first where it serves the model. Null until the gateway has indexed the catalog.",
             "title": "Selector"
           },
           "selectors": {
@@ -2743,7 +2743,7 @@
                 "type": "null"
               }
             ],
-            "description": "The id as a selector: send it as `model` and the model's cheapest offering answers. Null until the gateway has indexed the catalog.",
+            "description": "The id as a selector: send it as `model` and the model's cheapest offering the caller can reach answers, the vendor's own provider first where it serves the model. Null until the gateway has indexed the catalog.",
             "title": "Selector"
           },
           "selectors": {
@@ -2921,7 +2921,7 @@
                 "type": "null"
               }
             ],
-            "description": "A shorter spelling the gateway also accepts: the instance with the model's cleaned id (`fireworks:gpt-oss-120b`). Null where two offerings on the instance would share it, or until the gateway has indexed the catalog.",
+            "description": "The pinned spelling the gateway also accepts for this offering: the instance with the model's catalog id (`fireworks:openai/gpt-oss-120b`), which pins the instance and reaches the model's cheapest offering on it. Null for a dearer sibling on the same instance, or until the gateway has indexed the catalog.",
             "title": "Short Selector"
           },
           "usage_30d": {
@@ -13134,15 +13134,15 @@
             "title": "Offerings",
             "type": "integer"
           },
-          "short_selectors": {
-            "description": "Offerings with an unambiguous short spelling.",
-            "title": "Short Selectors",
+          "pinned_selectors": {
+            "description": "Pinned spellings, one per instance a model is offered on.",
+            "title": "Pinned Selectors",
             "type": "integer"
           }
         },
         "required": [
           "offerings",
-          "short_selectors",
+          "pinned_selectors",
           "models"
         ],
         "title": "SelectorIndexResponse",

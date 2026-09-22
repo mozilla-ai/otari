@@ -121,8 +121,7 @@ async def test_an_omitted_descriptor_does_not_count_toward_the_returned_tool_cei
 ) -> None:
     external_schema = {"type": "object", "$ref": "https://example.com/schema"}
     opened["session"] = _FakeSession(
-        [_tool(f"valid{i}") for i in range(DISCOVERY_MAX_TOOLS)]
-        + [_tool("broken", inputSchema=external_schema)]
+        [_tool(f"valid{i}") for i in range(DISCOVERY_MAX_TOOLS)] + [_tool("broken", inputSchema=external_schema)]
     )
 
     catalog = await discover_stored_tools(SERVER)

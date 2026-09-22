@@ -76,8 +76,7 @@ async def test_an_organization_membership_resolves_to_its_organization(async_db:
     service = _service(async_db)
 
     assert (
-        await service.get_organization_id_for_organization_member(acme.organization_member.id)
-        == acme.organization.id
+        await service.get_organization_id_for_organization_member(acme.organization_member.id) == acme.organization.id
     )
     assert (
         await service.get_organization_id_for_organization_member(globex.organization_member.id)

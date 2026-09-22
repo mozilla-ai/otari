@@ -116,9 +116,7 @@ def _act_in(client: TestClient, master_key_header: dict[str, str], db_session: S
     """
     marker = db_session.get(RuntimeSetting, BOOTSTRAP_IDENTITY_KEY)
     assert marker is not None, "the tenancy root is provisioned by the first master-key request"
-    db_session.add(
-        OrganizationMember(organization_id=organization_id, user_id=uuid.UUID(marker.value), role="owner")
-    )
+    db_session.add(OrganizationMember(organization_id=organization_id, user_id=uuid.UUID(marker.value), role="owner"))
     db_session.commit()
     switched = client.post(
         f"{API_ROOT}/organizations/me/switch",
@@ -350,9 +348,7 @@ def test_ingest_records_the_additive_default(
     assert row.cache_tokens_in_prompt is False
 
 
-def test_idempotent_resubmit(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session
-) -> None:
+def test_idempotent_resubmit(client: TestClient, master_key_header: dict[str, str], db_session: Session) -> None:
     """Re-posting the same (source, source_event_id) is a duplicate, not a new row."""
     _seed_user(client, master_key_header)
     _seed_pricing(client, master_key_header)
@@ -365,9 +361,7 @@ def test_idempotent_resubmit(
     assert db_session.query(UsageLog).filter(UsageLog.source_event_id == "req_dup").count() == 1
 
 
-def test_dedupes_within_batch(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session
-) -> None:
+def test_dedupes_within_batch(client: TestClient, master_key_header: dict[str, str], db_session: Session) -> None:
     """Two events with the same id in one batch collapse to a single row."""
     _seed_user(client, master_key_header)
     _seed_pricing(client, master_key_header)
@@ -427,9 +421,7 @@ def test_oversized_batch_rejected(client: TestClient, master_key_header: dict[st
     assert resp.status_code == 422
 
 
-def test_budget_isolation(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session
-) -> None:
+def test_budget_isolation(client: TestClient, master_key_header: dict[str, str], db_session: Session) -> None:
     """Imported cost never touches users.spend or users.reserved."""
     _seed_user(client, master_key_header)
     _seed_pricing(client, master_key_header)
@@ -442,9 +434,7 @@ def test_budget_isolation(
     assert float(user.reserved) == pytest.approx(0.0)
 
 
-def test_historical_pricing(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session
-) -> None:
+def test_historical_pricing(client: TestClient, master_key_header: dict[str, str], db_session: Session) -> None:
     """An event is priced at the rate effective at its own timestamp."""
     _seed_user(client, master_key_header)
     # Old cheap rate effective a year before the event; new expensive rate after.
@@ -704,9 +694,7 @@ def test_a_keys_import_prices_at_its_own_organizations_rate(
     assert str(row.workspace_id) == workspace_id
 
 
-def test_read_surface_source_filter_and_summary(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_read_surface_source_filter_and_summary(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Imported rows are exposed + labeled via the list and the summary."""
     _seed_user(client, master_key_header)
     _seed_pricing(client, master_key_header)
@@ -725,10 +713,7 @@ def test_read_surface_source_filter_and_summary(
     assert _SRC in sources and sources[_SRC]["requests"] == 1
 
 
-
-def test_per_event_user_override(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session
-) -> None:
+def test_per_event_user_override(client: TestClient, master_key_header: dict[str, str], db_session: Session) -> None:
     """A per-event user_id overrides the batch default so one feed serves a team."""
     _seed_user(client, master_key_header, "dev-a")
     _seed_user(client, master_key_header, "dev-b")

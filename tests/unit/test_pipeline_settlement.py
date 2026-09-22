@@ -1754,9 +1754,7 @@ async def test_a_request_without_a_workspace_is_refused_before_any_tool_resolves
 
     ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation())
     with pytest.raises(HTTPException) as exc_info:
-        await _call_prepare_gateway_tools(
-            ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")]
-        )
+        await _call_prepare_gateway_tools(ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")])
 
     assert exc_info.value.status_code == 500
     assert settlement.refunded == 1
@@ -1775,9 +1773,7 @@ async def test_unknown_mcp_server_id_releases_reservation(monkeypatch: pytest.Mo
 
     ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
     with pytest.raises(HTTPException) as exc_info:
-        await _call_prepare_gateway_tools(
-            ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")]
-        )
+        await _call_prepare_gateway_tools(ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")])
 
     assert exc_info.value.status_code == 404
     assert settlement.refunded == 1
@@ -1949,9 +1945,7 @@ async def test_a_database_failure_releases_the_reservation(monkeypatch: pytest.M
     db = AsyncMock()
     ctx = _ctx(GatewayConfig(), db=cast(Any, db), reservation=_reservation(), workspace_id=uuid.uuid4())
     with pytest.raises(SQLAlchemyError):
-        await _call_prepare_gateway_tools(
-            ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")]
-        )
+        await _call_prepare_gateway_tools(ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")])
 
     assert settlement.refunded == 1
     assert db.rollback.await_count == 1, "the session is rolled back first, or the release cannot run"
@@ -1976,9 +1970,7 @@ async def test_a_release_that_also_fails_reraises_the_original(monkeypatch: pyte
     db.rollback.side_effect = SQLAlchemyError("still down")
     ctx = _ctx(GatewayConfig(), db=cast(Any, db), reservation=_reservation(), workspace_id=uuid.uuid4())
     with pytest.raises(SQLAlchemyError, match="connection reset"):
-        await _call_prepare_gateway_tools(
-            ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")]
-        )
+        await _call_prepare_gateway_tools(ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")])
 
 
 @pytest.mark.asyncio
@@ -2134,9 +2126,7 @@ async def test_standalone_non_stream_success_logs_once_and_reconciles(monkeypatc
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    result, _ = await _run_standalone(
-        monkeypatch, result=_completion(usage=_usage()), reservation=_reservation()
-    )
+    result, _ = await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=_reservation())
 
     assert result.usage is not None
     assert len(settlement.logged) == 1

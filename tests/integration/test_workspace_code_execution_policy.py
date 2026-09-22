@@ -75,9 +75,7 @@ def _service(
     sandbox_configured: bool = True,
     allowed_images: tuple[str, ...] = (),
 ) -> WorkspaceCodeExecutionPolicyService:
-    return WorkspaceCodeExecutionPolicyService(
-        db, sandbox_configured=sandbox_configured, allowed_images=allowed_images
-    )
+    return WorkspaceCodeExecutionPolicyService(db, sandbox_configured=sandbox_configured, allowed_images=allowed_images)
 
 
 async def test_a_workspace_with_no_policy_reads_as_unconfigured_and_narrows_nothing(
@@ -432,9 +430,7 @@ async def test_the_policy_reports_what_may_be_pinned_and_which_tools_exist(async
     owner = await _member(async_db, org, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
 
-    unconfigured = await _service(async_db, allowed_images=(_IMAGE,)).get_policy(
-        user=owner, workspace_id=workspace.id
-    )
+    unconfigured = await _service(async_db, allowed_images=(_IMAGE,)).get_policy(user=owner, workspace_id=workspace.id)
 
     assert unconfigured.configured is False
     assert unconfigured.allowed_images == [_IMAGE]

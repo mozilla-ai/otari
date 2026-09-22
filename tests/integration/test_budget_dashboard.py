@@ -88,9 +88,7 @@ def test_budget_rollup_aggregates_assigned_users(
     assert row["total_reserved"] == 2.0
 
 
-def test_budget_rollup_excludes_deleted_users(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_budget_rollup_excludes_deleted_users(client: TestClient, master_key_header: dict[str, str]) -> None:
     """A soft-deleted user drops out of the budget's rollup."""
     budget_id = _make_budget(client, master_key_header)
     client.post(f"{API_ROOT}/users", json={"user_id": "gone", "budget_id": budget_id}, headers=master_key_header)

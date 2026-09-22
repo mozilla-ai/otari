@@ -298,9 +298,7 @@ async def test_the_batch_ladder_answers_what_settlement_answers(async_db: AsyncS
 
     for model_key in keys:
         provider, _, model = model_key.partition(":")
-        settled = await find_model_pricing(
-            async_db, provider, model, as_of=as_of, organization_id=organization_id
-        )
+        settled = await find_model_pricing(async_db, provider, model, as_of=as_of, organization_id=organization_id)
         rung = batch.get(model_key)
         assert (rung is None) == (settled is None), model_key
         if rung is None or settled is None:

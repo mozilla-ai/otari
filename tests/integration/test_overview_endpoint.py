@@ -248,9 +248,7 @@ async def test_reserved_spend_counts_against_a_ceiling(
 
 
 async def _organization(db: AsyncSession, *, slug: str) -> Organization:
-    return await OrganizationRepository(db).create_organization(
-        name=slug.title(), slug=slug, created_by_user_id=None
-    )
+    return await OrganizationRepository(db).create_organization(name=slug.title(), slug=slug, created_by_user_id=None)
 
 
 async def _member(db: AsyncSession, organization: Organization, *, role: str, full_name: str) -> User:
@@ -404,9 +402,7 @@ async def test_a_ceiling_keeps_the_scope_it_caps(
     organization = await _organization(async_db, slug="acme-scope-kept")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     scope_id = str(uuid.uuid4())
-    async_db.add(
-        Budget(budget_id="b-unnamed", name="Cap", max_budget=Decimal(10), organization_id=organization.id)
-    )
+    async_db.add(Budget(budget_id="b-unnamed", name="Cap", max_budget=Decimal(10), organization_id=organization.id))
     async_db.add(
         ScopedBudget(
             id="sb-unnamed",

@@ -50,9 +50,7 @@ def test_hybrid_mode_disables_local_management_endpoints(monkeypatch: pytest.Mon
         usage_response = client.get(f"{API_ROOT}/usage")
         # Invitations are tenancy too: a hybrid gateway holds no membership
         # state to accept one into, and the router is never registered.
-        validate_response = client.post(
-            f"{API_ROOT}/invitations/validate", json={"token": "some-token"}
-        )
+        validate_response = client.post(f"{API_ROOT}/invitations/validate", json={"token": "some-token"})
         accept_response = client.post(f"{API_ROOT}/invitations/accept", json={"token": "some-token"})
 
     expected = {"detail": "This endpoint is not available in hybrid mode. Manage this resource via the platform UI."}

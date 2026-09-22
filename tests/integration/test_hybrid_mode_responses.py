@@ -833,6 +833,7 @@ def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
     assert response.status_code == 404
     assert response.json() == {"detail": "The requested model was not found on the provider"}
 
+
 def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

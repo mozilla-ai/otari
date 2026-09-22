@@ -60,9 +60,7 @@ def test_provider_info_openai_metadata() -> None:
 
 def test_provider_info_uses_instance_type_for_named_instance() -> None:
     """A named instance backed by openai gets openai's metadata, keeps its name."""
-    config = _config(
-        {"my-openai": {"provider_type": "openai", "api_key": "sk-x", "api_base": "http://x/v1"}}
-    )
+    config = _config({"my-openai": {"provider_type": "openai", "api_key": "sk-x", "api_base": "http://x/v1"}})
     info = provider_info(config, "my-openai")
 
     assert info.instance == "my-openai"

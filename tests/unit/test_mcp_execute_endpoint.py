@@ -685,9 +685,7 @@ def test_an_oversized_result_is_an_unknown_outcome(
     platform: _Platform,
     session: _FakeSession,
 ) -> None:
-    session.result = CallToolResult(
-        content=[TextContent(type="text", text="x" * (mcp_stateless.RESULT_MAX_BYTES + 1))]
-    )
+    session.result = CallToolResult(content=[TextContent(type="text", text="x" * (mcp_stateless.RESULT_MAX_BYTES + 1))])
 
     response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
@@ -732,9 +730,11 @@ def test_a_capacity_refusal_is_the_only_failure_that_invites_a_retry(
     async def hold_the_only_slot() -> Any:
         async with gate.slot():
             return await asyncio.to_thread(
-                lambda: client.post(path, headers=USER_AUTH, json=_body())
-                if path.endswith("execute")
-                else client.get(path, headers=USER_AUTH)
+                lambda: (
+                    client.post(path, headers=USER_AUTH, json=_body())
+                    if path.endswith("execute")
+                    else client.get(path, headers=USER_AUTH)
+                )
             )
 
     response = asyncio.run(hold_the_only_slot())

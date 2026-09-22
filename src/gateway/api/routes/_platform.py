@@ -44,6 +44,7 @@ from gateway.services.mcp_stateless import (
     ExecutionState,
     McpExecutionError,
 )
+from gateway.services.provider_kwargs import split_selector
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 
@@ -466,18 +467,18 @@ async def run_platform_attempts(
 
 
 def _split_model_selector(model_selector: str) -> tuple[str | None, str]:
-    """Parse ``provider:model`` or ``provider/model`` into ``(provider, model)``.
+    """Split the request's selector into ``(provider, model)`` for the platform's resolve endpoint.
 
-    Used when calling the platform's resolve endpoint with the model selector
-    from the request. Returns ``(None, model_selector)`` for bare model names.
+    The same first-delimiter split every local resolver uses, so a pinned
+    ``nebius:deepseek/deepseek-v4.1-flash`` keeps its catalog id whole and a
+    catalog id ``deepseek/deepseek-v4.1-flash`` travels as its vendor and
+    model, which the peer reads through its own selector index. Returns
+    ``(None, model_selector)`` for a bare model name.
     """
-    if ":" in model_selector:
-        provider, model_name = model_selector.split(":", 1)
-        return provider or None, model_name
-    if "/" in model_selector:
-        provider, model_name = model_selector.split("/", 1)
-        return provider or None, model_name
-    return None, model_selector
+    split = split_selector(model_selector)
+    if split is None:
+        return None, model_selector
+    return split
 
 
 def _platform_url(base_url: str, path: str) -> str:

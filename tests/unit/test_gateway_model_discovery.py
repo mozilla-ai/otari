@@ -650,9 +650,7 @@ class TestDiscoveryStallGuards:
             await asyncio.sleep(0.02)
             return ProviderDiscovery(provider="p", models=[], error="NEW")
 
-        inflight = asyncio.ensure_future(
-            cache.get_or_discover("p", positive_ttl=300, negative_ttl=30, discover=stale)
-        )
+        inflight = asyncio.ensure_future(cache.get_or_discover("p", positive_ttl=300, negative_ttl=30, discover=stale))
         await asyncio.sleep(0.02)  # let the stale discovery register as in-flight
         cache.clear("p")  # a credential change invalidates it
         late = await cache.get_or_discover("p", positive_ttl=300, negative_ttl=30, discover=fresh)
@@ -711,9 +709,7 @@ class TestKeylessProviderConnection:
     """test_provider_credentials must honor the optional key for custom endpoints (otari#421)."""
 
     @pytest.mark.asyncio
-    async def test_keyless_custom_endpoint_supplies_placeholder(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_keyless_custom_endpoint_supplies_placeholder(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # A keyless "Test connection" for a custom endpoint would otherwise be
         # rejected by any-llm with MissingApiKeyError; the ad-hoc test path injects
         # the same placeholder the saved path uses so the endpoint is dialed.

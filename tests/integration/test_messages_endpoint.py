@@ -437,9 +437,7 @@ def test_count_tokens_accepts_context_management_and_betas(
             "model": "anthropic:claude-opus-5",
             "messages": [{"role": "user", "content": "Hello"}],
             "context_management": {
-                "edits": [
-                    {"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}
-                ]
+                "edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]
             },
             "betas": ["compact-2026-01-12"],
         },

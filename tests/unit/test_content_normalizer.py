@@ -78,9 +78,7 @@ async def test_native_image_passthrough() -> None:
 
 @pytest.mark.asyncio
 async def test_text_only_image_described(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_describe(
-        config: GatewayConfig, data_url: str
-    ) -> tuple[str | None, CompletionUsage | None]:
+    async def fake_describe(config: GatewayConfig, data_url: str) -> tuple[str | None, CompletionUsage | None]:
         return "a red circle", CompletionUsage(prompt_tokens=11, completion_tokens=7, total_tokens=18)
 
     monkeypatch.setattr(cn, "describe_image", fake_describe)
@@ -158,9 +156,7 @@ async def test_anthropic_image_passthrough_native() -> None:
     msgs = [
         {
             "role": "user",
-            "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _PNG_B64}}
-            ],
+            "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _PNG_B64}}],
         }
     ]
     out, stats = await normalize_messages(

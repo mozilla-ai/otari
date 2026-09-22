@@ -61,9 +61,7 @@ def test_rotate_generated_master_key_invalidates_old_key(tmp_path: Path, monkeyp
         assert new_response.json()["master_key_source"] == "generated"
 
 
-def test_rotate_generated_master_key_rejects_a_stale_rotation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_rotate_generated_master_key_rejects_a_stale_rotation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(master_key_service, "generate_master_key", lambda: "otari-mk-old")
 
     async def _stale_rotation(*_: object) -> tuple[str, str]:
@@ -98,9 +96,10 @@ def test_rotation_invalidates_the_old_generated_key_on_another_replica(
             assert rotated.status_code == 200, rotated.text
 
             assert second_client.get(f"{API_ROOT}/settings", headers=old_auth).status_code == 401
-            assert second_client.get(
-                f"{API_ROOT}/settings", headers={"Authorization": "Bearer otari-mk-new"}
-            ).status_code == 200
+            assert (
+                second_client.get(f"{API_ROOT}/settings", headers={"Authorization": "Bearer otari-mk-new"}).status_code
+                == 200
+            )
 
 
 def test_settings_reports_pricing_flags(tmp_path: Path) -> None:

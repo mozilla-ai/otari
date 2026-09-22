@@ -38,9 +38,7 @@ def _seed_pricing(client: TestClient, headers: dict[str, str], model_key: str) -
 # --- write API -------------------------------------------------------------
 
 
-def test_create_and_get_key_round_trips_allowed_models(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_create_and_get_key_round_trips_allowed_models(client: TestClient, master_key_header: dict[str, str]) -> None:
     resp = client.post(
         f"{API_ROOT}/keys",
         json={"key_name": "k", "allowed_models": ["openai:*", "anthropic:claude-3*"]},

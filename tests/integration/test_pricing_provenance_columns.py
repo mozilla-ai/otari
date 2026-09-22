@@ -121,4 +121,3 @@ def test_a_source_longer_than_the_platform_s_column_is_refused(test_db: Session)
 
     with pytest.raises(DataError):
         test_db.commit()
-

@@ -498,6 +498,7 @@ def test_a_ceiling_may_not_name_a_deployment_budget(
 # operator identity, which is a superuser and an owner everywhere.
 # =============================================================================
 
+
 async def _seeded[Row](db: AsyncSession, row: Row) -> Row:
     # A step that fails rolls the session back, which expires every attached row, so the tests hold detached ones.
     await db.commit()
@@ -1034,6 +1035,7 @@ async def test_a_concurrent_duplicate_ceiling_is_a_conflict_not_a_crash(
     with pytest.raises(OrganizationScopedBudgetAlreadyExistsError):
         await service.create_organization_ceiling(user=owner, request=request)
 
+
 @pytest.mark.asyncio
 async def test_an_explicit_null_clears_the_cap_as_the_schema_says(async_db: AsyncSession) -> None:
     """The behavior the update model's description used to deny.
@@ -1064,6 +1066,7 @@ async def test_an_explicit_null_clears_the_cap_as_the_schema_says(async_db: Asyn
     )
     assert renamed.max_budget is None
     assert renamed.name == "Uncapped"
+
 
 @pytest.mark.asyncio
 async def test_a_delete_is_refused_while_a_gateway_user_holds_the_budget(async_db: AsyncSession) -> None:

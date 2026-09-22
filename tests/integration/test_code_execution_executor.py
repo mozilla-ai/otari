@@ -269,9 +269,7 @@ def test_the_header_can_bring_anthropics_declaration_here_even_for_anthropic(
 ) -> None:
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
 
-    response, seen = _post_messages(
-        client, {**api_key_header, _HEADER: "otari"}, _messages_body(_ANTHROPIC, _DATED)
-    )
+    response, seen = _post_messages(client, {**api_key_header, _HEADER: "otari"}, _messages_body(_ANTHROPIC, _DATED))
 
     assert response.status_code == 200, response.text
     assert seen.loop_kwargs is not None
@@ -284,9 +282,7 @@ def test_the_header_can_leave_a_claimed_keyword_with_the_provider(
 ) -> None:
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
 
-    response, seen = _post_messages(
-        client, {**api_key_header, _HEADER: "provider"}, _messages_body(_ANTHROPIC, _BARE)
-    )
+    response, seen = _post_messages(client, {**api_key_header, _HEADER: "provider"}, _messages_body(_ANTHROPIC, _BARE))
 
     assert response.status_code == 200, response.text
     assert seen.forwarded_tool_types == {"code_execution"}
@@ -407,8 +403,9 @@ def test_a_header_that_disagrees_with_the_pin_is_refused(
     response, _ = _post_messages(client, {**api_key_header, _HEADER: "provider"}, _messages_body(_ANTHROPIC, _DATED))
 
     assert response.status_code == 403
-    assert "pins" in response.json()["detail"]["error"]["message"] or "decides" in (
-        response.json()["detail"]["error"]["message"]
+    assert (
+        "pins" in response.json()["detail"]["error"]["message"]
+        or "decides" in (response.json()["detail"]["error"]["message"])
     )
 
 

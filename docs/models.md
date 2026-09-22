@@ -18,9 +18,18 @@ ollama:llama3
 The prefix selects a provider or named provider instance. Everything after the
 first colon is sent as the provider's model ID.
 
-`provider/model` is also accepted on completion routes for compatibility with
-otari.ai. Prefer the colon form in standalone configuration, pricing, aliases,
-and routing policies.
+A request may also name the model the way the catalog does. `vendor/model`
+(`deepseek/deepseek-v4.1-flash`) is the model's catalog id, and Otari picks the
+provider: the vendor's own where it serves the model, otherwise the cheapest
+offering the caller can reach, including one on the organization's own
+provider key. `provider:vendor/model` (`nebius:deepseek/deepseek-v4.1-flash`)
+pins the provider and lets Otari pick the model id that provider spells it
+under. See [Catalog spellings](#catalog-spellings) for the rules.
+
+The legacy `provider/model` spelling is still honored where it names an
+offering the deployment serves (`openai/gpt-4o` while an `openai` instance
+serves `gpt-4o`); read as a catalog id otherwise. Prefer the colon form in
+standalone configuration, pricing, aliases, and routing policies.
 
 ## Configuring a provider
 
@@ -211,27 +220,37 @@ where it has one, and for a signed-in caller the organization's last thirty
 days on that offering: requests, cache hit rate, and the effective price per
 million tokens after cache reads and tiers.
 
-### Short selectors
+### Catalog spellings
 
-A provider's own id can be long, so the gateway also accepts two spellings the
-catalog shows. `instance:<cleaned id>` (`fireworks:glm-5.3`, spelled as the
-catalog spells the name) resolves to the provider's full id on that instance,
-where only one offering on the instance cleans to it. The model's catalog id
-(`z-ai/glm-5.3`) resolves to the model's cheapest offering by the deployment's
-own rates. Where that id's vendor is also a provider's name (`openai/gpt-4o`,
-which is equally the legacy spelling of a request to OpenAI), it resolves only
-among that provider's own offerings and otherwise not at all: a selector that
-names a provider reaches that provider or fails, and is never redirected to
-another one. A model's `selector` in the catalog is null where it has no such
-spelling. Both are relabeled
-like an alias, so a response's `model` is what was sent, and pricing, budgets
-and usage key on the offering reached. A key whose allow-list names some
-instances only should send one of those instances or an alias, since a bare
-model id resolves before the allow-list is consulted. The index behind this is
-rebuilt every minute from the deployment's catalog view and on
-`POST /api/v1/catalog/selectors/refresh`, an operator call, and each offering's
-`short_selector` and each model's `selector` in the catalog say what is in
-force.
+A provider's own id can be long, so the gateway also accepts the two spellings
+the catalog shows. Each is relabeled like an alias, so a response's `model` is
+what was sent, and pricing, budgets and usage key on the offering reached.
+
+- The model's catalog id (`z-ai/glm-5.3`, `deepseek/deepseek-v4.1-flash`)
+  resolves to the model's cheapest priced offering, at the caller's rates.
+  Where the id's vendor is also a provider (`openai/gpt-4o`), that provider's
+  own offerings win while it serves the model, because the caller who names
+  OpenAI's model while OpenAI is configured means OpenAI's price; where it
+  serves nothing, the model is reached through whoever resells it.
+- `instance:<catalog id>` (`nebius:deepseek/deepseek-v4.1-flash`) pins the
+  instance and resolves to the model's cheapest offering there, never
+  elsewhere. This is the spelling the catalog shows as an offering's
+  `short_selector`.
+
+A selector that already names an offering is never rewritten, so a provider's
+own id keeps working verbatim.
+
+The index behind this is rebuilt every minute and on
+`POST /api/v1/catalog/selectors/refresh`, an operator call. It holds the
+deployment's catalog view, priced from the deployment's list and the defaults,
+and one view per organization for the models it offers on its own provider
+keys, priced at that organization's rates. An organization's view answers only
+its own callers: a model one tenant reaches through its key is never where
+another tenant's selector lands, and a model nobody offers to the caller
+resolves as the deployment's view says. A model's `selector` in the catalog is
+null where the caller has no such spelling for it. A key whose allow-list names
+some instances only should send one of those instances, a pinned spelling or
+an alias, since a bare catalog id resolves before the allow-list is consulted.
 
 The dashboard's Models page is this catalog: one card per model, with a rail
 of filters beside it, and a page per model with its facts and every offering

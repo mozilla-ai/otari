@@ -68,9 +68,7 @@ def sessions(
         session.refresh(organization)
         return {
             "member": _identity(session, email="member@alpha.test", organization_id=organization.id),
-            "operator": _identity(
-                session, email="root@alpha.test", organization_id=organization.id, is_superuser=True
-            ),
+            "operator": _identity(session, email="root@alpha.test", organization_id=organization.id, is_superuser=True),
         }
     finally:
         session.close()

@@ -818,8 +818,7 @@ def _add_a_password(tmp_path: Path, email: str, password: str) -> None:
     with engine.begin() as connection:
         updated = connection.execute(
             text(
-                'UPDATE "user" SET hashed_password = :hashed, email_verified_at = :verified '
-                "WHERE lower(email) = :email"
+                'UPDATE "user" SET hashed_password = :hashed, email_verified_at = :verified WHERE lower(email) = :email'
             ),
             {"hashed": hash_password(password), "verified": datetime.now(UTC), "email": email},
         )

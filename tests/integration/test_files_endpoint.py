@@ -51,9 +51,7 @@ def _make_completion() -> Any:
         object="chat.completion",
         created=1700000000,
         model="llama3",
-        choices=[
-            Choice(index=0, message=ChatCompletionMessage(role="assistant", content="ok"), finish_reason="stop")
-        ],
+        choices=[Choice(index=0, message=ChatCompletionMessage(role="assistant", content="ok"), finish_reason="stop")],
         usage=CompletionUsage(prompt_tokens=10, completion_tokens=2, total_tokens=12),
     )
 
@@ -63,9 +61,7 @@ def test_upload_requires_auth(client: TestClient) -> None:
     assert resp.status_code == 401
 
 
-def test_upload_empty_file_rejected(
-    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None
-) -> None:
+def test_upload_empty_file_rejected(client: TestClient, api_key_header: dict[str, str], tmp_file_store: None) -> None:
     resp = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("empty.txt", b"", "text/plain")})
     assert resp.status_code == 400
 
@@ -324,9 +320,7 @@ def test_native_model_passes_file_through(
 
     body = {
         "model": "openai:gpt-4o",  # hosted, natively multimodal → passthrough
-        "messages": [
-            {"role": "user", "content": [{"type": "file", "file": {"file_id": file_id}}]}
-        ],
+        "messages": [{"role": "user", "content": [{"type": "file", "file": {"file_id": file_id}}]}],
     }
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):

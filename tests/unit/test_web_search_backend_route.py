@@ -315,9 +315,7 @@ def test_a_half_configured_provider_is_warned_about(
     assert expected in _warnings_from(config, caplog)
 
 
-def test_a_backend_token_with_no_provider_is_warned_about(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_a_backend_token_with_no_provider_is_warned_about(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """The token gates a route that is not mounted without a provider to serve,
     so on its own it silently does nothing."""
     config = GatewayConfig(

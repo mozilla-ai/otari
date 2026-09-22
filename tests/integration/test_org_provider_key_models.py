@@ -166,13 +166,7 @@ async def _key(db: AsyncSession, owner: User, *, provider: str = "openai", name:
 
 async def _offered(db: AsyncSession, key_id: uuid.UUID) -> dict[str, bool]:
     rows = (
-        (
-            await db.execute(
-                select(OrgProviderKeyModel).where(
-                    col(OrgProviderKeyModel.org_provider_key_id) == key_id
-                )
-            )
-        )
+        (await db.execute(select(OrgProviderKeyModel).where(col(OrgProviderKeyModel.org_provider_key_id) == key_id)))
         .scalars()
         .all()
     )
@@ -361,9 +355,7 @@ async def test_adding_a_model_by_name_offers_it(async_db: AsyncSession, monkeypa
         await _service(async_db).add_model(user=owner, key_id=key_id, model="gpt-4o")
 
 
-async def test_the_unique_index_decides_a_racing_offer(
-    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_the_unique_index_decides_a_racing_offer(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     """The pre-check races the insert, so the constraint is the real arbiter.
 
     Driven by making the pre-check answer "absent" for a model that is in fact
@@ -515,9 +507,7 @@ async def test_refreshing_pricing_serves_a_model_the_dataset_has_caught_up_with(
     assert await _offered(async_db, key_id) == {"gpt-6-unreleased": True}
 
 
-async def test_an_unchanged_default_is_not_repriced(
-    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_an_unchanged_default_is_not_repriced(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     """Compared at the rate column's own scale, so a stored value that has been
     through it and a freshly resolved one that has not still compare equal."""
     organization = await _organization(async_db)
@@ -607,9 +597,7 @@ async def test_switching_every_model_off_serves_none_rather_than_all(
     await _service(async_db).refresh_models(user=owner, key_id=key_id)
     listed = await _service(async_db).list_models(user=owner, key_id=key_id)
 
-    await _service(async_db).set_model_enabled(
-        user=owner, key_id=key_id, model_id=listed.data[0].id, enabled=False
-    )
+    await _service(async_db).set_model_enabled(user=owner, key_id=key_id, model_id=listed.data[0].id, enabled=False)
 
     assert cached_org_model_restriction(workspace.id, "openai") == []
 
@@ -692,16 +680,12 @@ async def test_serving_a_model_nothing_prices_is_refused(
     assert listed.data[0].enabled is False
 
     with pytest.raises(OrgProviderModelUnpricedError):
-        await _service(async_db).set_model_enabled(
-            user=owner, key_id=key_id, model_id=listed.data[0].id, enabled=True
-        )
+        await _service(async_db).set_model_enabled(user=owner, key_id=key_id, model_id=listed.data[0].id, enabled=True)
 
     assert await _offered(async_db, key_id) == {"gpt-6-unreleased": False}
 
 
-async def test_switching_a_model_off_is_never_refused(
-    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_switching_a_model_off_is_never_refused(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     """The guard above is one-directional on purpose: a row that reached the
     served state some other way still has to be withdrawable."""
     organization = await _organization(async_db)
@@ -764,9 +748,7 @@ async def test_a_model_from_another_key_is_not_found(async_db: AsyncSession, mon
     listed = await _service(async_db).list_models(user=owner, key_id=first)
 
     with pytest.raises(OrgProviderModelNotFoundError):
-        await _service(async_db).set_model_enabled(
-            user=owner, key_id=second, model_id=listed.data[0].id, enabled=False
-        )
+        await _service(async_db).set_model_enabled(user=owner, key_id=second, model_id=listed.data[0].id, enabled=False)
 
 
 async def test_no_response_carries_key_material(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:

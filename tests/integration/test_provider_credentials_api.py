@@ -208,9 +208,12 @@ def test_patch_and_delete_missing_are_404(
     client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _with_key(monkeypatch)
-    assert client.patch(
-        f"{API_ROOT}/provider-credentials/nope", json={"api_base": "x"}, headers=master_key_header
-    ).status_code == 404
+    assert (
+        client.patch(
+            f"{API_ROOT}/provider-credentials/nope", json={"api_base": "x"}, headers=master_key_header
+        ).status_code
+        == 404
+    )
     assert client.delete(f"{API_ROOT}/provider-credentials/nope", headers=master_key_header).status_code == 404
 
 
@@ -608,4 +611,3 @@ def test_a_credential_shaped_client_arg_can_still_be_replaced_and_removed(
     )
     assert cleared.status_code == 200, cleared.text
     assert _stored_client_args(db_session) == {}
-

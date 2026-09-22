@@ -83,6 +83,7 @@ def _parent_of(revision: str) -> str:
     assert isinstance(parent, str), f"{revision} should have exactly one parent, got {parent!r}"
     return parent
 
+
 _TOKEN_REVISION = "db8fbf901ee0"
 _BEFORE_TOKENS = "c8e2a4f6b0d3"
 _TOKEN_COLUMNS = {
@@ -248,8 +249,7 @@ def test_workspace_scope_seeds_a_default_and_backfills_existing_rows(tmp_path: P
     with engine.begin() as connection:
         seeded = connection.execute(
             text(
-                "SELECT w.id FROM workspace w "
-                "JOIN organization o ON o.id = w.organization_id WHERE o.slug = 'default'"
+                "SELECT w.id FROM workspace w JOIN organization o ON o.id = w.organization_id WHERE o.slug = 'default'"
             )
         ).scalar_one()
         assert connection.execute(text("SELECT workspace_id FROM api_keys")).scalar_one() == seeded
@@ -297,10 +297,7 @@ def _insert_identity(connection: Connection, *, email: str | None = None, token:
     organization_id = uuid.uuid4().hex
     user_id = uuid.uuid4().hex
     connection.execute(
-        text(
-            "INSERT INTO organization (id, name, slug, created_at) "
-            "VALUES (:id, :name, :slug, CURRENT_TIMESTAMP)"
-        ),
+        text("INSERT INTO organization (id, name, slug, created_at) VALUES (:id, :name, :slug, CURRENT_TIMESTAMP)"),
         {"id": organization_id, "name": f"Org {organization_id[:6]}", "slug": organization_id[:6]},
     )
     connection.execute(
@@ -337,9 +334,7 @@ def test_the_verification_token_is_uniquely_indexed(sqlite_at_head: tuple[Config
     """Unique like the platform's, because a shared token confirms the wrong address."""
     _, engine = sqlite_at_head
     indexes = [
-        index
-        for index in inspect(engine).get_indexes("user")
-        if index["column_names"] == ["email_verification_token"]
+        index for index in inspect(engine).get_indexes("user") if index["column_names"] == ["email_verification_token"]
     ]
 
     assert [index["name"] for index in indexes] == [_TOKEN_INDEX]
@@ -389,13 +384,17 @@ def test_an_existing_database_upgrades_with_its_rows_untouched(tmp_path: Path) -
     command.upgrade(config, _CREDENTIAL_REVISION)
 
     with engine.begin() as connection:
-        row = connection.execute(
-            text(
-                "SELECT email, full_name, is_active, hashed_password, terms_accepted_at, oauth_provider, "
-                'email_verification_token, email_verified_at FROM "user" WHERE id = :id'
-            ),
-            {"id": user_id},
-        ).mappings().one()
+        row = (
+            connection.execute(
+                text(
+                    "SELECT email, full_name, is_active, hashed_password, terms_accepted_at, oauth_provider, "
+                    'email_verification_token, email_verified_at FROM "user" WHERE id = :id'
+                ),
+                {"id": user_id},
+            )
+            .mappings()
+            .one()
+        )
 
     assert (row["email"], row["full_name"], row["is_active"]) == ("ada@example.com", "Ada", 1)
     assert all(row[column] is None for column in _CREDENTIAL_COLUMNS)
@@ -476,13 +475,17 @@ def test_an_existing_database_upgrades_with_its_token_columns_untouched(tmp_path
     command.upgrade(config, _TOKEN_REVISION)
 
     with engine.begin() as connection:
-        row = connection.execute(
-            text(
-                "SELECT email_verification_token_hash, email_verification_token_expires_at, "
-                'password_reset_token_hash, password_reset_token_expires_at FROM "user" WHERE id = :id'
-            ),
-            {"id": user_id},
-        ).mappings().one()
+        row = (
+            connection.execute(
+                text(
+                    "SELECT email_verification_token_hash, email_verification_token_expires_at, "
+                    'password_reset_token_hash, password_reset_token_expires_at FROM "user" WHERE id = :id'
+                ),
+                {"id": user_id},
+            )
+            .mappings()
+            .one()
+        )
 
     assert all(row[column] is None for column in _TOKEN_COLUMNS)
     engine.dispose()
@@ -669,10 +672,7 @@ def _two_workspaces(connection: Connection) -> tuple[str, str]:
     so the returned ids are what the ``workspace_id`` columns actually hold.
     """
     default = connection.execute(
-        text(
-            "SELECT w.id FROM workspace w JOIN organization o ON o.id = w.organization_id "
-            "WHERE o.slug = 'default'"
-        )
+        text("SELECT w.id FROM workspace w JOIN organization o ON o.id = w.organization_id WHERE o.slug = 'default'")
     ).scalar_one()
     organization_id = connection.execute(
         text("SELECT organization_id FROM workspace WHERE id = :id"), {"id": default}
@@ -811,9 +811,7 @@ def test_the_widening_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None
 
     inspector = inspect(engine)
     for table in ("model_aliases", "routing_policies"):
-        assert {c["name"] for c in inspector.get_unique_constraints(table)} == {
-            f"uq_{table}_workspace_name_user"
-        }
+        assert {c["name"] for c in inspector.get_unique_constraints(table)} == {f"uq_{table}_workspace_name_user"}
 
 
 def test_the_survivals_carry_a_restricting_workspace_foreign_key(
@@ -914,8 +912,7 @@ def test_existing_survival_rows_are_backfilled_onto_the_default_workspace(tmp_pa
     with engine.begin() as connection:
         default = connection.execute(
             text(
-                "SELECT w.id FROM workspace w "
-                "JOIN organization o ON o.id = w.organization_id WHERE o.slug = 'default'"
+                "SELECT w.id FROM workspace w JOIN organization o ON o.id = w.organization_id WHERE o.slug = 'default'"
             )
         ).scalar_one()
         for table in _SURVIVAL_TABLES:

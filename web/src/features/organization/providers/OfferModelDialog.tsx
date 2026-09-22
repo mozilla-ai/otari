@@ -87,7 +87,7 @@ export function OfferModelDialog({
         isSourceEmpty={listed.length === 0}
         emptyMessage={emptyMessage}
         noMatchesMessage="No model the provider lists matches what you typed. It is offered exactly as typed."
-        description="The id as the provider spells it, with no provider prefix."
+        description="The id as the provider spells it, with no provider prefix. Once the catalog has indexed it, requests may also send the model's catalog id or provider:vendor/model."
       />
     </FormDialog>
   )

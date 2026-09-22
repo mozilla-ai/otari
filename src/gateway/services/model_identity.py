@@ -154,6 +154,21 @@ _VENDOR_PROVIDERS: dict[str, frozenset[str]] = {
     "MiniMax": frozenset({"minimax"}),
 }
 
+# The same table by the vendor's id segment, which is how a selector spells it.
+_OWN_PROVIDERS_BY_SLUG: dict[str, frozenset[str]] = {}
+
+
+def own_providers_for_vendor_slug(slug: str) -> frozenset[str]:
+    """The provider ids a vendor publishes its own models under, by the vendor's id segment.
+
+    ``openai`` answers ``{"openai"}`` and ``moonshotai`` answers ``{"moonshot",
+    "moonshotai"}``; a vendor nobody resells for themselves answers nothing.
+    """
+    if not _OWN_PROVIDERS_BY_SLUG:
+        _OWN_PROVIDERS_BY_SLUG.update({vendor_slug(vendor): ids for vendor, ids in _VENDOR_PROVIDERS.items()})
+    return _OWN_PROVIDERS_BY_SLUG.get(slug.lower(), frozenset())
+
+
 # Hand rulings for what the two rungs get wrong, keyed ``provider_type/model_id``
 # and valued with the grouping key to use. Empty until a report says otherwise;
 # the point of having it is that a fix is one line here rather than a rule.
@@ -371,5 +386,6 @@ __all__ = [
     "identity_key",
     "infer_vendor",
     "normalize",
+    "own_providers_for_vendor_slug",
     "slugify",
 ]

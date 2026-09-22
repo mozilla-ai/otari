@@ -117,9 +117,7 @@ def test_load_config_reads_otari_prefixed_env_aliases(tmp_path: Path, monkeypatc
     assert config.bootstrap_api_key is False
 
 
-def test_load_config_treats_empty_otari_scalar_env_as_unset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_treats_empty_otari_scalar_env_as_unset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A blank OTARI_MASTER_KEY (common from container templating) must read as
     # unset, not "". An empty master key otherwise lets an empty bearer token
     # satisfy the master-key check on the shared auth path.
@@ -151,9 +149,7 @@ def test_load_config_ignores_legacy_gateway_prefix(tmp_path: Path, monkeypatch: 
     assert config.budget_strategy == "for_update"
 
 
-def test_load_config_otari_prefix_covers_all_scalar_fields(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_otari_prefix_covers_all_scalar_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Fields beyond the original hand-listed aliases must also resolve from OTARI_*.
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("{}\n", encoding="utf-8")
@@ -240,9 +236,7 @@ def test_retrieval_proxy_trust_defaults_off(monkeypatch: pytest.MonkeyPatch) -> 
     assert GatewayConfig().web_retrieval_trust_env_proxy is False
 
 
-def test_retrieval_proxy_trust_yaml_and_env_override(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_retrieval_proxy_trust_yaml_and_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OTARI_WEB_RETRIEVAL_TRUST_ENV_PROXY", raising=False)
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("web_retrieval_trust_env_proxy: true\n", encoding="utf-8")
@@ -287,9 +281,7 @@ def test_load_config_service_level_fields_ignore_legacy_gateway_prefix(
     assert config.mcp_allow_private_hosts is False
 
 
-def test_load_config_rejects_invalid_service_level_field(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_rejects_invalid_service_level_field(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # The promotion buys startup validation: a value the old code silently
     # ignored (a non-int web-search cap) now fails fast at config load.
     config_file = tmp_path / "gateway.yml"
@@ -301,9 +293,7 @@ def test_load_config_rejects_invalid_service_level_field(
         load_config(str(config_file))
 
 
-def test_load_config_bridges_yaml_service_fields_into_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_bridges_yaml_service_fields_into_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # The otari_env() read sites only see environment variables, so load_config
     # bridges YAML-set promoted fields into the process env; without this a
     # YAML-set sandbox_url would validate at startup and be ignored at request
@@ -329,9 +319,7 @@ def test_load_config_bridges_yaml_service_fields_into_env(
         assert otari_env("WEB_SEARCH_MAX_RESULTS") == "5"
 
 
-def test_load_config_env_wins_over_yaml_for_bridged_fields(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_env_wins_over_yaml_for_bridged_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # The bridge uses setdefault: an OTARI_ variable that is already set keeps
     # its value (and also wins in the field, via the env override machinery).
     config_file = tmp_path / "gateway.yml"
@@ -345,9 +333,7 @@ def test_load_config_env_wins_over_yaml_for_bridged_fields(
     assert otari_env("SANDBOX_URL") == "http://env-sandbox:9000"
 
 
-def test_load_config_does_not_bridge_fields_absent_from_yaml(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_does_not_bridge_fields_absent_from_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # The bridge only injects YAML-set promoted fields into the environment. A
     # field populated only from its OTARI_ env var is already visible to the
     # otari_env() read sites, so load_config leaves the environment untouched.
@@ -364,9 +350,7 @@ def test_load_config_does_not_bridge_fields_absent_from_yaml(
 
 
 @pytest.mark.asyncio
-async def test_yaml_ssrf_gates_round_trip_through_env_bridge(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_yaml_ssrf_gates_round_trip_through_env_bridge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A YAML-set SSRF gate boolean must reach the url_safety gate parsers with
     # the spelling they accept: `true` opens the private-host gates for both
     # the MCP and web-search fetch paths.
@@ -496,9 +480,7 @@ def test_load_config_derives_hybrid_mode_from_token_when_mode_unset(
     assert config.effective_mode == "hybrid"
 
 
-def test_load_config_rejects_standalone_mode_when_token_is_set(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_rejects_standalone_mode_when_token_is_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Explicitly asserting standalone while a platform token selects hybrid is a
     # conflicting configuration and must fail at startup rather than silently
     # running hybrid.
@@ -523,9 +505,7 @@ def test_load_config_rejects_standalone_mode_from_env_when_token_is_set(
         load_config(str(config_file))
 
 
-def test_load_config_honors_explicit_standalone_without_token(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_honors_explicit_standalone_without_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("mode: standalone\n", encoding="utf-8")
     monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
@@ -537,9 +517,7 @@ def test_load_config_honors_explicit_standalone_without_token(
     assert config.effective_mode == "standalone"
 
 
-def test_load_config_unset_mode_without_token_is_standalone(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_unset_mode_without_token_is_standalone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("", encoding="utf-8")
     monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
@@ -662,9 +640,7 @@ def test_load_config_structured_env_base64_tolerates_newline_wrapping(
     # The standard `base64` CLI and many env-var UIs wrap output at 76 columns.
     _isolate_structured_env(monkeypatch, tmp_path)
     yaml_text = (
-        "providers:\n"
-        "  openai:\n"
-        "    api_key: a-fairly-long-key-value-to-force-base64-line-wrapping-aaaaaaaaaaaaaa\n"
+        "providers:\n  openai:\n    api_key: a-fairly-long-key-value-to-force-base64-line-wrapping-aaaaaaaaaaaaaa\n"
     )
     wrapped = base64.encodebytes(yaml_text.encode("utf-8")).decode("ascii")
     assert "\n" in wrapped.strip()
@@ -731,9 +707,7 @@ def test_load_config_precedence_file_then_structured_then_scalar(
     assert config.providers["openai"]["api_key"] == "structured-key"
 
 
-def test_load_config_structured_env_resolves_var_references(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_structured_env_resolves_var_references(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _isolate_structured_env(monkeypatch, tmp_path)
     monkeypatch.setenv("MY_OPENAI_KEY", "resolved-secret")
     monkeypatch.setenv("OTARI_CONFIG_YAML", "providers:\n  openai:\n    api_key: ${MY_OPENAI_KEY}\n")
@@ -743,9 +717,7 @@ def test_load_config_structured_env_resolves_var_references(
     assert config.providers["openai"]["api_key"] == "resolved-secret"
 
 
-def test_load_config_structured_env_invalid_yaml_fails_fast(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_structured_env_invalid_yaml_fails_fast(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _isolate_structured_env(monkeypatch, tmp_path)
     monkeypatch.setenv("OTARI_CONFIG_YAML", "providers: [unclosed\n")
 
@@ -753,9 +725,7 @@ def test_load_config_structured_env_invalid_yaml_fails_fast(
         load_config()
 
 
-def test_load_config_structured_env_invalid_base64_fails_fast(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_structured_env_invalid_base64_fails_fast(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _isolate_structured_env(monkeypatch, tmp_path)
     monkeypatch.setenv("OTARI_CONFIG_B64", "not!valid!base64!")
 
@@ -763,9 +733,7 @@ def test_load_config_structured_env_invalid_base64_fails_fast(
         load_config()
 
 
-def test_load_config_structured_env_non_mapping_fails_fast(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_structured_env_non_mapping_fails_fast(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _isolate_structured_env(monkeypatch, tmp_path)
     monkeypatch.setenv("OTARI_CONFIG_YAML", "- just\n- a\n- list\n")
 

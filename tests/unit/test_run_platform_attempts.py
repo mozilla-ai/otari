@@ -64,9 +64,7 @@ def test_record_abandoned_attempt_labels_by_reason_and_position() -> None:
 
 
 def _single_attempt(provider: str, model: str) -> ResolvedAttempt:
-    return ResolvedAttempt(
-        attempt_id="a0", position=0, provider=provider, model=model, api_key="k", managed=False
-    )
+    return ResolvedAttempt(attempt_id="a0", position=0, provider=provider, model=model, api_key="k", managed=False)
 
 
 @pytest.mark.asyncio
@@ -362,12 +360,8 @@ async def test_gateway_terminal_error_marks_current_attempt_final(
 @pytest.mark.asyncio
 async def test_fallback_reports_nonfinal_error_and_final_success() -> None:
     attempts = [
-        ResolvedAttempt(
-            attempt_id="a0", position=0, provider="openai", model="gpt-4o", api_key="bad", managed=False
-        ),
-        ResolvedAttempt(
-            attempt_id="a1", position=1, provider="openai", model="gpt-4o", api_key="good", managed=False
-        ),
+        ResolvedAttempt(attempt_id="a0", position=0, provider="openai", model="gpt-4o", api_key="bad", managed=False),
+        ResolvedAttempt(attempt_id="a1", position=1, provider="openai", model="gpt-4o", api_key="good", managed=False),
     ]
     route = ResolvedRoute(request_id="r", fallback_enabled=True, attempts=attempts)
     reports: list[tuple[Any, ...]] = []
@@ -399,9 +393,7 @@ async def test_fallback_reports_nonfinal_error_and_final_success() -> None:
 @pytest.mark.asyncio
 async def test_nonretryable_error_marks_first_attempt_final() -> None:
     attempts = [
-        ResolvedAttempt(
-            attempt_id="a0", position=0, provider="openai", model="gpt-4o", api_key="bad", managed=False
-        ),
+        ResolvedAttempt(attempt_id="a0", position=0, provider="openai", model="gpt-4o", api_key="bad", managed=False),
         ResolvedAttempt(
             attempt_id="a1", position=1, provider="openai", model="gpt-4o", api_key="unused", managed=False
         ),
@@ -480,9 +472,7 @@ async def test_report_platform_usage_returns_completed_cost(monkeypatch: pytest.
 @pytest.mark.asyncio
 async def test_report_platform_usage_accepts_opaque_correlation_id(monkeypatch: pytest.MonkeyPatch) -> None:
     correlation_id = "01HX1ABCDEFGHJKMNPQRSTVWXYZ"
-    post_mock = AsyncMock(
-        return_value=httpx.Response(200, json=_completed_usage_body(correlation_id=correlation_id))
-    )
+    post_mock = AsyncMock(return_value=httpx.Response(200, json=_completed_usage_body(correlation_id=correlation_id)))
     monkeypatch.setattr(_platform, "_post_platform", post_mock)
 
     result = await _platform._report_platform_usage(

@@ -103,9 +103,7 @@ def test_delete_by_ids_removes_only_imported(
 
     # The request names an imported row *and* an enforced gateway row; only the
     # imported one may be removed.
-    resp = client.request(
-        "DELETE", DELETE_PATH, json={"ids": ["imp-1", "gw-1"]}, headers=master_key_header
-    )
+    resp = client.request("DELETE", DELETE_PATH, json={"ids": ["imp-1", "gw-1"]}, headers=master_key_header)
     assert resp.status_code == 200
     assert resp.json() == {"deleted": 1}
 
@@ -115,9 +113,7 @@ def test_delete_by_ids_removes_only_imported(
     assert _get(db_session, "gw-1") is not None
 
 
-def test_delete_by_filter_source(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session
-) -> None:
+def test_delete_by_filter_source(client: TestClient, master_key_header: dict[str, str], db_session: Session) -> None:
     _make_log(db_session, log_id="cc-1", counts_toward_budget=False, source="claude_code")
     _make_log(db_session, log_id="cc-2", counts_toward_budget=False, source="claude_code")
     _make_log(db_session, log_id="other-1", counts_toward_budget=False, source="codex")
@@ -184,9 +180,7 @@ def test_delete_by_filter_unpriced_only(
     _make_log(db_session, log_id="priced", counts_toward_budget=False, cost=0.02)
     db_session.commit()
 
-    resp = client.request(
-        "DELETE", DELETE_PATH, json={"by_filter": True, "priced": False}, headers=master_key_header
-    )
+    resp = client.request("DELETE", DELETE_PATH, json={"by_filter": True, "priced": False}, headers=master_key_header)
     assert resp.status_code == 200
     assert resp.json() == {"deleted": 1}
 
@@ -213,9 +207,7 @@ def test_delete_by_filter_never_touches_gateway_rows(
     assert _get(db_session, "gw-1") is not None
 
 
-def test_delete_by_filter_api_key(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session
-) -> None:
+def test_delete_by_filter_api_key(client: TestClient, master_key_header: dict[str, str], db_session: Session) -> None:
     _make_log(db_session, log_id="k1-a", counts_toward_budget=False)
     _make_log(db_session, log_id="k1-b", counts_toward_budget=False)
     db_session.query(UsageLog).filter(UsageLog.id.in_(["k1-a", "k1-b"])).update(
@@ -272,9 +264,7 @@ def test_ops_skip_backfilled_gateway_rows(
     db_session.commit()
 
     # Named explicitly on a delete: the backfilled row does not match.
-    resp = client.request(
-        "DELETE", DELETE_PATH, json={"ids": ["imp", "gw-migrated"]}, headers=master_key_header
-    )
+    resp = client.request("DELETE", DELETE_PATH, json={"ids": ["imp", "gw-migrated"]}, headers=master_key_header)
     assert resp.status_code == 200
     assert resp.json() == {"deleted": 1}
     db_session.expire_all()
@@ -301,9 +291,7 @@ def test_set_price_still_reaches_a_backfilled_import(
     and repricing imported usage is what this endpoint is for. A blanket match on the
     prefix would quietly take every migrated import out of reach.
     """
-    _make_log(
-        db_session, log_id="cc-migrated", counts_toward_budget=False, source="otari-ai:claude_code", cost=None
-    )
+    _make_log(db_session, log_id="cc-migrated", counts_toward_budget=False, source="otari-ai:claude_code", cost=None)
     db_session.commit()
 
     resp = client.post(
@@ -413,9 +401,7 @@ def test_by_filter_rejects_more_values_than_the_read_endpoints_accept(
     too_many = [f"m{index}" for index in range(MAX_FILTER_VALUES + 1)]
     assert client.get(COUNT_PATH, headers=master_key_header, params={"model": too_many}).status_code == 422
 
-    resp = client.request(
-        "DELETE", DELETE_PATH, json={"by_filter": True, "model": too_many}, headers=master_key_header
-    )
+    resp = client.request("DELETE", DELETE_PATH, json={"by_filter": True, "model": too_many}, headers=master_key_header)
     assert resp.status_code == 422
 
     at_cap = too_many[:MAX_FILTER_VALUES]
@@ -441,20 +427,14 @@ def test_delete_requires_master_key(client: TestClient) -> None:
     assert resp.status_code == 401
 
 
-def test_delete_empty_selection_is_rejected(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_delete_empty_selection_is_rejected(client: TestClient, master_key_header: dict[str, str]) -> None:
     # Neither ids nor by_filter: a 422, so an empty body can never match every row.
     resp = client.request("DELETE", DELETE_PATH, json={}, headers=master_key_header)
     assert resp.status_code == 422
 
 
-def test_delete_both_modes_is_rejected(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
-    resp = client.request(
-        "DELETE", DELETE_PATH, json={"ids": ["x"], "by_filter": True}, headers=master_key_header
-    )
+def test_delete_both_modes_is_rejected(client: TestClient, master_key_header: dict[str, str]) -> None:
+    resp = client.request("DELETE", DELETE_PATH, json={"ids": ["x"], "by_filter": True}, headers=master_key_header)
     assert resp.status_code == 422
 
 
@@ -542,9 +522,7 @@ def test_set_price_clears_the_provenance_of_the_amount_it_replaced(
     assert row.calculated_at is None
 
 
-def test_set_price_with_cache_rates(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session
-) -> None:
+def test_set_price_with_cache_rates(client: TestClient, master_key_header: dict[str, str], db_session: Session) -> None:
     _make_log(
         db_session,
         log_id="imp-cache",
@@ -707,9 +685,7 @@ def test_set_price_reports_unchanged_on_second_run(
     assert second.json() == {"matched": 1, "updated": 0, "unchanged": 1}
 
 
-def test_set_price_by_filter_model(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session
-) -> None:
+def test_set_price_by_filter_model(client: TestClient, master_key_header: dict[str, str], db_session: Session) -> None:
     _make_log(db_session, log_id="a", counts_toward_budget=False, model="openai/gpt-4", cost=None)
     _make_log(db_session, log_id="b", counts_toward_budget=False, model="anthropic/claude", cost=None)
     db_session.commit()
@@ -740,9 +716,7 @@ def test_set_price_requires_master_key(client: TestClient) -> None:
     assert resp.status_code == 401
 
 
-def test_set_price_rejects_negative_rate(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_set_price_rejects_negative_rate(client: TestClient, master_key_header: dict[str, str]) -> None:
     resp = client.post(
         SET_PRICE_PATH,
         json={"ids": ["x"], "input_price_per_million": -1.0, "output_price_per_million": 1.0},
@@ -790,9 +764,7 @@ def test_count_and_delete_agree_on_budget_exempt_gateway_rows(
     # still pages the served-here row, so an operator can see the traffic a cleanup is
     # not allowed to touch. Narrowing the shared filter builder instead of this one
     # endpoint would take it off the activity table with every test still green.
-    listed = client.get(
-        DELETE_PATH, params={"counts_toward_budget": "false", "limit": 100}, headers=master_key_header
-    )
+    listed = client.get(DELETE_PATH, params={"counts_toward_budget": "false", "limit": 100}, headers=master_key_header)
     assert listed.status_code == 200
     rows = {row["id"]: row for row in listed.json()}
     assert sorted(rows) == ["gw-exempt", "imp-1"]

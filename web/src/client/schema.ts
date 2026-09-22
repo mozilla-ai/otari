@@ -6459,7 +6459,7 @@ export interface components {
             resolves_to?: string | null;
             /**
              * Selector
-             * @description The id as a selector: send it as `model` and the model's cheapest offering answers. Null until the gateway has indexed the catalog.
+             * @description The id as a selector: send it as `model` and the model's cheapest offering the caller can reach answers, the vendor's own provider first where it serves the model. Null until the gateway has indexed the catalog.
              */
             selector?: string | null;
             /**
@@ -6557,7 +6557,7 @@ export interface components {
             resolves_to?: string | null;
             /**
              * Selector
-             * @description The id as a selector: send it as `model` and the model's cheapest offering answers. Null until the gateway has indexed the catalog.
+             * @description The id as a selector: send it as `model` and the model's cheapest offering the caller can reach answers, the vendor's own provider first where it serves the model. Null until the gateway has indexed the catalog.
              */
             selector?: string | null;
             /**
@@ -6629,7 +6629,7 @@ export interface components {
             selector: string;
             /**
              * Short Selector
-             * @description A shorter spelling the gateway also accepts: the instance with the model's cleaned id (`fireworks:gpt-oss-120b`). Null where two offerings on the instance would share it, or until the gateway has indexed the catalog.
+             * @description The pinned spelling the gateway also accepts for this offering: the instance with the model's catalog id (`fireworks:openai/gpt-oss-120b`), which pins the instance and reaches the model's cheapest offering on it. Null for a dearer sibling on the same instance, or until the gateway has indexed the catalog.
              */
             short_selector?: string | null;
             usage_30d?: components["schemas"]["OfferingUsage"] | null;
@@ -11418,10 +11418,10 @@ export interface components {
              */
             offerings: number;
             /**
-             * Short Selectors
-             * @description Offerings with an unambiguous short spelling.
+             * Pinned Selectors
+             * @description Pinned spellings, one per instance a model is offered on.
              */
-            short_selectors: number;
+            pinned_selectors: number;
         };
         /**
          * SendTestMailRequest

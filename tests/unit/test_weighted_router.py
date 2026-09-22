@@ -88,9 +88,7 @@ def _spec(
 
 def _rank(pool: list[str], weights: dict[str, float], seed: int = 0) -> list[str]:
     backend = WeightedRouterBackend(random.Random(seed))
-    ctx = RoutingContext(
-        user_id="alice", default_model=pool[-1], candidate_pool=pool, weights=weights
-    )
+    ctx = RoutingContext(user_id="alice", default_model=pool[-1], candidate_pool=pool, weights=weights)
     return asyncio.run(backend.rank(ctx)).ordered_models
 
 
@@ -135,9 +133,7 @@ def test_weights_are_refused_on_any_other_entry() -> None:
             }
         )
     with pytest.raises(ValidationError, match="only applies to a `router: weighted` entry"):
-        PolicySpec.model_validate(
-            {"select": [{"default": "openai:gpt-5", "weights": {"openai:gpt-5": 1}}]}
-        )
+        PolicySpec.model_validate({"select": [{"default": "openai:gpt-5", "weights": {"openai:gpt-5": 1}}]})
 
 
 @pytest.mark.parametrize("weight", [-1, float("inf"), float("nan")])
@@ -276,9 +272,7 @@ def test_the_backend_declines_a_policy_with_no_weights() -> None:
     backend = WeightedRouterBackend(random.Random(0))
     decision = asyncio.run(
         backend.rank(
-            RoutingContext(
-                user_id="alice", default_model="openai:gpt-5", candidate_pool=["openai:gpt-5", "a:b"]
-            )
+            RoutingContext(user_id="alice", default_model="openai:gpt-5", candidate_pool=["openai:gpt-5", "a:b"])
         )
     )
     assert decision.ordered_models == []
@@ -313,9 +307,7 @@ def test_a_weighted_policy_is_not_a_consumer_of_routing_memory() -> None:
         master_key="test-master-key",
         model_discovery=False,
         providers={"openai": {"api_key": "sk-openai"}, "anthropic": {"api_key": "sk-anthropic"}},
-        routing=RoutingConfig(
-            policies={"balanced": _spec({"openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30})}
-        ),
+        routing=RoutingConfig(policies={"balanced": _spec({"openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30})}),
     )
     assert not backend_pool_is_teachable(WEIGHTED_BACKEND)
     assert not backend_pool_is_teachable(" Weighted ")
@@ -353,9 +345,7 @@ def test_a_noop_placeholder_pool_is_still_teachable() -> None:
         cfg, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-5-mini": 1.0})], _WORKSPACE
     ) == {"openai:gpt-5-mini": "openai:gpt-5-mini"}
     with pytest.raises(HTTPException, match="do not name a model"):
-        _validated_scores(
-            cfg, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-4o": 1.0})], _WORKSPACE
-        )
+        _validated_scores(cfg, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-4o": 1.0})], _WORKSPACE)
 
 
 def test_the_backend_is_registered_and_needs_no_pricing(config: GatewayConfig) -> None:
@@ -464,9 +454,7 @@ def test_explain_renormalizes_over_what_the_caller_may_use(config: GatewayConfig
     # With the 70% candidate forbidden, the 30% one really does serve every request.
     spec = _spec({"openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30})
     _, shares = explain_router_ordering(config, spec, allowlist=["anthropic:*"])
-    assert [(item.selector, item.share_pct) for item in shares] == [
-        ("anthropic:claude-sonnet-4-5", 100.0)
-    ]
+    assert [(item.selector, item.share_pct) for item in shares] == [("anthropic:claude-sonnet-4-5", 100.0)]
 
 
 def test_explain_keeps_a_filtered_candidate_in_the_dropped_list(config: GatewayConfig) -> None:
@@ -495,9 +483,7 @@ def test_explain_names_every_candidate_when_the_whole_split_is_filtered_out(
     assert shares == []
     assert ordering is not None
     plan = compile_policy(config, "balanced", spec, allowlist=allowlist, router_ordering=ordering)
-    assert [f"{attempt.instance}:{attempt.model}" for attempt in plan.attempts] == [
-        "mistral:mistral-large-latest"
-    ]
+    assert [f"{attempt.instance}:{attempt.model}" for attempt in plan.attempts] == ["mistral:mistral-large-latest"]
     assert [(item.selector, item.reason) for item in plan.dropped] == [
         ("openai:gpt-5", "not_allowed"),
         ("anthropic:claude-sonnet-4-5", "not_allowed"),

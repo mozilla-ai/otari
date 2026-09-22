@@ -83,8 +83,9 @@ def test_the_roster_carries_the_same_id(
 ) -> None:
     created = _add_member(client, master_key_header, "ada@example.com")
 
-    assert _roster_row(client, master_key_header, "ada@example.com")["attribution_user_id"] == (
-        created["attribution_user_id"]
+    assert (
+        _roster_row(client, master_key_header, "ada@example.com")["attribution_user_id"]
+        == (created["attribution_user_id"])
     )
 
 

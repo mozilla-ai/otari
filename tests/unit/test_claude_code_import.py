@@ -360,9 +360,7 @@ def test_dry_run_reports_totals_and_sends_nothing(tmp_path: Path, fake_httpx: ty
     assert fake_httpx.posted == []
 
 
-def test_a_run_posts_the_batch_to_the_external_events_endpoint(
-    tmp_path: Path, fake_httpx: type[_FakeClient]
-) -> None:
+def test_a_run_posts_the_batch_to_the_external_events_endpoint(tmp_path: Path, fake_httpx: type[_FakeClient]) -> None:
     _write_transcript(tmp_path, "-Users-alice-Projects-otari", "session-a", [_assistant_line("msg_01")])
 
     result = CliRunner().invoke(
@@ -395,9 +393,7 @@ def test_a_run_posts_the_batch_to_the_external_events_endpoint(
 
 
 def test_an_empty_scan_sends_nothing(tmp_path: Path, fake_httpx: type[_FakeClient]) -> None:
-    result = CliRunner().invoke(
-        cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"]
-    )
+    result = CliRunner().invoke(cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"])
 
     assert result.exit_code == 0
     assert "Nothing to import." in result.output
@@ -409,27 +405,21 @@ def test_a_refused_batch_exits_non_zero(tmp_path: Path, fake_httpx: type[_FakeCl
     _write_transcript(tmp_path, "-Users-alice-Projects-otari", "session-a", [_assistant_line("msg_01")])
     fake_httpx.response = _FakeResponse(403, {"detail": "key is not budget-exempt"})
 
-    result = CliRunner().invoke(
-        cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"]
-    )
+    result = CliRunner().invoke(cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"])
 
     assert result.exit_code == 1
     assert "403" in result.output
     assert "key is not budget-exempt" in result.output
 
 
-def test_events_rejected_individually_also_exit_non_zero(
-    tmp_path: Path, fake_httpx: type[_FakeClient]
-) -> None:
+def test_events_rejected_individually_also_exit_non_zero(tmp_path: Path, fake_httpx: type[_FakeClient]) -> None:
     _write_transcript(tmp_path, "-Users-alice-Projects-otari", "session-a", [_assistant_line("msg_01")])
     fake_httpx.response = _FakeResponse(
         200,
         {"accepted": 0, "duplicate": 0, "rejected": 1, "errors": [{"index": 0, "detail": "no price"}]},
     )
 
-    result = CliRunner().invoke(
-        cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"]
-    )
+    result = CliRunner().invoke(cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"])
 
     assert result.exit_code == 1
     assert "no price" in result.output
@@ -458,9 +448,7 @@ def test_a_credential_is_only_required_to_send(tmp_path: Path, fake_httpx: type[
     assert "OTARI_MASTER_KEY" in send.output
 
 
-def test_the_master_key_env_var_also_supplies_the_credential(
-    tmp_path: Path, fake_httpx: type[_FakeClient]
-) -> None:
+def test_the_master_key_env_var_also_supplies_the_credential(tmp_path: Path, fake_httpx: type[_FakeClient]) -> None:
     """Either credential the endpoint accepts should be readable from its own env var."""
     _write_transcript(tmp_path, "-Users-alice-Projects-otari", "session-a", [_assistant_line("msg_01")])
 
@@ -485,9 +473,7 @@ def test_the_first_event_is_posted_alone_before_the_rest(tmp_path: Path, fake_ht
         _FakeResponse(200, {"accepted": 4, "duplicate": 0, "rejected": 0, "errors": []}),
     ]
 
-    result = CliRunner().invoke(
-        cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"]
-    )
+    result = CliRunner().invoke(cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"])
 
     assert result.exit_code == 0, result.output
     assert [len(post["body"]["events"]) for post in fake_httpx.posted] == [1, 4]
@@ -533,9 +519,7 @@ def test_a_refused_first_batch_stops_the_import(tmp_path: Path, fake_httpx: type
     )
     fake_httpx.response = _FakeResponse(403, {"detail": "key is not budget-exempt"})
 
-    result = CliRunner().invoke(
-        cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"]
-    )
+    result = CliRunner().invoke(cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"])
 
     assert result.exit_code == 1
     assert len(fake_httpx.posted) == 1
@@ -560,18 +544,14 @@ def test_a_transport_failure_stops_with_a_message_rather_than_a_traceback(
         httpx.ConnectError("connection reset"),
     ]
 
-    result = CliRunner().invoke(
-        cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"]
-    )
+    result = CliRunner().invoke(cli, ["import", "claude-code", "--projects-dir", str(tmp_path), "--api-key", "gw-test"])
 
     assert result.exit_code == 1
     assert "Import stopped after 1 event(s)" in result.output
     assert "duplicates" in result.output
 
 
-def test_a_batch_size_above_the_endpoints_cap_is_a_usage_error(
-    tmp_path: Path, fake_httpx: type[_FakeClient]
-) -> None:
+def test_a_batch_size_above_the_endpoints_cap_is_a_usage_error(tmp_path: Path, fake_httpx: type[_FakeClient]) -> None:
     """The cap belongs to the endpoint, so the CLI reads it rather than restating a number."""
     from gateway.services.external_usage_service import MAX_EVENTS_PER_BATCH
 

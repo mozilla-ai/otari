@@ -66,6 +66,7 @@ def gateway_logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCapture
     finally:
         gateway_logger.removeHandler(caplog.handler)
 
+
 SMTP_CONFIGURED = {"smtp_host": "smtp.example.com", "mail_from_email": "otari@example.com"}
 
 
@@ -108,7 +109,7 @@ def test_none_turns_mail_off_even_where_smtp_is_configured() -> None:
 
 
 def test_missing_settings_name_what_would_turn_mail_on() -> None:
-    """"Unavailable" is only honest if it says what to set."""
+    """ "Unavailable" is only honest if it says what to set."""
     assert GatewayConfig().missing_mail_settings == ("smtp_host", "mail_from_email", "public_base_url")
     assert GatewayConfig(smtp_host="smtp.example.com").missing_mail_settings == (
         "mail_from_email",

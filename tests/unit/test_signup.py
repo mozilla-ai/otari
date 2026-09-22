@@ -114,9 +114,7 @@ def test_signup_claims_a_roster_identity_and_sends_a_verification_link(
     with _client(tmp_path) as client:
         _add_member(client, email="ada@example.com")
 
-        token = _captured_verification_link(
-            caplog, client, email="ada@example.com", full_name="Ada Lovelace"
-        )
+        token = _captured_verification_link(caplog, client, email="ada@example.com", full_name="Ada Lovelace")
 
         # Unverified: the hard-block refuses the very password just set.
         response = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
@@ -149,9 +147,7 @@ def test_signup_preserves_the_existing_membership_and_organization(
         assert after["organization_member_id"] == before["organization_member_id"]
 
 
-def test_signup_on_an_untouched_address_is_enumeration_safe(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_signup_on_an_untouched_address_is_enumeration_safe(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """An earlier version answered 404 here, letting a caller enumerate the roster."""
     with _client(tmp_path) as client:
         gateway_logger.addHandler(caplog.handler)
@@ -180,9 +176,12 @@ def test_signup_on_an_already_completed_address_is_enumeration_safe(
         assert again.json() == _signup(client, email="nobody@example.com").json()
         # Nothing was re-sent, and the original password is untouched.
         assert "mail:console" not in caplog.text
-        assert client.post(
-            f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": "a-different-password"}
-        ).status_code == 401
+        assert (
+            client.post(
+                f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": "a-different-password"}
+            ).status_code
+            == 401
+        )
 
 
 def test_signup_on_a_deactivated_identity_writes_nothing(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -281,23 +280,17 @@ def test_open_signup_registers_an_unknown_address_and_verification_lets_it_sign_
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     with _client(tmp_path, open_signup=True) as client:
-        token = _captured_verification_link(
-            caplog, client, email="ada@example.com", full_name="Ada Lovelace"
-        )
+        token = _captured_verification_link(caplog, client, email="ada@example.com", full_name="Ada Lovelace")
 
         # Unverified, so the hard-block refuses the password that was just set,
         # exactly as it does on the claim path.
         assert (
-            client.post(
-                f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}
-            ).status_code
+            client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}).status_code
             == 403
         )
         assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
         assert (
-            client.post(
-                f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}
-            ).status_code
+            client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}).status_code
             == 200
         )
 
@@ -312,14 +305,10 @@ def test_open_signup_lands_the_new_account_in_an_organization_it_owns(
     closed default exists to prevent.
     """
     with _client(tmp_path, open_signup=True) as client:
-        token = _captured_verification_link(
-            caplog, client, email="ada@example.com", full_name="Ada Lovelace"
-        )
+        token = _captured_verification_link(caplog, client, email="ada@example.com", full_name="Ada Lovelace")
         assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
         assert (
-            client.post(
-                f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}
-            ).status_code
+            client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}).status_code
             == 200
         )
 
@@ -342,9 +331,7 @@ def test_open_signup_names_the_organization_from_the_address_when_no_name_is_giv
         token = _captured_verification_link(caplog, client, email="ada@example.com")
         assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
         assert (
-            client.post(
-                f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}
-            ).status_code
+            client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}).status_code
             == 200
         )
 
@@ -362,14 +349,10 @@ def test_open_signup_fits_a_long_name_into_the_organization_name_column(
     row: untruncated, a perfectly valid signup fails its flush.
     """
     with _client(tmp_path, open_signup=True) as client:
-        token = _captured_verification_link(
-            caplog, client, email="ada@example.com", full_name="A" * 255
-        )
+        token = _captured_verification_link(caplog, client, email="ada@example.com", full_name="A" * 255)
         assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
         assert (
-            client.post(
-                f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}
-            ).status_code
+            client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD}).status_code
             == 200
         )
 
@@ -395,9 +378,7 @@ def test_open_signup_claims_a_roster_address_rather_than_registering_a_second_te
         _captured_verification_link(caplog, client, email="grace@example.com")
 
         after = client.get(f"{API_ROOT}/organizations/me/members", headers=headers).json()["data"]
-        assert [row["organization_member_id"] for row in after] == [
-            row["organization_member_id"] for row in before
-        ]
+        assert [row["organization_member_id"] for row in after] == [row["organization_member_id"] for row in before]
         assert next(row for row in after if row["email"] == "grace@example.com")["role"] == "admin"
 
 

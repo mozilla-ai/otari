@@ -32,9 +32,7 @@ def _secret_key_and_clean_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[Non
 
 @pytest.mark.asyncio
 async def test_crud_round_trip(async_db: AsyncSession) -> None:
-    await save_credential(
-        async_db, instance="openai", api_key="sk-live-1234", api_base="https://api.openai.com/v1"
-    )
+    await save_credential(async_db, instance="openai", api_key="sk-live-1234", api_base="https://api.openai.com/v1")
     await async_db.commit()
 
     row = await get_credential(async_db, "openai")

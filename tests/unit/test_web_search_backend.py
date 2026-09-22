@@ -576,11 +576,7 @@ async def test_fetch_capped_truncates_huge_response(monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.asyncio
 async def test_complete_search_result_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
-    body = {
-        "results": [
-            {"url": "https://example.com/p", "title": "T" * 100_000, "content": "snippet"}
-        ]
-    }
+    body = {"results": [{"url": "https://example.com/p", "title": "T" * 100_000, "content": "snippet"}]}
     _patched_async_client({("searxng", "/search"): httpx.Response(200, json=body)}, monkeypatch)
 
     async with WebSearchBackend(base_url="http://searxng:8080", extract_content=False) as backend:

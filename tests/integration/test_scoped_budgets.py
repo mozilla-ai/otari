@@ -983,9 +983,7 @@ async def test_token_ceiling_holds_the_estimate_and_records_the_measured_total(
     async_db.add(cap)
     await async_db.commit()
 
-    handle = await reserve_budget(
-        async_db, tenancy.user_id, 0.0, estimated_tokens=4_000, scope=tenancy.scope()
-    )
+    handle = await reserve_budget(async_db, tenancy.user_id, 0.0, estimated_tokens=4_000, scope=tenancy.scope())
 
     # The ceiling leg, because this fixture's user has no budget row: the per-user
     # leg holds nothing, which is what the split makes explicit.
@@ -1000,9 +998,7 @@ async def test_token_ceiling_holds_the_estimate_and_records_the_measured_total(
 
 
 @pytest.mark.asyncio
-async def test_token_ceiling_refuses_a_request_that_would_exceed_it(
-    async_db: AsyncSession, tenancy: Fixture
-) -> None:
+async def test_token_ceiling_refuses_a_request_that_would_exceed_it(async_db: AsyncSession, tenancy: Fixture) -> None:
     """A hold larger than the remaining token headroom is refused, and nothing is held."""
     cap = await _scoped(
         async_db,
@@ -1086,9 +1082,7 @@ async def test_a_refunded_request_gives_back_every_axis(async_db: AsyncSession, 
     async_db.add(cap)
     await async_db.commit()
 
-    handle = await reserve_budget(
-        async_db, tenancy.user_id, 1.0, estimated_tokens=2_000, scope=tenancy.scope()
-    )
+    handle = await reserve_budget(async_db, tenancy.user_id, 1.0, estimated_tokens=2_000, scope=tenancy.scope())
     assert await _counters(async_db, cap.id) == (0.0, 1.0)
     assert await _token_counters(async_db, cap.id) == (0, 2_000)
     assert await _request_counters(async_db, cap.id) == (0, 1)
@@ -1101,9 +1095,7 @@ async def test_a_refunded_request_gives_back_every_axis(async_db: AsyncSession, 
 
 
 @pytest.mark.asyncio
-async def test_a_rolled_period_zeroes_every_axis_and_leaves_the_holds(
-    async_db: AsyncSession, tenancy: Fixture
-) -> None:
+async def test_a_rolled_period_zeroes_every_axis_and_leaves_the_holds(async_db: AsyncSession, tenancy: Fixture) -> None:
     """An expired window starts fresh on all three counters, so a spent cap admits again."""
     now = datetime.now(UTC)
     cap = await _scoped(
@@ -1155,9 +1147,7 @@ async def test_a_token_top_up_on_a_ceiling_is_released_when_the_user_has_no_budg
     async_db.add(cap)
     await async_db.commit()
 
-    handle = await reserve_budget(
-        async_db, tenancy.user_id, 1.0, estimated_tokens=1_000, scope=tenancy.scope()
-    )
+    handle = await reserve_budget(async_db, tenancy.user_id, 1.0, estimated_tokens=1_000, scope=tenancy.scope())
 
     assert not handle.reserved, "this fixture's user has no budget row"
     assert await _token_counters(async_db, cap.id) == (0, 1_000)
@@ -1175,9 +1165,7 @@ async def test_a_token_top_up_on_a_ceiling_is_released_when_the_user_has_no_budg
 
 
 @pytest.mark.asyncio
-async def test_a_refused_top_up_leaves_no_token_hold_behind(
-    async_db: AsyncSession, tenancy: Fixture
-) -> None:
+async def test_a_refused_top_up_leaves_no_token_hold_behind(async_db: AsyncSession, tenancy: Fixture) -> None:
     """A refund can only release what the handle records, so the growth is recorded first."""
     cap = await _scoped(
         async_db,
@@ -1189,9 +1177,7 @@ async def test_a_refused_top_up_leaves_no_token_hold_behind(
     async_db.add(cap)
     await async_db.commit()
 
-    handle = await reserve_budget(
-        async_db, tenancy.user_id, 0.0, estimated_tokens=1_000, scope=tenancy.scope()
-    )
+    handle = await reserve_budget(async_db, tenancy.user_id, 0.0, estimated_tokens=1_000, scope=tenancy.scope())
 
     with pytest.raises(HTTPException):
         await increase_reservation(async_db, handle, Decimal("0"), additional_tokens=500)
@@ -1231,9 +1217,7 @@ async def test_a_refusal_names_the_axis_that_bound(async_db: AsyncSession, tenan
 
 
 @pytest.mark.asyncio
-async def test_a_spent_dollar_cap_still_reads_as_a_budget_refusal(
-    async_db: AsyncSession, tenancy: Fixture
-) -> None:
+async def test_a_spent_dollar_cap_still_reads_as_a_budget_refusal(async_db: AsyncSession, tenancy: Fixture) -> None:
     """The counterpart, so the axis is read rather than always reported as tokens.
 
     The dollar axis keeps the word it always had, so a caller keying on "budget"
@@ -1257,9 +1241,7 @@ async def test_a_spent_dollar_cap_still_reads_as_a_budget_refusal(
 
 
 @pytest.mark.asyncio
-async def test_a_refusal_names_the_axis_a_hold_would_push_past(
-    async_db: AsyncSession, tenancy: Fixture
-) -> None:
+async def test_a_refusal_names_the_axis_a_hold_would_push_past(async_db: AsyncSession, tenancy: Fixture) -> None:
     """The other refusal shape: room now, none once this request's hold lands.
 
     The ceiling is under its cap, so a helper testing only "already at the cap"

@@ -24,6 +24,7 @@ from gateway.api.routes._pipeline import _raise_for_unresolvable_model, resolve_
 # _raise_for_unresolvable_model
 # ---------------------------------------------------------------------------
 
+
 def test_value_error_maps_to_400() -> None:
     with pytest.raises(HTTPException) as exc_info:
         _raise_for_unresolvable_model("nosuchmodel", ValueError("Invalid model format"))
@@ -49,6 +50,7 @@ def test_detail_contains_model_name() -> None:
 # ---------------------------------------------------------------------------
 # resolve_dispatch_provider
 # ---------------------------------------------------------------------------
+
 
 def _make_ctx(resolved_provider: object = None) -> MagicMock:
     ctx = MagicMock()

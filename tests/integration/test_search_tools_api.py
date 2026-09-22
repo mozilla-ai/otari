@@ -95,9 +95,7 @@ def test_unsupported_provider_is_refused(client: TestClient, master_key_header: 
     assert "not a supported search provider" in resp.json()["detail"]
 
 
-def test_provider_requiring_a_key_is_refused_without_one(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_provider_requiring_a_key_is_refused_without_one(client: TestClient, master_key_header: dict[str, str]) -> None:
     resp = _create(client, master_key_header, provider="exa", api_base=None)
     assert resp.status_code == 422
     assert "api_key is required" in resp.json()["detail"]
@@ -156,9 +154,7 @@ def test_patch_updates_base_keeps_key_then_rotates(client: TestClient, master_ke
     assert "exa-new-2222" not in rotated.text
 
 
-def test_patch_refuses_to_clear_a_key_the_provider_needs(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_patch_refuses_to_clear_a_key_the_provider_needs(client: TestClient, master_key_header: dict[str, str]) -> None:
     """The tool as it would be after the patch is validated, not the patch alone."""
     _create(client, master_key_header, provider="exa", api_base=None, api_key="exa-orig")
     resp = client.patch(f"{API_ROOT}/search-tools/local", json={"api_key": None}, headers=master_key_header)
@@ -189,9 +185,7 @@ def test_delete_removes_the_tool(client: TestClient, master_key_header: dict[str
     assert client.delete(f"{API_ROOT}/search-tools/local", headers=master_key_header).status_code == 404
 
 
-def test_delete_of_a_config_tool_explains_why_it_cannot(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_delete_of_a_config_tool_explains_why_it_cannot(client: TestClient, master_key_header: dict[str, str]) -> None:
     resp = client.delete(f"{API_ROOT}/search-tools/from-file", headers=master_key_header)
     assert resp.status_code == 404
     assert "defined in the config file" in resp.json()["detail"]

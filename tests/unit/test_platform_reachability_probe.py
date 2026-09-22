@@ -118,9 +118,7 @@ async def test_probe_falls_back_to_the_platform_route(monkeypatch: pytest.Monkey
     config = _hybrid_config(monkeypatch)
 
     assert await _check_platform_reachability(config) is True
-    assert [str(url) for url in stub.requested] == [
-        f"http://platform.test/v1{DEFAULT_PLATFORM_HEALTH_PATH}"
-    ]
+    assert [str(url) for url in stub.requested] == [f"http://platform.test/v1{DEFAULT_PLATFORM_HEALTH_PATH}"]
 
 
 @pytest.mark.parametrize("status", [200, 204])
@@ -153,17 +151,13 @@ async def test_a_non_success_reports_unreachable(
 
 
 @pytest.mark.asyncio
-async def test_a_redirect_is_not_followed_and_reports_unreachable(
-    monkeypatch: pytest.MonkeyPatch, probe: Any
-) -> None:
+async def test_a_redirect_is_not_followed_and_reports_unreachable(monkeypatch: pytest.MonkeyPatch, probe: Any) -> None:
     """A peer route that bounces to a login page has not answered the probe."""
     stub = probe(httpx.Response(302, headers={"location": "https://platform.test/login"}))
     config = _hybrid_config(monkeypatch)
 
     assert await _check_platform_reachability(config) is False
-    assert [str(url) for url in stub.requested] == [
-        f"http://platform.test/v1{DEFAULT_PLATFORM_HEALTH_PATH}"
-    ]
+    assert [str(url) for url in stub.requested] == [f"http://platform.test/v1{DEFAULT_PLATFORM_HEALTH_PATH}"]
 
 
 @pytest.mark.parametrize(

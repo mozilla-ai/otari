@@ -333,13 +333,16 @@ def test_the_deployment_wide_writers_still_refuse_a_tenant(client: TestClient, w
     assert _post(
         client, world, "alpha_admin", f"{API_ROOT}/routing/policies", _policy_body(world, name="x")
     ).status_code == (status.HTTP_403_FORBIDDEN)
-    assert _post(
-        client,
-        world,
-        "alpha_admin",
-        f"{API_ROOT}/aliases",
-        {"name": "x", "target": _ALPHA_TARGET},
-    ).status_code == status.HTTP_403_FORBIDDEN
+    assert (
+        _post(
+            client,
+            world,
+            "alpha_admin",
+            f"{API_ROOT}/aliases",
+            {"name": "x", "target": _ALPHA_TARGET},
+        ).status_code
+        == status.HTTP_403_FORBIDDEN
+    )
 
 
 def test_both_lists_are_bounded(client: TestClient, world: _World) -> None:

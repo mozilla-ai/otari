@@ -147,9 +147,7 @@ async def test_get_all_pages_in_a_defined_order(async_db: AsyncSession) -> None:
     assert [org.id for org in listed] == sorted(org.id for org in listed)
 
     # And the partition that ordering buys: paged in twos, every row once.
-    paged = [
-        org.slug for offset in range(0, len(listed), 2) for org in await repository.get_all(skip=offset, limit=2)
-    ]
+    paged = [org.slug for offset in range(0, len(listed), 2) for org in await repository.get_all(skip=offset, limit=2)]
     assert len(paged) == len(listed)
     assert len(set(paged)) == len(listed), "a page repeated a row, so another was skipped"
 

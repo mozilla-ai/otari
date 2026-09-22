@@ -222,9 +222,7 @@ def test_unresolvable_selector_releases_the_reservation(
 
     session = db_session_factory()
     try:
-        reserved = session.execute(
-            text("SELECT reserved FROM users WHERE user_id = 'stranded-user'")
-        ).scalar_one()
+        reserved = session.execute(text("SELECT reserved FROM users WHERE user_id = 'stranded-user'")).scalar_one()
     finally:
         session.close()
     assert float(reserved) == 0.0
@@ -306,9 +304,7 @@ def test_passthrough_model_not_allowed_is_recorded(client: TestClient, master_ke
     one it exercises the refund-then-log ordering.
     """
     _make_user(client, master_key_header, "scoped-embedder")
-    key = _make_key(
-        client, master_key_header, "scoped-embed", user_id="scoped-embedder", allowed_models=["cohere:*"]
-    )
+    key = _make_key(client, master_key_header, "scoped-embed", user_id="scoped-embedder", allowed_models=["cohere:*"])
 
     resp = client.post(
         f"{API_ROOT}/embeddings",

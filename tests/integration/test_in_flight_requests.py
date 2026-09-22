@@ -53,9 +53,7 @@ def _completion() -> ChatCompletion:
         object="chat.completion",
         created=0,
         model=MODEL_NAME,
-        choices=[
-            Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hi"), finish_reason="stop")
-        ],
+        choices=[Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hi"), finish_reason="stop")],
         usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
     )
 
@@ -88,9 +86,7 @@ def test_in_flight_requires_the_master_key(client: TestClient, api_key_header: d
     assert client.get(IN_FLIGHT, headers=api_key_header).status_code == 401
 
 
-def test_an_idle_gateway_reports_nothing_in_flight(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_an_idle_gateway_reports_nothing_in_flight(client: TestClient, master_key_header: dict[str, str]) -> None:
     resp = client.get(IN_FLIGHT, headers=master_key_header)
 
     assert resp.status_code == 200
@@ -180,9 +176,7 @@ def test_a_request_is_registered_while_its_provider_call_runs(
     assert len(registry) == 0
 
 
-def test_a_failed_request_does_not_stay_in_flight(
-    client: TestClient, api_key_header: dict[str, str]
-) -> None:
+def test_a_failed_request_does_not_stay_in_flight(client: TestClient, api_key_header: dict[str, str]) -> None:
     with patch("gateway.api.routes.chat.acompletion", side_effect=RuntimeError("provider down")):
         assert _chat(client, api_key_header).status_code >= 400
 
@@ -223,9 +217,7 @@ def test_a_stream_stays_in_flight_until_its_body_is_consumed(
     assert len(registry) == 0
 
 
-def test_a_pass_through_request_is_registered_too(
-    client: TestClient, api_key_header: dict[str, str]
-) -> None:
+def test_a_pass_through_request_is_registered_too(client: TestClient, api_key_header: dict[str, str]) -> None:
     """Embeddings, images, audio and friends run through their own scaffold.
 
     They write activity rows like any other request, and an image generation

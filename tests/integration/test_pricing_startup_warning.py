@@ -29,9 +29,7 @@ def _capture_gateway_logs(caplog: pytest.LogCaptureFixture) -> None:
 
 
 @pytest.mark.asyncio
-async def test_soft_note_when_default_pricing_enabled(
-    async_db: AsyncSession, caplog: pytest.LogCaptureFixture
-) -> None:
+async def test_soft_note_when_default_pricing_enabled(async_db: AsyncSession, caplog: pytest.LogCaptureFixture) -> None:
     """Default pricing on: no dire warning, but a softer coverage note is logged."""
     _capture_gateway_logs(caplog)
     try:
@@ -87,9 +85,7 @@ async def test_warning_for_a_search_tool_with_no_flat_rate(
 
 
 @pytest.mark.asyncio
-async def test_no_warning_once_a_flat_rate_exists(
-    async_db: AsyncSession, caplog: pytest.LogCaptureFixture
-) -> None:
+async def test_no_warning_once_a_flat_rate_exists(async_db: AsyncSession, caplog: pytest.LogCaptureFixture) -> None:
     """An explicit rate silences it, including a deliberate 0 for a free tool."""
     async_db.add(
         ModelPricing(

@@ -128,6 +128,24 @@ class OrgProviderKeyRepository(
         )
         return list(result.scalars().all())
 
+    async def list_all_live(self) -> Sequence[OrgProviderKey]:
+        """Every non-archived key on the deployment, for a read that spans organizations.
+
+        The selector index is rebuilt for every organization in one pass, so
+        this is one query rather than :meth:`list_live_keys` once per tenant.
+        """
+        result = await self.db.execute(
+            select(OrgProviderKey)
+            .where(col(OrgProviderKey.archived_at).is_(None))
+            .order_by(
+                col(OrgProviderKey.organization_id),
+                col(OrgProviderKey.provider),
+                col(OrgProviderKey.created_at),
+                col(OrgProviderKey.id),
+            )
+        )
+        return list(result.scalars().all())
+
     async def list_for_organization(
         self,
         organization_id: uuid.UUID,

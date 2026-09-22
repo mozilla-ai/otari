@@ -218,6 +218,32 @@ async def resolve_organization_offered_keys(db: AsyncSession, organization_id: u
     return frozenset(entry for entry in entries if not entry.endswith(":*"))
 
 
+async def resolve_all_organizations_offered_keys(db: AsyncSession) -> dict[uuid.UUID, frozenset[str]]:
+    """Every organization's served ``provider:model`` selectors, keyed by organization.
+
+    The selector index's read: it builds one view per organization in a single
+    pass, so this is two queries for the deployment rather than two per tenant.
+    An organization offering nothing is absent.
+    """
+    live = [key for key in await OrgProviderKeyRepository(db).list_all_live() if key_is_usable(key)]
+    if not live:
+        return {}
+    offered = await OrgProviderKeyModelRepository(db).enabled_models_for_keys({key.id for key in live})
+    by_organization: dict[uuid.UUID, set[str]] = {}
+    for key in live:
+        entries = _narrowed(provider_key(key.provider), offered.get(key.id), None)
+        by_organization.setdefault(key.organization_id, set()).update(
+            entry for entry in entries if not entry.endswith(":*")
+        )
+    return {organization: frozenset(keys) for organization, keys in by_organization.items() if keys}
+
+
+async def workspace_organizations(db: AsyncSession) -> dict[uuid.UUID, uuid.UUID]:
+    """Which organization each workspace belongs to."""
+    rows = await db.execute(select(col(Workspace.id), col(Workspace.organization_id)))
+    return {workspace_id: organization_id for workspace_id, organization_id in rows.all()}
+
+
 async def resolve_default_workspace_offered_keys(db: AsyncSession) -> frozenset[str]:
     """What the deployment's own organization offers, for a master-key caller.
 
@@ -328,4 +354,10 @@ async def resolve_session_model_allowlist(
     return scope.allowlist
 
 
-__all__ = ["SessionCatalogScope", "resolve_session_catalog_scope", "resolve_session_model_allowlist"]
+__all__ = [
+    "SessionCatalogScope",
+    "resolve_all_organizations_offered_keys",
+    "resolve_session_catalog_scope",
+    "resolve_session_model_allowlist",
+    "workspace_organizations",
+]

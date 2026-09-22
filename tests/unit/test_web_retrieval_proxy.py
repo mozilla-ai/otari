@@ -308,8 +308,7 @@ async def test_real_http_transport_sends_request_to_configured_proxy(monkeypatch
         try:
             received.append(await reader.readuntil(b"\r\n\r\n"))
             writer.write(
-                b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 4\r\n"
-                b"Connection: close\r\n\r\npage"
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 4\r\nConnection: close\r\n\r\npage"
             )
             await writer.drain()
         finally:

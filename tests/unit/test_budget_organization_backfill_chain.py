@@ -71,8 +71,7 @@ def _add_organization(engine: Engine, *, name: str, slug: str) -> str:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "INSERT INTO organization (id, name, slug, created_at, updated_at) "
-                "VALUES (:id, :name, :slug, :n, :n)"
+                "INSERT INTO organization (id, name, slug, created_at, updated_at) VALUES (:id, :name, :slug, :n, :n)"
             ),
             {"id": organization_id, "name": name, "slug": slug, "n": _NOW},
         )
@@ -103,9 +102,7 @@ def _add_gateway_user(engine: Engine, *, user_id: str, budget_id: str | None) ->
 
 def _owners(engine: Engine) -> dict[str, str | None]:
     with engine.begin() as connection:
-        return {
-            row[0]: row[1] for row in connection.execute(text("SELECT budget_id, organization_id FROM budgets"))
-        }
+        return {row[0]: row[1] for row in connection.execute(text("SELECT budget_id, organization_id FROM budgets"))}
 
 
 def test_the_column_and_its_index_arrive(sqlite_before: tuple[Config, Engine]) -> None:

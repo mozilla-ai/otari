@@ -27,22 +27,24 @@ def _mock_completion() -> ChatCompletion:
         object="chat.completion",
         created=0,
         model=MODEL_NAME,
-        choices=[
-            Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hi"), finish_reason="stop")
-        ],
+        choices=[Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hi"), finish_reason="stop")],
         usage=CompletionUsage(prompt_tokens=1_000_000, completion_tokens=500_000, total_tokens=1_500_000),
     )
 
 
 def _seed(client: TestClient, master_key_header: dict[str, str]) -> None:
-    client.post(f"{API_ROOT}/pricing", json={
-        "model_key": MODEL_NAME, "input_price_per_million": 2.5, "output_price_per_million": 10.0,
-    }, headers=master_key_header)
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": MODEL_NAME,
+            "input_price_per_million": 2.5,
+            "output_price_per_million": 10.0,
+        },
+        headers=master_key_header,
+    )
 
 
-def _make_key(
-    client: TestClient, master_key_header: dict[str, str], user_id: str, *, exclude: bool
-) -> dict[str, str]:
+def _make_key(client: TestClient, master_key_header: dict[str, str], user_id: str, *, exclude: bool) -> dict[str, str]:
     resp = client.post(
         f"{API_ROOT}/keys",
         json={"key_name": user_id, "user_id": user_id, "exclude_from_budget": exclude},

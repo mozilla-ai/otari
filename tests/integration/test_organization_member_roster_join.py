@@ -37,9 +37,7 @@ from gateway.services.tenancy.organization_service import OrganizationService
 
 
 async def _organization(db: AsyncSession, *, slug: str) -> Organization:
-    return await OrganizationRepository(db).create_organization(
-        name=slug.title(), slug=slug, created_by_user_id=None
-    )
+    return await OrganizationRepository(db).create_organization(name=slug.title(), slug=slug, created_by_user_id=None)
 
 
 async def _member(db: AsyncSession, organization: Organization, *, full_name: str, role: str = "member") -> User:
@@ -174,10 +172,10 @@ async def test_a_suspended_workspace_membership_is_not_a_placement(async_db: Asy
     owner = await _member(async_db, organization, full_name="Owner", role="owner")
     workspace = await _workspace(async_db, organization, name="Engineering", owner=owner)
     membership = (
-        await async_db.execute(
-            select(WorkspaceMember).where(col(WorkspaceMember.workspace_id) == workspace.id)
-        )
-    ).scalars().one()
+        (await async_db.execute(select(WorkspaceMember).where(col(WorkspaceMember.workspace_id) == workspace.id)))
+        .scalars()
+        .one()
+    )
     membership.status = "suspended"
     async_db.add(membership)
     await async_db.flush()

@@ -118,8 +118,7 @@ def test_an_explicit_preference_is_returned_as_asked(native_available: bool, san
 
 def test_auto_prefers_a_provider_that_runs_the_tool_natively() -> None:
     assert (
-        decide_code_executor(CodeExecutor.AUTO, sandbox_configured=True, native_available=True)
-        is CodeExecutor.PROVIDER
+        decide_code_executor(CodeExecutor.AUTO, sandbox_configured=True, native_available=True) is CodeExecutor.PROVIDER
     )
 
 

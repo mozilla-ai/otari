@@ -129,9 +129,7 @@ async def test_call_tool_outcome_preserves_server_error_status(is_error: bool) -
 async def test_call_tool_sanitizes_transport_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session = SimpleNamespace(
-        call_tool=AsyncMock(side_effect=RuntimeError("https://internal.test/?token=secret"))
-    )
+    session = SimpleNamespace(call_tool=AsyncMock(side_effect=RuntimeError("https://internal.test/?token=secret")))
     pool = MCPClientPool([])
     pool._servers["fixture"] = _ConnectedServer(
         name="fixture",

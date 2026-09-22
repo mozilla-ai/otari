@@ -839,8 +839,7 @@ def _completed_results_patches(tokens: CompletionUsage | None = None, count: int
     mock_completion.model_dump.return_value = {"id": "chatcmpl-1", "choices": []}
     mock_result = BatchResult(
         results=[
-            BatchResultItem(custom_id=f"req-{index + 1}", result=mock_completion, error=None)
-            for index in range(count)
+            BatchResultItem(custom_id=f"req-{index + 1}", result=mock_completion, error=None) for index in range(count)
         ]
     )
     return (

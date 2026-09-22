@@ -148,9 +148,7 @@ def test_select_flagged_does_not_mutate_input() -> None:
 
 
 def test_render_report_lists_each_flagged_pr() -> None:
-    prs = check.select_flagged(
-        [_pr("mozilla-ai/otari-sdk-python", 12, age_days=10)], max_age_days=7, now=_NOW
-    )
+    prs = check.select_flagged([_pr("mozilla-ai/otari-sdk-python", 12, age_days=10)], max_age_days=7, now=_NOW)
     report = check.render_report(prs, max_age_days=7, now=_NOW)
     assert "mozilla-ai/otari-sdk-python" in report
     assert "[#12](https://github.com/mozilla-ai/otari-sdk-python/pull/12)" in report

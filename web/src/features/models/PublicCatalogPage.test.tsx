@@ -56,7 +56,7 @@ const GLM_DETAIL: CatalogModelDetail = {
   offerings: [
     {
       selector: "nebius:zai-org/GLM-5.3",
-      short_selector: "nebius:glm-5.3",
+      short_selector: "nebius:z-ai/glm-5.3",
       provider: "nebius",
       provider_type: "nebius",
       credential: "deployment",
@@ -78,7 +78,7 @@ const GLM_DETAIL: CatalogModelDetail = {
     },
     {
       selector: "fireworks:accounts/fireworks/models/glm-5p3",
-      short_selector: "fireworks:glm-5p3",
+      short_selector: "fireworks:z-ai/glm-5.3",
       provider: "fireworks",
       provider_type: "fireworks",
       credential: "deployment",
