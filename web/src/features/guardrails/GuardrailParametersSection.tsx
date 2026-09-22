@@ -30,6 +30,7 @@ export function GuardrailParametersSection({
   extraJson,
   extraJsonError,
   isDescribed,
+  extraJsonDescription = "Sent to the guardrails service as validate_kwargs, under whatever the fields above set. Use it for a parameter this gateway has no schema for.",
   disabled,
   onChange,
   onExtraJsonChange,
@@ -49,6 +50,8 @@ export function GuardrailParametersSection({
    * takes none.
    */
   isDescribed: boolean
+  /** Where the raw parameters go, which depends on who runs the check. */
+  extraJsonDescription?: string
   disabled?: boolean
   onChange: (name: string, next: ParameterValues[string]) => void
   onExtraJsonChange: (next: string) => void
@@ -106,8 +109,7 @@ export function GuardrailParametersSection({
                 extraJsonError ? "text-caption text-danger" : "text-caption"
               }
             >
-              {extraJsonError ??
-                "Sent to the guardrails service as validate_kwargs, under whatever the fields above set. Use it for a parameter this gateway has no schema for."}
+              {extraJsonError ?? extraJsonDescription}
             </Description>
           </FieldMessages>
         </TextField>
