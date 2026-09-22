@@ -4,6 +4,47 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.7.0](https://github.com/mozilla-ai/otari/releases/tag/v0.7.0) - 2026-09-22
+
+
+
+### Bug Fixes
+
+- **tools:** Drop the X- prefix from the code-execution header in [#1496](https://github.com/mozilla-ai/otari/pull/1496) by [@peteski22](https://github.com/peteski22) ([`cc5c5ed`](https://github.com/mozilla-ai/otari/commit/cc5c5ed624add1c92e141255bd81a25e0e6d2f7d))
+- Name this project's install command when an optional extra is missing in [#1515](https://github.com/mozilla-ai/otari/pull/1515) by [@peteski22](https://github.com/peteski22) ([`cc617f3`](https://github.com/mozilla-ai/otari/commit/cc617f3f699f1a1d08e108ef674d9161ba61030a))
+
+
+### Features
+
+- **catalog:** Search the model catalog and the roster on the server in [#1436](https://github.com/mozilla-ai/otari/pull/1436) by [@khaledosman](https://github.com/khaledosman) ([`cf2968c`](https://github.com/mozilla-ai/otari/commit/cf2968c16563a18a484790e1665cc0219e134e1a))
+- **dashboard:** Show providers and model makers with their own marks in [#1427](https://github.com/mozilla-ai/otari/pull/1427) by [@jigjigjig](https://github.com/jigjigjig) ([`4a1015c`](https://github.com/mozilla-ai/otari/commit/4a1015c0c3f3419fcab57c5803e527c67ea37ab1))
+- **tenancy:** Answer the members page from one roster row in [#1437](https://github.com/mozilla-ai/otari/pull/1437) by [@khaledosman](https://github.com/khaledosman) ([`b8befec`](https://github.com/mozilla-ai/otari/commit/b8befecb5d99bd46e66427c03fcf5ab3e0181e26))
+- **policy-checks:** Let a repo author its own check_passed verifier ([`adaa323`](https://github.com/mozilla-ai/otari/commit/adaa32332f8f33e5a6cf177418ca249b469f7122))
+- **policy-checks:** Add a second check_passed verifier, no-stranded-docblocks ([`0021347`](https://github.com/mozilla-ai/otari/commit/0021347048004b48e601d55b1814088790c2e921))
+- **tools:** Add the code-execution vocabulary and its settings by [@daavoo](https://github.com/daavoo) ([`1fe96a6`](https://github.com/mozilla-ai/otari/commit/1fe96a6c833031c84df437a9b219b35842d3b2d1))
+- **files:** Add the fsspec store and the shared file helpers by [@daavoo](https://github.com/daavoo) ([`a1a2013`](https://github.com/mozilla-ai/otari/commit/a1a20135480d7f261ffd85ed50581678c9e62c64))
+- **files:** Serve both SDKs' Files APIs, with the schema and services behind them by [@daavoo](https://github.com/daavoo) ([`d0ca835`](https://github.com/mozilla-ai/otari/commit/d0ca83548b7a5122d3c2dff3c78a677dbfffd9a0))
+- **tools:** Run provider-native code execution on the sandbox when the model has none by [@daavoo](https://github.com/daavoo) ([`ff9dfd8`](https://github.com/mozilla-ai/otari/commit/ff9dfd8618d68cb76b3b328172fad502684e97f2))
+- **providers:** Offer, price and switch an organization's models on its own keys in [#1456](https://github.com/mozilla-ai/otari/pull/1456) by [@tbille](https://github.com/tbille) ([`1891972`](https://github.com/mozilla-ai/otari/commit/189197204d652f7fa7ceec1985b99755dcaabf9c))
+- **files:** Serve Anthropic's GA Files API shape and refuse the files beta header in [#1509](https://github.com/mozilla-ai/otari/pull/1509) by [@peteski22](https://github.com/peteski22) ([`05c7192`](https://github.com/mozilla-ai/otari/commit/05c7192d0128f3ecb33be7b935cce13294c8f9d1))
+- **sandbox:** Run code on a hosted provider, through a port rather than a second service by [@daavoo](https://github.com/daavoo) ([`d9cdc26`](https://github.com/mozilla-ai/otari/commit/d9cdc2638ce3298b2f437c451346f1ff85de63ee))
+- **sandbox:** Resume a code-execution sandbox across requests by container id in [#1433](https://github.com/mozilla-ai/otari/pull/1433) by [@daavoo](https://github.com/daavoo) ([`5b5c7f9`](https://github.com/mozilla-ai/otari/commit/5b5c7f90410c7cd2ac90e1f1e69f046a15ba75f3))
+- **compose:** Add SeaweedFS as a self-hosted object store, and test the fsspec file store against it in [#1514](https://github.com/mozilla-ai/otari/pull/1514) by [@peteski22](https://github.com/peteski22) ([`423624e`](https://github.com/mozilla-ai/otari/commit/423624e1172affba3356509ffe5fe0a61d934be6))
+- **files:** Copy the files a provider's code produces into Otari's store in [#1517](https://github.com/mozilla-ai/otari/pull/1517) by [@peteski22](https://github.com/peteski22) ([`ef31842`](https://github.com/mozilla-ai/otari/commit/ef318425dfbf3dda39f024d4247aaee54803b219))
+
+
+### Maintenance
+
+- **BREAKING:** **tools:** The code executor defaults to auto on upgrade; code_execution_executor: provider keeps forwarding in [#1507](https://github.com/mozilla-ai/otari/pull/1507) by [@peteski22](https://github.com/peteski22) ([`6264380`](https://github.com/mozilla-ai/otari/commit/6264380e06f3f05c96be9e683351bce28907257e))
+- **BREAKING:** **files:** GET /api/v1/files pages and the sweep reclaims files on upgrade; files_sweep_interval_sec: 0 disables the sweep in [#1508](https://github.com/mozilla-ai/otari/pull/1508) by [@peteski22](https://github.com/peteski22) ([`e424d08`](https://github.com/mozilla-ai/otari/commit/e424d081ee975fad14e0ce08bcde0a4ce8eb1792))
+
+
+### Other
+
+- Fixed wrong API URL in docker-compose.yml in [#1435](https://github.com/mozilla-ai/otari/pull/1435) by [@aittalam](https://github.com/aittalam) ([`ae17044`](https://github.com/mozilla-ai/otari/commit/ae170442b360e30311aabaed176b732231807c46))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.6.5...v0.7.0
 ## [0.6.5](https://github.com/mozilla-ai/otari/releases/tag/v0.6.5) - 2026-09-21
 
 
