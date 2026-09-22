@@ -918,7 +918,7 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         description=(
             "Root URL for the 'fsspec' files backend, e.g. 'gcs://bucket/otari-files', "
             "'abfs://container/prefix', 's3://bucket/prefix', 'sftp://host/path' or "
-            "'file:///var/lib/otari/files'. Needs the otari[fsspec] extra and the protocol's own "
+            "'file:///var/lib/otari/files'. Needs the fsspec extra and the protocol's own "
             "implementation package (gcsfs, adlfs, s3fs, paramiko, ...). Required when files_backend "
             "is 'fsspec'."
         ),
@@ -1075,7 +1075,7 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
             "What runs the code a code-execution tool call asks for: 'protocol' (the default) speaks the "
             "published code-execution protocol to the backend at sandbox_url, which is a container the "
             "operator runs; 'e2b' drives E2B's hosted sandboxes from this process and needs no sandbox_url, "
-            "only the otari[e2b] extra and E2B_API_KEY."
+            "only the e2b extra and E2B_API_KEY."
         ),
     )
     sandbox_container_idle_ttl_sec: Annotated[int, Shown(SettingsGroup.TOOLS)] = Field(

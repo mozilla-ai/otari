@@ -10,7 +10,7 @@ adapter holds no state between calls: any worker can serve any session, a kept
 sandbox is resumed by that id from any worker, and one nothing releases is
 reclaimed by E2B's own lifetime timer.
 
-The SDK is an optional extra (``otari[e2b]``) imported inside
+The SDK is an optional extra (``e2b``) imported inside
 :meth:`E2BCodeExecutionAdapter.open_session`, so a deployment that does not use
 it neither installs it nor pays for the import, and the OSS smoke gate keeps
 passing with no dev dependencies.
@@ -319,7 +319,7 @@ def _sdk() -> Any:
         import e2b
         from e2b_code_interpreter import AsyncSandbox
     except ImportError as exc:
-        msg = "sandbox_provider 'e2b' requires the E2B SDK. Install it with: pip install otari[e2b]"
+        msg = "sandbox_provider 'e2b' requires the E2B SDK. Install the e2b extra: uv sync --extra e2b"
         raise SandboxNotReachableError(msg) from exc
 
     # A namespace object rather than a class body, which cannot read a local of

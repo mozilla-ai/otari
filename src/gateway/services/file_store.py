@@ -221,7 +221,7 @@ def _translate_s3_errors(storage_ref: str) -> Iterator[None]:
     accordingly: the download route maps it to a clean 500 and the delete
     route's best-effort cleanup swallows it so a committed soft-delete never
     becomes a 500. Those callers live in the default local-only install and
-    cannot import ``botocore`` (it ships behind the optional ``otari[s3]``
+    cannot import ``botocore`` (it ships behind the optional ``s3``
     extra), so translating here keeps them backend-agnostic. A missing object
     maps to ``FileNotFoundError`` to mirror the local backend; every other S3
     failure maps to ``OSError``.
@@ -262,7 +262,7 @@ class S3FileStore:
         try:
             import boto3
         except ImportError as exc:
-            msg = "S3FileStore requires boto3. Install it with: pip install otari[s3]"
+            msg = "S3FileStore requires boto3. Install the s3 extra: uv sync --extra s3"
             raise ImportError(msg) from exc
 
         self._bucket = bucket
@@ -412,7 +412,7 @@ class FsspecFileStore:
         try:
             from fsspec.core import url_to_fs
         except ImportError as exc:
-            msg = "FsspecFileStore requires fsspec. Install it with: pip install otari[fsspec]"
+            msg = "FsspecFileStore requires fsspec. Install the fsspec extra: uv sync --extra fsspec"
             raise ImportError(msg) from exc
 
         fs, root = url_to_fs(url, **dict(storage_options or {}))
