@@ -636,27 +636,26 @@ def build_sandbox_file_bridge(
     *,
     raw_request: Request,
     config: GatewayConfig,
-    db: AsyncSession | None,
+    uow: UnitOfWork | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     inputs: list[StagedFile],
 ) -> SandboxFileBridge | None:
     """The file bridge a completion request's sandbox session gets, or ``None``.
 
-    Built by the route once the billed user and workspace are resolved, over the
-    request's own session. ``None`` in hybrid mode, which has no local database
-    or file store to hold what a run produces, and when files are disabled.
-    Produced files are announced under ``public_base_url`` where the deployment
-    knows its address, and otherwise under the one the request arrived on.
+    Built by the route once the billed user and workspace are resolved, on the request's own Unit of Work.
+    It is ``None`` when files are disabled, and in hybrid mode, which has no local database or file store.
+    Produced files are announced under ``public_base_url`` where the deployment knows its address,
+    and otherwise under the one the request arrived on.
     """
     file_store = getattr(raw_request.app.state, "file_store", None)
-    if db is None or not config.files_enabled or file_store is None or user_id is None or workspace_id is None:
+    if uow is None or not config.files_enabled or file_store is None or user_id is None or workspace_id is None:
         return None
     base = (config.public_base_url or str(raw_request.base_url)).rstrip("/")
     return SandboxFileBridge(
         file_store=file_store,
         config=config,
-        uow=UnitOfWork(db),
+        uow=uow,
         user_id=user_id,
         workspace_id=workspace_id,
         inputs=inputs,
@@ -667,7 +666,7 @@ def build_sandbox_file_bridge(
 def build_sandbox_container_registry(
     *,
     config: GatewayConfig,
-    db: AsyncSession | None,
+    uow: UnitOfWork | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     port: CodeExecutionPort | None,
@@ -681,7 +680,7 @@ def build_sandbox_container_registry(
     build runs, so a deployment that changes providers starts fresh.
     """
     if (
-        db is None
+        uow is None
         or user_id is None
         or workspace_id is None
         or port is None
@@ -689,7 +688,7 @@ def build_sandbox_container_registry(
     ):
         return None
     return SandboxContainerRegistry(
-        uow=UnitOfWork(db),
+        uow=uow,
         user_id=user_id,
         workspace_id=workspace_id,
         provider=port.label,

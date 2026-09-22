@@ -1,22 +1,30 @@
 """A Unit of Work commits a business step once, when its outermost block ends."""
 
 import asyncio
+import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
-from typing import Annotated, Any
+from types import SimpleNamespace
+from typing import Annotated, Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import event, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import SQLModel
 
-from gateway.api.deps import get_db_if_needed, get_unit_of_work, get_unit_of_work_if_needed
+from gateway.api.deps import (
+    build_sandbox_container_registry,
+    build_sandbox_file_bridge,
+    get_db_if_needed,
+    get_unit_of_work,
+    get_unit_of_work_if_needed,
+)
 from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session, get_db, init_db, reset_db
 from gateway.core.unit_of_work import (
@@ -27,8 +35,13 @@ from gateway.core.unit_of_work import (
     create_unit_of_work,
     session_for,
 )
+from gateway.models.base import Base
 from gateway.models.tenancy import OAuthPendingState
+from gateway.models.tools import SandboxContainer
+from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.repositories.base_repository import BaseRepository
+from gateway.services.code_execution import SandboxContainerRegistry
+from gateway.services.files import SandboxFileBridge
 
 
 @pytest_asyncio.fixture
@@ -302,3 +315,72 @@ def test_the_optional_request_dependency_produces_no_unit_of_work_in_hybrid_mode
     response = TestClient(_probe_app(GatewayConfig(mode="hybrid"))).get("/probe")
 
     assert response.json() == {"has_unit_of_work": False, "has_session": False}
+
+
+class _StubCodeExecutionPort:
+    """Only ``label`` is read when the registry is built."""
+
+    label = "stub"
+
+
+def _stub_request() -> Request:
+    """A request carrying the file store the bridge builder looks for on the app."""
+    return cast(Request, SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(file_store=object()))))
+
+
+def _build_bridge(uow: UnitOfWork | None) -> SandboxFileBridge | None:
+    return build_sandbox_file_bridge(
+        raw_request=_stub_request(),
+        config=GatewayConfig(public_base_url="http://testserver"),
+        uow=uow,
+        user_id="u1",
+        workspace_id=uuid.uuid4(),
+        inputs=[],
+    )
+
+
+def _build_registry(uow: UnitOfWork | None) -> SandboxContainerRegistry | None:
+    return build_sandbox_container_registry(
+        config=GatewayConfig(),
+        uow=uow,
+        user_id="u1",
+        workspace_id=uuid.uuid4(),
+        port=cast(CodeExecutionPort, _StubCodeExecutionPort()),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("build", [_build_bridge, _build_registry], ids=["file bridge", "container registry"])
+async def test_a_sandbox_collaborator_needs_a_unit_of_work(
+    notes_database: None, build: Callable[[UnitOfWork | None], object | None]
+) -> None:
+    """Hybrid mode has no Unit of Work, and a collaborator that writes cannot be built without one."""
+    assert build(None) is None
+    async with create_unit_of_work() as uow:
+        assert build(uow) is not None
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_collaborator_joins_the_step_the_request_has_open(notes_database: None) -> None:
+    """A collaborator's block is an inner block of the request's step, not a step of its own.
+
+    A collaborator holding a Unit of Work of its own would commit on leaving its
+    block, settling what the request had staged outside it.
+    """
+    async with create_session() as session:
+        uow = UnitOfWork(session)
+        async with uow:
+            table = Base.metadata.tables[SandboxContainer.__tablename__]
+            await session_for(uow).run_sync(lambda sync: table.create(sync.connection()))
+        registry = _build_registry(uow)
+        assert registry is not None
+
+        commits = _count_commits(session)
+        async with uow:
+            await _write(session_for(uow), "request step")
+            await registry.release("otari_cntr_unknown")
+            assert commits() == 0
+            assert await _committed_bodies() == []
+
+        assert commits() == 1
+        assert await _committed_bodies() == ["request step"]

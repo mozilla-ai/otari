@@ -878,7 +878,7 @@ async def create_message(
         container_id=request.container,
         sandbox_containers=build_sandbox_container_registry(
             config=config,
-            db=db,
+            uow=ctx.uow,
             user_id=ctx.user_id,
             workspace_id=ctx.workspace_id,
             port=code_execution_port,
@@ -886,7 +886,7 @@ async def create_message(
         sandbox_files=build_sandbox_file_bridge(
             raw_request=raw_request,
             config=config,
-            db=db,
+            uow=ctx.uow,
             user_id=ctx.user_id,
             workspace_id=ctx.workspace_id,
             inputs=sandbox_inputs,
