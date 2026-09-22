@@ -71,6 +71,24 @@ async def test_no_host_rejected() -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_label_names_the_surface_the_url_was_written_for() -> None:
+    """A caller that is not an MCP server must not tell its admin about one."""
+    with pytest.raises(UnsafeURLError, match="guardrail endpoint host"):
+        await validate_mcp_url(
+            "https://169.254.169.254/",
+            has_authorization_token=False,
+            label="guardrail endpoint",
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_default_label_leaves_the_mcp_wording_alone() -> None:
+    """Pinned because the label is what a future caller is tempted to rename."""
+    with pytest.raises(UnsafeURLError, match="MCP server URL must use http or https"):
+        await validate_mcp_url("ftp://example.com/mcp", has_authorization_token=False)
+
+
+@pytest.mark.asyncio
 async def test_private_override_allows_internal(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
     await validate_mcp_url("https://10.0.0.5/mcp", has_authorization_token=False)
