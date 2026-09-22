@@ -1,8 +1,9 @@
 """The guardrails an organization defined, built once per worker and held ready.
 
 The store next door (`organization_guardrail_definition_service`) says what each
-check is. This builds it. A later step looks one up by id and runs it on the
-request path; nothing here reads a request or changes what happens to one.
+check is. This builds it and holds it ready. The request path looks one up by id
+through :func:`handle` and runs it (`services/guardrails.py`); nothing here reads
+a request or decides what happens to one.
 
 It lives in this package, and not beside `services/guardrails.py`, because
 `org_provider_key_service` here already does this exact job for provider keys: a
@@ -57,7 +58,7 @@ import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from any_guardrail import AnyGuardrail, Guardrail, GuardrailName, GuardrailOutput
 
@@ -136,7 +137,7 @@ class OrganizationGuardrailHandle:
         self._guardrail_name = guardrail_name
         self._guardrail = guardrail
 
-    async def check(self, prompt: str) -> GuardrailCheck:
+    async def check(self, prompt: str, **validate_kwargs: Any) -> GuardrailCheck:
         """Run the guardrail over ``prompt``, in a thread, under a deadline.
 
         Every failure becomes `GuardrailsNotReachableError`, so an in-process
@@ -145,10 +146,17 @@ class OrganizationGuardrailHandle:
         definition and the exception's type and nothing else, because the
         caller's fail-open arm logs it; the public detail is generic, and a
         caller that knows the profile replaces it with one that names it.
+
+        ``validate_kwargs`` are the mandate's own per-check arguments, which the
+        remote path sends in its request body, so the same policy field means the
+        same thing on both backends. They are not validated against the catalog
+        here: an argument this guardrail does not take makes it unevaluable, the
+        same as any other failure to run, rather than being refused before the
+        deadline that bounds it.
         """
         try:
             output = await _in_a_thread(
-                lambda: AnyGuardrail.evaluate(self._guardrail_name, self._guardrail, prompt),
+                lambda: AnyGuardrail.evaluate(self._guardrail_name, self._guardrail, prompt, **validate_kwargs),
                 seconds=_CHECK_TIMEOUT_SECONDS,
             )
         except Exception as exc:  # noqa: BLE001 - see the module docstring: the message is never logged

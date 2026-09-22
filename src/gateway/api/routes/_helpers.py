@@ -15,7 +15,7 @@ from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.tenancy import Workspace
-from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
+from gateway.services.guardrails import GuardrailsNotReachableError, InProcessGuardrail, run_input_guardrails
 from gateway.services.routing.decide import RoutingSignal
 from gateway.services.url_safety import UnsafeURLError
 from gateway.services.workspace_scope import default_workspace_id
@@ -269,6 +269,7 @@ async def apply_input_guardrails(
     config: GatewayConfig | None = None,
     credentials: Mapping[str, str] | None = None,
     mandated: Collection[str] | None = None,
+    in_process: Mapping[str, InProcessGuardrail | None] | None = None,
 ) -> None:
     """Enforce the input guardrails for a request before the provider call.
 
@@ -282,7 +283,11 @@ async def apply_input_guardrails(
     which is what decides whether a URL that fails its safety check is the
     caller's malformed request (a 400 naming their own URL) or a stored entry
     being unevaluable (governed by its ``mode`` / ``on_unavailable``, with the
-    endpoint kept out of the response).
+    endpoint kept out of the response). ``in_process`` carries the guardrails
+    this worker holds for the organization's own definitions, keyed by profile;
+    one of those is answered here rather than sent to any service, and a profile
+    whose guardrail this worker does not hold arrives as ``None`` and is
+    unevaluable.
 
     No-op when ``guardrails`` is empty/None (zero overhead for the common
     case). On a ``block``-mode flag, raises ``403`` and the provider is never
@@ -326,6 +331,7 @@ async def apply_input_guardrails(
             default_url=default_url,
             credentials=credentials,
             mandated=mandated,
+            in_process=in_process,
         )
     except UnsafeURLError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

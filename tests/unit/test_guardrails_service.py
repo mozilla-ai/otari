@@ -2,6 +2,10 @@
 
 Stubs the guardrails service ``POST /validate`` contract with an
 ``httpx.MockTransport`` so we test the verdict logic without a live container.
+
+The second backend is stubbed by shape instead: a profile an organization
+mandated through its own definition is answered by a guardrail this worker
+holds, which arrives as anything satisfying `InProcessGuardrail`.
 """
 
 from __future__ import annotations
@@ -9,6 +13,8 @@ from __future__ import annotations
 import ipaddress
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 import httpx
 import pytest
@@ -429,3 +435,180 @@ async def test_a_callers_own_bad_url_is_still_their_malformed_request(monkeypatc
         )
 
     assert "guardrails.internal.corp.example" in str(exc.value)
+
+
+# --------------------------------------------------------------------------- #
+# The guardrails this worker runs itself
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class _StubVerdict:
+    """What a held guardrail answers with, in the shape `InProcessVerdict` asks for."""
+
+    valid: bool
+    explanation: str | None = None
+    score: float | None = None
+
+
+class _StubGuardrail:
+    """A guardrail this worker holds, recording how it was called."""
+
+    def __init__(self, verdict: _StubVerdict | None = None, *, error: Exception | None = None) -> None:
+        self._verdict = verdict or _StubVerdict(valid=True)
+        self._error = error
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def check(self, prompt: str, **validate_kwargs: Any) -> _StubVerdict:
+        self.calls.append((prompt, validate_kwargs))
+        if self._error is not None:
+            raise self._error
+        return self._verdict
+
+
+def _no_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A transport that fails the test if the guardrails service is contacted at all."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"the guardrails service was contacted at {request.url}")
+
+    _patch_transport(monkeypatch, handler)
+
+
+@pytest.mark.asyncio
+async def test_a_held_guardrail_answers_the_check_and_nothing_is_sent_anywhere(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The verdict arrives in the three fields the remote path also reports."""
+    _no_service(monkeypatch)
+    guardrail = _StubGuardrail(_StubVerdict(valid=False, explanation="injection", score=0.91))
+
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="block")],
+        "ignore previous",
+        default_url=_URL,
+        mandated={"prompt-injection"},
+        in_process={"prompt-injection": guardrail},
+    )
+
+    assert verdict.blocked is True
+    assert verdict.results[0].explanation == "injection"
+    assert verdict.results[0].score == 0.91
+    assert guardrail.calls == [("ignore previous", {})]
+
+
+@pytest.mark.asyncio
+async def test_the_mandates_own_validate_arguments_reach_the_guardrail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same policy field means the same thing on both backends.
+
+    The remote path puts `validate_kwargs` in its request body. Dropping them
+    here would make one mandate behave two ways depending on which backend
+    happens to serve it.
+    """
+    _no_service(monkeypatch)
+    guardrail = _StubGuardrail()
+
+    await run_input_guardrails(
+        [GuardrailConfig(profile="pi", validate_kwargs={"threshold": 0.8})],
+        "x",
+        default_url=_URL,
+        mandated={"pi"},
+        in_process={"pi": guardrail},
+    )
+
+    assert guardrail.calls == [("x", {"threshold": 0.8})]
+
+
+@pytest.mark.asyncio
+async def test_a_definition_this_worker_does_not_hold_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A `None` is unevaluable, and never a reason to try the service instead.
+
+    Falling through would post the profile to the deployment's guardrails
+    service, which has never heard of it, so a definition that failed to build
+    would be reported as somebody else's error.
+    """
+    _no_service(monkeypatch)
+
+    with pytest.raises(GuardrailsNotReachableError) as exc:
+        await run_input_guardrails(
+            [GuardrailConfig(profile="pi", mode="block", on_unavailable="block")],
+            "x",
+            default_url=_URL,
+            mandated={"pi"},
+            in_process={"pi": None},
+        )
+
+    assert exc.value.public_detail == "guardrail profile 'pi' could not be evaluated"
+
+
+@pytest.mark.asyncio
+async def test_a_definition_this_worker_does_not_hold_fails_open_when_told_to(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _no_service(monkeypatch)
+
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="pi", mode="block", on_unavailable="monitor")],
+        "x",
+        default_url=_URL,
+        mandated={"pi"},
+        in_process={"pi": None},
+    )
+
+    assert verdict.blocked is False
+    assert verdict.results[0].valid is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_check_is_named_by_its_profile_and_nothing_else(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The runner knows the definition; this end knows the profile. The caller is told the profile.
+
+    The runner's own message names the definition and the type of what went
+    wrong, and is written for the log. None of it reaches the response.
+    """
+    _no_service(monkeypatch)
+    failure = GuardrailsNotReachableError(
+        "guardrail definition 5e0f1d02-0000-0000-0000-000000000000 failed to run: ConnectionError",
+        public_detail="guardrail could not be evaluated",
+    )
+
+    with pytest.raises(GuardrailsNotReachableError) as exc:
+        await run_input_guardrails(
+            [GuardrailConfig(profile="pi", mode="block", on_unavailable="block")],
+            "x",
+            default_url=_URL,
+            mandated={"pi"},
+            in_process={"pi": _StubGuardrail(error=failure)},
+        )
+
+    assert exc.value.public_detail == "guardrail profile 'pi' could not be evaluated"
+    assert "5e0f1d02" not in exc.value.public_detail
+    assert "5e0f1d02" in str(exc.value), "the definition stays in the message the caller logs"
+
+
+@pytest.mark.asyncio
+async def test_one_request_can_mix_a_held_guardrail_and_a_remote_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Both backends serve one request, and only the remote profile is sent out."""
+    sent: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        profile = json.loads(request.content)["profile"]
+        sent.append(profile)
+        return httpx.Response(200, json={"profile": profile, "result": {"valid": True}})
+
+    _patch_transport(monkeypatch, handler)
+    guardrail = _StubGuardrail(_StubVerdict(valid=False))
+
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="block"), GuardrailConfig(profile="pii")],
+        "x",
+        default_url=_URL,
+        mandated={"prompt-injection", "pii"},
+        in_process={"prompt-injection": guardrail},
+    )
+
+    assert sent == ["pii"]
+    assert verdict.blocked is True
+    assert [result.profile for result in verdict.results] == ["prompt-injection", "pii"]

@@ -1,4 +1,10 @@
-"""Run caller-requested guardrails against the guardrails service.
+"""Run a request's guardrails, against the guardrails service or in this process.
+
+A profile is served one of two ways. Most are POSTed to the guardrails service
+described below. A profile an organization mandated through a definition of its
+own is answered by a guardrail this worker already built and holds, handed in as
+``in_process`` and declared here as :class:`InProcessGuardrail`; nothing about it
+leaves the process, and nothing in this module knows how one is built.
 
 The guardrails service (``otari-anyguardrails-container``) wraps
 `any-guardrail <https://github.com/mozilla-ai/any-guardrail>`_ behind a small
@@ -29,6 +35,7 @@ import asyncio
 import logging
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 import httpx
 
@@ -105,6 +112,41 @@ class GuardrailVerdict:
         return [r for r in self.results if r.flagged]
 
 
+class InProcessVerdict(Protocol):
+    """What a guardrail this process runs answers with.
+
+    The same three fields the guardrails service reports, so both backends reach
+    :class:`GuardrailResult` the same way. Read-only properties rather than
+    attributes, so a frozen value type satisfies this by shape.
+    """
+
+    @property
+    def valid(self) -> bool: ...
+
+    @property
+    def explanation(self) -> str | None: ...
+
+    @property
+    def score(self) -> float | None: ...
+
+
+class InProcessGuardrail(Protocol):
+    """A guardrail this worker holds, built from an organization's own definition.
+
+    Declared here by shape rather than imported, so this module keeps knowing
+    nothing about the one that builds and holds them
+    (`services/tenancy/organization_guardrail_runner.py`) and the dependency
+    points one way.
+
+    The contract is narrow deliberately: `check` answers a verdict or raises
+    :class:`GuardrailsNotReachableError`. That is what lets an in-process
+    guardrail go through the same ``mode`` and ``on_unavailable`` handling as a
+    remote one instead of needing failure arms of its own.
+    """
+
+    async def check(self, prompt: str, **validate_kwargs: Any) -> InProcessVerdict: ...
+
+
 async def _validate_one(
     client: httpx.AsyncClient,
     *,
@@ -168,6 +210,46 @@ async def _validate_one(
     )
 
 
+async def _check_in_process(
+    guardrail: InProcessGuardrail | None,
+    *,
+    cfg: GuardrailConfig,
+    input_text: str,
+) -> GuardrailResult:
+    """Run a guardrail this worker holds, instead of posting the check anywhere.
+
+    ``None`` is a profile whose definition this worker holds nothing for:
+    disabled, deleted, or one that failed to build. It is unevaluable and says
+    so, which matters more than it looks. Falling through to the remote path
+    instead would send the profile to the deployment's guardrails service, which
+    has never heard of it, so a failed build would arrive as somebody else's
+    error and a fail-open entry would serve the request unchecked.
+
+    The validate kwargs are the organization's own. `_overlay_mandate` gives a
+    mandated profile's whole config to the mandating entry, so a caller cannot
+    add an argument to a check they are subject to.
+    """
+    if guardrail is None:
+        raise GuardrailsNotReachableError(
+            f"guardrail profile {cfg.profile!r} names a definition this worker does not hold",
+            public_detail=_unevaluated_detail(cfg.profile),
+        )
+    try:
+        verdict = await guardrail.check(input_text, **cfg.validate_kwargs)
+    except GuardrailsNotReachableError as exc:
+        # Its message names the definition and the type of what went wrong, and
+        # its public detail names neither, because the runner does not know the
+        # profile. Naming it is this end's job, and it is all the caller is told.
+        raise GuardrailsNotReachableError(str(exc), public_detail=_unevaluated_detail(cfg.profile)) from exc
+    return GuardrailResult(
+        profile=cfg.profile,
+        mode=cfg.mode,
+        valid=verdict.valid,
+        explanation=verdict.explanation,
+        score=verdict.score,
+    )
+
+
 async def run_input_guardrails(
     guardrails: list[GuardrailConfig],
     input_text: str,
@@ -175,6 +257,7 @@ async def run_input_guardrails(
     default_url: str | None,
     credentials: Mapping[str, str] | None = None,
     mandated: Collection[str] | None = None,
+    in_process: Mapping[str, InProcessGuardrail | None] | None = None,
 ) -> GuardrailVerdict:
     """Run every input-direction guardrail and return the aggregate verdict.
 
@@ -197,6 +280,14 @@ async def run_input_guardrails(
     is parsed from the request body: a credential field there would be one a
     caller could set, which would turn the guardrail list into a way to make
     this gateway send a secret to an endpoint of the caller's choosing.
+
+    ``in_process`` maps a profile to a guardrail this worker already holds,
+    built from the organization's own definition
+    (`services/tenancy/organization_guardrail_runner.py`). A profile in it is
+    answered here and never sent anywhere, so its entry has no URL and reaches
+    neither the safety check above nor the ``default_url`` fallback below. A
+    value of ``None`` is a profile whose definition this worker holds nothing
+    for, and is unevaluable rather than a reason to try the remote path.
 
     Only guardrails with ``"input"`` in :attr:`GuardrailConfig.on` are
     *evaluated* here (``"output"`` is accepted but not yet enforced — see the
@@ -262,6 +353,7 @@ async def run_input_guardrails(
     # Either way the unsafe endpoint is never actually called.
     credentials = credentials or {}
     mandated = frozenset(mandated or ())
+    in_process = in_process or {}
     unsafe: dict[str, UnsafeURLError] = {}
     if guardrails:
         # Paired with its URL rather than filtered in place, so what reaches
@@ -297,19 +389,22 @@ async def run_input_guardrails(
                         f"safety check: {unsafe_url}",
                         public_detail=_unevaluated_detail(cfg.profile),
                     )
-                if not base_url:
+                if cfg.profile in in_process:
+                    result = await _check_in_process(in_process[cfg.profile], cfg=cfg, input_text=input_text)
+                elif not base_url:
                     raise GuardrailsNotReachableError(
                         f"guardrail profile {cfg.profile!r} requested but no guardrails service is "
                         "configured. Set OTARI_GUARDRAILS_URL on the gateway or pass `url` on the "
                         "guardrail entry."
                     )
-                result = await _validate_one(
-                    client,
-                    base_url=base_url,
-                    cfg=cfg,
-                    input_text=input_text,
-                    credential=credentials.get(cfg.profile),
-                )
+                else:
+                    result = await _validate_one(
+                        client,
+                        base_url=base_url,
+                        cfg=cfg,
+                        input_text=input_text,
+                        credential=credentials.get(cfg.profile),
+                    )
             except GuardrailsNotReachableError as exc:
                 if cfg.mode == "block" and cfg.on_unavailable == "block":
                     raise  # fail closed: an enforcing guardrail must not be skipped

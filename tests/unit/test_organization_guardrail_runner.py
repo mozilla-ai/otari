@@ -26,7 +26,7 @@ from any_guardrail import GuardrailName, GuardrailOutput
 from gateway.log_config import logger as gateway_logger
 from gateway.main import _LIFESPAN_WORKERS
 from gateway.models.guardrails import OrganizationGuardrailDefinition
-from gateway.services.guardrails import GuardrailsNotReachableError
+from gateway.services.guardrails import GuardrailsNotReachableError, InProcessGuardrail
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import organization_guardrail_runner as runner
 
@@ -272,6 +272,49 @@ async def test_a_check_is_given_the_prompt_and_no_response(monkeypatch: pytest.M
     await held.check("hello")
 
     assert seen == {"name": GuardrailName.LAKERA_GUARD, "guardrail": built, "prompt": "hello", "kwargs": {}}
+
+
+@pytest.mark.asyncio
+async def test_a_mandates_own_validate_arguments_are_handed_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The remote path sends these in its request body, so this one passes them too.
+
+    Nothing checks them against the catalog first: an argument the guardrail does
+    not take makes it unevaluable, which is the same answer as any other failure
+    to run.
+    """
+    seen: dict[str, Any] = {}
+
+    def _record(name: GuardrailName, guardrail: Any, prompt: str, **kwargs: Any) -> GuardrailOutput:
+        seen.update(kwargs)
+        return GuardrailOutput(valid=True)
+
+    _stub_any_guardrail(monkeypatch, evaluate=_record)
+    definition = _definition()
+    _hold(definition, _Verdict())
+    held = runner.handle(ORGANIZATION_ID, definition.id)
+    assert held is not None
+
+    await held.check("hello", threshold=0.8)
+
+    assert seen == {"threshold": 0.8}
+
+
+def test_a_handle_is_the_shape_the_request_path_declares() -> None:
+    """The one link between the two modules, and it is a shape rather than an import.
+
+    `services/guardrails` declares `InProcessGuardrail` and imports nothing from
+    this package. Passing a handle where that protocol is expected is what fails
+    the typecheck the day the two drift apart.
+    """
+    definition = _definition()
+    _hold(definition, _Verdict())
+    held = runner.handle(ORGANIZATION_ID, definition.id)
+    assert held is not None
+
+    def accepts(guardrail: InProcessGuardrail) -> InProcessGuardrail:
+        return guardrail
+
+    assert accepts(held) is held
 
 
 @pytest.mark.asyncio
