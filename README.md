@@ -114,7 +114,9 @@ One-click deployment templates are available for
 | Hybrid | A data-plane gateway resolves credentials and reports usage to otari.ai. |
 
 When `OTARI_MODE` is unset, `OTARI_AI_TOKEN` selects hybrid mode; otherwise
-Otari defaults to standalone. See [Runtime modes](docs/modes.md).
+Otari defaults to standalone. A mode says what a process serves, not who runs it,
+so "hosted" is not the opposite of "self-hosted". See
+[Runtime modes](docs/modes.md#mode-and-who-runs-it).
 
 ## API and dashboard
 
