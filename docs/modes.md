@@ -40,8 +40,8 @@ inference, files, batches, or other data-plane operations. Those paths return a
 descriptive `404`. Set `data_plane_url` so the error and dashboard snippets
 point clients to the correct gateway.
 
-The dashboard hides deployment-wide provider management and exposes
-organization-scoped provider keys instead. It also hides the Playground, whose
+The dashboard hides deployment-wide provider management, leaving the
+organization-scoped provider keys that a standalone deployment also has. It also hides the Playground, whose
 whole purpose is to dispatch a completion. Deployment-wide APIs still require
 operator authority; organization-scoped APIs apply membership and role checks.
 

@@ -105,6 +105,14 @@ reach, narrowed by any workspace model restriction. A deployment whose providers
 all come from `config.yml` therefore shows every tenant the same catalog it
 always did.
 
+The models an organization's own key reaches are the ones offered on it, which
+is what the Providers page records when it pulls a key's catalog. Each carries a
+Serving switch, and a model switched off leaves the catalog and is refused at
+dispatch, because both read one allow-list. A key nobody has refreshed offers no
+rows at all, and that is not the same as offering none: it means the key is
+unnarrowed and reaches whatever its provider serves, which is how such a key
+behaved before it could be narrowed.
+
 Aliases and stored routing policies are workspace-scoped rows, and the catalog
 reads them for a workspace rather than filtering them by target, so a name alone
 would cross a tenant boundary that the allow-list cannot see. A session is

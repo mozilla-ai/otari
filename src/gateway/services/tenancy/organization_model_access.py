@@ -85,10 +85,9 @@ class SessionCatalogScope:
     The allow-list above says what this caller *may* reach; this says what the
     catalog should *list*. The two are different questions for these models
     alone: discovery dials ``config.providers`` instances only, so a model on an
-    organization's own key is permitted by the allow-list and listed by nothing,
-    and it took an organization adopting models for that gap to matter. Empty for
-    a caller with no offered models, which is every caller on a deployment where
-    nobody has adopted any.
+    organization's own key is permitted by the allow-list and listed by nothing.
+    Empty for a caller with no offered models, which is every caller on a
+    deployment where nobody has adopted any.
     """
 
 

@@ -27,8 +27,8 @@ end says the addresses, the password and the master key.
 
 | Sign in as | Standing | What to try |
 | --- | --- | --- |
-| `operator@otari.local` | Platform admin: the deployment's operator, owner of the default organization and of Acme | Settings; Model pricing (the catalog policy, "Check for price updates", a rate on any selector, the drift column); Providers (add a real key); Accounts; switch into Acme from the organization menu |
-| `admin@acme.local` | Org admin of Acme | Model pricing shows the deployment's prices read-only and Acme's own rate overrides editable; a model page's rows say "Set your rate"; Members, Email domains, Spend & budgets, Acme's provider keys |
+| `operator@otari.local` | Platform admin: the deployment's operator, owner of the default organization and of Acme | Settings; Deployment providers (add a real key); Providers, where a key's models arrive priced with a Serving switch and the catalog policy, "Check for price updates" and the deployment price list sit below them; Accounts; switch into Acme from the organization menu |
+| `admin@acme.local` | Org admin of Acme | Providers shows the deployment's prices read-only and a rate on any of Acme's own offered models editable; a model page's rows say "Set your rate"; Members, Email domains, Spend & budgets |
 | `member@acme.local` | Member of Acme | Models at Acme's rates with nothing to edit; open a row for the selector and request; make an API key on API keys and send a request with it; Usage and Activity show only their own |
 
 Signed out, `#/models` is the public catalog at the deployment's list rates.
@@ -37,10 +37,11 @@ Signed out, `#/models` is the public catalog at the deployment's list rates.
 
 The config ships with no providers. Either add a `providers:` block to
 `.state/config.yml` and restart, or sign in as the platform admin and add the
-provider on Providers, which stores the key encrypted with the key in
+provider on Deployment providers, which stores the key encrypted with the key in
 `.state/secret-key`. Discovery is on, so a provider's models appear in the
 catalog as soon as its key works, priced from the genai-prices defaults until
-you set a rate on Model pricing.
+you set a rate. An organization's own key goes on Providers instead, where its
+models are pulled and priced when the key is added.
 
 ## Mail
 

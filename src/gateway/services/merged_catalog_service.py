@@ -439,12 +439,11 @@ async def catalog_scope(
     if session_identity is not None:
         if await DeploymentUserService(db).has_administration_access(session_identity):
             # Unrestricted, and still carrying its *own* organization's offered
-            # models. Not every organization's: that would cross the tenant line
-            # the rest of this function draws. But not none either, which is what
-            # this branch answered first and got wrong: on a standalone
+            # models. Not every organization's, which would cross the tenant line
+            # the rest of this function draws, and not none: on a standalone
             # deployment the operator is also the single organization's owner, so
-            # they adopt a model on Providers and would then not find it in the
-            # catalog they were just told it joined.
+            # an empty set would hide the model they just adopted on Providers
+            # from the catalog they were told it joined.
             return CatalogScope(
                 allowlist=None,
                 reads_workspace_layer=True,
@@ -625,12 +624,12 @@ async def build_merged_catalog(
 
     # Phase 2b: models the caller's organization offers on its own provider keys.
     #
-    # The phase that exists because neither of the two above can list these. A
-    # BYO key is not a discovery source (phase 1 dials ``config.providers``
-    # instances only), and an organization's own rate lives in
-    # ``organization_model_pricing`` rather than in the deployment price list
-    # phase 2 reads, so before this an organization could adopt a model, price it
-    # and serve it while the catalog said it did not exist.
+    # Neither phase above can list these. A BYO key is not a discovery source
+    # (phase 1 dials ``config.providers`` instances only), and an organization's
+    # own rate lives in ``organization_model_pricing`` rather than in the
+    # deployment price list phase 2 reads. Without this phase an organization can
+    # adopt a model, price it and serve it while the catalog says it does not
+    # exist.
     #
     # Priced by phase 3 and then by the per-viewer pass, which reads the
     # organization's own rate, so nothing here carries a price of its own: doing

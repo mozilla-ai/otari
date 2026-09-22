@@ -8,8 +8,9 @@ database.
 What it makes:
 
 - **Platform admin.** The bootstrap operator, claimed with an email and a
-  password. Deployment-wide standing: Settings, Model pricing's catalog
-  controls, Accounts, every provider. The master key stays the API credential.
+  password. Deployment-wide standing: Settings, the catalog and price controls
+  on Providers, Accounts, every provider. The master key stays the API
+  credential.
 - **Org admin.** ``Acme``, a second organization, with an admin who can set
   Acme's rate overrides, provider keys, members and budgets but not the
   deployment's.

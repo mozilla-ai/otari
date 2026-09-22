@@ -1,12 +1,11 @@
 """The models an organization offers on its own provider keys.
 
 An organization's BYO provider key reaches every model its provider serves and
-lists none of them: catalog discovery dials ``config.providers`` instances only,
-so before this a key bought an admin a credential and no way to see, price or
-withhold what it served. This service is the other half: it asks the provider
-what the stored credential reaches, records each model as offered, seeds a rate
-from the community dataset so the model can actually be served, and carries the
-switch that decides whether it is.
+lists none of them, because catalog discovery dials ``config.providers``
+instances only. This service is the other half: it asks the provider what the
+stored credential reaches, records each model as offered, seeds a rate from the
+community dataset so the model can actually be served, and carries the switch
+that decides whether it is.
 
 Three rules are worth stating once, because each is load-bearing and none is
 obvious from a signature.

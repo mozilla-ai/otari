@@ -53,14 +53,12 @@ org_router = APIRouter(
     dependencies=[Depends(verify_master_key)],
 )
 
-# Published by both topologies. It began as the hosted replacement for
-# ``providers``, where a credential keyed on an instance name alone is served to
-# every tenant; it is served on standalone too because the page behind it is now
-# where an organization's models are offered, priced and switched, which is a
-# tenant's question whether or not the deployment has more than one tenant.
-# ``providers`` stays standalone-only beside it, and the two are disjoint
-# mechanisms (see ``models/provider_keys.py``), so neither stands in for the
-# other. Not named after its prefix, since ``organizations`` is already a surface.
+# Published by both topologies, because the page behind it is where an
+# organization's models are offered, priced and switched, and that is a tenant's
+# question whether or not the deployment has more than one tenant. ``providers``
+# stays standalone-only beside it, and the two are disjoint mechanisms (see
+# ``models/provider_keys.py``), so neither stands in for the other. Not named
+# after its prefix, since ``organizations`` is already a surface.
 SURFACE = Surface("organization_providers")
 
 workspace_router = APIRouter(

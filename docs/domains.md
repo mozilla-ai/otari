@@ -68,11 +68,11 @@ since. A module "runs queries" when it imports a query builder (`select`,
 | Route modules that run queries | 17, plus 1 that only calls `session.get` |
 | Route modules that define Pydantic models inline | 40 |
 | Model modules | 19 |
-| Repository modules | 16: a base, `users_repository.py`, 7 under `tenancy/`, `overview/overview_repository.py`, `api_keys/api_key_repository.py`, 2 under `files/` and 3 under `budgets/` |
-| Service packages per domain | 4: `services/tools/`, which holds the built-in tool registry and no service yet, `services/overview/`, `services/budgets/` and `services/api_keys/`. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
-| Repository packages per domain | 4: `repositories/overview/`, `repositories/api_keys/`, `repositories/files/` and `repositories/budgets/`. `repositories/tenancy/` is an older subpackage |
-| Modules in `schemas/` | Two domain modules so far, `budgets.py` and `overview.py` |
-| Modules in `exceptions/` | The shared error bases in `_base.py`, which the package root re-exports, and one domain module so far, `budget_exceptions.py`. `services/tenancy/errors.py` holds the rest of the tenancy errors in 1,145 lines |
+| Repository modules | 18: a base, `users_repository.py`, and the rest under `tenancy/`, `overview/`, `api_keys/`, `files/`, `budgets/`, `pricing/` and `providers/` |
+| Service packages per domain | 6: `services/tools/`, which holds the built-in tool registry and no service yet, `services/overview/`, `services/budgets/`, `services/api_keys/`, `services/files/` and `services/providers/`, which holds the organization-scoped half of providers. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
+| Repository packages per domain | 6: `repositories/overview/`, `repositories/api_keys/`, `repositories/files/`, `repositories/budgets/`, `repositories/pricing/` and `repositories/providers/`. `repositories/tenancy/` is an older subpackage |
+| Modules in `schemas/` | Three domain modules so far, `budgets.py`, `overview.py` and `providers.py` |
+| Modules in `exceptions/` | The shared error bases in `_base.py`, which the package root re-exports, and two domain modules so far, `budget_exceptions.py` and `providers_exceptions.py`. `services/tenancy/errors.py` holds the rest of the tenancy errors in 1,145 lines |
 
 ## The domains
 
@@ -156,6 +156,7 @@ snapshots.
 - Routes: `pricing.py`, `organization_pricing.py`
 - Services: `pricing_service.py`, `pricing_init_service.py`,
   `pricing_refresh_service.py`, `organization_pricing_service.py`
+- Repositories: `pricing/`
 - Models: `pricing.py`, `pricing_schemas.py`
 
 ### providers
@@ -164,10 +165,13 @@ Provider credentials: instances configured at runtime, organization-scoped
 provider keys, their health, and what a dispatch needs to reach a provider.
 
 - Routes: `providers.py`, `org_provider_keys.py`
-- Services: `provider_store_service.py`, `provider_health_service.py`,
-  `provider_metadata_service.py`, `provider_kwargs.py`,
-  `bedrock_gateway_auth.py`, `tenancy/org_provider_key_service.py`
-- Repositories: `tenancy/org_provider_key_repository.py`
+- Services: `providers/`, `provider_store_service.py`,
+  `provider_health_service.py`, `provider_metadata_service.py`,
+  `provider_kwargs.py`, `bedrock_gateway_auth.py`,
+  `tenancy/org_provider_key_service.py`
+- Repositories: `providers/`, `tenancy/org_provider_key_repository.py`
+- Schemas: `providers.py`
+- Exceptions: `providers_exceptions.py`
 - Models: `providers.py`, `provider_keys.py`
 
 `tenancy/org_provider_key_service.py` has three divider sections (organization

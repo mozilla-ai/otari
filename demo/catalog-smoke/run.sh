@@ -123,8 +123,8 @@ cat <<EOF
 
   Sign in as                      password: $PASSWORD
   ───────────────────────────────────────────────────────
-  Platform admin   operator@otari.local   owns the deployment: Settings, Model pricing's catalog
-                                          controls, Accounts, every provider and every organization
+  Platform admin   operator@otari.local   owns the deployment: Settings, the catalog and price
+                                          controls on Providers, Accounts, every provider and org
   Org admin        admin@acme.local       admin of Acme: its rate overrides, provider keys, members,
                                           budgets; sees the deployment's prices, cannot change them
   Member           member@acme.local      member of Acme: browses the catalog at Acme's rates,
