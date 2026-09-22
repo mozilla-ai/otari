@@ -136,9 +136,9 @@ here, because a URL taken from an entry would be one a caller chose.
 
 `GET /api/v1/tool-settings/guardrails/catalog` lists the guardrails Otari can
 build and call without a service in front of them, with the constructor and
-per-call arguments each one takes. It is the operator-side counterpart of the
-profiles read above: the same picker, for a guardrail this deployment configures
-rather than one an operator's `service.yaml` already built.
+per-call arguments each one takes. It is the counterpart of the profiles read
+above: the same picker, for a guardrail this deployment configures rather than
+one an operator's `service.yaml` already built.
 
 It is not every guardrail [any-guardrail](https://github.com/mozilla-ai/any-guardrail)
 ships. A guardrail runs either as a call to a hosted API or by holding model
@@ -153,8 +153,13 @@ guardrail's parameters, so a saved configuration has no field in which to ask
 for it and Otari would load the weights instead.
 
 The catalog reaches no service, so unlike the profiles read it has no
-unavailable state. It is on the operator gate, because it is the picker behind a
-form that stores a vendor credential for the whole deployment.
+unavailable state. It is also the one of the two a tenant reads: the form that
+defines a guardrail belongs to an organization, and an owner or admin fills it
+without operator standing, so any signed-in user reaches this read and so does
+any API key. What it answers is a property of the installed library, identical
+on every deployment of the same build, and a parameter's environment variable
+is named without saying whether it is set. The profiles read keeps the stricter
+gate, because that one dials the deployment's own guardrails service.
 
 ### How the layers compose
 
