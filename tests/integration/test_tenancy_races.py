@@ -55,6 +55,7 @@ from gateway.schemas.budgets import (
     CreateScopedBudgetRequest,
     OrganizationBudgetCreate,
     OrganizationScopedBudgetCreate,
+    OrganizationScopedBudgetPublic,
     WorkspaceMemberBudgetPolicyCreate,
 )
 from gateway.services.api_keys import ApiKeyService
@@ -715,6 +716,74 @@ async def test_a_deployment_ceiling_created_during_a_workspace_delete_leaves_no_
     assert race.contended
     assert isinstance(race.produced, HTTPException)
     assert race.produced.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_a_workspace_delete_sweeps_a_ceiling_that_won_the_lock(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other order the lock allows: the create wins it, and the delete sweeps what it left.
+
+    That only holds while the delete takes the lock before it reads the memberships it
+    sweeps. Reverse those two and this is the ordering that strands a ceiling.
+    """
+    owner, target, _ = await _seed_a_workspace_to_delete(async_db)
+    budget = await _budget_service(async_db).create_organization_budget(
+        user=owner,
+        request=OrganizationBudgetCreate(name="Cap", max_budget=10.0),
+    )
+    await async_db.commit()
+
+    holding = asyncio.Event()
+    may_finish = asyncio.Event()
+
+    async def create() -> object:
+        async with sessions() as session:
+            actor = await UserRepository(session).get(owner.id)
+            assert actor is not None
+            organizations = OrganizationService(session, membership_listener=None)
+            creator = _budget_service(session, organizations)
+            take_lock = organizations.lock_workspace
+
+            async def hold_then_continue(workspace_id: uuid.UUID) -> None:
+                await take_lock(workspace_id)
+                holding.set()
+                await may_finish.wait()
+
+            monkeypatch.setattr(organizations, "lock_workspace", hold_then_continue)
+            return await creator.create_organization_ceiling(
+                user=actor,
+                request=OrganizationScopedBudgetCreate(
+                    scope_type=SCOPE_WORKSPACE,
+                    scope_id=str(target.id),
+                    budget_id=budget.budget_id,
+                ),
+            )
+
+    creating = asyncio.create_task(create())
+    await asyncio.wait_for(holding.wait(), timeout=_CHECKPOINT_TIMEOUT)
+
+    async def delete() -> None:
+        async with sessions() as session:
+            actor = await UserRepository(session).get(owner.id)
+            assert actor is not None
+            deleter = WorkspaceService(session, membership_listener=WorkspaceBudgetDefaultService(session))
+            await deleter.delete_workspace(user=actor, workspace_id=target.id)
+
+    deleting = asyncio.create_task(delete())
+    try:
+        blocked, _ = await asyncio.wait({deleting}, timeout=_WRITER_WINDOW)
+        assert not blocked, "the delete must wait on the lock the create holds"
+        may_finish.set()
+        created = await creating
+        await deleting
+    finally:
+        may_finish.set()
+
+    assert isinstance(created, OrganizationScopedBudgetPublic)
+    ceilings = (await async_db.execute(select(ScopedBudget))).scalars().all()
+    assert [ceiling.scope_id for ceiling in ceilings if ceiling.scope_id == str(target.id)] == []
 
 
 async def test_concurrent_invites_to_a_suspended_membership_produce_one_pending_invitation(
