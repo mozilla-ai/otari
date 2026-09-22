@@ -68,7 +68,7 @@ since. A module "runs queries" when it imports a query builder (`select`,
 | Route modules that run queries | 17, plus 1 that only calls `session.get` |
 | Route modules that define Pydantic models inline | 40 |
 | Model modules | 19 |
-| Repository modules | 18: a base, `users_repository.py`, and the rest under `tenancy/`, `overview/`, `api_keys/`, `files/`, `budgets/`, `pricing/` and `providers/` |
+| Repository modules | 18: a base, `users_repository.py`, and the rest under `tenancy/`, `overview/`, `api_keys/`, `files/`, `budgets/`, `pricing/`, `providers/` and `code_execution/` |
 | Service packages per domain | 6: `services/tools/`, which holds the built-in tool registry and no service yet, `services/overview/`, `services/budgets/`, `services/api_keys/`, `services/files/` and `services/providers/`, which holds the organization-scoped half of providers. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
 | Repository packages per domain | 6: `repositories/overview/`, `repositories/api_keys/`, `repositories/files/`, `repositories/budgets/`, `repositories/pricing/` and `repositories/providers/`. `repositories/tenancy/` is an older subpackage |
 | Modules in `schemas/` | Three domain modules so far, `budgets.py`, `overview.py` and `providers.py` |
@@ -76,10 +76,11 @@ since. A module "runs queries" when it imports a query builder (`select`,
 
 ## The domains
 
-Sixteen domains plus a shared set. A module appears once. Paths are relative to
-their layer's directory. A domain package is listed by its directory, which
-covers every module inside it. A route module whose name starts with an underscore is
-a shared helper, which the target shape moves out of the routes layer.
+Seventeen domains plus a shared set. A module appears once. Paths are
+relative to their layer's directory. A domain package is listed by its
+directory, which covers every module inside it. A route module whose name
+starts with an underscore is a shared helper, which the target shape moves
+out of the routes layer.
 
 Two groups of modules fail the domain test and are split here. Tenancy holds
 sign-in and organization management, which are separate sets of use cases, so
@@ -198,15 +199,32 @@ Routing policies, their compiled plans and the router backends.
   `routing/knn.py`, `routing/weighted.py`, `policy_store.py`
 - Models: `routing.py`
 
+### files
+
+Uploaded files: the Files API, the `file_objects` table, and a file's
+lifecycle, including its expiry and the sweep that gives its storage back.
+The bytes sit in a pluggable blob backend. The row holds the metadata and
+the reference to them.
+
+- Routes: `files.py`
+- Services: `files/`, `file_service.py`, `file_store.py`
+- Repositories: `files/`
+
+The model never calls files, so it is not a tool. Inference normalizes an
+uploaded file into a request. Tools hands one to a sandbox and returns one
+from a tool call.
+
+Its table sits in `models/tools.py` today, which tools holds.
+
 ### tools
 
 The tools the gateway runs itself: the tool loop, MCP, web search, web
-retrieval, code execution and files.
+retrieval and code execution.
 
 - Routes: `tools.py`, `tool_settings.py`, `search.py`, `search_tools.py`,
   `web_search_backend.py`, `workspace_web_search.py`, `mcp.py`,
-  `workspace_mcp_servers.py`, `workspace_code_execution_policy.py`,
-  `files.py`; helper `_tools.py`
+  `workspace_mcp_servers.py`, `workspace_code_execution_policy.py`;
+  helper `_tools.py`
 - Services: `_tool_loop.py`, `tools/`, `mcp_loop.py`, `mcp_loop_messages.py`,
   `mcp_loop_responses.py`, `mcp_client.py`, `mcp_stateless.py`,
   `sandbox_backend.py`, `search_backend.py`, `web_search_backend.py`,
@@ -214,14 +232,18 @@ retrieval, code execution and files.
   `web_fetch_service.py`, `web_retrieval_backend.py`,
   `web_retrieval_network.py`, `web_retrieval_policy.py`,
   `search_tool_store_service.py`, `tool_settings_service.py`,
-  `tool_format.py`, `tool_usage.py`, `file_service.py`, `file_store.py`,
-  `file_extractors.py`, `files/`, `tenancy/workspace_mcp_server_service.py`,
+  `tool_format.py`, `tool_usage.py`, `tenancy/workspace_mcp_server_service.py`,
   `tenancy/workspace_web_search_service.py`,
   `tenancy/workspace_code_execution_policy_service.py`, `code_execution/`
-- Repositories: `files/`, `code_execution/`
+- Repositories: `code_execution/`
 - Ports: `code_execution_port.py`
 - Adapters: `code_execution_adapter.py`, `e2b_code_execution_adapter.py`
 - Models: `tools.py`, `mcp.py`
+
+**The tool test.** A tool is something the model calls during a request. The
+domain holds the registry, the loop and each tool's settings. A capability the
+model does not call is not a tool, even when a tool uses it. A large tool
+splits inside tools, behind the registry interface, not into a new domain.
 
 ### guardrails
 
@@ -308,9 +330,13 @@ each domain it reads, and budgets is the first.
 
 Cross-cutting modules that several domains import. They stay where they are.
 
-- Services: `url_safety.py`, `secret_box.py`
+- Services: `url_safety.py`, `secret_box.py`, `file_extractors.py`
 - Repositories: `base_repository.py`
 - Models: `base.py`, `money.py`, `secret_fields.py`
+
+`file_extractors.py` turns bytes into text and holds no state. Inference
+imports it from `content_normalizer.py`, and tools from `web_extraction.py`.
+The files code does not import it.
 
 ## Order of work
 
@@ -318,14 +344,15 @@ One domain at a time, in this order:
 
 1. budgets, the pilot for the steps below.
 2. providers and catalog, the largest.
-3. tools, together with the built-in tool interface.
-4. usage-and-telemetry.
-5. pricing.
-6. routing.
-7. identity and organizations: splitting `organization_service.py` and
+3. files, which tools depends on.
+4. tools, together with the built-in tool interface.
+5. usage-and-telemetry.
+6. pricing.
+7. routing.
+8. identity and organizations: splitting `organization_service.py` and
    `errors.py`.
-8. api-keys, guardrails, agent-gates and platform, which are small.
-9. inference last, after the tool loop is split by dialect.
+9. api-keys, guardrails, agent-gates and platform, which are small.
+10. inference last, after the tool loop is split by dialect.
 
 ## What one domain change does
 
