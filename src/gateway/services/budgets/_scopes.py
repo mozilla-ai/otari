@@ -72,4 +72,31 @@ class ScopeOwnership:
         )
 
 
-__all__ = ["ScopeOwnership"]
+async def lock_workspace_for_scope(organizations: OrganizationService, scope_type: ScopeType, scope_id: str) -> None:
+    """Take the row lock on the workspace a workspace or membership scope sits in.
+
+    The lock is held for the rest of the transaction, so a check of the scope and a write that
+    follows it cannot straddle that workspace's deletion.
+    Any other scope type, and any ID naming no workspace, locks nothing, and the set locked here
+    must stay the set a workspace's deletion sweeps.
+
+    Precondition: ``organizations`` must run in the transaction the following write commits in.
+    """
+    workspace_id: uuid.UUID | None
+    match scope_type:
+        case "workspace":
+            workspace_id = _uuid_or_none(scope_id)
+        case "workspace_member":
+            member_id = _uuid_or_none(scope_id)
+            workspace_id = (
+                None if member_id is None else await organizations.get_workspace_id_for_workspace_member(member_id)
+            )
+        case "organization" | "org_member" | "api_token":
+            return
+        case _:
+            assert_never(scope_type)
+    if workspace_id is not None:
+        await organizations.lock_workspace(workspace_id)
+
+
+__all__ = ["ScopeOwnership", "lock_workspace_for_scope"]

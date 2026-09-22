@@ -253,6 +253,10 @@ class OrganizationService:
         """Return the ID of the organization that owns a workspace, or None when the workspace does not exist."""
         return await self.workspace_rows.get_organization_id(workspace_id)
 
+    async def lock_workspace(self, workspace_id: uuid.UUID) -> None:
+        """Serialize this transaction against every other writer holding the workspace's row lock."""
+        await self.workspace_rows.lock(workspace_id)
+
     async def get_organization_id_for_organization_member(
         self,
         organization_member_id: uuid.UUID,

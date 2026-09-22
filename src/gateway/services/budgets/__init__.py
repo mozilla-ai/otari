@@ -17,6 +17,7 @@ from gateway.services.budgets._reservations import (
 )
 from gateway.services.budgets._retiming import cadence_of, retime_ceilings_for_budget
 from gateway.services.budgets._scoped_enforcement import ApplicableBudget, BudgetScopeRequest, applicable_budgets
+from gateway.services.budgets._scopes import lock_workspace_for_scope
 from gateway.services.budgets._service import BudgetService
 
 __all__ = [
@@ -33,6 +34,7 @@ __all__ = [
     "estimate_tokens",
     "get_budget_state",
     "increase_reservation",
+    "lock_workspace_for_scope",
     "period_window",
     "reconcile_reservation",
     "record_external_spend",
