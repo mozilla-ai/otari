@@ -79,7 +79,7 @@ const FIELDS: ToolSettingField[] = [
     type: "str",
     value: null,
     description: "Who runs a provider-native code-execution declaration.",
-    choices: ["auto", "otari", "provider"],
+    options: ["auto", "otari", "provider"],
   },
   {
     key: "guardrails_url",

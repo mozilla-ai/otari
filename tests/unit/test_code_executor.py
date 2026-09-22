@@ -25,7 +25,7 @@ from gateway.api.routes._tools import (
     resolve_code_executor_preference,
 )
 from gateway.core.config import GatewayConfig
-from gateway.services.tool_settings_service import field_choices, validate_value
+from gateway.services.tool_settings_service import get_field_options, validate_value
 from gateway.types.code_execution import CodeExecutor
 
 ANTHROPIC_DATED = {"type": "code_execution_20250825", "name": "code_execution"}
@@ -235,8 +235,8 @@ def test_the_env_var_fills_in_when_the_override_is_cleared(monkeypatch: pytest.M
 
 
 def test_the_dashboard_setting_is_a_closed_vocabulary() -> None:
-    assert field_choices("code_execution_executor") == ["auto", "otari", "provider"]
-    assert field_choices("sandbox_url") is None
+    assert get_field_options("code_execution_executor") == ["auto", "otari", "provider"]
+    assert get_field_options("sandbox_url") is None
     assert validate_value("code_execution_executor", "OTARI") == "otari"
     assert validate_value("code_execution_executor", "") is None
     with pytest.raises(ValueError, match="must be one of"):

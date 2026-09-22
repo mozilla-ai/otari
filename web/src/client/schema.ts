@@ -11835,12 +11835,12 @@ export interface components {
          * @description One editable tool/guardrail field surfaced to the dashboard.
          */
         ToolSettingField: {
-            /** Choices */
-            choices?: string[] | null;
             /** Description */
             description?: string | null;
             /** Key */
             key: string;
+            /** Options */
+            options?: string[] | null;
             /**
              * Service
              * @enum {string}

@@ -57,7 +57,7 @@ export interface FieldCopy {
   isMachineReadable?: boolean
   /**
    * What each value of a closed-vocabulary field is called, keyed by the value
-   * the backend lists in `choices`. A value without an entry shows as itself.
+   * the backend lists in `options`. A value without an entry shows as itself.
    */
   choiceLabels?: Record<string, string>
 }
@@ -252,7 +252,7 @@ function BoolRow({
   )
 }
 
-// A `str` field the backend closes to a fixed vocabulary (`choices`). A select
+// A `str` field the backend closes to a fixed vocabulary (`options`). A select
 // rather than a text box, because the write refuses anything outside the list
 // and a field that can only fail on save is worse than one that cannot be
 // mistyped. "Default" is a clear, like the tri-state boolean beside it.
@@ -297,7 +297,7 @@ function ChoiceRow({
           }
           options={[
             { value: "default", label: defaultLabel },
-            ...(field.choices ?? []).map((choice) => ({
+            ...(field.options ?? []).map((choice) => ({
               value: choice,
               label: copy.choiceLabels?.[choice] ?? choice,
             })),
@@ -462,7 +462,7 @@ export function ToolSettingRow({
       />
     )
   }
-  if (field.choices && field.choices.length > 0) {
+  if (field.options && field.options.length > 0) {
     return (
       <ChoiceRow
         field={field}

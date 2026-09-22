@@ -13935,20 +13935,6 @@
       "ToolSettingField": {
         "description": "One editable tool/guardrail field surfaced to the dashboard.",
         "properties": {
-          "choices": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Choices"
-          },
           "description": {
             "anyOf": [
               {
@@ -13963,6 +13949,20 @@
           "key": {
             "title": "Key",
             "type": "string"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
           },
           "service": {
             "enum": [

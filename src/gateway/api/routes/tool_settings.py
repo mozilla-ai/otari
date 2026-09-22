@@ -58,9 +58,9 @@ from gateway.services.tool_settings_service import (
     apply_override,
     effective_value,
     effective_values,
-    field_choices,
     field_service,
     field_type,
+    get_field_options,
     stage_override,
     validate_url,
 )
@@ -103,9 +103,8 @@ class ToolSettingField(BaseModel):
     # keeping float out of the type narrows the OpenAPI contract accordingly.
     value: bool | int | str | None
     description: str | None = None
-    # The closed vocabulary of a ``str`` field. A dashboard offers exactly these
-    # rather than a text box, since the write refuses anything else.
-    choices: list[str] | None = None
+    # A write refuses any value outside this list.
+    options: list[str] | None = None
 
 
 class ToolSettingsResponse(BaseModel):
@@ -172,7 +171,7 @@ def _current_fields(config: GatewayConfig, *, include_urls: bool = True) -> Tool
             type=field_type(key),  # type: ignore[arg-type]
             value=_display_value(config, key),
             description=GatewayConfig.model_fields[key].description,
-            choices=field_choices(key),
+            options=get_field_options(key),
         )
         for key in keys
     ]

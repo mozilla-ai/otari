@@ -57,13 +57,12 @@ class _ToolSpec:
     ``type`` is one of ``"url" | "str" | "int" | "bool"``. Every field is
     nullable (an empty value clears the override); ``ge`` is an inclusive lower
     bound for ``int`` fields, mirroring the ``GatewayConfig`` field's constraint,
-    and ``choices`` closes a ``str`` field to a fixed vocabulary, which the
-    dashboard renders as a select.
+    and ``options`` closes a ``str`` field to a fixed set of values.
     """
 
     type: str
     ge: int | None = None
-    choices: tuple[str, ...] | None = None
+    options: tuple[str, ...] | None = None
 
 
 # The tool/guardrail config fields the dashboard may edit. These are the ``*_url``
@@ -78,7 +77,7 @@ _TOOL_SPECS: dict[str, _ToolSpec] = {
     WEB_SEARCH_PURPOSE_HINT: _ToolSpec("str"),
     SANDBOX_PURPOSE_HINT: _ToolSpec("str"),
     SANDBOX_SESSION_IMAGE: _ToolSpec("str"),
-    CODE_EXECUTION_EXECUTOR: _ToolSpec("str", choices=tuple(executor.value for executor in CodeExecutor)),
+    CODE_EXECUTION_EXECUTOR: _ToolSpec("str", options=tuple(executor.value for executor in CodeExecutor)),
     WEB_SEARCH_MAX_RESULTS: _ToolSpec("int", ge=1),
     WEB_SEARCH_EXTRACT: _ToolSpec("bool"),
     WEB_SEARCH_INTERCEPT: _ToolSpec("bool"),
@@ -173,10 +172,10 @@ def validate_value(key: str, value: SettingValue) -> SettingValue:
         raise ValueError(msg)
     if spec.type == "url":
         return validate_url(value)
-    if spec.choices is not None:
+    if spec.options is not None:
         normalized = value.strip().lower()
-        if normalized not in spec.choices:
-            msg = f"{key} must be one of {', '.join(spec.choices)}."
+        if normalized not in spec.options:
+            msg = f"{key} must be one of {', '.join(spec.options)}."
             raise ValueError(msg)
         return normalized
     return value
@@ -298,7 +297,7 @@ def field_type(key: str) -> str:
     return _TOOL_SPECS[key].type
 
 
-def field_choices(key: str) -> list[str] | None:
-    """The closed vocabulary of a ``str`` field, or ``None`` for free text."""
-    choices = _TOOL_SPECS[key].choices
-    return list(choices) if choices is not None else None
+def get_field_options(key: str) -> list[str] | None:
+    """Return the allowed values of a ``str`` field, or ``None`` for free text."""
+    options = _TOOL_SPECS[key].options
+    return list(options) if options is not None else None
