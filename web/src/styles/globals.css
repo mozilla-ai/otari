@@ -2611,6 +2611,64 @@ main {
 .otari-provider-keys-table[data-scrolled="true"] .table__cell[data-key="name"] {
   border-right: 1px solid var(--color-control-border);
 }
+/* The organization's guardrail definitions. Name, guardrail and checks absorb
+   what is left; the status lane is sized to its longest word, "Credentials
+   unreadable", so a row going unreadable moves no column. Three glyph actions. */
+.otari-guardrail-definitions-table .table__row .table__cell {
+  height: 3.625rem;
+  padding-block: 0;
+}
+.otari-guardrail-definitions-table .table__column[data-key="name"],
+.otari-guardrail-definitions-table .table__column[data-key="guardrail"] {
+  min-width: 11rem;
+}
+.otari-guardrail-definitions-table .table__column[data-key="checks"] {
+  min-width: 14rem;
+}
+.otari-guardrail-definitions-table .table__column[data-key="credentials"] {
+  width: 9rem;
+  min-width: 9rem;
+}
+.otari-guardrail-definitions-table .table__column[data-key="status"] {
+  width: 11rem;
+  min-width: 11rem;
+}
+.otari-guardrail-definitions-table .table__column[data-key="actions"] {
+  width: 9rem;
+  min-width: 9rem;
+}
+/* Where each one runs. No status lane: the switch in the actions is the
+   status. The profile lane is the widest, because under a broken guardrail it
+   also carries "Requests served unchecked". */
+.otari-guardrail-mandates-table .table__row .table__cell {
+  height: 3.625rem;
+  padding-block: 0;
+}
+.otari-guardrail-mandates-table .table__column[data-key="profile"] {
+  min-width: 13rem;
+}
+.otari-guardrail-mandates-table .table__column[data-key="runs_on"],
+.otari-guardrail-mandates-table .table__column[data-key="runs_in"] {
+  min-width: 11rem;
+}
+.otari-guardrail-mandates-table .table__column[data-key="mode"] {
+  width: 6.5rem;
+  min-width: 6.5rem;
+}
+/* Sized to "Serve it unchecked" on one line, since a wrapped answer reads as
+   two. The cell does not wrap either, so a longer phrasing grows the lane
+   rather than breaking it. */
+.otari-guardrail-mandates-table .table__column[data-key="on_unavailable"] {
+  width: 12rem;
+  min-width: 12rem;
+}
+.otari-guardrail-mandates-table .table__cell[data-key="on_unavailable"] {
+  white-space: nowrap;
+}
+.otari-guardrail-mandates-table .table__column[data-key="actions"] {
+  width: 9rem;
+  min-width: 9rem;
+}
 /* The models offered on one organization provider key, inside that key's row
    detail. Five rate lanes and two controls, so the name lane is the one that
    absorbs what is left; the table scrolls in its own frame rather than widening
