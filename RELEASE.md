@@ -92,6 +92,12 @@ Mark a breaking change with `!` in the PR title, after the type or the scope:
 git-cliff parses. git-cliff also reads a `BREAKING CHANGE:` footer, but a footer
 reaches the squash commit only from a branch commit message, so do not rely on it.
 
+A commit that reached `main` without the marker can still be marked: add a
+`commit_preprocessors` entry to `cliff.toml` that matches its exact subject and
+rewrites it with `!` and the setting that keeps the old behavior. Keep the entry
+after the release ships, because every release regenerates the whole
+`CHANGELOG.md` and removing it would drop the marker again.
+
 The release notes put the marker **BREAKING:** at the start of each breaking
 entry. The entry stays in the group of its type. A breaking commit of a hidden
 type, such as `refactor(ports)!:`, appears under "Maintenance".

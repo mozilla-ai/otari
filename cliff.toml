@@ -78,6 +78,13 @@ commit_preprocessors = [
   # commit parser and flip commit.conventional to false, which silently
   # drops the scope from the rendered line.
   { pattern = '(?m) \(#\d+\)$', replace = "" },
+
+  # Mark a commit breaking after it reached main without the `!`. Each entry
+  # matches one exact subject and rewrites it to carry the marker and the
+  # setting that keeps the old behavior. Keep the entries: every release
+  # regenerates the whole CHANGELOG.md, so removing one drops its marker.
+  { pattern = '(?m)^feat\(tools\): run provider-native code execution on the sandbox when the model has none$', replace = "feat(tools)!: run provider-native code execution on the sandbox when the model has none. With sandbox_url set, a code_interpreter or code_execution declaration that the model's provider does not run natively now runs on the sandbox and is billed as a sandbox tool call; code_execution_executor: provider keeps forwarding it" },
+  { pattern = "(?m)^feat\\(files\\): serve both SDKs' Files APIs, with the schema and services behind them$", replace = "feat(files)!: serve both SDKs' Files APIs, with the schema and services behind them. GET /api/v1/files now returns at most 100 files per page (limit up to 1000) with has_more, where it returned every file; and a background sweep deletes the rows and bytes of soft-deleted and expired files every hour, and files_sweep_interval_sec: 0 leaves cleanup to the operator as before" },
 ]
 
 commit_parsers = [

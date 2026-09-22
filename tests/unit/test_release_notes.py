@@ -26,6 +26,8 @@ _UNRELEASED_COMMITS = [
     "fix: correct a plain bug",
     "refactor: tidy a plain module",
     "Update a readme without a type",
+    "feat(tools): run provider-native code execution on the sandbox when the model has none",
+    "feat(files): serve both SDKs' Files APIs, with the schema and services behind them",
 ]
 
 
@@ -100,6 +102,24 @@ def entries_by_group(notes: str) -> dict[str, list[str]]:
 )
 def test_a_breaking_commit_is_marked(entries_by_group: dict[str, list[str]], group: str, entry: str) -> None:
     assert any(line.startswith(entry) for line in entries_by_group[group]), entries_by_group
+
+
+@pytest.mark.parametrize(
+    ("entry", "setting"),
+    [
+        (
+            "- **BREAKING:** **tools:** Run provider-native code execution on the sandbox",
+            "code_execution_executor: provider",
+        ),
+        ("- **BREAKING:** **files:** Serve both SDKs' Files APIs", "files_sweep_interval_sec: 0"),
+    ],
+)
+def test_a_commit_marked_breaking_after_merge_names_the_setting(
+    entries_by_group: dict[str, list[str]], entry: str, setting: str
+) -> None:
+    lines = [line for line in entries_by_group["Features"] if line.startswith(entry)]
+    assert lines, entries_by_group
+    assert setting in lines[0]
 
 
 def test_a_plain_commit_is_not_marked(entries_by_group: dict[str, list[str]]) -> None:
