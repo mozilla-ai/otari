@@ -21,6 +21,11 @@ which rebuilds that table to tighten a column to NOT NULL and point it at
 swaps the alias and policy uniqueness constraints (a batch rebuild with the
 partial indexes taken out and put back around it), the other adds
 ``workspace_id`` to three more tables.
+
+The guardrail definitions revision is here for the same reason and one more: it
+is the first to put a *check constraint* and a *composite* foreign key on a
+table that already exists, neither of which SQLite can add without rebuilding
+it, and the table it rebuilds is one another table's foreign key points at.
 """
 
 import json
@@ -66,6 +71,12 @@ _TOKEN_INDEX = "ix_user_email_verification_token"
 _ALIAS_WIDEN_REVISION = "c1e4a7b9d3f6"
 _SURVIVALS_REVISION = "d2f5b8c0e4a7"
 _SURVIVAL_TABLES = ("routing_memory", "router_preferences", "file_objects")
+
+_GUARDRAIL_DEFINITIONS_REVISION = "a9c4e7b2d5f8"
+_DEFINITIONS_TABLE = "organization_guardrail_definitions"
+_MANDATES_TABLE = "organization_guardrails"
+_MANDATES_BACKEND_CHECK = "ck_organization_guardrails_single_backend"
+_MANDATES_DEFINITION_FK = "fk_organization_guardrails_definition"
 
 
 def _parent_of(revision: str) -> str:
@@ -955,3 +966,145 @@ def test_the_migrated_survival_tables_match_their_models(sqlite_at_head: tuple[C
         declared = SQLModel.metadata.tables[table]
         migrated = {column["name"] for column in inspect(engine).get_columns(table)}
         assert migrated == set(declared.columns.keys()), table
+
+
+def test_the_guardrail_definitions_table_matches_its_model(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Hand-written revision, so nothing else would notice the two drifting apart."""
+    _, engine = sqlite_at_head
+
+    declared = SQLModel.metadata.tables[_DEFINITIONS_TABLE]
+    migrated = {column["name"] for column in inspect(engine).get_columns(_DEFINITIONS_TABLE)}
+    assert migrated == set(declared.columns.keys())
+
+
+def test_the_definition_link_survives_the_batch_rebuild(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Everything the mandate table carried before the rebuild, plus what it gained.
+
+    ``copy_from`` in the revision is what guarantees this. Without it the rebuild
+    reflects the table, and a constraint or index reflection renders differently
+    is one SQLite quietly drops.
+    """
+    _, engine = sqlite_at_head
+    inspector = inspect(engine)
+
+    assert _MANDATES_BACKEND_CHECK in {check["name"] for check in inspector.get_check_constraints(_MANDATES_TABLE)}
+    assert "uq_organization_guardrails_org_profile" in {
+        constraint["name"] for constraint in inspector.get_unique_constraints(_MANDATES_TABLE)
+    }
+    assert "ix_organization_guardrails_organization_id" in {
+        index["name"] for index in inspector.get_indexes(_MANDATES_TABLE)
+    }
+
+    targets = {
+        (fk["referred_table"], tuple(fk["constrained_columns"])) for fk in inspector.get_foreign_keys(_MANDATES_TABLE)
+    }
+    assert ("organization", ("organization_id",)) in targets
+    assert (_DEFINITIONS_TABLE, ("organization_id", "definition_id")) in targets
+
+    # The rebuild renames the mandate table out from under this one's foreign
+    # key and back again, which is the failure mode the rebuild has here that it
+    # did not have on the earlier revisions.
+    scoped = {fk["referred_table"] for fk in inspector.get_foreign_keys("organization_guardrail_workspaces")}
+    assert {_MANDATES_TABLE, "workspace"} <= scoped
+
+
+def test_the_definition_is_pinned_to_its_own_organization(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """The unique constraint the composite foreign key above is only possible because of."""
+    _, engine = sqlite_at_head
+    constraints = {
+        constraint["name"]: tuple(constraint["column_names"])
+        for constraint in inspect(engine).get_unique_constraints(_DEFINITIONS_TABLE)
+    }
+    assert constraints["uq_org_guardrail_definitions_org_id"] == ("organization_id", "id")
+    assert constraints["uq_org_guardrail_definitions_org_name"] == ("organization_id", "name")
+
+
+def test_a_mandate_cannot_name_both_a_url_and_a_definition(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """The check constraint, exercised rather than only reflected.
+
+    SQLite enforces a check constraint whatever ``PRAGMA foreign_keys`` says, so
+    this is the one half of the shape rule reachable here; the composite foreign
+    key is covered against PostgreSQL in
+    ``tests/integration/test_organization_guardrail_definitions.py``.
+    """
+    _, engine = sqlite_at_head
+
+    with engine.begin() as connection:
+        organization = _default_organization(connection)
+        _insert_mandate(connection, organization, profile="remote-only", url="https://example.invalid/guardrails")
+        _insert_mandate(connection, organization, profile="in-process", definition_id=uuid.uuid4().hex)
+        with pytest.raises(IntegrityError):
+            _insert_mandate(
+                connection,
+                organization,
+                profile="both",
+                url="https://example.invalid/guardrails",
+                definition_id=uuid.uuid4().hex,
+            )
+
+
+def _default_organization(connection: Connection) -> str:
+    """The organization the chain seeds, so this test needs no tenancy fixtures."""
+    return str(connection.execute(text("SELECT id FROM organization WHERE slug = 'default'")).scalar_one())
+
+
+def _insert_mandate(
+    connection: Connection,
+    organization: str,
+    *,
+    profile: str,
+    url: str | None = None,
+    definition_id: str | None = None,
+) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO organization_guardrails "
+            "(id, organization_id, profile, url, definition_id, mode, on_unavailable, enabled, "
+            " applies_to_all_workspaces, created_at, updated_at) "
+            "VALUES (:id, :organization_id, :profile, :url, :definition_id, 'monitor', 'block', 1, 1, "
+            " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        ),
+        {
+            "id": uuid.uuid4().hex,
+            "organization_id": organization,
+            "profile": profile,
+            "url": url,
+            "definition_id": definition_id,
+        },
+    )
+
+
+def test_the_guardrail_definitions_revision_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Down drops the table and unwinds the rebuild; up puts both back.
+
+    Two rebuilds in a row is the part worth exercising: the downgrade rebuilds
+    the mandate table to take the constraints off before the definitions table it
+    points at can be dropped, and the second upgrade has to find nothing left
+    over to collide with.
+    """
+    config, engine = sqlite_at_head
+    parent = _parent_of(_GUARDRAIL_DEFINITIONS_REVISION)
+
+    command.downgrade(config, parent)
+
+    inspector = inspect(engine)
+    assert _DEFINITIONS_TABLE not in set(inspector.get_table_names())
+    assert "definition_id" not in {column["name"] for column in inspector.get_columns(_MANDATES_TABLE)}
+    assert _MANDATES_BACKEND_CHECK not in {
+        check["name"] for check in inspector.get_check_constraints(_MANDATES_TABLE)
+    }
+    assert _MANDATES_DEFINITION_FK not in {fk["name"] for fk in inspector.get_foreign_keys(_MANDATES_TABLE)}
+    # The rebuild that takes the new constraints off must not take these with them.
+    assert "uq_organization_guardrails_org_profile" in {
+        constraint["name"] for constraint in inspector.get_unique_constraints(_MANDATES_TABLE)
+    }
+    assert "ix_organization_guardrails_organization_id" in {
+        index["name"] for index in inspector.get_indexes(_MANDATES_TABLE)
+    }
+
+    command.upgrade(config, "head")
+
+    inspector = inspect(engine)
+    assert _DEFINITIONS_TABLE in set(inspector.get_table_names())
+    assert "definition_id" in {column["name"] for column in inspector.get_columns(_MANDATES_TABLE)}
+    assert _MANDATES_DEFINITION_FK in {fk["name"] for fk in inspector.get_foreign_keys(_MANDATES_TABLE)}

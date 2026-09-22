@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-from sqlalchemy import JSON, ForeignKey, Text, UniqueConstraint, Uuid
+from sqlalchemy import JSON, CheckConstraint, ForeignKey, ForeignKeyConstraint, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
@@ -81,6 +81,80 @@ class GuardrailConfig(BaseModel):
     merged on top of the profile's own ``validate_kwargs`` server-side."""
 
 
+class OrganizationGuardrailDefinition(Base):
+    """An API-hosted guardrail an organization configured for Otari to build itself.
+
+    The mandate below says *where* a check runs and how hard it bites. This row
+    says *what* the check is: which of the guardrails
+    ``services/guardrail_catalog`` lists to construct, and the arguments to
+    construct it with. So an organization can define a check rather than only
+    name a profile some other service already serves.
+
+    A table of its own rather than three more columns on the mandate, because
+    the two have different keys. A mandate is identified by
+    ``(organization_id, profile)`` and also carries ``mode``,
+    ``on_unavailable`` and the workspace scope; the build arguments depend on
+    ``guardrail_name`` alone. Fused, one guardrail placed under two policies
+    would hold two copies of the same vendor key, take two writes to rotate it,
+    and build the same vendor client twice per worker, and "configured but not
+    mandated yet" would have nowhere to live. Fusing the two later is
+    denormalizing; splitting them later needs a migration that dedupes N
+    possibly-divergent copies with no safe automatic answer, and that asymmetry
+    is what settles it.
+
+    Organization-keyed, not deployment-global. A row that served every tenant
+    could not be reached from ``HOSTED_SURFACES`` at all (#818).
+
+    Nothing reads these rows yet: validation, encryption, the runner and the
+    request path all land on top of this.
+    """
+
+    __tablename__ = "organization_guardrail_definitions"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", name="uq_org_guardrail_definitions_org_name"),
+        # Covers (organization_id, id) so the mandate below can carry a composite
+        # foreign key to it, pinning each mandate to a definition of *its own*
+        # organization rather than trusting every write path to check. Same
+        # reason, same shape as ``uq_org_provider_keys_org_id``
+        # (``models/provider_keys.py``).
+        UniqueConstraint("organization_id", "id", name="uq_org_guardrail_definitions_org_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # What a mandate points at, and the organization's own label. Not the
+    # ``profile`` a caller sends and not the vendor's class name: an
+    # organization may configure Lakera Guard twice under two names, with
+    # different thresholds.
+    name: Mapped[str] = mapped_column(nullable=False)
+    # The ``any_guardrail`` class to construct, e.g. ``lakera_guard``. A plain
+    # string rather than an enum: the set of guardrails is upstream's to grow,
+    # and the catalog is what a write path checks the value against.
+    guardrail_name: Mapped[str] = mapped_column(nullable=False)
+    create_kwargs: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    # One encrypted ``{name: value}`` map, not a column per credential: the
+    # guardrails do not agree on how many they need (Bedrock 3, watsonx 2, most
+    # 1, two none), so a column each would chase every guardrail upstream adds.
+    # Encrypted as a single string through ``services/secret_box``, the way
+    # ``SearchToolCredential.encrypted_api_key`` is.
+    encrypted_create_secrets: Mapped[str | None] = mapped_column(Text, default=None)
+    # The organization's kill switch for the definition itself: one write stops
+    # the guardrail everywhere it is mandated, without losing the arguments and
+    # the secrets it took to set up.
+    enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    # ``onupdate`` is load-bearing beyond bookkeeping. A runner holding built
+    # guardrails needs a fingerprint to diff against, and ``(id, updated_at)``
+    # is it, so an unchanged definition is not rebuilt on every refresh.
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
 class OrganizationGuardrail(Base):
     """A guardrail an organization runs over the requests of its workspaces.
 
@@ -112,7 +186,35 @@ class OrganizationGuardrail(Base):
     """
 
     __tablename__ = "organization_guardrails"
-    __table_args__ = (UniqueConstraint("organization_id", "profile", name="uq_organization_guardrails_org_profile"),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "profile", name="uq_organization_guardrails_org_profile"),
+        # Composite on purpose. A plain ``definition_id`` foreign key would let
+        # one organization mandate another's definition, and its vendor key with
+        # it; carrying ``organization_id`` into the reference means the database
+        # refuses that whatever the write path checked.
+        ForeignKeyConstraint(
+            ["organization_id", "definition_id"],
+            [
+                "organization_guardrail_definitions.organization_id",
+                "organization_guardrail_definitions.id",
+            ],
+            name="fk_organization_guardrails_definition",
+            # RESTRICT, not CASCADE: dropping a definition a mandate still names
+            # would silently stop a guardrail running, the one outcome worth
+            # refusing outright. Deleting the *organization* still removes both,
+            # because each table cascades from ``organization`` within the one
+            # statement, and RESTRICT is checked at the end of it.
+            ondelete="RESTRICT",
+        ),
+        # Not an XOR. Both NULL is today's ordinary row, the one falling back to
+        # the deployment's ``guardrails_url``, so an XOR would refuse every
+        # existing mandate. This only says the two backends are exclusive: a row
+        # cannot both POST to a remote service and be built here.
+        CheckConstraint(
+            "NOT (url IS NOT NULL AND definition_id IS NOT NULL)",
+            name="ck_organization_guardrails_single_backend",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(
@@ -124,6 +226,10 @@ class OrganizationGuardrail(Base):
     # here, and then the credential below is what authenticates to it.
     url: Mapped[str | None] = mapped_column(default=None)
     encrypted_credential: Mapped[str | None] = mapped_column(Text, default=None)
+    # NULL means "this mandate names a profile on a service"; set means Otari
+    # builds and runs the check itself from the definition. Nullable with no
+    # backfill, because every row that predates this column is the former.
+    definition_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, default=None)
     mode: Mapped[str] = mapped_column(default="monitor", nullable=False)
     on_unavailable: Mapped[str] = mapped_column(default="block", nullable=False)
     validate_kwargs: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
