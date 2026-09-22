@@ -136,7 +136,7 @@ test.describe("dashboard core flows", () => {
       // apart: the organization's own credentials and the process-wide ones a
       // deployment operator manages.
       ["Providers", "Providers"],
-      ["Deployment providers", "Providers"],
+      ["Deployment providers", "Deployment providers"],
       ["Spend & budgets", "Budgets"],
     ]) {
       await nav(page).getByRole("link", { name: link, exact: true }).click()

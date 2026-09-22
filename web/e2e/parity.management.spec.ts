@@ -35,7 +35,7 @@ async function openPage(
   link: string,
   heading: string,
 ): Promise<void> {
-  await nav(page).getByRole("link", { name: link }).click()
+  await nav(page).getByRole("link", { name: link, exact: true }).click()
   await expect(
     page.getByRole("heading", { name: heading, exact: true }),
   ).toBeVisible()
@@ -78,7 +78,7 @@ test.describe("standalone provider setup", () => {
   }) => {
     await login(page)
     await openOrganization(page)
-    await openPage(page, "Providers", "Providers")
+    await openPage(page, "Deployment providers", "Deployment providers")
 
     await page.getByRole("button", { name: "Add provider" }).click()
     // Scoped: the heading's trigger and the dialog's submit both say "Add

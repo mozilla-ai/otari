@@ -1346,7 +1346,7 @@ export function ProvidersPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageIntro
-        title="Providers"
+        title="Deployment providers"
         action={
           <Button
             // Visible while the dialog is open and beside the first-run

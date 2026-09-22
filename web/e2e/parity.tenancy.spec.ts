@@ -21,7 +21,7 @@ async function openPage(
   link: string,
   heading: string,
 ): Promise<void> {
-  await nav(page).getByRole("link", { name: link }).click()
+  await nav(page).getByRole("link", { name: link, exact: true }).click()
   await expect(
     page.getByRole("heading", { name: heading, exact: true }),
   ).toBeVisible()
