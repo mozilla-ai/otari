@@ -54,6 +54,7 @@ _SETTING_NAMES = frozenset(
         "files_max_bytes",
         "files_output_max_bytes",
         "files_output_max_files",
+        "files_provider_copy_max_sec",
         "files_provider_upload_enabled",
         "files_provider_upload_ttl_hours",
         "files_retention_hours",
