@@ -30,6 +30,7 @@ from gateway.services.guardrail_catalog import (
     GuardrailParameterSpec,
     build_builtin_guardrail_catalog,
     builtin_guardrail_spec,
+    definable_by_an_organization,
     fetch_guardrail_catalog,
 )
 
@@ -521,6 +522,42 @@ def test_does_not_look_up_a_name_the_registry_has_never_heard_of() -> None:
     """A write path reads the name out of a request, so an unknown one is an answer, not a traceback."""
     assert builtin_guardrail_spec("not_a_guardrail") is None
     assert builtin_guardrail_spec("") is None
+
+
+def test_lists_any_llm_and_still_denies_it_to_an_organizations_own_store() -> None:
+    """The catalog and the organization store disagree about `any_llm`, on purpose.
+
+    It is a real hosted-API guardrail, so the catalog is right to list it, and it
+    takes no constructor arguments, so it judges text on whatever LLM key the
+    *process* holds. An organization storing one would spend the operator's key
+    with nothing metering it. A deployment-wide store may allow exactly that,
+    which is why the catalog keeps listing it and the payer decides.
+    """
+    listed = {spec.guardrail_name for spec in build_builtin_guardrail_catalog().guardrails}
+
+    assert "any_llm" in listed
+    assert builtin_guardrail_spec("any_llm") is not None
+    assert not definable_by_an_organization("any_llm")
+
+
+def test_offers_an_organization_every_other_guardrail_the_catalog_lists() -> None:
+    """One denial and no more, so the rule cannot quietly grow into a second filter."""
+    listed = {spec.guardrail_name for spec in build_builtin_guardrail_catalog().guardrails}
+
+    refused = {name for name in listed if not definable_by_an_organization(name)}
+    assert refused == {"any_llm"}
+
+
+def test_answers_about_a_guardrail_the_catalog_does_not_list() -> None:
+    """A name only, so the two checks compose rather than one standing in for the other.
+
+    A store asks this *after* the spec lookup, and something unbuildable is that
+    lookup's refusal to give. Answering true here would be the wrong answer to
+    the wrong question.
+    """
+    assert definable_by_an_organization("susfactor")
+    assert definable_by_an_organization("not_a_guardrail")
+
 
 def test_listing_the_catalog_never_loads_a_model_backend() -> None:
     """The whole point of reading the registry rather than constructing anything."""

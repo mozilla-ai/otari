@@ -416,3 +416,31 @@ def builtin_guardrail_spec(guardrail_name: str) -> BuiltInGuardrailSpec | None:
     except ValueError:
         return None
     return _builtin_spec(name) if _reachable_over_a_hosted_api(name) else None
+
+
+# The one listed guardrail an organization may not define for itself. `any_llm`
+# takes no constructor arguments, so it builds with no credential of anyone's and
+# judges the text by calling an LLM on the *process* environment's key. That call
+# is made nowhere near `reserve_budget`: nothing meters it, nothing refunds it,
+# and `/api/v1/usage/in-flight` never sees it. An organization storing one would
+# be spending the operator's key, once per request, in every workspace it scoped
+# the guardrail to.
+#
+# Not a narrowing of `_reachable_over_a_hosted_api`, because upstream's metadata
+# is right and the guardrail really does run as a call to a service. It is the
+# *payer* that makes it inadmissible, and only here: a deployment-wide store
+# should allow it, an operator spending the operator's own key being no leak at
+# all, and a filter in the catalog would hide it from that store too. A catalog
+# says what is possible; a billing rule inside one is a rule the next reader will
+# not look for.
+_NOT_DEFINABLE_BY_AN_ORGANIZATION: frozenset[str] = frozenset({GuardrailName.ANYLLM.value})
+
+
+def definable_by_an_organization(guardrail_name: str) -> bool:
+    """Whether an organization's own store may hold a definition of ``guardrail_name``.
+
+    Asked after :func:`builtin_guardrail_spec` and asking something else: that
+    one answers what this gateway can construct, this one answers whose money
+    the construction spends. A name neither lists is refused by the first.
+    """
+    return guardrail_name not in _NOT_DEFINABLE_BY_AN_ORGANIZATION
