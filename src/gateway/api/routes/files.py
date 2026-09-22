@@ -18,6 +18,7 @@ their paths and verbs and differ only in the JSON they return, so the response
 shape follows the caller: a request carrying Anthropic's ``anthropic-version``
 header (which its SDK sends on every call) gets ``FileMetadata``, everything
 else gets the OpenAI file object.
+The Anthropic flavor is its GA shape only, so a request for the Files API beta is a 400.
 """
 
 import base64
@@ -45,7 +46,20 @@ from gateway.services.file_store import FileStore
 from gateway.services.files.provider_files import stream_provider_file
 from gateway.services.workspace_scope import default_workspace_id
 
-router = APIRouter(tags=["files"])
+_FILES_BETA = "files-api-2025-04-14"
+
+
+async def _refuse_files_beta(raw_request: Request) -> None:
+    """Refuse Anthropic's Files API beta, whose shapes differ from the GA shapes served here."""
+    for header_value in raw_request.headers.getlist("anthropic-beta"):
+        if _FILES_BETA in (beta.strip() for beta in header_value.split(",")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"The {_FILES_BETA} beta is not supported: send Files API requests without it in anthropic-beta",
+            )
+
+
+router = APIRouter(tags=["files"], dependencies=[Depends(_refuse_files_beta)])
 
 # OpenAI's documented file purposes plus a generic default. We don't enforce the
 # enum (forward-compat), but normalise the empty case to "user_data".
@@ -62,9 +76,7 @@ _PAGE_TOKEN_PREFIX = "page_"
 
 def _anthropic_shape(raw_request: Request) -> bool:
     """Whether the caller speaks Anthropic's Files API rather than OpenAI's."""
-    return "anthropic-version" in raw_request.headers or any(
-        beta.strip().startswith("files-api") for beta in raw_request.headers.get("anthropic-beta", "").split(",")
-    )
+    return "anthropic-version" in raw_request.headers
 
 
 def _page_token(file_id: str) -> str:
