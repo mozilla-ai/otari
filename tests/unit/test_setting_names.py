@@ -53,6 +53,7 @@ _SETTING_NAMES = frozenset(
         "files_max_bytes",
         "files_output_max_bytes",
         "files_output_max_files",
+        "files_provider_copy_max_sec",
         "files_retention_hours",
         "files_s3_bucket",
         "files_s3_endpoint_url",

@@ -29,8 +29,6 @@ from gateway.services.files.provider_files import (
 
 # A missing credential or a database failure, which stop a copy before it starts.
 _COPY_SETUP_ERRORS: tuple[type[BaseException], ...] = (LookupError, ValueError, *DATABASE_ERRORS)
-# The time one request may spend copying a provider's files, across every call.
-_PROVIDER_COPY_SECONDS = 60.0
 
 
 class SandboxFileBridge:
@@ -70,9 +68,15 @@ class SandboxFileBridge:
         self.inputs = inputs
         self.base_url = base_url
         # What the request may still copy from a provider, across every call.
+        # An allowance of its own: a request that also runs Otari's sandbox
+        # spends that one through ``store_output`` and does not share this.
         self._provider_files_left = self.max_output_files
         self._provider_bytes_left = self.max_output_bytes
-        self._provider_files_handled: set[str] = set()
+        # The files this request will not attempt again, either because they are
+        # stored or because trying again cannot change the answer. A provider
+        # that merely refused is left out, so a later event naming the same file
+        # retries it.
+        self._provider_files_settled: set[str] = set()
         self._provider_copy_deadline: float | None = None
 
     @property
@@ -117,13 +121,19 @@ class SandboxFileBridge:
         """Copy the files a provider's own sandbox produced into the store, each under the provider's ID.
 
         The provider's ID is kept so a client that sends the turn back still names a file Otari knows.
-        A file already recorded, or already handled earlier in the request, is left alone.
-        The request copies at most ``max_output_files`` files and ``max_output_bytes`` in total, in one time limit.
+        A file already recorded, or already settled earlier in the request, is left alone. A file the
+        provider merely refused is not settled, so a later event naming it tries again.
+        The request copies at most ``max_output_files`` files and ``max_output_bytes`` in total,
+        within ``files_provider_copy_max_sec``. Those are the request's own allowance: what Otari's
+        sandbox stored through :meth:`store_output` does not come out of it.
         Never raises for a failed copy, because a lost file is a smaller failure than a lost reply.
         """
-        new = list({file.file_id: file for file in files if file.file_id not in self._provider_files_handled}.values())
-        self._provider_files_handled.update(file.file_id for file in new)
-        if not new or not serves_files(provider):
+        new = list({file.file_id: file for file in files if file.file_id not in self._provider_files_settled}.values())
+        if not new:
+            return
+        if not serves_files(provider):
+            # Otari cannot read this provider's files back at all, so a later event will fare no better.
+            self._provider_files_settled.update(file.file_id for file in new)
             return
         try:
             client = ProviderFileClient.for_run(
@@ -137,19 +147,34 @@ class SandboxFileBridge:
         except Exception:  # noqa: BLE001 - a copy failure must not fail the reply
             logger.exception("Not copying %d %s file(s)", len(new), provider)
             return
+        # An id that already has a row is somebody's stored file, and a second copy
+        # under it would either duplicate the row or overwrite another owner's.
+        self._provider_files_settled.update(known)
         pending = [file for file in new if file.file_id not in known]
         if len(pending) > self._provider_files_left:
             logger.warning(
-                "%s produced %d files; copying the first %d", provider, len(pending), self._provider_files_left
+                "%s named %d files to copy; %d may still be stored for this request",
+                provider,
+                len(pending),
+                self._provider_files_left,
             )
-        batch = pending[: self._provider_files_left]
-        self._provider_files_left -= len(batch)
         loop = asyncio.get_running_loop()
         if self._provider_copy_deadline is None:
-            self._provider_copy_deadline = loop.time() + _PROVIDER_COPY_SECONDS
-        for file in batch:
-            if self._provider_bytes_left <= 0 or loop.time() >= self._provider_copy_deadline:
-                logger.warning("%s file %s skipped: no bytes or time left for this request", provider, file.file_id)
+            self._provider_copy_deadline = loop.time() + self._config.files_provider_copy_max_sec
+        for file in pending:
+            # Each allowance is reported on its own: "no bytes left" and "no time
+            # left" are different operator problems with different knobs.
+            if self._provider_files_left <= 0:
+                logger.warning("%s file %s skipped: the request's file count is spent", provider, file.file_id)
+                self._provider_files_settled.add(file.file_id)
+                continue
+            if self._provider_bytes_left <= 0:
+                logger.warning("%s file %s skipped: the request's byte budget is spent", provider, file.file_id)
+                self._provider_files_settled.add(file.file_id)
+                continue
+            if loop.time() >= self._provider_copy_deadline:
+                logger.warning("%s file %s skipped: the request's copy time is spent", provider, file.file_id)
+                self._provider_files_settled.add(file.file_id)
                 continue
             window = asyncio.timeout_at(self._provider_copy_deadline)
             try:
@@ -162,7 +187,10 @@ class SandboxFileBridge:
                     file.file_id,
                     self._provider_bytes_left,
                 )
+                self._provider_files_settled.add(file.file_id)
             except ProviderFileUnavailableError as exc:
+                # Left unsettled on purpose: a Responses stream names the same
+                # file in up to four events, so the next one retries it free.
                 logger.warning("Could not copy %s file %s: %s", provider, file.file_id, exc)
             except Exception:  # noqa: BLE001 - one file that cannot be copied must not stop the rest
                 if window.expired():
@@ -170,7 +198,11 @@ class SandboxFileBridge:
                 else:
                     logger.exception("Could not copy %s file %s", provider, file.file_id)
             else:
+                # Only a stored file spends a slot: a provider having a bad minute
+                # must not cost the files named after it their allowance.
+                self._provider_files_left -= 1
                 self._provider_bytes_left -= size
+                self._provider_files_settled.add(file.file_id)
 
     async def _copy_provider_file(self, client: ProviderFileClient, file: ProviderFile, budget: int) -> int:
         """Copy one file into the store and record its row, returning its size."""
