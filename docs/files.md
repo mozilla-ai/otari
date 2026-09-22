@@ -222,20 +222,13 @@ in order:
 
 See [config.example.yml](../config.example.yml) for the full list. Key knobs:
 
-- `files_enabled`, `files_backend`, `files_local_dir`, `files_max_bytes`,
-`files_retention_hours`: upload storage. `files_output_max_files` and
-`files_output_max_bytes` bound what one code-execution call may store from its
-sandbox (see above). `files_backend` is `local` (a
-directory), `s3` (boto3, `files_s3_*`), or `fsspec`: any filesystem
-[fsspec](https://filesystem-spec.readthedocs.io) has an implementation for,
-named by `files_url` (`gcs://bucket/prefix`, `abfs://container/prefix`,
-`s3://bucket/prefix`, `sftp://host/path`, `file:///path`, ...) with the
-implementation's own keyword arguments in `files_storage_options`. It is an
-optional extra, `pip install otari[fsspec]`, like `otari[s3]`; install the
-implementation package for the protocol as well (`gcsfs`, `adlfs`, `s3fs`, `paramiko`);
-most read their standard credential environment variables on their own. An expired file answers 404 at once,
-and the background sweep (`files_sweep_interval_sec`, hourly by default, `0` to
-disable) then reclaims its bytes and row along with those of deleted files.
+- `files_enabled`, `files_backend`, `files_max_bytes`, `files_retention_hours`:
+upload storage (see [Storage backends](#storage-backends)).
+`files_output_max_files` and `files_output_max_bytes` bound what one
+code-execution call may store from its sandbox (see above). An expired file
+answers 404 at once, and the background sweep (`files_sweep_interval_sec`,
+hourly by default, `0` to disable) then reclaims its bytes and row along with
+those of deleted files.
 - `file_understanding_enabled`: master switch for content normalization.
 - `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:
 how images are handled for text-only models. The describe model may be a local
@@ -248,6 +241,72 @@ vision model (e.g. `ollama:qwen2-vl`) to keep captioning free.
 deleted file, or one past `files_retention_hours`, loses its row and bytes
 within an hour where cleanup was the operator's task. Set
 `files_sweep_interval_sec: 0` to keep it that way.
+
+### Storage backends
+
+`files_backend` chooses where the file bytes live. Their metadata stays in the
+database either way.
+
+- `local`, the default, writes under `files_local_dir`. Use it for development
+  and for a single node.
+- `s3` writes to `files_s3_bucket` through boto3. Use it for AWS S3 and for
+  S3-compatible stores, such as the SeaweedFS below; `files_s3_endpoint_url`
+  names a store that is not AWS. Credentials come from boto3's standard chain:
+  environment variables, `~/.aws/credentials`, or an IAM role.
+- `fsspec` writes under `files_url` through
+  [fsspec](https://filesystem-spec.readthedocs.io). Use it for the stores the
+  other two do not reach, such as GCS (`gcs://bucket/prefix`), Azure
+  (`abfs://container/prefix`) or SFTP (`sftp://host/path`).
+  `files_storage_options` holds the keyword arguments of the protocol's
+  implementation. It is an optional extra, `pip install otari[fsspec]`, like
+  `otari[s3]`; install the implementation package for the protocol as well
+  (`gcsfs`, `adlfs`, `s3fs`, `paramiko`). Most read their standard credential
+  environment variables on their own.
+
+`fsspec` also accepts `s3://`, but prefer `s3` for an S3 store: the published
+image includes boto3 and does not include `s3fs`.
+
+### Object storage with Docker Compose
+
+The `object-storage` Compose profile runs
+[SeaweedFS](https://github.com/seaweedfs/seaweedfs), an S3-compatible store,
+with an `otari-files` bucket. Set its credentials in `.env` beside
+`docker-compose.yml`. Compose gives Otari the same pair, as
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`:
+
+```dotenv
+OTARI_S3_ACCESS_KEY=otari
+OTARI_S3_SECRET_KEY=<a long random secret>
+```
+
+```bash
+docker compose --profile object-storage up -d
+```
+
+Then point `config.yml` at the bucket:
+
+```yaml
+files_backend: s3
+files_s3_bucket: otari-files
+files_s3_endpoint_url: http://seaweedfs:8333
+```
+
+A gateway that runs on the host rather than in Compose uses
+`http://localhost:8333`, with the pair exported as `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY`. With an image that adds `s3fs`, `fsspec` reaches the
+same bucket with `files_url: s3://otari-files` and
+`files_storage_options: { endpoint_url: "http://seaweedfs:8333" }`.
+
+Three things to know:
+
+- The AWS variables reach every AWS client in Otari, so Bedrock also uses
+  them when its provider entry sets no credentials of its own.
+- SeaweedFS's filer API answers on port 8888 without credentials, so the store
+  sits on an `object-storage` network that only the otari service joins. Keep
+  every other service off that network.
+- `OTARI_MCP_ALLOW_PRIVATE_HOSTS` and `OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS`
+  let Otari call private addresses on a request's behalf, and the store is one
+  of them. Leave both off in this setup.
 
 
 

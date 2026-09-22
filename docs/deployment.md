@@ -112,7 +112,12 @@ Compose profiles start the bundled service backends:
 docker compose --profile code-exec up -d
 docker compose --profile web-search up -d
 docker compose --profile guardrails up -d
+docker compose --profile object-storage up -d
 ```
+
+The `object-storage` profile runs an S3-compatible store for uploaded files;
+[Object storage with Docker Compose](files.md#object-storage-with-docker-compose)
+has the settings that use it.
 
 Web search needs no container when `web_search_provider` names a licensed API
 (`tavily` or `brave`) and `web_search_provider_api_key` carries its key. These
