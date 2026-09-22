@@ -1,25 +1,27 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/organization/pricing")({
-  // Model pricing folded into Providers, where an organization's models are
-  // offered, priced and switched in one place. The old path redirects so
-  // bookmarks and any link still pointing at it keep working.
+  // The retired path for organization pricing. Providers is where an
+  // organization's models are offered, priced and switched, so a bookmark or a
+  // link still pointing here lands there.
   //
-  // Only `override` travels. It named the organization's own rate for a model
-  // and still does, so a link carrying one lands on the editor it always meant.
-  // `model` named the *deployment's* rate, whose editor this change removed
-  // along with the price table it sat in, and the two are different price lists:
-  // forwarding it would leave a parameter nothing reads, and translating it to
-  // `override` would silently point a deployment rate at a tenant's. Dropped, so
-  // the URL says what the page will do.
+  // Only `override` travels. It names the organization's own rate for a model,
+  // which is what the destination's editor opens on. `model` names the
+  // *deployment's* rate, a different price list with no editor on this page, so
+  // forwarding it would leave a parameter nothing reads and translating it would
+  // point a deployment rate at a tenant's. Dropped, so the URL says what the
+  // page will do.
   //
   // In `beforeLoad`, so the page it replaces is never mounted and the dead path
   // leaves no history entry.
   beforeLoad: ({ search }) => {
-    const { override } = search as { override?: string }
+    // Read rather than cast: this route declares no schema, so `search` is
+    // whatever the URL carried, and a non-string `override` would otherwise be
+    // handed to the destination as one.
+    const override = (search as Record<string, unknown>).override
     throw redirect({
       to: "/organization/provider-keys",
-      search: override ? { override } : {},
+      search: typeof override === "string" && override ? { override } : {},
       replace: true,
     })
   },

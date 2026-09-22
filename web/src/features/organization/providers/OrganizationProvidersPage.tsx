@@ -28,6 +28,8 @@ import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { PricingOverrideDialog } from "@/features/organization/PricingOverrideDialog"
+import { canManage } from "@/features/organization/roles"
 import {
   BYO_UNSUPPORTED_PROVIDERS,
   type CredentialFieldValues,
@@ -60,8 +62,6 @@ import { formatRelative } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
 import { useUrlState } from "@/shared/helpers/urlState"
 
-import { PricingOverrideDialog } from "../PricingOverrideDialog"
-import { canManage } from "../roles"
 import { ProviderModelsPanel } from "./ProviderModelsPanel"
 
 // Every period one model can carry, which is what the editor reads. Generous
@@ -540,6 +540,7 @@ export function OrganizationProvidersPage() {
         error={
           context.error ??
           keys.error ??
+          overrides.error ??
           archive.error ??
           restore.error ??
           setDefault.error
@@ -670,8 +671,15 @@ export function OrganizationProvidersPage() {
       {/* The organization's own rate for one model, opened from a model row or
           from the Models detail page's "Set your rate" link. Mounted here
           rather than inside the panel because the panel lives in a table cell,
-          and a dialog rendered from one closes with the row that opened it. */}
-      {canEdit ? (
+          and a dialog rendered from one closes with the row that opened it.
+
+          Not mounted until the rates are in hand. The editor reads its start
+          values once, when it mounts, and `?override=` is in the URL a render
+          before the read answering it settles: mounted on the first render it
+          seeds itself from nothing and keeps that, showing an admin an empty
+          form over a rate that exists and replacing it on save. A read that
+          fails leaves it unmounted and says so in the banner above. */}
+      {canEdit && overrides.isSuccess ? (
         <PricingOverrideDialog
           key={ratingModelKey}
           isOpen={ratingModelKey !== ""}

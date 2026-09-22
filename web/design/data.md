@@ -112,10 +112,10 @@ tracks horizontal scroll so a first column can pin, and the per-page class is wh
 `globals.css` hangs that page's column widths and pinning off. The list is closed:
 `otari-keys-table`, `otari-models-table`, `otari-providers-table`,
 `otari-routing-table`, `otari-domains-table`, `otari-members-table`,
-`otari-provider-keys-table`, `otari-workspaces-table`, `otari-accounts-table`,
-`otari-activity-table`, `otari-budgets-table`, `otari-pricing-table`,
-`otari-mcp-table`, `otari-rate-overrides-table`, `otari-offerings-table`. Inventing one at the call site
-compiles and styles nothing.
+`otari-provider-keys-table`, `otari-offered-models-table`,
+`otari-workspaces-table`, `otari-accounts-table`, `otari-activity-table`,
+`otari-budgets-table`, `otari-mcp-table`, `otari-offerings-table`. Inventing one
+at the call site compiles and styles nothing.
 
 A new page adds its class to `src/styles/globals.css`, beside the others, and the
 block is small: the per-page rules there set column widths on

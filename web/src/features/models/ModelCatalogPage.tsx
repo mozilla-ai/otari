@@ -759,7 +759,7 @@ export function ModelCatalogView({
                 emptyContent={
                   <EmptyMessage>
                     {models.length === 0
-                      ? "No models yet. Configure a provider, or price a model on Model pricing."
+                      ? "No models yet. Configure a provider, or price a model on Providers."
                       : "No models match these filters."}
                   </EmptyMessage>
                 }
@@ -768,7 +768,7 @@ export function ModelCatalogView({
           ) : pageRows.length === 0 ? (
             <EmptyMessage minHeightClass="min-h-[12rem]">
               {models.length === 0
-                ? "No models yet. Configure a provider, or price a model on Model pricing."
+                ? "No models yet. Configure a provider, or price a model on Providers."
                 : "No models match these filters."}
             </EmptyMessage>
           ) : (

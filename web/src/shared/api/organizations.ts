@@ -25,6 +25,7 @@ import type {
   OrgProviderAvailableModels,
   OrgProviderKey,
   OrgProviderModel,
+  OrgProviderModels,
   OrgProviderModelsRefresh,
   PendingOrganizationInvitation,
   SwitchOrganizationRequest,
@@ -435,19 +436,33 @@ export function useAcceptInvitation() {
 // link. The response is the same sentence whether the address was unknown,
 // already claimed, or genuinely just claimed, so nothing here may branch on it.
 
+/**
+ * Refresh what one write to a provider key actually moved.
+ *
+ * Each flag is off by default because the blanket version was wrong in both
+ * directions. Refetching every key's model list on every write is the cost the
+ * separate root key exists to avoid (see `queryKeys.ts`): making a key default
+ * or renaming one moves no model row, and a page with a panel open would refetch
+ * it anyway. And no key write refreshed the catalog at all, while creating a key
+ * offers its whole model list, archiving one withdraws what it served, restoring
+ * one brings it back and deleting one takes its rows with it.
+ */
 function invalidateOrgProviderKeys(
   queryClient: ReturnType<typeof useQueryClient>,
+  { offeredModels = false, catalog = false } = {},
 ): void {
   void queryClient.invalidateQueries({
     queryKey: [ORGANIZATION_PROVIDER_KEYS],
   })
-  // The models ride the key: archiving one withdraws what it served, restoring
-  // one brings it back, and a rotated credential reaches a different catalog. A
-  // panel left open on a stale list would offer a switch over models the key no
-  // longer reaches.
-  void queryClient.invalidateQueries({
-    queryKey: [ORGANIZATION_PROVIDER_MODELS],
-  })
+  if (offeredModels) {
+    void queryClient.invalidateQueries({
+      queryKey: [ORGANIZATION_PROVIDER_MODELS],
+    })
+  }
+  if (catalog) {
+    void queryClient.invalidateQueries({ queryKey: [MODELS] })
+    void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+  }
 }
 
 // Every model write moves three reads: this key's panel, and both catalog
@@ -499,7 +514,13 @@ export function useCreateOrgProviderKey() {
         method: "POST",
         body: JSON.stringify(body),
       }),
-    onSuccess: () => invalidateOrgProviderKeys(queryClient),
+    onSuccess: () =>
+      // The create offers everything the credential reaches, so the whole
+      // catalog moves with it.
+      invalidateOrgProviderKeys(queryClient, {
+        offeredModels: true,
+        catalog: true,
+      }),
   })
 }
 
@@ -517,7 +538,10 @@ export function useUpdateOrgProviderKey() {
         `/organizations/me/provider-keys/${encodeURIComponent(keyId)}`,
         { method: "PATCH", body: JSON.stringify(body) },
       ),
-    onSuccess: () => invalidateOrgProviderKeys(queryClient),
+    onSuccess: () =>
+      // A rotated credential or a renamed key moves no offered row and nothing
+      // the catalog lists.
+      invalidateOrgProviderKeys(queryClient),
   })
 }
 
@@ -532,7 +556,9 @@ export function useArchiveOrgProviderKey() {
         `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/archive`,
         { method: "POST" },
       ),
-    onSuccess: () => invalidateOrgProviderKeys(queryClient),
+    onSuccess: () =>
+      // Archiving withdraws what the key served without touching its rows.
+      invalidateOrgProviderKeys(queryClient, { catalog: true }),
   })
 }
 
@@ -544,7 +570,9 @@ export function useRestoreOrgProviderKey() {
         `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/restore`,
         { method: "POST" },
       ),
-    onSuccess: () => invalidateOrgProviderKeys(queryClient),
+    onSuccess: () =>
+      // Restoring serves them again.
+      invalidateOrgProviderKeys(queryClient, { catalog: true }),
   })
 }
 
@@ -556,7 +584,9 @@ export function useSetOrgProviderKeyDefault() {
         `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/default`,
         { method: "POST" },
       ),
-    onSuccess: () => invalidateOrgProviderKeys(queryClient),
+    onSuccess: () =>
+      // Which key dispatches, not which models exist.
+      invalidateOrgProviderKeys(queryClient),
   })
 }
 
@@ -569,7 +599,12 @@ export function useDeleteOrgProviderKey() {
         `/organizations/me/provider-keys/${encodeURIComponent(keyId)}`,
         { method: "DELETE" },
       ),
-    onSuccess: () => invalidateOrgProviderKeys(queryClient),
+    onSuccess: () =>
+      // The rows cascade away with the key.
+      invalidateOrgProviderKeys(queryClient, {
+        offeredModels: true,
+        catalog: true,
+      }),
   })
 }
 
@@ -670,7 +705,7 @@ export function useOrgProviderModels(
   return useQuery({
     queryKey: [ORGANIZATION_PROVIDER_MODELS, keyId, page, pageSize],
     queryFn: () =>
-      apiFetch<{ data: OrgProviderModel[]; count: number }>(
+      apiFetch<OrgProviderModels>(
         `/organizations/me/provider-keys/${encodeURIComponent(keyId)}/models?skip=${page * pageSize}&limit=${pageSize}`,
       ),
     staleTime: 60_000,

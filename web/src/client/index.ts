@@ -356,6 +356,7 @@ export type UpdateOrgProviderKeyRequest = Schemas["OrgProviderKeyUpdateRequest"]
 // different provenance for the same number. A refresh reports its own failure in
 // the body rather than throwing, which is why `error` is on the result type.
 export type OrgProviderModel = Schemas["OrgProviderKeyModelPublic"]
+export type OrgProviderModels = Schemas["OrgProviderKeyModelsPublic"]
 export type OfferOrgProviderModelRequest =
   Schemas["OrgProviderKeyModelCreateRequest"]
 export type UpdateOrgProviderModelRequest =

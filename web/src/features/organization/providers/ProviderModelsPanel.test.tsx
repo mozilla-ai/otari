@@ -299,9 +299,8 @@ describe("ProviderModelsPanel", () => {
   })
 
   it("clears a rate the organization set, and offers that only where there is one", async () => {
-    // The action `RateOverridesCard` used to carry. Without it an admin could
-    // set a rate and never go back to the default, which is the state a seeded
-    // row is in and the one a refresh keeps current.
+    // Without it an admin could set a rate and never go back to the default,
+    // which is the state a seeded row is in and the one a refresh keeps current.
     const requests = mockApi({
       models: [
         orgProviderModel({

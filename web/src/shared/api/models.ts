@@ -15,26 +15,26 @@ import {
   NO_RETRY,
 } from "@/shared/api/queryKeys"
 
+/**
+ * The window `useCatalog` asks for: the endpoint's maximum, not its default 100.
+ *
+ * The catalog list filters, sorts, counts providers and builds its filter rail
+ * from what one request returns, so a window makes every one of those describe
+ * the window rather than the catalog. One BYO provider key can offer over a
+ * hundred models by itself, which is what put real deployments past the default.
+ *
+ * Still a window. `count` is the number of matches before it, and the page says
+ * so when the two differ. otari#1465 tracks moving the filtering to the server,
+ * which is the answer a bigger number is not.
+ */
+export const CATALOG_LIST_LIMIT = 1000
+
 // The catalog folded by model, priced for the caller. Any session may read it,
 // like `/v1/models`; the detail is keyed under the list so a pricing write that
 // invalidates CATALOG takes every open detail with it.
 // Keyed beside the model id so a detail read and a list read never share a
 // cache entry (a model whose id is `list` included), while both still fall
 // under the CATALOG prefix invalidations use.
-/**
- * The whole catalog, for a page that filters and facets it in the browser.
- *
- * The limit is the endpoint's maximum rather than its default of 100, because
- * the catalog list filters, sorts, counts providers and builds its filter rail
- * from what this returns: a window would quietly make every one of those
- * describe the window instead of the catalog. One BYO provider key can offer
- * over a hundred models on its own, so the default truncated real deployments.
- *
- * `count` is the number of matches before the window, so a reader still learns
- * when even the maximum was not enough.
- */
-export const CATALOG_LIST_LIMIT = 1000
-
 export function useCatalog() {
   return useQuery({
     ...NO_RETRY,

@@ -1,4 +1,3 @@
-import { Button } from "@heroui/react"
 import { useState } from "react"
 import {
   FiEdit2,
@@ -9,6 +8,7 @@ import {
 } from "react-icons/fi"
 
 import type { OrgProviderKey, OrgProviderModel } from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { ConfirmRowAction } from "@/design-system/actions/ConfirmRowAction"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
@@ -54,9 +54,14 @@ import { refreshOutcome } from "./refreshOutcome"
 // disabled rather than absent where that reads better, and so this is testable
 // on its own.
 
-/** A rate cell. An absent rate is a dash, never a zero, which is a real price. */
-function rate(value: number | null | undefined) {
-  return value === null || value === undefined ? (
+/**
+ * A rate cell. An absent rate is a dash, never a zero, which is a real price.
+ *
+ * One spelling for absent: the wire has the field optional *and* nullable, and
+ * the call sites collapse that to `null` on the way in.
+ */
+function rate(value: number | null) {
+  return value === null ? (
     <span className="text-subtle">—</span>
   ) : (
     <span className="text-mono-caption tabular-nums">{formatRate(value)}</span>
@@ -132,25 +137,25 @@ export function ProviderModelsPanel({
       id: "input",
       header: "Input / 1M",
       align: "end",
-      cell: (row) => rate(row.input_price_per_million),
+      cell: (row) => rate(row.input_price_per_million ?? null),
     },
     {
       id: "output",
       header: "Output / 1M",
       align: "end",
-      cell: (row) => rate(row.output_price_per_million),
+      cell: (row) => rate(row.output_price_per_million ?? null),
     },
     {
       id: "cache_read",
       header: "Cache read",
       align: "end",
-      cell: (row) => rate(row.cache_read_price_per_million),
+      cell: (row) => rate(row.cache_read_price_per_million ?? null),
     },
     {
       id: "cache_write",
       header: "Cache write",
       align: "end",
-      cell: (row) => rate(row.cache_write_price_per_million),
+      cell: (row) => rate(row.cache_write_price_per_million ?? null),
     },
     {
       id: "source",

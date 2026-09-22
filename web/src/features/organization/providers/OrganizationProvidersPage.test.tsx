@@ -6,13 +6,21 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
   OrganizationContext,
+  OrganizationPricingOverride,
   OrgProviderKey,
   OrgProviderModel,
 } from "@/client"
 import { OrganizationProvidersPage } from "@/features/organization/providers/OrganizationProvidersPage"
 import { API_ROOT } from "@/shared/api/client"
-import { organizationContext, orgProviderKey } from "@/tests/fixtures"
+import {
+  organizationContext,
+  organizationPricingOverride,
+  orgProviderKey,
+  orgProviderModel,
+} from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+
+const KEY_ID = "66666666-6666-6666-6666-666666666666"
 
 interface Request {
   url: string
@@ -38,6 +46,8 @@ interface MockOpts {
   catalogFails?: boolean
   // The models offered on whichever key a test expands.
   models?: OrgProviderModel[]
+  // The organization's own stored rates, which the editor seeds from.
+  overrides?: OrganizationPricingOverride[]
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -86,7 +96,8 @@ function mockApi(opts: MockOpts = {}) {
     }
     // Ahead of the context catch-all, because that path is a prefix of this one.
     if (url.includes(`${API_ROOT}/organizations/me/pricing`)) {
-      return jsonResponse({ count: 0, data: [] })
+      const overrides = opts.overrides ?? []
+      return jsonResponse({ count: overrides.length, data: overrides })
     }
     return jsonResponse(opts.context ?? organizationContext())
   })
@@ -790,5 +801,46 @@ describe("OrganizationProvidersPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Tenancy is unavailable",
     )
+  })
+  it("opens the rate editor on the rate the model already has, not on a blank form", async () => {
+    // The deep link is in the URL on the first render and the rates are not, so
+    // a dialog opened before they land seeds itself from nothing and keeps that:
+    // its fields read once, at mount. An admin following "Set your rate" from a
+    // model page would then see an empty form over a rate that exists and
+    // replace it by saving.
+    mockApi({
+      keys: [orgProviderKey({ id: KEY_ID, name: "Production" })],
+      overrides: [organizationPricingOverride()],
+    })
+
+    await renderPage(
+      <OrganizationProvidersPage />,
+      "/organization/provider-keys?override=openai%3Agpt-4o",
+    )
+
+    const dialog = await screen.findByRole("dialog")
+    // eslint-disable-next-line no-console
+    expect(within(dialog).getByLabelText("Input, per 1M tokens")).toHaveValue(
+      "2.5",
+    )
+    expect(within(dialog).getByLabelText("Output, per 1M tokens")).toHaveValue(
+      "10",
+    )
+  })
+
+  it("expands the provider named by the URL", async () => {
+    mockApi({
+      keys: [orgProviderKey({ id: KEY_ID, name: "Production" })],
+      models: [orgProviderModel({ model: "gpt-4o" })],
+    })
+
+    await renderPage(
+      <OrganizationProvidersPage />,
+      `/organization/provider-keys?provider=${KEY_ID}`,
+    )
+
+    expect(
+      await screen.findByRole("grid", { name: "Models on Production" }),
+    ).toBeInTheDocument()
   })
 })

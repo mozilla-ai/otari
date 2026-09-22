@@ -1,7 +1,38 @@
 import { expect, type Page } from "@playwright/test"
 
-import { gotoRoute, login } from "../helpers"
+import { API_ROOT } from "@/shared/api/client"
+
+import { authHeaders, expectOk, gotoRoute, login } from "../helpers"
 import { captureScreenshot, test } from "./fixtures"
+
+/**
+ * Give the deployment's own organization a BYO provider key to draw.
+ *
+ * Nothing else in the suite makes one, and the two entries below are about the
+ * page that lists them, so without this they capture an empty table. Idempotent:
+ * a warm database already has the key and answers 409.
+ *
+ * The credential is deliberately not a working one. Creating a key dials the
+ * provider for its model list and tolerates a dial that fails, so the key lands
+ * either way, and the row's Models control, which is what these entries press,
+ * is drawn from the key rather than from what the dial returned.
+ */
+async function ensureOrgProviderKey(page: Page): Promise<void> {
+  const created = await page.request.post(
+    `${API_ROOT}/organizations/me/provider-keys`,
+    {
+      headers: authHeaders,
+      data: {
+        provider: "openai",
+        name: "Screenshot key",
+        api_key: "sk-not-a-real-credential",
+      },
+    },
+  )
+  if (created.status() !== 409) {
+    await expectOk(created, "create organization provider key")
+  }
+}
 
 // One entry per destination the nav registry can reach. The matrix in
 // playwright.config.ts multiplies each of these by three viewports and both
@@ -162,6 +193,7 @@ test.describe("organization rail", () => {
     // model row under the provider that serves it, rather than at a destination
     // of its own.
     await login(page)
+    await ensureOrgProviderKey(page)
     await gotoRoute(page, "/organization/provider-keys")
     await expect(
       page.getByRole("heading", { name: /^providers$/i }).first(),
@@ -174,6 +206,7 @@ test.describe("organization rail", () => {
     // capture above does not reach it. Expanded by pressing the row's own
     // control rather than by a seeded id, which is created at run time.
     await login(page)
+    await ensureOrgProviderKey(page)
     await gotoRoute(page, "/organization/provider-keys")
     const models = page.getByRole("button", { name: /^Models on / }).first()
     await expect(models).toBeVisible()

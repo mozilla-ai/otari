@@ -20,6 +20,7 @@ import type {
   OrganizationDomain,
   OrganizationGuardrail,
   OrganizationMember,
+  OrganizationPricingOverride,
   OrganizationSpendCeiling,
   OrgProviderKey,
   OrgProviderModel,
@@ -662,6 +663,34 @@ export function organizationDomain(
     proof_expires_at: null,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,
+    ...overrides,
+  }
+}
+
+/**
+ * One rate an organization has stored for a model.
+ *
+ * Open ended and in force, which is the period the rate editor opens on. A test
+ * about a retired or future rate sets `effective_to` or `effective_from`.
+ */
+export function organizationPricingOverride(
+  overrides: Partial<OrganizationPricingOverride> = {},
+): OrganizationPricingOverride {
+  return {
+    id: "99999999-9999-9999-9999-999999999999",
+    organization_id: "11111111-1111-1111-1111-111111111111",
+    model_key: "openai:gpt-4o",
+    input_price_per_million: 2.5,
+    output_price_per_million: 10,
+    cache_read_price_per_million: null,
+    cache_write_price_per_million: null,
+    cache_write_1h_price_per_million: null,
+    pricing_tiers: [],
+    unit: "tokens",
+    effective_from: "2026-01-01T00:00:00Z",
+    effective_to: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
     ...overrides,
   }
 }

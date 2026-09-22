@@ -2590,11 +2590,14 @@ main {
 }
 /* The one lane whose armed state is wider than its resting one: the archive
    confirm swaps a glyph for the word "Archive" and a Cancel beside it, and the
-   column is fixed, so the width is the armed lane's rather than the three
-   glyphs'. Sized to the words, or arming one row would reflow every column. */
+   column is fixed, so the width is the armed lane's rather than the four
+   glyphs'. Sized to the words, or arming one row would reflow every column.
+   18rem is the measured floor: with Models, Make default, Edit, Archive and
+   Cancel in the row, it is the smallest width at which arming one moves no
+   column, and 17.5rem still shifts the name and api_base lanes. */
 .otari-provider-keys-table .table__column[data-key="actions"] {
-  width: 14.375rem;
-  min-width: 14.375rem;
+  width: 18rem;
+  min-width: 18rem;
 }
 .otari-provider-keys-table .table__column[data-key="name"],
 .otari-provider-keys-table .table__cell[data-key="name"] {

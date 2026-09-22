@@ -219,11 +219,11 @@ const BASE_NAV_SECTIONS = [
  * row, and this gateway serves no such surface at all; it is in Gateway, beside
  * nothing, which is why that whole group drops here.
  *
- * The organization's own provider credentials used to be a second such row, and
- * are not any more: `organization_providers` is published by both topologies now
- * that the page behind it is where an organization's models are offered, priced
- * and switched. It sits under General beside the process-global `providers` row,
- * and the two no longer share a label; see that pair for why.
+ * The organization's own provider credentials are not such a row:
+ * `organization_providers` is published by both topologies, because the page
+ * behind it is where an organization's models are offered, priced and switched.
+ * It sits under General beside the process-global `providers` row, under a
+ * different label; see that pair for why.
  *
  * The design draws two more, Billing and Gateways, and neither is declared here
  * at all, because neither is this build's to declare: Billing is

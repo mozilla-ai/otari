@@ -37,9 +37,9 @@ export interface TablePaginationProps {
   /**
    * What this pager pages, lower case and plural ("rate overrides"), for the
    * control labels. Two pagers on one page otherwise expose the same four
-   * accessible names with nothing to tell them apart, which `ModelPricingPage`
-   * does (the price table and the overrides card). Omitted where a page has
-   * only one, so the labels stay the shorter ones.
+   * accessible names with nothing to tell them apart. Omitted where a page has
+   * only one, so the labels stay the shorter ones, which is every page in the
+   * dashboard today: the `Labeled` story is what exercises it.
    */
   label?: string
 }
