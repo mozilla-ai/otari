@@ -365,7 +365,7 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
     )
 
 
-def _override_as_model_pricing(override: OrganizationModelPricing) -> ModelPricing:
+def override_as_model_pricing(override: OrganizationModelPricing) -> ModelPricing:
     """Present an organization's override as a transient ``ModelPricing``.
 
     The same trick :func:`default_model_pricing` uses for a genai-prices match,
@@ -445,7 +445,7 @@ async def _find_organization_override(
         .limit(1)
     )
     override = (await db.execute(stmt)).scalar_one_or_none()
-    return _override_as_model_pricing(override) if override is not None else None
+    return override_as_model_pricing(override) if override is not None else None
 
 
 class OverridePeriod(NamedTuple):
@@ -493,7 +493,7 @@ async def load_organization_override_index(
             effective_to = normalize_effective_at(row.effective_to) if row.effective_to is not None else None
             index.setdefault(row.model_key, []).append(
                 OverridePeriod(
-                    normalize_effective_at(row.effective_from), effective_to, _override_as_model_pricing(row)
+                    normalize_effective_at(row.effective_from), effective_to, override_as_model_pricing(row)
                 )
             )
     for periods in index.values():
@@ -988,7 +988,7 @@ async def _tool_rates(
             )
         )
         for override in (await db.execute(override_stmt)).scalars():
-            found[keys[override.model_key]] = _override_as_model_pricing(override)
+            found[keys[override.model_key]] = override_as_model_pricing(override)
 
     return found
 

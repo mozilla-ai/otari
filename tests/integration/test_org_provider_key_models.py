@@ -35,7 +35,6 @@ from gateway.models.provider_keys import (
     OrgProviderKeyModel,
 )
 from gateway.models.tenancy import Organization, User, Workspace
-from gateway.repositories.pricing import OrganizationModelPricingRepository
 from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -114,10 +113,11 @@ def _service(db: AsyncSession) -> OrgProviderModelService:
     config = GatewayConfig()
     return OrgProviderModelService(
         uow,
+        config=config,
         organizations=OrganizationService(db, membership_listener=None),
+        provider_keys=OrgProviderKeyService(db),
         org_pricing=OrganizationPricingService(db, config, model_provider=None),
         models=OrgProviderKeyModelRepository(uow),
-        pricing=OrganizationModelPricingRepository(uow),
         keys=OrgProviderKeyRepository(db),
         refresh_overlay=lambda: refresh_org_provider_cache(db),
     )
@@ -153,7 +153,7 @@ def _defaults(monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]]
             unit="tokens",
         )
 
-    monkeypatch.setattr("gateway.services.providers._org_provider_model_service.default_model_pricing", _stub)
+    monkeypatch.setattr("gateway.services.organization_pricing_service.default_model_pricing", _stub)
 
 
 async def _key(db: AsyncSession, owner: User, *, provider: str = "openai", name: str = "primary") -> uuid.UUID:
@@ -191,6 +191,44 @@ async def _deployment_rate_count(db: AsyncSession) -> int:
 # --------------------------------------------------------------------------- #
 
 
+async def test_adding_a_provider_offers_its_models_in_one_call(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _discovery(monkeypatch, "gpt-4o")
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+
+    key = await _service(async_db).add_provider_key(
+        user=owner, request=OrgProviderKeyCreateRequest(provider="openai", name="primary", api_key="sk-live-1234")
+    )
+
+    assert await _offered(async_db, key.id) == {"gpt-4o": True}
+
+
+async def test_a_key_survives_the_offer_that_follows_it_failing(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The create commits first, so an error after it would report a failure for
+    something already durable, and send the admin into a retry that collides with
+    the key they just made. The key comes back with nothing offered instead, which
+    is the state the Refresh models button is for."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+
+    async def _explode(**_: object) -> None:
+        raise RuntimeError("the dial blew up in a way nothing anticipated")
+
+    monkeypatch.setattr(OrgProviderModelService, "refresh_models", _explode)
+
+    key = await _service(async_db).add_provider_key(
+        user=owner, request=OrgProviderKeyCreateRequest(provider="openai", name="primary", api_key="sk-live-1234")
+    )
+
+    assert key.name == "primary"
+    assert await _offered(async_db, key.id) == {}
+
+
 async def test_a_refresh_offers_what_the_provider_lists_and_seeds_its_rates(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -200,7 +238,7 @@ async def test_a_refresh_offers_what_the_provider_lists_and_seeds_its_rates(
     _discovery(monkeypatch, "gpt-4o", "gpt-4o-mini")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10"), "gpt-4o-mini": ("0.15", "0.6")})
 
-    result = await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    result = await _service(async_db).refresh_models(user=owner, key_id=key_id)
 
     assert result.added == ["gpt-4o", "gpt-4o-mini"]
     assert result.count == 2
@@ -229,7 +267,7 @@ async def test_seeding_never_writes_to_the_deployment_price_list(
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
     before = await _deployment_rate_count(async_db)
 
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
 
     assert await _deployment_rate_count(async_db) == before
 
@@ -245,7 +283,7 @@ async def test_a_model_nothing_prices_is_offered_but_not_served(
     _discovery(monkeypatch, "gpt-4o", "gpt-6-unreleased")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
 
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
 
     assert await _offered(async_db, key_id) == {"gpt-4o": True, "gpt-6-unreleased": False}
 
@@ -260,7 +298,7 @@ async def test_a_provider_that_will_not_say_offers_nothing_and_says_why(
     key_id = await _key(async_db, owner)
     _discovery(monkeypatch, error="the upstream refused the credential")
 
-    result = await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    result = await _service(async_db).refresh_models(user=owner, key_id=key_id)
 
     assert result.error == "the upstream refused the credential"
     assert result.added == []
@@ -277,10 +315,10 @@ async def test_a_refresh_never_unlists_a_model_the_provider_dropped(
     key_id = await _key(async_db, owner)
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10"), "gpt-4o-mini": ("0.15", "0.6")})
     _discovery(monkeypatch, "gpt-4o", "gpt-4o-mini")
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
 
     _discovery(monkeypatch, "gpt-4o")
-    result = await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    result = await _service(async_db).refresh_models(user=owner, key_id=key_id)
 
     assert result.added == []
     assert set(await _offered(async_db, key_id)) == {"gpt-4o", "gpt-4o-mini"}
@@ -351,7 +389,7 @@ async def test_a_rate_the_admin_set_stops_following_the_community_default(
     key_id = await _key(async_db, owner)
     _discovery(monkeypatch, "gpt-4o")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
 
     # The dataset moves, and the seeded rate follows it.
     _defaults(monkeypatch, {"gpt-4o": ("3.0", "12")})
@@ -389,7 +427,7 @@ async def test_replacing_a_rate_through_the_pricing_api_stops_a_refresh_moving_i
     key_id = await _key(async_db, owner)
     _discovery(monkeypatch, "gpt-4o")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
     [seeded] = await _organization_rates(async_db)
 
     await OrganizationPricingService(async_db, GatewayConfig(), model_provider=None).replace_for_caller(
@@ -426,7 +464,7 @@ async def test_a_default_that_left_the_dataset_leaves_the_stored_rate_alone(
     key_id = await _key(async_db, owner)
     _discovery(monkeypatch, "gpt-4o")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
 
     _defaults(monkeypatch, {})
     result = await _service(async_db).refresh_pricing(user=owner, key_id=key_id)
@@ -446,7 +484,7 @@ async def test_refreshing_pricing_serves_a_model_the_dataset_has_caught_up_with(
     key_id = await _key(async_db, owner)
     _discovery(monkeypatch, "gpt-6-unreleased")
     _defaults(monkeypatch, {})
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
     assert await _offered(async_db, key_id) == {"gpt-6-unreleased": False}
 
     _defaults(monkeypatch, {"gpt-6-unreleased": ("4.0", "16")})
@@ -466,7 +504,7 @@ async def test_an_unchanged_default_is_not_repriced(
     key_id = await _key(async_db, owner)
     _discovery(monkeypatch, "gpt-4o")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
 
     result = await _service(async_db).refresh_pricing(user=owner, key_id=key_id)
 
@@ -495,7 +533,7 @@ async def test_a_deployment_priced_model_is_offered_without_a_seeded_rate(
     _discovery(monkeypatch, "gpt-4o")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
 
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
 
     assert await _organization_rates(async_db) == []
     assert await _offered(async_db, key_id) == {"gpt-4o": True}
@@ -520,7 +558,7 @@ async def test_the_switch_reaches_dispatch_through_the_overlay_cache(
     await OrgProviderKeyService(async_db).set_org_default_for_user(user=owner, key_id=key_id)
     _discovery(monkeypatch, "gpt-4o", "gpt-4o-mini")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10"), "gpt-4o-mini": ("0.15", "0.6")})
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
 
     await refresh_org_provider_cache(async_db)
     assert cached_org_model_restriction(workspace.id, "openai") == ["gpt-4o", "gpt-4o-mini"]
@@ -545,7 +583,7 @@ async def test_switching_every_model_off_serves_none_rather_than_all(
     await OrgProviderKeyService(async_db).set_org_default_for_user(user=owner, key_id=key_id)
     _discovery(monkeypatch, "gpt-4o")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
     listed = await _service(async_db).list_models(user=owner, key_id=key_id)
 
     await _service(async_db).set_model_enabled(
@@ -577,7 +615,7 @@ async def test_removing_a_model_keeps_its_rate(async_db: AsyncSession, monkeypat
     key_id = await _key(async_db, owner)
     _discovery(monkeypatch, "gpt-4o", "gpt-4o-mini")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10"), "gpt-4o-mini": ("0.15", "0.6")})
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
     listed = await _service(async_db).list_models(user=owner, key_id=key_id)
     removed = next(row for row in listed.data if row.model == "gpt-4o")
 
@@ -607,7 +645,7 @@ async def test_removing_the_last_model_is_refused_because_it_would_widen_the_key
     await OrgProviderKeyService(async_db).set_org_default_for_user(user=owner, key_id=key_id)
     _discovery(monkeypatch, "gpt-4o")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
     listed = await _service(async_db).list_models(user=owner, key_id=key_id)
 
     with pytest.raises(OrgProviderLastModelError):
@@ -628,7 +666,7 @@ async def test_serving_a_model_nothing_prices_is_refused(
     key_id = await _key(async_db, owner)
     _discovery(monkeypatch, "gpt-6-unreleased")
     _defaults(monkeypatch, {})
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
     listed = await _service(async_db).list_models(user=owner, key_id=key_id)
     assert listed.data[0].enabled is False
 
@@ -650,7 +688,7 @@ async def test_switching_a_model_off_is_never_refused(
     key_id = await _key(async_db, owner)
     _discovery(monkeypatch, "gpt-4o", "gpt-4o-mini")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10"), "gpt-4o-mini": ("0.15", "0.6")})
-    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
     listed = await _service(async_db).list_models(user=owner, key_id=key_id)
     # The rate goes away underneath it, which is the state the guard refuses to
     # enter and must not refuse to leave.
@@ -701,7 +739,7 @@ async def test_a_model_from_another_key_is_not_found(async_db: AsyncSession, mon
     second = await _key(async_db, owner, provider="anthropic", name="second")
     _discovery(monkeypatch, "gpt-4o")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
-    await _service(async_db).refresh_models(user=owner, key_id=first, timeout=1.0)
+    await _service(async_db).refresh_models(user=owner, key_id=first)
     listed = await _service(async_db).list_models(user=owner, key_id=first)
 
     with pytest.raises(OrgProviderModelNotFoundError):
@@ -719,9 +757,9 @@ async def test_no_response_carries_key_material(async_db: AsyncSession, monkeypa
     _discovery(monkeypatch, "gpt-4o")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
 
-    refreshed = await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    refreshed = await _service(async_db).refresh_models(user=owner, key_id=key_id)
     listed = await _service(async_db).list_models(user=owner, key_id=key_id)
-    available = await _service(async_db).available_models(user=owner, key_id=key_id, timeout=1.0)
+    available = await _service(async_db).available_models(user=owner, key_id=key_id)
 
     for payload in (refreshed, listed, available):
         assert "sk-live-1234" not in payload.model_dump_json()

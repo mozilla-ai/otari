@@ -15,6 +15,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -35,8 +36,9 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
     which owns the overlap rule that decides whether a period may exist at all.
     """
 
-    def __init__(self, uow: UnitOfWork):
-        super().__init__(uow, OrganizationModelPricing)
+    def __init__(self, db: AsyncSession | UnitOfWork):
+        """Bind to a unit of work, or to a session for a service still in the older shape."""
+        super().__init__(db, OrganizationModelPricing)
 
     async def applicable_rows(
         self,

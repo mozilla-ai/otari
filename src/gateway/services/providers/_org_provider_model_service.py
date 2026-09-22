@@ -36,13 +36,13 @@ No transaction is open across an upstream dial or across the thread hop that
 resolves community defaults, both of which can take the whole discovery timeout.
 """
 
-import asyncio
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from gateway.core.config import GatewayConfig
 from gateway.core.metered_pricing import quantize_rate
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import (
@@ -52,6 +52,7 @@ from gateway.exceptions.providers_exceptions import (
     OrgProviderModelNotFoundError,
     OrgProviderModelUnpricedError,
 )
+from gateway.log_config import logger
 from gateway.models.money import as_float, to_usd, to_usd_or_none
 from gateway.models.pricing import SEED_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
 from gateway.models.provider_keys import (
@@ -59,20 +60,22 @@ from gateway.models.provider_keys import (
     OrgProviderKeyModel,
 )
 from gateway.models.tenancy import User
-from gateway.repositories.pricing import OrganizationModelPricingRepository
 from gateway.repositories.providers import OfferedModelConflict, OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import OrgProviderKeyRepository
 from gateway.schemas.providers import (
     OrgProviderAvailableModelsPublic,
+    OrgProviderKeyCreateRequest,
     OrgProviderKeyModelPublic,
     OrgProviderKeyModelsPublic,
+    OrgProviderKeyPublic,
     OrgProviderModelsRefreshPublic,
 )
 from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
-from gateway.services.organization_pricing_service import OrganizationPricingService
+from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
 from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
 from gateway.services.tenancy.errors import OrgProviderKeyNotFoundError
+from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
 
 # What a client is told about where a rate came from. The spellings are
@@ -128,27 +131,44 @@ def _same_rates(stored: OrganizationModelPricing, default: ModelPricing) -> bool
     return list(stored.pricing_tiers or []) == list(default.pricing_tiers or [])
 
 
-def _price_from_organization_row(row: OrganizationModelPricing) -> _Price:
-    """Report a stored organization rate, saying whether it is still the seeded one."""
-    return _Price(
-        source=PRICE_SOURCE_DEFAULT if row.origin == SEED_ORIGIN else PRICE_SOURCE_ORGANIZATION,
-        input_price_per_million=float(row.input_price_per_million),
-        output_price_per_million=float(row.output_price_per_million),
-        cache_read_price_per_million=as_float(row.cache_read_price_per_million),
-        cache_write_price_per_million=as_float(row.cache_write_price_per_million),
-        cache_write_1h_price_per_million=as_float(row.cache_write_1h_price_per_million),
-        pricing_id=row.id,
-    )
+
+def _priced_by_deployment(rate: EffectiveRate | None) -> bool:
+    """Whether the deployment's own price list answers, which nothing here may reprice."""
+    return rate is not None and rate.source == "deployment"
 
 
-def _price_from_deployment_row(row: ModelPricing) -> _Price:
+def _repriceable(rate: EffectiveRate | None) -> bool:
+    """Whether a refresh may move what this key currently pays.
+
+    Two rungs are off limits. The deployment's list is not the organization's to
+    re-price, and a rate an admin chose stops following the dataset the moment
+    they choose it. What is left is a rate this surface seeded, and a model no
+    table prices yet, whose rate a refresh is precisely the button for.
+    """
+    if _priced_by_deployment(rate):
+        return False
+    if rate is not None and rate.row is not None:
+        return rate.row.origin == SEED_ORIGIN
+    return True
+
+
+def _price_from(rate: EffectiveRate) -> _Price:
+    """Name one rung for a reader.
+
+    The organization rung splits in two here and nowhere else: a row this
+    surface seeded is still a community default to the person looking at it,
+    and only a rate somebody chose reads as the organization's own.
+    """
+    seeded = rate.row is not None and rate.row.origin == SEED_ORIGIN
+    source = PRICE_SOURCE_DEFAULT if seeded else rate.source
     return _Price(
-        source=PRICE_SOURCE_DEPLOYMENT,
-        input_price_per_million=float(row.input_price_per_million),
-        output_price_per_million=float(row.output_price_per_million),
-        cache_read_price_per_million=as_float(row.cache_read_price_per_million),
-        cache_write_price_per_million=as_float(row.cache_write_price_per_million),
-        cache_write_1h_price_per_million=as_float(row.cache_write_1h_price_per_million),
+        source=source,
+        input_price_per_million=float(rate.rates.input_price_per_million),
+        output_price_per_million=float(rate.rates.output_price_per_million),
+        cache_read_price_per_million=as_float(rate.rates.cache_read_price_per_million),
+        cache_write_price_per_million=as_float(rate.rates.cache_write_price_per_million),
+        cache_write_1h_price_per_million=as_float(rate.rates.cache_write_1h_price_per_million),
+        pricing_id=rate.row.id if rate.row is not None else None,
     )
 
 
@@ -222,24 +242,34 @@ class OrgProviderModelService:
         self,
         uow: UnitOfWork,
         *,
+        config: GatewayConfig,
         organizations: OrganizationService,
+        provider_keys: OrgProviderKeyService,
         org_pricing: OrganizationPricingService,
         models: OrgProviderKeyModelRepository,
-        pricing: OrganizationModelPricingRepository,
         keys: OrgProviderKeyRepository,
         refresh_overlay: Callable[[], Awaitable[None]],
     ) -> None:
         """Bind the unit of work and the collaborators this service composes.
+
+        The discovery timeout comes from the config held here rather than from
+        each call, because it is a property of the deployment and not of the
+        request.
+
+        Only this domain's own repository is injected. Rates are read and
+        written through ``org_pricing``, which owns the order of the ladder and
+        the rules about which rates may exist at all.
 
         ``refresh_overlay`` reloads the dispatch-path credential and allow-list
         cache. Injected as a callable because that function takes the session,
         which a service may not name.
         """
         self.uow = uow
+        self.config = config
         self.organizations = organizations
+        self.provider_keys = provider_keys
         self.org_pricing = org_pricing
         self.models = models
-        self.pricing = pricing
         self.keys = keys
         self.refresh_overlay = refresh_overlay
 
@@ -285,7 +315,7 @@ class OrgProviderModelService:
         )
 
     async def available_models(
-        self, *, user: User, key_id: uuid.UUID, timeout: float
+        self, *, user: User, key_id: uuid.UUID
     ) -> OrgProviderAvailableModelsPublic:
         """What the provider says it serves on this key's stored credential.
 
@@ -300,7 +330,7 @@ class OrgProviderModelService:
             credential = self._credential(key)
         if credential is None:
             return OrgProviderAvailableModelsPublic(provider=provider, models=[], error=_UNDECRYPTABLE)
-        discovery = await self._dial(key, credential, timeout=timeout)
+        discovery = await self._dial(key, credential, timeout=self.config.model_discovery_timeout_seconds)
         return OrgProviderAvailableModelsPublic(
             provider=provider,
             models=sorted(model.id for model in discovery.models),
@@ -424,21 +454,31 @@ class OrgProviderModelService:
             await self.models.delete_row(row)
         await self.refresh_overlay()
 
-    async def offer_discovered_models(
-        self, *, user: User, key_id: uuid.UUID, timeout: float
-    ) -> OrgProviderModelsRefreshPublic:
-        """Offer everything the provider lists on a key, for a key that offers nothing yet.
+    async def add_provider_key(self, *, user: User, request: OrgProviderKeyCreateRequest) -> OrgProviderKeyPublic:
+        """Create a provider key and offer everything the credential reaches.
 
-        What a freshly created key runs, so it starts with its real catalog
-        rather than an empty list an admin retypes by hand. A provider that will
-        not say (no listing endpoint, unreachable, credential refused) yields no
-        models and a body saying why, never a failed create: the credential may
-        still be right for dispatch.
+        One use case, so one method: a key starts with its real catalog rather
+        than an empty list an admin retypes by hand.
+
+        The two steps are separate transactions on purpose. The create commits
+        first, so the dial that follows is not held inside its transaction, and
+        so the credential is usable the moment it exists. That ordering is also
+        why the offer may not fail the call: the key is already durable, and an
+        error returned after it would send the admin into a retry that collides
+        with the key they just made. A provider that will not say (no listing
+        endpoint, unreachable, credential refused) is already answered rather
+        than raised, and anything else is logged against the key and leaves an
+        empty list the Refresh models button fills.
         """
-        return await self.refresh_models(user=user, key_id=key_id, timeout=timeout)
+        key = await self.provider_keys.create_key_for_user(user=user, request=request)
+        try:
+            await self.refresh_models(user=user, key_id=key.id)
+        except Exception:
+            logger.exception("Offering the discovered models failed for new provider key %s", key.id)
+        return key
 
     async def refresh_models(
-        self, *, user: User, key_id: uuid.UUID, timeout: float
+        self, *, user: User, key_id: uuid.UUID
     ) -> OrgProviderModelsRefreshPublic:
         """Ask the provider again, offer whatever is newly listed, and move seeded rates.
 
@@ -458,7 +498,7 @@ class OrgProviderModelService:
         if credential is None:
             return OrgProviderModelsRefreshPublic(added=[], repriced=[], count=len(offered), error=_UNDECRYPTABLE)
 
-        discovery = await self._dial(key, credential, timeout=timeout)
+        discovery = await self._dial(key, credential, timeout=self.config.model_discovery_timeout_seconds)
         if discovery.error is not None or discovery.discovery_unsupported:
             return OrgProviderModelsRefreshPublic(
                 added=[],
@@ -508,20 +548,18 @@ class OrgProviderModelService:
             offered_rows = list(await self.models.list_all_for_key(key_id))
             now = normalize_effective_at(None)
             keys_by_model = {row.model: f"{provider}:{row.model}" for row in offered_rows}
-            stored = await self.pricing.applicable_rows(organization_id, keys_by_model.values(), now)
-            deployment = await self.pricing.deployment_rows(keys_by_model.values(), now)
+            priced = await self.org_pricing.rates_in_effect(organization_id, keys_by_model.values(), now)
 
-        # Every offered model whose rate this surface still owns, plus every
-        # offered model nothing prices at all: a model that arrived disabled
-        # because the dataset had not caught up is exactly what this pass is for.
-        candidates: list[str] = []
-        for row in offered_rows:
-            existing = stored.get(keys_by_model[row.model])
-            if existing is not None:
-                if existing.origin == SEED_ORIGIN:
-                    candidates.append(row.model)
-            elif keys_by_model[row.model] not in deployment:
-                candidates.append(row.model)
+        # Everything this surface may still move: a rate it seeded itself, and a
+        # model no table prices at all, which is the model that arrived disabled
+        # because the dataset had not caught up and is what this pass is for. The
+        # two it may not touch are the deployment's own list and a rate an admin
+        # chose.
+        candidates = [
+            row.model
+            for row in offered_rows
+            if _repriceable(priced.get(keys_by_model[row.model]))
+        ]
         defaults = await self._defaults_for(provider, [*candidates, *added])
 
         async with self.uow:
@@ -532,8 +570,7 @@ class OrgProviderModelService:
             now = normalize_effective_at(None)
             offered_rows = list(await self.models.list_all_for_key(key_id))
             keys_by_model = {row.model: f"{provider}:{row.model}" for row in offered_rows}
-            stored = await self.pricing.applicable_rows(organization_id, keys_by_model.values(), now)
-            deployment = await self.pricing.deployment_rows(keys_by_model.values(), now)
+            priced = await self.org_pricing.rates_in_effect(organization_id, keys_by_model.values(), now)
             allowed = await self._seedable(user, organization_id, provider, candidates)
 
             repriced: list[str] = []
@@ -541,7 +578,8 @@ class OrgProviderModelService:
             for row in offered_rows:
                 model_key = keys_by_model[row.model]
                 default = defaults.get(row.model)
-                existing = stored.get(model_key)
+                rate = priced.get(model_key)
+                existing = rate.row if rate is not None else None
                 if existing is not None:
                     if existing.origin != SEED_ORIGIN or default is None or _same_rates(existing, default):
                         # An admin owns this rate now, the dataset dropped the
@@ -551,7 +589,7 @@ class OrgProviderModelService:
                     _apply_default(existing, default)
                     repriced.append(row.model)
                     continue
-                if default is None or model_key in deployment or row.model not in allowed:
+                if default is None or _priced_by_deployment(rate) or row.model not in allowed:
                     continue
                 fresh.append(_seeded_row(organization_id, model_key, default, now))
                 if not row.enabled:
@@ -560,8 +598,7 @@ class OrgProviderModelService:
                     row.enabled = True
                     await self.models.save(row)
                 repriced.append(row.model)
-            self.pricing.add_all(fresh)
-            await self.pricing.flush()
+            await self.org_pricing.stage_seeded_rates(fresh)
 
             if added:
                 await self._offer(
@@ -594,19 +631,21 @@ class OrgProviderModelService:
             return []
         now = normalize_effective_at(None)
         keys_by_model = {model: f"{provider}:{model}" for model in models}
-        stored = await self.pricing.applicable_rows(organization_id, keys_by_model.values(), now)
-        deployment = await self.pricing.deployment_rows(keys_by_model.values(), now)
+        priced = await self.org_pricing.rates_in_effect(organization_id, keys_by_model.values(), now)
+        # A key a *table* prices is already answered; one only the dataset
+        # answers is what this pass stores, so the two are not the same set.
+        priced_by_a_table = {k for k, rate in priced.items() if rate.source != "defaults"}
         allowed = await self._seedable(user, organization_id, provider, models)
 
         seeded: dict[str, OrganizationModelPricing] = {}
         for model, model_key in keys_by_model.items():
-            if model_key in stored or model_key in deployment or model not in allowed:
+            if model_key in priced_by_a_table or model not in allowed:
                 continue
             default = defaults.get(model)
             if default is None:
                 continue
             seeded[model] = _seeded_row(organization_id, model_key, default, now)
-        self.pricing.add_all(list(seeded.values()))
+        await self.org_pricing.stage_seeded_rates(list(seeded.values()))
 
         rows = [
             OrgProviderKeyModel(
@@ -616,7 +655,7 @@ class OrgProviderModelService:
                 # Offered and not served when nothing prices it, so a model the
                 # community data has not caught up with cannot be billed at
                 # nothing.
-                enabled=keys_by_model[model] in stored or keys_by_model[model] in deployment or model in seeded,
+                enabled=keys_by_model[model] in priced_by_a_table or model in seeded,
             )
             for model in models
         ]
@@ -658,53 +697,36 @@ class OrgProviderModelService:
     ) -> dict[str, _Price]:
         """What each offered model currently costs this organization, keyed by model.
 
-        The same ladder ``pricing_service.find_model_pricing`` walks, in its
-        order: the organization's own row, then the deployment price list, then
-        the community dataset. A stored row this surface seeded reports as a
-        default, because that is what it is.
+        The ladder's order belongs to `OrganizationPricingService.rates_in_effect`,
+        which is what settlement walks. What is decided here is only how a rung
+        is *named* to a reader: a row this surface seeded reports as a default,
+        because that is what it is.
         """
         if not rows:
             return {}
         now = normalize_effective_at(None)
         keys_by_model = {row.model: f"{key.provider}:{row.model}" for row in rows}
-        stored = await self.pricing.applicable_rows(key.organization_id, keys_by_model.values(), now)
-        deployment = await self.pricing.deployment_rows(keys_by_model.values(), now)
+        effective = await self.org_pricing.rates_in_effect(key.organization_id, keys_by_model.values(), now)
+        return {
+            model: _price_from(rate)
+            for model, model_key in keys_by_model.items()
+            if (rate := effective.get(model_key)) is not None
+        }
 
-        prices: dict[str, _Price] = {}
-        unpriced: list[str] = []
-        for model, model_key in keys_by_model.items():
-            if (organization_row := stored.get(model_key)) is not None:
-                prices[model] = _price_from_organization_row(organization_row)
-            elif (deployment_row := deployment.get(model_key)) is not None:
-                prices[model] = _price_from_deployment_row(deployment_row)
-            else:
-                unpriced.append(model)
+    async def _defaults_for(self, provider: str, models: Sequence[str]) -> dict[str, ModelPricing]:
+        """Today's community rate for each model, keyed by the bare model name.
 
-        for model, default in (await self._defaults_for(key.provider, unpriced)).items():
-            prices[model] = _Price(
-                source=PRICE_SOURCE_DEFAULT,
-                input_price_per_million=float(default.input_price_per_million),
-                output_price_per_million=float(default.output_price_per_million),
-                cache_read_price_per_million=as_float(default.cache_read_price_per_million),
-                cache_write_price_per_million=as_float(default.cache_write_price_per_million),
-                cache_write_1h_price_per_million=as_float(default.cache_write_1h_price_per_million),
-            )
-        return prices
-
-    @staticmethod
-    async def _defaults_for(provider: str, models: Sequence[str]) -> dict[str, ModelPricing]:
-        """Community default rates, resolved off the loop.
-
-        Deliberately not gated on ``default_pricing_enabled``: that switch
-        governs the silent billing-time fallback, and this is an admin
-        explicitly offering a model, which needs a rate stored to be served at
-        all on a ``require_pricing`` deployment.
+        The dataset walk and its thread hop belong to the pricing service; this
+        only re-keys the answer, because every caller here holds model names
+        while the ladder speaks in ``provider:model``.
         """
         wanted = sorted(set(models))
         if not wanted:
             return {}
-        as_of = datetime.now(tz=UTC)
-        return await asyncio.to_thread(_resolve_defaults, provider, wanted, as_of)
+        by_key = await self.org_pricing.community_defaults(
+            [f"{provider}:{model}" for model in wanted], datetime.now(tz=UTC)
+        )
+        return {model: rate for model in wanted if (rate := by_key.get(f"{provider}:{model}")) is not None}
 
     @staticmethod
     def _credential(key: OrgProviderKey) -> dict[str, object] | None:

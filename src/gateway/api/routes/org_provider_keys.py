@@ -21,12 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     CurrentIdentity,
     OrgProviderModelServiceDep,
-    get_config,
     get_db,
     verify_master_key,
 )
 from gateway.api.routes.organizations import Message
-from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.schemas.providers import (
     OrgProviderAvailableModelsPublic,
@@ -80,8 +78,6 @@ def get_org_provider_key_service(db: Annotated[AsyncSession, Depends(get_db)]) -
 OrgProviderKeyServiceDep = Annotated[OrgProviderKeyService, Depends(get_org_provider_key_service)]
 
 
-DiscoveryTimeout = Annotated[GatewayConfig, Depends(get_config)]
-
 
 # ==============================================================================
 # Organization-scoped keys
@@ -104,11 +100,9 @@ async def list_org_provider_keys(
 
 @org_router.post("", status_code=status.HTTP_201_CREATED)
 async def create_org_provider_key(
-    service: OrgProviderKeyServiceDep,
     models: OrgProviderModelServiceDep,
     current_identity: CurrentIdentity,
     body: OrgProviderKeyCreateRequest,
-    config: DiscoveryTimeout,
 ) -> OrgProviderKeyPublic:
     """Create a provider key in the caller's organization. Organization owners and admins only.
 
@@ -120,13 +114,7 @@ async def create_org_provider_key(
     name. The response is the key either way; the models are read back through
     ``GET /{key_id}/models``.
     """
-    key = await service.create_key_for_user(user=current_identity, request=body)
-    # After the create has committed, so the dial is not held inside its
-    # transaction, and tolerant of its own failure for the reason above.
-    await models.offer_discovered_models(
-        user=current_identity, key_id=key.id, timeout=config.model_discovery_timeout_seconds
-    )
-    return key
+    return await models.add_provider_key(user=current_identity, request=body)
 
 
 @org_router.patch("/{key_id}")
@@ -262,7 +250,6 @@ async def refresh_org_provider_key_models(
     service: OrgProviderModelServiceDep,
     current_identity: CurrentIdentity,
     key_id: uuid.UUID,
-    config: DiscoveryTimeout,
 ) -> OrgProviderModelsRefreshPublic:
     """Ask the provider again and offer whatever is newly listed.
 
@@ -274,7 +261,7 @@ async def refresh_org_provider_key_models(
     Organization owners and admins only.
     """
     return await service.refresh_models(
-        user=current_identity, key_id=key_id, timeout=config.model_discovery_timeout_seconds
+        user=current_identity, key_id=key_id
     )
 
 
@@ -301,7 +288,6 @@ async def list_org_provider_key_available_models(
     service: OrgProviderModelServiceDep,
     current_identity: CurrentIdentity,
     key_id: uuid.UUID,
-    config: DiscoveryTimeout,
 ) -> OrgProviderAvailableModelsPublic:
     """Ask the provider what it serves on this key's stored credential.
 
@@ -311,7 +297,7 @@ async def list_org_provider_key_available_models(
     admins only.
     """
     return await service.available_models(
-        user=current_identity, key_id=key_id, timeout=config.model_discovery_timeout_seconds
+        user=current_identity, key_id=key_id
     )
 
 

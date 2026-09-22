@@ -29,7 +29,6 @@ from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
-from gateway.repositories.pricing import OrganizationModelPricingRepository
 from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import OrgProviderKeyRepository
 from gateway.services.api_keys import ApiKeyService
@@ -46,7 +45,7 @@ from gateway.services.providers import OrgProviderModelService
 from gateway.services.routing import clear_router_backend_cache
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
-from gateway.services.tenancy.org_provider_key_service import refresh_org_provider_cache
+from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_service import WorkspaceService
 
@@ -863,10 +862,11 @@ def get_org_provider_model_service(
     """
     return OrgProviderModelService(
         uow,
+        config=config,
         organizations=OrganizationService(db, membership_listener=None),
+        provider_keys=OrgProviderKeyService(db),
         org_pricing=OrganizationPricingService(db, config, model_provider=model_provider),
         models=OrgProviderKeyModelRepository(uow),
-        pricing=OrganizationModelPricingRepository(uow),
         keys=OrgProviderKeyRepository(db),
         refresh_overlay=lambda: refresh_org_provider_cache(db),
     )
