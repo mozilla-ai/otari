@@ -13,8 +13,17 @@ import { INPUT_CLASS } from "@/design-system/forms/inputClass"
 import { Badge } from "@/design-system/indicators/Badge"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import {
+  countServedUnchecked,
+  type MandateConsequence,
+  mandateConsequence,
+} from "@/features/guardrails/buildState"
 import { DefinitionDialog } from "@/features/guardrails/DefinitionDialog"
 import { GuardrailParametersSection } from "@/features/guardrails/GuardrailParametersSection"
+import {
+  MandateConsequenceMark,
+  ServedUncheckedBanner,
+} from "@/features/guardrails/GuardrailStatus"
 import {
   findProfile,
   parameterSpecs,
@@ -67,11 +76,14 @@ const UNAVAILABLE_OPTIONS = [
 function GuardrailRow({
   guardrail,
   catalog,
+  consequence,
   workspaces,
   onSaved,
 }: {
   guardrail: OrganizationGuardrail
   catalog: GuardrailCatalog | undefined
+  /** What the entry is doing to requests when its definition is not running. */
+  consequence: MandateConsequence
   workspaces: readonly Workspace[]
   onSaved: (message: string) => void
 }) {
@@ -182,6 +194,7 @@ function GuardrailRow({
           <Badge tone="muted">credential set</Badge>
         ) : null}
         {guardrail.enabled ? null : <Badge tone="warn">Paused</Badge>}
+        <MandateConsequenceMark consequence={consequence} />
       </div>
       {/* Two widths down the entry rather than six. Each control sized to its
           own content put 101, 178, 90, 288 and 208px in one row, and the scope
@@ -432,11 +445,15 @@ export function OrganizationGuardrailsCard({
         {manages ? (
           <>
             <ErrorBanner error={guardrails.error ?? workspaces.error} />
+            <ServedUncheckedBanner
+              count={countServedUnchecked(entries, defined)}
+            />
             {entries.map((guardrail) => (
               <GuardrailRow
                 key={guardrail.id}
                 guardrail={guardrail}
                 catalog={catalog.data}
+                consequence={mandateConsequence(guardrail, defined)}
                 workspaces={known}
                 onSaved={onSaved}
               />

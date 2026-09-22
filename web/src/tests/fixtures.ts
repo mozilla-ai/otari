@@ -19,6 +19,7 @@ import type {
   OrganizationContext,
   OrganizationDomain,
   OrganizationGuardrail,
+  OrganizationGuardrailDefinition,
   OrganizationMember,
   OrganizationPricingOverride,
   OrganizationSpendCeiling,
@@ -646,6 +647,26 @@ export function organizationGuardrail(
     workspace_ids: [],
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: "2026-08-24T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+export function organizationGuardrailDefinition(
+  overrides: Partial<OrganizationGuardrailDefinition> = {},
+): OrganizationGuardrailDefinition {
+  return {
+    id: "66666666-6666-6666-6666-666666666666",
+    organization_id: "11111111-1111-1111-1111-111111111111",
+    name: "prod-lakera",
+    guardrail_name: "lakera_guard",
+    enabled: true,
+    // Built and running, with its one secret held and readable.
+    build_state: "built",
+    create_kwargs: { endpoint: "https://api.lakera.ai" },
+    create_secrets: { api_key: "***" },
+    secrets_decryptable: true,
+    created_at: "2026-09-22T00:00:00+00:00",
+    updated_at: "2026-09-22T00:00:00+00:00",
     ...overrides,
   }
 }

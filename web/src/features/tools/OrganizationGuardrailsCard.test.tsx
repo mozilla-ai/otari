@@ -6,10 +6,15 @@ import type {
   GuardrailCatalog,
   GuardrailParameterSpec,
   OrganizationGuardrail,
+  OrganizationGuardrailDefinition,
 } from "@/client"
 import { OrganizationGuardrailsCard } from "@/features/tools/OrganizationGuardrailsCard"
 import { API_ROOT } from "@/shared/api/client"
-import { organizationContext, organizationGuardrail } from "@/tests/fixtures"
+import {
+  organizationContext,
+  organizationGuardrail,
+  organizationGuardrailDefinition,
+} from "@/tests/fixtures"
 import { pickOption, selectTrigger } from "@/tests/select"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
@@ -102,11 +107,13 @@ const TWIN_CATALOG: GuardrailCatalog = {
 
 function mockApi({
   guardrails = [] as OrganizationGuardrail[],
+  definitions = [] as OrganizationGuardrailDefinition[],
   role = "owner",
   catalog = CATALOG,
   catalogGate,
 }: {
   guardrails?: OrganizationGuardrail[]
+  definitions?: OrganizationGuardrailDefinition[]
   role?: string
   catalog?: GuardrailCatalog
   /** Held open to keep the catalog read in flight while the card is asserted. */
@@ -116,10 +123,10 @@ function mockApi({
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     const method = init?.method ?? "GET"
-    // No definitions, so the mandate dialog opens on "your own service", which
-    // is the shape these tests drive.
+    // No definitions unless a test passes some, so the mandate dialog opens on
+    // "your own service", which is the shape most of these tests drive.
     if (url.includes("/organizations/me/guardrail-definitions")) {
-      return Response.json({ data: [], count: 0 })
+      return Response.json({ data: definitions, count: definitions.length })
     }
     if (url.includes(`${API_ROOT}/tool-settings/guardrails/catalog`)) {
       return Response.json({ guardrails: [] })
@@ -225,6 +232,38 @@ describe("OrganizationGuardrailsCard", () => {
     expect(
       await screen.findByRole("heading", { name: "New guardrail" }),
     ).toBeInTheDocument()
+  })
+
+  it("says what a mandate on a broken definition is doing to requests", async () => {
+    mockApi({
+      definitions: [
+        organizationGuardrailDefinition({ id: "d1", build_state: "failed" }),
+      ],
+      guardrails: [
+        organizationGuardrail({
+          id: "open",
+          profile: "fails-open",
+          definition_id: "d1",
+          mode: "monitor",
+        }),
+        organizationGuardrail({
+          id: "closed",
+          profile: "fails-closed",
+          definition_id: "d1",
+          mode: "block",
+          on_unavailable: "block",
+        }),
+      ],
+    })
+    renderCard()
+
+    expect(
+      await screen.findByText(
+        "1 mandated guardrail is not running, so the requests it covers are being served unchecked.",
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText("Requests served unchecked")).toBeInTheDocument()
+    expect(screen.getByText("Requests refused")).toBeInTheDocument()
   })
 
   it("hides the whole surface from a member who cannot manage the organization", async () => {
