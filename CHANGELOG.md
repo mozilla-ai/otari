@@ -4,6 +4,16 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.8.0](https://github.com/mozilla-ai/otari/releases/tag/v0.8.0) - 2026-09-22
+
+
+
+### Features
+
+- **BREAKING:** **catalog:** Reach a model by vendor/model and pin a provider with provider:vendor/model in [#1521](https://github.com/mozilla-ai/otari/pull/1521) by [@tbille](https://github.com/tbille) ([`fc99acc`](https://github.com/mozilla-ai/otari/commit/fc99acc34bc37adcf7f34f24dc765ffa9940caae))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.7.0...v0.8.0
 ## [0.7.0](https://github.com/mozilla-ai/otari/releases/tag/v0.7.0) - 2026-09-22
 
 
