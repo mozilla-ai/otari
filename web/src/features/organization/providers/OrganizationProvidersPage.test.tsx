@@ -807,6 +807,7 @@ describe("OrganizationProvidersPage", () => {
       "Tenancy is unavailable",
     )
   })
+
   it("opens the rate editor on the rate the model already has, not on a blank form", async () => {
     // The deep link is in the URL on the first render and the rates are not, so
     // a dialog opened before they land seeds itself from nothing and keeps that:
@@ -896,6 +897,7 @@ describe("OrganizationProvidersPage", () => {
       await screen.findByRole("grid", { name: "Models on Production" }),
     ).toBeInTheDocument()
   })
+
   it("reports a rate list that could not be read instead of opening an empty editor", async () => {
     // The editor is held shut until the rates land, so a read that never lands
     // has to say so: silence plus no dialog reads as a link that did nothing.
@@ -943,6 +945,7 @@ describe("OrganizationProvidersPage", () => {
     ).toBeInTheDocument()
     expect(screen.queryByRole("dialog")).toBeNull()
   })
+
   it("reads the models page from the URL, so an expanded panel is shareable to the row", async () => {
     // The page an expanded panel is on travels with the link, the way `provider`
     // and `override` already do. Snapped to an offered size, so a stale or

@@ -347,12 +347,11 @@ export function OrganizationProvidersPage() {
   // whole table is not that: an organization with more overrides than fit in it
   // would open a create form over a rate that already exists, and the save
   // would earn the 409 the overlap check exists to prevent.
-  const isRating = ratingModelKey !== ""
   const overrides = useOrganizationPricing(
     0,
     OVERRIDE_PAGE_SIZE,
-    canEdit && isRating,
-    isRating ? ratingModelKey : undefined,
+    canEdit && ratingModelKey !== "",
+    ratingModelKey,
   )
 
   // Bumped on each open, and the create form is keyed on it, so the draft (the

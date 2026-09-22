@@ -345,7 +345,9 @@ export function ProviderModelsPanel({
             onPageChange={onPageChange}
             onPageSizeChange={onPageSizeChange}
             isFetching={models.isFetching}
-            label={`Models on ${providerKey.name}`}
+            // Lower case and plural, which is this prop's contract: it is
+            // suffixed onto the control names, not used as a heading.
+            label={`models on ${providerKey.name}`}
           />
         </>
       )}

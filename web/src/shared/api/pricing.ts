@@ -79,6 +79,9 @@ export function useOrganizationPricing(
    * that would overlap. Without it the editor reads the first page of the whole
    * table, and an organization with more overrides than that page silently
    * starts opening a create form over a rate that already exists.
+   *
+   * Empty means no filter, so a caller holding a URL value passes it as it is
+   * rather than converting one absent spelling into another.
    */
   modelKey?: string,
 ) {
