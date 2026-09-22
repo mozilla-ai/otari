@@ -9,6 +9,7 @@ cloud implementations are fsspec's to keep working.
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -148,3 +149,10 @@ def test_build_file_store_fsspec(tmp_path: Path) -> None:
         files_backend="fsspec", files_url=f"file://{tmp_path}", files_storage_options={"auto_mkdir": True}
     )
     assert isinstance(build_file_store(cfg), FsspecFileStore)
+
+
+def test_missing_fsspec_names_the_extra_to_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "fsspec.core", None)
+
+    with pytest.raises(ImportError, match=r"uv sync --extra fsspec"):
+        FsspecFileStore("memory://otari-test")

@@ -450,7 +450,7 @@ def test_the_sdk_namespace_is_built_from_the_real_import(monkeypatch: pytest.Mon
 def test_a_missing_sdk_names_the_extra_to_install(monkeypatch: pytest.MonkeyPatch) -> None:
     # None in sys.modules is what makes an import of a present module fail.
     monkeypatch.setitem(sys.modules, "e2b", None)
-    with pytest.raises(SandboxNotReachableError, match=r"pip install otari\[e2b\]"):
+    with pytest.raises(SandboxNotReachableError, match=r"uv sync --extra e2b"):
         e2b_adapter._sdk()
 
 

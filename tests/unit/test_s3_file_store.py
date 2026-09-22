@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
 from collections.abc import AsyncIterator, Generator
 from typing import IO
@@ -204,3 +205,10 @@ async def test_put_stream_removes_orphaned_upload_when_cancelled_after_success(
 
     listing = await asyncio.to_thread(client.list_objects_v2, Bucket=_BUCKET, Prefix="or/")
     assert listing.get("KeyCount", 0) == 0
+
+
+def test_missing_boto3_names_the_extra_to_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "boto3", None)
+
+    with pytest.raises(ImportError, match=r"uv sync --extra s3"):
+        S3FileStore(bucket=_BUCKET, endpoint_url=None, region=None)
