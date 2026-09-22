@@ -411,4 +411,34 @@ describe("ModelCatalogPage", () => {
 
     expect(await screen.findByText("opened a model")).toBeInTheDocument()
   })
+
+  it("asks for the whole catalog, not the endpoint's default window", async () => {
+    const fetchMock = mockApi()
+    renderPage(<ModelCatalogPage />)
+
+    await screen.findByRole("list", { name: "Models" })
+
+    const listCall = fetchMock.mock.calls
+      .map(([input]) => String(input))
+      .find((url) => url.includes(`${API_ROOT}/catalog/models?`))
+    expect(listCall).toContain("limit=1000")
+  })
+
+  it("says so when the catalog is larger than the page holds", async () => {
+    mockApi({ catalog: { ...CATALOG, count: 126 } })
+    renderPage(<ModelCatalogPage />)
+
+    // Every facet on this page is computed from what arrived, so the count the
+    // reader is shown has to be the one they can actually filter.
+    expect(await screen.findByText(/holds the first 2/)).toBeInTheDocument()
+    expect(screen.getByText(/remaining/)).toHaveTextContent("124")
+  })
+
+  it("draws no truncation notice when the whole catalog arrived", async () => {
+    mockApi()
+    renderPage(<ModelCatalogPage />)
+
+    await screen.findByRole("list", { name: "Models" })
+    expect(screen.queryByText(/holds the first/)).not.toBeInTheDocument()
+  })
 })

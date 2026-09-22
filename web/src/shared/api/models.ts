@@ -21,11 +21,26 @@ import {
 // Keyed beside the model id so a detail read and a list read never share a
 // cache entry (a model whose id is `list` included), while both still fall
 // under the CATALOG prefix invalidations use.
+/**
+ * The whole catalog, for a page that filters and facets it in the browser.
+ *
+ * The limit is the endpoint's maximum rather than its default of 100, because
+ * the catalog list filters, sorts, counts providers and builds its filter rail
+ * from what this returns: a window would quietly make every one of those
+ * describe the window instead of the catalog. One BYO provider key can offer
+ * over a hundred models on its own, so the default truncated real deployments.
+ *
+ * `count` is the number of matches before the window, so a reader still learns
+ * when even the maximum was not enough.
+ */
+export const CATALOG_LIST_LIMIT = 1000
+
 export function useCatalog() {
   return useQuery({
     ...NO_RETRY,
     queryKey: [CATALOG, "list"],
-    queryFn: () => apiFetch<CatalogResponse>("/catalog/models"),
+    queryFn: () =>
+      apiFetch<CatalogResponse>(`/catalog/models?limit=${CATALOG_LIST_LIMIT}`),
     staleTime: 60_000,
   })
 }

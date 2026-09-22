@@ -10,6 +10,7 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { TablePagination } from "@/design-system/data/TablePagination"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { INPUT_CLASS } from "@/design-system/forms/inputClass"
@@ -629,6 +630,10 @@ export function ModelCatalogView({
   }
 
   const defaultsAsOf = catalog.data?.defaults_as_of
+  // The filters, the sort, the provider count and the filter rail are all built
+  // from `models`, so a catalog larger than one request can carry makes every
+  // one of them describe a prefix. Say so rather than let them read as totals.
+  const withheld = Math.max(0, (catalog.data?.count ?? 0) - models.length)
 
   return (
     <div className="flex flex-col gap-5">
@@ -655,6 +660,15 @@ export function ModelCatalogView({
       </header>
 
       <ErrorBanner error={catalog.error} />
+
+      {withheld > 0 ? (
+        <InfoBanner tone="warning">
+          This deployment serves {catalog.data?.count} models, and this page
+          holds the first {models.length}. The filters, the sort and the
+          provider counts describe those {models.length}; the remaining{" "}
+          {withheld} are reachable by name from a model's own page.
+        </InfoBanner>
+      ) : null}
 
       <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-8">
         <aside
