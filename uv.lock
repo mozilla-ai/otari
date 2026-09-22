@@ -210,7 +210,7 @@ wheels = [
 
 [[package]]
 name = "any-llm-sdk"
-version = "1.27.1"
+version = "1.28.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
@@ -221,9 +221,9 @@ dependencies = [
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b5/67/e4ec7b8b065210e4069f54e4075871ad017b3dc988cf9230259c1abdad86/any_llm_sdk-1.27.1.tar.gz", hash = "sha256:605a44b24e67e3396f8cef9489bf5cf6a4cc59d25cd022ceb823aae268590cf0", size = 210430, upload-time = "2026-09-04T09:58:00.719Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/92/0a/c4fbcc0cd516e28eccafba9cfe5d87b45f8849b54e7be0369c339a4a12a2/any_llm_sdk-1.28.0.tar.gz", hash = "sha256:cf9e27f18647ee92f54def3faed035547f6fb9acaa626794c66edcb48f5c118f", size = 228780, upload-time = "2026-09-18T10:09:26.117Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/96/14/07f949b26734222d1cc0be2b461c68c7bd4cfb3849ed15ce9edcf640be7e/any_llm_sdk-1.27.1-py3-none-any.whl", hash = "sha256:be3a919c07163db94b88b0d8676d0abbc9a6ed432ca4d415741a71cbc25b91d7", size = 265047, upload-time = "2026-09-04T09:57:59.175Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/3b/379d3885fc1be7a85061d9a049a6561f06f5b4ab0aa98cf93908aa33d025/any_llm_sdk-1.28.0-py3-none-any.whl", hash = "sha256:4fb5e2c82b9e51be6293a97cf6efd6f3fce79684b97537f4f7926d4c3aa5abde", size = 285107, upload-time = "2026-09-18T10:09:24.572Z" },
 ]
 
 [package.optional-dependencies]
@@ -1097,7 +1097,7 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.19.0" },
     { name = "alembic", specifier = ">=1.13.0" },
     { name = "any-guardrail", specifier = ">=0.7.7,<0.8.0" },
-    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.27.1" },
+    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.28.0" },
     { name = "apron-auth", specifier = ">=0.15.1,<0.16.0" },
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "bcrypt", specifier = ">=5.0.0" },
@@ -1130,7 +1130,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
     { name = "webauthn", specifier = ">=2.5.0" },
 ]
-provides-extras = ["fsspec", "ocr", "s3"]
+provides-extras = ["ocr", "s3", "fsspec"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2599,7 +2599,7 @@ wheels = [
 
 [[package]]
 name = "otari"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -2607,9 +2607,9 @@ dependencies = [
     { name = "python-dateutil" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/24/57/a121d08fd41fde51948f7a8bc5176323a58988a394e0c28f5f16a550e7c6/otari-0.3.0.tar.gz", hash = "sha256:15b2408ade8cee9dfeb45adaf3396b3a3ba2a39d91f6645d53295447f96c817d", size = 259831, upload-time = "2026-08-14T08:27:57.671Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/79/4e/453a36fe9d147daecae2932e128a687e18153763a3caf385f5c9ba70049b/otari-0.4.0.tar.gz", hash = "sha256:42d8bdc3e666f3ddca928a6fdbfec1bd0b4977699d13f5d8dc518bfdeef60fae", size = 430152, upload-time = "2026-09-16T07:06:44.015Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ba/57/b5244e8b99d7f29cba2eac730e0ad60d38823132d83bf84da5faed15fed4/otari-0.3.0-py3-none-any.whl", hash = "sha256:9097c795b2b8007899750e34dcba106dbe713d20d4b8fc63d92a02df70145262", size = 669174, upload-time = "2026-08-14T08:27:56.064Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/91/165edde1b66d33c08539b582998a6cb40cee240556c0ddc12eaa52d62759/otari-0.4.0-py3-none-any.whl", hash = "sha256:3d7d2cc613d5c94a8e4b4c4fd44e0e62b2dc961f5e79fc436e74e885a44e4c08", size = 1128394, upload-time = "2026-09-16T07:06:42.035Z" },
 ]
 
 [[package]]
