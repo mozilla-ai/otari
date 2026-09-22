@@ -78,9 +78,10 @@ organization owner or admin), and each one carries:
 | `profile` | The profile on the guardrails service. One entry per profile per organization. |
 | `mode`, `on_unavailable` | The same two settings a request-body entry has, with the same meanings. |
 | `url` | An endpoint of the organization's own. Omit it to use the deployment's `guardrails_url`. |
+| `definition_id` | One of the organization's own guardrail definitions, for Otari to build and run the check itself. Exclusive with `url` and `credential`, which name a service instead. An explicit `null` clears it. |
 | `credential` | Sent to that endpoint as `Authorization: Bearer`. Requires `url`, which must then be `https`, so the credential is never sent to the deployment URL, which may be a plain-http sidecar. Encrypted at rest, never returned. |
 | `validate_kwargs` | Forwarded to the guardrails service `/validate` call. A parameter whose name looks credential-shaped (it contains `key`, `secret`, `token`, `password`, `authorization` or `credential`) is read back as `***` rather than its stored value. Sending `***` back keeps what is stored, so editing the rest of an entry does not overwrite the parameter you were never shown. |
-| `enabled` | `false` stops the guardrail everywhere without discarding the entry. |
+| `enabled` | `false` stops this mandate everywhere without discarding the entry. |
 | `applies_to_all_workspaces` | `true` runs it in every workspace, including any created later. |
 | `workspace_ids` | The workspaces it runs in, when it does not apply to all of them. |
 
@@ -228,11 +229,33 @@ organization's. And `any_llm` is refused outright: it takes no credential of its
 own, so it would judge text by calling an LLM on whatever key the deployment's
 environment holds, with nothing metering the call and nothing refunding it.
 
+A mandate points at a definition with `definition_id`, and then names no `url`
+of its own: a check runs either on a service the organization named or on the
+guardrail Otari builds from the definition, never on both.
+
 **A definition's `name` is not a mandate's `profile`.** The name is what an
 organization recognizes a definition by, so the same guardrail can be defined
 twice under two names with different arguments; the profile is what a caller
-sends, and what the layer merge keys on. Nothing points a mandate at a
-definition yet, so a definition on its own changes no request.
+sends, and what the layer merge keys on. Nothing builds these guardrails yet, so
+a mandate pointing at one is still resolved as a profile and a definition on its
+own changes no request.
+
+### Turning one off
+
+Two switches, stopping different amounts of work. `enabled: false` on a
+**definition** stops the guardrail everywhere it is mandated, in one write, and
+keeps the arguments and credentials it took to set up. `enabled: false` on a
+**mandate** stops that one mandate, and leaves any other mandate on the same
+definition running.
+
+Once Otari builds these guardrails, a mandate whose definition is disabled
+counts as unevaluable, so `mode` and `on_unavailable` will decide what happens
+to the request, the same as an endpoint that cannot be reached.
+
+Deleting a definition a mandate still names is refused rather than cascaded,
+because dropping it would silently stop a guardrail running. The refusal names
+the profiles holding it, and `enabled: false` is the answer when switching it
+off was the point.
 
 ### How the layers compose
 
