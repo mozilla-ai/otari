@@ -1102,10 +1102,11 @@ export interface paths {
          *     ``workspace_id`` narrows a master-key listing to one workspace; a keyed
          *     request is already confined to its key's own and cannot widen or move it.
          *
-         *     Pages are cursor-based: ``after`` (OpenAI) or ``after_id`` (Anthropic) names
-         *     the last file of the previous page, and ``has_more`` says whether to ask
-         *     again. A cursor that has since been deleted or has expired is still a
-         *     position; one the caller never owned is a 404.
+         *     Each flavor pages with its own cursor.
+         *     OpenAI's ``after`` names the last file of the previous page, and ``has_more`` says whether to ask again.
+         *     Anthropic's ``next_page`` is passed back as ``page``, and ``ids[]`` reads up to 100 named files in one page.
+         *     A cursor whose file has since been deleted or has expired is still a position.
+         *     An ``after`` the caller never owned is a 404, and a ``page`` token this gateway did not issue is a 400.
          */
         get: operations["files-list_files"];
         put?: never;
@@ -14918,8 +14919,9 @@ export interface operations {
                 workspace_id?: string | null;
                 limit?: number;
                 after?: string | null;
-                after_id?: string | null;
                 order?: "asc" | "desc";
+                page?: string | null;
+                "ids[]"?: string[] | null;
             };
             header?: never;
             path?: never;

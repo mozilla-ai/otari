@@ -1763,7 +1763,7 @@
         {
           "name": "List Files",
           "request": {
-            "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.\n\nPages are cursor-based: ``after`` (OpenAI) or ``after_id`` (Anthropic) names\nthe last file of the previous page, and ``has_more`` says whether to ask\nagain. A cursor that has since been deleted or has expired is still a\nposition; one the caller never owned is a 404.",
+            "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.\n\nEach flavor pages with its own cursor.\nOpenAI's ``after`` names the last file of the previous page, and ``has_more`` says whether to ask again.\nAnthropic's ``next_page`` is passed back as ``page``, and ``ids[]`` reads up to 100 named files in one page.\nA cursor whose file has since been deleted or has expired is still a position.\nAn ``after`` the caller never owned is a 404, and a ``page`` token this gateway did not issue is a 400.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1809,17 +1809,23 @@
                 {
                   "description": "",
                   "disabled": true,
-                  "key": "after_id",
+                  "key": "order",
                   "value": ""
                 },
                 {
                   "description": "",
                   "disabled": true,
-                  "key": "order",
+                  "key": "page",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "ids[]",
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/files?user=&purpose=&workspace_id=&limit=&after=&after_id=&order="
+              "raw": "{{baseUrl}}/api/v1/files?user=&purpose=&workspace_id=&limit=&after=&order=&page=&ids[]="
             }
           }
         },

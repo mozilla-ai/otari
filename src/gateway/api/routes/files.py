@@ -20,6 +20,7 @@ header (which its SDK sends on every call) gets ``FileMetadata``, everything
 else gets the OpenAI file object.
 """
 
+import base64
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime
@@ -54,6 +55,9 @@ _DEFAULT_PURPOSE = "user_data"
 # OpenAI's 10000 because a page is one query and one JSON body.
 _DEFAULT_LIST_LIMIT = 100
 _MAX_LIST_LIMIT = 1000
+_MAX_LIST_IDS = 100
+
+_PAGE_TOKEN_PREFIX = "page_"
 
 
 def _anthropic_shape(raw_request: Request) -> bool:
@@ -61,6 +65,54 @@ def _anthropic_shape(raw_request: Request) -> bool:
     return "anthropic-version" in raw_request.headers or any(
         beta.strip().startswith("files-api") for beta in raw_request.headers.get("anthropic-beta", "").split(",")
     )
+
+
+def _page_token(file_id: str) -> str:
+    """The opaque Anthropic ``next_page`` token that resumes a listing after ``file_id``."""
+    return _PAGE_TOKEN_PREFIX + base64.urlsafe_b64encode(file_id.encode()).decode().rstrip("=")
+
+
+def _could_name_a_file(value: str) -> bool:
+    # Every file ID is printable ASCII, and PostgreSQL rejects a NUL in a text parameter.
+    return value.isascii() and value.isprintable()
+
+
+def _invalid_page_token() -> HTTPException:
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid page token")
+
+
+def _page_token_file_id(token: str) -> str:
+    """The file ID a ``page`` token resumes after, raising a 400 for a token this gateway did not issue."""
+    if not token.startswith(_PAGE_TOKEN_PREFIX):
+        raise _invalid_page_token()
+    encoded = token.removeprefix(_PAGE_TOKEN_PREFIX)
+    try:
+        file_id = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode()
+    except ValueError as exc:
+        raise _invalid_page_token() from exc
+    if not _could_name_a_file(file_id):
+        raise _invalid_page_token()
+    return file_id
+
+
+def _check_anthropic_list_params(raw_request: Request, page: str | None, ids: list[str] | None) -> None:
+    """Refuse the parameter combinations Anthropic's GA listing refuses, given de-duplicated ``ids``."""
+    params = raw_request.query_params
+    if "after_id" in params or "before_id" in params:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="after_id and before_id are not supported: pass next_page back as page instead",
+        )
+    if ids is None:
+        return
+    if page is not None or "limit" in params:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="ids[] cannot be combined with page or limit"
+        )
+    if len(ids) > _MAX_LIST_IDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"ids[] takes at most {_MAX_LIST_IDS} file IDs"
+        )
 
 
 def _serialize(record: FileObject, raw_request: Request) -> dict[str, Any]:
@@ -255,22 +307,31 @@ async def list_files(
     workspace_id: uuid.UUID | None = None,
     limit: Annotated[int, Query(ge=1, le=_MAX_LIST_LIMIT)] = _DEFAULT_LIST_LIMIT,
     after: str | None = None,
-    after_id: str | None = None,
     order: Literal["asc", "desc"] = "desc",
+    page: str | None = None,
+    ids: Annotated[list[str] | None, Query(alias="ids[]")] = None,
 ) -> dict[str, Any]:
     """List the authenticated user's uploaded files in the request's workspace.
 
     ``workspace_id`` narrows a master-key listing to one workspace; a keyed
     request is already confined to its key's own and cannot widen or move it.
 
-    Pages are cursor-based: ``after`` (OpenAI) or ``after_id`` (Anthropic) names
-    the last file of the previous page, and ``has_more`` says whether to ask
-    again. A cursor that has since been deleted or has expired is still a
-    position; one the caller never owned is a 404.
+    Each flavor pages with its own cursor.
+    OpenAI's ``after`` names the last file of the previous page, and ``has_more`` says whether to ask again.
+    Anthropic's ``next_page`` is passed back as ``page``, and ``ids[]`` reads up to 100 named files in one page.
+    A cursor whose file has since been deleted or has expired is still a position.
+    An ``after`` the caller never owned is a 404, and a ``page`` token this gateway did not issue is a 400.
     """
     if not config.files_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
 
+    anthropic = _anthropic_shape(raw_request)
+    if anthropic:
+        named_ids = None if ids is None else list(dict.fromkeys(ids))
+        _check_anthropic_list_params(raw_request, page, named_ids)
+        cursor_id = _page_token_file_id(page) if page is not None else None
+    else:
+        named_ids, cursor_id = None, after
     user_id = _resolve_user(auth_result, user, config)
     # The key's own workspace wins over anything the caller sent, rather than
     # 400ing on a mismatch: the parameter is a master-key narrowing, and a keyed
@@ -289,17 +350,20 @@ async def list_files(
         stmt = stmt.where(FileObject.workspace_id == scope)
     if purpose is not None:
         stmt = stmt.where(FileObject.purpose == purpose)
+    if named_ids is not None:
+        stmt = stmt.where(FileObject.id.in_([file_id for file_id in named_ids if _could_name_a_file(file_id)]))
 
-    cursor_id = after or after_id
     if cursor_id is not None:
         # A position, not a file: the row is read with the tenant predicates
         # only, so a cursor that was deleted or expired between two pages (the
         # usual "list, delete each, list again" loop) still says where the next
-        # page starts. Another user's id stays a 404.
+        # page starts. Another user's ID is refused.
         cursor_conditions = [FileObject.id == cursor_id, FileObject.user_id == user_id]
         if scope is not None:
             cursor_conditions.append(FileObject.workspace_id == scope)
         cursor = (await db.execute(select(FileObject).where(*cursor_conditions))).scalar_one_or_none()
+        if cursor is None and anthropic:
+            raise _invalid_page_token()
         if cursor is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
         # (created_at, id) is the sort key, so the page after the cursor is
@@ -325,16 +389,17 @@ async def list_files(
     records = list((await db.execute(stmt.limit(limit + 1))).scalars().all())
     has_more = len(records) > limit
     records = records[:limit]
+    data = [_serialize(r, raw_request) for r in records]
 
-    page: dict[str, Any] = {
-        "data": [_serialize(r, raw_request) for r in records],
+    if anthropic:
+        return {"data": data, "next_page": _page_token(records[-1].id) if has_more else None}
+    return {
+        "object": "list",
+        "data": data,
         "has_more": has_more,
         "first_id": records[0].id if records else None,
         "last_id": records[-1].id if records else None,
     }
-    if not _anthropic_shape(raw_request):
-        page = {"object": "list", **page}
-    return page
 
 
 @router.get("/files/{file_id}")

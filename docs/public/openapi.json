@@ -20923,7 +20923,7 @@
     },
     "/api/v1/files": {
       "get": {
-        "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.\n\nPages are cursor-based: ``after`` (OpenAI) or ``after_id`` (Anthropic) names\nthe last file of the previous page, and ``has_more`` says whether to ask\nagain. A cursor that has since been deleted or has expired is still a\nposition; one the caller never owned is a 404.",
+        "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.\n\nEach flavor pages with its own cursor.\nOpenAI's ``after`` names the last file of the previous page, and ``has_more`` says whether to ask again.\nAnthropic's ``next_page`` is passed back as ``page``, and ``ids[]`` reads up to 100 named files in one page.\nA cursor whose file has since been deleted or has expired is still a position.\nAn ``after`` the caller never owned is a 404, and a ``page`` token this gateway did not issue is a 400.",
         "operationId": "files-list_files",
         "parameters": [
           {
@@ -21005,22 +21005,6 @@
           },
           {
             "in": "query",
-            "name": "after_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "After Id"
-            }
-          },
-          {
-            "in": "query",
             "name": "order",
             "required": false,
             "schema": {
@@ -21031,6 +21015,41 @@
               ],
               "title": "Order",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Page"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ids[]",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ids[]"
             }
           }
         ],
