@@ -1929,6 +1929,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/guardrail-definitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Organization Guardrail Definitions
+         * @description List the guardrails the caller's organization has defined.
+         *
+         *     Organization owners and admins only. A stored vendor credential is never
+         *     returned: each one comes back as ``***`` under its own name, which is what a
+         *     form resubmits to keep it.
+         */
+        get: operations["organization-guardrail-definitions-list_organization_guardrail_definitions"];
+        put?: never;
+        /**
+         * Create Organization Guardrail Definition
+         * @description Define a guardrail this deployment will build and call itself. Organization owners and admins only.
+         *
+         *     ``guardrail_name`` must be one the built-in guardrail catalog lists
+         *     (``GET /api/v1/tool-settings/guardrails/catalog``), and
+         *     ``create_kwargs`` must satisfy that guardrail's constructor as the catalog
+         *     describes it: no argument it does not declare, nothing it types as a live
+         *     object rather than configuration, and every required argument no environment
+         *     variable can supply. Arguments the catalog marks secret are encrypted at
+         *     rest.
+         *
+         *     A definition on its own changes no request. Mandate it through
+         *     ``/api/v1/organizations/me/guardrails`` for it to run.
+         */
+        post: operations["organization-guardrail-definitions-create_organization_guardrail_definition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/guardrail-definitions/{definition_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Organization Guardrail Definition
+         * @description Drop a definition and the credentials it holds.
+         *
+         *     Organization owners and admins only. Use ``enabled: false`` instead to stop
+         *     the guardrail everywhere while keeping both.
+         */
+        delete: operations["organization-guardrail-definitions-delete_organization_guardrail_definition"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Organization Guardrail Definition
+         * @description Change a definition's name, guardrail, build arguments, or enabled flag.
+         *
+         *     Organization owners and admins only. Omitted fields are left as they are.
+         *     ``create_kwargs`` replaces the arguments whole when sent, an argument sent as
+         *     ``***`` keeps the value stored under that name, and omitting the field
+         *     entirely leaves the stored credentials untouched and unread.
+         */
+        patch: operations["organization-guardrail-definitions-update_organization_guardrail_definition"];
+        trace?: never;
+    };
     "/api/v1/organizations/me/guardrails": {
         parameters: {
             query?: never;
@@ -9565,6 +9636,141 @@ export interface components {
             workspace_ids?: string[];
         };
         /**
+         * OrganizationGuardrailDefinitionCreate
+         * @description Request body for defining a guardrail Otari will build and call itself.
+         *
+         *     ``create_kwargs`` carries both halves of the form: the plain arguments and
+         *     the vendor credentials. Which is which is the catalog's answer, not this
+         *     schema's, so a credential lands in the encrypted map whatever it is called
+         *     and a caller cannot move one into the plain column by naming it oddly.
+         *
+         *     Per-call arguments are not offered. This row says what a guardrail is built
+         *     with; what travels with each check is the mandate's ``validate_kwargs``.
+         * @example {
+         *       "create_kwargs": {
+         *         "api_key": "lakera-...",
+         *         "endpoint": "https://api.lakera.ai"
+         *       },
+         *       "enabled": true,
+         *       "guardrail_name": "lakera_guard",
+         *       "name": "prod-lakera"
+         *     }
+         */
+        OrganizationGuardrailDefinitionCreate: {
+            /**
+             * Create Kwargs
+             * @description Constructor arguments for the guardrail. Every argument the catalog marks secret is encrypted at rest and never returned; the rest are stored and returned as sent
+             */
+            create_kwargs?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Enabled
+             * @description False stops the guardrail everywhere it is mandated
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Guardrail Name
+             * @description The any-guardrail class to build, as the built-in guardrail catalog names it
+             */
+            guardrail_name: string;
+            /**
+             * Name
+             * @description The organization's own label for this definition, unique within the organization
+             */
+            name: string;
+        };
+        /**
+         * OrganizationGuardrailDefinitionPublic
+         * @description The API-facing shape. Carries the names of the stored secrets and none of their values.
+         */
+        OrganizationGuardrailDefinitionPublic: {
+            /**
+             * Create Kwargs
+             * @description The constructor arguments the catalog does not mark secret, as they were stored. Returned in clear: the secrets were taken out of this map by flag, and a form has to round-trip an endpoint or a project id
+             */
+            create_kwargs: {
+                [key: string]: unknown;
+            };
+            /**
+             * Create Secrets
+             * @description The secret constructor arguments this definition holds, each as ***. Sending one back unchanged keeps the stored value; sending a new one rotates it, and leaving one out clears it
+             */
+            create_secrets: {
+                [key: string]: string;
+            };
+            /** Created At */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Guardrail Name */
+            guardrail_name: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /**
+             * Secrets Decryptable
+             * @description False when the stored secrets cannot be read with the current OTARI_SECRET_KEY, in which case create_secrets is empty and the definition needs its credentials sent again
+             */
+            secrets_decryptable: boolean;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
+         * OrganizationGuardrailDefinitionUpdate
+         * @description Partial update. Only the fields the caller sets are applied.
+         *
+         *     ``create_kwargs`` replaces the arguments whole when sent, and an argument the
+         *     catalog marks secret keeps its stored value where the caller echoes back the
+         *     ``***`` a read gave them. Omitting it leaves both columns untouched *and
+         *     reads neither*, which is what lets an admin on a deployment whose
+         *     ``OTARI_SECRET_KEY`` has moved still flip ``enabled`` and repair the row by
+         *     typing the credential again.
+         *
+         *     Changing ``guardrail_name`` without sending ``create_kwargs`` re-splits the
+         *     stored arguments under the new class, because the plain/secret split is the
+         *     old class's answer and would otherwise go stale.
+         * @example {
+         *       "create_kwargs": {
+         *         "api_key": "***",
+         *         "endpoint": "https://eu.api.lakera.ai"
+         *       },
+         *       "enabled": false
+         *     }
+         */
+        OrganizationGuardrailDefinitionUpdate: {
+            /**
+             * Create Kwargs
+             * @description Replaces the constructor arguments whole. An argument sent as *** keeps the value stored under that name; a secret left out is cleared. Omit the field to leave the stored arguments alone, and {} to clear them
+             */
+            create_kwargs?: {
+                [key: string]: unknown;
+            } | null;
+            /** Enabled */
+            enabled?: boolean;
+            /** Guardrail Name */
+            guardrail_name?: string;
+            /** Name */
+            name?: string;
+        };
+        /** OrganizationGuardrailDefinitionsPublic */
+        OrganizationGuardrailDefinitionsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["OrganizationGuardrailDefinitionPublic"][];
+        };
+        /**
          * OrganizationGuardrailPublic
          * @description The API-facing shape. Never carries the credential, nor a credential-shaped parameter.
          *
@@ -16421,6 +16627,139 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrganizationDomainPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-guardrail-definitions-list_organization_guardrail_definitions": {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationGuardrailDefinitionsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-guardrail-definitions-create_organization_guardrail_definition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationGuardrailDefinitionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationGuardrailDefinitionPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-guardrail-definitions-delete_organization_guardrail_definition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                definition_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-guardrail-definitions-update_organization_guardrail_definition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                definition_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationGuardrailDefinitionUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationGuardrailDefinitionPublic"];
                 };
             };
             /** @description Validation Error */

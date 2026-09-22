@@ -3584,6 +3584,153 @@
     {
       "item": [
         {
+          "name": "List Organization Guardrail Definitions",
+          "request": {
+            "description": "List the guardrails the caller's organization has defined.\n\nOrganization owners and admins only. A stored vendor credential is never\nreturned: each one comes back as ``***`` under its own name, which is what a\nform resubmits to keep it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "guardrail-definitions"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/guardrail-definitions?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Organization Guardrail Definition",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"create_kwargs\": {\n    \"api_key\": \"lakera-...\",\n    \"endpoint\": \"https://api.lakera.ai\"\n  },\n  \"enabled\": true,\n  \"guardrail_name\": \"lakera_guard\",\n  \"name\": \"prod-lakera\"\n}"
+            },
+            "description": "Define a guardrail this deployment will build and call itself. Organization owners and admins only.\n\n``guardrail_name`` must be one the built-in guardrail catalog lists\n(``GET /api/v1/tool-settings/guardrails/catalog``), and\n``create_kwargs`` must satisfy that guardrail's constructor as the catalog\ndescribes it: no argument it does not declare, nothing it types as a live\nobject rather than configuration, and every required argument no environment\nvariable can supply. Arguments the catalog marks secret are encrypted at\nrest.\n\nA definition on its own changes no request. Mandate it through\n``/api/v1/organizations/me/guardrails`` for it to run.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "guardrail-definitions"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/guardrail-definitions"
+            }
+          }
+        },
+        {
+          "name": "Update Organization Guardrail Definition",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"create_kwargs\": {\n    \"api_key\": \"***\",\n    \"endpoint\": \"https://eu.api.lakera.ai\"\n  },\n  \"enabled\": false\n}"
+            },
+            "description": "Change a definition's name, guardrail, build arguments, or enabled flag.\n\nOrganization owners and admins only. Omitted fields are left as they are.\n``create_kwargs`` replaces the arguments whole when sent, an argument sent as\n``***`` keeps the value stored under that name, and omitting the field\nentirely leaves the stored credentials untouched and unread.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "guardrail-definitions",
+                ":definition_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/guardrail-definitions/:definition_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "definition_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Organization Guardrail Definition",
+          "request": {
+            "description": "Drop a definition and the credentials it holds.\n\nOrganization owners and admins only. Use ``enabled: false`` instead to stop\nthe guardrail everywhere while keeping both.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "guardrail-definitions",
+                ":definition_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/guardrail-definitions/:definition_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "definition_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "organization-guardrail-definitions"
+    },
+    {
+      "item": [
+        {
           "name": "List Organization Guardrails",
           "request": {
             "description": "List the guardrails the caller's organization mandates.\n\nOrganization owners and admins only, unlike the pricing overrides next door\nthat any member may read: these rows name the endpoints this gateway\nconnects to and say which of them carry a credential. A credential is never\nreturned, only whether one is set.",

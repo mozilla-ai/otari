@@ -31,7 +31,7 @@ from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.providers import OrgProviderKeyModelRepository
-from gateway.repositories.tenancy import OrgProviderKeyRepository
+from gateway.repositories.tenancy import OrganizationGuardrailDefinitionRepository, OrgProviderKeyRepository
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
 from gateway.services.code_execution import SandboxContainerRegistry
@@ -48,6 +48,9 @@ from gateway.services.routing import clear_router_backend_cache
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
+from gateway.services.tenancy.organization_guardrail_definition_service import (
+    OrganizationGuardrailDefinitionService,
+)
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_service import WorkspaceService
 
@@ -923,6 +926,33 @@ def get_budget_service(
 
 
 BudgetServiceDep = Annotated[BudgetService, Depends(get_budget_service)]
+
+
+def get_organization_guardrail_definition_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> OrganizationGuardrailDefinitionService:
+    """Build an organization's guardrail-definition service on the request's Unit of Work.
+
+    Assembled here for the reason the overview service above is: a route does not
+    name a session type (``scripts/check_architecture.py``, rule 12).
+
+    The session is here only for the role gate. The service itself holds none,
+    reaching the database through its repository and committing in the blocks it
+    opens; `OrganizationService` is still in the old shape and takes a session,
+    and both are the request's one session, so a block commits what the gate
+    read.
+    """
+    return OrganizationGuardrailDefinitionService(
+        definitions=OrganizationGuardrailDefinitionRepository(uow),
+        organizations=OrganizationService(db, membership_listener=None),
+        uow=uow,
+    )
+
+
+OrganizationGuardrailDefinitionServiceDep = Annotated[
+    OrganizationGuardrailDefinitionService, Depends(get_organization_guardrail_definition_service)
+]
 
 ApiKeyFormatPortDep = Annotated[ApiKeyFormatPort, Depends(get_api_key_format_port)]
 BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]

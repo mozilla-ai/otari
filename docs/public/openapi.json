@@ -9171,6 +9171,184 @@
         "title": "OrganizationGuardrailCreate",
         "type": "object"
       },
+      "OrganizationGuardrailDefinitionCreate": {
+        "description": "Request body for defining a guardrail Otari will build and call itself.\n\n``create_kwargs`` carries both halves of the form: the plain arguments and\nthe vendor credentials. Which is which is the catalog's answer, not this\nschema's, so a credential lands in the encrypted map whatever it is called\nand a caller cannot move one into the plain column by naming it oddly.\n\nPer-call arguments are not offered. This row says what a guardrail is built\nwith; what travels with each check is the mandate's ``validate_kwargs``.",
+        "example": {
+          "create_kwargs": {
+            "api_key": "lakera-...",
+            "endpoint": "https://api.lakera.ai"
+          },
+          "enabled": true,
+          "guardrail_name": "lakera_guard",
+          "name": "prod-lakera"
+        },
+        "properties": {
+          "create_kwargs": {
+            "additionalProperties": true,
+            "description": "Constructor arguments for the guardrail. Every argument the catalog marks secret is encrypted at rest and never returned; the rest are stored and returned as sent",
+            "title": "Create Kwargs",
+            "type": "object"
+          },
+          "enabled": {
+            "default": true,
+            "description": "False stops the guardrail everywhere it is mandated",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "guardrail_name": {
+            "description": "The any-guardrail class to build, as the built-in guardrail catalog names it",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Guardrail Name",
+            "type": "string"
+          },
+          "name": {
+            "description": "The organization's own label for this definition, unique within the organization",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "guardrail_name"
+        ],
+        "title": "OrganizationGuardrailDefinitionCreate",
+        "type": "object"
+      },
+      "OrganizationGuardrailDefinitionPublic": {
+        "description": "The API-facing shape. Carries the names of the stored secrets and none of their values.",
+        "properties": {
+          "create_kwargs": {
+            "additionalProperties": true,
+            "description": "The constructor arguments the catalog does not mark secret, as they were stored. Returned in clear: the secrets were taken out of this map by flag, and a form has to round-trip an endpoint or a project id",
+            "title": "Create Kwargs",
+            "type": "object"
+          },
+          "create_secrets": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The secret constructor arguments this definition holds, each as ***. Sending one back unchanged keeps the stored value; sending a new one rotates it, and leaving one out clears it",
+            "title": "Create Secrets",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "guardrail_name": {
+            "title": "Guardrail Name",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "secrets_decryptable": {
+            "description": "False when the stored secrets cannot be read with the current OTARI_SECRET_KEY, in which case create_secrets is empty and the definition needs its credentials sent again",
+            "title": "Secrets Decryptable",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "name",
+          "guardrail_name",
+          "create_kwargs",
+          "create_secrets",
+          "secrets_decryptable",
+          "enabled",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "OrganizationGuardrailDefinitionPublic",
+        "type": "object"
+      },
+      "OrganizationGuardrailDefinitionUpdate": {
+        "description": "Partial update. Only the fields the caller sets are applied.\n\n``create_kwargs`` replaces the arguments whole when sent, and an argument the\ncatalog marks secret keeps its stored value where the caller echoes back the\n``***`` a read gave them. Omitting it leaves both columns untouched *and\nreads neither*, which is what lets an admin on a deployment whose\n``OTARI_SECRET_KEY`` has moved still flip ``enabled`` and repair the row by\ntyping the credential again.\n\nChanging ``guardrail_name`` without sending ``create_kwargs`` re-splits the\nstored arguments under the new class, because the plain/secret split is the\nold class's answer and would otherwise go stale.",
+        "example": {
+          "create_kwargs": {
+            "api_key": "***",
+            "endpoint": "https://eu.api.lakera.ai"
+          },
+          "enabled": false
+        },
+        "properties": {
+          "create_kwargs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replaces the constructor arguments whole. An argument sent as *** keeps the value stored under that name; a secret left out is cleared. Omit the field to leave the stored arguments alone, and {} to clear them",
+            "title": "Create Kwargs"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "guardrail_name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Guardrail Name",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "title": "OrganizationGuardrailDefinitionUpdate",
+        "type": "object"
+      },
+      "OrganizationGuardrailDefinitionsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationGuardrailDefinitionPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "OrganizationGuardrailDefinitionsPublic",
+        "type": "object"
+      },
       "OrganizationGuardrailPublic": {
         "description": "The API-facing shape. Never carries the credential, nor a credential-shaped parameter.\n\n``validate_kwargs`` is the second place a credential lives on this row, and\nthe one with no column of its own: a guardrail class can take a vendor key\nas a parameter, so the form offers a box for it and whatever is typed there\nis stored as plain JSON. It is masked the way\n``org_provider_keys.client_args`` is, by the *name* of the entry rather than\nby what the guardrail catalog says about it, so the mask still applies when\nthe guardrails service is down and no catalog can be read.",
         "properties": {
@@ -23438,6 +23616,235 @@
         "summary": "Verify Active Organization Domain",
         "tags": [
           "organizations"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/guardrail-definitions": {
+      "get": {
+        "description": "List the guardrails the caller's organization has defined.\n\nOrganization owners and admins only. A stored vendor credential is never\nreturned: each one comes back as ``***`` under its own name, which is what a\nform resubmits to keep it.",
+        "operationId": "organization-guardrail-definitions-list_organization_guardrail_definitions",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationGuardrailDefinitionsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Organization Guardrail Definitions",
+        "tags": [
+          "organization-guardrail-definitions"
+        ]
+      },
+      "post": {
+        "description": "Define a guardrail this deployment will build and call itself. Organization owners and admins only.\n\n``guardrail_name`` must be one the built-in guardrail catalog lists\n(``GET /api/v1/tool-settings/guardrails/catalog``), and\n``create_kwargs`` must satisfy that guardrail's constructor as the catalog\ndescribes it: no argument it does not declare, nothing it types as a live\nobject rather than configuration, and every required argument no environment\nvariable can supply. Arguments the catalog marks secret are encrypted at\nrest.\n\nA definition on its own changes no request. Mandate it through\n``/api/v1/organizations/me/guardrails`` for it to run.",
+        "operationId": "organization-guardrail-definitions-create_organization_guardrail_definition",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationGuardrailDefinitionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationGuardrailDefinitionPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Organization Guardrail Definition",
+        "tags": [
+          "organization-guardrail-definitions"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/guardrail-definitions/{definition_id}": {
+      "delete": {
+        "description": "Drop a definition and the credentials it holds.\n\nOrganization owners and admins only. Use ``enabled: false`` instead to stop\nthe guardrail everywhere while keeping both.",
+        "operationId": "organization-guardrail-definitions-delete_organization_guardrail_definition",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "definition_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Definition Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Organization Guardrail Definition",
+        "tags": [
+          "organization-guardrail-definitions"
+        ]
+      },
+      "patch": {
+        "description": "Change a definition's name, guardrail, build arguments, or enabled flag.\n\nOrganization owners and admins only. Omitted fields are left as they are.\n``create_kwargs`` replaces the arguments whole when sent, an argument sent as\n``***`` keeps the value stored under that name, and omitting the field\nentirely leaves the stored credentials untouched and unread.",
+        "operationId": "organization-guardrail-definitions-update_organization_guardrail_definition",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "definition_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Definition Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationGuardrailDefinitionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationGuardrailDefinitionPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Organization Guardrail Definition",
+        "tags": [
+          "organization-guardrail-definitions"
         ]
       }
     },

@@ -35,6 +35,7 @@ from gateway.api.routes import (
     moderations,
     org_provider_keys,
     organization_budgets,
+    organization_guardrail_definitions,
     organization_guardrails,
     organization_keys,
     organization_pricing,
@@ -215,6 +216,11 @@ def _register_core_routers(api: APIRouter, config: GatewayConfig, enabled_featur
     api.include_router(organization_budgets.budgets_router)
     api.include_router(organization_budgets.ceilings_router)
     api.include_router(organization_pricing.router)
+    # The definitions first, because that is the order an organization fills
+    # them in: a mandate can point at a definition, never the other way round.
+    # Two prefixes rather than one surface, for the reason the tables are two:
+    # what a check is and where it runs have different keys.
+    api.include_router(organization_guardrail_definitions.router)
     api.include_router(organization_guardrails.router)
     # The tenant-scoped read over the same rows ``/api/v1/usage`` serves to an
     # operator. Mounted with the rest of the ``/api/v1/organizations/me`` surface
