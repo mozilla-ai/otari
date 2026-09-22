@@ -1,8 +1,9 @@
 """Who runs a provider-native code-execution declaration: the executor decision.
 
-Pure logic in ``gateway.api.routes._tools`` plus the settings that feed it. The
-request-path wiring (claiming the keyword, the policy pin, the header) is
-covered by ``tests/integration/test_code_execution_executor.py``.
+Pure logic in ``gateway.api.routes._tools``, the settings that feed it, and the
+workspace policy write schema. The request-path wiring (claiming the keyword,
+the policy pin, the header) is covered by
+``tests/integration/test_code_execution_executor.py``.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from typing import Any
 
 import pytest
 from any_llm import LLMProvider
+from pydantic import ValidationError
 
 from gateway.api.routes._normalize import sandbox_requested
 from gateway.api.routes._tools import (
@@ -26,6 +28,9 @@ from gateway.api.routes._tools import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.models.tools import CodeExecutor
+from gateway.services.tenancy.workspace_code_execution_policy_service import (
+    WorkspaceCodeExecutionPolicyUpdate,
+)
 from gateway.services.tool_settings_service import get_field_options, validate_value
 
 ANTHROPIC_DATED = {"type": "code_execution_20250825", "name": "code_execution"}
@@ -61,7 +66,7 @@ def test_header_absent_or_blank_means_no_request_preference() -> None:
 
 
 def test_header_value_is_parsed_case_insensitively() -> None:
-    assert parse_code_execution_header("Otari") is CodeExecutor.OTARI
+    assert parse_code_execution_header(" OTARI ") is CodeExecutor.OTARI
 
 
 def test_header_outside_the_vocabulary_is_a_caller_error() -> None:
@@ -236,10 +241,24 @@ def test_the_env_var_fills_in_when_the_override_is_cleared(monkeypatch: pytest.M
 def test_the_dashboard_setting_is_a_closed_vocabulary() -> None:
     assert get_field_options("code_execution_executor") == ["auto", "otari", "provider"]
     assert get_field_options("sandbox_url") is None
-    assert validate_value("code_execution_executor", "OTARI") == "otari"
+    assert validate_value("code_execution_executor", " OTARI ") == "otari"
     assert validate_value("code_execution_executor", "") is None
     with pytest.raises(ValueError, match="must be one of"):
         validate_value("code_execution_executor", "anthropic")
+
+
+def test_the_workspace_policy_reads_the_same_vocabulary_the_same_way() -> None:
+    padded = WorkspaceCodeExecutionPolicyUpdate.model_validate({"enabled": True, "executor": " OTARI "})
+    assert padded.executor is CodeExecutor.OTARI
+    assert WorkspaceCodeExecutionPolicyUpdate(enabled=True).executor is None
+    with pytest.raises(ValidationError, match="executor"):
+        WorkspaceCodeExecutionPolicyUpdate.model_validate({"enabled": True, "executor": "anthropic"})
+
+
+def test_a_blank_executor_means_no_pin_as_a_blank_image_means_no_image() -> None:
+    for blank in ("", "   "):
+        policy = WorkspaceCodeExecutionPolicyUpdate.model_validate({"enabled": True, "executor": blank})
+        assert policy.executor is None
 
 
 def test_declaration_forms_include_the_provider_keywords_unless_the_provider_owns_them() -> None:

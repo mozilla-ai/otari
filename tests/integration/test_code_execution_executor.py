@@ -471,6 +471,19 @@ def test_a_provider_pin_keeps_a_disabled_veto_out_of_the_way(
     assert seen.forwarded_tool_types == {"code_execution_20250825"}
 
 
+def test_the_policy_takes_an_executor_in_any_case_and_answers_canonically(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    workspace_id = _default_workspace_id(client, master_key_header)
+    response = client.put(
+        f"{API_ROOT}/workspaces/{workspace_id}/code-execution-policy",
+        json={"enabled": True, "executor": " OTARI "},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["executor"] == "otari"
+
+
 def test_the_policy_refuses_an_executor_outside_the_vocabulary(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:

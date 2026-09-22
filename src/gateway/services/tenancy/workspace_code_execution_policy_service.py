@@ -143,6 +143,18 @@ class WorkspaceCodeExecutionPolicyUpdate(BaseModel):
             raise ValueError(msg)
         return deduped
 
+    @field_validator("executor", mode="before")
+    @classmethod
+    def _parse_executor(cls, value: object) -> object:
+        """Accept the vocabulary in any case, and a blank string as no pin.
+
+        An unparseable value passes through for the enum to refuse, because ``None`` would store no pin at all.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        parsed = CodeExecutor.parse(value)
+        return value if parsed is None else parsed
+
 
 class WorkspaceCodeExecutionPolicyPublic(BaseModel):
     """A workspace's policy, or the unconfigured policy it has without one."""
