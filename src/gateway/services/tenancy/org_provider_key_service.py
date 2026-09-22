@@ -228,7 +228,21 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     )
     overrides = (await db.execute(select(WorkspaceProviderKeyOverride))).scalars().all()
     restrictions = (await db.execute(select(WorkspaceProviderModelRestriction))).scalars().all()
-    offered_models = (await db.execute(select(OrgProviderKeyModel))).scalars().all()
+    # Three columns rather than whole rows, and only for keys that are still
+    # live. This is the table of the five that grows with an organization's
+    # catalog rather than with its workspaces, so one adopted provider adds more
+    # rows here than the rest of this refresh reads put together.
+    offered_models = (
+        await db.execute(
+            select(
+                col(OrgProviderKeyModel.org_provider_key_id),
+                col(OrgProviderKeyModel.model),
+                col(OrgProviderKeyModel.enabled),
+            )
+            .join(OrgProviderKey, col(OrgProviderKeyModel.org_provider_key_id) == col(OrgProviderKey.id))
+            .where(col(OrgProviderKey.archived_at).is_(None))
+        )
+    ).all()
 
     keys_by_org_provider: dict[tuple[uuid.UUID, str], list[OrgProviderKey]] = defaultdict(list)
     providers_by_org: dict[uuid.UUID, set[str]] = defaultdict(set)
@@ -246,10 +260,10 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     # *served* row: a key whose every model is switched off has to read as an
     # empty allow-list rather than as an absent one.
     enabled_models_by_key: dict[uuid.UUID, list[str]] = {}
-    for offered_model in offered_models:
-        served = enabled_models_by_key.setdefault(offered_model.org_provider_key_id, [])
-        if offered_model.enabled:
-            served.append(offered_model.model)
+    for key_id, model, enabled in offered_models:
+        served = enabled_models_by_key.setdefault(key_id, [])
+        if enabled:
+            served.append(model)
 
     new_cache: dict[tuple[uuid.UUID, str], dict[str, Any]] = {}
     new_restrictions: dict[tuple[uuid.UUID, str], list[str]] = {}

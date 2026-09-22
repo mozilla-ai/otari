@@ -270,6 +270,33 @@ class OrganizationPricingService:
         rather than refusing, since the model is still legitimately offered and
         simply prices from the deployment's list instead.
         """
+        byo = await self.provider_keys.get_byo_providers(organization_id=organization_id)
+        return await self._is_deployment_supplied(organization_id, model_key, byo)
+
+    async def deployment_supplied_keys(
+        self, organization_id: uuid.UUID, model_keys: Collection[str]
+    ) -> set[str]:
+        """Which of ``model_keys`` the deployment pays the upstream bill for.
+
+        The batch form. :meth:`is_deployment_supplied` resolves the organization's
+        BYO providers before it can ask the port, and that is one query, so asking
+        it per model makes a page of models a page of queries for an answer that
+        does not change between them. The port call stays per model, because
+        whether a hosted credential serves one is a question about that model.
+        """
+        if not model_keys:
+            return set()
+        byo = await self.provider_keys.get_byo_providers(organization_id=organization_id)
+        return {
+            model_key
+            for model_key in model_keys
+            if await self._is_deployment_supplied(organization_id, model_key, byo)
+        }
+
+    async def _is_deployment_supplied(
+        self, organization_id: uuid.UUID, model_key: str, byo_providers: Collection[str]
+    ) -> bool:
+        """The rule itself, over a BYO set the caller has already resolved."""
         if is_deployment_instance_key(self.config, model_key):
             return True
         if self.model_provider is None:
@@ -279,7 +306,7 @@ class OrganizationPricingService:
             return False
         provider, model = split
         # Gotcha: keep this before the port call. The port's contract only covers a candidate no BYO key serves.
-        if provider in await self.provider_keys.get_byo_providers(organization_id=organization_id):
+        if provider in byo_providers:
             return False
         try:
             credential = await self.model_provider.resolve_hosted_credential(

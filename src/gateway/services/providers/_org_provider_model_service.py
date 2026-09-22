@@ -571,7 +571,7 @@ class OrgProviderModelService:
             offered_rows = list(await self.models.list_all_for_key(key_id))
             keys_by_model = {row.model: f"{provider}:{row.model}" for row in offered_rows}
             priced = await self.org_pricing.rates_in_effect(organization_id, keys_by_model.values(), now)
-            allowed = await self._seedable(user, organization_id, provider, candidates)
+            allowed = await self._seedable(organization_id, provider, candidates)
 
             repriced: list[str] = []
             fresh: list[OrganizationModelPricing] = []
@@ -635,7 +635,7 @@ class OrgProviderModelService:
         # A key a *table* prices is already answered; one only the dataset
         # answers is what this pass stores, so the two are not the same set.
         priced_by_a_table = {k for k, rate in priced.items() if rate.source != "defaults"}
-        allowed = await self._seedable(user, organization_id, provider, models)
+        allowed = await self._seedable(organization_id, provider, models)
 
         seeded: dict[str, OrganizationModelPricing] = {}
         for model, model_key in keys_by_model.items():
@@ -661,32 +661,21 @@ class OrgProviderModelService:
         ]
         return await self.models.create_many(rows)
 
-    async def _seedable(
-        self, user: User, organization_id: uuid.UUID, provider: str, models: Sequence[str]
-    ) -> set[str]:
+    async def _seedable(self, organization_id: uuid.UUID, provider: str, models: Sequence[str]) -> set[str]:
         """Which of ``models`` this organization may hold its own rate for.
 
         A model the *deployment* supplies the credential for is priced by the
-        deployment's list, because the deployment settles that upstream bill;
-        the organization pricing surface refuses an override for one, and
-        seeding past that refusal would store a rate nobody could have created.
-        Checked here rather than raised, because such a model is still legitimately
-        offered: it simply prices from the rung below.
-
-        One question for the whole pass where the answer is the same for every
-        model (the organization's own key covers this provider), and per model
-        only where it is not.
+        deployment's list, because the deployment settles that upstream bill; the
+        organization pricing surface refuses an override for one, and seeding
+        past that refusal would store a rate nobody could have created. Asked
+        rather than raised, because such a model is still legitimately offered:
+        it simply prices from the rung below.
         """
         if not models:
             return set()
-        byo = await self.org_pricing.provider_keys.get_byo_providers(organization_id=organization_id)
-        if provider in byo:
-            return set(models)
-        allowed: set[str] = set()
-        for model in models:
-            if not await self.org_pricing.is_deployment_supplied(organization_id, f"{provider}:{model}"):
-                allowed.add(model)
-        return allowed
+        keys_by_model = {model: f"{provider}:{model}" for model in models}
+        supplied = await self.org_pricing.deployment_supplied_keys(organization_id, keys_by_model.values())
+        return {model for model, model_key in keys_by_model.items() if model_key not in supplied}
 
     # ------------------------------------------------------------------
     # Pricing and dialing
