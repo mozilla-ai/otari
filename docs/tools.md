@@ -191,6 +191,11 @@ In hybrid mode the control plane's policy is consulted only once the decision
 already points at the sandbox, so a declaration the provider serves natively is
 never turned into a 403 for a workspace the control plane has not enabled.
 
+**Upgrading from 0.6.** A deployment with `sandbox_url` set that forwarded
+`code_interpreter`, `code_execution_<date>` or `code_execution` to a provider
+with no native tool for the model now runs it on the sandbox and bills it as a
+sandbox tool call. Set `code_execution_executor: provider` to keep forwarding.
+
 ### Per-workspace code policy
 
 A workspace policy can disable code execution or narrow the deployment limits:
