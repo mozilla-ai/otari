@@ -20,9 +20,8 @@ import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Badge } from "@/design-system/indicators/Badge"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
-import { canManage } from "@/features/organization/roles"
-import { GuardrailParametersSection } from "@/features/tools/GuardrailParametersSection"
-import { GuardrailProfileField } from "@/features/tools/GuardrailProfileField"
+import { GuardrailParametersSection } from "@/features/guardrails/GuardrailParametersSection"
+import { GuardrailProfileField } from "@/features/guardrails/GuardrailProfileField"
 import {
   buildValidateKwargs,
   findProfile,
@@ -34,7 +33,8 @@ import {
   profileIdentity,
   type SeededParameters,
   seedParameters,
-} from "@/features/tools/guardrailParameters"
+} from "@/features/guardrails/guardrailParameters"
+import { canManage } from "@/features/organization/roles"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useCreateOrganizationGuardrail,

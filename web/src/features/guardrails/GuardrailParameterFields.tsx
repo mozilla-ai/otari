@@ -10,7 +10,7 @@ import {
   type ParameterErrors,
   type ParameterValues,
   parameterLabel,
-} from "@/features/tools/guardrailParameters"
+} from "@/features/guardrails/guardrailParameters"
 
 // One control per parameter the chosen profile accepts, picked by the type the
 // catalog reports. The whole point of the catalog is that this file names no

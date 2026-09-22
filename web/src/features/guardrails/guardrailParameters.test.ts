@@ -8,7 +8,7 @@ import {
   parseExtraJson,
   profileIdentity,
   seedParameters,
-} from "@/features/tools/guardrailParameters"
+} from "@/features/guardrails/guardrailParameters"
 import { REDACTED_SECRET } from "@/shared/helpers/redaction"
 
 function spec(

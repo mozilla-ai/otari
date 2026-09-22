@@ -4,7 +4,7 @@ import { useState } from "react"
 import type { GuardrailCatalog } from "@/client"
 import { Field } from "@/design-system/forms/Field"
 import { Select } from "@/design-system/forms/Select"
-import { findProfile } from "@/features/tools/guardrailParameters"
+import { findProfile } from "@/features/guardrails/guardrailParameters"
 
 // Which profile a new entry mandates.
 //
