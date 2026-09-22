@@ -97,9 +97,9 @@ async def test_a_refresh_holds_every_organizations_enabled_definitions(
 
     await _refresh(async_db)
 
-    assert runner.build_state(first.id, held.id) == "built"
-    assert runner.build_state(second.id, elsewhere.id) == "built"
-    assert runner.build_state(first.id, off.id) is None
+    assert runner.build_state(first.id, held.id, held.updated_at) == "built"
+    assert runner.build_state(second.id, elsewhere.id, elsewhere.updated_at) == "built"
+    assert runner.build_state(first.id, off.id, off.updated_at) == "pending"
     assert len(builds) == 2
 
 
@@ -146,7 +146,7 @@ async def test_a_definition_that_was_disabled_is_dropped(
     await _refresh(async_db)
 
     assert runner.handle(organization.id, definition.id) is None
-    assert runner.build_state(organization.id, definition.id) is None
+    assert runner.build_state(organization.id, definition.id, definition.updated_at) == "pending"
 
 
 async def test_a_definition_that_was_deleted_is_dropped(
@@ -162,7 +162,7 @@ async def test_a_definition_that_was_deleted_is_dropped(
     await async_db.flush()
     await _refresh(async_db)
 
-    assert runner.build_state(organization.id, definition_id) is None
+    assert runner.build_state(organization.id, definition_id, datetime.now(UTC)) == "pending"
 
 
 async def test_one_row_that_will_not_build_does_not_cost_the_others_theirs(
@@ -185,8 +185,8 @@ async def test_one_row_that_will_not_build_does_not_cost_the_others_theirs(
 
     await _refresh(async_db)
 
-    assert runner.build_state(organization.id, good.id) == "built"
-    assert runner.build_state(organization.id, bad.id) == "failed"
+    assert runner.build_state(organization.id, good.id, good.updated_at) == "built"
+    assert runner.build_state(organization.id, bad.id, bad.updated_at) == "failed"
     assert runner.handle(organization.id, bad.id) is None
 
 
@@ -251,6 +251,121 @@ async def test_a_build_that_failed_is_not_tried_again(
 
     assert attempts == 1
     assert next(iter(runner._held.values())).guardrail is None
+
+
+# --------------------------------------------------------------------------- #
+# Rebuilding one definition, which is what a write asks for
+# --------------------------------------------------------------------------- #
+
+
+async def test_one_definition_is_rebuilt_without_touching_the_others(
+    async_db: AsyncSession, builds: list[GuardrailName]
+) -> None:
+    """A write is about one row, and an unrelated organization's vendor is not dialed for it."""
+    mine = await _organization(async_db, slug="mine")
+    theirs = await _organization(async_db, slug="theirs")
+    definition = await _definition(async_db, mine, name="lakera")
+    await _definition(async_db, theirs, name="lakera")
+
+    state = await runner.rebuild_definition(UnitOfWork(async_db), mine.id, definition.id)
+
+    assert state == "built"
+    assert len(builds) == 1
+    assert list(runner._held) == [(mine.id, definition.id)]
+
+
+async def test_a_rebuild_reports_a_failure_rather_than_raising(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The write is already committed, so the build's outcome is news, not an error."""
+    organization = await _organization(async_db, slug="bad-key")
+    definition = await _definition(async_db, organization, name="lakera")
+
+    class _Stub:
+        @staticmethod
+        def create(_guardrail_name: GuardrailName, **_kwargs: Any) -> Any:
+            raise RuntimeError("vendor refused the key")
+
+    monkeypatch.setattr(runner, "AnyGuardrail", _Stub)
+
+    assert await runner.rebuild_definition(UnitOfWork(async_db), organization.id, definition.id) == "failed"
+
+
+async def test_a_rebuild_that_runs_out_of_time_is_pending_rather_than_failed(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An admin waits ten seconds at most, and a slow vendor is not a broken definition."""
+    organization = await _organization(async_db, slug="slow")
+    definition = await _definition(async_db, organization, name="lakera")
+
+    class _Stub:
+        @staticmethod
+        def create(_guardrail_name: GuardrailName, **_kwargs: Any) -> Any:
+            time.sleep(0.5)
+            return _Built()
+
+    monkeypatch.setattr(runner, "AnyGuardrail", _Stub)
+    monkeypatch.setattr(runner, "_WRITE_BUILD_TIMEOUT_SECONDS", 0.05)
+
+    assert await runner.rebuild_definition(UnitOfWork(async_db), organization.id, definition.id) == "pending"
+    assert runner._held == {}
+
+
+async def test_a_rebuild_of_a_disabled_definition_drops_what_was_held(
+    async_db: AsyncSession, builds: list[GuardrailName]
+) -> None:
+    """Turning a definition off has to stop the guardrail on the worker that served the write."""
+    organization = await _organization(async_db, slug="switched-off")
+    definition = await _definition(async_db, organization, name="lakera")
+    await _refresh(async_db)
+    assert runner.handle(organization.id, definition.id) is not None
+
+    definition.enabled = False
+    await async_db.flush()
+
+    assert await runner.rebuild_definition(UnitOfWork(async_db), organization.id, definition.id) == "pending"
+    assert runner.handle(organization.id, definition.id) is None
+
+
+async def test_a_rebuild_of_a_deleted_definition_drops_what_was_held(
+    async_db: AsyncSession, builds: list[GuardrailName]
+) -> None:
+    organization = await _organization(async_db, slug="deleted")
+    definition = await _definition(async_db, organization, name="lakera")
+    await _refresh(async_db)
+    definition_id = definition.id
+
+    await async_db.delete(definition)
+    await async_db.flush()
+
+    assert await runner.rebuild_definition(UnitOfWork(async_db), organization.id, definition_id) == "pending"
+    assert runner.handle(organization.id, definition_id) is None
+
+
+async def test_a_rebuild_will_not_reach_another_organizations_definition(
+    async_db: AsyncSession, builds: list[GuardrailName]
+) -> None:
+    """The tenant predicate is the repository's, so a leaked id alone builds nothing."""
+    theirs = await _organization(async_db, slug="not-yours")
+    definition = await _definition(async_db, theirs, name="lakera")
+
+    state = await runner.rebuild_definition(UnitOfWork(async_db), uuid.uuid4(), definition.id)
+
+    assert state == "pending"
+    assert builds == []
+
+
+async def test_a_rebuild_of_an_unchanged_row_builds_nothing_again(
+    async_db: AsyncSession, builds: list[GuardrailName]
+) -> None:
+    """A write that changed no column leaves the stamp alone, so the vendor is not dialed twice."""
+    organization = await _organization(async_db, slug="untouched")
+    definition = await _definition(async_db, organization, name="lakera")
+    await _refresh(async_db)
+    assert len(builds) == 1
+
+    assert await runner.rebuild_definition(UnitOfWork(async_db), organization.id, definition.id) == "built"
+    assert len(builds) == 1
 
 
 async def test_a_definition_this_worker_never_held_is_not_a_handle(async_db: AsyncSession) -> None:

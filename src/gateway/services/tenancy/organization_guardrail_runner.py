@@ -5,6 +5,12 @@ check is. This builds it and holds it ready. The request path looks one up by id
 through :func:`handle` and runs it (`services/guardrails.py`); nothing here reads
 a request or decides what happens to one.
 
+A write asks for two things beyond that. :func:`rebuild_definition` brings this
+worker back in step with one row once the write has committed, and
+:func:`build_state` says what this worker holds for a given version of a row, so
+an admin is told "saved, but not running" rather than being left to find out
+from a request that stopped being served.
+
 It lives in this package, and not beside `services/guardrails.py`, because
 `org_provider_key_service` here already does this exact job for provider keys: a
 process-wide cache, a load at startup and a background refresher. A
@@ -58,7 +64,7 @@ import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from any_guardrail import AnyGuardrail, Guardrail, GuardrailName, GuardrailOutput
 
@@ -91,7 +97,18 @@ _CHECK_TIMEOUT_SECONDS = 10.0
 # validates its URL over the network inside the constructor.
 _BUILD_TIMEOUT_SECONDS = 20.0
 
+# Shorter than the one above, because somebody pressed Save and is watching the
+# form. Running out of it reports `pending` rather than `failed`, and the
+# refresher retries with the full deadline, so the only thing a short deadline
+# here costs is how soon the answer is certain.
+_WRITE_BUILD_TIMEOUT_SECONDS = 10.0
+
 _T = TypeVar("_T")
+
+# What this worker holds for one version of one definition. Not whether the
+# guardrail works: a worker answers for itself, and a sibling that has not
+# caught up yet says `pending` rather than borrowing this one's answer.
+BuildState = Literal["built", "failed", "pending"]
 
 # (organization_id, definition_id) -> what this worker holds for it.
 _held: dict[tuple[uuid.UUID, uuid.UUID], "_Held"] = {}
@@ -195,16 +212,27 @@ def handle(organization_id: uuid.UUID, definition_id: uuid.UUID) -> Organization
     return OrganizationGuardrailHandle(definition_id, GuardrailName(entry.guardrail_name), entry.guardrail)
 
 
-def build_state(organization_id: uuid.UUID, definition_id: uuid.UUID) -> str | None:
-    """Whether this worker built the definition, failed to, or has not seen it.
+def build_state(organization_id: uuid.UUID, definition_id: uuid.UUID, updated_at: datetime) -> BuildState:
+    """What this worker holds for the version of the definition stamped ``updated_at``.
 
     Separate from :func:`handle` because the two audiences differ: a request only
     needs to know whether a check can run, while an admin reading their own row
     needs "saved, but not running" told apart from "not saved here yet".
+
+    The stamp is the whole point and not a convenience. This worker may hold a
+    guardrail built from arguments the row no longer has, and answering "built"
+    for it would report the health of a definition nobody is looking at. A held
+    entry whose fingerprint has moved on is therefore `pending`, which is also
+    what a worker says while it catches up with a write another one served.
     """
     entry = _held.get((organization_id, definition_id))
-    if entry is None:
-        return None
+    if entry is None or entry.fingerprint != updated_at:
+        return "pending"
+    return _state_of(entry)
+
+
+def _state_of(entry: _Held) -> BuildState:
+    """The two answers a held entry can give. Never `pending`: it is held."""
     return "built" if entry.guardrail is not None else "failed"
 
 
@@ -278,6 +306,44 @@ async def _refresh_on_a_session_of_its_own() -> None:
     """
     async with create_unit_of_work() as uow:
         await refresh_guardrail_runner(uow)
+
+
+async def rebuild_definition(uow: UnitOfWork, organization_id: uuid.UUID, definition_id: uuid.UUID) -> BuildState:
+    """Bring this worker back in step with one definition's row, and say what it holds.
+
+    What a write calls once its transaction has committed. The row is the truth
+    and this cache is a copy of it, so the write is never rolled back for a
+    build: the outcome is reported instead, and an admin learns at the moment
+    they pressed Save that a definition saved but is not running.
+
+    One row rather than :func:`refresh_guardrail_runner`'s whole pass, because a
+    write is about one definition and an unrelated organization's slow vendor
+    has no business inside somebody's PATCH. It also builds under the shorter
+    deadline for the same reason.
+
+    A row that is gone or disabled drops what was held, which is what stops a
+    guardrail on the worker that served the write rather than thirty seconds
+    later. Every other worker converges on the refresher's tick, so the answer
+    here is this worker's and is honest only about this worker.
+    """
+    async with uow:
+        row = await OrganizationGuardrailDefinitionRepository(uow).get_in_organization(definition_id, organization_id)
+
+    key = (organization_id, definition_id)
+    if row is None or not row.enabled:
+        _held.pop(key, None)
+        return "pending"
+
+    entry = _held.get(key)
+    if entry is not None and entry.fingerprint == row.updated_at:
+        return _state_of(entry)
+
+    built = await _build(row, seconds=_WRITE_BUILD_TIMEOUT_SECONDS)
+    if built is None:
+        _held.pop(key, None)
+        return "pending"
+    _held[key] = built
+    return _state_of(built)
 
 
 async def refresh_guardrail_runner(uow: UnitOfWork) -> None:
@@ -392,11 +458,13 @@ def _thread_pool() -> ThreadPoolExecutor:
 
 __all__ = [
     "GUARDRAIL_RUNNER_REFRESH_SECONDS",
+    "BuildState",
     "GuardrailCheck",
     "OrganizationGuardrailHandle",
     "build_state",
     "handle",
     "load_guardrail_runner_at_startup",
+    "rebuild_definition",
     "refresh_guardrail_runner",
     "reset_guardrail_runner",
     "run_guardrail_runner_refresher",

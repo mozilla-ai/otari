@@ -17,7 +17,7 @@ import json
 import logging
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -227,7 +227,7 @@ def test_a_definition_that_built_is_handed_out(monkeypatch: pytest.MonkeyPatch) 
     _hold(definition, _Verdict())
 
     assert runner.handle(ORGANIZATION_ID, definition.id) is not None
-    assert runner.build_state(ORGANIZATION_ID, definition.id) == "built"
+    assert runner.build_state(ORGANIZATION_ID, definition.id, definition.updated_at) == "built"
 
 
 def test_a_definition_that_failed_to_build_is_not_handed_out() -> None:
@@ -236,12 +236,36 @@ def test_a_definition_that_failed_to_build_is_not_handed_out() -> None:
     _hold(definition, None)
 
     assert runner.handle(ORGANIZATION_ID, definition.id) is None
-    assert runner.build_state(ORGANIZATION_ID, definition.id) == "failed"
+    assert runner.build_state(ORGANIZATION_ID, definition.id, definition.updated_at) == "failed"
 
 
-def test_a_definition_this_worker_never_saw_has_no_state() -> None:
+def test_a_definition_this_worker_never_saw_is_pending() -> None:
     assert runner.handle(ORGANIZATION_ID, uuid.uuid4()) is None
-    assert runner.build_state(ORGANIZATION_ID, uuid.uuid4()) is None
+    assert runner.build_state(ORGANIZATION_ID, uuid.uuid4(), datetime.now(UTC)) == "pending"
+
+
+def test_a_worker_still_holding_an_older_version_is_pending() -> None:
+    """The reason the state takes the row's own stamp rather than the id alone.
+
+    Without it a worker that built the previous arguments answers "built" for a
+    row it has never seen, which is the one reading an admin acts on.
+    """
+    definition = _definition()
+    _hold(definition, _Verdict())
+
+    moved_on = definition.updated_at + timedelta(seconds=1)
+
+    assert runner.build_state(ORGANIZATION_ID, definition.id, moved_on) == "pending"
+
+
+def test_an_older_failure_is_pending_rather_than_failed() -> None:
+    """A repaired row must not keep reporting the failure of the row it replaced."""
+    definition = _definition()
+    _hold(definition, None)
+
+    repaired = definition.updated_at + timedelta(seconds=1)
+
+    assert runner.build_state(ORGANIZATION_ID, definition.id, repaired) == "pending"
 
 
 def test_another_organizations_definition_is_not_reachable_by_id() -> None:
@@ -454,7 +478,7 @@ async def test_a_load_starts_from_nothing_held(monkeypatch: pytest.MonkeyPatch) 
 
     await runner.load_guardrail_runner_at_startup()
 
-    assert runner.build_state(ORGANIZATION_ID, stale.id) is None
+    assert runner.build_state(ORGANIZATION_ID, stale.id, stale.updated_at) == "pending"
 
 
 def test_the_shutdown_that_drops_the_guardrails_also_drops_the_threads() -> None:
