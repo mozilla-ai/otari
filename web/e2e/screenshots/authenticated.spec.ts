@@ -158,8 +158,9 @@ test.describe("organization rail", () => {
   })
 
   test("organization providers", async ({ page }) => {
-    // Model pricing folded into this page, so its bands are below the
-    // organization's own providers rather than at a destination of their own.
+    // Model pricing folded into this page: an organization's rate is set on the
+    // model row under the provider that serves it, rather than at a destination
+    // of its own.
     await login(page)
     await gotoRoute(page, "/organization/provider-keys")
     await expect(

@@ -741,10 +741,10 @@ describe("OverviewIndex routing", () => {
   })
 
   it("shows a getting-started overview and links to providers on a fresh gateway", async () => {
-    // The organization's own page, on a deployment that serves both. It is the
-    // one an organization owner or admin can actually use: `/providers` manages
-    // the deployment's own credentials and refuses anyone who is not the
-    // operator, and the first thing a new admin clicks must not be a refusal.
+    // The deployment's own credentials. Standalone serves both provider pages
+    // now, and this one stays right because only a deployment operator reaches
+    // this strip at all: a caller who is not one gets `OrganizationOverview`,
+    // which does not draw it.
     mockApi({ providers: [] })
     const user = userEvent.setup()
     renderPage(<OverviewIndex />)
@@ -756,9 +756,7 @@ describe("OverviewIndex routing", () => {
     await user.click(
       screen.getByRole("button", { name: "Add your first provider" }),
     )
-    expect(await screen.findByTestId("loc")).toHaveTextContent(
-      "/organization/provider-keys",
-    )
+    expect(await screen.findByTestId("loc")).toHaveTextContent("/providers")
   })
 
   it("sends a hosted deployment to the same organization page", async () => {
@@ -784,25 +782,6 @@ describe("OverviewIndex routing", () => {
     expect(await screen.findByTestId("loc")).toHaveTextContent(
       "/organization/provider-keys",
     )
-  })
-
-  it("falls back to the deployment's own providers where that is all there is", async () => {
-    // The fallback arm, which nothing else covers now that both shipped
-    // topologies publish the organization surface: a deployment that serves only
-    // the process-global page still has to send somebody somewhere real.
-    mockApi({ providers: [] })
-    const user = userEvent.setup()
-    renderPage(
-      <OverviewIndex />,
-      "/overview",
-      bootstrap({ surfaces: ["providers"] }),
-    )
-
-    await screen.findByText("Get started with Otari")
-    await user.click(
-      screen.getByRole("button", { name: "Add your first provider" }),
-    )
-    expect(await screen.findByTestId("loc")).toHaveTextContent("/providers")
   })
 
   it("reports a failed provider query instead of silently rendering a normal overview", async () => {

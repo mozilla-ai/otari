@@ -806,17 +806,20 @@ function OverviewHeader({
 // organization page could show. `AttentionStrip` drops the link there rather
 // than sending somebody to a page the instance is not on.
 // Where "add a provider" should send somebody, given what this deployment
-// serves. The organization's own page is preferred where it is served, which is
-// now everywhere: it is the one an organization owner or admin can actually use,
-// where `/providers` is the deployment's own credentials and refuses anyone who
-// is not the operator. Standalone publishes both surfaces, so the order here is
-// what decides, and getting it the other way round would send most admins to a
-// page that turns them away.
+// serves. A control plane reports no `providers` surface at all, so there is one
+// provider page there and this is it.
+//
+// Standalone now serves both, and this still prefers the deployment's own
+// credentials, which is not the obvious answer once two pages exist. It is the
+// right one because of who reaches this button: `OverviewIndex` hands a caller
+// who does not operate the deployment to `OrganizationOverview`, which has no
+// getting-started strip, so the only person who can press this is the operator.
+// `/providers` is where a fresh gateway is set up and carries the first-run
+// panel that continues the flow. Gating on the caller here as well would state a
+// rule that is already guaranteed one level up.
 function useAddProviderRoute(): "/providers" | "/organization/provider-keys" {
   const serves = useSurfaces()
-  return serves("organization_providers")
-    ? "/organization/provider-keys"
-    : "/providers"
+  return serves("providers") ? "/providers" : "/organization/provider-keys"
 }
 
 function GetStartedStrip() {

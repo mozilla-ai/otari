@@ -132,9 +132,12 @@ test.describe("dashboard core flows", () => {
 
     await openOrganization(page)
     for (const [link, heading] of [
+      // Two provider rows on this rail now, and the labels are what tell them
+      // apart: the organization's own credentials and the process-wide ones a
+      // deployment operator manages.
       ["Providers", "Providers"],
+      ["Deployment providers", "Providers"],
       ["Spend & budgets", "Budgets"],
-      ["Model pricing", "Model pricing"],
     ]) {
       await nav(page).getByRole("link", { name: link, exact: true }).click()
       await expect(pageHeading(page, heading)).toBeVisible()
