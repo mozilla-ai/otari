@@ -76,11 +76,11 @@ since. A module "runs queries" when it imports a query builder (`select`,
 
 ## The domains
 
-Seventeen domains plus a shared set. A module appears once. Paths are
-relative to their layer's directory. A domain package is listed by its
-directory, which covers every module inside it. A route module whose name
-starts with an underscore is a shared helper, which the target shape moves
-out of the routes layer.
+Each domain has a section below. The shared set follows them. A module
+appears once. Paths are relative to their layer's directory. A domain
+package is listed by its directory, which covers every module inside it. A
+route module whose name starts with an underscore is a shared helper, which
+the target shape moves out of the routes layer.
 
 Two groups of modules fail the domain test and are split here. Tenancy holds
 sign-in and organization management, which are separate sets of use cases, so
