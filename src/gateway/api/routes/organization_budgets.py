@@ -10,9 +10,8 @@ A budget with no ``organization_id`` belongs to the deployment, and no route her
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
+from gateway.api.deps import BudgetServiceDep, CurrentIdentity, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.schemas.budgets import (
     OrganizationBudgetCreate,
@@ -24,7 +23,6 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetsPublic,
     OrganizationScopedBudgetUpdate,
 )
-from gateway.services.budgets import OrganizationBudgetService
 
 # Master key on the router, as every standalone management router declares it.
 # The role gate is a separate question answered in the service: the credential
@@ -43,38 +41,30 @@ ceilings_router = APIRouter(
 )
 
 
-def get_organization_budget_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationBudgetService:
-    """Build the service on the request's session."""
-    return OrganizationBudgetService(db)
-
-
-ServiceDep = Annotated[OrganizationBudgetService, Depends(get_organization_budget_service)]
-
-
 @budgets_router.get("")
 async def list_organization_budgets(
-    service: ServiceDep,
+    service: BudgetServiceDep,
     current_identity: CurrentIdentity,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
 ) -> OrganizationBudgetsPublic:
     """List the budgets this organization has defined. Owners and admins only."""
-    return await service.list_budgets(user=current_identity, skip=skip, limit=limit)
+    return await service.list_organization_budgets(user=current_identity, skip=skip, limit=limit)
 
 
 @budgets_router.post("", status_code=status.HTTP_201_CREATED)
 async def create_organization_budget(
-    service: ServiceDep,
+    service: BudgetServiceDep,
     current_identity: CurrentIdentity,
     body: OrganizationBudgetCreate,
 ) -> OrganizationBudgetPublic:
     """Define a budget owned by this organization. Owners and admins only."""
-    return await service.create_budget(user=current_identity, request=body)
+    return await service.create_organization_budget(user=current_identity, request=body)
 
 
 @budgets_router.patch("/{budget_id}")
 async def update_organization_budget(
-    service: ServiceDep,
+    service: BudgetServiceDep,
     current_identity: CurrentIdentity,
     budget_id: str,
     body: OrganizationBudgetUpdate,
@@ -84,23 +74,23 @@ async def update_organization_budget(
     Every ceiling naming it is held to the new figure from here on, which is the
     point of naming a budget rather than typing an amount per place it applies.
     """
-    return await service.update_budget(user=current_identity, budget_id=budget_id, request=body)
+    return await service.update_organization_budget(user=current_identity, budget_id=budget_id, request=body)
 
 
 @budgets_router.delete("/{budget_id}")
 async def delete_organization_budget(
-    service: ServiceDep,
+    service: BudgetServiceDep,
     current_identity: CurrentIdentity,
     budget_id: str,
 ) -> Message:
     """Delete a budget, refused with 409 while a ceiling or workspace default names it."""
-    await service.delete_budget(user=current_identity, budget_id=budget_id)
+    await service.delete_organization_budget(user=current_identity, budget_id=budget_id)
     return Message(message="Budget deleted")
 
 
 @ceilings_router.get("")
 async def list_organization_spend_ceilings(
-    service: ServiceDep,
+    service: BudgetServiceDep,
     current_identity: CurrentIdentity,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
@@ -111,12 +101,12 @@ async def list_organization_spend_ceilings(
     ``manageable`` false rather than omitted: it is enforcing against this
     organization's spend, so leaving it out would let the page read as uncapped.
     """
-    return await service.list_ceilings(user=current_identity, skip=skip, limit=limit)
+    return await service.list_organization_ceilings(user=current_identity, skip=skip, limit=limit)
 
 
 @ceilings_router.post("", status_code=status.HTTP_201_CREATED)
 async def create_organization_spend_ceiling(
-    service: ServiceDep,
+    service: BudgetServiceDep,
     current_identity: CurrentIdentity,
     body: OrganizationScopedBudgetCreate,
 ) -> OrganizationScopedBudgetPublic:
@@ -126,12 +116,12 @@ async def create_organization_spend_ceiling(
     creating a ceiling that can never bind, and 404 when the budget is not this
     organization's.
     """
-    return await service.create_ceiling(user=current_identity, request=body)
+    return await service.create_organization_ceiling(user=current_identity, request=body)
 
 
 @ceilings_router.patch("/{ceiling_id}")
 async def update_organization_spend_ceiling(
-    service: ServiceDep,
+    service: BudgetServiceDep,
     current_identity: CurrentIdentity,
     ceiling_id: str,
     body: OrganizationScopedBudgetUpdate,
@@ -142,17 +132,17 @@ async def update_organization_spend_ceiling(
     move the ceiling to a different identity while carrying its spend, which is a
     delete and a create.
     """
-    return await service.update_ceiling(user=current_identity, ceiling_id=ceiling_id, request=body)
+    return await service.update_organization_ceiling(user=current_identity, ceiling_id=ceiling_id, request=body)
 
 
 @ceilings_router.delete("/{ceiling_id}")
 async def delete_organization_spend_ceiling(
-    service: ServiceDep,
+    service: BudgetServiceDep,
     current_identity: CurrentIdentity,
     ceiling_id: str,
 ) -> Message:
     """Remove a ceiling inside this organization."""
-    await service.delete_ceiling(user=current_identity, ceiling_id=ceiling_id)
+    await service.delete_organization_ceiling(user=current_identity, ceiling_id=ceiling_id)
     return Message(message="Spend ceiling deleted")
 
 

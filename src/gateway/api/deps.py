@@ -26,8 +26,11 @@ from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.repositories.api_keys import ApiKeyRepository
+from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
-from gateway.services.budgets import WorkspaceBudgetDefaultService
+from gateway.services.api_keys import ApiKeyService
+from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.file_service import StagedFile
 from gateway.services.file_store import FileStore
@@ -814,6 +817,22 @@ def get_overview_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Overvi
 
 
 OverviewServiceDep = Annotated[OverviewService, Depends(get_overview_service)]
+
+
+def get_budget_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> BudgetService:
+    """Build the request's budget service on the request's Unit of Work."""
+    return BudgetService(
+        uow,
+        BudgetRepositories.on(uow),
+        OrganizationService(db, membership_listener=None),
+        ApiKeyService(ApiKeyRepository(uow)),
+    )
+
+
+BudgetServiceDep = Annotated[BudgetService, Depends(get_budget_service)]
 
 ApiKeyFormatPortDep = Annotated[ApiKeyFormatPort, Depends(get_api_key_format_port)]
 BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
