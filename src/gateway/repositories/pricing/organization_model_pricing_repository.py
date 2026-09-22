@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Collection, Sequence
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -65,6 +65,15 @@ class OrganizationModelPricingRepository:
                     col(OrganizationModelPricing.organization_id) == organization_id,
                     col(OrganizationModelPricing.model_key).in_(chunk),
                     col(OrganizationModelPricing.effective_from) <= as_of,
+                    # The half-open period, stated in SQL rather than walked in
+                    # Python: this table grows a row per model per period, so an
+                    # expired one filtered here is a row the database never
+                    # sends. ``effective_to`` is exclusive, so a period ending
+                    # exactly at ``as_of`` no longer applies.
+                    or_(
+                        col(OrganizationModelPricing.effective_to).is_(None),
+                        col(OrganizationModelPricing.effective_to) > as_of,
+                    ),
                 )
                 .order_by(
                     col(OrganizationModelPricing.model_key),
@@ -72,8 +81,6 @@ class OrganizationModelPricingRepository:
                 )
             )
             for row in result.scalars():
-                if row.effective_to is not None and row.effective_to <= as_of:
-                    continue
                 # Ordered oldest-first, so the last applicable period seen for a
                 # key is the newest one, which is the one that applies.
                 applicable[row.model_key] = row
@@ -89,13 +96,30 @@ class OrganizationModelPricingRepository:
         current: dict[str, ModelPricing] = {}
         for start in range(0, len(keys), _KEY_CHUNK):
             chunk = keys[start : start + _KEY_CHUNK]
-            result = await self.db.execute(
-                select(ModelPricing)
+            # One row per key, chosen in SQL. ``model_pricing`` is a version
+            # series, so a model repriced often carries a row per version and
+            # loading them all to keep the last is a table that grows with the
+            # deployment's history rather than with the page being drawn.
+            newest = (
+                select(
+                    col(ModelPricing.model_key).label("model_key"),
+                    func.max(col(ModelPricing.effective_at)).label("effective_at"),
+                )
                 .where(
                     col(ModelPricing.model_key).in_(chunk),
                     col(ModelPricing.effective_at) <= as_of,
                 )
-                .order_by(col(ModelPricing.model_key), col(ModelPricing.effective_at))
+                .group_by(col(ModelPricing.model_key))
+                .subquery()
+            )
+            result = await self.db.execute(
+                select(ModelPricing).join(
+                    newest,
+                    and_(
+                        col(ModelPricing.model_key) == newest.c.model_key,
+                        col(ModelPricing.effective_at) == newest.c.effective_at,
+                    ),
+                )
             )
             for row in result.scalars():
                 current[row.model_key] = row

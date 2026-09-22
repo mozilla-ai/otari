@@ -246,6 +246,7 @@ class OrganizationPricingService:
         self,
         user: TenancyUser,
         *,
+        model_key: str | None = None,
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[list[OrganizationModelPricing], int]:
@@ -255,20 +256,26 @@ class OrganizationPricingService:
         long-lived organization accumulates them and an unbounded read would get
         slower forever. Ordered by key then newest period, so paging is stable.
 
+        ``model_key`` narrows to one model, which is what an editor for that
+        model needs: it has to see every period stored for it, both to open on
+        the one in force and to refuse a new one that would overlap. Taking the
+        first page of the whole table instead would answer that correctly only
+        while the organization's overrides fit in one page, then quietly start
+        opening a create form over a rate that already exists.
+
         The count is the total matching rows, not the length of the page, because
         that is what tells a client whether to ask for another one.
         """
         organization_id = await self._readable_organization_id(user)
+        where = [OrganizationModelPricing.organization_id == organization_id]
+        if model_key is not None:
+            where.append(OrganizationModelPricing.model_key == model_key)
         total = (
-            await self.db.execute(
-                select(func.count())
-                .select_from(OrganizationModelPricing)
-                .where(OrganizationModelPricing.organization_id == organization_id)
-            )
+            await self.db.execute(select(func.count()).select_from(OrganizationModelPricing).where(*where))
         ).scalar_one()
         stmt = (
             select(OrganizationModelPricing)
-            .where(OrganizationModelPricing.organization_id == organization_id)
+            .where(*where)
             .order_by(
                 OrganizationModelPricing.model_key,
                 OrganizationModelPricing.effective_from.desc(),

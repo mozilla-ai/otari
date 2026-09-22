@@ -2322,6 +2322,11 @@ export interface paths {
          *     Paged on the same bounds the rest of the tenancy surface uses, because the
          *     table grows a row per model per period. ``count`` is the total, so a client
          *     knows whether another page is owed.
+         *
+         *     ``model_key`` narrows to one model, which is what an editor for that model
+         *     needs: every period stored for it, so it can open on the one in force and
+         *     refuse a new one that would overlap. Normalized the same way a write is, so
+         *     a legacy ``provider/model`` spelling finds the rows a canonical one stored.
          */
         get: operations["organization-pricing-list_organization_pricing"];
         put?: never;
@@ -17029,6 +17034,8 @@ export interface operations {
     "organization-pricing-list_organization_pricing": {
         parameters: {
             query?: {
+                /** @description Return only this model's periods, in the canonical 'provider:model' form. */
+                model_key?: string | null;
                 /** @description Number of records to skip */
                 skip?: number;
                 /** @description Maximum number of records to return */

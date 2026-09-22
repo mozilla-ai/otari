@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { OrgProviderModel } from "@/client"
-import { API_ROOT } from "@/shared/api/client"
 import { orgProviderKey, orgProviderModel } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
@@ -160,6 +159,51 @@ describe("ProviderModelsPanel", () => {
         ),
       ).toBe(true)
     })
+  })
+
+  it("will not offer to serve a model nothing prices", async () => {
+    // The server refuses it too, for the reason the offer rule exists: a model
+    // with no rate would be billed at nothing. The control says so rather than
+    // taking a press and answering with a banner.
+    mockApi({
+      models: [
+        orgProviderModel({
+          model: "gpt-6-unreleased",
+          price_source: null,
+          input_price_per_million: null,
+          output_price_per_million: null,
+          enabled: false,
+        }),
+      ],
+    })
+    await renderPanel()
+
+    expect(
+      await screen.findByRole("switch", {
+        name: "gpt-6-unreleased has no rate yet, so it cannot be served",
+      }),
+    ).toBeDisabled()
+  })
+
+  it("still lets an unpriced model be switched off", async () => {
+    // One-directional, matching the server: a row that reached the served state
+    // some other way has to stay withdrawable.
+    mockApi({
+      models: [
+        orgProviderModel({
+          model: "gpt-6-unreleased",
+          price_source: null,
+          input_price_per_million: null,
+          output_price_per_million: null,
+          enabled: true,
+        }),
+      ],
+    })
+    await renderPanel()
+
+    expect(
+      await screen.findByRole("switch", { name: "Serve gpt-6-unreleased" }),
+    ).toBeEnabled()
   })
 
   it("says what each refresh did, per button", async () => {
@@ -333,11 +377,12 @@ describe("ProviderModelsPanel", () => {
 
     await user.click(screen.getByRole("button", { name: /Add model/ }))
 
+    // The available-models route specifically. The panel's own list read is
+    // under the same prefix, so a predicate on the prefix alone passes whether
+    // or not opening the form ever dials.
     await waitFor(() => {
       expect(
-        requests.some((request) =>
-          request.url.includes(`${API_ROOT}/organizations/me/provider-keys`),
-        ),
+        requests.some((request) => request.url.includes("/available-models")),
       ).toBe(true)
     })
   })

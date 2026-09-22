@@ -12,6 +12,7 @@ import uuid
 from collections.abc import Collection, Sequence
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -22,6 +23,20 @@ from gateway.models.provider_keys import (
     OrgProviderKeyModelUpdateRequest,
 )
 from gateway.repositories.base_repository import BaseRepository
+
+
+class OfferedModelConflict(Exception):
+    """The unique index refused a model already offered on this key.
+
+    Raised here rather than letting ``IntegrityError`` travel, because the
+    service that maps this to its domain error may not import a database
+    library (``scripts/check_architecture.py``, rule 11). It carries the model
+    so the caller can name it without re-reading the row.
+    """
+
+    def __init__(self, model: str) -> None:
+        super().__init__(model)
+        self.model = model
 
 
 class OrgProviderKeyModelRepository(
@@ -144,11 +159,22 @@ class OrgProviderKeyModelRepository(
         return offered
 
     async def create_many(self, rows: Sequence[OrgProviderKeyModel]) -> Sequence[OrgProviderKeyModel]:
-        """Stage several offered rows at once. The caller owns the transaction."""
+        """Stage several offered rows at once. The caller owns the transaction.
+
+        Flushed here rather than left to the commit, so the unique index answers
+        while the caller can still say which model it refused. A pre-check races
+        the insert, and the constraint is what actually decides.
+
+        Raises:
+            OfferedModelConflict: one of these models is already offered here.
+        """
         if not rows:
             return []
         self.db.add_all(rows)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError as exc:
+            raise OfferedModelConflict(rows[0].model) from exc
         return rows
 
     async def save(self, row: OrgProviderKeyModel) -> OrgProviderKeyModel:

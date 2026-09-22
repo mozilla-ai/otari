@@ -57,16 +57,22 @@ from gateway.models.provider_keys import (
 )
 from gateway.models.tenancy import User
 from gateway.repositories.pricing import OrganizationModelPricingRepository
-from gateway.repositories.tenancy import OrgProviderKeyModelRepository, OrgProviderKeyRepository
+from gateway.repositories.tenancy import (
+    OfferedModelConflict,
+    OrgProviderKeyModelRepository,
+    OrgProviderKeyRepository,
+)
 from gateway.services.model_discovery_service import ProviderDiscovery, test_provider_credentials
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
 from gateway.services.tenancy.errors import (
     OrgProviderKeyNotFoundError,
+    OrgProviderLastModelError,
     OrgProviderModelAlreadyOfferedError,
     OrgProviderModelNameRequiredError,
     OrgProviderModelNotFoundError,
+    OrgProviderModelUnpricedError,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
 
@@ -340,17 +346,22 @@ class OrgProviderModelService:
         async with self.uow:
             key = await self._key_for_user(user, key_id)
             if await self.models.get_by_model(key_id, name) is not None:
-                # The pre-check above races the insert, the same way every other
-                # create in this slice does.
                 raise OrgProviderModelAlreadyOfferedError(provider, name)
-            [row] = await self._offer(
-                key_id=key_id,
-                organization_id=organization_id,
-                provider=provider,
-                models=[name],
-                defaults=defaults,
-                user=user,
-            )
+            try:
+                [row] = await self._offer(
+                    key_id=key_id,
+                    organization_id=organization_id,
+                    provider=provider,
+                    models=[name],
+                    defaults=defaults,
+                    user=user,
+                )
+            except OfferedModelConflict as conflict:
+                # The pre-check above races the insert, and the unique index is
+                # what actually decides, the same way every other create in this
+                # slice resolves it. Without this the loser of that race leaves
+                # with a 500 rather than the 409 it is.
+                raise OrgProviderModelAlreadyOfferedError(provider, conflict.model) from conflict
             prices = await self._current_prices(key, [row])
             public = _model_public(row, prices.get(row.model))
         await self.refresh_overlay()
@@ -361,15 +372,27 @@ class OrgProviderModelService:
     ) -> OrgProviderKeyModelPublic:
         """Turn one offered model's serving switch on or off.
 
+        Switching one on is refused where nothing prices it. The offer path
+        already records such a model unserved so it cannot be billed at nothing,
+        and without the same check here the switch would be a way straight past
+        that rule: the model would reach the catalog, and the dispatch gate, with
+        no rate behind it. Switching one *off* is never refused, so a row that
+        reached that state some other way can still be withdrawn.
+
         Raises:
             OrgProviderKeyNotFoundError: no such key in the caller's organization.
             OrgProviderModelNotFoundError: no such model on that key.
+            OrgProviderModelUnpricedError: serving was asked for an unpriced model.
         """
         async with self.uow:
             key = await self._key_for_user(user, key_id)
             row = await self.models.get_in_key(model_id, key_id)
             if row is None:
                 raise OrgProviderModelNotFoundError(model_id)
+            if enabled and not row.enabled:
+                priced = await self._current_prices(key, [row])
+                if row.model not in priced:
+                    raise OrgProviderModelUnpricedError(row.model)
             row.enabled = enabled
             await self.models.save(row)
             prices = await self._current_prices(key, [row])
@@ -384,15 +407,25 @@ class OrgProviderModelService:
         offered again should find its rate where it was left rather than
         reverting to a default unannounced.
 
+        The last one is refused, because removing it would *widen* the key.
+        Absent rows mean unnarrowed, which is what a key nobody has refreshed
+        looks like, so emptying the list returns the key to reaching everything
+        its provider serves. That is the opposite of what pressing "stop
+        offering" reads as, and it would happen quietly. The switch is how a
+        model stops being served.
+
         Raises:
             OrgProviderKeyNotFoundError: no such key in the caller's organization.
             OrgProviderModelNotFoundError: no such model on that key.
+            OrgProviderLastModelError: it is the only model the key offers.
         """
         async with self.uow:
             await self._key_for_user(user, key_id)
             row = await self.models.get_in_key(model_id, key_id)
             if row is None:
                 raise OrgProviderModelNotFoundError(model_id)
+            if len(await self.models.names_for_key(key_id)) == 1:
+                raise OrgProviderLastModelError
             await self.models.delete_row(row)
         await self.refresh_overlay()
 

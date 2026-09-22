@@ -407,6 +407,62 @@ def test_the_list_is_paged_and_counts_the_whole_set(
     assert len(set(ids)) == 3
 
 
+def test_the_list_narrows_to_one_model(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """What an editor for one model reads.
+
+    It needs every period stored for that model, both to open on the one in
+    force and to refuse a new one that would overlap. Taking the first page of
+    the whole table answers that only while the organization's overrides fit in
+    one page, and then starts opening a create form over a rate that exists.
+    """
+    start = datetime.now(UTC) - timedelta(days=30)
+    for index in range(3):
+        assert (
+            client.post(
+                _ENDPOINT,
+                json=_body(
+                    model_key="openai:gpt-4o",
+                    effective_from=(start + timedelta(days=index * 2)).isoformat(),
+                    effective_to=(start + timedelta(days=index * 2 + 1)).isoformat(),
+                ),
+                headers=master_key_header,
+            ).status_code
+            == status.HTTP_201_CREATED
+        )
+    assert (
+        client.post(_ENDPOINT, json=_body(model_key="openai:gpt-4o-mini"), headers=master_key_header).status_code
+        == status.HTTP_201_CREATED
+    )
+
+    narrowed = client.get(f"{_ENDPOINT}?model_key=openai:gpt-4o", headers=master_key_header)
+
+    assert narrowed.status_code == status.HTTP_200_OK, narrowed.text
+    assert {row["model_key"] for row in narrowed.json()["data"]} == {"openai:gpt-4o"}
+    # Every period of that model, and the count narrows with the rows rather
+    # than reporting the whole table.
+    assert len(narrowed.json()["data"]) == 3
+    assert narrowed.json()["count"] == 3
+
+
+def test_the_list_narrows_on_the_canonical_key_whichever_spelling_is_asked(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Keys are canonicalized on write, so a legacy slash spelling has to find
+    the rows a colon one stored rather than answering empty."""
+    assert (
+        client.post(_ENDPOINT, json=_body(model_key="openai:gpt-4o"), headers=master_key_header).status_code
+        == status.HTTP_201_CREATED
+    )
+
+    legacy = client.get(f"{_ENDPOINT}?model_key=openai/gpt-4o", headers=master_key_header)
+
+    assert [row["model_key"] for row in legacy.json()["data"]] == ["openai:gpt-4o"]
+
+
 def test_the_list_refuses_a_limit_past_the_ceiling(
     client: TestClient,
     master_key_header: dict[str, str],

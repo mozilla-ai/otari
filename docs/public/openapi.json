@@ -24486,9 +24486,27 @@
     },
     "/api/v1/organizations/me/pricing": {
       "get": {
-        "description": "List the organization's rate overrides.\n\nReadable by any member: these rates decide what the caller's own requests\ncost, so they are not withheld from the people billed at them. Writing needs\nan owner or admin.\n\nPaged on the same bounds the rest of the tenancy surface uses, because the\ntable grows a row per model per period. ``count`` is the total, so a client\nknows whether another page is owed.",
+        "description": "List the organization's rate overrides.\n\nReadable by any member: these rates decide what the caller's own requests\ncost, so they are not withheld from the people billed at them. Writing needs\nan owner or admin.\n\nPaged on the same bounds the rest of the tenancy surface uses, because the\ntable grows a row per model per period. ``count`` is the total, so a client\nknows whether another page is owed.\n\n``model_key`` narrows to one model, which is what an editor for that model\nneeds: every period stored for it, so it can open on the one in force and\nrefuse a new one that would overlap. Normalized the same way a write is, so\na legacy ``provider/model`` spelling finds the rows a canonical one stored.",
         "operationId": "organization-pricing-list_organization_pricing",
         "parameters": [
+          {
+            "description": "Return only this model's periods, in the canonical 'provider:model' form.",
+            "in": "query",
+            "name": "model_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return only this model's periods, in the canonical 'provider:model' form.",
+              "title": "Model Key"
+            }
+          },
           {
             "description": "Number of records to skip",
             "in": "query",

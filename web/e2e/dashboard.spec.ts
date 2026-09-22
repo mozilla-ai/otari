@@ -3,6 +3,7 @@ import { API_ROOT } from "@/shared/api/client"
 import {
   dismissComboBoxInDialog,
   expectedKeyFingerprint,
+  gotoRoute,
   login,
   MASTER_KEY,
   nav,
@@ -142,6 +143,18 @@ test.describe("dashboard core flows", () => {
       await nav(page).getByRole("link", { name: link, exact: true }).click()
       await expect(pageHeading(page, heading)).toBeVisible()
     }
+
+    // The retired Model pricing path still answers, because bookmarks and links
+    // to it outlive the page. `override` named this organization's own rate for
+    // a model and still does, so it survives the redirect; `model` named the
+    // deployment's rate, whose editor went with the price table, so it is
+    // dropped rather than left in a URL nothing reads.
+    await gotoRoute(page, "/organization/pricing?override=openai:gpt-4o")
+    await expect(pageHeading(page, "Providers")).toBeVisible()
+    await expect(page).toHaveURL(/override=openai(%3A|:)gpt-4o/)
+    await gotoRoute(page, "/organization/pricing?model=openai:gpt-4o")
+    await expect(pageHeading(page, "Providers")).toBeVisible()
+    await expect(page).not.toHaveURL(/model=/)
 
     // The deployment's own rail, which neither loop above reaches: it is entered
     // from the account menu rather than from a row, and the menu closes on the

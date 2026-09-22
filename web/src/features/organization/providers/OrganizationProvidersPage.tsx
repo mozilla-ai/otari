@@ -64,9 +64,9 @@ import { PricingOverrideDialog } from "../PricingOverrideDialog"
 import { canManage } from "../roles"
 import { ProviderModelsPanel } from "./ProviderModelsPanel"
 
-// One page of overrides is enough to seed the editor and the overlap check: the
-// dialog needs the row it is editing and the periods it must not collide with,
-// and an organization with more rates than this pages them on its own read.
+// Every period one model can carry, which is what the editor reads. Generous
+// rather than tuned: the read is narrowed to a single model, so this bounds the
+// periods stored for it rather than the organization's whole table.
 const OVERRIDE_PAGE_SIZE = 200
 
 // The two URL-held pieces of page state: which key's models are open, and which
@@ -328,7 +328,17 @@ export function OrganizationProvidersPage() {
   const url = useUrlState(URL_DEFAULTS)
   const expandedKeyId = url.get("provider")
   const ratingModelKey = url.get("override")
-  const overrides = useOrganizationPricing(0, OVERRIDE_PAGE_SIZE, canEdit)
+  // Narrowed to the model being edited, and read only while one is. Every
+  // period of that model is what the editor needs, and the first page of the
+  // whole table is not that: an organization with more overrides than fit in it
+  // would open a create form over a rate that already exists, and the save
+  // would earn the 409 the overlap check exists to prevent.
+  const overrides = useOrganizationPricing(
+    0,
+    OVERRIDE_PAGE_SIZE,
+    canEdit && ratingModelKey !== "",
+    ratingModelKey || undefined,
+  )
 
   // Bumped on each open, and the create form is keyed on it, so the draft (the
   // plaintext secret included) is fresh every time and untouched through the

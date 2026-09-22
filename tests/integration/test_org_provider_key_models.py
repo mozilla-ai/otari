@@ -46,9 +46,11 @@ from gateway.services.tenancy import OrgProviderKeyService
 from gateway.services.tenancy.errors import (
     NotAuthorizedError,
     OrgProviderKeyNotFoundError,
+    OrgProviderLastModelError,
     OrgProviderModelAlreadyOfferedError,
     OrgProviderModelNameRequiredError,
     OrgProviderModelNotFoundError,
+    OrgProviderModelUnpricedError,
 )
 from gateway.services.tenancy.org_provider_key_service import (
     cached_org_model_restriction,
@@ -93,6 +95,11 @@ def _secret_key_and_clean_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[Non
     reset_org_provider_cache()
     yield
     reset_org_provider_cache()
+
+
+async def _none(*_args: object, **_kwargs: object) -> None:
+    """A repository read that answers "absent", standing in for a lost race."""
+    return None
 
 
 def _service(db: AsyncSession) -> OrgProviderModelService:
@@ -283,6 +290,31 @@ async def test_adding_a_model_by_name_offers_it(async_db: AsyncSession, monkeypa
     assert offered.model == "gpt-4o"
     assert offered.enabled is True
     assert offered.price_source == "default"
+
+    with pytest.raises(OrgProviderModelAlreadyOfferedError):
+        await _service(async_db).add_model(user=owner, key_id=key_id, model="gpt-4o")
+
+
+async def test_the_unique_index_decides_a_racing_offer(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pre-check races the insert, so the constraint is the real arbiter.
+
+    Driven by making the pre-check answer "absent" for a model that is in fact
+    already offered, which is the state a concurrent request leaves behind
+    between the two. Without the translation the loser leaves with a 500 rather
+    than the 409 it is.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key(async_db, owner)
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    await _service(async_db).add_model(user=owner, key_id=key_id, model="gpt-4o")
+
+    monkeypatch.setattr(
+        "gateway.repositories.tenancy.OrgProviderKeyModelRepository.get_by_model",
+        _none,
+    )
 
     with pytest.raises(OrgProviderModelAlreadyOfferedError):
         await _service(async_db).add_model(user=owner, key_id=key_id, model="gpt-4o")
@@ -536,15 +568,95 @@ async def test_removing_a_model_keeps_its_rate(async_db: AsyncSession, monkeypat
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     key_id = await _key(async_db, owner)
+    _discovery(monkeypatch, "gpt-4o", "gpt-4o-mini")
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10"), "gpt-4o-mini": ("0.15", "0.6")})
+    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    listed = await _service(async_db).list_models(user=owner, key_id=key_id)
+    removed = next(row for row in listed.data if row.model == "gpt-4o")
+
+    await _service(async_db).remove_model(user=owner, key_id=key_id, model_id=removed.id)
+
+    assert await _offered(async_db, key_id) == {"gpt-4o-mini": True}
+    assert sorted(row.model_key for row in await _organization_rates(async_db)) == [
+        "openai:gpt-4o",
+        "openai:gpt-4o-mini",
+    ]
+
+
+async def test_removing_the_last_model_is_refused_because_it_would_widen_the_key(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Absent rows mean unnarrowed, so emptying the list is not "serve nothing":
+    it returns the key to reaching everything its provider does, which is the
+    opposite of what pressing "stop offering" reads as."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    # Read before the refusal below. The unit of work rolls back when the error
+    # leaves its block, which expires every instance in the session, and reading
+    # an expired attribute back is a lazy load the async session cannot run.
+    workspace_id = workspace.id
+    key_id = await _key(async_db, owner)
+    await OrgProviderKeyService(async_db).set_org_default_for_user(user=owner, key_id=key_id)
     _discovery(monkeypatch, "gpt-4o")
     _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
     await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
     listed = await _service(async_db).list_models(user=owner, key_id=key_id)
 
-    await _service(async_db).remove_model(user=owner, key_id=key_id, model_id=listed.data[0].id)
+    with pytest.raises(OrgProviderLastModelError):
+        await _service(async_db).remove_model(user=owner, key_id=key_id, model_id=listed.data[0].id)
 
-    assert await _offered(async_db, key_id) == {}
-    assert [row.model_key for row in await _organization_rates(async_db)] == ["openai:gpt-4o"]
+    assert await _offered(async_db, key_id) == {"gpt-4o": True}
+    assert cached_org_model_restriction(workspace_id, "openai") == ["gpt-4o"]
+
+
+async def test_serving_a_model_nothing_prices_is_refused(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of disabled-until-priced. The offer path records such a
+    model unserved so it cannot be billed at nothing; the switch must not be a
+    way straight past that."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key(async_db, owner)
+    _discovery(monkeypatch, "gpt-6-unreleased")
+    _defaults(monkeypatch, {})
+    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    listed = await _service(async_db).list_models(user=owner, key_id=key_id)
+    assert listed.data[0].enabled is False
+
+    with pytest.raises(OrgProviderModelUnpricedError):
+        await _service(async_db).set_model_enabled(
+            user=owner, key_id=key_id, model_id=listed.data[0].id, enabled=True
+        )
+
+    assert await _offered(async_db, key_id) == {"gpt-6-unreleased": False}
+
+
+async def test_switching_a_model_off_is_never_refused(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard above is one-directional on purpose: a row that reached the
+    served state some other way still has to be withdrawable."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key(async_db, owner)
+    _discovery(monkeypatch, "gpt-4o", "gpt-4o-mini")
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10"), "gpt-4o-mini": ("0.15", "0.6")})
+    await _service(async_db).refresh_models(user=owner, key_id=key_id, timeout=1.0)
+    listed = await _service(async_db).list_models(user=owner, key_id=key_id)
+    # The rate goes away underneath it, which is the state the guard refuses to
+    # enter and must not refuse to leave.
+    _defaults(monkeypatch, {})
+    for row in await _organization_rates(async_db):
+        await async_db.delete(row)
+    await async_db.commit()
+
+    updated = await _service(async_db).set_model_enabled(
+        user=owner, key_id=key_id, model_id=listed.data[0].id, enabled=False
+    )
+
+    assert updated.enabled is False
 
 
 # --------------------------------------------------------------------------- #

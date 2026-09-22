@@ -156,13 +156,24 @@ export function ProviderModelsPanel({
       cell: (row) => (
         <Toggle
           isSelected={row.enabled}
-          // Only the row being written, not every row: one in-flight toggle must
-          // not freeze the rest of the table.
+          // Three reasons a switch is not yours to move. Only the row being
+          // written, not every row: one in-flight toggle must not freeze the
+          // rest of the table. And an unpriced model cannot be switched *on*,
+          // which the server refuses too, so the control says so rather than
+          // taking a press and answering with a banner. Switching one off stays
+          // available, so a row that reached that state some other way can
+          // still be withdrawn.
           isDisabled={
             !canEdit ||
-            (setEnabled.isPending && setEnabled.variables?.modelId === row.id)
+            (setEnabled.isPending &&
+              setEnabled.variables?.modelId === row.id) ||
+            (!row.enabled && !row.price_source)
           }
-          label={`Serve ${row.model}`}
+          label={
+            !row.enabled && !row.price_source
+              ? `${row.model} has no rate yet, so it cannot be served`
+              : `Serve ${row.model}`
+          }
           onChange={(enabled) => {
             clearOutcome()
             setEnabled.mutate({ modelId: row.id, enabled })

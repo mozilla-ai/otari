@@ -102,11 +102,13 @@ The organization view contains tenant-wide administration:
 - General: Providers, followed by Deployment providers and Org settings.
   Providers is the organization's own upstream credentials, the models each one
   reaches, and what this organization pays for them: adding a key offers every
-  model the provider lists on it, each priced from the community defaults and
-  carrying a switch that decides whether the runtime serves it. Deployment
-  providers is the process-wide credential list, which a deployment operator
-  manages and which is served to every organization; it appears in standalone
-  mode only.
+  model the provider lists on it, each carrying a switch that decides whether
+  the runtime serves it. Each is priced by the first rung that answers, which is
+  the order a request is metered by: this organization's own rate, then the
+  deployment price list, then the community defaults. A model nothing prices is
+  offered and left unserved. Deployment providers is the process-wide credential
+  list, which a deployment operator manages and which is served to every
+  organization; it appears in standalone mode only.
 
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the

@@ -277,6 +277,11 @@ async def _commit(db: AsyncSession) -> None:
 async def list_organization_pricing(
     identity: CurrentIdentity,
     service: ServiceDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    model_key: Annotated[
+        str | None,
+        Query(description="Return only this model's periods, in the canonical 'provider:model' form."),
+    ] = None,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
 ) -> OrganizationModelPricingsPublic:
@@ -289,8 +294,14 @@ async def list_organization_pricing(
     Paged on the same bounds the rest of the tenancy surface uses, because the
     table grows a row per model per period. ``count`` is the total, so a client
     knows whether another page is owed.
+
+    ``model_key`` narrows to one model, which is what an editor for that model
+    needs: every period stored for it, so it can open on the one in force and
+    refuse a new one that would overlap. Normalized the same way a write is, so
+    a legacy ``provider/model`` spelling finds the rows a canonical one stored.
     """
-    overrides, total = await service.list_for_caller(identity, skip=skip, limit=limit)
+    normalized = normalize_pricing_key(config, model_key) if model_key else None
+    overrides, total = await service.list_for_caller(identity, model_key=normalized, skip=skip, limit=limit)
     return OrganizationModelPricingsPublic(
         data=[OrganizationModelPricingPublic.from_model(override) for override in overrides],
         count=total,

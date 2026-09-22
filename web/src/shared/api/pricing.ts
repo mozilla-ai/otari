@@ -14,6 +14,7 @@ import {
   CATALOG,
   MODELS,
   ORGANIZATION_PRICING,
+  ORGANIZATION_PROVIDER_MODELS,
   PRICING,
 } from "@/shared/api/queryKeys"
 
@@ -72,6 +73,14 @@ export function useOrganizationPricing(
   page: number,
   pageSize: number,
   enabled = true,
+  /**
+   * Narrow to one model, which is what the rate editor needs: every period
+   * stored for it, so it opens on the one in force and can refuse a new one
+   * that would overlap. Without it the editor reads the first page of the whole
+   * table, and an organization with more overrides than that page silently
+   * starts opening a create form over a rate that already exists.
+   */
+  modelKey?: string,
 ) {
   const organization = useOrganizationContext()
   const context = organization.data
@@ -88,10 +97,13 @@ export function useOrganizationPricing(
       context?.organization?.id ?? null,
       page,
       pageSize,
+      modelKey ?? null,
     ],
     queryFn: () =>
       apiFetch<OrganizationPricingOverrides>(
-        `/organizations/me/pricing?skip=${page * pageSize}&limit=${pageSize}`,
+        `/organizations/me/pricing?skip=${page * pageSize}&limit=${pageSize}${
+          modelKey ? `&model_key=${encodeURIComponent(modelKey)}` : ""
+        }`,
       ),
     staleTime: 60_000,
     // Kept across a page change and dropped across an organization change, for
@@ -116,6 +128,13 @@ function invalidateOrganizationPricing(
   void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_PRICING] })
   void queryClient.invalidateQueries({ queryKey: [MODELS] })
   void queryClient.invalidateQueries({ queryKey: [CATALOG] })
+  // The offered-models panel reads the same rates through a different route, so
+  // a rate written here moves a row there: its price and the badge saying which
+  // rung set it. Without this the panel keeps showing the number you just
+  // replaced.
+  void queryClient.invalidateQueries({
+    queryKey: [ORGANIZATION_PROVIDER_MODELS],
+  })
 }
 
 export function useCreateOrganizationPricing() {
