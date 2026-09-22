@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
 import pytest
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -21,6 +22,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
+from gateway.api.routes.scoped_budgets import create_scoped_budget
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -50,6 +52,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.schemas.budgets import (
+    CreateScopedBudgetRequest,
     OrganizationBudgetCreate,
     OrganizationScopedBudgetCreate,
     WorkspaceMemberBudgetPolicyCreate,
@@ -671,6 +674,47 @@ async def test_an_organization_ceiling_created_during_a_workspace_delete_leaves_
     # The negative above would pass on a create that never contended. These say it did.
     assert race.contended
     assert isinstance(race.produced, OrganizationScopeNotFoundError)
+
+
+@pytest.mark.parametrize("scope_type", [SCOPE_WORKSPACE, SCOPE_WORKSPACE_MEMBER])
+async def test_a_deployment_ceiling_created_during_a_workspace_delete_leaves_no_orphan(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    scope_type: ScopeType,
+) -> None:
+    """A ceiling created through the operator's route must not outlive its scope either.
+
+    The route checks the scope exists and then inserts on a session of its own, so a
+    deletion committing between the two leaves a ceiling that nothing sweeps.
+    """
+    owner, target, membership = await _seed_a_workspace_to_delete(async_db)
+    budget_id = await create_budget(async_db, max_budget=10.0)
+    await async_db.commit()
+
+    scope_id = str(target.id if scope_type == SCOPE_WORKSPACE else membership.id)
+
+    async def create(session: AsyncSession, ready: asyncio.Event) -> object:
+        ready.set()
+        return await create_scoped_budget(
+            CreateScopedBudgetRequest(scope_type=scope_type, scope_id=scope_id, budget_id=budget_id),
+            session,
+            OrganizationService(session, membership_listener=None),
+        )
+
+    race = await _race_a_workspace_delete(
+        owner=owner,
+        workspace_id=target.id,
+        sessions=sessions,
+        produce=create,
+    )
+
+    gone = {str(target.id), str(membership.id)}
+    ceilings = (await async_db.execute(select(ScopedBudget))).scalars().all()
+    assert [ceiling.scope_id for ceiling in ceilings if ceiling.scope_id in gone] == []
+    # The negative above would pass on a create that never contended. These say it did.
+    assert race.contended
+    assert isinstance(race.produced, HTTPException)
+    assert race.produced.status_code == status.HTTP_404_NOT_FOUND
 
 
 async def test_concurrent_invites_to_a_suspended_membership_produce_one_pending_invitation(
