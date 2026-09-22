@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from gateway.repositories.budgets import BudgetRepositories, BudgetRepository, ScopedBudgetRepository, ScopeIdSets
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import OutsideUnitOfWorkError, UnitOfWork
@@ -24,6 +23,7 @@ from gateway.models.budgets import (
 )
 from gateway.models.tenancy import Organization, User
 from gateway.models.users import User as ApiUser
+from gateway.repositories.budgets import BudgetRepositories, BudgetRepository, ScopedBudgetRepository, ScopeIdSets
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -282,29 +282,28 @@ async def test_has_ceiling_is_per_scope_and_provider(async_db: AsyncSession) -> 
 
 async def test_add_stages_a_ceiling_and_refuses_a_duplicate(async_db: AsyncSession) -> None:
     acme = await _organization(async_db, slug="acme")
-    budget = await _budget(async_db, acme, name="acme")
+    budget_id = (await _budget(async_db, acme, name="acme")).budget_id
     uow = UnitOfWork(async_db)
 
     async with uow:
         ceiling = await ScopedBudgetRepository(uow).add(
-            ScopedBudget(scope_type=SCOPE_WORKSPACE, scope_id="ws-1", budget_id=budget.budget_id)
+            ScopedBudget(scope_type=SCOPE_WORKSPACE, scope_id="ws-1", budget_id=budget_id)
         )
         assert ceiling.id
         assert ceiling.created_at is not None
+    ceiling_id = ceiling.id
 
     with pytest.raises(SpendCeilingAlreadyExistsError):
         async with uow:
             await ScopedBudgetRepository(uow).add(
-                ScopedBudget(scope_type=SCOPE_WORKSPACE, scope_id="ws-1", budget_id=budget.budget_id)
+                ScopedBudget(scope_type=SCOPE_WORKSPACE, scope_id="ws-1", budget_id=budget_id)
             )
 
     async with uow:
         narrowed = await ScopedBudgetRepository(uow).add(
-            ScopedBudget(
-                scope_type=SCOPE_WORKSPACE, scope_id="ws-1", provider_key_id="pk-a", budget_id=budget.budget_id
-            )
+            ScopedBudget(scope_type=SCOPE_WORKSPACE, scope_id="ws-1", provider_key_id="pk-a", budget_id=budget_id)
         )
-        assert narrowed.id != ceiling.id
+        assert narrowed.id != ceiling_id
 
 
 async def test_remove_deletes_a_ceiling(async_db: AsyncSession) -> None:
