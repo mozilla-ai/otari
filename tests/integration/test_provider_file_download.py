@@ -98,7 +98,17 @@ class _StubAnthropic:
             return httpx.Response(404)
         if tail == "content":
             return httpx.Response(200, content=self.files[file_id])
-        return httpx.Response(200, json={"id": file_id, "filename": "bar_plot.png"})
+        return httpx.Response(
+            200,
+            json={
+                "id": file_id,
+                "type": "file",
+                "filename": "bar_plot.png",
+                "mime_type": "image/png",
+                "size_bytes": len(self.files[file_id]),
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+        )
 
 
 @pytest.fixture
