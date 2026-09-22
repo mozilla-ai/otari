@@ -37,6 +37,15 @@ def _epoch_seconds(value: datetime | None) -> int | None:
     return int(value.timestamp())
 
 
+def _rfc3339(value: datetime | None) -> str | None:
+    """Return an RFC 3339 timestamp from a stored datetime, reading a naive value as UTC."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.isoformat().replace("+00:00", "Z")
+
+
 class SearchToolCredential(Base):
     """A ``POST /v1/search`` tool configured at runtime through the dashboard.
 
@@ -161,24 +170,19 @@ class FileObject(Base):
         }
 
     def to_anthropic_dict(self) -> dict[str, Any]:
-        """Convert to the Anthropic Files API ``FileMetadata`` shape.
+        """Convert to the ``FileMetadata`` shape of Anthropic's GA Files API.
 
-        Anthropic's SDK reads ``size_bytes`` and ``mime_type`` where OpenAI's
-        reads ``bytes`` and nothing, and takes ``created_at`` as an RFC 3339
-        string rather than an epoch. ``downloadable`` is always true here: the
-        gateway serves every stored file's bytes back, unlike Anthropic, which
-        withholds user uploads.
+        ``expires_at`` is always present and ``None`` for a file kept indefinitely.
+        ``downloadable`` is always true, because the gateway serves every stored file's bytes back.
         """
-        created_at = self.created_at
-        if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=UTC)
         return {
             "id": self.id,
             "type": "file",
             "filename": self.filename,
             "mime_type": self.mime_type,
             "size_bytes": self.bytes,
-            "created_at": created_at.isoformat().replace("+00:00", "Z"),
+            "created_at": _rfc3339(self.created_at),
+            "expires_at": _rfc3339(self.expires_at),
             "downloadable": True,
         }
 
