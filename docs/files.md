@@ -226,6 +226,13 @@ how images are handled for text-only models. The describe model may be a local
 vision model (e.g. `ollama:qwen2-vl`) to keep captioning free.
 - `model_capabilities`: per-model `supports_image` / `supports_pdf` overrides.
 
+**Upgrading from 0.6.** Two things change. `GET /api/v1/files` returns at most
+100 files per page where it returned every file, so a client with more than
+100 files must follow `has_more`. And the sweep now runs by default, so a
+deleted file, or one past `files_retention_hours`, loses its row and bytes
+within an hour where cleanup was the operator's task. Set
+`files_sweep_interval_sec: 0` to keep it that way.
+
 
 
 ## Dependencies
