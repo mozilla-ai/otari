@@ -215,11 +215,14 @@ const BASE_NAV_SECTIONS = [
  * bootstrap does not report** (`STANDALONE_SURFACES` in
  * `src/gateway/api/routes/bootstrap.py` is that list), so it is absent here and
  * present on a deployment that serves it, and a group whose every row is gated
- * drops entirely, heading included. The organization guardrail ceiling is that
- * row, and this gateway serves no such surface at all; it is in Gateway, beside
- * nothing, which is why that whole group drops here.
+ * drops entirely, heading included. Usage is that row; its own comment says why.
  *
- * The organization's own provider credentials are not such a row:
+ * The organization's guardrails are not such a row: `organization_guardrails`
+ * is published by both topologies, because its rows are keyed on the
+ * organization. It is in General, under Deployment providers. Gateway holds
+ * nothing in this build and drops; it stays declared for an overlay's Gateways.
+ *
+ * The organization's own provider credentials are not such a row either:
  * `organization_providers` is published by both topologies, because the page
  * behind it is where an organization's models are offered, priced and switched.
  * It sits under General beside the process-global `providers` row, under a
