@@ -1,4 +1,8 @@
-"""Errors the budget surfaces raise, and the HTTP status each carries."""
+"""Errors that the budgets domain may raise.
+
+The surface errors carry the HTTP status each renders as.
+The repository errors are internal: a service translates each into a surface error and never renders it.
+"""
 
 from gateway.exceptions import TenancyConflictError, TenancyNotFoundError
 
@@ -104,13 +108,29 @@ class OrganizationScopedBudgetAlreadyExistsError(TenancyConflictError):
         )
 
 
+class BudgetStillReferencedError(Exception):
+    """A row still names the budget, so the delete was refused."""
+
+    def __init__(self, budget_id: object):
+        super().__init__(f"Budget {budget_id} is still referenced")
+
+
+class SpendCeilingAlreadyExistsError(Exception):
+    """A ceiling already caps this scope for this provider."""
+
+    def __init__(self, scope_type: object, scope_id: object):
+        super().__init__(f"A spend ceiling already exists for {scope_type} {scope_id}")
+
+
 __all__ = [
+    "BudgetStillReferencedError",
     "OrganizationBudgetHeldElsewhereError",
     "OrganizationBudgetInUseError",
     "OrganizationBudgetNotFoundError",
     "OrganizationScopeNotFoundError",
     "OrganizationScopedBudgetAlreadyExistsError",
     "OrganizationScopedBudgetNotFoundError",
+    "SpendCeilingAlreadyExistsError",
     "WorkspaceBudgetDefaultAlreadyExistsError",
     "WorkspaceBudgetDefaultBudgetNotFoundError",
     "WorkspaceBudgetDefaultNotFoundError",
