@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
@@ -22,6 +22,14 @@ PRICING_UNITS: tuple[str, ...] = ("tokens", "requests", "images")
 # a later refresh may move, where every other origin is a rate somebody chose
 # and a refresh leaves alone.
 PRICING_ORIGINS: tuple[str, ...] = ("config", "api", "migration", "seed")
+
+# Which rung of the ladder answered for a rate a reader is shown, in the order
+# ``pricing_service.find_model_pricing`` walks. One vocabulary, because the
+# Models page and the offered-models panel name the same rungs to the same
+# reader, and two spellings of one rung read as two different facts. ``defaults``
+# is plural for the dataset it comes from, and is not the ``default`` that
+# ``ModelObject.pricing_source`` uses internally for the same rung.
+PriceSource = Literal["organization", "deployment", "defaults"]
 
 
 class PricingSnapshot(Base):

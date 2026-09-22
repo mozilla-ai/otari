@@ -686,7 +686,7 @@ export function orgProviderModel(
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
     cache_write_1h_price_per_million: null,
-    price_source: "default",
+    price_source: "defaults",
     pricing_id: null,
     enabled: true,
     created_at: "2026-08-24T00:00:00+00:00",

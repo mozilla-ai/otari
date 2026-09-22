@@ -289,7 +289,7 @@ async def test_adding_a_model_by_name_offers_it(async_db: AsyncSession, monkeypa
 
     assert offered.model == "gpt-4o"
     assert offered.enabled is True
-    assert offered.price_source == "default"
+    assert offered.price_source == "defaults"
 
     with pytest.raises(OrgProviderModelAlreadyOfferedError):
         await _service(async_db).add_model(user=owner, key_id=key_id, model="gpt-4o")

@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -24,7 +24,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
-from gateway.models.pricing import ModelPricing
+from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.pricing_schemas import PricingTier
 from gateway.models.routing import PolicySpec
 from gateway.models.tenancy import User as TenancyUser
@@ -711,7 +711,6 @@ async def build_merged_catalog(
     )
 
 
-PriceSource = Literal["organization", "deployment", "defaults"]
 
 
 class ViewerPrice(NamedTuple):

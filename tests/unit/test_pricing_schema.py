@@ -1,5 +1,7 @@
 """Unit tests for pricing API request validation."""
 
+from typing import get_args
+
 import pytest
 from pydantic import ValidationError
 
@@ -30,3 +32,21 @@ def test_set_pricing_request_allows_a_free_tier_override() -> None:
 
     assert request.pricing_tiers is not None
     assert request.pricing_tiers[0].cache_write_1h_price_per_million == 0.0
+
+
+def test_both_rate_surfaces_name_the_rungs_the_same_way() -> None:
+    """The Models page and the offered-models panel answer the same reader.
+
+    Two spellings of one rung read as two different facts, and both fields
+    reach the browser as free strings unless something holds them together.
+    """
+    from gateway.models.pricing import PriceSource
+    from gateway.models.provider_keys import OrgProviderKeyModelPublic
+    from gateway.services.merged_catalog_service import ViewerPrice
+
+    rungs = set(get_args(PriceSource))
+    assert rungs == {"organization", "deployment", "defaults"}
+
+    offered = OrgProviderKeyModelPublic.model_fields["price_source"].annotation
+    assert set(get_args(get_args(offered)[0])) == rungs
+    assert set(get_args(get_args(ViewerPrice.__annotations__["source"])[0])) == rungs

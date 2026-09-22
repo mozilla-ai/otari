@@ -9083,7 +9083,7 @@ export interface components {
          * @description One offered model, with the rate the caller's organization is charged for it.
          *
          *     ``price_source`` says which rung of ``services.pricing_service`` answered:
-         *     ``organization`` for a rate an admin set, ``default`` for the
+         *     ``organization`` for a rate an admin set, ``defaults`` for the
          *     community-maintained rate this surface seeded or the genai-prices fallback,
          *     ``deployment`` for the deployment's own price list, and None when nothing
          *     prices the model yet. ``pricing_id`` names the organization's own row where
@@ -9120,7 +9120,7 @@ export interface components {
             /** Output Price Per Million */
             output_price_per_million?: number | null;
             /** Price Source */
-            price_source?: string | null;
+            price_source?: ("organization" | "deployment" | "defaults") | null;
             /** Pricing Id */
             pricing_id?: string | null;
             /** Updated At */

@@ -46,7 +46,7 @@ from decimal import Decimal
 from gateway.core.metered_pricing import quantize_rate
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.money import as_float, to_usd, to_usd_or_none
-from gateway.models.pricing import ModelPricing, OrganizationModelPricing
+from gateway.models.pricing import ModelPricing, OrganizationModelPricing, PriceSource
 from gateway.models.provider_keys import (
     OrgProviderAvailableModelsPublic,
     OrgProviderKey,
@@ -80,12 +80,12 @@ from gateway.services.tenancy.organization_service import OrganizationService
 # opposed to one somebody chose. See the module docstring.
 SEED_ORIGIN = "seed"
 
-# What a client is told about where a rate came from, in the vocabulary
-# ``merged_catalog_service.PriceSource`` already uses, so the models panel and
-# the Models page name the same rungs.
-PRICE_SOURCE_ORGANIZATION = "organization"
-PRICE_SOURCE_DEFAULT = "default"
-PRICE_SOURCE_DEPLOYMENT = "deployment"
+# What a client is told about where a rate came from. The spellings are
+# ``models.pricing.PriceSource``, so the models panel and the Models page name
+# the same rungs to the same reader.
+PRICE_SOURCE_ORGANIZATION: PriceSource = "organization"
+PRICE_SOURCE_DEFAULT: PriceSource = "defaults"
+PRICE_SOURCE_DEPLOYMENT: PriceSource = "deployment"
 
 # The message an operator needs when a stored credential will not decrypt. The
 # row is intact; the configured OTARI_SECRET_KEY just cannot read it any more.

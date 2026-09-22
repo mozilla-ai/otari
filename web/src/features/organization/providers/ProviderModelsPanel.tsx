@@ -63,10 +63,17 @@ function rate(value: number | null | undefined) {
   )
 }
 
-function PriceSourceBadge({ source }: { source: string | null | undefined }) {
+// Typed rather than `string`, so the day a rung is renamed or added this stops
+// compiling instead of quietly falling through to Unpriced. The spellings are
+// the gateway's one `PriceSource` vocabulary, which the Models page names too.
+function PriceSourceBadge({
+  source,
+}: {
+  source: OrgProviderModel["price_source"]
+}) {
   if (source === "organization") return <Badge tone="muted">Your rate</Badge>
   if (source === "deployment") return <Badge tone="muted">Deployment</Badge>
-  if (source === "default") return <Badge tone="muted">Default</Badge>
+  if (source === "defaults") return <Badge tone="muted">Default</Badge>
   return <Badge tone="warn">Unpriced</Badge>
 }
 

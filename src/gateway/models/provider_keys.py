@@ -63,6 +63,7 @@ from sqlalchemy import JSON, Column, ForeignKeyConstraint, Index, UniqueConstrai
 from sqlmodel import Field, SQLModel
 
 from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
+from gateway.models.pricing import PriceSource
 from gateway.models.secret_fields import redact_secret_like_values
 
 # ``client_args`` is arbitrary JSON, and this gateway's own Bedrock support is
@@ -351,7 +352,7 @@ class OrgProviderKeyModelPublic(SQLModel):
     """One offered model, with the rate the caller's organization is charged for it.
 
     ``price_source`` says which rung of ``services.pricing_service`` answered:
-    ``organization`` for a rate an admin set, ``default`` for the
+    ``organization`` for a rate an admin set, ``defaults`` for the
     community-maintained rate this surface seeded or the genai-prices fallback,
     ``deployment`` for the deployment's own price list, and None when nothing
     prices the model yet. ``pricing_id`` names the organization's own row where
@@ -366,7 +367,7 @@ class OrgProviderKeyModelPublic(SQLModel):
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
     cache_write_1h_price_per_million: float | None = None
-    price_source: str | None = None
+    price_source: PriceSource | None = None
     pricing_id: uuid.UUID | None = None
     enabled: bool
     created_at: datetime

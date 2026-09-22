@@ -313,7 +313,7 @@ describe("ProviderModelsPanel", () => {
         orgProviderModel({
           id: "seeded",
           model: "priced-by-default",
-          price_source: "default",
+          price_source: "defaults",
           pricing_id: null,
         }),
       ],
