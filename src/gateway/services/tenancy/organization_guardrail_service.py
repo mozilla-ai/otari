@@ -59,7 +59,12 @@ from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.guardrails import GuardrailConfig, OrganizationGuardrail, OrganizationGuardrailWorkspace
+from gateway.models.guardrails import (
+    GuardrailConfig,
+    OrganizationGuardrail,
+    OrganizationGuardrailDefinition,
+    OrganizationGuardrailWorkspace,
+)
 from gateway.models.secret_fields import redact_secret_like_values, restore_redacted_values
 from gateway.models.tenancy import User
 from gateway.repositories.tenancy import WorkspaceRepository
@@ -71,9 +76,11 @@ from gateway.services.secret_box import (
 from gateway.services.tenancy.errors import (
     OrganizationGuardrailAlreadyExistsError,
     OrganizationGuardrailCredentialNeedsUrlError,
+    OrganizationGuardrailDefinitionNotFoundError,
     OrganizationGuardrailLimitReachedError,
     OrganizationGuardrailNotFoundError,
     OrganizationGuardrailScopeConflictError,
+    OrganizationGuardrailSingleBackendError,
     OrganizationGuardrailUnsafeUrlError,
     SecretBoxUnavailableTenancyError,
     WorkspaceNotFoundError,
@@ -167,6 +174,14 @@ class OrganizationGuardrailCreate(BaseModel):
             "which is commonly a same-host http sidecar. Encrypted at rest, never returned"
         ),
     )
+    definition_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "A guardrail definition of this organization for Otari to build and run itself, "
+            "instead of calling a profile on a guardrails service. Mutually exclusive with url "
+            "and credential, which name a service"
+        ),
+    )
     mode: Literal["block", "monitor"] = Field(
         default="monitor",
         description="block rejects a flagged request with 403; monitor annotates the response and forwards it",
@@ -217,6 +232,12 @@ class OrganizationGuardrailUpdate(BaseModel):
     credential it was never shown.
 
     ``workspace_ids`` replaces the scope whole when sent; ``[]`` clears it.
+
+    ``definition_id`` diverges: an explicit ``null`` **clears** it. The rule
+    above protects a field the client was never shown, and this one is returned
+    on every read, so a form sending ``null`` is sending back a field it was
+    given rather than an empty box it never filled in. Omitting it still leaves
+    the link alone.
     """
 
     # Same reason as the create body above: a credential requires an https
@@ -241,6 +262,13 @@ class OrganizationGuardrailUpdate(BaseModel):
     ) = None
     url: str | None = Field(default=None, max_length=2048)
     credential: str | None = Field(default=None, max_length=8192)
+    definition_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "The organization's own definition this mandate runs. Unlike url and credential, "
+            "an explicit null clears the link; omit the field to leave it as it is"
+        ),
+    )
     mode: Literal["block", "monitor"] | SkipJsonSchema[None] = None
     on_unavailable: Literal["block", "monitor"] | SkipJsonSchema[None] = None
     validate_kwargs: dict[str, Any] | None = Field(
@@ -291,6 +319,9 @@ class OrganizationGuardrailPublic(BaseModel):
     profile: str
     url: str | None
     has_credential: bool
+    # Returned in clear, which is what makes an explicit null on the update
+    # schema a clear rather than the "leave it alone" the fields above it mean.
+    definition_id: uuid.UUID | None
     mode: str
     on_unavailable: str
     validate_kwargs: dict[str, Any] | None = Field(
@@ -319,6 +350,7 @@ class OrganizationGuardrailPublic(BaseModel):
             profile=guardrail.profile,
             url=guardrail.url,
             has_credential=guardrail.encrypted_credential is not None,
+            definition_id=guardrail.definition_id,
             mode=guardrail.mode,
             on_unavailable=guardrail.on_unavailable,
             validate_kwargs=redact_secret_like_values(guardrail.validate_kwargs),
@@ -449,6 +481,23 @@ def _require_url_for_credential(url: str | None, has_credential: bool) -> None:
         raise OrganizationGuardrailCredentialNeedsUrlError()
 
 
+def _require_single_backend(url: str | None, has_credential: bool, definition_id: uuid.UUID | None) -> None:
+    """Refuse a mandate that names both a guardrails service and a definition.
+
+    Both unset stays the ordinary row, the one falling back to the deployment's
+    ``guardrails_url``, which is why ``ck_organization_guardrails_single_backend``
+    is not an XOR either.
+
+    The credential arm has no counterpart in that constraint, and is the reason
+    this is checked before :func:`_require_url_for_credential` rather than after:
+    a credential sent beside a definition would otherwise be answered "a
+    credential needs a url", sending the caller to add the very field that makes
+    the contradiction explicit.
+    """
+    if definition_id is not None and (url is not None or has_credential):
+        raise OrganizationGuardrailSingleBackendError()
+
+
 async def _validate_url(url: str, *, has_credential: bool) -> None:
     """Run the same SSRF/TLS check a request-body guardrail URL faces, at write time.
 
@@ -501,6 +550,31 @@ class OrganizationGuardrailService:
         if guardrail is None or guardrail.organization_id != organization_id:
             raise OrganizationGuardrailNotFoundError(guardrail_id)
         return guardrail
+
+    async def _require_definition_in_organization(self, organization_id: uuid.UUID, definition_id: uuid.UUID) -> None:
+        """Refuse a mandate naming a definition this organization does not hold.
+
+        Not the isolation control: ``fk_organization_guardrails_definition``
+        carries ``organization_id`` into the reference, so another
+        organization's definition is unreachable whatever this checks. This is
+        the *answer*. A foreign key violation arrives as the same
+        ``IntegrityError`` the profile index raises, and the write path reports
+        one of those as a profile collision, so without this a caller who
+        mistyped an id is told something false about a field they got right.
+
+        A definition in another organization reads as not found, as everywhere
+        else, so this is not an existence oracle across tenants.
+        """
+        found = (
+            await self.db.execute(
+                select(OrganizationGuardrailDefinition.id).where(
+                    OrganizationGuardrailDefinition.id == definition_id,
+                    OrganizationGuardrailDefinition.organization_id == organization_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if found is None:
+            raise OrganizationGuardrailDefinitionNotFoundError(definition_id)
 
     async def _scope_ids(self, guardrail_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[uuid.UUID]]:
         """The scoped workspace ids for a page of guardrails, in one query.
@@ -617,9 +691,12 @@ class OrganizationGuardrailService:
 
         url = _blank_to_none(request.url)
         credential = _blank_to_none(request.credential)
+        _require_single_backend(url, credential is not None, request.definition_id)
         _require_url_for_credential(url, credential is not None)
         if url is not None:
             await _validate_url(url, has_credential=credential is not None)
+        if request.definition_id is not None:
+            await self._require_definition_in_organization(organization_id, request.definition_id)
         workspace_ids = await self._require_workspaces_in_organization(
             organization_id, [] if request.applies_to_all_workspaces else request.workspace_ids
         )
@@ -629,6 +706,7 @@ class OrganizationGuardrailService:
             profile=request.profile,
             url=url,
             encrypted_credential=_encrypted(credential) if credential else None,
+            definition_id=request.definition_id,
             mode=request.mode,
             on_unavailable=request.on_unavailable,
             # Nothing stored to restore from, so this keeps whatever was sent:
@@ -673,12 +751,21 @@ class OrganizationGuardrailService:
         if "url" in fields and request.url is not None:
             new_url = _blank_to_none(request.url)
         effective_url = new_url if new_url is not _UNSET else guardrail.url
+        # Read through `model_fields_set` rather than against None, because
+        # here a sent null is the clear: see this request model's docstring.
+        new_definition_id: Any = request.definition_id if "definition_id" in fields else _UNSET
+        effective_definition_id = new_definition_id if new_definition_id is not _UNSET else guardrail.definition_id
         # Checked against the *pair* rather than either half, so the two ways in
         # are both closed: adding a credential to an entry that has no endpoint,
-        # and clearing the endpoint from one that keeps its credential.
+        # and clearing the endpoint from one that keeps its credential. Same for
+        # the backends: a request naming one of them is refused against the one
+        # already stored, which the request alone cannot see.
+        _require_single_backend(effective_url, effective_has_credential, effective_definition_id)
         _require_url_for_credential(effective_url, effective_has_credential)
         if effective_url is not None:
             await _validate_url(effective_url, has_credential=effective_has_credential)
+        if new_definition_id is not _UNSET and new_definition_id is not None:
+            await self._require_definition_in_organization(organization_id, new_definition_id)
 
         applies_to_all = (
             request.applies_to_all_workspaces
@@ -702,6 +789,8 @@ class OrganizationGuardrailService:
             guardrail.url = new_url
         if new_credential is not _UNSET:
             guardrail.encrypted_credential = _encrypted(new_credential) if new_credential else None
+        if new_definition_id is not _UNSET:
+            guardrail.definition_id = new_definition_id
         if request.profile is not None:
             guardrail.profile = request.profile
         if request.mode is not None:

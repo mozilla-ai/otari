@@ -12,6 +12,7 @@ happens. ``validate_mcp_url`` resolves a hostname through DNS, so a test naming
 one would pass or fail on whether the runner has egress.
 """
 
+import uuid
 from collections.abc import Iterator
 
 import pytest
@@ -19,7 +20,11 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.guardrails import OrganizationGuardrail, OrganizationGuardrailWorkspace
+from gateway.models.guardrails import (
+    OrganizationGuardrail,
+    OrganizationGuardrailDefinition,
+    OrganizationGuardrailWorkspace,
+)
 from gateway.models.tenancy import Organization, User, Workspace
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -33,9 +38,11 @@ from gateway.services.tenancy.errors import (
     NotAuthorizedError,
     OrganizationGuardrailAlreadyExistsError,
     OrganizationGuardrailCredentialNeedsUrlError,
+    OrganizationGuardrailDefinitionNotFoundError,
     OrganizationGuardrailLimitReachedError,
     OrganizationGuardrailNotFoundError,
     OrganizationGuardrailScopeConflictError,
+    OrganizationGuardrailSingleBackendError,
     OrganizationGuardrailUnsafeUrlError,
     WorkspaceNotFoundError,
 )
@@ -83,6 +90,26 @@ async def _workspace(
 def _secret_key(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
     yield
+
+
+async def _definition(
+    db: AsyncSession, organization: Organization, *, name: str = "lakera"
+) -> OrganizationGuardrailDefinition:
+    """A definition row, added with the session directly.
+
+    The mandate is what is under test, and going through
+    `organization_guardrail_definition_service` would put its catalog rules in
+    front of every case here.
+    """
+    definition = OrganizationGuardrailDefinition(
+        organization_id=organization.id,
+        name=name,
+        guardrail_name="lakera_guard",
+        create_kwargs={"endpoint": PUBLIC_URL},
+    )
+    db.add(definition)
+    await db.flush()
+    return definition
 
 
 def _create(**overrides: object) -> OrganizationGuardrailCreate:
@@ -326,6 +353,156 @@ async def test_the_entry_count_is_bounded(async_db: AsyncSession) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# The definition a mandate runs
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_mandate_can_name_a_definition(async_db: AsyncSession) -> None:
+    """The link, and the read that reports it."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    definition = await _definition(async_db, organization)
+    service = OrganizationGuardrailService(async_db)
+
+    created = await service.create_guardrail(user=owner, request=_create(definition_id=definition.id))
+    assert created.definition_id == definition.id
+    assert created.url is None
+
+    listed = (await service.list_guardrails(user=owner)).data
+    assert [entry.definition_id for entry in listed] == [definition.id]
+
+
+async def test_a_mandate_names_one_backend_or_the_other(async_db: AsyncSession) -> None:
+    """Both at once has no resolution rule, so it is refused rather than decided."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    definition = await _definition(async_db, organization)
+    service = OrganizationGuardrailService(async_db)
+
+    with pytest.raises(OrganizationGuardrailSingleBackendError):
+        await service.create_guardrail(
+            user=owner, request=_create(url=PUBLIC_URL, definition_id=definition.id)
+        )
+
+
+async def test_a_credential_beside_a_definition_is_refused_as_the_contradiction(
+    async_db: AsyncSession,
+) -> None:
+    """Not as "a credential needs a url", which would send the caller the wrong way.
+
+    A credential is only ever sent to a guardrails service, so one beside a
+    definition is the same two-backend contradiction a step earlier. The check
+    constraint does not cover this pair, which makes the service the only place
+    it is caught.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    definition = await _definition(async_db, organization)
+    service = OrganizationGuardrailService(async_db)
+
+    with pytest.raises(OrganizationGuardrailSingleBackendError):
+        await service.create_guardrail(
+            user=owner, request=_create(credential="sk-guardrails", definition_id=definition.id)
+        )
+
+
+async def test_a_definition_cannot_be_added_to_a_mandate_that_has_an_endpoint(async_db: AsyncSession) -> None:
+    """The stored half the request never mentions is what it is checked against."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    definition = await _definition(async_db, organization)
+    service = OrganizationGuardrailService(async_db)
+    created = await service.create_guardrail(user=owner, request=_create(url=PUBLIC_URL))
+
+    with pytest.raises(OrganizationGuardrailSingleBackendError):
+        await service.update_guardrail(
+            user=owner,
+            guardrail_id=created.id,
+            request=OrganizationGuardrailUpdate(definition_id=definition.id),
+        )
+
+
+async def test_an_endpoint_cannot_be_added_to_a_mandate_that_has_a_definition(async_db: AsyncSession) -> None:
+    """The same crossing from the other side."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    definition = await _definition(async_db, organization)
+    service = OrganizationGuardrailService(async_db)
+    created = await service.create_guardrail(user=owner, request=_create(definition_id=definition.id))
+
+    with pytest.raises(OrganizationGuardrailSingleBackendError):
+        await service.update_guardrail(
+            user=owner, guardrail_id=created.id, request=OrganizationGuardrailUpdate(url=PUBLIC_URL)
+        )
+
+
+async def test_an_explicit_null_clears_the_link(async_db: AsyncSession) -> None:
+    """The divergence from ``url`` and ``credential``, which a null leaves alone.
+
+    A definition id is returned on every read, so a client sending null is
+    sending back a field it was shown.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    definition = await _definition(async_db, organization)
+    service = OrganizationGuardrailService(async_db)
+    created = await service.create_guardrail(user=owner, request=_create(definition_id=definition.id))
+
+    cleared = await service.update_guardrail(
+        user=owner, guardrail_id=created.id, request=OrganizationGuardrailUpdate(definition_id=None)
+    )
+    assert cleared.definition_id is None
+
+    # And the endpoint it was exclusive with is now available.
+    remote = await service.update_guardrail(
+        user=owner, guardrail_id=created.id, request=OrganizationGuardrailUpdate(url=PUBLIC_URL)
+    )
+    assert remote.url == PUBLIC_URL
+
+
+async def test_an_edit_that_never_mentions_the_link_keeps_it(async_db: AsyncSession) -> None:
+    """The case that makes the null above a deliberate clear rather than a side effect."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    definition = await _definition(async_db, organization)
+    service = OrganizationGuardrailService(async_db)
+    created = await service.create_guardrail(user=owner, request=_create(definition_id=definition.id))
+
+    updated = await service.update_guardrail(
+        user=owner, guardrail_id=created.id, request=OrganizationGuardrailUpdate(mode="block")
+    )
+    assert updated.mode == "block"
+    assert updated.definition_id == definition.id
+
+
+async def test_another_organizations_definition_is_not_found(async_db: AsyncSession) -> None:
+    """A 404 about the definition, not the 409 about a profile the database would produce.
+
+    The composite foreign key refuses the write either way. What is under test
+    is the answer: every `IntegrityError` on this path is reported as a profile
+    collision, so an unchecked foreign id would deny a field the caller got
+    right.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    other = await _organization(async_db, slug="other")
+    theirs = await _definition(async_db, other, name="theirs")
+    service = OrganizationGuardrailService(async_db)
+
+    with pytest.raises(OrganizationGuardrailDefinitionNotFoundError):
+        await service.create_guardrail(user=owner, request=_create(definition_id=theirs.id))
+
+
+async def test_a_definition_that_does_not_exist_is_not_found(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrganizationGuardrailService(async_db)
+
+    with pytest.raises(OrganizationGuardrailDefinitionNotFoundError):
+        await service.create_guardrail(user=owner, request=_create(definition_id=uuid.uuid4()))
+
+
+# --------------------------------------------------------------------------- #
 # Authorization
 # --------------------------------------------------------------------------- #
 
@@ -543,3 +720,27 @@ async def test_a_workspace_of_another_organization_resolves_nothing(async_db: As
 
     resolved = await resolve_organization_guardrails(async_db, organization_id=ours.id, workspace_id=our_workspace.id)
     assert resolved == []
+
+
+async def test_a_linked_mandate_still_resolves_as_a_profile(async_db: AsyncSession) -> None:
+    """Nothing runs a definition yet, and the resolver is where that is visible.
+
+    The row resolves exactly as a mandate naming a profile on the deployment's
+    guardrails service does. Reading the link and building the guardrail is a
+    later step; this asserts that this one did not start.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    definition = await _definition(async_db, organization)
+    service = OrganizationGuardrailService(async_db)
+    await service.create_guardrail(
+        user=owner, request=_create(definition_id=definition.id, applies_to_all_workspaces=True)
+    )
+
+    resolved = await resolve_organization_guardrails(
+        async_db, organization_id=organization.id, workspace_id=workspace.id
+    )
+    assert [entry.config.profile for entry in resolved] == ["prompt-injection"]
+    assert resolved[0].config.url is None
+    assert resolved[0].credential is None

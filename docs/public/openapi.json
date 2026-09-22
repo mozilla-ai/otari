@@ -9095,6 +9095,19 @@
             "description": "Bearer credential for this entry's endpoint. Requires url to be set, and https: an entry with no endpoint of its own falls back to the deployment's guardrails_url, which is commonly a same-host http sidecar. Encrypted at rest, never returned",
             "title": "Credential"
           },
+          "definition_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A guardrail definition of this organization for Otari to build and run itself, instead of calling a profile on a guardrails service. Mutually exclusive with url and credential, which name a service",
+            "title": "Definition Id"
+          },
           "enabled": {
             "default": true,
             "description": "False stops the guardrail everywhere without discarding it",
@@ -9360,6 +9373,18 @@
             "title": "Created At",
             "type": "string"
           },
+          "definition_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition Id"
+          },
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
@@ -9433,6 +9458,7 @@
           "profile",
           "url",
           "has_credential",
+          "definition_id",
           "mode",
           "on_unavailable",
           "validate_kwargs",
@@ -9446,7 +9472,7 @@
         "type": "object"
       },
       "OrganizationGuardrailUpdate": {
-        "description": "Partial update. Only the fields the caller sets are applied.\n\n``credential`` and ``url`` have three states rather than two, which is what\na write-only field and its nullable partner need: omit to leave the stored\nvalue alone, send ``\"\"`` to clear it, send a value to replace it. An\nexplicit ``null`` also leaves them alone, matching\n`WorkspaceMcpServerUpdate`: a client that serializes its whole form back,\nwith an empty credential box it never filled in, must not destroy a\ncredential it was never shown.\n\n``workspace_ids`` replaces the scope whole when sent; ``[]`` clears it.",
+        "description": "Partial update. Only the fields the caller sets are applied.\n\n``credential`` and ``url`` have three states rather than two, which is what\na write-only field and its nullable partner need: omit to leave the stored\nvalue alone, send ``\"\"`` to clear it, send a value to replace it. An\nexplicit ``null`` also leaves them alone, matching\n`WorkspaceMcpServerUpdate`: a client that serializes its whole form back,\nwith an empty credential box it never filled in, must not destroy a\ncredential it was never shown.\n\n``workspace_ids`` replaces the scope whole when sent; ``[]`` clears it.\n\n``definition_id`` diverges: an explicit ``null`` **clears** it. The rule\nabove protects a field the client was never shown, and this one is returned\non every read, so a form sending ``null`` is sending back a field it was\ngiven rather than an empty box it never filled in. Omitting it still leaves\nthe link alone.",
         "example": {
           "credential": "sk-guardrails-...",
           "mode": "monitor",
@@ -9468,6 +9494,19 @@
               }
             ],
             "title": "Credential"
+          },
+          "definition_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization's own definition this mandate runs. Unlike url and credential, an explicit null clears the link; omit the field to leave it as it is",
+            "title": "Definition Id"
           },
           "enabled": {
             "title": "Enabled",

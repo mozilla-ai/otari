@@ -9593,6 +9593,11 @@ export interface components {
              */
             credential?: string | null;
             /**
+             * Definition Id
+             * @description A guardrail definition of this organization for Otari to build and run itself, instead of calling a profile on a guardrails service. Mutually exclusive with url and credential, which name a service
+             */
+            definition_id?: string | null;
+            /**
              * Enabled
              * @description False stops the guardrail everywhere without discarding it
              * @default true
@@ -9787,6 +9792,8 @@ export interface components {
             applies_to_all_workspaces: boolean;
             /** Created At */
             created_at: string;
+            /** Definition Id */
+            definition_id: string | null;
             /** Enabled */
             enabled: boolean;
             /** Has Credential */
@@ -9834,6 +9841,12 @@ export interface components {
          *     credential it was never shown.
          *
          *     ``workspace_ids`` replaces the scope whole when sent; ``[]`` clears it.
+         *
+         *     ``definition_id`` diverges: an explicit ``null`` **clears** it. The rule
+         *     above protects a field the client was never shown, and this one is returned
+         *     on every read, so a form sending ``null`` is sending back a field it was
+         *     given rather than an empty box it never filled in. Omitting it still leaves
+         *     the link alone.
          * @example {
          *       "credential": "sk-guardrails-...",
          *       "mode": "monitor",
@@ -9845,6 +9858,11 @@ export interface components {
             applies_to_all_workspaces?: boolean;
             /** Credential */
             credential?: string | null;
+            /**
+             * Definition Id
+             * @description The organization's own definition this mandate runs. Unlike url and credential, an explicit null clears the link; omit the field to leave it as it is
+             */
+            definition_id?: string | null;
             /** Enabled */
             enabled?: boolean;
             /**

@@ -1034,6 +1034,27 @@ class OrganizationGuardrailLimitReachedError(TenancyValidationError):
         super().__init__(f"This organization already configures the maximum of {limit} guardrails")
 
 
+class OrganizationGuardrailSingleBackendError(TenancyValidationError):
+    """A mandate named both an endpoint of its own and a definition to build.
+
+    Two ways to run one check, and nothing in the row decides between them, so
+    the pair is refused rather than resolved. ``credential`` counts as naming an
+    endpoint: it is only ever sent to one, so a credential beside a definition is
+    the same contradiction one step back.
+
+    ``ck_organization_guardrails_single_backend`` says the url half in the
+    database too, which is what holds when a write path forgets. It says it as
+    an ``IntegrityError``, and the write path reports one of those as a profile
+    collision, so the answer a caller can act on has to come from here.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A guardrail mandate names either its own endpoint or a definition for Otari to "
+            "build, not both; clear one of them"
+        )
+
+
 class OrganizationGuardrailDefinitionNotFoundError(TenancyNotFoundError):
     def __init__(self, definition_id: object):
         super().__init__(f"Organization guardrail definition {definition_id} not found")
