@@ -1,8 +1,12 @@
-"""Data access for files a provider's own sandbox holds.
+"""Data access for files a provider's own sandbox produced.
 
-A row here carries no ``storage_ref``: it names the provider that has the
-bytes, so ``GET /v1/files/{id}/content`` can stream them on demand. See
-``services/provider_files.py`` for why they are recorded at all.
+A row normally carries a ``storage_ref``, because the bytes are copied into
+Otari's store as the run is recorded: a provider reclaims its container long
+before the caller is finished with the chart it drew. ``storage_ref`` is
+``None`` only for a copy that could not be made, and for rows written before
+copying existed; those still name the provider, so
+``GET /v1/files/{id}/content`` can stream them on demand for as long as the
+provider keeps them. See ``services/files/provider_files.py``.
 """
 
 from __future__ import annotations
@@ -32,6 +36,10 @@ class ProviderFileRow:
     provider_instance: str | None
     container_id: str | None
     expires_at: datetime | None
+    # Where Otari put the bytes, and how many. ``None`` leaves the row serving
+    # by proxy from the provider, which is all a failed copy can still offer.
+    storage_ref: str | None = None
+    size_bytes: int = 0
 
 
 async def existing_file_ids(uow: UnitOfWork, file_ids: Collection[str]) -> set[str]:
@@ -53,11 +61,11 @@ async def record_provider_file_rows(uow: UnitOfWork, rows: Collection[ProviderFi
                 workspace_id=row.workspace_id,
                 filename=row.filename,
                 mime_type=row.mime_type,
-                # The provider holds the bytes and does not say how many until
-                # they are read, so a listing shows 0 rather than a guess.
-                bytes=0,
+                #0 for a row still served by proxy: the provider does not say
+                # how many bytes it holds until they are read.
+                bytes=row.size_bytes,
                 purpose=row.purpose,
-                storage_ref=None,
+                storage_ref=row.storage_ref,
                 provider=row.provider,
                 provider_instance=row.provider_instance,
                 provider_container_id=row.container_id,

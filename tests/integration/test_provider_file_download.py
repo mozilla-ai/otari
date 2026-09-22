@@ -1,15 +1,18 @@
-"""Integration tests for downloading a file a provider's own sandbox produced.
+"""Integration tests for a file a provider's own sandbox produced.
 
-Such a file is a ``file_objects`` row with no ``storage_ref``: Otari holds the
-record saying whose it is, and streams the bytes from the provider on demand.
-The provider call itself is faked here (the URL and headers it builds are unit
-tested); what these cover is the route, the tenant predicate, and what a
-listing says about a file whose size Otari does not know.
+The bytes are copied into Otari's store as the run is recorded, so the file
+outlives the provider's container. A row whose copy failed, and every row
+written before copying existed, keeps the older shape: no ``storage_ref``, the
+provider named, and the bytes streamed from it on demand. Both are covered
+here, along with the route, the tenant predicate, and the output caps. The
+provider call itself is faked (the URL and headers it builds are unit tested).
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, AsyncIterator
+import base64
+import json
+from collections.abc import AsyncGenerator, AsyncIterator, Generator
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
@@ -17,6 +20,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 from anthropic.types import CodeExecutionOutputBlock, CodeExecutionResultBlock, CodeExecutionToolResultBlock
+from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from any_llm.types.messages import (
     ContentBlockStartEvent,
     MessageDelta,
@@ -30,9 +34,12 @@ from any_llm.types.messages import (
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.tools import FileObject
 from gateway.services.file_store import LocalDirFileStore
+from gateway.services.files import provider_files
+
+from .conftest import build_test_client
 
 CHART = b"\x89PNG\r\n\x1a\nfake chart bytes"
 
@@ -240,14 +247,28 @@ def _native_request(*, stream: bool = False) -> dict[str, Any]:
 
 @pytest.fixture
 def anthropic_credentialed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A deployment credentialed for Anthropic by the SDK's own variable, with the metadata call faked."""
+    """A deployment credentialed for Anthropic, with the metadata and content calls faked.
+
+    The content fake is what lets the copy succeed; without it every copy would
+    fail the same way a real provider outage does, and a test asserting the
+    stored bytes would pass for the wrong reason.
+    """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 
     async def _named(provider: str, file_id: str, api_key: str, api_base: str | None) -> str | None:
         del provider, file_id, api_key, api_base
         return "bar_plot.png"
 
+    async def _bytes(
+        provider: str, file_id: str, container_id: str | None, api_key: str, api_base: str | None, budget: int
+    ) -> AsyncGenerator[bytes, None]:
+        del provider, file_id, container_id, api_key, api_base
+        if len(CHART) > budget:
+            raise provider_files.OutputOverBudget
+        yield CHART
+
     monkeypatch.setattr("gateway.services.files.provider_files._fetch_filename", _named)
+    monkeypatch.setattr("gateway.services.files.provider_files._provider_bytes", _bytes)
 
 
 def test_a_file_a_provider_native_run_produced_is_recorded_and_served(
@@ -272,7 +293,10 @@ def test_a_file_a_provider_native_run_produced_is_recorded_and_served(
     assert (meta.json()["filename"], meta.json()["purpose"]) == ("bar_plot.png", "code_execution_output")
     row = db_session.get(FileObject, "file_01provider")
     assert row is not None
-    assert (row.storage_ref, row.provider, row.provider_instance) == (None, "anthropic", "anthropic")
+    assert (row.provider, row.provider_instance) == ("anthropic", "anthropic")
+    # Copied, not merely named: the id outlives the provider's container.
+    assert row.storage_ref is not None
+    assert row.bytes == len(CHART)
 
 
 def test_a_streamed_provider_native_run_records_its_files_too(
@@ -311,3 +335,154 @@ def test_a_streamed_provider_native_run_records_its_files_too(
     meta = client.get(f"{API_ROOT}/files/file_01streamed", headers=api_key_header)
     assert meta.status_code == 200, meta.text
     assert meta.json()["filename"] == "bar_plot.png"
+
+
+def test_a_copied_file_still_downloads_once_the_provider_has_dropped_it(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    anthropic_credentialed: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The point of copying. OpenAI discards a container twenty minutes after its
+    last use, and everything in it, so a caller returning to the conversation the
+    next day was holding an id nobody could serve."""
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        return _provider_reply(_provider_run_block("file_01outlives"))
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(f"{API_ROOT}/messages", json=_native_request(), headers=api_key_header)
+    assert resp.status_code == 200, resp.text
+
+    # The provider is now refusing, as it does once the container is reclaimed.
+    monkeypatch.setattr(
+        "gateway.api.routes.files.stream_provider_file", _refusing(httpx.HTTPError("container is gone"))
+    )
+    content = client.get(f"{API_ROOT}/files/file_01outlives/content", headers=api_key_header)
+
+    assert content.status_code == 200, content.text
+    assert content.content == CHART
+
+
+def test_a_file_whose_copy_failed_still_serves_by_proxy(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    db_session: Session,
+    tmp_file_store: None,
+    anthropic_credentialed: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A copy is best effort: losing it must not cost the caller the row, which is
+    what every provider file had before copying existed."""
+
+    async def _unreachable(*args: Any, **kwargs: Any) -> AsyncGenerator[bytes, None]:
+        raise httpx.HTTPError("provider unreachable")
+        yield b""  # pragma: no cover - unreachable, keeps this a generator
+
+    monkeypatch.setattr("gateway.services.files.provider_files._provider_bytes", _unreachable)
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        return _provider_reply(_provider_run_block("file_01nocopy"))
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(f"{API_ROOT}/messages", json=_native_request(), headers=api_key_header)
+    assert resp.status_code == 200, resp.text
+
+    row = db_session.get(FileObject, "file_01nocopy")
+    assert row is not None
+    assert (row.storage_ref, row.bytes) == (None, 0), "the row stays, serving by proxy"
+
+    monkeypatch.setattr("gateway.api.routes.files.stream_provider_file", _serving(CHART))
+    content = client.get(f"{API_ROOT}/files/file_01nocopy/content", headers=api_key_header)
+    assert content.status_code == 200
+    assert content.content == CHART
+
+
+@pytest.fixture
+def one_output_client(test_config: GatewayConfig, clean_database: None, tmp_path: Path) -> Generator[TestClient]:
+    """A deployment that will copy one produced file per response and no more."""
+    updated = test_config.model_copy(update={"files_output_max_files": 1})
+    for candidate in build_test_client(updated):
+        cast(Any, candidate.app).state.file_store = LocalDirFileStore(str(tmp_path))
+        yield candidate
+
+
+def test_the_output_caps_apply_to_copied_files(
+    one_output_client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    anthropic_credentialed: None,
+) -> None:
+    """The same two caps a sandbox run's outputs get. Past the count a file is
+    still recorded, so its id resolves; it just serves by proxy as before."""
+    key = one_output_client.post(f"{API_ROOT}/keys", json={"key_name": "k"}, headers=master_key_header)
+    assert key.status_code == 200, key.text
+    headers = {next(iter(master_key_header)): f"Bearer {key.json()['key']}"}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        return _provider_reply(_provider_run_block("file_01first"), _provider_run_block("file_01second"))
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = one_output_client.post(f"{API_ROOT}/messages", json=_native_request(), headers=headers)
+    assert resp.status_code == 200, resp.text
+
+    first = db_session.get(FileObject, "file_01first")
+    second = db_session.get(FileObject, "file_01second")
+    assert first is not None and second is not None
+    assert first.storage_ref is not None, "the first is within the count"
+    assert (second.storage_ref, second.bytes) == (None, 0), "past the count, recorded but not copied"
+
+
+def test_a_produced_file_can_be_attached_to_a_later_request(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    anthropic_credentialed: None,
+) -> None:
+    """The other half of copying: a chart the provider drew is an ordinary Otari
+    file, so the next turn can hand it back to the model. A row with no bytes is
+    skipped by the content normalizer, which is what made this impossible."""
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        return _provider_reply(_provider_run_block("file_01reused"))
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        first = client.post(f"{API_ROOT}/messages", json=_native_request(), headers=api_key_header)
+    assert first.status_code == 200, first.text
+
+    captured: dict[str, Any] = {}
+
+    async def capture_acompletion(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return ChatCompletion(
+            id="chatcmpl-test",
+            object="chat.completion",
+            created=1700000000,
+            model="llama3",
+            choices=[
+                Choice(index=0, message=ChatCompletionMessage(role="assistant", content="ok"), finish_reason="stop")
+            ],
+            usage=CompletionUsage(prompt_tokens=10, completion_tokens=2, total_tokens=12),
+        )
+
+    # A model that reads images natively, so the block passes through with the
+    # bytes rather than being extracted to text for a text-only one.
+    body = {
+        "model": "anthropic:claude-sonnet-4-5",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "what does this chart show?"},
+                    {"type": "image_url", "image_url": {"url": ""}, "file_id": "file_01reused"},
+                ],
+            }
+        ],
+    }
+    with patch("gateway.api.routes.chat.acompletion", new=capture_acompletion):
+        second = client.post(f"{API_ROOT}/chat/completions", headers=api_key_header, json=body)
+
+    assert second.status_code == 200, second.text
+    sent = json.dumps(captured["messages"])
+    assert base64.b64encode(CHART).decode() in sent, "the produced file's bytes reached the model"

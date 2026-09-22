@@ -1,12 +1,18 @@
 """Files a provider's own sandbox produced, which Otari serves by proxy.
 
 A provider-native code execution keeps what it wrote in the provider's
-container, and answers with the provider's file id. Nothing is copied here:
-the run is recorded as a ``file_objects`` row with no ``storage_ref``, naming
-the provider that holds the bytes, and ``GET /v1/files/{id}/content`` streams
-them from that provider on demand. So the same call serves a chart whichever
-sandbox drew it, and a caller swapping one model for another changes nothing
-but the model.
+container, and answers with the provider's file id. The bytes are copied into
+Otari's store as the run is recorded, because the container does not last:
+OpenAI discards one twenty minutes after its last use, and everything in it.
+A caller who comes back to the conversation the next day would otherwise be
+holding an id for a chart nobody can serve. So the run becomes a
+``file_objects`` row like any upload, and the same ``GET /v1/files/{id}/content``
+serves a chart whichever sandbox drew it.
+
+A copy is best effort, and a row whose copy failed keeps the older behavior:
+no ``storage_ref``, the provider named, and the bytes streamed from that
+provider on demand for as long as it still has them. Rows written before
+copying existed are served the same way, which is why the proxy stays.
 
 The row is what makes that safe. A provider authenticates the deployment's own
 credential, which is coarser than a workspace-scoped API key, so without a
@@ -28,6 +34,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -39,6 +46,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.repositories.files import ProviderFileRow, existing_file_ids, record_provider_file_rows
 from gateway.services.file_service import CODE_EXECUTION_OUTPUT_PURPOSE, expiry_for, guess_mime_type
+from gateway.services.file_store import FileStore, build_file_store
 from gateway.services.provider_kwargs import get_provider_kwargs
 
 if TYPE_CHECKING:
@@ -158,24 +166,103 @@ def _credentials(
     return str(api_key), kwargs.get("api_base")
 
 
-def _request_for(record: FileObject, api_key: str, api_base: str | None) -> tuple[str, dict[str, str]]:
-    """The URL and headers that read ``record``'s bytes from its provider."""
-    if record.provider == LLMProvider.ANTHROPIC.value:
+def _content_request(
+    provider: str, file_id: str, container_id: str | None, api_key: str, api_base: str | None
+) -> tuple[str, dict[str, str]]:
+    """The URL and headers that read one provider-held file's bytes."""
+    if provider == LLMProvider.ANTHROPIC.value:
         base = (api_base or ANTHROPIC_FILES_BASE).rstrip("/")
         headers = {
             "x-api-key": api_key,
             "anthropic-version": ANTHROPIC_VERSION,
             "anthropic-beta": ANTHROPIC_FILES_BETA,
         }
-        return f"{base}/files/{record.id}/content", headers
+        return f"{base}/files/{file_id}/content", headers
     base = (api_base or OPENAI_BASE).rstrip("/")
     # OpenAI keys a container file on its container as well as its id.
-    if not record.provider_container_id:
-        raise LookupError(f"{record.provider} file {record.id} names no container to read it from")
+    if not container_id:
+        raise LookupError(f"{provider} file {file_id} names no container to read it from")
     return (
-        f"{base}/containers/{record.provider_container_id}/files/{record.id}/content",
+        f"{base}/containers/{container_id}/files/{file_id}/content",
         {"Authorization": f"Bearer {api_key}"},
     )
+
+
+def _request_for(record: FileObject, api_key: str, api_base: str | None) -> tuple[str, dict[str, str]]:
+    """The URL and headers that read ``record``'s bytes from its provider."""
+    return _content_request(
+        str(record.provider), record.id, record.provider_container_id, api_key, api_base
+    )
+
+
+class OutputOverBudget(Exception):
+    """A produced file ran past the bytes this response may still copy."""
+
+
+async def _provider_bytes(
+    provider: str, file_id: str, container_id: str | None, api_key: str, api_base: str | None, budget: int
+) -> AsyncGenerator[bytes, None]:
+    """Stream one produced file from its provider, stopping past ``budget``.
+
+    What a run writes is untrusted, so the count is checked as the bytes arrive
+    rather than after: a provider that declares no length, or declares one and
+    sends more, cannot spend more of the response's budget than it was given.
+    """
+    url, headers = _content_request(provider, file_id, container_id, api_key, api_base)
+    declared = None
+    async with (
+        httpx.AsyncClient(timeout=_TIMEOUT) as client,
+        client.stream("GET", url, headers=headers) as response,
+    ):
+        response.raise_for_status()
+        declared = response.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > budget:
+            raise OutputOverBudget
+        total = 0
+        async for chunk in response.aiter_bytes():
+            total += len(chunk)
+            if total > budget:
+                raise OutputOverBudget
+            yield chunk
+
+
+async def _copy_into_store(
+    store: FileStore,
+    file: ProviderFile,
+    *,
+    provider: str,
+    api_key: str,
+    api_base: str | None,
+    budget: int,
+) -> tuple[str, int] | None:
+    """Copy one produced file into Otari's store: its ref and size, or ``None``.
+
+    Best effort by design. A file that cannot be copied is still recorded, and
+    still serves by proxy for as long as the provider holds it, which is what
+    every provider row did before copying existed. Failing the copy must never
+    cost the caller the response it already has.
+    """
+    if budget <= 0:
+        logger.warning("Not copying %s file %s: the response's output budget is spent", provider, file.file_id)
+        return None
+    chunks = _provider_bytes(provider, file.file_id, file.container_id, api_key, api_base, budget)
+    try:
+        async with aclosing(chunks) as stream:
+            return await store.put_stream(file.file_id, stream)
+    except OutputOverBudget:
+        logger.warning("Not copying %s file %s: it is past the response's output budget", provider, file.file_id)
+    except (httpx.HTTPError, LookupError, OSError) as exc:
+        logger.warning("Could not copy %s file %s into the store: %s", provider, file.file_id, exc)
+    await _discard_partial(store, file.file_id)
+    return None
+
+
+async def _discard_partial(store: FileStore, file_id: str) -> None:
+    """Drop whatever a failed copy wrote, so a proxy row never shadows a truncated blob."""
+    try:
+        await store.delete(file_id)
+    except Exception as exc:  # noqa: BLE001 - the blob is orphaned either way; the row is what matters
+        logger.warning("Could not discard the partial copy of %s: %s", file_id, exc)
 
 
 async def _fetch_filename(provider: str, file_id: str, api_key: str, api_base: str | None) -> str | None:
@@ -213,6 +300,7 @@ async def record_provider_files(
     workspace_id: uuid.UUID,
     config: GatewayConfig,
     provider_instance: str | None = None,
+    store: FileStore | None = None,
 ) -> None:
     """Record what a provider's sandbox produced, so its ids serve from Otari's files API.
 
@@ -237,11 +325,25 @@ async def record_provider_files(
         async with uow:
             known = await existing_file_ids(uow, [file.file_id for file in files])
         expires_at = expiry_for(config)
+        store = store or build_file_store(config)
+        # The same two caps a sandbox run's outputs get. Files past the count
+        # are recorded but not copied, which leaves them exactly as every
+        # provider row was before copying existed.
+        budget = config.files_output_max_bytes
+        copyable = config.files_output_max_files
         rows = []
         for file in files:
             if file.file_id in known:
                 continue
             filename = file.filename or await _fetch_filename(provider, file.file_id, api_key, api_base)
+            stored = None
+            if copyable > 0:
+                copyable -= 1
+                stored = await _copy_into_store(
+                    store, file, provider=provider, api_key=api_key, api_base=api_base, budget=budget
+                )
+            if stored is not None:
+                budget -= stored[1]
             rows.append(
                 ProviderFileRow(
                     file_id=file.file_id,
@@ -254,6 +356,8 @@ async def record_provider_files(
                     provider_instance=provider_instance,
                     container_id=file.container_id,
                     expires_at=expires_at,
+                    storage_ref=stored[0] if stored else None,
+                    size_bytes=stored[1] if stored else 0,
                 )
             )
         if not rows:

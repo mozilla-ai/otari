@@ -183,9 +183,10 @@ async def _resolve_from_ref(
             logger.warning("content normalizer: file_id %s not found for user %s", file_id, user_id)
             return None
         if record.storage_ref is None:
-            # A file a provider's own sandbox produced. Otari serves its bytes
-            # by proxy on download but never holds them, so there is nothing to
-            # show the model or seed a session with.
+            # A produced file whose copy into Otari's store never landed, or one
+            # recorded before produced files were copied at all. Downloads still
+            # proxy from the provider, but there is nothing here to show the
+            # model or seed a session with.
             logger.warning("content normalizer: file_id %s is held by its provider, not readable here", file_id)
             return None
         staged = StagedFile(record.id, record.filename, record.mime_type, record.storage_ref)

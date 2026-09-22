@@ -158,6 +158,7 @@ from gateway.services.code_execution import (
     ContainerNotFoundError,
     SandboxContainerRegistry,
 )
+from gateway.services.file_store import FileStore
 from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for, record_provider_files
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
@@ -920,8 +921,13 @@ class RequestContext:
         organization_id: uuid.UUID | None = None,
         code_execution_policy: ResolvedCodeExecutionPolicy | None = None,
         code_execution_policy_loaded: bool = False,
+        file_store: FileStore | None = None,
     ) -> None:
         self.config = config
+        # The deployment's blob backend, as the app built it. Taken from the app
+        # rather than rebuilt from config so a produced file is copied into the
+        # same store ``/v1/files`` reads from. ``None`` where files are off.
+        self.file_store = file_store
         self.db = db
         self.log_writer = log_writer
         self.hybrid_mode = hybrid_mode
@@ -2193,6 +2199,7 @@ async def resolve_request_context(
         estimate_inputs=estimate_inputs,
         request_group_id=str(uuid.uuid4()) if plan is not None else None,
         organization_id=organization_id,
+        file_store=getattr(raw_request.app.state, "file_store", None),
     )
 
 
@@ -3444,6 +3451,7 @@ async def _record_provider_files(ctx: RequestContext, files: list[ProviderFile],
         user_id=ctx.user_id,
         workspace_id=ctx.workspace_id,
         config=ctx.config,
+        store=ctx.file_store,
     )
 
 
