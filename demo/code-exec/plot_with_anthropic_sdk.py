@@ -66,8 +66,8 @@ def produced_file_ids(message: Any) -> list[str]:
 
 def download(file_id: str, model: str) -> pathlib.Path:
     """Fetch a produced file from Otari, wherever its bytes actually live."""
-    meta = otari.beta.files.retrieve_metadata(file_id)
-    body = otari.beta.files.download(file_id)
+    meta = otari.files.retrieve_metadata(file_id)
+    body = otari.files.download(file_id)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{model.replace(':', '-').replace('/', '-')}-{meta.filename}"
