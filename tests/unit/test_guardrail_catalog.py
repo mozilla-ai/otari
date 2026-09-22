@@ -29,6 +29,7 @@ from gateway.services.guardrail_catalog import (
     BuiltInGuardrailSpec,
     GuardrailParameterSpec,
     build_builtin_guardrail_catalog,
+    builtin_guardrail_spec,
     fetch_guardrail_catalog,
 )
 
@@ -498,6 +499,28 @@ def test_leaves_requirement_groups_empty_for_a_guardrail_without_one() -> None:
     """The majority. An empty list must not read as "constraints unknown"."""
     assert _spec(build_builtin_guardrail_catalog(), "lakera_guard").requirement_groups == []
 
+
+def test_looks_up_exactly_what_the_catalog_lists() -> None:
+    """One derivation, read by the form through the catalog and by a write path through this.
+
+    Two of them could disagree about which guardrails exist, and the disagreement
+    would surface as a saved row nothing can build.
+    """
+    catalog = build_builtin_guardrail_catalog()
+
+    for spec in catalog.guardrails:
+        assert builtin_guardrail_spec(spec.guardrail_name) == spec
+
+    unlisted = {name.value for name in GuardrailName} - {spec.guardrail_name for spec in catalog.guardrails}
+    assert unlisted
+    for name in unlisted:
+        assert builtin_guardrail_spec(name) is None
+
+
+def test_does_not_look_up_a_name_the_registry_has_never_heard_of() -> None:
+    """A write path reads the name out of a request, so an unknown one is an answer, not a traceback."""
+    assert builtin_guardrail_spec("not_a_guardrail") is None
+    assert builtin_guardrail_spec("") is None
 
 def test_listing_the_catalog_never_loads_a_model_backend() -> None:
     """The whole point of reading the registry rather than constructing anything."""

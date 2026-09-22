@@ -400,3 +400,19 @@ def build_builtin_guardrail_catalog() -> BuiltInGuardrailCatalog:
             key=lambda spec: spec.display_name.casefold(),
         )
     )
+
+
+def builtin_guardrail_spec(guardrail_name: str) -> BuiltInGuardrailSpec | None:
+    """One listed guardrail's row, or None where this gateway cannot build it.
+
+    What a write path reads before it stores a definition, so the set it accepts
+    and the set the form offers are one derivation rather than two that could
+    disagree. A name the installed registry has never heard of and a name whose
+    guardrail holds model weights answer alike, because neither is a guardrail
+    this gateway can construct and a caller can do nothing different with either.
+    """
+    try:
+        name = GuardrailName(guardrail_name)
+    except ValueError:
+        return None
+    return _builtin_spec(name) if _reachable_over_a_hosted_api(name) else None
