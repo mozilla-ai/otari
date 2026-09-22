@@ -102,6 +102,7 @@ async def test_apply_input_guardrails_uses_config_url(monkeypatch: pytest.Monkey
         default_url: str | None,
         credentials: Any = None,
         mandated: Any = None,
+        in_process: Any = None,
     ) -> Any:
         seen["default_url"] = default_url
 
