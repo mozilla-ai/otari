@@ -170,6 +170,10 @@ class _StubProviderClient:
         self._files = files
         self._delay = delay
         self.reads: list[str] = []
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
 
     async def get_filename(self, file_id: str) -> str | None:
         if file_id == "file_01nameless":
@@ -213,7 +217,7 @@ async def _copy(bridge: SandboxFileBridge, *file_ids: str) -> None:
 
 @pytest.mark.asyncio
 async def test_a_provider_file_is_copied_under_the_providers_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_provider(monkeypatch, {"file_01chart": b"\x89PNG..."})
+    client = _stub_provider(monkeypatch, {"file_01chart": b"\x89PNG..."})
     store = _MemoryStore()
     db = _FakeDb()
 
@@ -234,6 +238,8 @@ async def test_a_provider_file_is_copied_under_the_providers_id(monkeypatch: pyt
     # The blob key is Otari's own, never the provider's ID.
     assert record.storage_ref != "file_01chart"
     assert store.blobs == {record.storage_ref: b"\x89PNG..."}
+    # The client holds the provider connection, so the copy owns closing it.
+    assert client.closed
 
 
 @pytest.mark.asyncio

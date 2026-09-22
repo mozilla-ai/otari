@@ -137,7 +137,11 @@ class SandboxFileBridge:
         except Exception:  # noqa: BLE001 - a copy failure must not fail the reply
             logger.exception("Not copying %d %s file(s)", len(new), provider)
             return
-        pending = [file for file in new if file.file_id not in known]
+        async with contextlib.aclosing(client):
+            await self._copy_batch(client, [file for file in new if file.file_id not in known], provider)
+
+    async def _copy_batch(self, client: ProviderFileClient, pending: list[ProviderFile], provider: str) -> None:
+        """Copy what the caps and the request's remaining time allow, logging whatever cannot be copied."""
         if len(pending) > self._provider_files_left:
             logger.warning(
                 "%s produced %d files; copying the first %d", provider, len(pending), self._provider_files_left

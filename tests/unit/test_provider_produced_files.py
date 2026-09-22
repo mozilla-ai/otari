@@ -9,18 +9,21 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
+from any_llm import LLMProvider
+from any_llm.types.files import AsyncFileDownload
 
 from gateway.services.files.provider_files import (
-    ANTHROPIC_FILES_BETA,
+    _TIMEOUT,
     FileOverBudgetError,
     ProviderFile,
     ProviderFileClient,
     ProviderFileUnavailableError,
-    _request_for,
+    _container_file_request,
+    _declared_size,
     anthropic_produced_files,
     produced_files_for,
     responses_produced_files,
@@ -98,16 +101,8 @@ def test_only_providers_otari_can_read_back_are_recorded() -> None:
     assert not serves_files("nebius")
 
 
-def test_anthropic_download_takes_the_id_alone() -> None:
-    url, headers = _request_for("anthropic", ProviderFile(file_id="file_01abc"), "sk-ant-test", None)
-
-    assert url == "https://api.anthropic.com/v1/files/file_01abc/content"
-    assert headers["x-api-key"] == "sk-ant-test"
-    assert headers["anthropic-beta"] == ANTHROPIC_FILES_BETA
-
-
 def test_openai_download_is_keyed_on_the_container() -> None:
-    url, headers = _request_for("openai", ProviderFile(file_id="cfile_1", container_id="cntr_1"), "sk-test", None)
+    url, headers = _container_file_request(ProviderFile(file_id="cfile_1", container_id="cntr_1"), "sk-test", None)
 
     assert url == "https://api.openai.com/v1/containers/cntr_1/files/cfile_1/content"
     assert headers == {"Authorization": "Bearer sk-test"}
@@ -116,8 +111,8 @@ def test_openai_download_is_keyed_on_the_container() -> None:
 def test_an_openai_file_with_no_container_cannot_be_read() -> None:
     # The download is keyed on the container, so a row without one has no URL
     # to build; refusing here is what keeps ``containers/None/...`` off the wire.
-    with pytest.raises(LookupError):
-        _request_for("openai", ProviderFile(file_id="cfile_1"), "sk-test", None)
+    with pytest.raises(ProviderFileUnavailableError, match="names no container"):
+        _container_file_request(ProviderFile(file_id="cfile_1"), "sk-test", None)
 
 
 def test_a_streamed_messages_result_block_names_its_files() -> None:
@@ -166,22 +161,69 @@ def test_a_citation_field_that_is_not_text_is_dropped() -> None:
     assert produced_files_for("responses", event) == [ProviderFile(file_id="cfile_1")]
 
 
-def test_a_configured_api_base_is_where_the_download_goes() -> None:
-    url, _ = _request_for(
-        "anthropic", ProviderFile(file_id="file_01abc"), "sk-ant-test", "https://anthropic.internal/v1/"
-    )
-
-    assert url == "https://anthropic.internal/v1/files/file_01abc/content"
-
-
 def test_an_id_stays_one_path_segment() -> None:
-    url, _ = _request_for("openai", ProviderFile(file_id="../cfile_1", container_id="cntr/1"), "sk-test", None)
+    url, _ = _container_file_request(ProviderFile(file_id="../cfile_1", container_id="cntr/1"), "sk-test", None)
 
     assert url == "https://api.openai.com/v1/containers/cntr%2F1/files/..%2Fcfile_1/content"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("file_id", ["../secret", "..", "a\\b", ""])
+async def test_an_anthropic_id_that_could_escape_its_path_reaches_no_provider(
+    monkeypatch: pytest.MonkeyPatch, file_id: str
+) -> None:
+    # any-llm rejects these rather than Otari, so this pins the behavior the
+    # Anthropic path relies on instead of validating the ID itself.
+    seen = _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
+
+    with pytest.raises(ProviderFileUnavailableError):
+        await _read_all(_client().read(ProviderFile(file_id=file_id), budget_bytes=5))
+    assert seen == []
+
+
+def test_a_provider_whose_files_otari_cannot_read_is_refused() -> None:
+    # serves_files names the set; refusing here is what stops a third provider's
+    # credential reaching OpenAI's container endpoint.
+    with pytest.raises(LookupError, match="nebius"):
+        ProviderFileClient(provider=LLMProvider.NEBIUS, provider_instance="nebius", api_key="sk-test", api_base=None)
+
+
+@pytest.mark.asyncio
+async def test_both_providers_read_under_one_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
+    anthropic, openai = _client(), _client("openai")
+
+    # Without this the Anthropic path would inherit the SDK's own 600s read timeout.
+    assert cast("Any", anthropic._llm).client.timeout == _TIMEOUT
+    assert anthropic._connection.timeout == _TIMEOUT
+    assert openai._connection.timeout == _TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_aclose_releases_the_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
+    client = _client()
+
+    await _read_all(client.read(ProviderFile(file_id="file_01abc"), budget_bytes=5))
+    await client.aclose()
+
+    assert client._connection.is_closed
+
+
+@pytest.mark.asyncio
+async def test_a_declared_size_is_read_whatever_case_the_header_arrives_in() -> None:
+    # AsyncFileDownload promises a plain mapping, which no HTTP header class need back.
+    download = AsyncFileDownload(status_code=200, headers={"Content-Length": "9"}, chunks=_no_chunks())
+
+    assert _declared_size(download) == 9
+
+
 def _serving(monkeypatch: pytest.MonkeyPatch, handler: Any) -> list[httpx.Request]:
-    """Route every ``httpx.AsyncClient`` the client opens to ``handler``, returning the requests it saw."""
+    """Route every ``httpx.AsyncClient`` the client opens to ``handler``, returning the requests it saw.
+
+    Patches the constructor rather than passing a transport, because the
+    provider SDK builds clients of its own that a caller cannot reach.
+    """
     seen: list[httpx.Request] = []
 
     def _recording(request: httpx.Request) -> httpx.Response:
@@ -199,8 +241,26 @@ def _serving(monkeypatch: pytest.MonkeyPatch, handler: Any) -> list[httpx.Reques
     return seen
 
 
-def _client(provider: str = "anthropic") -> ProviderFileClient:
-    return ProviderFileClient(provider=provider, provider_instance=provider, api_key="sk-test", api_base=None)
+def _client(provider: str = "anthropic", api_base: str | None = None) -> ProviderFileClient:
+    member = LLMProvider(provider)
+    return ProviderFileClient(provider=member, provider_instance=provider, api_key="sk-test", api_base=api_base)
+
+
+def _metadata(filename: str = "bar_plot.png") -> dict[str, Any]:
+    """Anthropic's file metadata, with every field its SDK requires."""
+    return {
+        "id": "file_01abc",
+        "type": "file",
+        "filename": filename,
+        "mime_type": "image/png",
+        "size_bytes": 5,
+        "created_at": "2026-01-01T00:00:00Z",
+    }
+
+
+async def _no_chunks() -> AsyncIterator[bytes]:
+    return
+    yield  # pragma: no cover
 
 
 async def _read_all(chunks: AsyncGenerator[bytes, None]) -> bytes:
@@ -216,6 +276,18 @@ async def test_read_streams_the_file(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert data == b"chart"
     assert seen[0].url.path == "/v1/files/file_01abc/content"
+    assert seen[0].headers["x-api-key"] == "sk-test"
+
+
+@pytest.mark.asyncio
+async def test_a_configured_api_base_is_where_the_download_goes(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An instance's api_base names the server, not a versioned prefix.
+    seen = _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
+
+    client = _client(api_base="https://anthropic.internal")
+    await _read_all(client.read(ProviderFile(file_id="file_01abc"), budget_bytes=5))
+
+    assert str(seen[0].url) == "https://anthropic.internal/v1/files/file_01abc/content"
 
 
 @pytest.mark.asyncio
@@ -259,28 +331,29 @@ async def test_read_raises_when_the_connection_fails(monkeypatch: pytest.MonkeyP
 
 @pytest.mark.asyncio
 async def test_read_refuses_an_openai_file_with_no_container() -> None:
-    with pytest.raises(ProviderFileUnavailableError):
+    # The reason reaches the caller, which is what an operator reads in the log.
+    with pytest.raises(ProviderFileUnavailableError, match="names no container"):
         await _read_all(_client("openai").read(ProviderFile(file_id="cfile_1"), budget_bytes=5))
 
 
 @pytest.mark.asyncio
 async def test_get_filename_reads_anthropic_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen = _serving(monkeypatch, lambda request: httpx.Response(200, json={"filename": "bar_plot.png"}))
+    seen = _serving(monkeypatch, lambda request: httpx.Response(200, json=_metadata()))
 
     assert await _client().get_filename("file_01abc") == "bar_plot.png"
     assert seen[0].url.path == "/v1/files/file_01abc"
-    assert seen[0].headers["anthropic-beta"] == ANTHROPIC_FILES_BETA
 
 
 @pytest.mark.asyncio
 async def test_get_filename_is_none_when_the_lookup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    _serving(monkeypatch, lambda request: httpx.Response(500))
+    _serving(monkeypatch, lambda request: httpx.Response(404))
 
     assert await _client().get_filename("file_01abc") is None
 
 
 @pytest.mark.asyncio
 async def test_get_filename_is_none_when_the_metadata_is_not_an_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A body no reader expects costs the caller the name, never the file it holds.
     _serving(monkeypatch, lambda request: httpx.Response(200, json=["bar_plot.png"]))
 
     assert await _client().get_filename("file_01abc") is None
@@ -289,7 +362,7 @@ async def test_get_filename_is_none_when_the_metadata_is_not_an_object(monkeypat
 @pytest.mark.asyncio
 async def test_get_filename_asks_nothing_of_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     # OpenAI's citation already names the file, so there is no metadata call to make.
-    seen = _serving(monkeypatch, lambda request: httpx.Response(200, json={"filename": "x"}))
+    seen = _serving(monkeypatch, lambda request: httpx.Response(200, json=_metadata()))
 
     assert await _client("openai").get_filename("cfile_1") is None
     assert seen == []
