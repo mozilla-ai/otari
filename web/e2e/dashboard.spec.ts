@@ -133,9 +133,9 @@ test.describe("dashboard core flows", () => {
 
     await openOrganization(page)
     for (const [link, heading] of [
-      // Two provider rows on this rail now, and the labels are what tell them
-      // apart: the organization's own credentials and the process-wide ones a
-      // deployment operator manages.
+      // Two provider rows on this rail, told apart by their labels: the
+      // organization's own credentials and the process-wide ones a deployment
+      // operator manages.
       ["Providers", "Providers"],
       ["Deployment providers", "Deployment providers"],
       ["Spend & budgets", "Budgets"],

@@ -228,9 +228,9 @@ describe("nav registry", () => {
       ["Members & roles", "organizations"],
       ["Email domains", "organizations"],
     ])
-    // One row, not two: Model pricing folded into Providers, where an
-    // organization's models are offered, priced and switched together, and its
-    // old path is a redirect. A rail row points at a real page.
+    // One row. An organization's rates are set on Providers, beside the models
+    // they price, and `/organization/pricing` is a redirect, which a rail row
+    // may not point at.
     const money = ORG_NAV_SECTIONS.find((section) => section.id === "org-money")
     expect(money?.items.map((item) => [item.label, item.surface])).toEqual([
       ["Spend & budgets", "budgets"],

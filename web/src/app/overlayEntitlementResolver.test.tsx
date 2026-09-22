@@ -226,8 +226,8 @@ describe("the shell's mount point", () => {
     // Waiting on one would hold back a panel that is already correct.
     // `/organization/usage` is gated on `organization_usage`, which
     // `STANDALONE_SURFACES` does not report, so the base registry gates it off
-    // in this build with no overlay contribution involved. (It used to be
-    // `/organization/provider-keys`; standalone publishes that surface now.)
+    // in this build with no overlay contribution involved. Not
+    // `/organization/provider-keys`, which standalone does publish.
     resolved.value = { capabilities: [], isLoading: true }
     await renderShell(<p>ORGANIZATION USAGE</p>, "/organization/usage")
 

@@ -350,4 +350,65 @@ describe("PricingOverrideDialog", () => {
       expect(screen.getByLabelText(/input, per 1m tokens/i)).toHaveFocus(),
     )
   })
+  it("blocks an edit whose start has been cleared", async () => {
+    // A period with no start resolves for nothing, so the form refuses it here
+    // rather than letting the server answer.
+    const requests = mockApi({ overrides: [] })
+    const stored = pricingOverride()
+    const user = userEvent.setup()
+
+    await renderDialog([stored], { editing: stored })
+
+    await user.clear(await screen.findByLabelText(/applies from/i))
+
+    expect(screen.getByText(/an edit needs a start/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /save override/i }),
+    ).toBeDisabled()
+    expect(requests.some((request) => request.method === "PUT")).toBe(false)
+  })
+
+  it("does not greet the next open with the last attempt's refusal", async () => {
+    // The mutation lives below the caller's key, so remounting the dialog on a
+    // different model drops it. Asserted as two renders, which is what the page
+    // does when `?override=` changes.
+    mockApi({
+      overrides: [],
+      writeStatus: 409,
+      writeBody: { detail: "A period already covers that instant" },
+    })
+    const user = userEvent.setup()
+
+    const first = await renderDialog([], { initialModelKey: "openai:gpt-4o" })
+    await user.type(await screen.findByLabelText(/input, per 1m tokens/i), "1")
+    await user.type(screen.getByLabelText(/output, per 1m tokens/i), "2")
+    await user.click(screen.getByRole("button", { name: /^add override$/i }))
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
+    first.unmount()
+
+    await renderDialog([], { initialModelKey: "openai:gpt-4o-mini" })
+
+    expect(
+      await screen.findByLabelText(/input, per 1m tokens/i),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
+  it("seeds each opener's dialog fresh, whichever one was used last", async () => {
+    // Keyed on the model in the page above, so a second opener starts from that
+    // model's stored rate and not from whatever the last one left typed.
+    mockApi({ overrides: [] })
+    const stored = pricingOverride()
+    const user = userEvent.setup()
+
+    const first = await renderDialog([], { initialModelKey: "openai:gpt-4o" })
+    await user.type(await screen.findByLabelText(/input, per 1m tokens/i), "9")
+    first.unmount()
+
+    await renderDialog([stored], { editing: stored })
+
+    expect(await screen.findByLabelText(/input, per 1m tokens/i)).toHaveValue(
+      String(stored.input_price_per_million),
+    )
+  })
 })
