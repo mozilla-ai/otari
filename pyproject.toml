@@ -117,6 +117,17 @@ s3 = [
 fsspec = [
     "fsspec>=2024.6.0",
 ]
+# Hosted sandboxes through E2B, for a deployment that cannot run the reference
+# code-execution container with the isolation untrusted code needs. Selected
+# with `sandbox_provider: e2b`; the adapter imports the SDK only then.
+# The adapter walks a listing with `depth=`, and reads `size` and
+# `modified_time` off its entries, none of which the 1.x SDK has, so the floor
+# is the line it was written against rather than the first release to carry the
+# names.
+e2b = [
+    "e2b>=2.0.0",
+    "e2b-code-interpreter>=2.0.0",
+]
 
 [dependency-groups]
 dev = [
@@ -237,6 +248,12 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # fsspec ships no stubs; the file store drives it through a handful of calls.
 module = ["fsspec", "fsspec.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# The E2B SDK ships no stubs and is an optional extra, so it is absent from the
+# default environment the type check runs in.
+module = ["e2b", "e2b.*", "e2b_code_interpreter", "e2b_code_interpreter.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

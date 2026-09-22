@@ -844,7 +844,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # reason config is: two apps in one process must not share one. A bootstrap
     # that cannot be loaded raises here, so a deployment that named one and got
     # it wrong fails to start instead of quietly running the plain build.
-    app.state.container = build_container(config.bootstrap)
+    app.state.container = build_container(config.bootstrap, config=config)
 
     register_routers(app, config)
     app.add_exception_handler(TenancyError, _tenancy_error_handler)

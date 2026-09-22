@@ -80,7 +80,7 @@ A **port** is a domain-named interface (a Python `Protocol`), named for what it 
 | `IdentityProviderPort` | Authenticating users/sign-in. |
 | `RoutingPort` | Choosing the provider/model attempts for a request. |
 | `ModelProviderPort` | Resolving the deployment-owned credential that serves a request bringing none. |
-| `CodeExecutionPort` | Running model-generated code in a sandbox. |
+| `CodeExecutionPort` | Running model-generated code in a sandbox. Two core adapters: the published protocol over HTTP, and E2B's hosted sandboxes. |
 | `BillingPort` | Metering and charging for usage. |
 | `GrowthSignalPort` | Telling an outside CRM or support messenger about a user's lifecycle. |
 | `TelemetryStoragePort` | Where captured agent telemetry is stored and read back. |

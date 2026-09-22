@@ -2351,9 +2351,10 @@ class _FakeSandboxBackend:
     def __init__(
         self,
         *,
-        sandbox_url: str,
+        port: Any,
         purpose_hint: str | None = None,
         timeout_s: float = 0.0,
+        max_executions: int = 1,
         auth_token: str | None = None,
         image: str | None = None,
         allowed_tools: frozenset[str] | None = None,

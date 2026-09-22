@@ -21,6 +21,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
 from gateway.ports.billing_port import BillingPort
+from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
@@ -740,6 +741,28 @@ PortSessionDep = Annotated[AsyncSession | None, Depends(get_db_if_needed)]
 def get_api_key_format_port(db: PortSessionDep, container: ContainerDep) -> ApiKeyFormatPort:
     """Resolve the key-format adapter this build bound at startup."""
     return container.resolve(ApiKeyFormatPort, db)
+
+
+def get_code_execution_port(
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    container: ContainerDep,
+) -> CodeExecutionPort | None:
+    """Resolve the code-execution adapter this build bound at startup.
+
+    ``None`` where the deployment has configured no sandbox, which is most of
+    them: every completion request resolves this, and one that never asks for
+    code execution must not be refused because there is nowhere to run it. The
+    request that does ask is refused by name in ``prepare_gateway_tools``.
+
+    No session either: the adapter reaches a sandbox, not this database, and
+    which one it reaches is a deployment setting rather than a request fact.
+    """
+    if not config.sandbox_configured():
+        return None
+    return container.resolve(CodeExecutionPort, None)
+
+
+CodeExecutionPortDep = Annotated[CodeExecutionPort | None, Depends(get_code_execution_port)]
 
 
 def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort:

@@ -1,38 +1,20 @@
-"""Dispatch `code_execution` tool calls to a sandbox container.
+"""Dispatch `code_execution` tool calls to a sandbox.
 
 A backend the tool-use loop in :mod:`gateway.services.mcp_loop` dispatches
-to whenever the model emits a ``code_execution(code=…)`` call. The sandbox
-container lives in its own repo
-(https://github.com/mozilla-ai/otari-sandbox-container) and is pulled from
-Docker Hub (``mzdotai/otari-sandbox-container``). It runs a Python REPL
-with a curated set of data-science libraries pre-installed.
+to whenever the model emits a ``code_execution(code=…)`` call. Everything here
+is the half that does not depend on how the code is actually run: the tool the
+model is offered, the allow-list, the usage tally, seeding the request's
+uploads and collecting what a run produced. Reaching a sandbox at all belongs
+to :mod:`gateway.ports.code_execution_port` and the adapters under it, so a
+container the operator runs and a hosted provider are the same to this module.
+The shapes a run returns are typed in :mod:`gateway.types.code_execution`.
 
-The contract this drives is specified in ``docs/code-execution-protocol.md``;
-the shapes it returns are typed in :mod:`gateway.types.code_execution`. The
-three operations used here:
-
-* ``POST /sessions``         → creates a session, returns a handle carrying
-                              ``session_id``. Carries ``{image: "…"}`` when a
-                              workspace policy or the deployment names one, and
-                              an empty body otherwise
-* ``POST /sessions/{id}/exec``  with ``{tool: "code_execution",
-                                        input: {code: "…"},
-                                        timeout_seconds: int}``
-                              → returns ``{result_block: {…}}``
-* ``DELETE /sessions/{id}``  → tears the session down
-* ``POST /sessions/{id}/files``, ``GET /sessions/{id}/files/list`` and
-  ``GET /sessions/{id}/files?path=…``
-                              → seed the request's uploads into the workspace
-                              before the first call, then after each call list
-                              the workspace and fetch what appeared or changed,
-                              when a :class:`SandboxFiles` bridge is attached
-
-Session lifecycle is per-request: enter creates a session, exit
-destroys it. State does not persist across separate chat-completion
-requests in this minimum-viable backend. A future stateful variant
-(per-conversation session affinity, warm pool, etc.) is the platform's
-problem — see ``docs/sandbox-oss-platform-direction.md`` in the
-private platform repo for that picture.
+Session lifecycle is per-request: enter leases a session, exit releases it.
+State does not persist across separate chat-completion requests in this
+minimum-viable backend. A future stateful variant (per-conversation session
+affinity, warm pool, etc.) is the platform's problem; see
+``docs/sandbox-oss-platform-direction.md`` in the private platform repo for
+that picture.
 
 This backend satisfies the same duck-typed protocol the MCP loop uses
 for tool dispatch (``openai_tools``, ``owns_tool``, ``purpose_hints``,
@@ -45,16 +27,21 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
-import httpx
 from opentelemetry import trace
-from pydantic import ValidationError
 
+from gateway.ports.code_execution_port import (
+    CodeExecutionPort,
+    CodeExecutionSession,
+    OutputOverBudget,
+    SandboxNotReachableError,
+    SandboxUnavailableError,
+)
 from gateway.services.tool_usage import ToolUsageTally
-from gateway.types.code_execution import ExecResponse, ResultBlock, SessionHandle
+from gateway.types.code_execution import ResultBlock
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -63,6 +50,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
+
+# ``SandboxNotReachableError`` and ``SandboxUnavailableError`` are the port's,
+# because the adapters raise them, and are re-exported here so the routes and
+# tests that have always caught them from this module still can.
+__all__ = [
+    "CODE_EXECUTION_TOOL_NAME",
+    "CODE_EXECUTION_TOOL_NAMES",
+    "CONTAINER_ID_PREFIX",
+    "CodeExecution",
+    "SandboxBackend",
+    "SandboxFiles",
+    "SandboxNotReachableError",
+    "SandboxUnavailableError",
+    "code_execution_tool_definition",
+]
 
 CODE_EXECUTION_TOOL_NAME = "code_execution"
 # The gateway's own container ids. OpenAI issues ``cntr_``-prefixed ids and
@@ -86,12 +88,22 @@ CODE_EXECUTION_TOOL_NAMES: tuple[str, ...] = (
 # rather than carrying a second idea of the default (see
 # ``services/tenancy/workspace_code_execution_policy_service.py``).
 DEFAULT_EXEC_TIMEOUT_S = 60.0
-# Headroom added on top of the execution budget for the exec POST's own read
-# timeout. The sandbox is granted ``timeout_seconds`` to run the code; the HTTP
-# client must wait longer than that (network + serialization + the sandbox's own
-# teardown) so a legitimate near-max execution returns its result instead of
-# tripping the client read timeout as a spurious ``SandboxNotReachableError``.
-_EXEC_TIMEOUT_BUFFER_S = 10.0
+# Headroom on top of what the calls themselves may spend, for the lease a
+# session is opened with: seeding the uploads and collecting the outputs happen
+# outside any execution budget, and a provider that reclaims on its own timer
+# must not take the sandbox away while they run.
+_SESSION_TTL_SLACK_S = 60.0
+# How many code calls one tool-loop round is assumed to carry. The iteration cap
+# bounds rounds, not calls: a model may emit several code calls in one round and
+# nothing narrows that, so the cap alone under-counts what a request can spend.
+# Guessing high is the cheap direction, because the session is released when the
+# request ends and the provider's own timer is only the backstop for a release
+# that never ran.
+_CALLS_PER_ROUND_ALLOWANCE = 4
+# The longest lease worth asking for. Providers cap how long they will hold a
+# sandbox, and a plan's ceiling is a refused creation rather than a shorter
+# lease, so a generous estimate is clamped rather than sent.
+_MAX_SESSION_TTL_S = 3600.0
 _DEFAULT_PURPOSE_HINT = (
     "Prefer `code_execution` for any computation, data analysis, date "
     "arithmetic, statistics, or anything that benefits from exact output. "
@@ -186,47 +198,6 @@ class CodeExecution:
     file_ids: dict[str, str] = field(default_factory=dict)
 
 
-class SandboxNotReachableError(RuntimeError):
-    """Raised when the sandbox container can't be reached or returns malformed data."""
-
-
-class SandboxUnavailableError(SandboxNotReachableError):
-    """Temporary sandbox capacity or dependency failure."""
-
-    def __init__(self, retry_after: str | None = None) -> None:
-        super().__init__("sandbox temporarily unavailable")
-        # Forward only validated delay-seconds.
-        self.retry_after = (
-            retry_after
-            if retry_after and retry_after.isascii() and retry_after.isdigit() and len(retry_after) <= 6
-            else None
-        )
-
-
-def _contract_violation(exc: ValidationError) -> str:
-    """Summarise a schema violation without quoting the payload.
-
-    Pydantic's ``ValidationError`` subclasses ``ValueError``, so every handler
-    below must catch it *before* the clause that catches ``ValueError``.
-    Reordering them silently routes schema violations through the generic
-    handler and reintroduces the leak this exists to prevent.
-
-    Pydantic renders the offending values into ``str(exc)`` (``input_value=...``),
-    and a result block carries arbitrary program output from model-generated
-    code, so rendering it would put that output into logs and spans. The field
-    locations and error types are the diagnostically useful part and carry none
-    of it.
-    """
-    fields = ", ".join(
-        f"{'.'.join(str(part) for part in error['loc']) or '(root)'}: {error['type']}" for error in exc.errors()
-    )
-    return f"response does not match the code-execution contract ({fields})"
-
-
-class _OutputOverBudget(Exception):
-    """A produced file ran past the bytes this call may still store."""
-
-
 class _CountedChunks:
     """An async iterator over ``source`` that counts bytes and stops past ``budget``."""
 
@@ -242,7 +213,7 @@ class _CountedChunks:
         chunk = await self._source.__anext__()
         self.total += len(chunk)
         if self.total > self._budget:
-            raise _OutputOverBudget
+            raise OutputOverBudget
         return chunk
 
 
@@ -251,7 +222,8 @@ class SandboxBackend:
 
     Usage::
 
-        async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        port = ProtocolCodeExecutionAdapter("http://sandbox:8080")
+        async with SandboxBackend(port=port, max_executions=N) as backend:
             # backend duck-types as the MCP loop's `pool` parameter
             result = await mcp_tool_loop(
                 completion_kwargs=kwargs, pool=backend, max_iterations=N,
@@ -261,9 +233,10 @@ class SandboxBackend:
     def __init__(
         self,
         *,
-        sandbox_url: str,
+        port: CodeExecutionPort,
         purpose_hint: str | None = None,
         timeout_s: float = DEFAULT_EXEC_TIMEOUT_S,
+        max_executions: int = 1,
         auth_token: str | None = None,
         image: str | None = None,
         allowed_tools: frozenset[str] | None = None,
@@ -271,7 +244,7 @@ class SandboxBackend:
         files: SandboxFiles | None = None,
         files_base_url: str | None = None,
     ) -> None:
-        self._sandbox_url = sandbox_url.rstrip("/")
+        self._port = port
         # Where this deployment serves ``/v1/files`` from: a loop answering in
         # OpenAI's vocabulary needs a URL to announce a produced image with.
         # None outside a request (tests, direct use), which announces none.
@@ -284,6 +257,14 @@ class SandboxBackend:
         self._tally = tally
         self._purpose_hint = purpose_hint or _DEFAULT_PURPOSE_HINT
         self._timeout_s = timeout_s
+        # How long the lease has to last, as against what one call may spend.
+        # A request runs code at least once per tool-loop round, so a provider
+        # that reclaims a sandbox on a timer of its own (E2B) has to be told the
+        # whole request's worth or it takes the sandbox away mid-loop.
+        self._session_ttl_s = min(
+            timeout_s * max(max_executions, 1) * _CALLS_PER_ROUND_ALLOWANCE + _SESSION_TTL_SLACK_S,
+            _MAX_SESSION_TTL_S,
+        )
         # Optional bearer credential forwarded as `Authorization: Bearer` on every
         # call to the sandbox backend. Set in hybrid mode so the platform-hosted
         # /v1/sandbox proxy (which authenticates the caller's workspace token) admits
@@ -302,8 +283,7 @@ class SandboxBackend:
         # ``owns_tool`` claims, so a name outside it is never offered to the
         # model and never dispatched if the model invents it anyway.
         self._allowed_tools = allowed_tools
-        self._client: httpx.AsyncClient | None = None
-        self._session_id: str | None = None
+        self._session: CodeExecutionSession | None = None
         self._stack: AsyncExitStack = AsyncExitStack()
         # The calls executed since the last ``take_executions``, in order. A loop
         # that mints native result blocks drains this right after the awaited
@@ -318,26 +298,14 @@ class SandboxBackend:
         self.container_id = f"{CONTAINER_ID_PREFIX}{uuid.uuid4().hex}"
 
     async def __aenter__(self) -> SandboxBackend:
-        try:
-            headers = {"Authorization": f"Bearer {self._auth_token}"} if self._auth_token else None
-            self._client = await self._stack.enter_async_context(
-                httpx.AsyncClient(timeout=self._timeout_s, headers=headers)
+        self._session = await self._stack.enter_async_context(
+            self._port.open_session(
+                image=self._image,
+                timeout_s=self._timeout_s,
+                session_ttl_s=self._session_ttl_s,
+                auth_token=self._auth_token,
             )
-            payload = {"image": self._image} if self._image else {}
-            response = await self._client.post(f"{self._sandbox_url}/sessions", json=payload)
-            if response.status_code == 503:
-                await self._stack.aclose()
-                raise SandboxUnavailableError(response.headers.get("Retry-After"))
-            response.raise_for_status()
-            self._session_id = SessionHandle.model_validate(response.json()).session_id
-        except ValidationError as exc:
-            await self._stack.aclose()
-            raise SandboxNotReachableError(
-                f"failed to create sandbox session at {self._sandbox_url}: {_contract_violation(exc)}"
-            ) from None
-        except (httpx.HTTPError, ValueError) as exc:
-            await self._stack.aclose()
-            raise SandboxNotReachableError(f"failed to create sandbox session at {self._sandbox_url}: {exc}") from exc
+        )
         try:
             await self._seed_inputs()
             if self._files is not None:
@@ -358,49 +326,27 @@ class SandboxBackend:
         """
         if self._files is None or not self._files.inputs:
             return
-        assert self._client is not None and self._session_id is not None
+        assert self._session is not None
         for staged in self._files.inputs:
             try:
                 data = await self._files.read_input(staged)
             except OSError as exc:
                 raise SandboxNotReachableError(f"could not read attachment {staged.file_id} for the sandbox") from exc
             try:
-                response = await self._client.post(
-                    f"{self._sandbox_url}/sessions/{self._session_id}/files",
-                    files={"file": (staged.filename, data, staged.mime_type)},
-                    data={"path": staged.filename},
-                )
-                response.raise_for_status()
-            except httpx.HTTPError as exc:
+                await self._session.put_file(staged.filename, data, mime_type=staged.mime_type)
+            except SandboxNotReachableError as exc:
                 raise SandboxNotReachableError(f"sandbox refused attachment {staged.file_id}: {exc}") from exc
-            logger.info("sandbox session %s seeded with file %s", self._session_id, staged.file_id)
+            logger.info("sandbox session %s seeded with file %s", self._session.session_id, staged.file_id)
 
     async def _list_workspace(self) -> dict[str, tuple[int, float | None]]:
         """The session workspace's files, path -> (size, modified_at); empty when unlistable.
 
-        ``ListFiles`` is optional in the contract, so a backend without it (404,
-        or any other failure) simply leaves the diff empty and the result block's
-        own file list as the only source of produced files.
+        Listing is optional, so an adapter whose backend cannot do it reports
+        nothing, which leaves the result block's own file list as the only
+        source of produced files.
         """
-        assert self._client is not None and self._session_id is not None
-        try:
-            response = await self._client.get(f"{self._sandbox_url}/sessions/{self._session_id}/files/list")
-            response.raise_for_status()
-            entries = response.json().get("files")
-        except (httpx.HTTPError, ValueError, AttributeError) as exc:
-            logger.debug("sandbox session %s workspace not listable: %s", self._session_id, exc)
-            return {}
-        listed: dict[str, tuple[int, float | None]] = {}
-        for entry in entries if isinstance(entries, list) else []:
-            if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
-                continue
-            size = entry.get("size_bytes")
-            modified = entry.get("modified_at")
-            listed[entry["path"]] = (
-                size if isinstance(size, int) else -1,
-                float(modified) if isinstance(modified, int | float) else None,
-            )
-        return listed
+        assert self._session is not None
+        return {entry.path: (entry.size_bytes, entry.modified_at) for entry in await self._session.list_files()}
 
     async def _produced_files(self, block: ResultBlock) -> list[str]:
         """The files this call produced: what the block names, plus what the workspace diff shows.
@@ -431,7 +377,6 @@ class SandboxBackend:
         """
         if self._files is None:
             return [], {}
-        assert self._client is not None and self._session_id is not None
         produced = await self._produced_files(block)
         max_files = self._files.max_output_files
         if len(produced) > max_files:
@@ -439,12 +384,21 @@ class SandboxBackend:
         ids: dict[str, str] = {}
         budget = self._files.max_output_bytes
         for filename in produced[:max_files]:
+            # What the listing already said about the file, where it said
+            # anything: refusing here keeps an adapter whose provider hands a
+            # file over whole from being asked for one that cannot be stored.
+            listed = self._workspace.get(filename)
+            if listed is not None and listed[0] > budget:
+                logger.warning(
+                    "sandbox output %r skipped: over the %d byte budget left for this call", filename, budget
+                )
+                continue
             try:
                 stored = await self._store_output(filename, budget)
-            except httpx.HTTPError as exc:
+            except SandboxNotReachableError as exc:
                 logger.warning("sandbox output %r could not be fetched: %s", filename, exc)
                 continue
-            except _OutputOverBudget:
+            except OutputOverBudget:
                 logger.warning(
                     "sandbox output %r skipped: over the %d byte budget left for this call", filename, budget
                 )
@@ -462,21 +416,15 @@ class SandboxBackend:
     async def _store_output(self, filename: str, budget: int) -> tuple[str, int] | None:
         """Stream one produced file from the sandbox into the store, returning its id and size.
 
-        Never holds the file whole: the bytes go from the sandbox's response to
-        the store as they arrive, and the count is checked on the way, so a file
-        past ``budget`` is abandoned mid-stream (the store removes the partial
-        blob). A declared ``Content-Length`` past it is refused before a byte is
+        Never holds the file whole: the bytes go from the sandbox to the store
+        as they arrive, and the count is checked on the way, so a file past
+        ``budget`` is abandoned mid-stream and the store removes the partial
+        blob. An adapter that learns the size first refuses before a byte is
         read. ``None`` for an empty file.
         """
-        assert self._client is not None and self._session_id is not None and self._files is not None
-        async with self._client.stream(
-            "GET", f"{self._sandbox_url}/sessions/{self._session_id}/files", params={"path": filename}
-        ) as response:
-            response.raise_for_status()
-            declared = response.headers.get("content-length", "")
-            if declared.isdigit() and int(declared) > budget:
-                raise _OutputOverBudget
-            counted = _CountedChunks(response.aiter_bytes(), budget)
+        assert self._session is not None and self._files is not None
+        async with aclosing(self._session.read_file(filename, budget_bytes=budget)) as chunks:
+            counted = _CountedChunks(chunks, budget)
             file_id = await self._files.store_output(filename, counted)
         if file_id is None:
             logger.warning("sandbox output %r skipped: empty", filename)
@@ -489,11 +437,9 @@ class SandboxBackend:
         _exc: BaseException | None,
         _tb: TracebackType | None,
     ) -> None:
-        if self._client is not None and self._session_id is not None:
-            try:
-                await self._client.delete(f"{self._sandbox_url}/sessions/{self._session_id}")
-            except httpx.HTTPError:
-                logger.warning("sandbox session %s cleanup failed", self._session_id, exc_info=True)
+        # Releasing the session is the port's; this unwinds the block it was
+        # entered in, which is what triggers that release.
+        self._session = None
         await self._stack.aclose()
 
     # ----- duck-typed protocol the MCP loop uses on `pool` -----
@@ -551,14 +497,9 @@ class SandboxBackend:
         return result
 
     async def _exec_tool(self, code: str) -> tuple[str, ResultBlock, dict[str, str]]:
-        if self._client is None or self._session_id is None:
+        if self._session is None:
             raise RuntimeError("SandboxBackend not entered as an async context manager")
 
-        payload = {
-            "tool": CODE_EXECUTION_TOOL_NAME,
-            "input": {"code": code},
-            "timeout_seconds": int(self._timeout_s),
-        }
         with tracer.start_as_current_span(
             CODE_EXECUTION_TOOL_NAME,
             record_exception=False,
@@ -567,40 +508,26 @@ class SandboxBackend:
             span.set_attribute("tool.name", CODE_EXECUTION_TOOL_NAME)
             span.set_attribute("tool.type", "otari_code_execution")
             span.set_attribute("code_execution.code_size", len(code))
-            span.set_attribute("code_execution.backend_url", self._sandbox_url)
+            span.set_attribute("code_execution.backend", self._port.label)
+            span.set_attribute("code_execution.session_id", self._session.session_id)
             try:
-                response = await self._client.post(
-                    f"{self._sandbox_url}/sessions/{self._session_id}/exec",
-                    json=payload,
-                    # Override the client default (which equals the exec budget) so the
-                    # sandbox always gets to answer before the client read timeout fires.
-                    timeout=self._timeout_s + _EXEC_TIMEOUT_BUFFER_S,
-                )
-                if response.status_code == 503:
-                    raise SandboxUnavailableError(response.headers.get("Retry-After"))
-                response.raise_for_status()
-                # A malformed body is a contract violation, indistinguishable to the
-                # caller from an unreachable backend: both mean this exec produced no
-                # usable result, so they raise the same error.
-                exec_response = ExecResponse.model_validate(response.json())
-            except ValidationError as exc:
-                # Raised `from None`, and the summary is built rather than rendered,
-                # so neither the message nor the chained traceback carries the
-                # payload into the span. See _contract_violation.
-                err = SandboxNotReachableError(f"sandbox exec failed: {_contract_violation(exc)}")
-                span.record_exception(err)
-                span.set_status(trace.StatusCode.ERROR, str(err))
-                raise err from None
-            except (httpx.HTTPError, ValueError) as exc:
-                span.record_exception(exc)
-                span.set_status(trace.StatusCode.ERROR, str(exc))
-                raise SandboxNotReachableError(f"sandbox exec failed: {exc}") from exc
+                block = await self._session.execute(code, timeout_s=self._timeout_s)
+            except SandboxNotReachableError as exc:
+                # The adapter wrapped whatever went wrong, so the span records
+                # the cause where there is one: a connect error is worth seeing
+                # by its own type. A reply that failed validation is raised with
+                # no cause on purpose, and records as the wrapper, so neither the
+                # payload nor a credential reaches the span.
+                recorded = exc.__cause__ or exc
+                span.record_exception(recorded)
+                span.set_status(trace.StatusCode.ERROR, str(recorded))
+                raise
 
-            produced, file_ids = await self._collect_outputs(exec_response.result_block)
-            result = _flatten_result_block(exec_response.result_block, file_ids, produced)
+            produced, file_ids = await self._collect_outputs(block)
+            result = _flatten_result_block(block, file_ids, produced)
             if result.startswith("[tool error]"):
                 span.set_status(trace.StatusCode.ERROR, result)
-            return result, exec_response.result_block, file_ids
+            return result, block, file_ids
 
 
 def _flatten_result_block(

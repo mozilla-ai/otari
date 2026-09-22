@@ -80,15 +80,21 @@ const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
     help: "Sent to the backend when a tool entry has none of its own.",
     placeholder: "Answer from official docs",
   },
+  sandbox_provider: {
+    label: "Provider",
+    help: "What runs the code: protocol talks to the backend URL below, e2b runs it on E2B from this process and needs no backend URL.",
+    placeholder: "protocol",
+    isMachineReadable: true,
+  },
   sandbox_url: {
     label: "Backend URL",
-    help: "While unset, otari_code_execution requests are rejected with 400.",
+    help: "Where the protocol provider runs code. While unset, otari_code_execution requests are rejected with 400 unless sandbox_provider names a hosted one.",
     placeholder: "http://sandbox:8080",
     isMachineReadable: true,
   },
   sandbox_session_image: {
     label: "Session image",
-    help: "The image a leased session runs. Blank lets the backend choose.",
+    help: "The image a leased session runs, for the protocol provider. Blank lets the backend choose.",
     placeholder: "mzdotai/otari-sandbox-container:latest",
     isMachineReadable: true,
   },

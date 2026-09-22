@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
-from gateway.core.env import otari_env
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
     WorkspaceCodeExecutionPolicyPublic,
     WorkspaceCodeExecutionPolicyService,
@@ -50,7 +49,7 @@ def get_workspace_code_execution_policy_service(
     """
     return WorkspaceCodeExecutionPolicyService(
         db,
-        sandbox_configured=bool(config.sandbox_url or otari_env("SANDBOX_URL")),
+        sandbox_configured=config.sandbox_configured(),
         allowed_images=config.pinnable_sandbox_images(),
     )
 

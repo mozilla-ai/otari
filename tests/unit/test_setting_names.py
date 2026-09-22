@@ -107,6 +107,7 @@ _SETTING_NAMES = frozenset(
         "router_seed_count",
         "routing",
         "sandbox_allowed_session_images",
+        "sandbox_provider",
         "sandbox_purpose_hint",
         "sandbox_session_image",
         "sandbox_url",

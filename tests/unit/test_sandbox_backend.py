@@ -1,17 +1,24 @@
 """Unit tests for `SandboxBackend`.
 
-Mocks the HTTP layer with `respx` so the suite needs no sandbox container.
+Mocks the HTTP layer so the suite needs no sandbox container. The backend is
+driven through the protocol adapter, which is the one that speaks HTTP; what
+these cover is the half above the port, and the adapter's own handling of the
+contract.
 """
 
 from __future__ import annotations
 
 import json
 import traceback
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
 import pytest
 
+from gateway.adapters.code_execution_adapter import ProtocolCodeExecutionAdapter
 from gateway.services.sandbox_backend import (
     CODE_EXECUTION_TOOL_NAME,
     SandboxBackend,
@@ -26,6 +33,12 @@ class _MockTransport(httpx.AsyncBaseTransport):
     def __init__(self, handlers: dict[tuple[str, str], httpx.Response | Exception]) -> None:
         self._handlers = handlers
         self.captured: list[httpx.Request] = []
+        self.closed = False
+
+    async def aclose(self) -> None:
+        # httpx closes its transport with the client, which is how these tests
+        # see that the adapter released the connection it opened.
+        self.closed = True
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         self.captured.append(request)
@@ -36,6 +49,14 @@ class _MockTransport(httpx.AsyncBaseTransport):
         if isinstance(handler, Exception):
             raise handler
         return handler
+
+
+SANDBOX_URL = "http://sandbox:8080"
+
+
+def _sandbox(**kwargs: Any) -> SandboxBackend:
+    """A backend over the protocol adapter, which is the half these tests mock."""
+    return SandboxBackend(port=ProtocolCodeExecutionAdapter(SANDBOX_URL), **kwargs)
 
 
 def _patched_async_client(handlers: dict[tuple[str, str], Any], monkeypatch: pytest.MonkeyPatch) -> _MockTransport:
@@ -60,7 +81,7 @@ async def test_creates_session_on_enter_and_destroys_on_exit(monkeypatch: pytest
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         assert backend.owns_tool(CODE_EXECUTION_TOOL_NAME)
 
     methods_and_paths = [(r.method, r.url.path) for r in transport.captured]
@@ -94,7 +115,7 @@ async def test_call_tool_dispatches_code_to_sandbox(monkeypatch: pytest.MonkeyPa
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(6 * 7)"})
 
     assert "stdout:" in result
@@ -128,7 +149,7 @@ async def test_exec_read_timeout_exceeds_execution_budget(monkeypatch: pytest.Mo
     )
 
     timeout_s = 30.0
-    async with SandboxBackend(sandbox_url="http://sandbox:8080", timeout_s=timeout_s) as backend:
+    async with _sandbox(timeout_s=timeout_s) as backend:
         await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
 
     exec_request = next(r for r in transport.captured if r.url.path == "/sessions/s1/exec")
@@ -161,7 +182,7 @@ async def test_call_tool_surfaces_stderr_and_nonzero_return_code(monkeypatch: py
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(foo)"})
 
     # Non-zero return_code or stderr-only output is marked as [tool error]
@@ -199,7 +220,7 @@ async def test_stderr_only_treated_as_error(monkeypatch: pytest.MonkeyPatch) -> 
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
 
     assert result.startswith("[tool error]")
@@ -214,13 +235,13 @@ async def test_enter_raises_when_sandbox_unreachable(monkeypatch: pytest.MonkeyP
     )
 
     with pytest.raises(SandboxNotReachableError, match="failed to create"):
-        async with SandboxBackend(sandbox_url="http://sandbox:8080"):
+        async with _sandbox():
             pass
 
 
 @pytest.mark.asyncio
 async def test_owns_only_code_execution() -> None:
-    backend = SandboxBackend(sandbox_url="http://sandbox:8080")
+    backend = _sandbox()
     assert backend.owns_tool(CODE_EXECUTION_TOOL_NAME)
     assert not backend.owns_tool("now_utc")
     assert not backend.owns_tool("anything_else")
@@ -228,7 +249,7 @@ async def test_owns_only_code_execution() -> None:
 
 @pytest.mark.asyncio
 async def test_openai_tools_advertises_code_execution() -> None:
-    backend = SandboxBackend(sandbox_url="http://sandbox:8080")
+    backend = _sandbox()
     tools = backend.openai_tools
     assert len(tools) == 1
     assert tools[0]["function"]["name"] == CODE_EXECUTION_TOOL_NAME
@@ -237,7 +258,7 @@ async def test_openai_tools_advertises_code_execution() -> None:
 
 @pytest.mark.asyncio
 async def test_purpose_hint_is_emitted() -> None:
-    backend = SandboxBackend(sandbox_url="http://sandbox:8080")
+    backend = _sandbox()
     hints = backend.purpose_hints()
     assert len(hints) == 1
     assert hints[0][0] == CODE_EXECUTION_TOOL_NAME
@@ -261,7 +282,7 @@ async def test_auth_token_forwarded_as_bearer(monkeypatch: pytest.MonkeyPatch) -
     )
 
     async with SandboxBackend(
-        sandbox_url="http://sandbox:8080",
+        port=ProtocolCodeExecutionAdapter("http://sandbox:8080"),
         auth_token="tk_workspace_token",  # noqa: S106 — test fixture, not a real secret
     ) as backend:
         await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
@@ -283,7 +304,7 @@ async def test_no_auth_header_when_auth_token_unset(monkeypatch: pytest.MonkeyPa
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080"):
+    async with _sandbox():
         pass
 
     assert transport.captured, "expected at least one request"
@@ -334,7 +355,7 @@ async def test_call_tool_emits_span_with_code_attribute(monkeypatch: pytest.Monk
             monkeypatch,
         )
 
-        async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        async with _sandbox() as backend:
             await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(6 * 7)"})
     finally:
         otel_trace.set_tracer_provider(original_provider)
@@ -350,7 +371,7 @@ async def test_call_tool_emits_span_with_code_attribute(monkeypatch: pytest.Monk
     assert span.attributes is not None
     assert span.attributes["tool.type"] == "otari_code_execution"
     assert span.attributes["code_execution.code_size"] == len("print(6 * 7)")
-    assert span.attributes["code_execution.backend_url"] == "http://sandbox:8080"
+    assert span.attributes["code_execution.backend"] == "http://sandbox:8080"
 
 
 @pytest.mark.asyncio
@@ -379,7 +400,7 @@ async def test_call_tool_span_records_error_on_sandbox_unreachable(monkeypatch: 
 
         from gateway.services.sandbox_backend import SandboxNotReachableError
 
-        async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        async with _sandbox() as backend:
             with pytest.raises(SandboxNotReachableError):
                 await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
     finally:
@@ -435,7 +456,7 @@ async def test_call_tool_span_error_status_on_tool_error_result(monkeypatch: pyt
             monkeypatch,
         )
 
-        async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        async with _sandbox() as backend:
             result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(foo)"})
     finally:
         otel_trace.set_tracer_provider(original_provider)
@@ -481,7 +502,7 @@ async def test_unknown_result_block_type_still_renders(monkeypatch: pytest.Monke
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(42)"})
 
     assert result == "stdout:\n42\n"
@@ -505,7 +526,7 @@ async def test_unrecognised_fields_are_ignored(monkeypatch: pytest.MonkeyPatch) 
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
 
     assert result == "stdout:\nok"
@@ -530,7 +551,7 @@ async def test_file_refs_are_listed(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "savefig()"})
 
     assert "files: chart.png, ?" in result
@@ -565,7 +586,7 @@ async def test_malformed_exec_response_raises(body: dict[str, Any], monkeypatch:
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         with pytest.raises(SandboxNotReachableError, match="sandbox exec failed"):
             await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
 
@@ -578,7 +599,7 @@ async def test_enter_raises_when_session_handle_lacks_id(monkeypatch: pytest.Mon
     )
 
     with pytest.raises(SandboxNotReachableError, match="failed to create"):
-        async with SandboxBackend(sandbox_url="http://sandbox:8080"):
+        async with _sandbox():
             pass
 
 
@@ -621,7 +642,7 @@ async def test_documented_exec_response_shape_parses(monkeypatch: pytest.MonkeyP
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(3.14)"})
 
     assert result == "stdout:\n3.14\n\nfiles: chart.png"
@@ -653,7 +674,7 @@ async def test_schema_violation_message_omits_the_payload(monkeypatch: pytest.Mo
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         with pytest.raises(SandboxNotReachableError) as excinfo:
             await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
 
@@ -671,7 +692,7 @@ async def test_session_handle_violation_message_omits_the_payload(monkeypatch: p
     )
 
     with pytest.raises(SandboxNotReachableError) as excinfo:
-        async with SandboxBackend(sandbox_url="http://sandbox:8080"):
+        async with _sandbox():
             pass
 
     rendered = "".join(traceback.format_exception(excinfo.value))
@@ -732,7 +753,7 @@ async def test_renderable_fields_absorb_unusable_values(
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
 
     assert result == expected
@@ -791,7 +812,7 @@ async def test_structured_values_in_render_only_fields_keep_the_signal(
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
 
     assert result == expected
@@ -817,7 +838,7 @@ async def test_create_session_omits_image_when_none_is_pinned(monkeypatch: pytes
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080"):
+    async with _sandbox():
         pass
 
     create = next(r for r in transport.captured if r.method == "POST")
@@ -834,7 +855,7 @@ async def test_create_session_sends_the_pinned_image(monkeypatch: pytest.MonkeyP
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080", image="mzdotai/otari-sandbox-container:latest"):
+    async with _sandbox(image="mzdotai/otari-sandbox-container:latest"):
         pass
 
     create = next(r for r in transport.captured if r.method == "POST")
@@ -844,7 +865,7 @@ async def test_create_session_sends_the_pinned_image(monkeypatch: pytest.MonkeyP
 @pytest.mark.asyncio
 async def test_allowed_tools_including_code_execution_changes_nothing() -> None:
     backend = SandboxBackend(
-        sandbox_url="http://sandbox:8080",
+        port=ProtocolCodeExecutionAdapter("http://sandbox:8080"),
         allowed_tools=frozenset({CODE_EXECUTION_TOOL_NAME, "bash_code_execution"}),
     )
     assert backend.owns_tool(CODE_EXECUTION_TOOL_NAME)
@@ -862,7 +883,7 @@ async def test_allowed_tools_excluding_code_execution_offers_nothing() -> None:
     caller that skips the 403 still cannot have the tool run.
     """
     backend = SandboxBackend(
-        sandbox_url="http://sandbox:8080",
+        port=ProtocolCodeExecutionAdapter("http://sandbox:8080"),
         allowed_tools=frozenset({"bash_code_execution"}),
     )
     assert not backend.owns_tool(CODE_EXECUTION_TOOL_NAME)
@@ -888,7 +909,7 @@ async def test_served_tool_names_is_what_the_backend_actually_advertises() -> No
     """
     from gateway.services.tenancy.workspace_code_execution_policy_service import SERVED_TOOL_NAMES
 
-    backend = SandboxBackend(sandbox_url="http://sandbox:8080")
+    backend = _sandbox()
     advertised = tuple(tool["function"]["name"] for tool in backend.openai_tools)
 
     assert advertised == SERVED_TOOL_NAMES
@@ -904,12 +925,12 @@ async def test_session_503_preserves_retry_hint_and_closes_client(
         {("POST", "/sessions"): httpx.Response(503, headers=headers, json={"detail": "private internals"})},
         monkeypatch,
     )
-    backend = SandboxBackend(sandbox_url="http://sandbox:8080")
+    backend = _sandbox()
     with pytest.raises(SandboxUnavailableError) as caught:
         await backend.__aenter__()
     assert caught.value.retry_after == expected
     assert "private internals" not in str(caught.value)
-    assert backend._client is not None and backend._client.is_closed
+    assert transport.closed, "the adapter left its client open after a refused session"
     assert len(transport.captured) == 1
 
 
@@ -923,7 +944,7 @@ async def test_exec_503_preserves_retry_hint(monkeypatch: pytest.MonkeyPatch) ->
         },
         monkeypatch,
     )
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         with pytest.raises(SandboxUnavailableError) as caught:
             await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(42)"})
     assert caught.value.retry_after == "15"
@@ -974,7 +995,7 @@ async def test_staged_inputs_are_seeded_before_the_first_call(monkeypatch: pytes
         monkeypatch,
     )
     files = _FakeFiles([_staged()])
-    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files):
+    async with _sandbox(files=files):
         pass
 
     put = next(r for r in transport.captured if r.method == "POST" and r.url.path == "/sessions/s1/files")
@@ -995,7 +1016,7 @@ async def test_refused_seed_is_terminal_and_releases_the_session(monkeypatch: py
         monkeypatch,
     )
     with pytest.raises(SandboxNotReachableError, match="file-csv"):
-        async with SandboxBackend(sandbox_url="http://sandbox:8080", files=_FakeFiles([_staged()])):
+        async with _sandbox(files=_FakeFiles([_staged()])):
             pass
     assert ("DELETE", "/sessions/s1") in [(r.method, r.url.path) for r in transport.captured]
 
@@ -1023,7 +1044,7 @@ async def test_produced_files_are_fetched_stored_and_named_with_file_ids(monkeyp
         monkeypatch,
     )
     files = _FakeFiles([])
-    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+    async with _sandbox(files=files) as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "plt.savefig('chart.png')"})
 
     assert files.stored == [("chart.png", b"\x89PNG")]
@@ -1053,7 +1074,7 @@ async def test_unfetchable_output_is_still_named_and_does_not_fail_the_run(monke
         monkeypatch,
     )
     files = _FakeFiles([])
-    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+    async with _sandbox(files=files) as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
 
     assert files.stored == []
@@ -1082,7 +1103,7 @@ async def test_no_bridge_leaves_outputs_untouched(monkeypatch: pytest.MonkeyPatc
         },
         monkeypatch,
     )
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
     assert result == "files: a.txt"
     assert all(r.url.path != "/sessions/s1/files" for r in transport.captured)
@@ -1105,7 +1126,7 @@ async def test_executions_are_kept_in_order_and_drained_by_take(monkeypatch: pyt
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         assert backend.container_id.startswith("otari_cntr_")
         await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
         await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(2)"})
@@ -1128,7 +1149,7 @@ async def test_an_exec_that_never_answered_is_kept_without_a_result(monkeypatch:
         monkeypatch,
     )
 
-    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+    async with _sandbox() as backend:
         with pytest.raises(SandboxNotReachableError):
             await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
         executions = backend.take_executions()
@@ -1161,7 +1182,7 @@ async def test_an_execution_carries_the_stored_ids_of_the_files_it_produced(monk
         },
         monkeypatch,
     )
-    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=_FakeFiles([])) as backend:
+    async with _sandbox(files=_FakeFiles([])) as backend:
         await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "plt.savefig('chart.png')"})
         execution = backend.take_executions()[0]
 
@@ -1203,7 +1224,7 @@ async def test_an_output_declared_over_the_cap_is_refused_before_it_is_read(monk
         monkeypatch,
     )
     files = _FakeFiles([], max_output_bytes=16)
-    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+    async with _sandbox(files=files) as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
 
     assert files.stored == []
@@ -1232,7 +1253,7 @@ async def test_an_output_that_grows_past_the_cap_is_abandoned_mid_stream(monkeyp
         monkeypatch,
     )
     files = _FakeFiles([], max_output_bytes=32)
-    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+    async with _sandbox(files=files) as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
 
     assert files.stored == []
@@ -1250,7 +1271,7 @@ def _empty_result_block(stdout: str = "saved\n") -> dict[str, Any]:
     }
 
 
-def _listing(*entries: tuple[str, int, float]) -> dict[str, Any]:
+def _listing(*entries: tuple[str, int | None, float]) -> dict[str, Any]:
     return {"files": [{"path": p, "size_bytes": s, "mime_type": None, "modified_at": m} for p, s, m in entries]}
 
 
@@ -1304,7 +1325,7 @@ async def test_a_file_the_block_does_not_name_is_found_by_the_workspace_diff(mon
         monkeypatch,
     )
     files = _FakeFiles([_staged()])
-    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+    async with _sandbox(files=files) as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "open('out.txt','w').write('hello')"})
         execution = backend.take_executions()[0]
 
@@ -1338,7 +1359,7 @@ async def test_the_diff_moves_forward_so_a_later_call_collects_only_its_own_file
         monkeypatch,
     )
     files = _FakeFiles([])
-    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+    async with _sandbox(files=files) as backend:
         await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "one"})
         await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "two"})
         first, second = backend.take_executions()
@@ -1364,7 +1385,7 @@ async def test_a_backend_without_list_files_still_collects_what_the_block_names(
         monkeypatch,
     )
     files = _FakeFiles([])
-    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+    async with _sandbox(files=files) as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
 
     assert files.stored == [("chart.png", b"\x89PNG")]
@@ -1387,7 +1408,7 @@ async def test_a_call_stores_at_most_the_configured_number_of_files(monkeypatch:
         monkeypatch,
     )
     files = _FakeFiles([], max_output_files=2)
-    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+    async with _sandbox(files=files) as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
 
     assert [name for name, _ in files.stored] == ["a.txt", "b.txt"]
@@ -1408,7 +1429,8 @@ async def test_a_call_stores_at_most_the_configured_bytes_across_its_files(monke
             ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
             ("GET", "/sessions/s1/files/list"): [
                 httpx.Response(200, json=_listing()),
-                httpx.Response(200, json=_listing(("a.bin", 20, 1.0), ("b.bin", 20, 1.0))),
+                # No declared size either, so nothing is known until the bytes arrive.
+                httpx.Response(200, json=_listing(("a.bin", None, 1.0), ("b.bin", None, 1.0))),
             ],
             ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": _empty_result_block()}),
             # No Content-Length: the budget has to hold on the bytes as they arrive.
@@ -1418,7 +1440,7 @@ async def test_a_call_stores_at_most_the_configured_bytes_across_its_files(monke
         monkeypatch,
     )
     files = _FakeFiles([], max_output_bytes=30)
-    async with SandboxBackend(sandbox_url="http://sandbox:8080", files=files) as backend:
+    async with _sandbox(files=files) as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
 
     # The first file fits (20 of 30); the second runs past what is left and is
@@ -1427,3 +1449,79 @@ async def test_a_call_stores_at_most_the_configured_bytes_across_its_files(monke
     assert files.abandoned == ["b.bin"]
     assert "a.bin (file_id: file-1)" in result
     assert "b.bin (file_id" not in result
+
+
+@pytest.mark.asyncio
+async def test_an_output_the_listing_already_says_is_too_big_is_never_fetched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = _patched_sequence_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("GET", "/sessions/s1/files/list"): [
+                httpx.Response(200, json=_listing()),
+                httpx.Response(200, json=_listing(("huge.bin", 10_000, 1.0))),
+            ],
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": _empty_result_block()}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    files = _FakeFiles([], max_output_bytes=30)
+    async with _sandbox(files=files) as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+
+    # Not fetched at all: an adapter whose provider hands a file over whole would
+    # otherwise hold 10kB to discover it may store 30 bytes of it.
+    assert files.stored == []
+    assert not any(request.url.path == "/sessions/s1/files" for request in transport.captured)
+    # Still named, so the model knows the run wrote it.
+    assert "huge.bin" in result
+    assert "huge.bin (file_id" not in result
+
+
+class _RecordingPort:
+    """A port that records the lease it was asked for and runs nothing."""
+
+    label = "recording"
+
+    def __init__(self) -> None:
+        self.session_ttl_s: float | None = None
+
+    @asynccontextmanager
+    async def open_session(
+        self,
+        *,
+        image: str | None = None,
+        timeout_s: float,
+        session_ttl_s: float,
+        auth_token: str | None = None,
+    ) -> AsyncIterator[Any]:
+        del image, timeout_s, auth_token
+        self.session_ttl_s = session_ttl_s
+        yield SimpleNamespace(session_id="s-recording")
+
+
+@pytest.mark.asyncio
+async def test_the_lease_outlasts_a_round_that_batches_calls() -> None:
+    """The iteration cap bounds rounds, not code calls: a model may emit several
+    in one round, and a lease sized for one per round is reclaimed mid-request."""
+    port = _RecordingPort()
+    async with SandboxBackend(port=port, timeout_s=10.0, max_executions=4):
+        pass
+
+    # 10s a call, four calls a round, four rounds, plus the 60s of slack the
+    # seeding and collecting run in. Spelled out rather than compared against
+    # one call per round, which the old sizing also satisfies through the slack.
+    assert port.session_ttl_s == 10.0 * 4 * 4 + 60.0
+
+
+@pytest.mark.asyncio
+async def test_the_lease_is_capped_rather_than_asked_for_in_full() -> None:
+    """A provider refuses a creation that asks to hold a sandbox past its plan's
+    ceiling, so a generous estimate is clamped rather than sent."""
+    port = _RecordingPort()
+    async with SandboxBackend(port=port, timeout_s=600.0, max_executions=50):
+        pass
+
+    assert port.session_ttl_s == 3600.0

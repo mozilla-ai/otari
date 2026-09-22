@@ -5,7 +5,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.pricing import ModelPricing
 from gateway.services.pricing_service import (
@@ -100,7 +99,7 @@ async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSes
         configured.append(WEB_FETCH_TOOL_NAME)
     if config.web_search_configured():
         configured.append(WEB_SEARCH_TOOL_NAME)
-    if config.sandbox_url or otari_env("SANDBOX_URL"):
+    if config.sandbox_configured():
         configured.append(CODE_EXECUTION_TOOL_NAME)
 
     unpriced = [

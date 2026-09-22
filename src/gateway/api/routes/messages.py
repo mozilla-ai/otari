@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    CodeExecutionPortDep,
     ModelProviderPortDep,
     build_sandbox_file_bridge,
     extract_credential_token,
@@ -744,6 +745,7 @@ async def create_message(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
+    code_execution_port: CodeExecutionPortDep,
 ) -> dict[str, Any] | StreamingResponse:
     """Anthropic Messages API-compatible endpoint.
 
@@ -857,6 +859,7 @@ async def create_message(
         max_tool_iterations=request.max_tool_iterations,
         tools_header=request.tools_header,
         code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+        code_execution_port=code_execution_port,
         sandbox_files=build_sandbox_file_bridge(
             raw_request=raw_request,
             config=config,

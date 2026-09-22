@@ -329,7 +329,7 @@ address nobody has added.
 The Tools pages and `GET /api/v1/tool-settings` show effective sandbox, web-search,
 and guardrail configuration. Common startup settings are:
 
-- `sandbox_url`
+- `sandbox_provider` and `sandbox_url`
 - `code_execution_executor`
 - `web_search_url`
 - `web_search_provider` and `web_search_provider_api_key`

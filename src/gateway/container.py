@@ -31,14 +31,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
+from gateway.adapters.code_execution_adapter import build_code_execution_port, verify_code_execution_ready
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
+from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
+from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
@@ -252,7 +255,26 @@ def _load_register(selector: str) -> Register:
     return cast(Register, register)
 
 
-def build_container(bootstrap_selector: str | None = None) -> Container:
+def _code_execution_adapter_factory(config: GatewayConfig | None) -> PortFactory[CodeExecutionPort]:
+    """The core ``CodeExecutionPort`` factory, closed over this app's config.
+
+    Config rather than a session, because which adapter runs the code is a
+    deployment setting (``sandbox_provider``) and not a per-request fact. A
+    container built without config (the test helper's default) resolves this
+    port only to raise, which is louder than quietly picking a backend.
+    """
+
+    def factory(session: AsyncSession | None) -> CodeExecutionPort:
+        del session
+        if config is None:
+            msg = "CodeExecutionPort needs the deployment config; build the container with it"
+            raise ContainerError(msg)
+        return build_code_execution_port(config)
+
+    return factory
+
+
+def build_container(bootstrap_selector: str | None = None, config: GatewayConfig | None = None) -> Container:
     """Build the composition-root container for this deployment.
 
     Binds the core adapters, then, if a selector is given, lets the bootstrap it
@@ -294,6 +316,19 @@ def build_container(bootstrap_selector: str | None = None) -> Container:
     # presented key against its own rows. A hosted overlay binds a format that
     # carries a region and a checksum, and routes a key minted elsewhere away.
     container.bind(ApiKeyFormatPort, _api_key_format_adapter)
+    # Code execution: the base speaks the published protocol to the backend at
+    # ``sandbox_url``, and runs E2B's hosted sandboxes in this process when the
+    # deployment asks for them instead. An overlay with its own platform binds
+    # a third adapter here and changes nothing above the port.
+    container.bind(CodeExecutionPort, _code_execution_adapter_factory(config))
+    if config is not None:
+        # Asked once, at build, rather than per request: selecting a hosted
+        # provider is itself what publishes code execution on ``/v1/tools``, in
+        # the playground menu and to the pricing warning, so a missing extra or
+        # credential would otherwise be found by a caller, as a 502 on work it
+        # was told would run. A deployment that named a sandbox it cannot lease
+        # fails to start, the way one that named a bootstrap it cannot load does.
+        verify_code_execution_ready(config)
 
     if bootstrap_selector is None:
         # No selector is a legitimate deployment (the plain open-source one), so

@@ -25,7 +25,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
-from gateway.core.env import otari_env
 from gateway.models.playground import (
     MAX_FAVORITE_MODELS,
     MAX_SAVED_COMPARISONS,
@@ -235,9 +234,9 @@ async def resolve_tool_availability(
     reachability probe belongs to the request that needs the backend, not to
     drawing a menu.
     """
-    # The same resolution the request path uses: the effective config value
-    # falling back to the env var, so a pure-env deployment reports accurately.
-    sandbox_configured = bool(config.sandbox_url or otari_env("SANDBOX_URL"))
+    # The same question the request path asks, asked the same way, so the menu
+    # cannot hide a tool a request would then be allowed to use.
+    sandbox_configured = config.sandbox_configured()
     web_search_configured = config.web_search_configured()
 
     web_search_row = (

@@ -373,9 +373,41 @@ with the reference one rather than merely similar to it.
 
 | Setting | Env var | Meaning |
 |---|---|---|
-| `sandbox_url` | `OTARI_SANDBOX_URL` | Base URL of the backend. Unset, `otari_code_execution` requests are rejected. |
+| `sandbox_provider` | `OTARI_SANDBOX_PROVIDER` | What runs the code: `protocol` (the default) speaks this contract to `sandbox_url`; `e2b` drives [E2B](https://e2b.dev)'s hosted sandboxes from the gateway process and needs no backend of your own. |
+| `sandbox_url` | `OTARI_SANDBOX_URL` | Base URL of the backend, for the `protocol` provider. Unset, `otari_code_execution` requests are rejected. |
 | `sandbox_purpose_hint` | `OTARI_SANDBOX_PURPOSE_HINT` | Default purpose hint for the tool, when a request supplies none. |
 | `code_execution_executor` | `OTARI_CODE_EXECUTION_EXECUTOR` | Who runs a provider-native code-execution declaration: `auto` (default), `otari` or `provider`. See [Built-in tools](tools.md#code-execution-executor). |
+
+### Running code without a backend of your own
+
+This contract is how Otari reaches a backend an operator runs, and it stays the
+way to plug in one Otari knows nothing about, in any language. A deployment
+that cannot run such a backend, a PaaS with no privileged containers for
+instance, has a second option: set `sandbox_provider` to a hosted provider and
+Otari drives it in its own process, over that provider's SDK rather than over
+this contract. `e2b` ships in the core (`pip install otari[e2b]`, then
+`E2B_API_KEY`). Everything above the seam is the same either way, including the
+per-workspace policy, the usage tally, and seeding and collecting files, so the
+choice is about what you run, not about what a request can do. The seam itself
+is `CodeExecutionPort` (see [ARCHITECTURE.md](../ARCHITECTURE.md)); a provider
+Otari does not ship is an adapter, and `scripts/check_code_execution_conformance.py`
+certifies a backend rather than an adapter.
+
+One setting does not carry over: `sandbox_session_image` (and the
+`sandbox_allowed_session_images` that curates it) names a container image,
+which is this contract's vocabulary. A hosted provider names workspaces its own
+way, so the `e2b` adapter ignores a pinned image and logs that it did. Pick the
+sandbox a run gets in the provider's own account instead.
+
+The isolation a run gets is the provider's too, and it is worth knowing what
+you traded for not running a container. What the reference backend confines,
+notably a sandbox's outbound network, a hosted provider decides for itself:
+E2B's sandboxes reach the internet by default, so code the model writes can
+send an attached file anywhere it likes. That is the same posture as a
+reference container an operator deliberately gave egress, but it is the
+default here rather than a choice, and the controls over it live in the
+provider's account rather than in Otari's settings. A deployment handling data
+that must not leave should confine it there before choosing this provider.
 
 See [Configuration](configuration.md) for the full settings reference and
 [Built-in tools](tools.md) for the user-facing view of the tool.

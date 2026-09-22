@@ -27,7 +27,6 @@ from pydantic import BaseModel, Field
 from gateway.api.deps import get_config, verify_catalog_reader
 from gateway.api.routes._tools import Tool, code_execution_declaration_forms, web_search_declaration_forms
 from gateway.core.config import GatewayConfig
-from gateway.core.env import otari_env
 from gateway.core.surface import Surface
 from gateway.services.sandbox_backend import code_execution_tool_definition
 from gateway.services.web_retrieval_backend import web_fetch_tool_definition, web_search_tool_definition
@@ -77,9 +76,10 @@ def _managed_tools(config: GatewayConfig) -> list[ManagedTool]:
     web_search = web_search_tool_definition()["function"]
     web_fetch = web_fetch_tool_definition()["function"]
     code_execution = code_execution_tool_definition()["function"]
-    # Same resolution the request path uses: the effective config value, falling back
-    # to the env var so a pure-env deployment reports accurately.
-    sandbox_configured = bool(config.sandbox_url or otari_env("SANDBOX_URL"))
+    # The same question the request path asks, asked the same way: a hosted
+    # provider needs no URL, so deriving this from sandbox_url would publish
+    # "unavailable" for a deployment that runs code perfectly well.
+    sandbox_configured = config.sandbox_configured()
     can_web_search = config.web_search_configured()
     return [
         ManagedTool(

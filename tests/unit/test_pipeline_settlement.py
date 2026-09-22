@@ -74,7 +74,7 @@ def _tool_ctx(**overrides: Any) -> ToolContext:
         "mcp_server_configs": None,
         "use_sandbox": False,
         "sandbox_tool_entry": None,
-        "sandbox_url": None,
+        "code_execution_port": None,
         "sandbox_auth_token": None,
         "use_web_search": False,
         "web_search_tool_entry": None,

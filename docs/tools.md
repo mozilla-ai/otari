@@ -119,8 +119,12 @@ Request it with:
 }
 ```
 
-The sandbox speaks the [code-execution protocol](code-execution-protocol.md).
-A runnable example lives under `demo/code-exec/`.
+The sandbox speaks the [code-execution protocol](code-execution-protocol.md),
+which is what `sandbox_url` points at. A deployment that would rather not run
+one sets `sandbox_provider: e2b` instead and Otari runs the code on
+[E2B](https://e2b.dev) itself, with no backend of its own and no `sandbox_url`;
+everything below is the same either way. A runnable example lives under
+`demo/code-exec/`.
 
 ### Code-execution executor
 

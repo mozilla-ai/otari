@@ -343,7 +343,7 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         if config.dashboard_login_rate_limit_per_minute is not None
         else None
     )
-    app.state.container = build_container(config.bootstrap)
+    app.state.container = build_container(config.bootstrap, config=config)
 
 
 def dispose_async_engine(async_engine: AsyncEngine) -> None:

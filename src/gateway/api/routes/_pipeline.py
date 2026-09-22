@@ -136,6 +136,7 @@ from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
+from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budgets import (
@@ -2189,7 +2190,7 @@ class ToolContext:
         mcp_server_configs: list[McpServerConfig] | None,
         use_sandbox: bool,
         sandbox_tool_entry: dict[str, Any] | None,
-        sandbox_url: str | None,
+        code_execution_port: CodeExecutionPort | None,
         sandbox_auth_token: str | None,
         sandbox_exec_timeout_s: int | None = None,
         sandbox_session_image: str | None = None,
@@ -2215,7 +2216,9 @@ class ToolContext:
         # land in. None in hybrid mode and when files are disabled.
         self.sandbox_files = sandbox_files
         self.sandbox_tool_entry = sandbox_tool_entry
-        self.sandbox_url = sandbox_url
+        # The adapter that runs this request's code, resolved from the container
+        # by the route. None outside a request, where nothing opens a sandbox.
+        self.code_execution_port = code_execution_port
         self.sandbox_auth_token = sandbox_auth_token
         # The execution budget one sandbox call gets. A workspace policy may only
         # lower it, so the deployment's default is the ceiling rather than a value
@@ -2264,11 +2267,14 @@ class ToolContext:
         spelled three times, a fourth field was added to two of them, and the
         third silently kept sending the old session body.
         """
-        assert self.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
+        assert self.code_execution_port is not None  # use_sandbox implies the route resolved one
         return SandboxBackend(
-            sandbox_url=self.sandbox_url,
+            port=self.code_execution_port,
             purpose_hint=_resolve_sandbox_purpose_hint(self.sandbox_tool_entry, self.config),
             timeout_s=self.sandbox_timeout_s,
+            # The loop runs code at most once per round, so the iteration cap is
+            # what bounds a session's life: a leased sandbox must outlast them all.
+            max_executions=self.max_tool_iterations,
             auth_token=self.sandbox_auth_token,
             image=self.sandbox_session_image,
             allowed_tools=self.sandbox_allowed_tools,
@@ -2732,6 +2738,7 @@ async def prepare_gateway_tools(
     tools_header: str | None,
     code_execution_header: str | None = None,
     sandbox_files: SandboxFileBridge | None = None,
+    code_execution_port: CodeExecutionPort | None = None,
 ) -> ToolContext:
     """Guardrails, MCP server-id resolution, and gateway-tool extraction.
 
@@ -2820,7 +2827,12 @@ async def prepare_gateway_tools(
         # Read the effective config value (dashboard override / env / YAML), falling
         # back to the env var so pure-env deployments are unchanged. A dashboard
         # override mutates ctx.config, so it hot-applies on the next request.
+        # Only the hybrid-mode question below reads it now, which is whether the
+        # backend this deployment points at is the platform's own: what runs the
+        # code is the port, and a hosted provider has no URL at all.
         sandbox_url: str | None = ctx.config.sandbox_url or otari_env("SANDBOX_URL") or None
+        # Whether code can run here is therefore the deployment's answer, not the URL.
+        sandbox_available = ctx.config.sandbox_configured()
         try:
             requested_executor = parse_code_execution_header(code_execution_header)
         except ValueError:
@@ -2832,7 +2844,7 @@ async def prepare_gateway_tools(
         # policy has had its say, so here it is only found, not claimed.
         sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
         provider_code_entry = first_provider_code_execution_tool(tools_after_sandbox)
-        if sandbox_tool_entry is not None and sandbox_url is None:
+        if sandbox_tool_entry is not None and not sandbox_available:
             raise adapter.error(400, SANDBOX_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
 
         # Forwarded to the sandbox backend as `Authorization: Bearer`. Only set in
@@ -2857,7 +2869,7 @@ async def prepare_gateway_tools(
         # to, so it is forwarded exactly as it always was and no policy is read for
         # it: a deployment without a sandbox is a deployment the executor does not
         # touch. (The explicit type was refused above.)
-        if sandbox_url is not None and (sandbox_tool_entry is not None or provider_code_entry is not None):
+        if sandbox_available and (sandbox_tool_entry is not None or provider_code_entry is not None):
             deployment_executor = ctx.config.effective_code_executor()
             native_available = provider_runs_code_natively(
                 provider_code_entry, provider=_dispatch_provider_name(ctx), dialect=adapter.name
@@ -2923,12 +2935,11 @@ async def prepare_gateway_tools(
 
         if use_sandbox:
             assert sandbox_tool_entry is not None
-            assert sandbox_url is not None
             if mcp_servers:
                 raise adapter.error(400, SANDBOX_MCP_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
             if ctx.hybrid_mode:
                 assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
-                if url_targets_platform(sandbox_url, ctx.config.platform.get("base_url")):
+                if sandbox_url is not None and url_targets_platform(sandbox_url, ctx.config.platform.get("base_url")):
                     sandbox_auth_token = ctx.user_token
             # The policy narrows what the deployment allows and never widens it: a
             # veto, two ceilings applied with ``min`` further down and in
@@ -3139,7 +3150,7 @@ async def prepare_gateway_tools(
         mcp_server_configs=mcp_servers,
         use_sandbox=use_sandbox,
         sandbox_tool_entry=sandbox_tool_entry,
-        sandbox_url=sandbox_url,
+        code_execution_port=code_execution_port,
         sandbox_auth_token=sandbox_auth_token,
         sandbox_exec_timeout_s=sandbox_exec_timeout_s,
         sandbox_session_image=sandbox_session_image,

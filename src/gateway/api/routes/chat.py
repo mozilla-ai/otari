@@ -15,6 +15,7 @@ from pydantic import Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    CodeExecutionPortDep,
     ModelProviderPortDep,
     build_sandbox_file_bridge,
     get_config,
@@ -51,6 +52,7 @@ from gateway.core.usage_source import PLAYGROUND_USAGE_ENDPOINT
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.file_service import StagedFile
 from gateway.services.log_writer import LogWriter
@@ -393,6 +395,7 @@ async def chat_completions(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
+    code_execution_port: CodeExecutionPortDep,
 ) -> ChatCompletion | StreamingResponse:
     """OpenAI-compatible chat completions endpoint.
 
@@ -413,6 +416,7 @@ async def chat_completions(
         config=config,
         log_writer=log_writer,
         model_provider=model_provider,
+        code_execution_port=code_execution_port,
     )
 
 
@@ -426,6 +430,7 @@ async def run_chat_completion(
     config: GatewayConfig,
     log_writer: LogWriter,
     model_provider: ModelProviderPort,
+    code_execution_port: CodeExecutionPort | None,
     session_principal: SessionPrincipal | None = None,
 ) -> ChatCompletion | StreamingResponse:
     """Serve one chat completion, from the resolved preamble to the response.
@@ -526,6 +531,7 @@ async def run_chat_completion(
         max_tool_iterations=request.max_tool_iterations,
         tools_header=request.tools_header,
         code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+        code_execution_port=code_execution_port,
         sandbox_files=build_sandbox_file_bridge(
             raw_request=raw_request,
             config=config,

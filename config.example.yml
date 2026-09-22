@@ -112,3 +112,8 @@ providers:
 #   local:
 #     provider: searxng
 #     api_base: "http://searxng:8080"
+
+# What runs code-execution tool calls: "protocol" (the default) talks to the
+# backend at sandbox_url, "e2b" runs them on E2B from this process and needs
+# the otari[e2b] extra plus E2B_API_KEY. See docs/tools.md.
+# sandbox_provider: protocol

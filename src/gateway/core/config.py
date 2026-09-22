@@ -26,6 +26,10 @@ from gateway.models.routing import RoutingConfig
 from gateway.types.code_execution import CodeExecutor
 
 API_KEY_HEADER = "Otari-Key"
+# What may run a code-execution tool call. ``protocol`` is a backend of the
+# operator's own, reached over the published contract; the rest are hosted
+# providers this process drives itself (``adapters/code_execution_adapter.py``).
+SANDBOX_PROVIDERS = frozenset({"protocol", "e2b"})
 # Aliases accepted for a provider instance's ``provider_type`` that map onto a
 # real any-llm implementation. The "openai-compatible" spelling mirrors the
 # naming opencode / pi use for self-hosted OpenAI-compatible backends.
@@ -119,6 +123,7 @@ ENV_BRIDGED_FIELDS = (
     "sandbox_purpose_hint",
     "sandbox_session_image",
     "sandbox_allowed_session_images",
+    "sandbox_provider",
     "code_execution_executor",
     "web_search_url",
     "web_search_purpose_hint",
@@ -1060,7 +1065,17 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
             "(e.g. 'mzdotai/otari-sandbox-container:latest,ghcr.io/acme/sandbox:2'). Deliberately "
             "not editable from the dashboard: it is the operator's supply-chain allow-list, and "
             "sandbox_session_image is always pinnable whether or not it appears here. When unset, a "
-            "workspace may not pin an image at all."
+            "workspace may not pin an image at all. Applies to the 'protocol' sandbox provider: a hosted "
+            "provider names its workspaces its own way and ignores this."
+        ),
+    )
+    sandbox_provider: Annotated[str, Shown(SettingsGroup.TOOLS)] = Field(
+        default="protocol",
+        description=(
+            "What runs the code a code-execution tool call asks for: 'protocol' (the default) speaks the "
+            "published code-execution protocol to the backend at sandbox_url, which is a container the "
+            "operator runs; 'e2b' drives E2B's hosted sandboxes from this process and needs no sandbox_url, "
+            "only the otari[e2b] extra and E2B_API_KEY."
         ),
     )
     code_execution_executor: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -1834,8 +1849,13 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
     def sandbox_configured(self) -> bool:
         """Whether this deployment can run ``otari_code_execution`` at all.
 
+        A hosted provider needs no URL, so selecting one is itself the answer;
+        the default ``protocol`` provider needs a backend to point at.
+
         Gotcha: a cleared dashboard override leaves ``sandbox_url`` as ``None``, so the environment value still counts.
         """
+        if (self.sandbox_provider or "").strip().lower() not in ("", "protocol"):
+            return True
         return bool(self.sandbox_url or otari_env("SANDBOX_URL"))
 
     def effective_sandbox_image(self) -> str | None:
@@ -2102,6 +2122,15 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         normalized = value.strip().lower()
         if normalized not in MAIL_TRANSPORT_SETTINGS:
             msg = f"mail_transport must be one of {sorted(MAIL_TRANSPORT_SETTINGS)}, got '{value}'"
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("sandbox_provider")
+    @classmethod
+    def _validate_sandbox_provider(cls, value: str) -> str:
+        normalized = (value or "protocol").strip().lower() or "protocol"
+        if normalized not in SANDBOX_PROVIDERS:
+            msg = f"sandbox_provider must be one of {sorted(SANDBOX_PROVIDERS)}, got '{value}'"
             raise ValueError(msg)
         return normalized
 

@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from gateway.adapters.code_execution_adapter import ProtocolCodeExecutionAdapter
 from gateway.api.routes._tools import Tool
 from gateway.api.routes.tools import _managed_tools
 from gateway.api.routes.usage import GATEWAY_TOOL_NAMES
@@ -77,7 +78,7 @@ def _backend_for(tool: BuiltinTool) -> ToolBackend:
     if tool.name == WEB_FETCH_TOOL_NAME:
         return WebRetrievalBackend(enable_search=False, enable_fetch=True)
     if tool.name == CODE_EXECUTION_TOOL_NAME:
-        return SandboxBackend(sandbox_url="http://sandbox.invalid")
+        return SandboxBackend(port=ProtocolCodeExecutionAdapter("http://sandbox.invalid"))
     raise AssertionError(f"no backend case for listed tool {tool.name!r}")
 
 
@@ -100,6 +101,9 @@ def test_the_backend_that_runs_a_tool_advertises_its_listed_definition(tool: Bui
         ({"web_search_provider": "brave"}, {}),
         ({"sandbox_url": "http://sandbox.invalid"}, {}),
         ({}, {"OTARI_SANDBOX_URL": "http://sandbox.invalid"}),
+        # A hosted provider needs no URL, so a reading that goes by sandbox_url
+        # publishes "unavailable" for a deployment that runs code perfectly well.
+        ({"sandbox_provider": "e2b"}, {}),
         ({}, {"OTARI_WEB_SEARCH_URL": "http://search.invalid"}),
     ],
     ids=[
@@ -111,6 +115,7 @@ def test_the_backend_that_runs_a_tool_advertises_its_listed_definition(tool: Bui
         "search-provider-without-key",
         "sandbox-url",
         "sandbox-url-from-env",
+        "sandbox-hosted-provider-without-url",
         "search-url-from-env",
     ],
 )
