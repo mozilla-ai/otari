@@ -3415,7 +3415,7 @@
         "type": "object"
       },
       "CodeExecutor": {
-        "description": "Who runs the code a request's code-execution tool asks for.\n\nThe one vocabulary shared by the deployment setting, the workspace policy,\nthe per-request header and the platform's resolve payload, so a value read\nfrom any of them means the same thing at admission.",
+        "description": "Who runs the code a request's code-execution tool asks for.\n\nValues are read without regard to case or surrounding whitespace.",
         "enum": [
           "auto",
           "otari",

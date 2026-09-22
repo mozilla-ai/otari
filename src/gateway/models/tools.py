@@ -1,7 +1,8 @@
-"""ORM tables for gateway-run tools: search credentials, uploaded files, and workspace tool policies."""
+"""ORM tables for gateway-run tools, and the vocabulary the executor column is closed to."""
 
 import uuid
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
@@ -236,6 +237,32 @@ class WorkspaceMcpServer(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+class CodeExecutor(StrEnum):
+    """Who runs the code a request's code-execution tool asks for.
+
+    Values are read without regard to case or surrounding whitespace.
+    """
+
+    AUTO = "auto"
+    """The provider when it runs this tool natively for this model, else Otari."""
+    OTARI = "otari"
+    """Always the configured code-execution backend, whatever the provider offers."""
+    PROVIDER = "provider"
+    """Always the provider: the declaration is forwarded untouched."""
+
+    @classmethod
+    def parse(cls, value: object) -> "CodeExecutor | None":
+        """The member for a stored or wire value, or ``None`` for anything else."""
+        if isinstance(value, cls):
+            return value
+        if not isinstance(value, str):
+            return None
+        try:
+            return cls(value.strip().lower())
+        except ValueError:
+            return None
 
 
 class WorkspaceCodeExecutionPolicy(Base):

@@ -6808,9 +6808,7 @@ export interface components {
          * CodeExecutor
          * @description Who runs the code a request's code-execution tool asks for.
          *
-         *     The one vocabulary shared by the deployment setting, the workspace policy,
-         *     the per-request header and the platform's resolve payload, so a value read
-         *     from any of them means the same thing at admission.
+         *     Values are read without regard to case or surrounding whitespace.
          * @enum {string}
          */
         CodeExecutor: "auto" | "otari" | "provider";

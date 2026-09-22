@@ -25,8 +25,8 @@ from gateway.api.routes._tools import (
     resolve_code_executor_preference,
 )
 from gateway.core.config import GatewayConfig
+from gateway.models.tools import CodeExecutor
 from gateway.services.tool_settings_service import get_field_options, validate_value
-from gateway.types.code_execution import CodeExecutor
 
 ANTHROPIC_DATED = {"type": "code_execution_20250825", "name": "code_execution"}
 OPENAI_INTERPRETER = {"type": "code_interpreter", "container": {"type": "auto"}}

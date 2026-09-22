@@ -29,9 +29,9 @@ from gateway.api.routes._tools import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.models.tools import CodeExecutor
 from gateway.services.content_normalizer import NormalizationStats, WireFormat, normalize_messages
 from gateway.services.model_capabilities import resolve_capabilities
-from gateway.types.code_execution import CodeExecutor
 
 
 def sandbox_requested(

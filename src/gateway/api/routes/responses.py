@@ -54,6 +54,7 @@ from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.models.tools import CodeExecutor
 from gateway.services.file_service import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
@@ -67,7 +68,6 @@ from gateway.services.tool_format import inject_purpose_hints_responses, openai_
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
-from gateway.types.code_execution import CodeExecutor
 
 router = APIRouter(tags=["responses"])
 

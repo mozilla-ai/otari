@@ -135,6 +135,7 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing
+from gateway.models.tools import CodeExecutor
 from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
@@ -253,7 +254,6 @@ from gateway.streaming import (
     streaming_generator,
 )
 from gateway.types.attempt import Attempt
-from gateway.types.code_execution import CodeExecutor
 from gateway.types.session_principal import SessionPrincipal
 
 ResultT = TypeVar("ResultT")

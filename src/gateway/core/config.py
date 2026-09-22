@@ -23,7 +23,7 @@ from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
-from gateway.types.code_execution import CodeExecutor
+from gateway.models.tools import CodeExecutor
 
 API_KEY_HEADER = "Otari-Key"
 # What may run a code-execution tool call. ``protocol`` is a backend of the

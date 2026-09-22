@@ -34,8 +34,8 @@ from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.platform import RuntimeSetting
+from gateway.models.tools import CodeExecutor
 from gateway.services.runtime_settings_service import SettingValue
-from gateway.types.code_execution import CodeExecutor
 
 WEB_SEARCH_URL = "web_search_url"
 WEB_SEARCH_ENGINES = "web_search_engines"

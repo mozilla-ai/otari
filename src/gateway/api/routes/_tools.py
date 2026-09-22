@@ -18,7 +18,7 @@ dispatch.
 
 A provider-native code-execution keyword (``code_execution``,
 ``code_interpreter``, ``code_execution_<date>``) is decided by the request's
-**executor** instead (:class:`gateway.types.code_execution.CodeExecutor`): the
+**executor** instead (:class:`gateway.models.tools.CodeExecutor`): the
 provider, Otari's sandbox, or ``auto``, which picks the provider only when it
 runs that tool natively for the dispatched model. ``auto`` is the default, and
 it is what lets a request written against a frontier model's own sandbox keep
@@ -37,6 +37,7 @@ from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.core.config import parse_bool_env
 from gateway.core.env import otari_env
 from gateway.log_config import logger
+from gateway.models.tools import CodeExecutor
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.web_retrieval_backend import (
     DEFAULT_MAX_RESULTS,
@@ -45,7 +46,6 @@ from gateway.services.web_retrieval_backend import (
     WebRetrievalCounter,
 )
 from gateway.services.web_retrieval_policy import DomainPolicy
-from gateway.types.code_execution import CodeExecutor
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig

@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.tenancy import User, Workspace
-from gateway.models.tools import WorkspaceCodeExecutionPolicy
+from gateway.models.tools import CodeExecutor, WorkspaceCodeExecutionPolicy
 from gateway.services.mcp_loop import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.sandbox_backend import (
     CODE_EXECUTION_TOOL_NAME,
@@ -35,7 +35,6 @@ from gateway.services.sandbox_backend import (
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.errors import SandboxImageNotAllowedError, SandboxToolsUnrunnableError
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.types.code_execution import CodeExecutor
 
 # The two ceilings a workspace value is floored against, which are also the
 # largest values worth storing: a policy may only narrow, so a number above the

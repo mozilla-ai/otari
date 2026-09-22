@@ -55,6 +55,7 @@ from gateway.core.usage_source import PLAYGROUND_USAGE_ENDPOINT
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.models.tools import CodeExecutor
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.file_service import StagedFile
@@ -69,7 +70,6 @@ from gateway.services.mcp_loop import (
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
-from gateway.types.code_execution import CodeExecutor
 from gateway.types.session_principal import SessionPrincipal
 
 router = APIRouter(prefix="/chat", tags=["chat"])
