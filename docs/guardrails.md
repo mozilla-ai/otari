@@ -222,6 +222,23 @@ required argument that no environment variable can supply is missing. Whether a
 variable is *set* is never consulted: the process that writes the row is not
 always the process that builds the guardrail, and the row may outlive both.
 
+An argument whose value carries a scheme is checked as an address too, because
+a later step builds the guardrail from these arguments and dials it. Seven of
+the eight definable guardrails take one, spelled `endpoint`, `base_url` or
+`url`, and the check reads the value rather than the argument's name, so a
+spelling any-guardrail adds next is covered without an Otari release. It
+refuses plain `http`, an address with no host, and a host that resolves inside
+the network Otari runs in, and it looks inside a nested argument such as
+Alinia's `detection_config`. The check runs at the write and not on every
+request: the guardrail owns the socket it dials, so a later lookup would report
+something Otari could not act on. Two things follow. An endpoint that arrives
+from an environment variable (`ALINIA_ENDPOINT`, `CONTENT_SAFETY_ENDPOINT`,
+`WATSONX_URL`) is never checked, the same carve-out the required-argument rule
+makes, and that address is the operator's own rather than an organization
+admin's. And an operator who has set `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` has
+turned the private-address half of this check off as well: one flag covers
+every address this gateway is asked to dial.
+
 Two guardrails the catalog lists cannot be defined this way. `bedrock_guardrails`
 needs both AWS keys, because without them boto3 falls back to the instance role
 of the host Otari runs on, which is the operator's identity rather than the
