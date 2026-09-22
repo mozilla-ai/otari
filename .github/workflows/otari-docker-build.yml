@@ -13,8 +13,12 @@ name: Otari Docker Build
 # sources, and dependency resolution. src/gateway/** is left out on purpose. A
 # Python source change cannot fail the build (nothing compiles it) and
 # otari-tests.yml already covers it, so including it would add a multi-minute
-# image build to nearly every PR for no signal. cli/src/** is the exception: the
-# liveness check asserts what `otari --version` reports inside the image.
+# image build to nearly every PR for no signal. That stays true now the container
+# also serves a request below: what the hybrid smoke adds here is whether the
+# *image* can serve one (its layout, entrypoint and baked environment), and the
+# same walk against the source checkout runs per PR in otari-oss-edition.yml.
+# cli/src/** is the one Python source that is listed: the liveness check asserts
+# what `otari --version` reports inside the image.
 #
 # Single-platform on purpose too: this proves the recipe works and the container
 # boots. The publish workflow still builds linux/arm64 under QEMU, which is
@@ -33,6 +37,7 @@ on:
       - 'cli/src/**'
       - 'uv.lock'
       - 'scripts/docker_liveness_check.sh'
+      - 'scripts/hybrid_edition_smoke.py'
       - '.github/workflows/otari-docker-build.yml'
   workflow_dispatch:
 
@@ -70,3 +75,20 @@ jobs:
       # fallback, which is what a bundle that never reached the image looks like.
       - name: Run container liveness check
         run: ./scripts/docker_liveness_check.sh otari-pr:${{ github.sha }}
+
+      # Liveness proves the container answers its health probes. This proves it
+      # can serve a request: the same hybrid walk as otari-oss-edition.yml, run
+      # against the image a deployment actually pulls rather than a source
+      # checkout. The image pins OTARI_HOST/OTARI_PORT as environment variables,
+      # which beat a mounted config file, so an image that boots but cannot
+      # serve is a break only this step sees.
+      - name: Install the smoke's environment
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.14"
+
+      - name: Smoke the container in hybrid mode
+        run: |
+          uv sync --frozen --no-dev
+          uv run --frozen --no-dev python scripts/hybrid_edition_smoke.py \
+            --image otari-pr:${{ github.sha }}

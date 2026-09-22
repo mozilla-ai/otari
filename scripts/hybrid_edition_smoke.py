@@ -39,13 +39,13 @@ It walks:
    configured: Anthropic's dated tool on Messages, OpenAI's ``code_interpreter``
    on Responses, each answered in its own native result blocks.
 
-Standard library only, and no dev dependencies, for the same reason as
-``oss_edition_smoke.py``: CI runs it against ``uv sync --frozen --no-dev``, so a
-dev-only import on a hybrid code path fails here.
-
 8. Provider-native web search is forwarded the same way (``web_search_intercept``
    is off by default): Anthropic's ``web_search_20250305`` on Messages, OpenAI's
    ``web_search_preview`` on Responses, each answered in its own result blocks.
+
+Standard library only, and no dev dependencies, for the same reason as
+``oss_edition_smoke.py``: CI runs it against ``uv sync --frozen --no-dev``, so a
+dev-only import on a hybrid code path fails here.
 
 ``--live`` keeps the fake control plane and MCP server but points the resolved
 attempts at the real OpenAI and Anthropic APIs, with keys read from
@@ -60,9 +60,19 @@ real model drives the managed loop, and whether the native tools still exist
 under the names the gateway forwards. It runs on pushes to ``main``, which is
 also the commit the dev gateway deploys.
 
+``--image`` runs the same walk against the published container instead of a
+source checkout, which is what a deployment actually runs: the image's own
+filesystem, entrypoint and baked dependencies. ``otari-docker-build.yml`` proves
+today only that the container answers its health probes, so an image that boots
+but cannot serve a request is a break nothing here catches, and that class of
+break is the one that took otari-ai's dev deployment down. The fakes then bind
+every interface and the container reaches them through ``host.docker.internal``,
+so the run works the same on a Linux runner and on Docker Desktop.
+
 Usage:
     uv run --frozen --no-dev python scripts/hybrid_edition_smoke.py
     uv run --frozen --no-dev python scripts/hybrid_edition_smoke.py --live
+    uv run --frozen --no-dev python scripts/hybrid_edition_smoke.py --image otari:pr-sha
 """
 
 from __future__ import annotations
@@ -247,16 +257,37 @@ class _RecordingHandler(BaseHTTPRequestHandler):
         return urllib.parse.urlsplit(self.path).path
 
 
+# Where the fakes bind, and the host the gateway reaches them on. They differ
+# only for a container run: the gateway is then in its own network namespace, so
+# loopback is not shared and the fakes have to be reachable from outside it.
+# Bound briefly, on a throwaway port, serving nothing but this run's fixtures.
+LOOPBACK = "127.0.0.1"
+ALL_INTERFACES = ""
+CONTAINER_HOST_ALIAS = "host.docker.internal"
+# The image pins OTARI_HOST and OTARI_PORT as environment variables, and an
+# env-bridged setting beats a config file, so a container listens here whatever
+# the mounted config says. A deployment relies on exactly that, so this run does
+# too: a free host port is published to this one.
+CONTAINER_PORT = 8000
+
+
 class _FakeServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, handler: type[BaseHTTPRequestHandler]) -> None:
-        super().__init__(("127.0.0.1", 0), handler)
+    def __init__(self, handler: type[BaseHTTPRequestHandler], bind_host: str = LOOPBACK) -> None:
+        super().__init__((bind_host, 0), handler)
         self.recorder = Recorder()
+        # The address the *gateway* dials, which is not always where we bound.
+        self.peer_host = CONTAINER_HOST_ALIAS if bind_host == ALL_INTERFACES else LOOPBACK
+
+    @property
+    def port(self) -> int:
+        return int(self.server_address[1])
 
     @property
     def base_url(self) -> str:
-        return f"http://127.0.0.1:{self.server_address[1]}"
+        """The URL the gateway should dial to reach this fake."""
+        return f"http://{self.peer_host}:{self.port}"
 
 
 ServerT = TypeVar("ServerT", bound=_FakeServer)
@@ -325,8 +356,8 @@ class ControlPlaneState:
 class FakeControlPlane(_FakeServer):
     """Speaks docs/hybrid-mode-protocol.md, keyed on which user token is presented."""
 
-    def __init__(self, state: ControlPlaneState) -> None:
-        super().__init__(_ControlPlaneHandler)
+    def __init__(self, state: ControlPlaneState, bind_host: str = LOOPBACK) -> None:
+        super().__init__(_ControlPlaneHandler, bind_host)
         self.state = state
 
 
@@ -447,8 +478,8 @@ class _ControlPlaneHandler(_RecordingHandler):
 
 
 class MockProvider(_FakeServer):
-    def __init__(self) -> None:
-        super().__init__(_ProviderHandler)
+    def __init__(self, bind_host: str = LOOPBACK) -> None:
+        super().__init__(_ProviderHandler, bind_host)
 
 
 def _tool_names(body: dict[str, Any]) -> set[str]:
@@ -626,8 +657,8 @@ class _ProviderHandler(_RecordingHandler):
 
 
 class FakeMcpServer(_FakeServer):
-    def __init__(self) -> None:
-        super().__init__(_McpHandler)
+    def __init__(self, bind_host: str = LOOPBACK) -> None:
+        super().__init__(_McpHandler, bind_host)
 
     @property
     def mcp_url(self) -> str:
@@ -709,7 +740,13 @@ def hybrid_env(base_env: dict[str, str]) -> dict[str, str]:
     return env
 
 
-def hybrid_config(*, port: int, platform_base_url: str, tavily_key: str | None = None) -> dict[str, Any]:
+def hybrid_config(
+    *,
+    port: int,
+    platform_base_url: str,
+    tavily_key: str | None = None,
+    in_container: bool = False,
+) -> dict[str, Any]:
     """The config a hybrid deployment writes: a platform block and no providers.
 
     No ``database_url``: a hybrid gateway runs no database. No ``sandbox_url``,
@@ -717,14 +754,17 @@ def hybrid_config(*, port: int, platform_base_url: str, tavily_key: str | None =
     which is the path step 7 proves. ``web_search_url`` sits under the platform
     base URL, which is what makes the gateway send its token on search queries.
     A live run adds Tavily, which the backend prefers over the URL.
+    ``in_container`` leaves out ``host`` and ``port``, which the image's own
+    environment owns and a config file cannot override.
     """
     config: dict[str, Any] = {
-        "host": "127.0.0.1",
-        "port": port,
         "platform": {"base_url": platform_base_url, "resolve_timeout_ms": 5000},
         # The gateway appends /search itself; the doc's GET {base}/gateway/web-search/search.
         "web_search_url": f"{platform_base_url}/gateway/web-search",
     }
+    if not in_container:
+        config["host"] = LOOPBACK
+        config["port"] = port
     if tavily_key:
         config["web_search_provider"] = "tavily"
         config["web_search_provider_api_key"] = tavily_key
@@ -805,6 +845,90 @@ def gateway(config_path: Path, env: dict[str, str], base_url: str, log_path: Pat
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=20)
+
+
+@contextmanager
+def gateway_container(image: str, config_path: Path, port: int, base_url: str, log_path: Path) -> Iterator[None]:
+    """Run the published image in hybrid mode and wait for it to be healthy.
+
+    ``port`` is the host port published to the container's own
+    :data:`CONTAINER_PORT`. ``host.docker.internal`` is mapped explicitly rather
+    than assumed: Docker
+    Desktop provides it, a Linux runner does not, and ``host-gateway`` is what
+    makes the same command work on both.
+    """
+    if shutil.which("docker") is None:
+        raise SmokeFailure("--image needs docker on PATH")
+    name = f"otari-hybrid-smoke-{secrets.token_hex(4)}"
+    log(f"Starting the hybrid gateway from {image}")
+    started = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--detach",
+            "--name",
+            name,
+            "--add-host",
+            f"{CONTAINER_HOST_ALIAS}:host-gateway",
+            "--publish",
+            f"{port}:{CONTAINER_PORT}",
+            "--env",
+            f"{PLATFORM_TOKEN_ENV_VAR}={GATEWAY_TOKEN}",
+            # The MCP fake runs on the host, which from inside the container is a
+            # private address, and the SSRF guard rejects it by design (it names
+            # this override in the refusal). Relaxed only here, only for MCP, and
+            # only because the peer is outside the container's namespace; the
+            # guard itself is covered by tests/unit/test_url_safety.py.
+            "--env",
+            "OTARI_MCP_ALLOW_PRIVATE_HOSTS=true",
+            "--volume",
+            f"{config_path}:/tmp/hybrid.yml:ro",
+            image,
+            "otari",
+            "serve",
+            "--config",
+            "/tmp/hybrid.yml",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if started.returncode != 0:
+        raise SmokeFailure(f"'docker run' exited {started.returncode}: {started.stderr.strip()}")
+    try:
+        _await_container_health(name, base_url)
+        yield
+    finally:
+        # Captured before the container goes, so a failure still has its log.
+        logs = subprocess.run(["docker", "logs", name], capture_output=True, check=False, text=True)
+        log_path.write_text(logs.stdout + logs.stderr, encoding="utf-8")
+        subprocess.run(["docker", "rm", "--force", name], capture_output=True, check=False)
+
+
+def _container_is_running(name: str) -> bool:
+    probe = subprocess.run(
+        ["docker", "inspect", "--format", "{{.State.Running}}", name],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    return probe.returncode == 0 and probe.stdout.strip() == "true"
+
+
+def _await_container_health(name: str, base_url: str) -> None:
+    deadline = time.monotonic() + HEALTH_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if not _container_is_running(name):
+            raise SmokeFailure("The gateway container exited before becoming healthy")
+        try:
+            status, _, _ = _request("GET", f"{base_url}{API_ROOT}/health")
+        except OSError:
+            status = 0
+        if status == 200:
+            return
+        time.sleep(0.5)
+    raise SmokeFailure(f"The gateway container did not answer {API_ROOT}/health within {HEALTH_TIMEOUT_SECONDS}s")
 
 
 def _await_health(process: subprocess.Popen[bytes], base_url: str) -> None:
@@ -1252,6 +1376,11 @@ def smoke(base_url: str, fakes: Fakes) -> None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
+        "--image",
+        default=None,
+        help="Run this container image instead of the source checkout's CLI, as a deployment does.",
+    )
+    parser.add_argument(
         "--live",
         action="store_true",
         help="Resolve attempts to the real OpenAI and Anthropic APIs and search through Tavily, "
@@ -1263,6 +1392,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     live = LiveProviders.from_env(dict(os.environ)) if args.live else None
+    # A container reaches the fakes from its own namespace, so they cannot bind loopback.
+    bind_host = ALL_INTERFACES if args.image else LOOPBACK
     with tempfile.TemporaryDirectory(prefix="otari-hybrid-smoke-") as workdir_name:
         workdir = Path(workdir_name)
         config_path = workdir / "hybrid.yml"
@@ -1270,18 +1401,29 @@ def main(argv: list[str] | None = None) -> int:
         port = _free_port()
         base_url = f"http://127.0.0.1:{port}"
         try:
-            with serve(MockProvider(), "mock-provider") as provider, serve(FakeMcpServer(), "fake-mcp") as mcp:
+            with (
+                serve(MockProvider(bind_host), "mock-provider") as provider,
+                serve(FakeMcpServer(bind_host), "fake-mcp") as mcp,
+            ):
                 state = ControlPlaneState(provider_base_url=provider.base_url, mcp_url=mcp.mcp_url, live=live)
-                with serve(FakeControlPlane(state), "fake-control-plane") as control_plane:
+                with serve(FakeControlPlane(state, bind_host), "fake-control-plane") as control_plane:
                     fakes = Fakes(control_plane=control_plane, provider=provider, mcp=mcp, live=live)
                     platform_base_url = f"{control_plane.base_url}{PLATFORM_PREFIX}"
                     config = hybrid_config(
                         port=port,
                         platform_base_url=platform_base_url,
                         tavily_key=live.tavily_key if live else None,
+                        in_container=bool(args.image),
                     )
                     write_config(config_path, config)
-                    with gateway(config_path, hybrid_env(dict(os.environ)), base_url, log_path):
+                    # World-readable: the container runs as its own user and has
+                    # to read the mount. The file holds this run's fixtures.
+                    config_path.chmod(0o644)
+                    if args.image:
+                        run_gateway = gateway_container(args.image, config_path, port, base_url, log_path)
+                    else:
+                        run_gateway = gateway(config_path, hybrid_env(dict(os.environ)), base_url, log_path)
+                    with run_gateway:
                         smoke(base_url, fakes)
         except SmokeFailure as failure:
             log(f"\nHybrid smoke FAILED: {failure}\n\n{_tail(log_path)}")
@@ -1289,7 +1431,12 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as error:
             log(f"\nHybrid smoke FAILED: {type(error).__name__}: {error}\n\n{_tail(log_path)}")
             return 1
-    log("\nHybrid smoke passed" + (" against live providers." if live else "."))
+    where = []
+    if args.image:
+        where.append("in the container")
+    if live:
+        where.append("against live providers")
+    log("\nHybrid smoke passed" + (f" {' '.join(where)}." if where else "."))
     return 0
 
 

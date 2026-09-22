@@ -398,3 +398,35 @@ def test_live_resolve_carries_the_real_key_and_no_api_base() -> None:
             assert attempt["api_key"] == key
             assert attempt["api_base"] is None, "a live attempt dials the provider's own endpoint"
             assert attempt["provider"] == provider
+
+
+# --------------------------------------------------------------------------- #
+# The container mode
+# --------------------------------------------------------------------------- #
+
+
+def test_container_config_leaves_the_listen_address_to_the_image() -> None:
+    """The image pins OTARI_HOST/OTARI_PORT, and env beats a config file.
+
+    Writing them anyway would state something the run does not honor, and was
+    how the first container run failed: the gateway listened on the image's 8000
+    while the smoke polled a port of its own.
+    """
+    config = smoke.hybrid_config(port=8123, platform_base_url="http://cp/api/v1", in_container=True)
+    assert "host" not in config
+    assert "port" not in config
+    source = smoke.hybrid_config(port=8123, platform_base_url="http://cp/api/v1")
+    assert (source["host"], source["port"]) == (smoke.LOOPBACK, 8123)
+
+
+def test_fakes_bind_loopback_by_default_and_are_dialled_there() -> None:
+    with smoke.serve(smoke.MockProvider(), "test-bind-default") as server:
+        assert server.peer_host == smoke.LOOPBACK
+        assert server.base_url == f"http://{smoke.LOOPBACK}:{server.port}"
+
+
+def test_fakes_are_dialled_through_the_host_alias_when_bound_for_a_container() -> None:
+    """A container has its own loopback, so the fakes must be reachable by name."""
+    with smoke.serve(smoke.MockProvider(smoke.ALL_INTERFACES), "test-bind-container") as server:
+        assert server.peer_host == smoke.CONTAINER_HOST_ALIAS
+        assert server.base_url == f"http://{smoke.CONTAINER_HOST_ALIAS}:{server.port}"
