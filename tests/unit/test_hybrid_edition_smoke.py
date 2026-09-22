@@ -148,15 +148,19 @@ def test_resolve_routes_anthropic_to_the_messages_base(control_plane: Any) -> No
     assert body["attempts"][0]["api_key"] == smoke.ANTHROPIC_KEY
 
 
+# Parametrized by attribute name, not by value: the tokens are generated per
+# import, so a value here would give each xdist worker a different test id and
+# collection would disagree across workers.
 @pytest.mark.parametrize(
-    ("token", "status"),
+    ("token_name", "status"),
     [
-        (smoke.USER_TOKEN_BROKE, 402),
-        (smoke.USER_TOKEN_THROTTLED, 429),
-        (smoke.USER_TOKEN_UNKNOWN, 401),
+        ("USER_TOKEN_BROKE", 402),
+        ("USER_TOKEN_THROTTLED", 429),
+        ("USER_TOKEN_UNKNOWN", 401),
     ],
 )
-def test_resolve_refuses_by_user_token(control_plane: Any, token: str, status: int) -> None:
+def test_resolve_refuses_by_user_token(control_plane: Any, token_name: str, status: int) -> None:
+    token: str = getattr(smoke, token_name)
     got, _ = _call("POST", _resolve_url(control_plane), headers=_tokens(token), body={"model": "m"})
     assert got == status
 
