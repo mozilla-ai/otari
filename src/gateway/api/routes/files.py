@@ -40,8 +40,8 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.tools import FileObject
+from gateway.ports.file_storage_port import FileStoragePort
 from gateway.services.file_service import expiry_for, fetch_file, guess_mime_type
-from gateway.services.file_store import FileStore
 from gateway.services.workspace_scope import default_workspace_id
 
 _FILES_BETA = "files-api-2025-04-14"
@@ -180,7 +180,7 @@ async def _capped_chunks(file: UploadFile, max_bytes: int) -> AsyncIterator[byte
 
     This is what keeps the size cap an HTTP concern living in the route: it
     yields chunks straight through to the storage backend (via
-    ``FileStore.put_stream``) instead of accumulating them, so the cap is
+    ``FileStoragePort.put_stream``) instead of accumulating them, so the cap is
     enforced as bytes flow rather than after a full buffer is built.
     """
     total = 0
@@ -249,7 +249,7 @@ async def create_file(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    file_store: Annotated[FileStore, Depends(get_file_store)],
+    file_store: Annotated[FileStoragePort, Depends(get_file_store)],
     file: UploadFile = File(...),
     purpose: str = Form(_DEFAULT_PURPOSE),
     user: str | None = Form(None),
@@ -458,7 +458,7 @@ async def get_file_content(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    file_store: Annotated[FileStore, Depends(get_file_store)],
+    file_store: Annotated[FileStoragePort, Depends(get_file_store)],
     user: str | None = None,
 ) -> Response:
     """Download the raw bytes of a file, streamed rather than buffered whole."""
@@ -502,7 +502,7 @@ async def delete_file(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    file_store: Annotated[FileStore, Depends(get_file_store)],
+    file_store: Annotated[FileStoragePort, Depends(get_file_store)],
     user: str | None = None,
 ) -> dict[str, Any]:
     """Soft-delete a file's metadata and remove its bytes from the backend."""

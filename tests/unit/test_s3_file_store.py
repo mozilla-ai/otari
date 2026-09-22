@@ -12,7 +12,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from gateway.services.file_store import S3FileStore
+from gateway.adapters.file_storage_adapter import S3FileStore
 
 _BUCKET = "otari-test-bucket"
 

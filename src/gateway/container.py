@@ -33,6 +33,7 @@ from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.code_execution_adapter import build_code_execution_port, verify_code_execution_ready
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
+from gateway.adapters.file_storage_adapter import build_file_storage_port
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
@@ -43,6 +44,7 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
+from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
@@ -298,6 +300,32 @@ def _code_execution_adapter_factory(config: GatewayConfig | None) -> PortFactory
     return factory
 
 
+def _file_storage_port_factory(config: GatewayConfig | None) -> PortFactory[FileStoragePort]:
+    """The core ``FileStoragePort`` factory, closed over this app's config.
+
+    Config rather than a session, because which store holds the bytes is a
+    deployment setting (``files_backend``) and not a per-request fact.
+    The store is built on first resolve and reused, so the retention sweep
+    reclaims bytes through the same store the request path wrote them with, and
+    a process that never resolves this port opens no client at all.
+    A container built without config resolves this port only to raise, which is
+    louder than quietly writing to a directory nobody chose.
+    """
+    store: FileStoragePort | None = None
+
+    def factory(session: AsyncSession | None) -> FileStoragePort:
+        del session
+        nonlocal store
+        if config is None:
+            msg = "FileStoragePort needs the deployment config; build the container with it"
+            raise ContainerError(msg)
+        if store is None:
+            store = build_file_storage_port(config)
+        return store
+
+    return factory
+
+
 def build_container(bootstrap_selector: str | None = None, config: GatewayConfig | None = None) -> Container:
     """Build the composition-root container for this deployment.
 
@@ -345,6 +373,10 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # deployment asks for them instead. An overlay with its own platform binds
     # a third adapter here and changes nothing above the port.
     container.bind(CodeExecutionPort, _code_execution_adapter_factory(config))
+    # Uploaded file bytes: the base writes them to a local directory, an S3
+    # bucket or any fsspec filesystem, whichever ``files_backend`` names. An
+    # overlay binds a store of its own and changes nothing above the port.
+    container.bind(FileStoragePort, _file_storage_port_factory(config))
     if config is not None:
         # Asked once, at build, rather than per request: selecting a hosted
         # provider is itself what publishes code execution on ``/v1/tools``, in

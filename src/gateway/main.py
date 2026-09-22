@@ -25,6 +25,7 @@ from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, ge
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
+from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.rate_limit import RateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
@@ -34,7 +35,6 @@ from gateway.services.budgets import run_reservation_sweeper
 from gateway.services.catalog_selectors import reset_selector_index
 from gateway.services.code_execution.container_sweeper import run_sandbox_container_sweeper
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
-from gateway.services.file_store import build_file_store
 from gateway.services.files import run_file_sweeper
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
@@ -175,11 +175,15 @@ def _start_reservation_sweeper(config: GatewayConfig, _container: Container) -> 
     )
 
 
-def _start_file_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:
-    """Return the file retention sweep, or None when files or the interval disable it."""
+def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutine[Any, Any, None] | None:
+    """Return the file retention sweep, or None when files or the interval disable it.
+
+    Sweeps through the same store the request path writes to, since the bytes a
+    request wrote are the bytes this reclaims.
+    """
     if not config.files_enabled or config.files_sweep_interval_sec <= 0:
         return None
-    return run_file_sweeper(config.files_sweep_interval_sec, build_file_store(config))
+    return run_file_sweeper(config.files_sweep_interval_sec, container.resolve(FileStoragePort, None))
 
 
 def _start_container_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:
@@ -546,8 +550,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # vendor handshake.
             await load_guardrail_runner_at_startup()
             log_writer = create_log_writer(config.log_writer_strategy)
-            app.state.file_store = build_file_store(config)
-            workers = _start_lifespan_workers(config, app.state.container)
+            container: Container = app.state.container
+            # The retention sweep below resolves this same port, so both it and
+            # the request path use whatever store this build bound.
+            app.state.file_store = container.resolve(FileStoragePort, None)
+            workers = _start_lifespan_workers(config, container)
             # Workers of the enabled features. Same supervisor as the registry
             # above: created here, cancelled together in ``finally`` under one
             # shared bound.

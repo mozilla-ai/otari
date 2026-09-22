@@ -1,20 +1,12 @@
-"""Pluggable blob storage for uploaded file bytes.
+"""Otari's own file-storage adapters: a local directory, S3, and any fsspec filesystem.
 
-The ``/v1/files`` API stores file *metadata* in the database (see
-``gateway.models.tools.FileObject``) and the raw *bytes* here, keyed by an
-opaque ``storage_ref``. Keeping bytes out of the relational store lets large
-uploads live on a filesystem / object store while the DB stays lean.
-
-``put``/``get`` are the full-buffer path (kept for callers, like the content
-normalizer, that need the whole blob in memory regardless). ``put_stream`` /
-``get_stream`` let the upload and download routes move bytes chunk-by-chunk
-instead of buffering an entire file, which is what actually bounds memory use
-for concurrent large uploads (see issue #156).
-
-Three backends implement the :class:`FileStore` protocol: a local directory,
-S3 through boto3, and :class:`FsspecFileStore`, which reaches any filesystem
+Each satisfies :class:`gateway.ports.file_storage_port.FileStoragePort`.
+:class:`FsspecFileStore` is the general one: it reaches whatever filesystem
 `fsspec <https://filesystem-spec.readthedocs.io>`_ has an implementation for
-(GCS, Azure, SFTP, HDFS, WebDAV, and S3 again) from one ``files_url``.
+(GCS, Azure, SFTP, HDFS, WebDAV, and S3 again) from a single ``files_url``, so
+a deployment on a store the other two do not name still has a backend.
+
+:func:`build_file_storage_port` picks the one ``files_backend`` selects.
 """
 
 from __future__ import annotations
@@ -24,10 +16,11 @@ import tempfile
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import IO, TYPE_CHECKING, Any
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.ports.file_storage_port import FileStoragePort
 
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
@@ -73,46 +66,8 @@ async def _open_handle(path: Path, mode: str) -> AsyncIterator[IO[bytes]]:
             logger.warning("_open_handle: failed to close %s: %s", path, close_exc)
 
 
-@runtime_checkable
-class FileStore(Protocol):
-    """Storage backend for raw uploaded file bytes."""
-
-    async def put(self, file_id: str, data: bytes) -> str:
-        """Persist ``data`` for ``file_id`` and return an opaque storage ref."""
-        ...
-
-    async def get(self, storage_ref: str) -> bytes:
-        """Return the bytes previously stored under ``storage_ref``."""
-        ...
-
-    async def put_stream(self, file_id: str, chunks: AsyncIterator[bytes]) -> tuple[str, int]:
-        """Persist ``chunks`` for ``file_id`` without buffering them fully in memory.
-
-        Returns the opaque storage ref and the total byte count written. Callers
-        that need to cap the upload size (e.g. the ``/v1/files`` route) must
-        enforce that themselves while producing ``chunks``; this is a pure
-        storage primitive and does not know about HTTP limits.
-        """
-        ...
-
-    def get_stream(self, storage_ref: str) -> AsyncGenerator[bytes, None]:
-        """Yield the bytes stored under ``storage_ref`` chunk-by-chunk.
-
-        Not ``async def``: implementations are async generators, called
-        synchronously and consumed with ``async for``, not awaited first.
-        Typed as ``AsyncGenerator``, not the narrower ``AsyncIterator``,
-        because callers rely on ``aclose()`` (e.g. the download route closes
-        it early on client disconnect so the file handle doesn't linger).
-        """
-        ...
-
-    async def delete(self, storage_ref: str) -> None:
-        """Remove the bytes under ``storage_ref`` (no-op if already gone)."""
-        ...
-
-
 class LocalDirFileStore:
-    """Filesystem-backed :class:`FileStore`.
+    """Filesystem-backed :class:`FileStoragePort`.
 
     Files are sharded into 256 subdirectories by the first two hex characters of
     the file id to avoid pathologically large directories. The ``storage_ref``
@@ -242,7 +197,7 @@ def _translate_s3_errors(storage_ref: str) -> Iterator[None]:
 
 
 class S3FileStore:
-    """S3-compatible object-storage :class:`FileStore` (AWS S3, MinIO, or any
+    """S3-compatible object-storage :class:`FileStoragePort` (AWS S3, MinIO, or any
     S3 API-compatible endpoint via ``endpoint_url``).
 
     Uses the synchronous ``boto3`` client via :func:`asyncio.to_thread` rather
@@ -393,7 +348,7 @@ def _translate_fsspec_errors(storage_ref: str) -> Iterator[None]:
 
 
 class FsspecFileStore:
-    """A :class:`FileStore` over any `fsspec <https://filesystem-spec.readthedocs.io>`_ filesystem.
+    """A :class:`FileStoragePort` over any `fsspec <https://filesystem-spec.readthedocs.io>`_ filesystem.
 
     ``url`` names the root the store writes under, ``s3://bucket/otari-files``,
     ``gcs://bucket/prefix``, ``abfs://container/prefix``, ``file:///var/otari``,
@@ -522,8 +477,14 @@ class FsspecFileStore:
             await asyncio.to_thread(_rm)
 
 
-def build_file_store(config: GatewayConfig) -> FileStore:
-    """Construct the configured :class:`FileStore` backend."""
+def build_file_storage_port(config: GatewayConfig) -> FileStoragePort:
+    """Build the file store this deployment's ``files_backend`` selects.
+
+    Raises:
+        ValueError: If ``files_backend`` names no backend that exists, or names
+            one whose required setting is unset.
+
+    """
     backend = config.files_backend.strip().lower()
     if backend == "local":
         return LocalDirFileStore(config.files_local_dir)

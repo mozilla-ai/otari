@@ -26,10 +26,10 @@ from anthropic import Anthropic, BadRequestError
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_ROOT, API_VERSION
 from gateway.models.tools import FileObject
 from gateway.services.file_extractors import ExtractionResult
-from gateway.services.file_store import LocalDirFileStore
 
 
 @pytest.fixture

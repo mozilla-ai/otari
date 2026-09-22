@@ -732,7 +732,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/external_usage_service.py",
     "gateway/services/file_extractors.py",
     "gateway/services/file_service.py",
-    "gateway/services/file_store.py",
     "gateway/services/guardrail_catalog.py",
     "gateway/services/guardrails.py",
     "gateway/services/log_writer.py",

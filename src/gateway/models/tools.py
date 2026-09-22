@@ -96,15 +96,14 @@ class SearchToolCredential(Base):
 
 
 class FileObject(Base):
-    """Uploaded file metadata for the OpenAI-compatible /v1/files API.
+    """Uploaded file metadata for the OpenAI-compatible files API.
 
-    The raw bytes live in a pluggable blob backend (see
-    gateway.services.file_store); this row holds metadata plus the backend
-    ``storage_ref`` used to fetch them. Files are scoped to ``user_id`` for
-    tenant isolation and soft-deleted via ``deleted_at``. ``workspace_id`` is a
-    second, independent axis: it says which workspace the upload was made in, so
-    a key confined to one workspace never reaches another's files even when the
-    same user holds keys in both.
+    The raw bytes live in a pluggable blob store; this row holds metadata plus
+    the ``storage_ref`` that store minted for them. Files are scoped to
+    ``user_id`` for tenant isolation and soft-deleted via ``deleted_at``.
+    ``workspace_id`` is a second, independent axis: it says which workspace the
+    upload was made in, so a key confined to one workspace never reaches
+    another's files even when the same user holds keys in both.
     """
 
     __tablename__ = "file_objects"

@@ -22,8 +22,8 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
+from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_ROOT
-from gateway.services.file_store import LocalDirFileStore
 
 ALIASES = f"{API_ROOT}/aliases"
 POLICIES = f"{API_ROOT}/routing/policies"

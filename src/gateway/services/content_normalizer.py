@@ -32,9 +32,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.ports.file_storage_port import FileStoragePort
 from gateway.services.file_extractors import extract_text_from_file, ocr_image, rasterize_pdf
 from gateway.services.file_service import StagedFile, fetch_file, read_file_bytes, sandbox_path_for
-from gateway.services.file_store import FileStore
 from gateway.services.model_capabilities import Capabilities
 from gateway.services.vision import describe_image
 
@@ -164,7 +164,7 @@ async def _resolve_from_ref(
     ref: dict[str, Any],
     *,
     db: AsyncSession | None,
-    file_store: FileStore | None,
+    file_store: FileStoragePort | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     read_bytes: bool = True,
@@ -202,7 +202,7 @@ async def _classify(
     fmt: WireFormat,
     *,
     db: AsyncSession | None,
-    file_store: FileStore | None,
+    file_store: FileStoragePort | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     sandbox_requested: bool = False,
@@ -373,7 +373,7 @@ async def _normalize_block(
     stats: NormalizationStats,
     *,
     db: AsyncSession | None,
-    file_store: FileStore | None,
+    file_store: FileStoragePort | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     sandbox_requested: bool = False,
@@ -452,7 +452,7 @@ async def normalize_messages(
     caps: Capabilities,
     fmt: WireFormat,
     db: AsyncSession | None,
-    file_store: FileStore | None,
+    file_store: FileStoragePort | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None = None,
     sandbox_requested: bool = False,

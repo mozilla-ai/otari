@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.models.tools import FileObject
-from gateway.services.file_store import FileStore
+from gateway.ports.file_storage_port import FileStoragePort
 
 # The purpose stamped on a file the code-execution sandbox produced, so a
 # listing can tell a run's artifact from a user's upload.
@@ -65,7 +65,7 @@ async def fetch_file(
     return record
 
 
-async def read_file_bytes(file_store: FileStore, record: FileObject) -> bytes:
+async def read_file_bytes(file_store: FileStoragePort, record: FileObject) -> bytes:
     """Load the raw bytes for ``record`` from the blob backend.
 
     Raises ``FileNotFoundError`` for a row with no stored bytes.

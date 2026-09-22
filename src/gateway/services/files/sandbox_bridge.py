@@ -11,6 +11,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
+from gateway.ports.file_storage_port import FileStoragePort
 from gateway.repositories.files import OutputFileRow, existing_file_ids, record_output_file
 from gateway.services.file_service import (
     CODE_EXECUTION_OUTPUT_PURPOSE,
@@ -18,7 +19,6 @@ from gateway.services.file_service import (
     expiry_for,
     guess_mime_type,
 )
-from gateway.services.file_store import FileStore
 from gateway.services.files.provider_files import (
     FileOverBudgetError,
     ProviderFile,
@@ -54,7 +54,7 @@ class SandboxFileBridge:
     def __init__(
         self,
         *,
-        file_store: FileStore,
+        file_store: FileStoragePort,
         config: GatewayConfig,
         uow: UnitOfWork,
         user_id: str,

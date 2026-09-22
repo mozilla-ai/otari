@@ -1,8 +1,8 @@
 """File-domain services that are not part of the original flat modules.
 
-``file_service.py``, ``file_store.py`` and ``file_extractors.py`` next door
-still serve uploads and document understanding; this package holds what has
-been written since the layout rule took effect.
+``file_service.py`` and ``file_extractors.py`` next door still serve uploads
+and document understanding; this package holds what has been written since the
+layout rule took effect.
 """
 
 from gateway.services.files.file_sweeper import SweepBatch, run_file_sweeper, sweep_files

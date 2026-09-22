@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from gateway.adapters.file_storage_adapter import LocalDirFileStore, S3FileStore, build_file_storage_port
 from gateway.core.config import GatewayConfig
-from gateway.services.file_store import LocalDirFileStore, build_file_store
 
 
 async def _iter(chunks: list[bytes]) -> AsyncIterator[bytes]:
@@ -176,25 +176,23 @@ async def test_rejects_path_traversal(tmp_path: Path) -> None:
             await store.delete(ref)
 
 
-def test_build_file_store_local(tmp_path: Path) -> None:
+def test_build_file_storage_port_local(tmp_path: Path) -> None:
     config = GatewayConfig(files_backend="local", files_local_dir=str(tmp_path))
-    assert isinstance(build_file_store(config), LocalDirFileStore)
+    assert isinstance(build_file_storage_port(config), LocalDirFileStore)
 
 
-def test_build_file_store_rejects_unknown_backend() -> None:
+def test_build_file_storage_port_rejects_unknown_backend() -> None:
     config = GatewayConfig(files_backend="ceph")
     with pytest.raises(ValueError, match="Unsupported files_backend"):
-        build_file_store(config)
+        build_file_storage_port(config)
 
 
-def test_build_file_store_s3_requires_bucket() -> None:
+def test_build_file_storage_port_s3_requires_bucket() -> None:
     config = GatewayConfig(files_backend="s3", files_s3_bucket=None)
     with pytest.raises(ValueError, match="files_s3_bucket is required"):
-        build_file_store(config)
+        build_file_storage_port(config)
 
 
-def test_build_file_store_s3() -> None:
-    from gateway.services.file_store import S3FileStore
-
+def test_build_file_storage_port_s3() -> None:
     config = GatewayConfig(files_backend="s3", files_s3_bucket="my-bucket")
-    assert isinstance(build_file_store(config), S3FileStore)
+    assert isinstance(build_file_storage_port(config), S3FileStore)

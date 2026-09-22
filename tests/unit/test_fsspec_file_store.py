@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from gateway.adapters.file_storage_adapter import FsspecFileStore, build_file_storage_port
 from gateway.core.config import GatewayConfig
-from gateway.services.file_store import FsspecFileStore, build_file_store
 
 # The backend is an optional extra; the store module itself imports it lazily.
 fsspec = pytest.importorskip("fsspec")
@@ -138,17 +138,17 @@ async def test_local_file_protocol_writes_under_the_root(tmp_path: Path) -> None
     assert await store.get(ref) == b"on disk"
 
 
-def test_build_file_store_fsspec_requires_url() -> None:
+def test_build_file_storage_port_fsspec_requires_url() -> None:
     cfg = GatewayConfig(files_backend="fsspec")
     with pytest.raises(ValueError, match="files_url"):
-        build_file_store(cfg)
+        build_file_storage_port(cfg)
 
 
-def test_build_file_store_fsspec(tmp_path: Path) -> None:
+def test_build_file_storage_port_fsspec(tmp_path: Path) -> None:
     cfg = GatewayConfig(
         files_backend="fsspec", files_url=f"file://{tmp_path}", files_storage_options={"auto_mkdir": True}
     )
-    assert isinstance(build_file_store(cfg), FsspecFileStore)
+    assert isinstance(build_file_storage_port(cfg), FsspecFileStore)
 
 
 def test_missing_fsspec_names_the_extra_to_install(monkeypatch: pytest.MonkeyPatch) -> None:

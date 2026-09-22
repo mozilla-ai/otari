@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
+from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
@@ -25,14 +26,17 @@ from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageA
 from gateway.container import (
     BootstrapError,
     Container,
+    ContainerError,
     PortNotBoundError,
     PortShapeError,
     RouterContribution,
     build_container,
 )
+from gateway.core.config import GatewayConfig
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.entitlement_port import EntitlementPort
+from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
@@ -110,6 +114,24 @@ def test_no_selector_contributes_no_routers_and_says_so() -> None:
         TelemetryStoragePort,
     ):
         assert port.__name__ in container.summary
+
+
+def test_file_storage_resolves_to_one_store_for_the_whole_container(tmp_path: Path) -> None:
+    """The retention sweep reclaims the bytes the request path wrote, so both get one store."""
+    container = build_container(config=GatewayConfig(files_backend="local", files_local_dir=str(tmp_path)))
+
+    store = container.resolve(FileStoragePort, NO_SESSION)
+
+    assert isinstance(store, LocalDirFileStore)
+    assert container.resolve(FileStoragePort, NO_SESSION) is store
+
+
+def test_file_storage_refuses_a_container_built_without_config() -> None:
+    """With no config there is no ``files_backend`` to honor, so resolving says so."""
+    container = build_container()
+
+    with pytest.raises(ContainerError, match="FileStoragePort"):
+        container.resolve(FileStoragePort, NO_SESSION)
 
 
 def test_resolve_refuses_a_port_nothing_bound() -> None:

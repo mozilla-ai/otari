@@ -23,6 +23,7 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdi
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
+from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
@@ -37,7 +38,6 @@ from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultServic
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.file_service import StagedFile
-from gateway.services.file_store import FileStore
 from gateway.services.files import SandboxFileBridge
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
@@ -1024,9 +1024,9 @@ def get_log_writer(request: Request) -> LogWriter:
     return writer
 
 
-def get_file_store(request: Request) -> FileStore:
+def get_file_store(request: Request) -> FileStoragePort:
     """Return the configured blob store for uploaded files (standalone mode)."""
-    store: FileStore = request.app.state.file_store
+    store: FileStoragePort = request.app.state.file_store
     return store
 
 

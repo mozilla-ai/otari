@@ -13,8 +13,8 @@ from datetime import datetime
 
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
+from gateway.ports.file_storage_port import FileStoragePort
 from gateway.repositories.files import delete_file_rows, reclaimable_files
-from gateway.services.file_store import FileStore
 
 # Passes one tick may make before waiting again, so a large backlog drains over
 # several ticks instead of holding one session open until it is done.
@@ -36,7 +36,7 @@ class SweepBatch:
 
 async def sweep_files(
     uow: UnitOfWork,
-    file_store: FileStore,
+    file_store: FileStoragePort,
     *,
     batch_size: int,
     after: tuple[datetime, str] | None = None,
@@ -69,7 +69,7 @@ async def sweep_files(
     return SweepBatch(reclaimed=len(reclaimed), seen=len(records), cursor=cursor)
 
 
-async def run_file_sweeper(interval: float, file_store: FileStore, *, batch_size: int = 200) -> None:
+async def run_file_sweeper(interval: float, file_store: FileStoragePort, *, batch_size: int = 200) -> None:
     """Reclaim expired and deleted files on a timer, forever. Cancelled at shutdown.
 
     Every error is swallowed and retried on the next tick, matching the other

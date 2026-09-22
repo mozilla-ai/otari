@@ -10,7 +10,7 @@ import pytest
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.wait_strategies import HttpWaitStrategy
 
-from gateway.services.file_store import FsspecFileStore
+from gateway.adapters.file_storage_adapter import FsspecFileStore
 
 _SEAWEEDFS_IMAGE = "docker.io/chrislusf/seaweedfs:4.47"
 _S3_PORT = 8333
