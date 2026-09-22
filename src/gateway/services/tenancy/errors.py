@@ -1034,6 +1034,84 @@ class OrganizationGuardrailLimitReachedError(TenancyValidationError):
         super().__init__(f"This organization already configures the maximum of {limit} guardrails")
 
 
+class OrganizationGuardrailDefinitionNotFoundError(TenancyNotFoundError):
+    def __init__(self, definition_id: object):
+        super().__init__(f"Organization guardrail definition {definition_id} not found")
+
+
+class OrganizationGuardrailDefinitionAlreadyExistsError(TenancyConflictError):
+    """The organization already has a definition under this name.
+
+    One definition per name, which is what a mandate points at and what an
+    organization recognizes it by. Unlike the mandate's ``profile``, the name is
+    the organization's own label, so the same guardrail may be defined twice
+    under two names with different arguments.
+    """
+
+    def __init__(self, name: object):
+        super().__init__(f"This organization already defines a guardrail named '{name}'")
+
+
+class OrganizationGuardrailDefinitionLimitReachedError(TenancyValidationError):
+    """The organization already defines as many guardrails as it may.
+
+    A separate ceiling from the mandates', and bounding something else: each
+    enabled definition becomes a built vendor client held in memory by every
+    worker, where a mandate is one more sequential call on a request. Neither
+    number constrains the other, so neither limit stands in for the other.
+    """
+
+    def __init__(self, limit: int):
+        super().__init__(f"This organization already defines the maximum of {limit} guardrails")
+
+
+class OrganizationGuardrailNotBuildableError(TenancyValidationError):
+    """The named guardrail is not one this gateway can construct and call itself.
+
+    One answer for a name the installed any-guardrail has never heard of and for
+    one whose guardrail holds local model weights, because a caller can do
+    nothing different with either. What this gateway builds is a property of the
+    library it ships with, so the catalog read is where the answer comes from.
+    """
+
+    def __init__(self, guardrail_name: object):
+        super().__init__(
+            f"'{guardrail_name}' is not a guardrail this deployment can run itself; "
+            "the built-in guardrail catalog lists the ones it can"
+        )
+
+
+class OrganizationGuardrailNotDefinableError(TenancyValidationError):
+    """The guardrail exists and an organization still may not define it.
+
+    A different refusal from :class:`OrganizationGuardrailNotBuildableError`,
+    which is about what is possible. This one is about who pays: a guardrail that
+    takes no credential of its own bills whatever the deployment's environment
+    holds, outside the budget the request reserved.
+    """
+
+    def __init__(self, guardrail_name: object):
+        super().__init__(
+            f"'{guardrail_name}' cannot be defined by an organization, because it would run on the "
+            "deployment's own credentials with nothing metering it"
+        )
+
+
+class OrganizationGuardrailDefinitionArgumentsError(TenancyValidationError):
+    """The submitted build arguments do not make a guardrail this gateway can construct.
+
+    Carries the reason verbatim, the way `OrganizationGuardrailUnsafeUrlError`
+    does, because every reason names a parameter and this surface is
+    management-gated rather than caller-supplied. Every rule behind it is read
+    off the guardrail catalog, so the refusals and the form's fields are one
+    derivation; a list written here could only drift from the picker it exists to
+    accept.
+    """
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+
+
 class SandboxToolsUnrunnableError(TenancyValidationError):
     """A code-execution policy's tool list names nothing this deployment serves.
 
