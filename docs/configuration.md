@@ -337,6 +337,7 @@ and guardrail configuration. Common startup settings are:
 - `web_search_url`
 - `web_search_provider` and `web_search_provider_api_key`
 - `guardrails_url`
+- `guardrail_thread_pool_size`
 - `mcp_allow_loopback` and `mcp_allow_private_hosts`
 - `web_search_allow_private_hosts`
 - `provider_allow_private_hosts`

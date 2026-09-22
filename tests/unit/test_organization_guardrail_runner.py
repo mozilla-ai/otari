@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 from any_guardrail import GuardrailName, GuardrailOutput
 
+from gateway.core.config import ENV_BRIDGED_FIELDS
 from gateway.log_config import logger as gateway_logger
 from gateway.main import _LIFESPAN_WORKERS
 from gateway.models.guardrails import OrganizationGuardrailDefinition
@@ -479,6 +480,44 @@ async def test_a_load_starts_from_nothing_held(monkeypatch: pytest.MonkeyPatch) 
     await runner.load_guardrail_runner_at_startup()
 
     assert runner.build_state(ORGANIZATION_ID, stale.id, stale.updated_at) == "pending"
+
+
+def test_the_pool_is_four_threads_wide_unless_a_deployment_says_otherwise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OTARI_GUARDRAIL_THREAD_POOL_SIZE", raising=False)
+
+    assert runner._thread_pool()._max_workers == 4
+
+
+def test_a_deployment_can_widen_the_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read at first use, so the value a lifespan already bridged is the one that lands."""
+    monkeypatch.setenv("OTARI_GUARDRAIL_THREAD_POOL_SIZE", "16")
+
+    assert runner._thread_pool()._max_workers == 16
+
+
+@pytest.mark.parametrize("configured", ["four", "", "0", "-1", "2.5"])
+def test_a_pool_size_that_is_not_a_positive_integer_is_ignored(
+    monkeypatch: pytest.MonkeyPatch, configured: str
+) -> None:
+    """Startup validation refuses these, so arriving here means the environment set them.
+
+    Guardrails still get built either way: a bad number is worth a log line and
+    not worth a worker that will not start.
+    """
+    monkeypatch.setenv("OTARI_GUARDRAIL_THREAD_POOL_SIZE", configured)
+
+    assert runner._thread_pool()._max_workers == 4
+
+
+def test_the_deployment_setting_reaches_the_pool_by_its_own_name() -> None:
+    """The bridge is what carries a `config.yml` value to a module with no config.
+
+    Named in `ENV_BRIDGED_FIELDS` and nowhere else, a YAML-set size would
+    validate at startup and then be quietly ignored here.
+    """
+    assert "guardrail_thread_pool_size" in ENV_BRIDGED_FIELDS
 
 
 def test_the_shutdown_that_drops_the_guardrails_also_drops_the_threads() -> None:

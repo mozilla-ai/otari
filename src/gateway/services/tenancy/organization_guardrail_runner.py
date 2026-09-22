@@ -31,7 +31,8 @@ drain: the bound is the backstop a cancellation cannot be.
 
 *Three: ``asyncio.to_thread`` would share the process-wide default executor* with
 `services/file_extractors`, so a burst of checks would stall file extraction as
-collateral damage. This pool is its own, and small.
+collateral damage. This pool is its own, and small unless a deployment running
+many organizations' guardrails raises `guardrail_thread_pool_size`.
 
 **The cache is keyed on the definition, not on the profile an organization
 mandates it under.** One definition mandated under three profiles is one entry
@@ -68,6 +69,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from any_guardrail import AnyGuardrail, Guardrail, GuardrailName, GuardrailOutput
 
+from gateway.core.env import otari_env
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.repositories.tenancy import OrganizationGuardrailDefinitionRepository
@@ -86,7 +88,9 @@ GUARDRAIL_RUNNER_REFRESH_SECONDS = 30.0
 
 # Small on purpose. These are vendor HTTP calls, not model loads, and the bound
 # is what stops a hung vendor from taking threads the rest of the process needs.
-_MAX_THREADS = 4
+# A deployment that runs many organizations' guardrails raises it with
+# `guardrail_thread_pool_size`.
+_DEFAULT_MAX_THREADS = 4
 
 # Well under the remote path's 30 seconds. A guardrail runs before a request is
 # dispatched, so its deadline is part of the caller's latency rather than a
@@ -454,6 +458,42 @@ async def _in_a_thread(call: Callable[[], _T], *, seconds: float) -> _T:
     return await asyncio.wait_for(loop.run_in_executor(_thread_pool(), call), seconds)
 
 
+def _max_threads() -> int:
+    """How wide the pool is, from the environment, defaulting to `_DEFAULT_MAX_THREADS`.
+
+    Read through ``otari_env`` rather than a ``GatewayConfig``, which this module
+    has nowhere to take one from: it is a process-global cache reached from a
+    lifespan worker and from a write, and neither hands it a config. That is what
+    ``ENV_BRIDGED_FIELDS`` is for, so a value set in ``config.yml`` arrives here
+    as ``OTARI_GUARDRAIL_THREAD_POOL_SIZE``.
+
+    Startup validation has already refused a value that is not an integer or is
+    below one, so reaching either branch below means the variable was set in the
+    environment around this process rather than through the config. Say so and
+    carry on: a malformed pool size is not a reason to stop building guardrails.
+    """
+    configured = otari_env("GUARDRAIL_THREAD_POOL_SIZE")
+    if not configured:
+        return _DEFAULT_MAX_THREADS
+    try:
+        size = int(configured)
+    except ValueError:
+        logger.warning(
+            "OTARI_GUARDRAIL_THREAD_POOL_SIZE=%r is not an integer; using %d",
+            configured,
+            _DEFAULT_MAX_THREADS,
+        )
+        return _DEFAULT_MAX_THREADS
+    if size < 1:
+        logger.warning(
+            "OTARI_GUARDRAIL_THREAD_POOL_SIZE=%r is not at least 1; using %d",
+            configured,
+            _DEFAULT_MAX_THREADS,
+        )
+        return _DEFAULT_MAX_THREADS
+    return size
+
+
 def _thread_pool() -> ThreadPoolExecutor:
     """This module's executor, built on first use.
 
@@ -464,7 +504,7 @@ def _thread_pool() -> ThreadPoolExecutor:
     global _threads  # noqa: PLW0603
 
     if _threads is None:
-        _threads = ThreadPoolExecutor(max_workers=_MAX_THREADS, thread_name_prefix="otari-guardrail")
+        _threads = ThreadPoolExecutor(max_workers=_max_threads(), thread_name_prefix="otari-guardrail")
     return _threads
 
 

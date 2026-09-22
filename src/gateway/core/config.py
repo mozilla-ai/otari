@@ -119,6 +119,7 @@ OTARI_CONFIG_B64_ENV = "OTARI_CONFIG_B64"
 ENV_BRIDGED_FIELDS = (
     "sandbox_url",
     "guardrails_url",
+    "guardrail_thread_pool_size",
     "tools_header",
     "sandbox_purpose_hint",
     "sandbox_session_image",
@@ -1025,6 +1026,17 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         description=(
             "Default URL of the input-guardrails service used when a request does not pass its "
             "own guardrail `url`. docker-compose sets this to the bundled guardrails container."
+        ),
+    )
+    guardrail_thread_pool_size: Annotated[int | None, Shown(SettingsGroup.TOOLS)] = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Threads reserved for the guardrails this gateway builds and runs itself. "
+            "any-guardrail calls its vendor synchronously, so a check holds one thread for "
+            "its whole deadline and the bound is what stops a hung vendor from taking the "
+            "threads the rest of the process needs. Sized once, so config or environment "
+            "only. Does not apply to the remote guardrails service."
         ),
     )
     tools_header: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
