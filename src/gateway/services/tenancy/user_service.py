@@ -357,17 +357,30 @@ async def create_user_for_signup(
                 raise
             return None
 
-    identity.full_name = identity.full_name or full_name
-    identity.hashed_password = await hash_password_async(password)
-    if terms_accepted:
-        identity.terms_accepted_at = datetime.now(UTC)
     token = generate_token()
-    identity.email_verification_token_hash = hash_token(token)
-    identity.email_verification_token_expires_at = datetime.now(UTC) + timedelta(
-        hours=config.email_verification_expiry_hours
+    values: dict[str, str | datetime | None] = {
+        "full_name": identity.full_name or full_name,
+        "email_verification_token_hash": hash_token(token),
+        "email_verification_token_expires_at": datetime.now(UTC)
+        + timedelta(hours=config.email_verification_expiry_hours),
+    }
+    if terms_accepted:
+        values["terms_accepted_at"] = datetime.now(UTC)
+    # Conditional rather than a plain write: the check above raced any other
+    # first-credential write on this address (another signup, an invitation
+    # accepted with a password), and this is what decides between them. The
+    # loser answers like every other enumeration-safe path.
+    claimed = await UserRepository(db).claim_first_password(
+        identity.id,
+        hashed_password=await hash_password_async(password),
+        require_unverified=False,
+        values=values,
     )
-    db.add(identity)
+    if not claimed:
+        await db.rollback()
+        return None
     await db.commit()
+    await db.refresh(identity)
 
     await mailer.send(
         to=address,

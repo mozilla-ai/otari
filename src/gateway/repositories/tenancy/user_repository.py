@@ -1,8 +1,10 @@
 """Data access for the reconciled control plane's identities."""
 
 import uuid
+from datetime import datetime
+from typing import Any, cast
 
-from sqlalchemy import func, nulls_last, select
+from sqlalchemy import CursorResult, func, nulls_last, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
@@ -181,6 +183,47 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         land. A deployment that needs this guarantee runs PostgreSQL.
         """
         await self.db.execute(select(col(User.id)).where(col(User.id) == user_id).with_for_update())
+
+    async def claim_first_password(
+        self,
+        user_id: uuid.UUID,
+        *,
+        hashed_password: str,
+        require_unverified: bool,
+        values: dict[str, str | datetime | None],
+    ) -> bool:
+        """Set a first password only while the identity still has none; say whether this call did.
+
+        The one write every first-credential path goes through (signup, and an
+        invitation accepted with a password), because each of them checks
+        "no password yet" before it hashes one, and a check followed by a
+        plain write lets a slower caller overwrite a faster one's password.
+        The condition in the ``UPDATE`` is what decides instead: on PostgreSQL
+        the second writer waits on the first's row lock and then matches no
+        row, and on SQLite writes are serialized outright.
+
+        ``require_unverified`` also refuses an identity with a verified address,
+        which is what a provider sign-in leaves on one that never set a password.
+
+        Staged, not committed, and not synchronized into the session: a caller
+        that won commits, and one that lost rolls back.
+        """
+        statement = update(User).where(
+            col(User.id) == user_id,
+            col(User.hashed_password).is_(None),
+            col(User.is_active).is_(True),
+        )
+        if require_unverified:
+            statement = statement.where(col(User.email_verified_at).is_(None))
+        result = cast(
+            "CursorResult[Any]",
+            await self.db.execute(
+                statement.values(hashed_password=hashed_password, **values).execution_options(
+                    synchronize_session=False
+                )
+            ),
+        )
+        return bool(result.rowcount)
 
     async def set_active_organization(self, user: User, organization_id: uuid.UUID) -> User:
         """Stage a change of the identity's active organization."""

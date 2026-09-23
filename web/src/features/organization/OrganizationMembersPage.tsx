@@ -288,9 +288,9 @@ function InviteMemberForm({
           <span className="break-all text-xs">{acceptLink}</span>
         </CopyableValue>
         <p className="text-xs text-muted">
-          Whoever opens it can join as {result.email} and set its password, so
-          send it only to them. It works once, until{" "}
-          {formatDateTime(result.expires_at)}.
+          Whoever opens it can join as {result.email}, and choose its first
+          password if that address has never signed in, so send it only to them.
+          It works once, until {formatDateTime(result.expires_at)}.
         </p>
       </FormDialog>
     )

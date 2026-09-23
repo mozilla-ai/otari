@@ -1205,15 +1205,27 @@ class OrganizationService:
             invitee = await self.users.get(membership.user_id)
             if invitee is None or not _has_never_signed_in(invitee):
                 raise InvitationPasswordNotAcceptedError
-            # Staged, not committed: it lands in the same commit as the
-            # membership below, so a failed accept never leaves a claimed
-            # identity outside the organization it was claimed for.
-            invitee.hashed_password = await hash_password_async(password)
-            invitee.email_verified_at = datetime.now(UTC)
-            invitee.full_name = invitee.full_name or (full_name or "").strip() or None
+            now = datetime.now(UTC)
+            values: dict[str, str | datetime | None] = {
+                "email_verified_at": now,
+                "full_name": invitee.full_name or (full_name or "").strip() or None,
+            }
             if terms_accepted:
-                invitee.terms_accepted_at = datetime.now(UTC)
-            self.db.add(invitee)
+                values["terms_accepted_at"] = now
+            # The check above only gives the common refusal its message: a
+            # signup on the same address can pass its own check meanwhile, and
+            # this conditional write is what decides between the two. It lands
+            # in the same commit as the membership below, so a failed accept
+            # never leaves a claimed identity outside its organization.
+            claimed = await self.users.claim_first_password(
+                invitee.id,
+                hashed_password=await hash_password_async(password),
+                require_unverified=True,
+                values=values,
+            )
+            if not claimed:
+                await self.db.rollback()
+                raise InvitationPasswordNotAcceptedError
         result = await self._resolve_invitation_to_active_membership(invitation, membership, organization)
         return result.model_copy(update={"password_set": password is not None})
 

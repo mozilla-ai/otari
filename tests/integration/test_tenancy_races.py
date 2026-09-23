@@ -67,6 +67,7 @@ from gateway.services.tenancy.errors import (
     ForeignTenancyError,
     InvitationAlreadyPendingError,
     InvitationAlreadyUsedError,
+    InvitationPasswordNotAcceptedError,
     LastWorkspaceError,
     MembershipUpdateError,
     NotAuthorizedError,
@@ -911,6 +912,76 @@ async def test_concurrent_accepts_of_one_invitation_produce_one_active_membershi
         {workspace.id: "viewer"}, membership.user_id
     )
     assert len(workspace_members) == 1
+
+
+async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Both paths set a first password on the same unclaimed identity; exactly one may.
+
+    Each checks "no password yet" and then hashes, which takes long enough for
+    the other to pass its own check meanwhile. Written as plain assignments, the
+    later commit replaced the earlier password, and when the accept went first
+    that left a verified address signing in with the signup caller's password.
+    """
+    _, owner = await _seed_owner(async_db)
+    owner_row = await UserRepository(async_db).get(owner.id)
+    assert owner_row is not None
+    config = GatewayConfig(mail_transport="console", public_base_url="https://gw.example.com")
+    invited = await OrganizationService(
+        async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)
+    ).invite_active_organization_member_for_user(
+        user=owner_row,
+        request=InviteOrganizationMemberRequest(email="iris@example.com"),
+        config=config,
+    )
+    token = invited.accept_link.split("token=")[1]
+
+    async def accept() -> object:
+        async with sessions() as session:
+            try:
+                return await OrganizationService(
+                    session, membership_listener=WorkspaceBudgetDefaultService(session)
+                ).accept_invitation(token, password="accepted-password")
+            except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+                return exc
+
+    async def signup(index: int) -> object:
+        async with sessions() as session:
+            try:
+                return await user_service.create_user_for_signup(
+                    session,
+                    config,
+                    email="iris@example.com",
+                    password=f"signup-password-{index}",
+                    membership_listener=WorkspaceBudgetDefaultService(session),
+                )
+            except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+                return exc
+
+    accepted, *signed_up = await asyncio.gather(accept(), *(signup(index) for index in range(_RACERS)))
+
+    signup_winners = [index for index, outcome in enumerate(signed_up) if isinstance(outcome, User)]
+    assert all(outcome is None or isinstance(outcome, User) for outcome in signed_up), signed_up
+    async_db.expire_all()
+    membership = await OrganizationMemberRepository(async_db).get(invited.organization_member_id)
+    assert membership is not None
+    row = await UserRepository(async_db).get(membership.user_id)
+    assert row is not None and row.hashed_password is not None
+    if isinstance(accepted, InvitationPasswordNotAcceptedError):
+        # A signup got there first: one of them holds the password, and the
+        # address is still waiting on its verification link.
+        assert len(signup_winners) == 1
+        assert row.email_verified_at is None
+        assert await verify_password_async(f"signup-password-{signup_winners[0]}", row.hashed_password)
+        assert membership.status == "invited"
+    else:
+        assert not isinstance(accepted, Exception), accepted
+        assert signup_winners == []
+        assert row.email_verified_at is not None
+        assert await verify_password_async("accepted-password", row.hashed_password)
+        assert membership.status == "active"
 
 
 async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consistent_outcome(
