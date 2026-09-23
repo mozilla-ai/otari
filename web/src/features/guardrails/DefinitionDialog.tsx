@@ -44,7 +44,7 @@ function guardrailOptionLabel(spec: { display_name: string; vendor?: string }) {
 }
 
 /**
- * Set up a guardrail Otari builds and runs itself, or edit one.
+ * Configure a guardrail Otari builds and runs itself, or edit one.
  *
  * No question here about who runs the check: that is the mandate's question,
  * and a definition is only ever "Otari runs it". The check and the guardrail
@@ -173,7 +173,7 @@ export function DefinitionDialog({
       size="lg"
       title={isEdit ? "Guardrail" : "New guardrail"}
       description="Otari builds and runs this check itself. It changes no request until you choose where it runs."
-      submitLabel={isEdit ? "Save guardrail" : "Set up guardrail"}
+      submitLabel={isEdit ? "Save guardrail" : "Configure guardrail"}
       onSubmit={submit}
       isPending={isPending}
       isSubmitDisabled={guardrailName === "" || name.trim() === ""}

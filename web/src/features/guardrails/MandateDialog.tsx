@@ -298,7 +298,7 @@ export function MandateDialog({
           {isDefinitionsSettled && !hasDefinitions ? (
             <div>
               <Button size="sm" variant="ghost" onPress={onSetUpDefinition}>
-                Set up a guardrail
+                Configure a guardrail
               </Button>
             </div>
           ) : null}

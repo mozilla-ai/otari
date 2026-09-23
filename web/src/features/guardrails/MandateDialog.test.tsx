@@ -116,7 +116,7 @@ describe("MandateDialog, creating one", () => {
       "Your own guardrails service",
     )
     await userEvent.click(
-      dialog().getByRole("button", { name: "Set up a guardrail" }),
+      dialog().getByRole("button", { name: "Configure a guardrail" }),
     )
     expect(onSetUpDefinition).toHaveBeenCalled()
   })

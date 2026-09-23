@@ -241,7 +241,9 @@ describe("DefinitionDialog, setting one up", () => {
     await pickOption(user, "Which guardrail?", "Lakera Guard · Lakera")
     expect(dialog().getByLabelText("Name")).toHaveValue("lakera-guard-2")
     await user.type(dialog().getByLabelText("Api key"), "lk-secret")
-    await user.click(dialog().getByRole("button", { name: "Set up guardrail" }))
+    await user.click(
+      dialog().getByRole("button", { name: "Configure guardrail" }),
+    )
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
     expect(calls.find((call) => call.method === "POST")?.body).toEqual({
@@ -258,7 +260,9 @@ describe("DefinitionDialog, setting one up", () => {
 
     await pickOption(user, "What do you want checked?", "Prompt injection")
     await pickOption(user, "Which guardrail?", "Lakera Guard · Lakera")
-    await user.click(dialog().getByRole("button", { name: "Set up guardrail" }))
+    await user.click(
+      dialog().getByRole("button", { name: "Configure guardrail" }),
+    )
 
     expect(
       await screen.findByText("This guardrail needs a value here."),
@@ -322,7 +326,9 @@ describe("DefinitionDialog, setting one up", () => {
     expect(dialog().getByRole("checkbox", { name: "Security" })).toBeChecked()
     await user.click(dialog().getByRole("checkbox", { name: "Safety" }))
     await user.type(dialog().getByLabelText("Api key"), "al-secret")
-    await user.click(dialog().getByRole("button", { name: "Set up guardrail" }))
+    await user.click(
+      dialog().getByRole("button", { name: "Configure guardrail" }),
+    )
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
     expect(calls.find((call) => call.method === "POST")?.body).toMatchObject({
@@ -343,7 +349,9 @@ describe("DefinitionDialog, setting one up", () => {
     await pickOption(user, "Which guardrail?", "Patronus · Patronus AI")
     await user.click(dialog().getByRole("checkbox", { name: "Lynx" }))
     await user.type(dialog().getByLabelText("Api key"), "pa-secret")
-    await user.click(dialog().getByRole("button", { name: "Set up guardrail" }))
+    await user.click(
+      dialog().getByRole("button", { name: "Configure guardrail" }),
+    )
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
     expect(calls.find((call) => call.method === "POST")?.body).toMatchObject({

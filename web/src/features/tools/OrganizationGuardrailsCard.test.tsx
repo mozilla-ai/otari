@@ -219,7 +219,7 @@ describe("OrganizationGuardrailsCard", () => {
       ),
     )
     await userEvent.click(
-      inDialog().getByRole("button", { name: "Set up a guardrail" }),
+      inDialog().getByRole("button", { name: "Configure a guardrail" }),
     )
 
     expect(

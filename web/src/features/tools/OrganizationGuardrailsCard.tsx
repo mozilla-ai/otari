@@ -414,7 +414,7 @@ export function OrganizationGuardrailsCard({
           manages ? (
             <div className="flex flex-wrap gap-2">
               <Button variant="ghost" onPress={() => openDialog("definition")}>
-                Set up guardrail
+                Configure guardrail
               </Button>
               <Button variant="primary" onPress={() => openDialog("mandate")}>
                 Mandate a guardrail
