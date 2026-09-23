@@ -30,7 +30,8 @@ Callers reach an endpoint as `<name>:<model>`, for example `my-vllm:qwen3`, on
 the workspace and the user, so no request field can reach somebody else's
 endpoint. A name is letters, digits, `.`, `_` and `-`, and it may not be a
 provider's name or a configured instance's, because that selector already means
-something.
+something. An instance added later with an endpoint's name takes the selector
+over, and the endpoint stops resolving until it is renamed.
 
 Endpoints are not routing targets: a routing policy that names one does not
 resolve it, and neither do embeddings, batches or the other pass-through routes.
@@ -92,3 +93,7 @@ address it checked rather than resolving the name a second time. Redirects are
 not followed. An endpoint with an API key must use `https`, since the key
 travels in every request. Requests to an endpoint do not use the environment's
 HTTP proxy.
+
+Each gateway worker holds at most 100 concurrent requests open to one endpoint
+address. A request that finds them all in use waits up to 10 seconds for one,
+then fails rather than queueing behind streams that can run for minutes.

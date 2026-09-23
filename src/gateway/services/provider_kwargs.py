@@ -44,7 +44,12 @@ from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
 
 from gateway.auth.vertex_auth import setup_vertex_environment
-from gateway.core.config import GatewayConfig, provider_credential_env_names
+from gateway.core.config import (
+    PROVIDER_TYPE_ALIASES,
+    RESERVED_PROVIDER_INSTANCE_NAMES,
+    GatewayConfig,
+    provider_credential_env_names,
+)
 from gateway.core.provider_params import FORBIDDEN_ENDPOINT_DEFAULTS
 from gateway.services.alias_service import resolve_effective_alias
 from gateway.services.catalog_selectors import resolve_catalog_selector
@@ -82,6 +87,13 @@ _KEYLESS_PLACEHOLDER_API_KEY = "otari-no-key-required"
 # localhost or LAN base URL, so a bare ``vllm:my-model`` reaches a self-hosted
 # server today with nothing configured in otari at all.
 _KEYLESS_SELF_HOSTED_PROVIDERS = frozenset({"vllm", "lmstudio", "cascadia", "otari"})
+
+# Selector prefixes that name a provider whatever the deployment configures, so
+# an owned endpoint never resolves under one.
+_PROVIDER_NAMES: frozenset[str] = frozenset(
+    {provider.value for provider in LLMProvider} | set(PROVIDER_TYPE_ALIASES) | RESERVED_PROVIDER_INSTANCE_NAMES
+)
+
 # Providers authenticating from cloud SDK credentials this gateway cannot see:
 # an EC2 instance profile, an SSO session, or an ambient boto3 chain. They are
 # the same category as Vertex AI's application default credentials, which
@@ -339,13 +351,21 @@ def _resolve_owned_endpoint(
     user_id: str | None,
     workspace_id: uuid.UUID | None,
 ) -> tuple[str, "OwnedEndpoint", str] | None:
-    """``(name, endpoint, model)`` when the selector's prefix names one of the caller's endpoints."""
+    """``(name, endpoint, model)`` when the selector's prefix names one of the caller's endpoints.
+
+    A prefix that already names an instance or a provider keeps that meaning.
+    Saving an endpoint refuses such names too, but an instance added at runtime
+    or a provider a later any-llm adds would otherwise be taken over by an
+    endpoint saved before it.
+    """
     if split is None or workspace_id is None or not config.provider_endpoints_enabled:
+        return None
+    name, model = split
+    if name in config.providers or name in _PROVIDER_NAMES:
         return None
     # Imported here: the providers package imports this module through model discovery.
     from gateway.services.providers import cached_owned_endpoint
 
-    name, model = split
     endpoint = cached_owned_endpoint(name, workspace_id=workspace_id, user_id=user_id)
     return (name, endpoint, model) if endpoint is not None else None
 

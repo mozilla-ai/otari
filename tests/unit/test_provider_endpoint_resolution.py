@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import httpx
 import pytest
@@ -76,6 +76,22 @@ def test_nothing_resolves_while_the_deployment_has_endpoints_off() -> None:
         resolve_provider_selector(
             _config(enabled=False), "box:qwen3", "alice", workspace_id=WORKSPACE, owned_endpoints=True
         )
+
+
+def test_a_configured_instance_keeps_its_name_over_an_endpoint_saved_before_it() -> None:
+    config = GatewayConfig(
+        providers={"box": {"provider_type": "openai", "api_key": "sk-op"}}, provider_endpoints_enabled=True
+    )
+    resolved = resolve_provider_selector(config, "box:qwen3", "alice", workspace_id=WORKSPACE, owned_endpoints=True)
+    assert resolved.owned_endpoint is None
+    assert resolved.kwargs["api_key"] == "sk-op"
+
+
+def test_a_provider_name_keeps_its_meaning_over_an_endpoint_of_that_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_provider_endpoint_cache, "_shared", {WORKSPACE: {"openai": _endpoint()}})
+    resolved = _resolve("openai:gpt-4o", user_id=None)
+    assert resolved.owned_endpoint is None
+    assert resolved.instance == "openai"
 
 
 def test_a_keyless_endpoint_gets_the_placeholder_even_with_the_operators_env_key(
@@ -152,5 +168,50 @@ def test_the_client_follows_no_redirect_and_is_shared_within_a_loop() -> None:
         client = owned_endpoint_http_client()
         assert client.follow_redirects is False
         assert owned_endpoint_http_client() is client
+
+    asyncio.run(go())
+
+
+def _streaming_transport(chunks: list[bytes], seen: list[httpx.Request]) -> OwnedEndpointTransport:
+    async def body() -> AsyncIterator[bytes]:
+        for chunk in chunks:
+            yield chunk
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=body())
+
+    return OwnedEndpointTransport(transport_factory=lambda: httpx.MockTransport(handler))
+
+
+def _active_leases(transport: OwnedEndpointTransport) -> int:
+    return sum(entry.active_responses for entry in transport._pools.values())  # noqa: SLF001
+
+
+def test_a_streamed_post_arrives_whole_and_gives_its_connection_back() -> None:
+    chunks = [b'data: {"n": 1}\n\n', b'data: {"n": 2}\n\n', b"data: [DONE]\n\n"]
+
+    async def go() -> None:
+        seen: list[httpx.Request] = []
+        transport = _streaming_transport(chunks, seen)
+        async with httpx.AsyncClient(transport=transport) as client:
+            async with client.stream("POST", "https://1.1.1.1/v1/chat/completions", json={"stream": True}) as response:
+                assert _active_leases(transport) == 1
+                received = [chunk async for chunk in response.aiter_raw()]
+        assert b"".join(received) == b"".join(chunks)
+        assert [request.method for request in seen] == ["POST"]
+        assert _active_leases(transport) == 0
+
+    asyncio.run(go())
+
+
+def test_a_stream_closed_early_gives_its_connection_back() -> None:
+    async def go() -> None:
+        transport = _streaming_transport([b"data: 1\n\n"] * 50, [])
+        async with httpx.AsyncClient(transport=transport) as client:
+            async with client.stream("POST", "https://1.1.1.1/v1/chat/completions") as response:
+                async for _ in response.aiter_raw():
+                    break
+        assert _active_leases(transport) == 0
 
     asyncio.run(go())

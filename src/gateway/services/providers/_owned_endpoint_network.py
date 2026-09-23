@@ -22,11 +22,17 @@ from gateway.services.web_retrieval_network import (
     PinnedAsyncHTTPTransport,
     PinnedTransportError,
     RetrievalTargetError,
+    TransportFactory,
     validate_retrieval_target,
 )
 
-# The provider SDKs' own default: long generations need the read budget.
-_TIMEOUT = httpx.Timeout(600.0, connect=5.0)
+# The provider SDKs' own default: long generations need the read budget. A
+# caller waiting on a full pool is refused within seconds rather than held for
+# the whole read budget behind other callers' streams.
+_TIMEOUT = httpx.Timeout(600.0, connect=5.0, pool=10.0)
+# Concurrent requests one worker holds open to one endpoint address. A stream
+# holds its connection for the whole generation.
+_MAX_CONNECTIONS_PER_ADDRESS = 100
 # Pools are per endpoint origin and address, so the bound is how many distinct
 # endpoints one worker can hold open at once.
 _MAX_POOLS = 500
@@ -49,8 +55,13 @@ class OwnedEndpointTransport(PinnedAsyncHTTPTransport):
 
     allowed_methods = frozenset({"GET", "POST", "DELETE"})
 
-    def __init__(self) -> None:
-        super().__init__(max_connections=20, max_keepalive_connections=20, max_pools=_MAX_POOLS)
+    def __init__(self, *, transport_factory: TransportFactory | None = None) -> None:
+        super().__init__(
+            transport_factory=transport_factory,
+            max_connections=_MAX_CONNECTIONS_PER_ADDRESS,
+            max_keepalive_connections=20,
+            max_pools=_MAX_POOLS,
+        )
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         try:
