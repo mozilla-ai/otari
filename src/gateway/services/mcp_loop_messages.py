@@ -478,8 +478,8 @@ class _MessagesToolLoopStrategy:
     ``amessages`` is resolved as a module global at call time so tests can
     monkeypatch ``gateway.services.mcp_loop_messages.amessages``.
 
-    Native web-search, code-execution and MCP activity emission are per-request
-    capabilities, so a request that wants any gets its own strategy instance
+    Native server-tool emission and MCP activity emission are per-request
+    capabilities, so a request that wants either gets its own strategy instance
     rather than sharing the module-level default one.
     """
 
@@ -488,14 +488,14 @@ class _MessagesToolLoopStrategy:
     def __init__(
         self,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
+        native_tools: frozenset[str] = frozenset(),
         emit_native_mcp: bool = False,
         budget: WebSearchBudget | None = None,
         container: ContainerLease | None = None,
     ) -> None:
-        self._emit_native_web_search = emit_native_web_search
-        self._emit_native_code_execution = emit_native_code_execution
+        # The gateway-run tools this caller declared in Anthropic's own words, so
+        # each one's blocks go out only to a client that asked in the vocabulary.
+        self._native_tools = native_tools
         self._emit_native_mcp = emit_native_mcp
         # Absent unless the caller capped the searches, so the shared instance in
         # ``_strategy_for`` stays free of per-request state.
@@ -507,7 +507,7 @@ class _MessagesToolLoopStrategy:
 
     def _native_sink(self, sink: list[Any]) -> list[Any] | None:
         """``sink`` when native emission is on, else ``None`` (collect nothing)."""
-        return sink if self._emit_native_web_search or self._emit_native_code_execution else None
+        return sink if self._native_tools else None
 
     def coerce_transcript(self, value: Any) -> list[Any]:
         return list(value or [])
@@ -879,11 +879,10 @@ def _attach_container(event: Any, lease: ContainerLease) -> None:
 
 
 def _strategy_for(
-    emit_native_web_search: bool,
+    native_tools: frozenset[str],
     budget: WebSearchBudget | None,
     *,
     emit_native_mcp: bool = False,
-    emit_native_code_execution: bool = False,
     container: ContainerLease | None = None,
 ) -> _MessagesToolLoopStrategy:
     """The shared strategy, or a per-request one when any of the options is set.
@@ -892,12 +891,10 @@ def _strategy_for(
     module-level instance; a request wanting neither native emission nor a cap
     nor a container has nothing per-request to hold and keeps reusing it.
     """
-    per_request = emit_native_web_search or emit_native_mcp or emit_native_code_execution
-    if not per_request and budget is None and container is None:
+    if not native_tools and not emit_native_mcp and budget is None and container is None:
         return _MESSAGES_STRATEGY
     return _MessagesToolLoopStrategy(
-        emit_native_web_search=emit_native_web_search,
-        emit_native_code_execution=emit_native_code_execution,
+        native_tools=native_tools,
         emit_native_mcp=emit_native_mcp,
         budget=budget,
         container=container,
@@ -910,8 +907,7 @@ async def anthropic_tool_loop(
     pool: ToolBackend,
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
-    emit_native_web_search: bool = False,
-    emit_native_code_execution: bool = False,
+    native_tools: frozenset[str] = frozenset(),
     web_search_budget: WebSearchBudget | None = None,
     container: ContainerLease | None = None,
 ) -> MessageResponse:
@@ -935,19 +931,12 @@ async def anthropic_tool_loop(
     ``on_first_response`` follows the provider lock-in contract documented on
     :func:`gateway.services._tool_loop.run_tool_loop`.
 
-    With ``emit_native_web_search``, the returned content is prefixed with a
-    ``server_tool_use`` / ``web_search_tool_result`` pair per gateway-run search;
-    with ``emit_native_code_execution``, a ``server_tool_use`` /
-    ``code_execution_tool_result`` pair per gateway-run execution. ``container``
-    is the sandbox the request holds, reported on the returned message.
+    ``native_tools`` names the gateway-run tools whose calls the returned content is
+    prefixed with native server-tool blocks for. ``container`` is the sandbox the
+    request holds, reported on the returned message.
     """
     return await run_tool_loop(
-        strategy=_strategy_for(
-            emit_native_web_search,
-            web_search_budget,
-            emit_native_code_execution=emit_native_code_execution,
-            container=container,
-        ),
+        strategy=_strategy_for(native_tools, web_search_budget, container=container),
         completion_kwargs=completion_kwargs,
         pool=pool,
         max_iterations=max_iterations,
@@ -960,8 +949,7 @@ async def anthropic_tool_loop_stream(
     completion_kwargs: dict[str, Any],
     pool: ToolBackend,
     max_iterations: int,
-    emit_native_web_search: bool = False,
-    emit_native_code_execution: bool = False,
+    native_tools: frozenset[str] = frozenset(),
     emit_native_mcp: bool = False,
     web_search_budget: WebSearchBudget | None = None,
     container: ContainerLease | None = None,
@@ -998,10 +986,9 @@ async def anthropic_tool_loop_stream(
     async with aclosing(
         run_tool_loop_stream(
             strategy=_strategy_for(
-                emit_native_web_search,
+                native_tools,
                 web_search_budget,
                 emit_native_mcp=emit_native_mcp,
-                emit_native_code_execution=emit_native_code_execution,
                 container=container,
             ),
             completion_kwargs=completion_kwargs,

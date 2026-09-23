@@ -106,7 +106,6 @@ from gateway.api.routes._tools import (
     _web_search_intercept_enabled,
     decide_code_executor,
     declares_code_execution,
-    declares_native_web_search,
     first_provider_code_execution_tool,
     native_code_execution_dialect,
     parse_code_execution_header,
@@ -227,6 +226,7 @@ from gateway.services.tool_usage import (
     TOOL_METER_NAMESPACE,
     ToolUsageTally,
 )
+from gateway.services.tools import Dialect, native_rendering
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.web_retrieval_backend import (
@@ -782,7 +782,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
     tests can monkeypatch them there.
     """
 
-    name: str
+    name: Dialect
     endpoint: str
     stream_format: StreamFormat
 
@@ -839,8 +839,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         max_iterations: int,
         on_first_response: Callable[[], None] | None = None,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
+        native_tools: frozenset[str] = frozenset(),
         web_search_budget: WebSearchBudget | None = None,
     ) -> ResultT: ...
 
@@ -850,8 +849,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         pool: ToolBackend,
         max_iterations: int,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
+        native_tools: frozenset[str] = frozenset(),
         web_search_budget: WebSearchBudget | None = None,
     ) -> AsyncIterator[ChunkT]: ...
 
@@ -2377,12 +2375,34 @@ class ToolContext:
         return name if isinstance(name, str) and name else None
 
     @property
-    def emit_native_web_search(self) -> bool:
-        """Whether this request should get Anthropic-native server-tool blocks back."""
-        return self.use_web_search and declares_native_web_search(self.web_search_tool_entry)
+    def declared_gateway_tools(self) -> dict[str, dict[str, Any] | None]:
+        """Each built-in tool this request runs, by name, with the caller's declaration of it."""
+        declared = {
+            WEB_SEARCH_TOOL_NAME: (self.web_search_tool_entry, self.use_web_search),
+            WEB_FETCH_TOOL_NAME: (self.web_fetch_tool_entry, self.use_web_fetch),
+            CODE_EXECUTION_TOOL_NAME: (self.sandbox_tool_entry, self.use_sandbox),
+        }
+        return {name: entry for name, (entry, in_use) in declared.items() if in_use}
+
+    def native_tools(self, dialect: Dialect) -> frozenset[str]:
+        """The built-in tools this request announces in ``dialect``'s own server-tool vocabulary.
+
+        A caller who declared a tool in a provider's words is owed that provider's
+        items back, and each tool's registry entry decides whether its declaration
+        asks for them. Code execution answers from :attr:`native_code_execution_dialect`
+        instead, because the dialect loops still build its blocks themselves.
+        """
+        names = {
+            name
+            for name, entry in self.declared_gateway_tools.items()
+            if (rendering := native_rendering(name, dialect)) is not None and rendering.declared(entry)
+        }
+        if self.use_sandbox and self.native_code_execution_dialect == dialect:
+            names.add(CODE_EXECUTION_TOOL_NAME)
+        return frozenset(names)
 
     @property
-    def native_code_execution_dialect(self) -> str | None:
+    def native_code_execution_dialect(self) -> Dialect | None:
         """The wire format whose native code-execution blocks this request expects.
 
         Set only when the gateway runs a declaration made in a provider's own
@@ -2398,9 +2418,9 @@ class ToolContext:
     def max_web_search_uses(self) -> int | None:
         """The web-search use cap, when the caller supplied one.
 
-        Not gated on :attr:`emit_native_web_search`: the cap bounds what the request
-        is billed for, so it is honored on every declaration shape and in every wire
-        format. Only the *refusal* is format-specific, an Anthropic
+        Not gated on :meth:`native_tools`: the cap bounds what the request is billed
+        for, so it is honored on every declaration shape and in every wire format.
+        Only the *refusal* is format-specific, an Anthropic
         ``max_uses_exceeded`` result block where the caller can read one and a plain
         tool error everywhere else.
 
@@ -4209,17 +4229,15 @@ def _container_headers(lease: ContainerLease | None) -> dict[str, str]:
     }
 
 
-def _sandbox_loop_options(adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext) -> dict[str, Any]:
-    """Sandbox-loop kwargs, presence-encoded like :func:`_loop_options`.
+def _native_loop_options(adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext) -> dict[str, Any]:
+    """Native-emission loop kwargs, presence-encoded like :func:`_loop_options`.
 
-    The native flag travels only when this request's declaration is in the
-    adapter's own vocabulary: an Anthropic-dated keyword on Messages, OpenAI's
-    ``code_interpreter`` on Responses. A caller who said ``otari_code_execution``
-    gets the plain result it always has.
+    The set travels only when it names something, so a request owed nothing in this
+    adapter's vocabulary passes no kwarg at all and a format with no vocabulary of its
+    own never sees one.
     """
-    if tool_ctx.native_code_execution_dialect != adapter.name:
-        return {}
-    return {"emit_native_code_execution": True}
+    native_tools = tool_ctx.native_tools(adapter.name)
+    return {"native_tools": native_tools} if native_tools else {}
 
 
 async def dispatch_non_stream(
@@ -4249,7 +4267,7 @@ async def dispatch_non_stream(
                 backend,
                 tool_ctx.max_tool_iterations,
                 on_first_response,
-                **_sandbox_loop_options(adapter, tool_ctx),
+                **_native_loop_options(adapter, tool_ctx),
                 **_container_loop_option(adapter, backend),
             )
 
@@ -4261,7 +4279,7 @@ async def dispatch_non_stream(
             web_backend,
             tool_ctx.max_tool_iterations,
             on_first_response,
-            emit_native_web_search=tool_ctx.emit_native_web_search,
+            **_native_loop_options(adapter, tool_ctx),
             **_loop_options(tool_ctx),
         )
 
@@ -4295,9 +4313,8 @@ async def _eager_backend_stream(
             hinted,
             backend,
             tool_ctx.max_tool_iterations,
-            emit_native_web_search=tool_ctx.emit_native_web_search,
+            **_native_loop_options(adapter, tool_ctx),
             **_loop_options(tool_ctx),
-            **(_sandbox_loop_options(adapter, tool_ctx) if tool_ctx.use_sandbox else {}),
             **(_container_loop_option(adapter, backend) if tool_ctx.use_sandbox else {}),
         ):
             yield event
@@ -5029,9 +5046,8 @@ async def run_streaming_with_fallback(
             kwargs,
             pool_for_loop,
             tool_ctx.max_tool_iterations,
-            emit_native_web_search=tool_ctx.emit_native_web_search,
+            **_native_loop_options(adapter, tool_ctx),
             **_loop_options(tool_ctx),
-            **(_sandbox_loop_options(adapter, tool_ctx) if tool_ctx.use_sandbox else {}),
         )
 
     # See run_platform_non_stream: BackgroundTasks only run after a successful

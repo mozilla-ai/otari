@@ -13,10 +13,16 @@ from anthropic.types import (
 )
 
 from gateway.services.tools._native import SERVER_TOOL_USE_ID_PREFIX, NativeCall
-from gateway.services.web_retrieval_backend import WEB_RETRIEVAL_RESULT_MAX_BYTES, WEB_SEARCH_TOOL_NAME
+from gateway.services.web_retrieval_backend import (
+    WEB_RETRIEVAL_RESULT_MAX_BYTES,
+    WEB_SEARCH_NATIVE_TYPE_PREFIX,
+    WEB_SEARCH_TOOL_NAME,
+)
 from gateway.services.web_retrieval_network import truncate_utf8
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from gateway.services._tool_loop import ToolBackend
 
 # A search result's recency, collapsed to one line and length-capped before it goes
@@ -96,6 +102,18 @@ class MessagesWebSearchRendering:
     rejected there, which is the same trade-off the Responses rendering accepts for
     its minted ``web_search_call`` items.
     """
+
+    def declared(self, tool_entry: Mapping[str, Any] | None) -> bool:
+        """Whether the caller asked in Anthropic's own words, which is what asks for the pair.
+
+        A dated or preview keyword is what the Anthropic SDK, Claude Code and Claude
+        Desktop send, and it is what makes them expect these blocks and render
+        citations from them. ``otari_web_search`` and the bare ``web_search`` short
+        form imply no response shape, so those callers keep the plain-text result
+        they always have.
+        """
+        type_value = (tool_entry or {}).get("type")
+        return isinstance(type_value, str) and type_value.startswith(WEB_SEARCH_NATIVE_TYPE_PREFIX)
 
     def ran(self, call: NativeCall, pool: ToolBackend) -> list[Any]:
         """The pair for one completed search, empty for a search that failed.

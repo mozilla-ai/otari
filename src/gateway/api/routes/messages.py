@@ -79,7 +79,7 @@ from gateway.services.mcp_loop_messages import (
 )
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
-from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX
+from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, Dialect
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
@@ -531,7 +531,7 @@ class _MessagesAdapter:
     and friends.
     """
 
-    name = "messages"
+    name = Dialect.MESSAGES
     endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = ANTHROPIC_STREAM_FORMAT
     # A successful non-streaming call without provider usage data skips the
@@ -622,8 +622,7 @@ class _MessagesAdapter:
         max_iterations: int,
         on_first_response: Callable[[], None] | None = None,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
+        native_tools: frozenset[str] = frozenset(),
         web_search_budget: WebSearchBudget | None = None,
         container: ContainerLease | None = None,
     ) -> MessageResponse:
@@ -634,8 +633,8 @@ class _MessagesAdapter:
             extra["on_first_response"] = on_first_response
         if web_search_budget is not None:
             extra["web_search_budget"] = web_search_budget
-        if emit_native_code_execution:
-            extra["emit_native_code_execution"] = True
+        if native_tools:
+            extra["native_tools"] = native_tools
         if container is not None:
             extra["container"] = container
         provider_kwargs, _ = _split_client_betas(kwargs)
@@ -643,7 +642,6 @@ class _MessagesAdapter:
             completion_kwargs=provider_kwargs,
             pool=pool,
             max_iterations=max_iterations,
-            emit_native_web_search=emit_native_web_search,
             **extra,
         )
 
@@ -653,8 +651,7 @@ class _MessagesAdapter:
         pool: ToolBackend,
         max_iterations: int,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
+        native_tools: frozenset[str] = frozenset(),
         web_search_budget: WebSearchBudget | None = None,
         container: ContainerLease | None = None,
     ) -> AsyncIterator[MessageStreamEvent]:
@@ -664,15 +661,14 @@ class _MessagesAdapter:
             extra["emit_native_mcp"] = True
         if web_search_budget is not None:
             extra["web_search_budget"] = web_search_budget
-        if emit_native_code_execution:
-            extra["emit_native_code_execution"] = True
+        if native_tools:
+            extra["native_tools"] = native_tools
         if container is not None:
             extra["container"] = container
         return anthropic_tool_loop_stream(
             completion_kwargs=provider_kwargs,
             pool=pool,
             max_iterations=max_iterations,
-            emit_native_web_search=emit_native_web_search,
             **extra,
         )
 

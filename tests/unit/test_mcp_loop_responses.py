@@ -34,7 +34,7 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop,
     responses_tool_loop_stream,
 )
-from gateway.services.sandbox_backend import CodeExecution
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecution
 from gateway.services.tool_format import (
     inject_purpose_hints_responses,
     openai_to_responses_tools,
@@ -1148,7 +1148,7 @@ async def test_a_gateway_execution_is_announced_as_a_code_interpreter_call(monke
         completion_kwargs={"model": "fake", "input_data": [{"role": "user", "content": "compute"}]},
         pool=cast(Any, _FakeSandboxPool()),
         max_iterations=5,
-        emit_native_code_execution=True,
+        native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
     )
 
     items = [item for item in (out.output or []) if getattr(item, "type", None) == "code_interpreter_call"]
@@ -1180,7 +1180,7 @@ async def test_a_mixed_batch_still_announces_the_gateway_execution(monkeypatch: 
         completion_kwargs={"model": "fake", "input_data": "go"},
         pool=cast(Any, pool),
         max_iterations=5,
-        emit_native_code_execution=True,
+        native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
     )
 
     assert pool.calls == [("code_execution", {"code": "print(1)"})]
@@ -1219,7 +1219,7 @@ async def test_a_streamed_mixed_batch_announces_the_execution_and_the_terminal_l
             completion_kwargs={"model": "fake", "input_data": "go"},
             pool=cast(Any, pool),
             max_iterations=5,
-            emit_native_code_execution=True,
+            native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
         )
     ]
 
@@ -1254,7 +1254,7 @@ async def test_a_failed_program_is_a_failed_interpreter_call(monkeypatch: pytest
         completion_kwargs={"model": "fake", "input_data": [{"role": "user", "content": "compute"}]},
         pool=cast(Any, _FakeSandboxPool(result=_exec_result(stdout="", stderr="boom", return_code=1))),
         max_iterations=5,
-        emit_native_code_execution=True,
+        native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
     )
 
     item = cast(Any, next(i for i in (out.output or []) if getattr(i, "type", None) == "code_interpreter_call"))
@@ -1315,7 +1315,7 @@ async def test_stream_announces_the_execution_as_a_code_interpreter_call(monkeyp
             completion_kwargs={"model": "fake", "input_data": "go"},
             pool=cast(Any, pool),
             max_iterations=5,
-            emit_native_code_execution=True,
+            native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
         )
     ]
 

@@ -65,6 +65,7 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop_stream,
 )
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
+from gateway.services.tools import Dialect
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
@@ -309,7 +310,7 @@ class _ResponsesAdapter:
     and friends.
     """
 
-    name = "responses"
+    name = Dialect.RESPONSES
     endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = RESPONSES_STREAM_FORMAT
     log_success_without_usage = True
@@ -397,15 +398,9 @@ class _ResponsesAdapter:
         max_iterations: int,
         on_first_response: Callable[[], None] | None = None,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
+        native_tools: frozenset[str] = frozenset(),
         web_search_budget: WebSearchBudget | None = None,
     ) -> ResponsesResponse:
-        # ``emit_native_web_search`` is accepted for interface parity and ignored:
-        # this format announces a gateway-run search natively on every request
-        # (see docs/tools.md), so the Anthropic-shaped opt-in has nothing to add.
-        # ``web_search_budget`` is not: the cap bounds what the caller is billed
-        # for, which every format owes whether or not it can describe the search.
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
         # the platform-attempt path so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
@@ -413,8 +408,8 @@ class _ResponsesAdapter:
             extra["on_first_response"] = on_first_response
         if web_search_budget is not None:
             extra["web_search_budget"] = web_search_budget
-        if emit_native_code_execution:
-            extra["emit_native_code_execution"] = True
+        if native_tools:
+            extra["native_tools"] = native_tools
         return await responses_tool_loop(
             completion_kwargs=kwargs,
             pool=pool,
@@ -428,15 +423,14 @@ class _ResponsesAdapter:
         pool: ToolBackend,
         max_iterations: int,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
+        native_tools: frozenset[str] = frozenset(),
         web_search_budget: WebSearchBudget | None = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
         extra: dict[str, Any] = {}
         if web_search_budget is not None:
             extra["web_search_budget"] = web_search_budget
-        if emit_native_code_execution:
-            extra["emit_native_code_execution"] = True
+        if native_tools:
+            extra["native_tools"] = native_tools
         return responses_tool_loop_stream(
             completion_kwargs=kwargs,
             pool=pool,

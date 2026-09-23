@@ -590,7 +590,7 @@ def test_hybrid_mode_resolves_workspace_mcp_server_ids(
         pool: Any,
         max_iterations: int,
         on_first_response: Any = None,
-        emit_native_web_search: bool = False,
+        native_tools: frozenset[str] = frozenset(),
     ) -> MessageResponse:
         return _message_response()
 

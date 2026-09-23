@@ -49,6 +49,10 @@ class NativeCall:
 class NativeRendering(Protocol):
     """One tool's gateway-run calls, in one dialect's server-tool vocabulary."""
 
+    def declared(self, tool_entry: Mapping[str, Any] | None) -> bool:
+        """Whether a caller declaring the tool this way expects this rendering back."""
+        ...
+
     def ran(self, call: NativeCall, pool: ToolBackend) -> list[Any]:
         """Wire items announcing a call the gateway ran, empty where there is nothing to report."""
         ...

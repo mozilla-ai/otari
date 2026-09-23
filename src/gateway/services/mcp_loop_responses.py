@@ -43,7 +43,7 @@ from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     ToolBackend,
 )
-from gateway.services.sandbox_backend import CodeExecution
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecution
 from gateway.services.tool_format import openai_to_responses_tools
 from gateway.services.tools import Dialect, NativeCall, native_rendering
 from gateway.services.web_search_budget import MAX_USES_EXCEEDED_ERROR, WebSearchBudget, is_capped_search
@@ -443,11 +443,17 @@ class _ResponsesToolLoopStrategy:
 
     transcript_key = "input_data"
 
-    def __init__(self, *, budget: WebSearchBudget | None = None, emit_native_code_execution: bool = False) -> None:
+    def __init__(self, *, budget: WebSearchBudget | None = None, native_tools: frozenset[str] = frozenset()) -> None:
         # Absent unless the caller capped the searches, which keeps the shared
         # instance in ``_strategy_for`` free of per-request state.
         self._budget = budget
-        self._emit_native_code_execution = emit_native_code_execution
+        # The gateway-run tools this caller declared in OpenAI's own words, so each
+        # one's items go out only to a client that asked in the vocabulary.
+        self._native_tools = native_tools
+
+    @property
+    def _emit_code_execution(self) -> bool:
+        return CODE_EXECUTION_TOOL_NAME in self._native_tools
 
     def coerce_transcript(self, value: Any) -> list[Any]:
         return _coerce_input_to_list(value)
@@ -505,7 +511,7 @@ class _ResponsesToolLoopStrategy:
         outputs = await _execute_function_calls(pool, owned, budget=self._budget, refused_call_ids=refused)
         if acc is not None:
             acc["native_items"].extend(
-                _native_items_for(owned, pool, refused, emit_code_execution=self._emit_native_code_execution)
+                _native_items_for(owned, pool, refused, emit_code_execution=self._emit_code_execution)
             )
         return outputs
 
@@ -556,7 +562,7 @@ class _ResponsesToolLoopStrategy:
             acc["compactions"].extend(_compaction_items(output))
             acc["native_items"].extend(
                 _native_items_for(
-                    owned, pool, refused_call_ids, emit_code_execution=self._emit_native_code_execution
+                    owned, pool, refused_call_ids, emit_code_execution=self._emit_code_execution
                 )
             )
 
@@ -717,7 +723,7 @@ class _ResponsesToolLoopStrategy:
         # it announces the runs natively before the round exits.
         if state.owned_specs:
             await _execute_stream_owned(
-                state, pool, budget=self._budget, emit_code_execution=self._emit_native_code_execution
+                state, pool, budget=self._budget, emit_code_execution=self._emit_code_execution
             )
             for event in self.synthetic_events(state, acc):
                 yield event
@@ -805,7 +811,7 @@ class _ResponsesToolLoopStrategy:
         transcript.extend(_items_to_dicts(replay_items))
         transcript.extend(
             await _execute_stream_owned(
-                state, pool, budget=self._budget, emit_code_execution=self._emit_native_code_execution
+                state, pool, budget=self._budget, emit_code_execution=self._emit_code_execution
             )
         )
         return
@@ -816,17 +822,17 @@ _RESPONSES_STRATEGY = _ResponsesToolLoopStrategy()
 
 
 def _strategy_for(
-    budget: WebSearchBudget | None, *, emit_native_code_execution: bool = False
+    budget: WebSearchBudget | None, *, native_tools: frozenset[str] = frozenset()
 ) -> _ResponsesToolLoopStrategy:
     """The shared strategy, or a per-request one when either option is set.
 
-    Only a capped request, or one owed native interpreter items, has anything
+    Only a capped request, or one owed a tool's native items, has anything
     per-request to hold, so every other request keeps reusing the single
     module-level instance.
     """
-    if budget is None and not emit_native_code_execution:
+    if budget is None and not native_tools:
         return _RESPONSES_STRATEGY
-    return _ResponsesToolLoopStrategy(budget=budget, emit_native_code_execution=emit_native_code_execution)
+    return _ResponsesToolLoopStrategy(budget=budget, native_tools=native_tools)
 
 
 async def responses_tool_loop(
@@ -836,7 +842,7 @@ async def responses_tool_loop(
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
     web_search_budget: WebSearchBudget | None = None,
-    emit_native_code_execution: bool = False,
+    native_tools: frozenset[str] = frozenset(),
 ) -> Response:
     """Non-streaming OpenAI Responses tool-use loop.
 
@@ -860,7 +866,7 @@ async def responses_tool_loop(
     reasoning items that can't be replayed against another provider.
     """
     return await run_tool_loop(
-        strategy=_strategy_for(web_search_budget, emit_native_code_execution=emit_native_code_execution),
+        strategy=_strategy_for(web_search_budget, native_tools=native_tools),
         completion_kwargs=completion_kwargs,
         pool=pool,
         max_iterations=max_iterations,
@@ -874,7 +880,7 @@ async def responses_tool_loop_stream(
     pool: ToolBackend,
     max_iterations: int,
     web_search_budget: WebSearchBudget | None = None,
-    emit_native_code_execution: bool = False,
+    native_tools: frozenset[str] = frozenset(),
 ) -> AsyncGenerator[ResponseStreamEvent, None]:
     """Streaming OpenAI Responses tool-use loop.
 
@@ -895,7 +901,7 @@ async def responses_tool_loop_stream(
     # instead of waiting for event-loop async-generator finalization.
     async with aclosing(
         run_tool_loop_stream(
-            strategy=_strategy_for(web_search_budget, emit_native_code_execution=emit_native_code_execution),
+            strategy=_strategy_for(web_search_budget, native_tools=native_tools),
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,

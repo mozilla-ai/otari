@@ -8,6 +8,8 @@ from openai.types.responses import ResponseFunctionWebSearch
 from openai.types.responses.response_function_web_search import ActionSearch
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from gateway.services._tool_loop import ToolBackend
     from gateway.services.tools._native import NativeCall
 
@@ -20,6 +22,11 @@ class ResponsesWebSearchRendering:
     id, an action and a status, all of which the gateway legitimately knows. The
     Anthropic equivalent needs a signed ``encrypted_content`` blob (see docs/tools.md).
     """
+
+    def declared(self, tool_entry: Mapping[str, Any] | None) -> bool:
+        """Every caller: the item forges nothing, so any of them can be told the search ran."""
+        del tool_entry
+        return True
 
     def ran(self, call: NativeCall, pool: ToolBackend) -> list[Any]:
         """The item for one search, whether or not it returned hits.

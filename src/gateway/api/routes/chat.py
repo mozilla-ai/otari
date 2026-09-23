@@ -67,6 +67,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop,
     mcp_tool_loop_stream,
 )
+from gateway.services.tools import Dialect
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
@@ -176,7 +177,7 @@ class _ChatAdapter:
     and friends.
     """
 
-    name = "chat"
+    name = Dialect.CHAT
     stream_format: StreamFormat = OPENAI_STREAM_FORMAT
     log_success_without_usage = True
 
@@ -275,14 +276,13 @@ class _ChatAdapter:
         max_iterations: int,
         on_first_response: Callable[[], None] | None = None,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
+        native_tools: frozenset[str] = frozenset(),
         web_search_budget: WebSearchBudget | None = None,
     ) -> ChatCompletion:
-        # The two ``emit_native_*`` flags are accepted for interface parity and
-        # ignored: this format has no native vocabulary for a server-side tool
-        # call, so a gateway-run search or execution stays invisible on the wire
-        # (see docs/tools.md).
+        # ``native_tools`` is accepted for interface parity and always empty: this
+        # format has no native vocabulary for a server-side tool call, so a
+        # gateway-run search or execution stays invisible on the wire (see
+        # docs/tools.md).
         # ``web_search_budget`` is not: the cap bounds what the caller is billed
         # for, which every format owes whether or not it can describe the search.
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
@@ -305,8 +305,7 @@ class _ChatAdapter:
         pool: ToolBackend,
         max_iterations: int,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
+        native_tools: frozenset[str] = frozenset(),
         web_search_budget: WebSearchBudget | None = None,
     ) -> AsyncIterator[ChatCompletionChunk]:
         extra: dict[str, Any] = {}

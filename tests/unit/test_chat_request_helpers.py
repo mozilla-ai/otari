@@ -28,9 +28,9 @@ from gateway.api.routes._tools import (
     _retargeted_tool_choice,
     _strip_gateway_fields,
     _web_search_intercept_enabled,
-    declares_native_web_search,
 )
 from gateway.core.config import GatewayConfig
+from gateway.services.tools import Dialect
 
 
 def test_extracts_otari_code_execution() -> None:
@@ -238,24 +238,6 @@ def test_intercept_off_is_the_default_and_passes_provider_keywords_through() -> 
     assert remaining == [{"type": "web_search_20250305"}]
 
 
-# --- native-declaration discrimination ---------------------------------------
-
-
-def test_versioned_declaration_is_native() -> None:
-    assert declares_native_web_search({"type": "web_search_20250305"}) is True
-
-
-def test_bare_and_canonical_declarations_are_not_native() -> None:
-    """Neither shape implies the caller expects native server-tool blocks back."""
-    assert declares_native_web_search({"type": "web_search"}) is False
-    assert declares_native_web_search({"type": "otari_web_search"}) is False
-
-
-def test_missing_declaration_is_not_native() -> None:
-    assert declares_native_web_search(None) is False
-    assert declares_native_web_search({}) is False
-
-
 # --- intercept toggle resolution ---------------------------------------------
 
 
@@ -392,7 +374,7 @@ def test_max_uses_is_honored_on_a_declaration_with_no_native_response_shape() ->
     for type_value in ("otari_web_search", "web_search"):
         entry = {"type": type_value, "max_uses": 2}
         ctx = _capped_context(entry)
-        assert ctx.emit_native_web_search is False
+        assert ctx.native_tools(Dialect.MESSAGES) == frozenset()
         assert ctx.max_web_search_uses == 2, type_value
 
 
