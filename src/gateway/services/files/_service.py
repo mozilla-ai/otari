@@ -14,7 +14,6 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import (
     EmptyUploadError,
     FileNotServedError,
-    FilesDisabledError,
     FileStorageError,
     UnknownPageCursorError,
     UploadTooLargeError,
@@ -139,12 +138,10 @@ class FileService:
         """Store an upload's bytes and record the file, and return the row.
 
         Raises:
-            FilesDisabledError: the deployment does not serve files.
             UploadTooLargeError: the upload ran past the deployment's ceiling.
             EmptyUploadError: the upload carried no bytes.
             FileStorageError: the bytes were written but the row would not land.
         """
-        self._require_enabled()
         workspace_id = upload.workspace_id or await self._default_workspace()
         file_id = f"file-{uuid.uuid4().hex}"
         max_bytes = self._config.files_max_bytes
@@ -189,11 +186,9 @@ class FileService:
         """Return one page of the caller's files, and the cursor that resumes after it.
 
         Raises:
-            FilesDisabledError: the deployment does not serve files.
             UnknownPageCursorError: an Anthropic page token names no position this gateway issued.
             FileNotServedError: an OpenAI cursor names no file the caller owns.
         """
-        self._require_enabled()
         limit = min(listing.limit, MAX_LIST_LIMIT)
         anthropic = listing.dialect is FileDialect.ANTHROPIC
         cursor_id = listing.cursor
@@ -226,10 +221,8 @@ class FileService:
         """Return the file the caller is served under ``file_id``.
 
         Raises:
-            FilesDisabledError: the deployment does not serve files.
             FileNotServedError: no such file is served to this caller.
         """
-        self._require_enabled()
         async with self._uow:
             record = await self._files.live(file_id, scope.user_id, workspace_id=scope.workspace_id)
         if record is None:
@@ -244,7 +237,6 @@ class FileService:
         the caller has been told the read succeeded.
 
         Raises:
-            FilesDisabledError: the deployment does not serve files.
             FileNotServedError: no such file is served to this caller, or its row holds no bytes.
             FileStorageError: the bytes could not be read.
         """
@@ -284,11 +276,9 @@ class FileService:
         """Stop serving the file and give its bytes back.
 
         Raises:
-            FilesDisabledError: the deployment does not serve files.
             FileNotServedError: no such file is served to this caller.
             FileStorageError: the file is still served because the row would not change.
         """
-        self._require_enabled()
         try:
             # One block for the read and the write, so nothing can discard the
             # file between proving the caller is served it and stamping the row.
@@ -339,10 +329,6 @@ class FileService:
                 raise UnknownPageCursorError
             raise FileNotServedError
         return cursor.created_at, cursor.id
-
-    def _require_enabled(self) -> None:
-        if not self._config.files_enabled:
-            raise FilesDisabledError
 
 
 async def _capped(chunks: AsyncIterator[bytes], max_bytes: int) -> AsyncIterator[bytes]:

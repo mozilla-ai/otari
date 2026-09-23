@@ -885,6 +885,31 @@ def test_a_deployment_that_does_not_serve_files_refuses_every_verb(
     assert upload.json()["detail"] == "File uploads are disabled"
 
 
+def test_a_disabled_deployment_refuses_before_it_reads_the_request(
+    files_off_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A surface that is not served answers the same way to every caller.
+
+    The refusal comes before the request is parsed and before the caller is
+    authenticated, so a disabled deployment cannot be told from an unmounted one
+    by sending a request it would otherwise refuse for another reason.
+    """
+    # A master-key request with no ``user`` is a 400 on a deployment that serves files.
+    no_user = files_off_client.post(
+        f"{API_ROOT}/files", headers=master_key_header, files={"file": ("a.txt", b"x", "text/plain")}
+    )
+    # ``ids[]`` with ``limit`` is a 400 on a deployment that serves files.
+    bad_params = files_off_client.get(
+        f"{API_ROOT}/files",
+        headers={**master_key_header, "anthropic-version": "2023-06-01"},
+        params={"ids[]": "file-a", "limit": 5, "user": "someone"},
+    )
+    unauthenticated = files_off_client.get(f"{API_ROOT}/files/file-x")
+
+    assert [resp.status_code for resp in (no_user, bad_params, unauthenticated)] == [404, 404, 404]
+    assert no_user.json()["detail"] == "File uploads are disabled"
+
+
 def test_a_storage_failure_answers_a_generic_500(
     client: TestClient, api_key_header: dict[str, str], tmp_file_store: None, tmp_path: Path
 ) -> None:

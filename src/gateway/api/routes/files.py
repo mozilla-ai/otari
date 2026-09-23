@@ -32,6 +32,7 @@ from fastapi.responses import Response, StreamingResponse
 from gateway.api.deps import FileServiceDep, get_config, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.files_exceptions import FilesDisabledError
 from gateway.models.api_keys import APIKey
 from gateway.schemas.files import (
     AnthropicFileDeleted,
@@ -63,7 +64,21 @@ async def _refuse_files_beta(raw_request: Request) -> None:
             )
 
 
-router = APIRouter(tags=["files"], dependencies=[Depends(_refuse_files_beta)])
+async def _require_files_enabled(config: Annotated[GatewayConfig, Depends(get_config)]) -> None:
+    """Refuse every verb when the deployment does not serve files.
+
+    A router dependency, so the refusal comes before the request is parsed and
+    before the caller is authenticated. That is what makes a switched-off
+    feature answer like an unmounted one instead of leaking, through the
+    refusal it picks, that the paths are there at all.
+    """
+    if not config.files_enabled:
+        raise FilesDisabledError
+
+
+router = APIRouter(
+    tags=["files"], dependencies=[Depends(_require_files_enabled), Depends(_refuse_files_beta)]
+)
 
 # OpenAI's documented file purposes plus a generic default. We don't enforce the
 # enum (forward-compat), but normalise the empty case to "user_data".

@@ -2105,8 +2105,8 @@ async def resolve_request_context(
                 # a keyed request, the session's for a Playground one, and None
                 # only for the master key, which has no key and resolves to the
                 # default workspace, where narrowing would hide an operator's own
-                # file references. `fetch_file` reads None as "every workspace",
-                # matching the /api/v1/files routes.
+                # file references. The files service reads None as "every
+                # workspace", matching the /api/v1/files routes.
                 post_chars, vision_usage = await normalize_messages(
                     user_id,
                     gate_impl,
