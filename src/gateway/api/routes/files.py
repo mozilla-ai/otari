@@ -25,7 +25,7 @@ import base64
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
@@ -41,6 +41,14 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.tools import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
+from gateway.schemas.files import (
+    AnthropicFileDeleted,
+    AnthropicFileList,
+    AnthropicFileMetadata,
+    OpenAIFileDeleted,
+    OpenAIFileList,
+    OpenAIFileObject,
+)
 from gateway.services.file_service import expiry_for, fetch_file, guess_mime_type
 from gateway.services.workspace_scope import default_workspace_id
 
@@ -125,8 +133,11 @@ def _check_anthropic_list_params(raw_request: Request, page: str | None, ids: li
         )
 
 
-def _serialize(record: FileObject, raw_request: Request) -> dict[str, Any]:
-    return record.to_anthropic_dict() if _anthropic_shape(raw_request) else record.to_dict()
+def _serialize(record: FileObject, raw_request: Request) -> OpenAIFileObject | AnthropicFileMetadata:
+    """The one file's shape the caller asked for."""
+    if _anthropic_shape(raw_request):
+        return AnthropicFileMetadata.of(record)
+    return OpenAIFileObject.of(record)
 
 
 def _request_workspace_id(auth_result: tuple[APIKey | None, bool]) -> uuid.UUID | None:
@@ -253,7 +264,7 @@ async def create_file(
     file: UploadFile = File(...),
     purpose: str = Form(_DEFAULT_PURPOSE),
     user: str | None = Form(None),
-) -> dict[str, Any]:
+) -> OpenAIFileObject | AnthropicFileMetadata:
     """Upload a file. Answers in the OpenAI or Anthropic file shape, following the caller's headers."""
     if not config.files_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
@@ -320,7 +331,7 @@ async def list_files(
     order: Literal["asc", "desc"] = "desc",
     page: str | None = None,
     ids: Annotated[list[str] | None, Query(alias="ids[]")] = None,
-) -> dict[str, Any]:
+) -> OpenAIFileList | AnthropicFileList:
     """List the authenticated user's uploaded files in the request's workspace.
 
     ``workspace_id`` narrows a master-key listing to one workspace; a keyed
@@ -399,17 +410,18 @@ async def list_files(
     records = list((await db.execute(stmt.limit(limit + 1))).scalars().all())
     has_more = len(records) > limit
     records = records[:limit]
-    data = [_serialize(r, raw_request) for r in records]
 
     if anthropic:
-        return {"data": data, "next_page": _page_token(records[-1].id) if has_more else None}
-    return {
-        "object": "list",
-        "data": data,
-        "has_more": has_more,
-        "first_id": records[0].id if records else None,
-        "last_id": records[-1].id if records else None,
-    }
+        return AnthropicFileList(
+            data=[AnthropicFileMetadata.of(record) for record in records],
+            next_page=_page_token(records[-1].id) if has_more else None,
+        )
+    return OpenAIFileList(
+        data=[OpenAIFileObject.of(record) for record in records],
+        has_more=has_more,
+        first_id=records[0].id if records else None,
+        last_id=records[-1].id if records else None,
+    )
 
 
 @router.get("/files/{file_id}")
@@ -420,7 +432,7 @@ async def get_file(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     user: str | None = None,
-) -> dict[str, Any]:
+) -> OpenAIFileObject | AnthropicFileMetadata:
     """Retrieve metadata for a single file."""
     if not config.files_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
@@ -504,7 +516,7 @@ async def delete_file(
     config: Annotated[GatewayConfig, Depends(get_config)],
     file_store: Annotated[FileStoragePort, Depends(get_file_store)],
     user: str | None = None,
-) -> dict[str, Any]:
+) -> OpenAIFileDeleted | AnthropicFileDeleted:
     """Soft-delete a file's metadata and remove its bytes from the backend."""
     if not config.files_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
@@ -536,5 +548,5 @@ async def delete_file(
         logger.warning("Soft-deleted file %s but failed to remove its blob %s: %s", file_id, storage_ref, exc)
 
     if _anthropic_shape(raw_request):
-        return {"id": file_id, "type": "file_deleted"}
-    return {"id": file_id, "object": "file", "deleted": True}
+        return AnthropicFileDeleted(id=file_id)
+    return OpenAIFileDeleted(id=file_id)

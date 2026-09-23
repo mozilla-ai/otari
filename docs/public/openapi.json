@@ -1371,6 +1371,120 @@
         "title": "Annotations",
         "type": "object"
       },
+      "AnthropicFileDeleted": {
+        "description": "Anthropic's answer to a delete.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "file_deleted",
+            "default": "file_deleted",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "AnthropicFileDeleted",
+        "type": "object"
+      },
+      "AnthropicFileList": {
+        "description": "A page of files in Anthropic's list shape, whose cursor is an opaque token.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AnthropicFileMetadata"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page"
+          }
+        },
+        "required": [
+          "data",
+          "next_page"
+        ],
+        "title": "AnthropicFileList",
+        "type": "object"
+      },
+      "AnthropicFileMetadata": {
+        "description": "One file in the ``FileMetadata`` shape of Anthropic's GA Files API.\n\n``expires_at`` is always present and ``None`` for a file kept indefinitely.\n``downloadable`` is always true, because the gateway serves every stored file's bytes back.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "downloadable": {
+            "const": true,
+            "default": true,
+            "title": "Downloadable",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mime_type": {
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "type": {
+            "const": "file",
+            "default": "file",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "mime_type",
+          "size_bytes",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "AnthropicFileMetadata",
+        "type": "object"
+      },
       "AudioContent": {
         "additionalProperties": true,
         "description": "Audio content for a message.",
@@ -8066,6 +8180,143 @@
           "effective_price_per_million"
         ],
         "title": "OfferingUsage",
+        "type": "object"
+      },
+      "OpenAIFileDeleted": {
+        "description": "OpenAI's answer to a delete.",
+        "properties": {
+          "deleted": {
+            "const": true,
+            "default": true,
+            "title": "Deleted",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "object": {
+            "const": "file",
+            "default": "file",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "OpenAIFileDeleted",
+        "type": "object"
+      },
+      "OpenAIFileList": {
+        "description": "A page of files in OpenAI's list shape, whose cursor is the last entry's ID.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OpenAIFileObject"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "first_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Id"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "last_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Id"
+          },
+          "object": {
+            "const": "list",
+            "default": "list",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "has_more",
+          "first_id",
+          "last_id"
+        ],
+        "title": "OpenAIFileList",
+        "type": "object"
+      },
+      "OpenAIFileObject": {
+        "description": "One file in OpenAI's file object shape.",
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "object": {
+            "const": "file",
+            "default": "file",
+            "title": "Object",
+            "type": "string"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "bytes",
+          "created_at",
+          "expires_at",
+          "filename",
+          "purpose"
+        ],
+        "title": "OpenAIFileObject",
         "type": "object"
       },
       "OrgProviderAvailableModelsPublic": {
@@ -21468,9 +21719,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Files-List Files",
-                  "type": "object"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenAIFileList"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AnthropicFileList"
+                    }
+                  ],
+                  "title": "Response Files-List Files"
                 }
               }
             },
@@ -21518,9 +21775,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Files-Create File",
-                  "type": "object"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenAIFileObject"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AnthropicFileMetadata"
+                    }
+                  ],
+                  "title": "Response Files-Create File"
                 }
               }
             },
@@ -21587,9 +21850,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Files-Delete File",
-                  "type": "object"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenAIFileDeleted"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AnthropicFileDeleted"
+                    }
+                  ],
+                  "title": "Response Files-Delete File"
                 }
               }
             },
@@ -21654,9 +21923,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Files-Get File",
-                  "type": "object"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenAIFileObject"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AnthropicFileMetadata"
+                    }
+                  ],
+                  "title": "Response Files-Get File"
                 }
               }
             },

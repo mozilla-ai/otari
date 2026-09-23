@@ -24,29 +24,6 @@ from gateway.models.base import Base, UtcDateTime
 from gateway.models.secret_fields import redact_secret_like_values
 
 
-def _epoch_seconds(value: datetime | None) -> int | None:
-    """Return a UTC epoch from a stored datetime.
-
-    SQLite hands datetimes back naive; ``datetime.timestamp()`` would then read
-    them as local time and skew the epoch by the server's UTC offset. Treat a
-    naive value as the UTC it was stored as before converting.
-    """
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return int(value.timestamp())
-
-
-def _rfc3339(value: datetime | None) -> str | None:
-    """Return an RFC 3339 timestamp from a stored datetime, reading a naive value as UTC."""
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.isoformat().replace("+00:00", "Z")
-
-
 class SearchToolCredential(Base):
     """A ``POST /v1/search`` tool configured at runtime through the dashboard.
 
@@ -149,35 +126,6 @@ class FileObject(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
 
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to the OpenAI file object shape."""
-        return {
-            "id": self.id,
-            "object": "file",
-            "bytes": self.bytes,
-            "created_at": _epoch_seconds(self.created_at),
-            "expires_at": _epoch_seconds(self.expires_at),
-            "filename": self.filename,
-            "purpose": self.purpose,
-        }
-
-    def to_anthropic_dict(self) -> dict[str, Any]:
-        """Convert to the ``FileMetadata`` shape of Anthropic's GA Files API.
-
-        ``expires_at`` is always present and ``None`` for a file kept indefinitely.
-        ``downloadable`` is always true, because the gateway serves every stored file's bytes back.
-        """
-        return {
-            "id": self.id,
-            "type": "file",
-            "filename": self.filename,
-            "mime_type": self.mime_type,
-            "size_bytes": self.bytes,
-            "created_at": _rfc3339(self.created_at),
-            "expires_at": _rfc3339(self.expires_at),
-            "downloadable": True,
-        }
 
 
 class WorkspaceMcpServer(Base):

@@ -6036,6 +6036,63 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * AnthropicFileDeleted
+         * @description Anthropic's answer to a delete.
+         */
+        AnthropicFileDeleted: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default file_deleted
+             * @constant
+             */
+            type: "file_deleted";
+        };
+        /**
+         * AnthropicFileList
+         * @description A page of files in Anthropic's list shape, whose cursor is an opaque token.
+         */
+        AnthropicFileList: {
+            /** Data */
+            data: components["schemas"]["AnthropicFileMetadata"][];
+            /** Next Page */
+            next_page: string | null;
+        };
+        /**
+         * AnthropicFileMetadata
+         * @description One file in the ``FileMetadata`` shape of Anthropic's GA Files API.
+         *
+         *     ``expires_at`` is always present and ``None`` for a file kept indefinitely.
+         *     ``downloadable`` is always true, because the gateway serves every stored file's bytes back.
+         */
+        AnthropicFileMetadata: {
+            /** Created At */
+            created_at: string | null;
+            /**
+             * Downloadable
+             * @default true
+             * @constant
+             */
+            downloadable: true;
+            /** Expires At */
+            expires_at: string | null;
+            /** Filename */
+            filename: string;
+            /** Id */
+            id: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Type
+             * @default file
+             * @constant
+             */
+            type: "file";
+        };
+        /**
          * AudioContent
          * @description Audio content for a message.
          */
@@ -9207,6 +9264,70 @@ export interface components {
             spend_usd: number;
             /** Total Tokens */
             total_tokens: number;
+        };
+        /**
+         * OpenAIFileDeleted
+         * @description OpenAI's answer to a delete.
+         */
+        OpenAIFileDeleted: {
+            /**
+             * Deleted
+             * @default true
+             * @constant
+             */
+            deleted: true;
+            /** Id */
+            id: string;
+            /**
+             * Object
+             * @default file
+             * @constant
+             */
+            object: "file";
+        };
+        /**
+         * OpenAIFileList
+         * @description A page of files in OpenAI's list shape, whose cursor is the last entry's ID.
+         */
+        OpenAIFileList: {
+            /** Data */
+            data: components["schemas"]["OpenAIFileObject"][];
+            /** First Id */
+            first_id: string | null;
+            /** Has More */
+            has_more: boolean;
+            /** Last Id */
+            last_id: string | null;
+            /**
+             * Object
+             * @default list
+             * @constant
+             */
+            object: "list";
+        };
+        /**
+         * OpenAIFileObject
+         * @description One file in OpenAI's file object shape.
+         */
+        OpenAIFileObject: {
+            /** Bytes */
+            bytes: number;
+            /** Created At */
+            created_at: number | null;
+            /** Expires At */
+            expires_at: number | null;
+            /** Filename */
+            filename: string;
+            /** Id */
+            id: string;
+            /**
+             * Object
+             * @default file
+             * @constant
+             */
+            object: "file";
+            /** Purpose */
+            purpose: string;
         };
         /**
          * OrgProviderAvailableModelsPublic
@@ -15353,9 +15474,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OpenAIFileList"] | components["schemas"]["AnthropicFileList"];
                 };
             };
             /** @description Validation Error */
@@ -15388,9 +15507,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OpenAIFileObject"] | components["schemas"]["AnthropicFileMetadata"];
                 };
             };
             /** @description Validation Error */
@@ -15423,9 +15540,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OpenAIFileObject"] | components["schemas"]["AnthropicFileMetadata"];
                 };
             };
             /** @description Validation Error */
@@ -15458,9 +15573,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OpenAIFileDeleted"] | components["schemas"]["AnthropicFileDeleted"];
                 };
             };
             /** @description Validation Error */
