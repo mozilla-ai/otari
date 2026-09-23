@@ -99,12 +99,30 @@ MCP_ACTIVITY_ID_PREFIX = "otari_mcptoolu_"
 MCP_CLIENT_BETA = "mcp-client-2025-11-20"
 
 
-def _max_uses_exceeded_result(call: NativeCall, native_blocks: list[Any] | None) -> dict[str, Any]:
+class _NativeSink:
+    """The native blocks one iteration collects, and the tools whose calls belong in them.
+
+    A request may declare one tool in a provider's words and another in the gateway's,
+    so a call is dropped unless this caller asked to hear about its tool.
+    """
+
+    def __init__(self, tools: frozenset[str], blocks: list[Any]) -> None:
+        self._tools = tools
+        self._blocks = blocks
+
+    def wants(self, name: str) -> bool:
+        return name in self._tools
+
+    def extend(self, blocks: list[Any]) -> None:
+        self._blocks.extend(blocks)
+
+
+def _max_uses_exceeded_result(call: NativeCall, native: _NativeSink | None) -> dict[str, Any]:
     """The tool_result for a call the use cap refused, collecting its native blocks."""
-    if native_blocks is not None:
+    if native is not None and native.wants(call.name):
         rendering = native_rendering(call.name, Dialect.MESSAGES)
         if rendering is not None:
-            native_blocks.extend(rendering.refused(call))
+            native.extend(rendering.refused(call))
     return {"type": "tool_result", "tool_use_id": call.id, "content": MAX_USES_EXCEEDED_ERROR}
 
 
@@ -191,7 +209,7 @@ async def _execute_tool_uses(
     pool: ToolBackend,
     blocks: list[Any],
     *,
-    native_blocks: list[Any] | None = None,
+    native: _NativeSink | None = None,
     budget: ToolUseBudget | None = None,
 ) -> list[dict[str, Any]]:
     """Run each owned tool_use block and return the Anthropic tool_result blocks.
@@ -202,17 +220,17 @@ async def _execute_tool_uses(
     from ``BaseException`` and skip the ``Exception`` clause. Same idiom as
     :func:`gateway.services.mcp_loop._execute_mcp_calls`.
 
-    When ``native_blocks`` is given, each call appends the native server-tool
-    blocks describing it, per :func:`_native_blocks_for_call`. Collecting
-    immediately after each awaited call is what makes the backend's result buffer
-    safe, since the calls run one at a time.
+    When ``native`` is given, each call appends the native server-tool blocks
+    describing it, per :func:`_native_blocks_for_call`. Collecting immediately after
+    each awaited call is what makes the backend's result buffer safe, since the calls
+    run one at a time.
     """
     out: list[dict[str, Any]] = []
     for block in blocks:
         arguments = dict(block.input or {})
         capped = is_capped_call(budget, pool, block.name)
         if capped and budget is not None and budget.exhausted():
-            out.append(_max_uses_exceeded_result(NativeCall(block.name, block.id, arguments), native_blocks))
+            out.append(_max_uses_exceeded_result(NativeCall(block.name, block.id, arguments), native))
             continue
         try:
             text = await pool.call_tool(block.name, arguments)
@@ -224,9 +242,9 @@ async def _execute_tool_uses(
         else:
             if capped and budget is not None:
                 budget.record(text)
-        if native_blocks is not None:
+        if native is not None and native.wants(block.name):
             call = NativeCall(block.name, block.id, arguments, failed=is_tool_error(text))
-            native_blocks.extend(_native_blocks_for_call(pool, call))
+            native.extend(_native_blocks_for_call(pool, call))
         out.append({"type": "tool_result", "tool_use_id": block.id, "content": text})
     return out
 
@@ -425,7 +443,7 @@ async def _execute_stream_owned_events(
     results: list[dict[str, Any]],
     *,
     emit_mcp_activity: bool,
-    native_blocks: list[Any] | None = None,
+    native: _NativeSink | None = None,
     budget: ToolUseBudget | None = None,
 ) -> AsyncGenerator[MessageStreamEvent, None]:
     """Execute owned calls and optionally yield MCP activity representations.
@@ -438,7 +456,7 @@ async def _execute_stream_owned_events(
         parsed_input = _parsed_stream_input(state, spec)
         capped = is_capped_call(budget, pool, name)
         if capped and budget is not None and budget.exhausted():
-            results.append(_max_uses_exceeded_result(NativeCall(name, spec["id"], parsed_input), native_blocks))
+            results.append(_max_uses_exceeded_result(NativeCall(name, spec["id"], parsed_input), native))
             continue
         mcp_backend = _as_mcp_tool_backend(pool)
         server_name = _mcp_server_name(mcp_backend, name)
@@ -463,9 +481,9 @@ async def _execute_stream_owned_events(
         )
         if capped and budget is not None:
             budget.record(text)
-        if native_blocks is not None:
+        if native is not None and native.wants(name):
             call = NativeCall(name, spec["id"], parsed_input, failed=is_error)
-            native_blocks.extend(_native_blocks_for_call(pool, call))
+            native.extend(_native_blocks_for_call(pool, call))
         results.append({"type": "tool_result", "tool_use_id": spec["id"], "content": text})
 
         if activity_id is not None:
@@ -512,9 +530,9 @@ class _MessagesToolLoopStrategy:
         # sends it back to resume the workspace.
         self._container = container
 
-    def _native_sink(self, sink: list[Any]) -> list[Any] | None:
-        """``sink`` when native emission is on, else ``None`` (collect nothing)."""
-        return sink if self._native_tools else None
+    def _native_sink(self, blocks: list[Any]) -> _NativeSink | None:
+        """A sink over ``blocks`` when native emission is on, else ``None`` (collect nothing)."""
+        return _NativeSink(self._native_tools, blocks) if self._native_tools else None
 
     def coerce_transcript(self, value: Any) -> list[Any]:
         return list(value or [])
@@ -574,7 +592,7 @@ class _MessagesToolLoopStrategy:
         return await _execute_tool_uses(
             pool,
             owned,
-            native_blocks=native_sink,
+            native=native_sink,
             budget=self._budget,
         )
 
@@ -615,7 +633,7 @@ class _MessagesToolLoopStrategy:
                 "content": await _execute_tool_uses(
                     pool,
                     owned,
-                    native_blocks=native_sink,
+                    native=native_sink,
                     budget=self._budget,
                 ),
             }
@@ -774,7 +792,7 @@ class _MessagesToolLoopStrategy:
                 acc,
                 discarded,
                 emit_mcp_activity=self._emit_native_mcp,
-                native_blocks=self._native_sink(state.native_blocks),
+                native=self._native_sink(state.native_blocks),
                 budget=self._budget,
             ):
                 yield event
@@ -860,7 +878,7 @@ class _MessagesToolLoopStrategy:
             acc,
             tool_results,
             emit_mcp_activity=self._emit_native_mcp,
-            native_blocks=self._native_sink(state.native_blocks),
+            native=self._native_sink(state.native_blocks),
             budget=self._budget,
         ):
             yield event

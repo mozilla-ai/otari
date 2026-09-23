@@ -268,13 +268,15 @@ def _parsed_arguments(raw: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _native_items(call: NativeCall, pool: ToolBackend, *, refused: bool) -> list[Any]:
-    """Native items announcing one gateway-run call, if its tool has any in this dialect.
+def _native_items(call: NativeCall, pool: ToolBackend, tools: frozenset[str], *, refused: bool) -> list[Any]:
+    """Native items announcing one gateway-run call, if this caller asked to hear about it.
 
     A refused call is announced through its tool's refusal rendering, which for a
     search is nothing: no search ran. An MCP call has no native equivalent at all and
     stays invisible.
     """
+    if call.name not in tools:
+        return []
     rendering = native_rendering(call.name, Dialect.RESPONSES)
     if rendering is None:
         return []
@@ -284,15 +286,14 @@ def _native_items(call: NativeCall, pool: ToolBackend, *, refused: bool) -> list
 def _native_items_for(
     owned: list[Any],
     pool: ToolBackend,
-    refused: set[str] | None = None,
+    refused_call_ids: set[str] | None = None,
     *,
-    emit_code_execution: bool = False,
+    tools: frozenset[str] = frozenset(),
 ) -> list[Any]:
-    """Native items for the gateway-run calls among ``owned``.
+    """Native items for the gateway-run calls among ``owned`` whose tool ``tools`` names.
 
-    ``code_execution`` maps to a ``code_interpreter_call`` only for a caller that
-    declared the tool in OpenAI's vocabulary (``emit_code_execution``), read off the
-    executions the sandbox backend kept for the calls just awaited.
+    ``code_execution`` maps to a ``code_interpreter_call``, read off the executions the
+    sandbox backend kept for the calls just awaited rather than off the calls themselves.
     """
     items: list[Any] = []
     for item in owned:
@@ -301,8 +302,8 @@ def _native_items_for(
             str(getattr(item, "call_id", "") or ""),
             _parsed_arguments(getattr(item, "arguments", "")),
         )
-        items.extend(_native_items(call, pool, refused=bool(refused and call.id in refused)))
-    items.extend(_code_interpreter_items(pool, emit=emit_code_execution))
+        items.extend(_native_items(call, pool, tools, refused=bool(refused_call_ids and call.id in refused_call_ids)))
+    items.extend(_code_interpreter_items(pool, emit=CODE_EXECUTION_TOOL_NAME in tools))
     return items
 
 
@@ -340,7 +341,7 @@ async def _execute_stream_owned(
     pool: ToolBackend,
     *,
     budget: ToolUseBudget | None = None,
-    emit_code_execution: bool = False,
+    tools: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     """Run the stream's gateway-owned function calls, returning their output items.
 
@@ -354,7 +355,7 @@ async def _execute_stream_owned(
         call = NativeCall(str(spec["name"]), str(spec["call_id"]), args)
         capped = is_capped_call(budget, pool, call.name)
         if capped and budget is not None and budget.exhausted():
-            state.native_items.extend(_native_items(call, pool, refused=True))
+            state.native_items.extend(_native_items(call, pool, tools, refused=True))
             results.append({"type": "function_call_output", "call_id": call.id, "output": MAX_USES_EXCEEDED_ERROR})
             continue
         try:
@@ -367,9 +368,9 @@ async def _execute_stream_owned(
         else:
             if capped and budget is not None:
                 budget.record(text)
-        state.native_items.extend(_native_items(call, pool, refused=False))
+        state.native_items.extend(_native_items(call, pool, tools, refused=False))
         results.append({"type": "function_call_output", "call_id": call.id, "output": text})
-    state.code_interpreter_items.extend(_code_interpreter_items(pool, emit=emit_code_execution))
+    state.code_interpreter_items.extend(_code_interpreter_items(pool, emit=CODE_EXECUTION_TOOL_NAME in tools))
     return results
 
 
@@ -457,10 +458,6 @@ class _ResponsesToolLoopStrategy:
         # one's items go out only to a client that asked in the vocabulary.
         self._native_tools = native_tools
 
-    @property
-    def _emit_code_execution(self) -> bool:
-        return CODE_EXECUTION_TOOL_NAME in self._native_tools
-
     def coerce_transcript(self, value: Any) -> list[Any]:
         return _coerce_input_to_list(value)
 
@@ -513,11 +510,11 @@ class _ResponsesToolLoopStrategy:
         # Mixed-batch exit: the owned subset runs for its side effects. Collect
         # its native items too, since ``fold_usage`` runs on that path and
         # prepends them, so the caller still sees the search or run it paid for.
-        refused: set[str] = set()
-        outputs = await _execute_function_calls(pool, owned, budget=self._budget, refused_call_ids=refused)
+        refused_call_ids: set[str] = set()
+        outputs = await _execute_function_calls(pool, owned, budget=self._budget, refused_call_ids=refused_call_ids)
         if acc is not None:
             acc["native_items"].extend(
-                _native_items_for(owned, pool, refused, emit_code_execution=self._emit_code_execution)
+                _native_items_for(owned, pool, refused_call_ids, tools=self._native_tools)
             )
         return outputs
 
@@ -568,7 +565,7 @@ class _ResponsesToolLoopStrategy:
             acc["compactions"].extend(_compaction_items(output))
             acc["native_items"].extend(
                 _native_items_for(
-                    owned, pool, refused_call_ids, emit_code_execution=self._emit_code_execution
+                    owned, pool, refused_call_ids, tools=self._native_tools
                 )
             )
 
@@ -729,7 +726,7 @@ class _ResponsesToolLoopStrategy:
         # it announces the runs natively before the round exits.
         if state.owned_specs:
             await _execute_stream_owned(
-                state, pool, budget=self._budget, emit_code_execution=self._emit_code_execution
+                state, pool, budget=self._budget, tools=self._native_tools
             )
             for event in self.synthetic_events(state, acc):
                 yield event
@@ -817,7 +814,7 @@ class _ResponsesToolLoopStrategy:
         transcript.extend(_items_to_dicts(replay_items))
         transcript.extend(
             await _execute_stream_owned(
-                state, pool, budget=self._budget, emit_code_execution=self._emit_code_execution
+                state, pool, budget=self._budget, tools=self._native_tools
             )
         )
         return

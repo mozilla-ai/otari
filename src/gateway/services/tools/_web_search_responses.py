@@ -33,6 +33,10 @@ class ResponsesWebSearchRendering:
 
         ``pool`` carries no part of the item: unlike the Messages rendering, this
         vocabulary reports that a search happened rather than what it found.
+        ``call.failed`` is not read either, so a search whose backend errored is still
+        announced as completed. The model is told about the failure in the call's own
+        output, and reporting it here as well needs an outcome the non-streaming caller
+        does not hold.
         """
         return [
             ResponseFunctionWebSearch(

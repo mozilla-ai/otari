@@ -43,6 +43,8 @@ from gateway.services.tools import ToolUseBudget
 from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
 from gateway.types.code_execution import ResultBlock
 
+_SEARCH = frozenset({WEB_SEARCH_TOOL_NAME})
+
 
 def _use_budget(max_uses: int) -> ToolUseBudget:
     """A cap on the gateway's own searches, which is the tool these loops run."""
@@ -281,6 +283,7 @@ async def test_max_uses_stops_further_searches_and_announces_only_the_one_that_r
         pool=cast(Any, pool),
         max_iterations=5,
         use_budget=_use_budget(1),
+        native_tools=_SEARCH,
     )
 
     assert pool.calls == [("web_search", {"query": "first"})]
@@ -747,6 +750,7 @@ async def test_stream_max_uses_announces_only_the_search_that_ran(
             pool=cast(Any, pool),
             max_iterations=5,
             use_budget=_use_budget(1),
+            native_tools=_SEARCH,
         )
     ]
 
@@ -987,6 +991,7 @@ async def test_stream_announces_gateway_search_as_native_web_search_call(
             completion_kwargs={"model": "fake", "input_data": "go"},
             pool=cast(Any, pool),
             max_iterations=5,
+            native_tools=_SEARCH,
         )
     ]
 
