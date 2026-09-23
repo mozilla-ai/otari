@@ -862,6 +862,17 @@ def get_model_provider_port(db: PortSessionDep, container: ContainerDep) -> Mode
     return container.resolve(ModelProviderPort, db)
 
 
+# ``get_db`` rather than ``PortSessionDep``: every management-plane caller here already
+# holds a session from ``get_db``, and naming the same dependency shares it instead of
+# opening a second one. Data-plane routes (chat/messages/responses) keep the port above.
+def get_model_provider_port_shared(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    container: ContainerDep,
+) -> ModelProviderPort:
+    """Resolve the model-provider adapter, sharing the caller's own database session."""
+    return container.resolve(ModelProviderPort, db)
+
+
 # Deliberately ``get_db`` and not ``PortSessionDep``: every surface that
 # resolves this port (the OTLP receiver, the telemetry read and purge
 # endpoints, user deletion) is standalone-only and already holds a session from
@@ -927,6 +938,7 @@ EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
 GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]
 IdentityProviderPortDep = Annotated[IdentityProviderPort, Depends(get_identity_provider_port)]
 ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_port)]
+ModelProviderPortSharedDep = Annotated[ModelProviderPort, Depends(get_model_provider_port_shared)]
 
 
 def get_org_provider_model_service(

@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, ModelProviderPortDep, get_config, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, ModelProviderPortSharedDep, get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.models.money import as_float
 from gateway.models.pricing import OrganizationModelPricing
@@ -212,7 +212,7 @@ class OrganizationModelPricingsPublic(BaseModel):
 def get_organization_pricing_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    model_provider: ModelProviderPortDep,
+    model_provider: ModelProviderPortSharedDep,
 ) -> OrganizationPricingService:
     """Build the pricing service on the request's session, provider map, and hosted-credential port."""
     return OrganizationPricingService(db, config, model_provider=model_provider)
