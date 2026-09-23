@@ -1,9 +1,10 @@
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Never
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -42,6 +43,17 @@ def _in_scopes(scopes: ScopeIdSets) -> ColumnElement[bool]:
         (ScopedBudget.scope_type == SCOPE_WORKSPACE_MEMBER) & ScopedBudget.scope_id.in_(scopes.workspace_member_ids),
         (ScopedBudget.scope_type == SCOPE_API_TOKEN) & ScopedBudget.scope_id.in_(scopes.api_key_ids),
     )
+
+
+def _for_provider(provider_key_id: str | None) -> ColumnElement[bool]:
+    """Match a ceiling's provider, where None matches the ceiling that caps every provider."""
+    if provider_key_id is None:
+        return ScopedBudget.provider_key_id.is_(None)
+    return ScopedBudget.provider_key_id == provider_key_id
+
+
+def _member_scope_ids(member_ids: Sequence[uuid.UUID]) -> list[str]:
+    return [str(member_id) for member_id in member_ids]
 
 
 class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
@@ -87,22 +99,85 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
         result = await self.db.execute(select(func.count()).select_from(ScopedBudget).where(_in_scopes(scopes)))
         return result.scalar_one()
 
+    async def delete_for_member(self, member_id: uuid.UUID) -> None:
+        """Delete every ceiling keyed on this membership.
+
+        ``scope_id`` is not a foreign key, so nothing cascades, and a ceiling left
+        behind would refuse its budget's deletion.
+        """
+        await self.db.execute(
+            delete(ScopedBudget).where(
+                ScopedBudget.scope_type == SCOPE_WORKSPACE_MEMBER,
+                ScopedBudget.scope_id == str(member_id),
+            )
+        )
+
+    async def delete_for_workspace(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
+        """Delete every ceiling keyed on this workspace or on one of these memberships.
+
+        Precondition: the workspace's row lock is held, or a ceiling created on one of
+        these scopes lands after the sweep and outlives the workspace.
+        """
+        await self.db.execute(
+            delete(ScopedBudget)
+            .where(
+                or_(
+                    (ScopedBudget.scope_type == SCOPE_WORKSPACE) & (ScopedBudget.scope_id == str(workspace_id)),
+                    (ScopedBudget.scope_type == SCOPE_WORKSPACE_MEMBER)
+                    & ScopedBudget.scope_id.in_(_member_scope_ids(member_ids)),
+                )
+            )
+            .execution_options(synchronize_session=False)
+        )
+
     async def has_ceiling(self, scope_type: ScopeType, scope_id: str, provider_key_id: str | None) -> bool:
         """Report whether a ceiling caps this scope for this provider, where None means every provider."""
-        stmt = select(func.count()).select_from(ScopedBudget).where(
-            ScopedBudget.scope_type == scope_type,
-            ScopedBudget.scope_id == scope_id,
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(ScopedBudget)
+            .where(
+                ScopedBudget.scope_type == scope_type,
+                ScopedBudget.scope_id == scope_id,
+                _for_provider(provider_key_id),
+            )
         )
-        if provider_key_id is None:
-            stmt = stmt.where(ScopedBudget.provider_key_id.is_(None))
-        else:
-            stmt = stmt.where(ScopedBudget.provider_key_id == provider_key_id)
-        result = await self.db.execute(stmt)
         return result.scalar_one() > 0
 
-    async def list_in_scopes(
-        self, scopes: ScopeIdSets, *, skip: int, limit: int
-    ) -> list[tuple[ScopedBudget, Budget]]:
+    async def insert_member_ceilings(self, ceilings: Sequence[ScopedBudget]) -> list[ScopedBudget]:
+        """Stage these membership ceilings, skipping any the database already caps, and return those staged.
+
+        A ceiling another writer placed first is skipped, because nothing locks the gap
+        between deciding which memberships need one and inserting them. Any other refusal
+        is raised, so a ceiling naming no budget is not reported as one already in place.
+        """
+        if not ceilings:
+            return []
+        # A savepoint flushes what is already pending as it opens, so each attempt adds
+        # its ceilings inside the block rather than before it.
+        try:
+            async with self.db.begin_nested():
+                self.db.add_all(ceilings)
+                await self.db.flush()
+            return list(ceilings)
+        except IntegrityError:
+            pass
+
+        staged: list[ScopedBudget] = []
+        for ceiling in ceilings:
+            scope_id, provider_key_id = ceiling.scope_id, ceiling.provider_key_id
+            try:
+                async with self.db.begin_nested():
+                    self.db.add(ceiling)
+                    await self.db.flush()
+            except IntegrityError:
+                # Asked of the database, because the engines word the refusal differently.
+                if not await self.has_ceiling(SCOPE_WORKSPACE_MEMBER, scope_id, provider_key_id):
+                    raise
+                continue
+            staged.append(ceiling)
+        return staged
+
+    async def list_in_scopes(self, scopes: ScopeIdSets, *, skip: int, limit: int) -> list[tuple[ScopedBudget, Budget]]:
         """Return a page of the ceilings on these scopes, each with the budget it names, oldest first."""
         result = await self.db.execute(
             select(ScopedBudget, Budget)
@@ -113,6 +188,30 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
             .limit(limit)
         )
         return list(result.tuples().all())
+
+    async def member_ceiling(self, member_id: uuid.UUID, provider_key_id: str | None) -> ScopedBudget | None:
+        """Return the ceiling capping this membership for this provider, where None means every provider."""
+        result = await self.db.execute(
+            select(ScopedBudget).where(
+                ScopedBudget.scope_type == SCOPE_WORKSPACE_MEMBER,
+                ScopedBudget.scope_id == str(member_id),
+                _for_provider(provider_key_id),
+            )
+        )
+        return result.scalars().first()
+
+    async def members_with_ceiling(
+        self, member_ids: Sequence[uuid.UUID], provider_key_id: str | None
+    ) -> set[uuid.UUID]:
+        """Return the IDs of the memberships among these that a ceiling already caps for this provider."""
+        result = await self.db.execute(
+            select(ScopedBudget.scope_id).where(
+                ScopedBudget.scope_type == SCOPE_WORKSPACE_MEMBER,
+                ScopedBudget.scope_id.in_(_member_scope_ids(member_ids)),
+                _for_provider(provider_key_id),
+            )
+        )
+        return {uuid.UUID(scope_id) for scope_id in result.scalars().all()}
 
     async def remove(self, ceiling: ScopedBudget) -> None:
         """Stage the deletion of a ceiling."""

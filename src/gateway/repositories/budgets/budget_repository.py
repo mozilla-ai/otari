@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Sequence
 from typing import Never
 
 from sqlalchemy import func, select
@@ -51,6 +52,11 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
             select(Budget).where(Budget.budget_id == budget_id, Budget.organization_id == organization_id)
         )
         return result.scalar_one_or_none()
+
+    async def get_many(self, budget_ids: Sequence[str]) -> dict[str, Budget]:
+        """Return the budgets with these IDs, keyed on ID, omitting an ID that names none."""
+        result = await self.db.execute(select(Budget).where(Budget.budget_id.in_(budget_ids)))
+        return {budget.budget_id: budget for budget in result.scalars().all()}
 
     async def list_by_organization(self, organization_id: uuid.UUID, *, skip: int, limit: int) -> list[Budget]:
         """Return a page of the organization's budgets, oldest first."""
