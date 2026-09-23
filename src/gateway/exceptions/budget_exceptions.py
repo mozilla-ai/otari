@@ -115,6 +115,14 @@ class BudgetStillReferencedError(Exception):
         super().__init__(f"Budget {budget_id} is still referenced")
 
 
+class MemberBudgetPolicyAlreadyExistsError(Exception):
+    """A policy already caps this workspace's members for this provider."""
+
+    def __init__(self, workspace_id: object, provider_key_id: object):
+        provider = "every provider" if provider_key_id is None else f"provider '{provider_key_id}'"
+        super().__init__(f"Workspace {workspace_id} already has a member budget policy for {provider}")
+
+
 class SpendCeilingAlreadyExistsError(Exception):
     """A ceiling already caps this scope for this provider."""
 
@@ -124,6 +132,7 @@ class SpendCeilingAlreadyExistsError(Exception):
 
 __all__ = [
     "BudgetStillReferencedError",
+    "MemberBudgetPolicyAlreadyExistsError",
     "OrganizationBudgetHeldElsewhereError",
     "OrganizationBudgetInUseError",
     "OrganizationBudgetNotFoundError",
