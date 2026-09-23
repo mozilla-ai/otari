@@ -39,8 +39,14 @@ from gateway.services.tool_format import (
     inject_purpose_hints_responses,
     openai_to_responses_tools,
 )
-from gateway.services.web_search_budget import WebSearchBudget
+from gateway.services.tools import ToolUseBudget
+from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
 from gateway.types.code_execution import ResultBlock
+
+
+def _use_budget(max_uses: int) -> ToolUseBudget:
+    """A cap on the gateway's own searches, which is the tool these loops run."""
+    return ToolUseBudget(WEB_SEARCH_TOOL_NAME, max_uses)
 
 
 class _FakePool:
@@ -274,7 +280,7 @@ async def test_max_uses_stops_further_searches_and_announces_only_the_one_that_r
         completion_kwargs={"model": "fake", "input_data": [{"role": "user", "content": "hi"}]},
         pool=cast(Any, pool),
         max_iterations=5,
-        web_search_budget=WebSearchBudget(1),
+        use_budget=_use_budget(1),
     )
 
     assert pool.calls == [("web_search", {"query": "first"})]
@@ -439,7 +445,7 @@ async def test_loop_mixed_capped_search_hides_refusal_and_returns_foreign_call(
         completion_kwargs={"model": "fake", "input_data": "go"},
         pool=cast(Any, pool),
         max_iterations=5,
-        web_search_budget=WebSearchBudget(0),
+        use_budget=_use_budget(0),
     )
 
     assert pool.calls == []
@@ -740,7 +746,7 @@ async def test_stream_max_uses_announces_only_the_search_that_ran(
             completion_kwargs={"model": "fake", "input_data": "go"},
             pool=cast(Any, pool),
             max_iterations=5,
-            web_search_budget=WebSearchBudget(1),
+            use_budget=_use_budget(1),
         )
     ]
 
@@ -1083,7 +1089,7 @@ async def test_stream_mixed_capped_search_hides_refusal_and_returns_foreign_call
             completion_kwargs={"model": "fake", "input_data": "go"},
             pool=cast(Any, pool),
             max_iterations=5,
-            web_search_budget=WebSearchBudget(0),
+            use_budget=_use_budget(0),
         )
     ]
 

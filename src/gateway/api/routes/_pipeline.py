@@ -226,7 +226,7 @@ from gateway.services.tool_usage import (
     TOOL_METER_NAMESPACE,
     ToolUsageTally,
 )
-from gateway.services.tools import Dialect, native_rendering
+from gateway.services.tools import Dialect, ToolUseBudget, native_rendering
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.web_retrieval_backend import (
@@ -244,7 +244,6 @@ from gateway.services.web_retrieval_policy import (
     intersect_domain_allow_lists,
     union_domain_block_lists,
 )
-from gateway.services.web_search_budget import WebSearchBudget
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -840,7 +839,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         on_first_response: Callable[[], None] | None = None,
         *,
         native_tools: frozenset[str] = frozenset(),
-        web_search_budget: WebSearchBudget | None = None,
+        use_budget: ToolUseBudget | None = None,
     ) -> ResultT: ...
 
     def open_tool_loop_stream(
@@ -850,7 +849,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         max_iterations: int,
         *,
         native_tools: frozenset[str] = frozenset(),
-        web_search_budget: WebSearchBudget | None = None,
+        use_budget: ToolUseBudget | None = None,
     ) -> AsyncIterator[ChunkT]: ...
 
     def inject_hints(
@@ -2310,7 +2309,7 @@ class ToolContext:
         self.tally = ToolUsageTally()
         # Successful Search calls spend the caller's cap across all routing attempts.
         cap = self.max_web_search_uses
-        self.web_search_budget = WebSearchBudget(cap) if cap is not None else None
+        self.use_budget = ToolUseBudget(WEB_SEARCH_TOOL_NAME, cap) if cap is not None else None
         # Search and Fetch share a separate attempted-call cap across routing attempts.
         self.web_retrieval_counter = WebRetrievalCounter()
 
@@ -4148,8 +4147,8 @@ def _loop_options(tool_ctx: ToolContext) -> dict[str, Any]:
     one request draws on the same one.
     """
     options: dict[str, Any] = {}
-    if tool_ctx.web_search_budget is not None:
-        options["web_search_budget"] = tool_ctx.web_search_budget
+    if tool_ctx.use_budget is not None:
+        options["use_budget"] = tool_ctx.use_budget
     return options
 
 

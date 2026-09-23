@@ -65,8 +65,7 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop_stream,
 )
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
-from gateway.services.tools import Dialect
-from gateway.services.web_search_budget import WebSearchBudget
+from gateway.services.tools import Dialect, ToolUseBudget
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 
@@ -399,15 +398,15 @@ class _ResponsesAdapter:
         on_first_response: Callable[[], None] | None = None,
         *,
         native_tools: frozenset[str] = frozenset(),
-        web_search_budget: WebSearchBudget | None = None,
+        use_budget: ToolUseBudget | None = None,
     ) -> ResponsesResponse:
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
         # the platform-attempt path so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
         if native_tools:
             extra["native_tools"] = native_tools
         return await responses_tool_loop(
@@ -424,11 +423,11 @@ class _ResponsesAdapter:
         max_iterations: int,
         *,
         native_tools: frozenset[str] = frozenset(),
-        web_search_budget: WebSearchBudget | None = None,
+        use_budget: ToolUseBudget | None = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
         extra: dict[str, Any] = {}
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
         if native_tools:
             extra["native_tools"] = native_tools
         return responses_tool_loop_stream(

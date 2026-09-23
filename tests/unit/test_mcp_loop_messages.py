@@ -42,10 +42,14 @@ from gateway.services.tool_format import (
     inject_purpose_hints_anthropic,
     openai_to_anthropic_tools,
 )
-from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX
+from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, ToolUseBudget
 from gateway.services.web_retrieval_backend import WEB_RETRIEVAL_RESULT_MAX_BYTES, WEB_SEARCH_TOOL_NAME
-from gateway.services.web_search_budget import WebSearchBudget
 from gateway.types.code_execution import ResultBlock
+
+
+def _use_budget(max_uses: int) -> ToolUseBudget:
+    """A cap on the gateway's own searches, which is the tool these loops run."""
+    return ToolUseBudget(WEB_SEARCH_TOOL_NAME, max_uses)
 
 
 class _FakePool:
@@ -1583,7 +1587,7 @@ async def test_native_max_uses_stops_further_searches_and_reports_an_error(
         pool=cast(Any, pool),
         max_iterations=5,
         native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
-        web_search_budget=WebSearchBudget(1),
+        use_budget=_use_budget(1),
     )
 
     assert pool.calls == [("web_search", {"query": "first"})]
@@ -1647,7 +1651,7 @@ async def test_stream_native_max_uses_stops_further_searches_and_reports_an_erro
             pool=cast(Any, pool),
             max_iterations=5,
             native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
-            web_search_budget=WebSearchBudget(1),
+            use_budget=_use_budget(1),
         )
     ]
 
@@ -1690,7 +1694,7 @@ async def test_native_max_uses_error_block_is_anthropic_schema_only(
         pool=cast(Any, _FakeSearchPool()),
         max_iterations=5,
         native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
-        web_search_budget=WebSearchBudget(1),
+        use_budget=_use_budget(1),
     )
 
     error_content = cast(Any, cast(Any, result.content[3]).content)
@@ -1722,7 +1726,7 @@ async def test_native_max_uses_is_not_spent_by_a_failed_search(
         pool=cast(Any, pool),
         max_iterations=5,
         native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
-        web_search_budget=WebSearchBudget(1),
+        use_budget=_use_budget(1),
     )
 
     assert pool.calls == [("web_search", {"query": "first"}), ("web_search", {"query": "second"})]
@@ -2021,7 +2025,7 @@ async def test_stream_mixed_batch_exit_still_honors_the_cap(
             pool=cast(Any, pool),
             max_iterations=5,
             native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
-            web_search_budget=WebSearchBudget(1),
+            use_budget=_use_budget(1),
         )
     ]
 

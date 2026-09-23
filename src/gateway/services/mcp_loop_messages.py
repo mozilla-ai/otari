@@ -48,8 +48,15 @@ from gateway.services.mcp_loop import (
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecution
 from gateway.services.tool_format import openai_to_anthropic_tools
 from gateway.services.tool_usage import is_tool_error
-from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, Dialect, NativeCall, native_rendering
-from gateway.services.web_search_budget import MAX_USES_EXCEEDED_ERROR, WebSearchBudget, is_capped_search
+from gateway.services.tools import (
+    MAX_USES_EXCEEDED_ERROR,
+    SERVER_TOOL_USE_ID_PREFIX,
+    Dialect,
+    NativeCall,
+    ToolUseBudget,
+    is_capped_call,
+    native_rendering,
+)
 
 if TYPE_CHECKING:
     from any_llm.types.messages import (
@@ -185,7 +192,7 @@ async def _execute_tool_uses(
     blocks: list[Any],
     *,
     native_blocks: list[Any] | None = None,
-    budget: WebSearchBudget | None = None,
+    budget: ToolUseBudget | None = None,
 ) -> list[dict[str, Any]]:
     """Run each owned tool_use block and return the Anthropic tool_result blocks.
 
@@ -203,7 +210,7 @@ async def _execute_tool_uses(
     out: list[dict[str, Any]] = []
     for block in blocks:
         arguments = dict(block.input or {})
-        capped = is_capped_search(budget, pool, block.name)
+        capped = is_capped_call(budget, pool, block.name)
         if capped and budget is not None and budget.exhausted():
             out.append(_max_uses_exceeded_result(NativeCall(block.name, block.id, arguments), native_blocks))
             continue
@@ -419,7 +426,7 @@ async def _execute_stream_owned_events(
     *,
     emit_mcp_activity: bool,
     native_blocks: list[Any] | None = None,
-    budget: WebSearchBudget | None = None,
+    budget: ToolUseBudget | None = None,
 ) -> AsyncGenerator[MessageStreamEvent, None]:
     """Execute owned calls and optionally yield MCP activity representations.
 
@@ -429,7 +436,7 @@ async def _execute_stream_owned_events(
     for spec in state.owned_specs:
         name = str(spec["name"])
         parsed_input = _parsed_stream_input(state, spec)
-        capped = is_capped_search(budget, pool, name)
+        capped = is_capped_call(budget, pool, name)
         if capped and budget is not None and budget.exhausted():
             results.append(_max_uses_exceeded_result(NativeCall(name, spec["id"], parsed_input), native_blocks))
             continue
@@ -490,7 +497,7 @@ class _MessagesToolLoopStrategy:
         *,
         native_tools: frozenset[str] = frozenset(),
         emit_native_mcp: bool = False,
-        budget: WebSearchBudget | None = None,
+        budget: ToolUseBudget | None = None,
         container: ContainerLease | None = None,
     ) -> None:
         # The gateway-run tools this caller declared in Anthropic's own words, so
@@ -812,12 +819,12 @@ class _MessagesToolLoopStrategy:
     def synthetic_events(
         self, state: _MessagesStreamState, acc: _MessagesStreamAccumulator
     ) -> list[Any]:
-        """Announce this iteration's gateway-run searches as native content blocks.
+        """Announce this iteration's gateway-run calls as native content blocks.
 
-        The model's own ``tool_use`` events were swallowed, so a
-        ``server_tool_use`` / ``web_search_tool_result`` pair takes their place for a
-        caller that declared the tool natively. MCP activity is yielded directly
-        around execution and therefore does not pass through this deferred hook.
+        The model's own ``tool_use`` events were swallowed, so each tool's native
+        server-tool blocks take their place for a caller that declared the tool
+        natively. MCP activity is yielded directly around execution and therefore does
+        not pass through this deferred hook.
 
         Each block gets a ``content_block_start`` carrying the complete block plus a
         ``content_block_stop``, and no ``input_json_delta``: the SDK accumulator
@@ -880,7 +887,7 @@ def _attach_container(event: Any, lease: ContainerLease) -> None:
 
 def _strategy_for(
     native_tools: frozenset[str],
-    budget: WebSearchBudget | None,
+    budget: ToolUseBudget | None,
     *,
     emit_native_mcp: bool = False,
     container: ContainerLease | None = None,
@@ -908,7 +915,7 @@ async def anthropic_tool_loop(
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
     native_tools: frozenset[str] = frozenset(),
-    web_search_budget: WebSearchBudget | None = None,
+    use_budget: ToolUseBudget | None = None,
     container: ContainerLease | None = None,
 ) -> MessageResponse:
     """Non-streaming Anthropic Messages tool-use loop.
@@ -936,7 +943,7 @@ async def anthropic_tool_loop(
     request holds, reported on the returned message.
     """
     return await run_tool_loop(
-        strategy=_strategy_for(native_tools, web_search_budget, container=container),
+        strategy=_strategy_for(native_tools, use_budget, container=container),
         completion_kwargs=completion_kwargs,
         pool=pool,
         max_iterations=max_iterations,
@@ -951,7 +958,7 @@ async def anthropic_tool_loop_stream(
     max_iterations: int,
     native_tools: frozenset[str] = frozenset(),
     emit_native_mcp: bool = False,
-    web_search_budget: WebSearchBudget | None = None,
+    use_budget: ToolUseBudget | None = None,
     container: ContainerLease | None = None,
 ) -> AsyncGenerator[MessageStreamEvent, None]:
     """Streaming Anthropic Messages tool-use loop.
@@ -987,7 +994,7 @@ async def anthropic_tool_loop_stream(
         run_tool_loop_stream(
             strategy=_strategy_for(
                 native_tools,
-                web_search_budget,
+                use_budget,
                 emit_native_mcp=emit_native_mcp,
                 container=container,
             ),

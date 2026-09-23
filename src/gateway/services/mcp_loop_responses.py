@@ -45,8 +45,14 @@ from gateway.services.mcp_loop import (
 )
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecution
 from gateway.services.tool_format import openai_to_responses_tools
-from gateway.services.tools import Dialect, NativeCall, native_rendering
-from gateway.services.web_search_budget import MAX_USES_EXCEEDED_ERROR, WebSearchBudget, is_capped_search
+from gateway.services.tools import (
+    MAX_USES_EXCEEDED_ERROR,
+    Dialect,
+    NativeCall,
+    ToolUseBudget,
+    is_capped_call,
+    native_rendering,
+)
 
 if TYPE_CHECKING:
     from any_llm.types.responses import Response, ResponseStreamEvent
@@ -88,17 +94,17 @@ async def _execute_function_calls(
     pool: ToolBackend,
     items: list[Any],
     *,
-    budget: WebSearchBudget | None = None,
+    budget: ToolUseBudget | None = None,
     refused_call_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Run each owned function_call and return the Responses function_call_output items.
 
     Tool failures convert to a ``[tool error] ...`` string in the output so the
     model can recover. Only cancellation-class exceptions escape; same idiom
-    as :func:`gateway.services.mcp_loop._execute_mcp_calls`. A search past
-    ``budget`` is refused as one of those errors. When supplied,
-    ``refused_call_ids`` records that decision at its source so no native
-    ``web_search_call`` item claims a search that never ran.
+    as :func:`gateway.services.mcp_loop._execute_mcp_calls`. A call past ``budget``
+    is refused as one of those errors. When supplied, ``refused_call_ids`` records
+    that decision at its source, so a tool announces a refused call the way its own
+    rendering says to rather than as one that ran.
     """
     out: list[dict[str, Any]] = []
     for item in items:
@@ -106,7 +112,7 @@ async def _execute_function_calls(
             args = json.loads(item.arguments or "{}")
         except json.JSONDecodeError:
             args = {}
-        capped = is_capped_search(budget, pool, item.name)
+        capped = is_capped_call(budget, pool, item.name)
         if capped and budget is not None and budget.exhausted():
             if refused_call_ids is not None:
                 refused_call_ids.add(str(item.call_id))
@@ -333,7 +339,7 @@ async def _execute_stream_owned(
     state: "_ResponsesStreamState",
     pool: ToolBackend,
     *,
-    budget: WebSearchBudget | None = None,
+    budget: ToolUseBudget | None = None,
     emit_code_execution: bool = False,
 ) -> list[dict[str, Any]]:
     """Run the stream's gateway-owned function calls, returning their output items.
@@ -346,7 +352,7 @@ async def _execute_stream_owned(
     for spec in state.owned_specs:
         args = _parsed_arguments(spec.get("arguments"))
         call = NativeCall(str(spec["name"]), str(spec["call_id"]), args)
-        capped = is_capped_search(budget, pool, call.name)
+        capped = is_capped_call(budget, pool, call.name)
         if capped and budget is not None and budget.exhausted():
             state.native_items.extend(_native_items(call, pool, refused=True))
             results.append({"type": "function_call_output", "call_id": call.id, "output": MAX_USES_EXCEEDED_ERROR})
@@ -443,7 +449,7 @@ class _ResponsesToolLoopStrategy:
 
     transcript_key = "input_data"
 
-    def __init__(self, *, budget: WebSearchBudget | None = None, native_tools: frozenset[str] = frozenset()) -> None:
+    def __init__(self, *, budget: ToolUseBudget | None = None, native_tools: frozenset[str] = frozenset()) -> None:
         # Absent unless the caller capped the searches, which keeps the shared
         # instance in ``_strategy_for`` free of per-request state.
         self._budget = budget
@@ -822,7 +828,7 @@ _RESPONSES_STRATEGY = _ResponsesToolLoopStrategy()
 
 
 def _strategy_for(
-    budget: WebSearchBudget | None, *, native_tools: frozenset[str] = frozenset()
+    budget: ToolUseBudget | None, *, native_tools: frozenset[str] = frozenset()
 ) -> _ResponsesToolLoopStrategy:
     """The shared strategy, or a per-request one when either option is set.
 
@@ -841,7 +847,7 @@ async def responses_tool_loop(
     pool: ToolBackend,
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
-    web_search_budget: WebSearchBudget | None = None,
+    use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
 ) -> Response:
     """Non-streaming OpenAI Responses tool-use loop.
@@ -866,7 +872,7 @@ async def responses_tool_loop(
     reasoning items that can't be replayed against another provider.
     """
     return await run_tool_loop(
-        strategy=_strategy_for(web_search_budget, native_tools=native_tools),
+        strategy=_strategy_for(use_budget, native_tools=native_tools),
         completion_kwargs=completion_kwargs,
         pool=pool,
         max_iterations=max_iterations,
@@ -879,7 +885,7 @@ async def responses_tool_loop_stream(
     completion_kwargs: dict[str, Any],
     pool: ToolBackend,
     max_iterations: int,
-    web_search_budget: WebSearchBudget | None = None,
+    use_budget: ToolUseBudget | None = None,
     native_tools: frozenset[str] = frozenset(),
 ) -> AsyncGenerator[ResponseStreamEvent, None]:
     """Streaming OpenAI Responses tool-use loop.
@@ -901,7 +907,7 @@ async def responses_tool_loop_stream(
     # instead of waiting for event-loop async-generator finalization.
     async with aclosing(
         run_tool_loop_stream(
-            strategy=_strategy_for(web_search_budget, native_tools=native_tools),
+            strategy=_strategy_for(use_budget, native_tools=native_tools),
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,

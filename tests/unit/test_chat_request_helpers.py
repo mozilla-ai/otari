@@ -389,8 +389,8 @@ def test_a_zero_max_uses_caps_the_searches_at_none_rather_than_at_no_limit() -> 
     entry = {"type": "web_search_20250305", "max_uses": 0}
     ctx = _capped_context(entry)
     assert ctx.max_web_search_uses == 0
-    assert ctx.web_search_budget is not None
-    assert ctx.web_search_budget.exhausted(), "the first search must already be over the cap"
+    assert ctx.use_budget is not None
+    assert ctx.use_budget.exhausted(), "the first search must already be over the cap"
 
 
 def test_a_nonsensical_max_uses_is_refused_by_the_reader() -> None:

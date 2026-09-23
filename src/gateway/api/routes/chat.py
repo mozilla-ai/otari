@@ -67,8 +67,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop,
     mcp_tool_loop_stream,
 )
-from gateway.services.tools import Dialect
-from gateway.services.web_search_budget import WebSearchBudget
+from gateway.services.tools import Dialect, ToolUseBudget
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 from gateway.types.session_principal import SessionPrincipal
@@ -277,21 +276,21 @@ class _ChatAdapter:
         on_first_response: Callable[[], None] | None = None,
         *,
         native_tools: frozenset[str] = frozenset(),
-        web_search_budget: WebSearchBudget | None = None,
+        use_budget: ToolUseBudget | None = None,
     ) -> ChatCompletion:
         # ``native_tools`` is accepted for interface parity and always empty: this
         # format has no native vocabulary for a server-side tool call, so a
         # gateway-run search or execution stays invisible on the wire (see
         # docs/tools.md).
-        # ``web_search_budget`` is not: the cap bounds what the caller is billed
+        # ``use_budget`` is not: the cap bounds what the caller is billed
         # for, which every format owes whether or not it can describe the search.
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
         # the platform-attempt path so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
         return await mcp_tool_loop(
             completion_kwargs=kwargs,
             pool=pool,
@@ -306,11 +305,11 @@ class _ChatAdapter:
         max_iterations: int,
         *,
         native_tools: frozenset[str] = frozenset(),
-        web_search_budget: WebSearchBudget | None = None,
+        use_budget: ToolUseBudget | None = None,
     ) -> AsyncIterator[ChatCompletionChunk]:
         extra: dict[str, Any] = {}
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
         return mcp_tool_loop_stream(
             completion_kwargs=kwargs,
             pool=pool,

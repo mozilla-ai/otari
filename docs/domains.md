@@ -230,7 +230,7 @@ retrieval and code execution.
 - Services: `_tool_loop.py`, `tools/`, `mcp_loop.py`, `mcp_loop_messages.py`,
   `mcp_loop_responses.py`, `mcp_client.py`, `mcp_stateless.py`,
   `sandbox_backend.py`, `search_backend.py`, `web_search_backend.py`,
-  `web_search_budget.py`, `web_search_providers.py`, `web_extraction.py`,
+  `web_search_providers.py`, `web_extraction.py`,
   `web_fetch_service.py`, `web_retrieval_backend.py`,
   `web_retrieval_network.py`, `web_retrieval_policy.py`,
   `search_tool_store_service.py`, `tool_settings_service.py`,

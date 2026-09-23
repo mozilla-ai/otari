@@ -1700,10 +1700,10 @@ def test_intercept_routes_provider_keywords_to_the_gateway_backend(
         pool: Any,
         max_iterations: int,
         native_tools: frozenset[str] = frozenset(),
-        web_search_budget: Any = None,
+        use_budget: Any = None,
     ) -> MessageResponse:
         pool_seen.append(pool)
-        budgets_seen.append(web_search_budget)
+        budgets_seen.append(use_budget)
         return _text_response("via-web-search-loop")
 
     fake_backend = AsyncMock()

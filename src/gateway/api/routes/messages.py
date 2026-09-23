@@ -79,8 +79,7 @@ from gateway.services.mcp_loop_messages import (
 )
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
-from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, Dialect
-from gateway.services.web_search_budget import WebSearchBudget
+from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, Dialect, ToolUseBudget
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 
@@ -623,7 +622,7 @@ class _MessagesAdapter:
         on_first_response: Callable[[], None] | None = None,
         *,
         native_tools: frozenset[str] = frozenset(),
-        web_search_budget: WebSearchBudget | None = None,
+        use_budget: ToolUseBudget | None = None,
         container: ContainerLease | None = None,
     ) -> MessageResponse:
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
@@ -631,8 +630,8 @@ class _MessagesAdapter:
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
         if native_tools:
             extra["native_tools"] = native_tools
         if container is not None:
@@ -652,15 +651,15 @@ class _MessagesAdapter:
         max_iterations: int,
         *,
         native_tools: frozenset[str] = frozenset(),
-        web_search_budget: WebSearchBudget | None = None,
+        use_budget: ToolUseBudget | None = None,
         container: ContainerLease | None = None,
     ) -> AsyncIterator[MessageStreamEvent]:
         provider_kwargs, emit_native_mcp = _split_client_betas(kwargs)
         extra: dict[str, Any] = {}
         if emit_native_mcp:
             extra["emit_native_mcp"] = True
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
         if native_tools:
             extra["native_tools"] = native_tools
         if container is not None:
