@@ -201,10 +201,6 @@ wheels = [
 ]
 
 [package.optional-dependencies]
-e2b = [
-    { name = "e2b", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "e2b-code-interpreter", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-]
 vertex = [
     { name = "google-auth", extra = ["requests"] },
 ]
@@ -709,8 +705,8 @@ name = "connectrpc"
 version = "0.11.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "protobuf-py", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "pyqwest", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "protobuf-py" },
+    { name = "pyqwest" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/8b/b5/63e14ab9d4d4cc58818562db4120a35fa7454e3035633da41bdc6b712abd/connectrpc-0.11.1.tar.gz", hash = "sha256:18277f7838847b4271ca38d40c7d2387b5a2ea6a29f240689c19e1ec84aaff66", size = 46222, upload-time = "2026-07-15T06:33:31.601Z" }
 wheels = [
@@ -913,18 +909,18 @@ name = "e2b"
 version = "2.51.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "attrs", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "connectrpc", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "dockerfile-parse", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "h2", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "httpx", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "packaging", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "protobuf-py", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "pyqwest", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "python-dateutil", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "rich", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "typing-extensions", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "wcmatch", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "attrs" },
+    { name = "connectrpc" },
+    { name = "dockerfile-parse" },
+    { name = "h2" },
+    { name = "httpx" },
+    { name = "packaging" },
+    { name = "protobuf-py" },
+    { name = "pyqwest" },
+    { name = "python-dateutil" },
+    { name = "rich" },
+    { name = "typing-extensions" },
+    { name = "wcmatch" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/44/04/31a10aad90c6d9a55cd2f638b47b92fd867cc188127bc5087809b2b67628/e2b-2.51.0.tar.gz", hash = "sha256:902ee861b30c8ec3e46e7f84db8c993f30695872c7b4490efaad1627ec6e08ba", size = 229124, upload-time = "2026-09-18T12:06:54.814Z" }
 wheels = [
@@ -936,9 +932,9 @@ name = "e2b-code-interpreter"
 version = "2.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "attrs", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "e2b", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "httpx", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "attrs" },
+    { name = "e2b" },
+    { name = "httpx" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c9/57/fbe0361dfc925d22d2d67c5763f7c32b1bf9a9a97ad2d1537e70f951cb67/e2b_code_interpreter-2.10.0.tar.gz", hash = "sha256:57fb7f9b9ad99ebbdf407619786fdb84e31537c2fbc8358c394aa0f0cbc1af28", size = 12164, upload-time = "2026-09-09T10:29:51.639Z" }
 wheels = [
@@ -1163,8 +1159,8 @@ dependencies = [
 
 [package.optional-dependencies]
 e2b = [
-    { name = "e2b", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "e2b-code-interpreter", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "e2b" },
+    { name = "e2b-code-interpreter" },
 ]
 fsspec = [
     { name = "fsspec" },
@@ -1209,14 +1205,14 @@ requires-dist = [
     { name = "click", specifier = ">=8.1.0" },
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "dnspython", specifier = ">=2.7.0" },
-    { name = "e2b-code-interpreter", marker = "extra == 'e2b'", specifier = ">=2.0.0" },
     { name = "e2b", marker = "extra == 'e2b'", specifier = ">=2.0.0" },
+    { name = "e2b-code-interpreter", marker = "extra == 'e2b'", specifier = ">=2.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "fsspec", marker = "extra == 'fsspec'", specifier = ">=2024.6.0" },
     { name = "genai-prices", specifier = ">=0.1.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "idna", specifier = ">=3.10" },
-    { name = "markitdown", extras = ["docx", "pptx", "xlsx", "pdf"], specifier = ">=0.1.0" },
+    { name = "markitdown", extras = ["docx", "pptx", "xlsx", "pdf"], specifier = ">=0.1.7" },
     { name = "mcp", specifier = ">=1.28.1,<1.29.0" },
     { name = "numpy", marker = "extra == 'ocr'", specifier = ">=1.26.0" },
     { name = "opentelemetry-api", specifier = ">=1.39.1" },
@@ -2166,7 +2162,7 @@ wheels = [
 
 [[package]]
 name = "markitdown"
-version = "0.1.6"
+version = "0.1.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -2176,9 +2172,9 @@ dependencies = [
     { name = "markdownify" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/18/b7/91fe0e2df07107ab701a15c8ad3213135707e4d6206ae9bd8f457a7ad86a/markitdown-0.1.6.tar.gz", hash = "sha256:e5bdbaffd971b29598c7c39ef0e9afce2f08c0751fbfa4e4257678ebaf8cfc7e", size = 50795, upload-time = "2026-05-26T22:43:59.318Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/93/e8a4af0c47551beb6383e226e840cbc811a577b8096eb385251b3fcc8f62/markitdown-0.1.7.tar.gz", hash = "sha256:4d1f3c69cd43b82288fdc3653686d759dcf355ee7c681aa6a855aed98a1e4f44", size = 51767, upload-time = "2026-07-29T18:20:31.496Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/30/8031f183ee86ea8ac4e7ea1296bab4cca1bee2fd036a26df69764eb7ca74/markitdown-0.1.6-py3-none-any.whl", hash = "sha256:07b2d5bf87b5c53e13a9f2fdc440df8ccc85e26f40c1e557781727b700049775", size = 70032, upload-time = "2026-05-26T22:44:03.209Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/16/51d269a754d690ec31d3faa0686c8c14ac955dbc0580c358f256ba3391ec/markitdown-0.1.7-py3-none-any.whl", hash = "sha256:4eca912c87c6aa6897284a7f4bf6769a23bccf8544530f5d8b175fbe3797c916", size = 71093, upload-time = "2026-07-29T18:20:30.226Z" },
 ]
 
 [package.optional-dependencies]
@@ -2954,7 +2950,7 @@ name = "protobuf-py"
 version = "0.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "protobuf-py-ext", marker = "(platform_machine == 'arm64' and platform_python_implementation == 'CPython' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (platform_machine == 'x86_64' and platform_python_implementation == 'CPython' and sys_platform == 'linux')" },
+    { name = "protobuf-py-ext", marker = "(platform_machine == 'arm64' and platform_python_implementation == 'CPython' and sys_platform != 'linux') or (platform_machine == 'aarch64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (platform_machine == 'x86_64' and platform_python_implementation == 'CPython' and sys_platform == 'linux')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/72/ed/02fd902d9c51b7ff53dfc9a745eb11490722edfd30073af889e171f07b8e/protobuf_py-0.1.1.tar.gz", hash = "sha256:6bd08ac4d8f1661965bbe2685429d79043704cdd1ee720a7a89617331742240b", size = 133525, upload-time = "2026-06-24T19:02:15.271Z" }
 wheels = [
@@ -3240,7 +3236,7 @@ name = "pyqwest"
 version = "0.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "opentelemetry-api", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "opentelemetry-api" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/07/ee/0ff9facfa9e7a4f6df2a770d4eaf1ad0f74165da7e8c28e888461f07604c/pyqwest-0.10.0.tar.gz", hash = "sha256:6c1a693be17d57d2c2eca4085e32c2809c53090c16719a907c90ebcf1f40dc01", size = 482248, upload-time = "2026-08-21T06:09:20.656Z" }
 wheels = [
@@ -4236,7 +4232,7 @@ name = "wcmatch"
 version = "11.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "bracex", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "bracex" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/57/43/30e407989e313677dbb9d5f045f966549a7254834571e342eaa4b55cc67b/wcmatch-11.0.1.tar.gz", hash = "sha256:1ea2b4fa678b8ca268253798d5963935df39132d47c3e241c0a0732224005e7d", size = 144662, upload-time = "2026-08-14T15:20:40.477Z" }
 wheels = [

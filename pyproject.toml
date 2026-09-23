@@ -59,7 +59,7 @@ dependencies = [
     # is IDNA2003 and folds `faß.de` into `fass.de`, which would let a proof
     # taken on one domain admit addresses at another.
     "idna>=3.10",
-    "markitdown[docx,pptx,xlsx,pdf]>=0.1.0",
+    "markitdown[docx,pptx,xlsx,pdf]>=0.1.7",
     # Pinned to one minor line, not just below the next major. The major
     # ceiling is #689: mcp 2.0 removed
     # `mcp.client.streamable_http.streamablehttp_client`, which
