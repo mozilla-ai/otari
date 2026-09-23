@@ -316,10 +316,12 @@ export function FormDialog({
                       </Button>
                       <Button
                         variant="danger"
-                        onPress={() => {
-                          setIsGuarding(false)
-                          onOpenChange(false)
-                        }}
+                        // The guard stays up until the dialog has closed (the
+                        // effect above clears it). Cleared here, the footer
+                        // swaps back mid-press and React reuses this button as
+                        // the submit, so the click that ends the press saves
+                        // the form being discarded.
+                        onPress={() => onOpenChange(false)}
                       >
                         Discard
                       </Button>

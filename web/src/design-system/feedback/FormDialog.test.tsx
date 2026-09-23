@@ -411,6 +411,26 @@ describe("FormDialog", () => {
       expect(onOpenChange).toHaveBeenCalledWith(false)
     })
 
+    it("does not submit the form it discards", async () => {
+      // Discard sits where the submit sits, and React reuses that button. If
+      // the footer swapped back before the press finished, the click that
+      // follows it landed on a button that was now the submit, and the form
+      // it was discarding got saved.
+      const onSubmit = vi.fn()
+      const user = userEvent.setup()
+      render(
+        // Held open, as a parent's exit animation holds it.
+        <FormDialog {...base} isOpen isDirty onSubmit={onSubmit}>
+          {withField}
+        </FormDialog>,
+      )
+      await user.click(screen.getByRole("button", { name: "Close" }))
+      await user.click(screen.getByRole("button", { name: "Discard" }))
+
+      expect(onSubmit).not.toHaveBeenCalled()
+      expect(screen.queryByRole("button", { name: "Create key" })).toBeNull()
+    })
+
     it("returns the footer to its actions on Keep editing", async () => {
       const user = userEvent.setup()
       render(
