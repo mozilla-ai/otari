@@ -23,8 +23,9 @@ from gateway.log_config import logger
 from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.repositories.files import FilePageQuery, FileRepositories
-from gateway.services.file_service import expiry_for, guess_mime_type
 from gateway.services.files._file_ids import could_name_a_file, file_id_in, page_token
+from gateway.services.files._metadata import expiry_for, guess_mime_type
+from gateway.services.files._staging import StagedFile
 
 # Resolves the workspace a deployment-wide write lands in. It belongs to the
 # organizations domain, so files receives it rather than looking it up.
@@ -249,6 +250,27 @@ class FileService:
             logger.error("Failed to read blob for file %s (ref=%s): %s", file_id, record.storage_ref, exc)
             raise FileStorageError(f"Could not read the bytes of {file_id}") from exc
         return FileContent(chunks=chunks, filename=record.filename, mime_type=record.mime_type)
+
+    async def staged_upload(self, file_id: str, scope: FileScope) -> StagedFile | None:
+        """The stored upload under ``file_id``, ready to be read or handed to a sandbox, or None.
+
+        None whenever the file cannot be served to this caller, and for a row
+        whose bytes are not in the store, so that a reference to one is dropped
+        rather than failing the request that carried it.
+
+        It answers whether or not the deployment serves the Files API, because
+        it resolves a reference a request already holds rather than serving that
+        API, and its caller has a switch of its own.
+        """
+        async with self._uow:
+            record = await self._files.live(file_id, scope.user_id, workspace_id=scope.workspace_id)
+        if record is None or record.storage_ref is None:
+            return None
+        return StagedFile(record.id, record.filename, record.mime_type, record.storage_ref)
+
+    async def read_bytes(self, staged: StagedFile) -> bytes:
+        """The whole of a staged upload's bytes."""
+        return await self._file_store.get(staged.storage_ref)
 
     async def discard(self, file_id: str, scope: FileScope) -> None:
         """Stop serving the file and give its bytes back.

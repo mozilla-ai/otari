@@ -19,9 +19,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.repositories.files import FileRepository
-from gateway.services import file_service
-from gateway.services.files import ProviderFile, SandboxFileBridge
-from gateway.services.files.provider_files import FileOverBudgetError, ProviderFileUnavailableError
+from gateway.services.files import CODE_EXECUTION_OUTPUT_PURPOSE, ProviderFile, SandboxFileBridge
+from gateway.services.files._provider_files import FileOverBudgetError, ProviderFileUnavailableError
 
 
 class _MemoryStore:
@@ -142,7 +141,7 @@ async def test_store_output_streams_the_file_in_and_writes_its_row() -> None:
         file_id,
         "chart.png",
         7,
-        file_service.CODE_EXECUTION_OUTPUT_PURPOSE,
+        CODE_EXECUTION_OUTPUT_PURPOSE,
     )
 
 
@@ -226,7 +225,7 @@ def _stub_provider(
 ) -> _StubProviderClient:
     client = _StubProviderClient(files, delay)
     monkeypatch.setattr(
-        "gateway.services.files.sandbox_bridge.ProviderFileClient.for_run", lambda *args, **kwargs: client
+        "gateway.services.files._sandbox_bridge.ProviderFileClient.for_run", lambda *args, **kwargs: client
     )
     return client
 
@@ -255,7 +254,7 @@ async def test_a_provider_file_is_copied_under_the_providers_id(monkeypatch: pyt
     assert (record.provider, record.provider_instance, record.purpose) == (
         "anthropic",
         "anthropic-eu",
-        file_service.CODE_EXECUTION_OUTPUT_PURPOSE,
+        CODE_EXECUTION_OUTPUT_PURPOSE,
     )
     # The blob key is Otari's own, never the provider's ID.
     assert record.storage_ref != "file_01chart"
@@ -353,7 +352,7 @@ async def test_no_credential_copies_nothing_and_never_raises(monkeypatch: pytest
     def _no_credential(*args: Any, **kwargs: Any) -> Any:
         raise LookupError("no credential configured for provider 'anthropic'")
 
-    monkeypatch.setattr("gateway.services.files.sandbox_bridge.ProviderFileClient.for_run", _no_credential)
+    monkeypatch.setattr("gateway.services.files._sandbox_bridge.ProviderFileClient.for_run", _no_credential)
     store = _MemoryStore()
 
     await _copy(_bridge(store), "file_01a")
@@ -391,7 +390,7 @@ async def test_a_file_cited_again_in_one_request_is_tried_once(monkeypatch: pyte
 
 @pytest.mark.asyncio
 async def test_the_copy_stops_at_the_time_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("gateway.services.files.sandbox_bridge._PROVIDER_COPY_SECONDS", 0.05)
+    monkeypatch.setattr("gateway.services.files._sandbox_bridge._PROVIDER_COPY_SECONDS", 0.05)
     _stub_provider(monkeypatch, {"file_01slow": b"a", "file_01next": b"b"}, delay=1.0)
     store = _MemoryStore()
     db = _FakeDb()

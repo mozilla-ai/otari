@@ -16,8 +16,6 @@ import uuid
 from typing import Any
 
 from any_llm import LLMProvider
-from fastapi import Request
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.routes._tools import (
     _extract_code_execution_tool,
@@ -31,6 +29,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.tools import CodeExecutor
 from gateway.services.content_normalizer import NormalizationStats, WireFormat, normalize_messages
+from gateway.services.files import FileService
 from gateway.services.model_capabilities import resolve_capabilities
 
 
@@ -79,8 +78,7 @@ async def normalize_request_messages(
     config: GatewayConfig,
     provider: LLMProvider | None,
     model: str,
-    db: AsyncSession | None,
-    raw_request: Request,
+    files: FileService | None,
     user_id: str | None,
     instance: str | None = None,
     workspace_id: uuid.UUID | None = None,
@@ -105,14 +103,12 @@ async def normalize_request_messages(
         return messages, NormalizationStats()
     try:
         caps = resolve_capabilities(config, provider, model, instance=instance)
-        file_store = getattr(raw_request.app.state, "file_store", None)
         return await normalize_messages(
             messages,
             config=config,
             caps=caps,
             fmt=fmt,
-            db=db,
-            file_store=file_store,
+            files=files,
             user_id=user_id,
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,

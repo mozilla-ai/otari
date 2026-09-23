@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     CodeExecutionPortDep,
     ModelProviderPortDep,
+    build_file_service,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
@@ -58,7 +59,7 @@ from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.models.tools import CodeExecutor
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.model_provider_port import ModelProviderPort
-from gateway.services.file_service import StagedFile
+from gateway.services.files import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
     MAX_TOOL_ITERATIONS_CAP,
@@ -467,6 +468,8 @@ async def run_chat_completion(
     # sandbox session once the billed user and workspace are resolved.
     sandbox_inputs: list[StagedFile] = []
 
+    files = build_file_service(raw_request=raw_request, config=config, uow=uow, db=db)
+
     async def _normalize(
         user_id: str,
         provider: LLMProvider | None,
@@ -485,8 +488,7 @@ async def run_chat_completion(
             config=config,
             provider=provider,
             model=model,
-            db=db,
-            raw_request=raw_request,
+            files=files,
             user_id=user_id,
             instance=instance,
             workspace_id=workspace_id,

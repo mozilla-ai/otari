@@ -13,19 +13,15 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.repositories.files import FileRepository, OutputFileRow
-from gateway.services.file_service import (
-    CODE_EXECUTION_OUTPUT_PURPOSE,
-    StagedFile,
-    expiry_for,
-    guess_mime_type,
-)
-from gateway.services.files.provider_files import (
+from gateway.services.files._metadata import expiry_for, guess_mime_type
+from gateway.services.files._provider_files import (
     FileOverBudgetError,
     ProviderFile,
     ProviderFileClient,
     ProviderFileUnavailableError,
     serves_files,
 )
+from gateway.services.files._staging import CODE_EXECUTION_OUTPUT_PURPOSE, StagedFile
 
 # A missing credential or a database failure, which stop a copy before it starts.
 _COPY_SETUP_ERRORS: tuple[type[BaseException], ...] = (LookupError, ValueError, *DATABASE_ERRORS)

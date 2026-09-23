@@ -38,8 +38,7 @@ from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
-from gateway.services.file_service import StagedFile
-from gateway.services.files import FileService, SandboxFileBridge
+from gateway.services.files import FileService, SandboxFileBridge, StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.organization_pricing_service import OrganizationPricingService
@@ -638,6 +637,24 @@ async def get_db_if_needed(
     async with aclosing(get_db()) as sessions:
         async for db in sessions:
             yield db
+
+
+def build_file_service(
+    *,
+    raw_request: Request,
+    config: GatewayConfig,
+    uow: UnitOfWork | None,
+    db: AsyncSession | None,
+) -> FileService | None:
+    """The files service a completion request resolves its attachments through, or ``None``.
+
+    ``None`` in hybrid mode, which has no local database and no file store, so a
+    stored ``file_id`` cannot be resolved there at all.
+    """
+    file_store = getattr(raw_request.app.state, "file_store", None)
+    if uow is None or db is None or file_store is None:
+        return None
+    return FileService(uow, FileRepositories.on(uow), file_store, config, lambda: default_workspace_id(db))
 
 
 def build_sandbox_file_bridge(

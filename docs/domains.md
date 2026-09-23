@@ -62,8 +62,8 @@ since. A module "runs queries" when it imports a query builder (`select`,
 
 | Measure | Count |
 | --- | --- |
-| Service modules | 124, of which 65 sit flat at the top of `services/` |
-| Service modules that run queries | 37, plus 2 that only call `session.get` |
+| Service modules | 125, of which 64 sit flat at the top of `services/` |
+| Service modules that run queries | 35, plus 2 that only call `session.get` |
 | Route modules | 74 |
 | Route modules that run queries | 16, plus 1 that only calls `session.get` |
 | Route modules that define Pydantic models inline | 40 |
@@ -207,13 +207,13 @@ The bytes sit in a pluggable blob backend. The row holds the metadata and
 the reference to them.
 
 - Routes: `files.py`
-- Services: `files/`, `file_service.py`
+- Services: `files/`
+- Repositories: `files/`
 - Schemas: `files.py`
 - Exceptions: `files_exceptions.py`
-- Repositories: `files/`
+- Models: `files.py`
 - Ports: `file_storage_port.py`
 - Adapters: `file_storage_adapter.py`
-- Models: `files.py`
 
 The model never calls files, so it is not a tool. Inference normalizes an
 uploaded file into a request. Tools hands one to a sandbox and returns one

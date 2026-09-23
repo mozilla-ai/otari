@@ -327,10 +327,8 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/budgets/_reservations.py",
     "gateway/services/budgets/_retiming.py",
     "gateway/services/budgets/_scoped_enforcement.py",
-    "gateway/services/content_normalizer.py",
     "gateway/services/dashboard_session_service.py",
     "gateway/services/external_usage_service.py",
-    "gateway/services/file_service.py",
     "gateway/services/maintenance_mode_service.py",
     "gateway/services/master_key_service.py",
     "gateway/services/merged_catalog_service.py",
@@ -369,7 +367,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
 )
 ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/_helpers.py",
-    "gateway/api/routes/_normalize.py",
     "gateway/api/routes/_passthrough.py",
     "gateway/api/routes/_pipeline.py",
     "gateway/api/routes/admin.py",
@@ -729,7 +726,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/dashboard_session_service.py",
     "gateway/services/external_usage_service.py",
     "gateway/services/file_extractors.py",
-    "gateway/services/file_service.py",
     "gateway/services/guardrail_catalog.py",
     "gateway/services/guardrails.py",
     "gateway/services/log_writer.py",

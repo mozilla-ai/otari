@@ -982,7 +982,7 @@ class _FakeFiles:
 
 
 def _staged(file_id: str = "file-csv", filename: str = "data.csv") -> Any:
-    from gateway.services.file_service import StagedFile
+    from gateway.services.files import StagedFile
 
     return StagedFile(file_id, filename, "text/csv", f"x/{file_id}")
 

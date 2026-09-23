@@ -28,13 +28,11 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from any_llm.types.completion import CompletionUsage
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.ports.file_storage_port import FileStoragePort
 from gateway.services.file_extractors import extract_text_from_file, ocr_image, rasterize_pdf
-from gateway.services.file_service import StagedFile, fetch_file, read_file_bytes, sandbox_path_for
+from gateway.services.files import FileScope, FileService, StagedFile, sandbox_path_for
 from gateway.services.model_capabilities import Capabilities
 from gateway.services.vision import describe_image
 
@@ -163,8 +161,7 @@ class _Resolved:
 async def _resolve_from_ref(
     ref: dict[str, Any],
     *,
-    db: AsyncSession | None,
-    file_store: FileStoragePort | None,
+    files: FileService | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     read_bytes: bool = True,
@@ -177,17 +174,15 @@ async def _resolve_from_ref(
     """
     filename = ref.get("filename")
     file_id = ref.get("file_id")
-    if file_id and db is not None and file_store is not None:
-        record = await fetch_file(db, str(file_id), user_id, workspace_id=workspace_id)
-        if record is None:
-            logger.warning("content normalizer: file_id %s not found for user %s", file_id, user_id)
+    if file_id and files is not None:
+        # A request with no resolved user owns no file, so it resolves nothing.
+        scope = None if user_id is None else FileScope(user_id, workspace_id)
+        staged = None if scope is None else await files.staged_upload(str(file_id), scope)
+        if staged is None:
+            logger.warning("content normalizer: file_id %s not available to user %s", file_id, user_id)
             return None
-        if record.storage_ref is None:
-            logger.warning("content normalizer: file_id %s has no stored bytes", file_id)
-            return None
-        staged = StagedFile(record.id, record.filename, record.mime_type, record.storage_ref)
-        data = await read_file_bytes(file_store, record) if read_bytes else None
-        return _Resolved(data, record.mime_type, record.filename, staged)
+        data = await files.read_bytes(staged) if read_bytes else None
+        return _Resolved(data, staged.mime_type, staged.filename, staged)
 
     url = ref.get("file_data") or ref.get("url")
     if isinstance(url, str) and url.startswith("data:"):
@@ -201,8 +196,7 @@ async def _classify(
     block: dict[str, Any],
     fmt: WireFormat,
     *,
-    db: AsyncSession | None,
-    file_store: FileStoragePort | None,
+    files: FileService | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     sandbox_requested: bool = False,
@@ -216,8 +210,7 @@ async def _classify(
         # block falls back to being a document the model reads.
         resolved = await _resolve_from_ref(
             block,
-            db=db,
-            file_store=file_store,
+            files=files,
             user_id=user_id,
             workspace_id=workspace_id,
             read_bytes=not sandbox_requested,
@@ -235,7 +228,7 @@ async def _classify(
                 return _Source(_IMAGE, data, src.get("media_type", "image/png"), None, None)
             if src.get("type") == "file":
                 resolved = await _resolve_from_ref(
-                    src, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
+                    src, files=files, user_id=user_id, workspace_id=workspace_id
                 )
                 if resolved:
                     return resolved.source(_IMAGE)
@@ -245,7 +238,7 @@ async def _classify(
         url = image_url.get("url") if isinstance(image_url, dict) else image_url
         if block.get("file_id"):
             resolved = await _resolve_from_ref(
-                block, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
+                block, files=files, user_id=user_id, workspace_id=workspace_id
             )
             if resolved:
                 return resolved.source(_IMAGE)
@@ -267,14 +260,14 @@ async def _classify(
                 return _Source(_DOCUMENT, data, src.get("media_type", "application/pdf"), None, None)
             if src.get("type") == "file":
                 resolved = await _resolve_from_ref(
-                    src, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
+                    src, files=files, user_id=user_id, workspace_id=workspace_id
                 )
                 if resolved:
                     return resolved.source(_DOCUMENT)
             return _Source(_DOCUMENT, None, "application/pdf", None, src.get("url"))
         ref = block.get("file", block) if btype == "file" else block
         resolved = await _resolve_from_ref(
-            ref, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
+            ref, files=files, user_id=user_id, workspace_id=workspace_id
         )
         if resolved:
             return resolved.source(_DOCUMENT)
@@ -372,8 +365,7 @@ async def _normalize_block(
     config: GatewayConfig,
     stats: NormalizationStats,
     *,
-    db: AsyncSession | None,
-    file_store: FileStoragePort | None,
+    files: FileService | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     sandbox_requested: bool = False,
@@ -384,8 +376,7 @@ async def _normalize_block(
         src = await _classify(
             block,
             fmt,
-            db=db,
-            file_store=file_store,
+            files=files,
             user_id=user_id,
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
@@ -451,8 +442,7 @@ async def normalize_messages(
     config: GatewayConfig,
     caps: Capabilities,
     fmt: WireFormat,
-    db: AsyncSession | None,
-    file_store: FileStoragePort | None,
+    files: FileService | None,
     user_id: str | None,
     workspace_id: uuid.UUID | None = None,
     sandbox_requested: bool = False,
@@ -487,8 +477,7 @@ async def normalize_messages(
             caps,
             config,
             stats,
-            db=db,
-            file_store=file_store,
+            files=files,
             user_id=user_id,
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,

@@ -37,7 +37,7 @@ from openai.types.responses.response_output_item_done_event import ResponseOutpu
 
 from gateway.log_config import logger
 from gateway.services._tool_loop import StreamAction, run_tool_loop, run_tool_loop_stream
-from gateway.services.file_service import guess_mime_type
+from gateway.services.files import guess_mime_type
 from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
