@@ -19,6 +19,7 @@ from any_llm.types.files import AsyncFileDownload
 from gateway.services.files.provider_files import (
     _TIMEOUT,
     FileOverBudgetError,
+    ProviderCredential,
     ProviderFile,
     ProviderFileClient,
     ProviderFileUnavailableError,
@@ -102,7 +103,9 @@ def test_only_providers_otari_can_read_back_are_recorded() -> None:
 
 
 def test_openai_download_is_keyed_on_the_container() -> None:
-    url, headers = _container_file_request(ProviderFile(file_id="cfile_1", container_id="cntr_1"), "sk-test", None)
+    url, headers = _container_file_request(
+        ProviderFile(file_id="cfile_1", container_id="cntr_1"), ProviderCredential(api_key="sk-test")
+    )
 
     assert url == "https://api.openai.com/v1/containers/cntr_1/files/cfile_1/content"
     assert headers == {"Authorization": "Bearer sk-test"}
@@ -112,7 +115,7 @@ def test_an_openai_file_with_no_container_cannot_be_read() -> None:
     # The download is keyed on the container, so a row without one has no URL
     # to build; refusing here is what keeps ``containers/None/...`` off the wire.
     with pytest.raises(ProviderFileUnavailableError, match="names no container"):
-        _container_file_request(ProviderFile(file_id="cfile_1"), "sk-test", None)
+        _container_file_request(ProviderFile(file_id="cfile_1"), ProviderCredential(api_key="sk-test"))
 
 
 def test_a_streamed_messages_result_block_names_its_files() -> None:
@@ -162,7 +165,9 @@ def test_a_citation_field_that_is_not_text_is_dropped() -> None:
 
 
 def test_an_id_stays_one_path_segment() -> None:
-    url, _ = _container_file_request(ProviderFile(file_id="../cfile_1", container_id="cntr/1"), "sk-test", None)
+    url, _ = _container_file_request(
+        ProviderFile(file_id="../cfile_1", container_id="cntr/1"), ProviderCredential(api_key="sk-test")
+    )
 
     assert url == "https://api.openai.com/v1/containers/cntr%2F1/files/..%2Fcfile_1/content"
 
@@ -185,7 +190,9 @@ def test_a_provider_whose_files_otari_cannot_read_is_refused() -> None:
     # serves_files names the set; refusing here is what stops a third provider's
     # credential reaching OpenAI's container endpoint.
     with pytest.raises(LookupError, match="nebius"):
-        ProviderFileClient(provider=LLMProvider.NEBIUS, provider_instance="nebius", api_key="sk-test", api_base=None)
+        ProviderFileClient(
+            provider=LLMProvider.NEBIUS, provider_instance="nebius", credential=ProviderCredential(api_key="sk-test")
+        )
 
 
 @pytest.mark.asyncio
@@ -265,9 +272,12 @@ def _serving(monkeypatch: pytest.MonkeyPatch, handler: Any) -> list[httpx.Reques
     return seen
 
 
-def _client(provider: str = "anthropic", api_base: str | None = None) -> ProviderFileClient:
+def _client(
+    provider: str = "anthropic", api_base: str | None = None, client_args: dict[str, Any] | None = None
+) -> ProviderFileClient:
     member = LLMProvider(provider)
-    return ProviderFileClient(provider=member, provider_instance=provider, api_key="sk-test", api_base=api_base)
+    credential = ProviderCredential(api_key="sk-test", api_base=api_base, client_args=client_args or {})
+    return ProviderFileClient(provider=member, provider_instance=provider, credential=credential)
 
 
 def _metadata(filename: str = "bar_plot.png") -> dict[str, Any]:
@@ -301,6 +311,31 @@ async def test_read_streams_the_file(monkeypatch: pytest.MonkeyPatch) -> None:
     assert data == b"chart"
     assert seen[0].url.path == "/v1/files/file_01abc/content"
     assert seen[0].headers["x-api-key"] == "sk-test"
+
+
+@pytest.mark.asyncio
+async def test_an_instances_own_client_args_reach_the_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A proxy an instance is configured to dispatch through has to serve its
+    # file reads too, so the settings that reach it are the same ones.
+    seen = _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
+
+    client = _client(client_args={"default_headers": {"x-proxy-token": "let-me-in"}})
+    await _read_all(client.read(ProviderFile(file_id="file_01abc"), budget_bytes=5))
+
+    assert seen[0].headers["x-proxy-token"] == "let-me-in"
+
+
+@pytest.mark.asyncio
+async def test_an_instance_cannot_widen_the_budget_a_read_runs_under(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The copy shares one deadline across every file, so these three stay Otari's.
+    seen = _serving(monkeypatch, lambda request: httpx.Response(500))
+    client = _client(client_args={"timeout": httpx.Timeout(600.0), "max_retries": 5})
+
+    with pytest.raises(ProviderFileUnavailableError):
+        await _read_all(client.read(ProviderFile(file_id="file_01abc"), budget_bytes=5))
+
+    assert len(seen) == 1
+    assert cast("Any", client._llm).client.timeout == _TIMEOUT
 
 
 @pytest.mark.asyncio

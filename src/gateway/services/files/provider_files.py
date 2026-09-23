@@ -11,7 +11,7 @@ import os
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Any
 from urllib.parse import quote
@@ -143,14 +143,23 @@ def serves_files(provider: str) -> bool:
         return False
 
 
+@dataclass(frozen=True)
+class ProviderCredential:
+    """What one configured provider instance calls its provider with."""
+
+    api_key: str
+    api_base: str | None = None
+    client_args: dict[str, Any] = field(default_factory=dict)
+
+
 def _credentials(
     config: GatewayConfig, provider: LLMProvider, instance: str | None, workspace_id: uuid.UUID | None
-) -> tuple[str, str | None]:
-    """The API key and base URL to read ``provider``'s files with.
+) -> ProviderCredential:
+    """What ``provider`` is called with to read its files.
 
     ``instance`` is the configured entry the run dispatched through, so a named
-    instance's own key and base URL are the ones used to read back what it
-    produced. Falls back to the provider SDK's own environment variable, which
+    instance's own settings are the ones used to read back what it produced.
+    Falls back to the provider SDK's own environment variable for the key, which
     is how a config with an empty provider stanza is credentialed for dispatch
     too.
     """
@@ -163,7 +172,9 @@ def _credentials(
                 break
     if not api_key:
         raise LookupError(f"no credential configured for provider '{provider.value}'")
-    return str(api_key), kwargs.get("api_base")
+    return ProviderCredential(
+        api_key=str(api_key), api_base=kwargs.get("api_base"), client_args=dict(kwargs.get("client_args") or {})
+    )
 
 
 class FileOverBudgetError(Exception):
@@ -186,7 +197,7 @@ def _declared_size(download: AsyncFileDownload) -> int:
     return 0
 
 
-def _container_file_request(file: ProviderFile, api_key: str, api_base: str | None) -> tuple[str, dict[str, str]]:
+def _container_file_request(file: ProviderFile, credential: ProviderCredential) -> tuple[str, dict[str, str]]:
     """The URL and headers that read ``file``'s bytes out of its OpenAI container.
 
     Raises :class:`ProviderFileUnavailableError` for a file that names no container.
@@ -194,10 +205,10 @@ def _container_file_request(file: ProviderFile, api_key: str, api_base: str | No
     # OpenAI keys a container file on its container as well as its ID.
     if not file.container_id:
         raise ProviderFileUnavailableError(f"openai file {file.file_id} names no container to read it from")
-    base = (api_base or OPENAI_BASE).rstrip("/")
+    base = (credential.api_base or OPENAI_BASE).rstrip("/")
     return (
         f"{base}/containers/{quote(file.container_id, safe='')}/files/{quote(file.file_id, safe='')}/content",
-        {"Authorization": f"Bearer {api_key}"},
+        {"Authorization": f"Bearer {credential.api_key}"},
     )
 
 
@@ -208,13 +219,12 @@ class ProviderFileClient:
     :meth:`aclose` once it has read everything it wants.
     """
 
-    def __init__(self, *, provider: LLMProvider, provider_instance: str, api_key: str, api_base: str | None) -> None:
+    def __init__(self, *, provider: LLMProvider, provider_instance: str, credential: ProviderCredential) -> None:
         if provider not in _FILE_PROVIDERS:
             raise LookupError(f"otari cannot read files back from provider '{provider.value}'")
         self._provider = provider
         self._provider_instance = provider_instance
-        self._api_key = api_key
-        self._api_base = api_base
+        self._credential = credential
         # Handing this client to the provider SDK replaces the one it would have
         # built, whose own default is to follow the redirect a download can answer with.
         self._connection = httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True)
@@ -229,8 +239,8 @@ class ProviderFileClient:
         when the deployment holds no credential for one it can.
         """
         member = LLMProvider(provider)
-        api_key, api_base = _credentials(config, member, provider_instance, workspace_id)
-        return cls(provider=member, provider_instance=provider_instance, api_key=api_key, api_base=api_base)
+        credential = _credentials(config, member, provider_instance, workspace_id)
+        return cls(provider=member, provider_instance=provider_instance, credential=credential)
 
     @property
     def provider(self) -> str:
@@ -245,13 +255,19 @@ class ProviderFileClient:
         """The any-llm instance this client's file operations run on."""
         return AnyLLM.create(
             self._provider.value,
-            api_key=self._api_key,
-            api_base=self._api_base,
-            http_client=self._connection,
-            timeout=_TIMEOUT,
-            # A caller shares one deadline across every file it reads, so a retry
-            # here spends the time the files after this one need.
-            max_retries=0,
+            **{
+                **self._credential.client_args,
+                "api_key": self._credential.api_key,
+                "api_base": self._credential.api_base,
+                # The connection and the budget a read runs under belong to this
+                # client, so an instance's own transport settings do not reach
+                # them. A caller shares one deadline across every file it reads,
+                # so a retry or a longer wait here spends the time the files
+                # after this one need.
+                "http_client": self._connection,
+                "timeout": _TIMEOUT,
+                "max_retries": 0,
+            },
         )
 
     async def aclose(self) -> None:
@@ -314,7 +330,7 @@ class ProviderFileClient:
         Stopgap: read it through any-llm once that can reach a container's files
         (mozilla-ai/any-llm#1419, tracked in #1480).
         """
-        url, headers = _container_file_request(file, self._api_key, self._api_base)
+        url, headers = _container_file_request(file, self._credential)
         async with self._connection.stream("GET", url, headers=headers) as response:
             response.raise_for_status()
             yield AsyncFileDownload(
