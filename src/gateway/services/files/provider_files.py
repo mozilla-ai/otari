@@ -309,7 +309,11 @@ class ProviderFileClient:
 
     @asynccontextmanager
     async def _open_container_file(self, file: ProviderFile) -> AsyncIterator[AsyncFileDownload]:
-        """Open an OpenAI container file's download, which any-llm has no call for."""
+        """Open an OpenAI container file's download, which any-llm has no call for.
+
+        Stopgap: read it through any-llm once that can reach a container's files
+        (mozilla-ai/any-llm#1419, tracked in #1480).
+        """
         url, headers = _container_file_request(file, self._api_key, self._api_base)
         async with self._connection.stream("GET", url, headers=headers) as response:
             response.raise_for_status()
