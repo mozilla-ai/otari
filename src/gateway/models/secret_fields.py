@@ -98,13 +98,56 @@ def _restore_node(incoming: Any, stored: Any, depth: int) -> Any:
                 out[key] = _restore_node(value, stored_map.get(key), depth + 1)
         return out
     if isinstance(incoming, list):
-        # Positional, and only when the shapes still line up: a list the caller
-        # resized is a rewrite, and pairing it off by index would splice stored
-        # values into positions that no longer mean the same thing.
-        if isinstance(stored, list) and len(stored) == len(incoming):
-            return [_restore_node(item, stored[index], depth + 1) for index, item in enumerate(incoming)]
-        return list(incoming)
+        return _restore_list(incoming, stored if isinstance(stored, list) else [], depth)
     return incoming
+
+
+def _restore_list(incoming: list[Any], stored: list[Any], depth: int) -> list[Any]:
+    """Pair each element with the stored element it IS, then restore within it.
+
+    An element has no key, so it is identified by content: it is the stored
+    element whose masked form it equals, which is exactly what an entry the
+    caller did not edit looks like, wherever it moved in the list. Pairing by
+    index instead handed each entry whatever credential used to sit at its
+    position, so reordering two headers swapped their tokens.
+
+    An edited entry matches nothing. It still keeps its stored credential when
+    it is the only unmatched entry, the only unclaimed stored entry sits at the
+    same index, and the list kept its length: that is an in-place edit, and
+    nothing else fits. Anything less certain keeps the mask as submitted rather
+    than guess, and so do entries that mask to the same thing but hold
+    different values.
+
+    A bare element is masked only at the depth bound, where it has no content to
+    be identified by, so it keeps its position while the length is unchanged.
+    """
+    same_length = len(stored) == len(incoming)
+    masked = [_redact_node(item, depth + 1) for item in stored]
+    paired: dict[int, int] = {}
+    claimed: set[int] = set()
+    unmatched: list[int] = []
+    for index, item in enumerate(incoming):
+        if not isinstance(item, (dict, list)):
+            continue
+        candidates = [pos for pos, form in enumerate(masked) if form == item]
+        if candidates and all(stored[pos] == stored[candidates[0]] for pos in candidates):
+            paired[index] = candidates[0]
+            claimed.update(candidates)
+        else:
+            unmatched.append(index)
+    unclaimed = [pos for pos, item in enumerate(stored) if pos not in claimed and isinstance(item, (dict, list))]
+    if same_length and len(unmatched) == 1 and unclaimed == unmatched:
+        paired[unmatched[0]] = unmatched[0]
+
+    out: list[Any] = []
+    for index, item in enumerate(incoming):
+        if index in paired:
+            out.append(_restore_node(item, stored[paired[index]], depth + 1))
+        elif not isinstance(item, (dict, list)) and same_length:
+            out.append(_restore_node(item, stored[index], depth + 1))
+        else:
+            out.append(_restore_node(item, None, depth + 1))
+    return out
 
 
 def restore_redacted_values(
@@ -135,6 +178,9 @@ def restore_redacted_values(
     A bare ``***`` inside a LIST is taken literally, because masking never puts
     one there (list elements have no key to match on), so an element that looks
     like the mask came from the caller and means itself.
+
+    Elements of a list are paired by identity, not position; see
+    :func:`_restore_list`.
     """
     if incoming is None:
         return None

@@ -121,13 +121,89 @@ class TestNestedRoundTrip:
 
         assert restore_redacted_values(echoed, stored) == stored
 
-    def test_a_resized_list_is_a_rewrite_and_not_paired_off_by_index(self) -> None:
-        # Splicing stored values into positions that no longer mean the same
-        # thing would put a credential under a different header.
+    def test_entries_that_mask_to_the_same_thing_are_not_guessed_between(self) -> None:
+        # Both stored entries mask to {"token": "***"}, so the one that was kept
+        # cannot be told from the one that was dropped. Guessing would put a
+        # credential under a different header; the mask is kept literally.
         stored = {"extra_headers": [{"token": "live-a"}, {"token": "live-b"}]}
         submitted = {"extra_headers": [{"token": REDACTED_VALUE}]}
 
         assert restore_redacted_values(submitted, stored) == {"extra_headers": [{"token": REDACTED_VALUE}]}
+
+
+class TestListElementIdentity:
+    """A list element has no key, so it is paired with the stored element it IS.
+
+    The editor echoes each entry masked; an entry the caller did not edit is
+    therefore identical to its stored entry's masked form, wherever it moved.
+    """
+
+    STORED = {"extra_headers": [{"name": "x", "token": "live-a"}, {"name": "y", "token": "live-b"}]}
+
+    def test_reordering_entries_keeps_each_entry_its_own_credential(self) -> None:
+        # The report on #1129: pairing by index handed each entry the token of
+        # whatever used to sit at its position.
+        submitted = {"extra_headers": [{"name": "y", "token": REDACTED_VALUE}, {"name": "x", "token": REDACTED_VALUE}]}
+
+        assert restore_redacted_values(submitted, self.STORED) == {
+            "extra_headers": [{"name": "y", "token": "live-b"}, {"name": "x", "token": "live-a"}]
+        }
+
+    def test_appending_an_entry_keeps_the_credentials_of_the_others(self) -> None:
+        submitted = {
+            "extra_headers": [
+                {"name": "x", "token": REDACTED_VALUE},
+                {"name": "y", "token": REDACTED_VALUE},
+                {"name": "z", "token": "live-c"},
+            ]
+        }
+
+        assert restore_redacted_values(submitted, self.STORED) == {
+            "extra_headers": [
+                {"name": "x", "token": "live-a"},
+                {"name": "y", "token": "live-b"},
+                {"name": "z", "token": "live-c"},
+            ]
+        }
+
+    def test_dropping_an_entry_keeps_the_credential_of_the_one_left(self) -> None:
+        submitted = {"extra_headers": [{"name": "y", "token": REDACTED_VALUE}]}
+
+        assert restore_redacted_values(submitted, self.STORED) == {"extra_headers": [{"name": "y", "token": "live-b"}]}
+
+    def test_editing_one_entry_in_place_keeps_its_credential(self) -> None:
+        # The dashboard flow the restore exists for: change one visible field of
+        # one entry and save the whole object back.
+        submitted = {"extra_headers": [{"name": "x", "token": REDACTED_VALUE}, {"name": "y2", "token": REDACTED_VALUE}]}
+
+        assert restore_redacted_values(submitted, self.STORED) == {
+            "extra_headers": [{"name": "x", "token": "live-a"}, {"name": "y2", "token": "live-b"}]
+        }
+
+    def test_an_edited_entry_that_also_moved_is_not_paired_by_position(self) -> None:
+        # "x" moved to index 1, so index 0 no longer means the entry stored
+        # there. The edited entry cannot be identified and keeps the mask
+        # rather than taking x's token.
+        submitted = {"extra_headers": [{"name": "y2", "token": REDACTED_VALUE}, {"name": "x", "token": REDACTED_VALUE}]}
+
+        assert restore_redacted_values(submitted, self.STORED) == {
+            "extra_headers": [{"name": "y2", "token": REDACTED_VALUE}, {"name": "x", "token": "live-a"}]
+        }
+
+    def test_two_edited_entries_are_not_paired_by_position(self) -> None:
+        # With every entry edited nothing shows whether they also moved, so
+        # neither is guessed at.
+        submitted = {
+            "extra_headers": [{"name": "y2", "token": REDACTED_VALUE}, {"name": "x2", "token": REDACTED_VALUE}]
+        }
+
+        assert restore_redacted_values(submitted, self.STORED) == submitted
+
+    def test_duplicate_entries_with_different_credentials_are_not_guessed_between(self) -> None:
+        stored = {"extra_headers": [{"name": "x", "token": "live-a"}, {"name": "x", "token": "live-b"}]}
+        submitted = {"extra_headers": [{"name": "x", "token": REDACTED_VALUE}, {"name": "x", "token": REDACTED_VALUE}]}
+
+        assert restore_redacted_values(submitted, stored) == submitted
 
     def test_a_real_nested_value_still_replaces_the_stored_one(self) -> None:
         # The control for the whole pairing: restoring must not mean "the caller
@@ -176,7 +252,7 @@ class TestNestedRoundTrip:
             stored = nest(list_depth, ["live-token", "second"])
             echoed = redact_secret_like_values(stored)  # type: ignore[arg-type]
 
-            assert restore_redacted_values(echoed, stored) == stored, f"list at depth {list_depth}"
+            assert restore_redacted_values(echoed, stored) == stored, f"list at depth {list_depth}"  # type: ignore[arg-type]
 
 
 class TestRestoreRedactedValues:
