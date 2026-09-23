@@ -58,7 +58,7 @@ export function ClaimForm({
         submit()
       }}
     >
-      <p className="text-xs text-muted">
+      <p className="text-caption">
         Set a password to sign in as {preview.email}.
       </p>
       <AuthTextField

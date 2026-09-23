@@ -48,8 +48,14 @@ export const pageHeading = (page: Page, name: string): Locator =>
 
 export async function login(page: Page): Promise<void> {
   await page.goto("/")
-  await page.locator('input[type="password"]').fill(MASTER_KEY)
-  await page.locator('input[type="password"]').press("Enter")
+  // Once any member holds a password (the tenancy spec's invitee does), the
+  // screen offers both credentials and defaults to email and password.
+  const field = page.locator('input[type="password"]')
+  await expect(field.first()).toBeVisible()
+  const useMasterKey = page.getByRole("button", { name: "Use your master key" })
+  if (await useMasterKey.isVisible()) await useMasterKey.click()
+  await field.fill(MASTER_KEY)
+  await field.press("Enter")
   // The sidebar appears once authenticated, regardless of the index landing
   // page.
   await expect(nav(page).getByRole("link", { name: "Overview" })).toBeVisible()

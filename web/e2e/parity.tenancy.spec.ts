@@ -192,7 +192,9 @@ test.describe("standalone tenancy", () => {
     await reinviteDialog.getByRole("button", { name: "Done" }).click()
     await expect(memberRow(page, email)).toHaveCount(1)
 
-    // Leave the roster as this spec found it.
+    // Leave the roster as this spec found it. The invitee's identity keeps its
+    // password, so later specs see a sign-in screen offering both credentials,
+    // which `login` handles.
     await memberRow(page, email).getByRole("button", { name: "Revoke" }).click()
     await page.getByRole("button", { name: "Revoke invitation" }).click()
     await expect(memberRow(page, email)).toHaveCount(0)
