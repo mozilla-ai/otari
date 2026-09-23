@@ -13,27 +13,23 @@ from pydantic import BaseModel
 from gateway.models.files import FileObject
 
 
-def _epoch_seconds(value: datetime | None) -> int | None:
-    """Return a UTC epoch from a stored datetime.
+def _as_utc(value: datetime) -> datetime:
+    """Read a stored datetime as the UTC it was written as.
 
-    SQLite hands datetimes back naive; ``datetime.timestamp()`` would then read
-    them as local time and skew the epoch by the server's UTC offset. Treat a
-    naive value as the UTC it was stored as before converting.
+    SQLite hands datetimes back naive, and both conversions below would then
+    read them as local time and skew the answer by the server's UTC offset.
     """
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return int(value.timestamp())
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-def _rfc3339(value: datetime | None) -> str | None:
-    """Return an RFC 3339 timestamp from a stored datetime, reading a naive value as UTC."""
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.isoformat().replace("+00:00", "Z")
+def _epoch_seconds(value: datetime) -> int:
+    """Return a UTC epoch from a stored datetime."""
+    return int(_as_utc(value).timestamp())
+
+
+def _rfc3339(value: datetime) -> str:
+    """Return an RFC 3339 timestamp from a stored datetime."""
+    return _as_utc(value).isoformat().replace("+00:00", "Z")
 
 
 class OpenAIFileObject(BaseModel):
@@ -42,7 +38,7 @@ class OpenAIFileObject(BaseModel):
     id: str
     object: Literal["file"] = "file"
     bytes: int
-    created_at: int | None
+    created_at: int
     expires_at: int | None
     filename: str
     purpose: str
@@ -54,7 +50,7 @@ class OpenAIFileObject(BaseModel):
             id=record.id,
             bytes=record.bytes,
             created_at=_epoch_seconds(record.created_at),
-            expires_at=_epoch_seconds(record.expires_at),
+            expires_at=None if record.expires_at is None else _epoch_seconds(record.expires_at),
             filename=record.filename,
             purpose=record.purpose,
         )
@@ -90,7 +86,7 @@ class AnthropicFileMetadata(BaseModel):
     filename: str
     mime_type: str
     size_bytes: int
-    created_at: str | None
+    created_at: str
     expires_at: str | None
     downloadable: Literal[True] = True
 
@@ -103,7 +99,7 @@ class AnthropicFileMetadata(BaseModel):
             mime_type=record.mime_type,
             size_bytes=record.bytes,
             created_at=_rfc3339(record.created_at),
-            expires_at=_rfc3339(record.expires_at),
+            expires_at=None if record.expires_at is None else _rfc3339(record.expires_at),
         )
 
 

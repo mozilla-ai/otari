@@ -6068,7 +6068,7 @@ export interface components {
          */
         AnthropicFileMetadata: {
             /** Created At */
-            created_at: string | null;
+            created_at: string;
             /**
              * Downloadable
              * @default true
@@ -9313,7 +9313,7 @@ export interface components {
             /** Bytes */
             bytes: number;
             /** Created At */
-            created_at: number | null;
+            created_at: number;
             /** Expires At */
             expires_at: number | null;
             /** Filename */

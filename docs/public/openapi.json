@@ -1424,15 +1424,8 @@
         "description": "One file in the ``FileMetadata`` shape of Anthropic's GA Files API.\n\n``expires_at`` is always present and ``None`` for a file kept indefinitely.\n``downloadable`` is always true, because the gateway serves every stored file's bytes back.",
         "properties": {
           "created_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
+            "title": "Created At",
+            "type": "string"
           },
           "downloadable": {
             "const": true,
@@ -8268,15 +8261,8 @@
             "type": "integer"
           },
           "created_at": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
+            "title": "Created At",
+            "type": "integer"
           },
           "expires_at": {
             "anyOf": [

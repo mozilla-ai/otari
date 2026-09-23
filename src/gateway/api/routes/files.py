@@ -234,16 +234,18 @@ async def list_files(
         cursor = page
     else:
         named_ids, cursor = None, after
-    scope = _scope(auth_result, user, config)
     # The key's own workspace wins over anything the caller sent, rather than
     # 400ing on a mismatch: the parameter is a master-key narrowing, and a keyed
     # request is confined either way, so refusing it would only add a way to get
     # an error instead of the same answer.
-    narrowed = FileScope(user_id=scope.user_id, workspace_id=scope.workspace_id or workspace_id)
+    scope = FileScope(
+        user_id=_resolve_user(auth_result, user, config),
+        workspace_id=_request_workspace_id(auth_result) or workspace_id,
+    )
 
     result = await files.page(
         FileListing(
-            scope=narrowed,
+            scope=scope,
             dialect=dialect,
             limit=limit,
             ascending=order == "asc",

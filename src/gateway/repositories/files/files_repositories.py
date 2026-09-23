@@ -1,3 +1,5 @@
+"""The files domain's repositories, as one service receives them."""
+
 from dataclasses import dataclass
 from typing import Self
 

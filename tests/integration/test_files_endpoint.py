@@ -883,3 +883,32 @@ def test_a_deployment_that_does_not_serve_files_refuses_every_verb(
 
     assert [resp.status_code for resp in (upload, listing, read)] == [404, 404, 404]
     assert upload.json()["detail"] == "File uploads are disabled"
+
+
+def test_a_storage_failure_answers_a_generic_500(
+    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None, tmp_path: Path
+) -> None:
+    """A 5xx names no internals: the condition goes to the log, the caller gets the house detail."""
+
+    class _UnreadableStore(LocalDirFileStore):
+        def get_stream(self, storage_ref: str) -> Any:
+            raise OSError("disk gone")
+
+    resp = client.post(
+        f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"payload", "text/plain")}
+    )
+    assert resp.status_code == 200, resp.text
+    file_id = resp.json()["id"]
+
+    cast(Any, client.app).state.file_store = _UnreadableStore(str(tmp_path))
+    failed = client.get(f"{API_ROOT}/files/{file_id}/content", headers=api_key_header)
+
+    assert failed.status_code == 500
+    assert failed.json() == {"detail": "Internal server error"}
+
+
+def test_a_file_id_that_could_name_nothing_is_a_404(client: TestClient, api_key_header: dict[str, str]) -> None:
+    """A NUL in an ID reaches a bind parameter, so the refusal must not become a driver error."""
+    resp = client.get(f"{API_ROOT}/files/file-%00x", headers=api_key_header)
+
+    assert resp.status_code == 404, resp.text

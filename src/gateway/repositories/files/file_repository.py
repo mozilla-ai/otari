@@ -16,6 +16,15 @@ from gateway.models.files import FileObject
 from gateway.repositories.base_repository import BaseRepository
 
 
+def could_name_a_file(value: str) -> bool:
+    """Whether ``value`` could be a file ID at all.
+
+    Every file ID is printable ASCII, and PostgreSQL refuses a NUL in a text
+    parameter, so a value that fails this must not reach a query.
+    """
+    return value.isascii() and value.isprintable()
+
+
 def _ordering(*, ascending: bool) -> tuple[Any, Any]:
     """The ``(created_at, id)`` sort key a page is cut along."""
     if ascending:
@@ -90,12 +99,14 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, FileObject)
 
-    async def add(self, record: FileObject) -> FileObject:
-        """Stage a new file row and return it with its generated values."""
+    async def add(self, record: FileObject) -> None:
+        """Stage a new file row.
+
+        The database generates nothing on this table, so the caller's instance
+        already carries every value the row will have.
+        """
         self.db.add(record)
         await self.db.flush()
-        await self.db.refresh(record)
-        return record
 
     async def live(self, file_id: str, user_id: str, *, workspace_id: uuid.UUID | None = None) -> FileObject | None:
         """Return the file this caller is still served, or None.
@@ -117,8 +128,11 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
         """Return the row this caller owns under ``file_id``, served or not.
 
         A paging cursor names a position rather than a file, so a row deleted or
-        expired between two pages still says where the next page starts.
+        expired between two pages still says where the next page starts. A value
+        that could not name a file names no row rather than reaching the query.
         """
+        if not could_name_a_file(file_id):
+            return None
         conditions = [FileObject.id == file_id, FileObject.user_id == user_id]
         if workspace_id is not None:
             conditions.append(FileObject.workspace_id == workspace_id)
@@ -130,18 +144,20 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
         Expired rows are left out for the same reason :meth:`live` leaves them
         out: the sweep reclaims them on a timer, so between expiry and the next
         tick a page would otherwise offer files that every other verb refuses.
+        The boundary matches :func:`_expired`, so one verb cannot drop a file
+        another still serves.
         """
         stmt = select(FileObject).where(
             FileObject.user_id == query.user_id,
             FileObject.deleted_at.is_(None),
-            or_(FileObject.expires_at.is_(None), FileObject.expires_at > datetime.now(UTC)),
+            or_(FileObject.expires_at.is_(None), FileObject.expires_at >= datetime.now(UTC)),
         )
         if query.workspace_id is not None:
             stmt = stmt.where(FileObject.workspace_id == query.workspace_id)
         if query.purpose is not None:
             stmt = stmt.where(FileObject.purpose == query.purpose)
         if query.file_ids is not None:
-            stmt = stmt.where(FileObject.id.in_(list(query.file_ids)))
+            stmt = stmt.where(FileObject.id.in_([f for f in query.file_ids if could_name_a_file(f)]))
         if query.after is not None:
             stmt = stmt.where(_past(query.after, ascending=query.ascending))
         stmt = stmt.order_by(*_ordering(ascending=query.ascending)).limit(query.limit)

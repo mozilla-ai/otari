@@ -1,4 +1,4 @@
-"""How a file ID is spelled: what may be one, and the opaque cursor a listing pages with.
+"""The opaque cursor a listing pages with.
 
 Anthropic's Files API resumes a page from a token rather than an offset, so the
 token is one file's ID, encoded so that a caller reads it as opaque and does not
@@ -7,13 +7,9 @@ build one of its own.
 
 import base64
 
+from gateway.repositories.files import could_name_a_file
+
 _TOKEN_PREFIX = "page_"
-
-
-def could_name_a_file(value: str) -> bool:
-    """Whether ``value`` could be a file ID at all."""
-    # Every file ID is printable ASCII, and PostgreSQL rejects a NUL in a text parameter.
-    return value.isascii() and value.isprintable()
 
 
 def page_token(file_id: str) -> str:

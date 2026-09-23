@@ -23,7 +23,7 @@ from gateway.log_config import logger
 from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.repositories.files import FilePageQuery, FileRepositories
-from gateway.services.files._file_ids import could_name_a_file, file_id_in, page_token
+from gateway.services.files._file_ids import file_id_in, page_token
 from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._staging import StagedFile
 
@@ -113,9 +113,12 @@ class FileService:
     """Everything the Files API does with a caller's uploads.
 
     The bytes go to a blob store behind :class:`FileStoragePort` and the
-    metadata to a row, and the two are kept in step: an upload whose row does
-    not land takes its bytes with it, and a discarded file loses its bytes
-    after the row says so.
+    metadata to a row, and the two are kept in step as far as they can be: an
+    upload refused after its bytes are written takes them with it, and a
+    discarded file loses its bytes after the row says so. Neither is absolute.
+    A cancellation between the write and the commit leaves bytes no row points
+    at, because the commit's outcome is unknown there and removing them could
+    destroy the bytes of a row that did land.
     """
 
     def __init__(
@@ -202,11 +205,7 @@ class FileService:
             user_id=listing.scope.user_id,
             workspace_id=listing.scope.workspace_id,
             purpose=listing.purpose,
-            file_ids=(
-                None
-                if listing.file_ids is None
-                else [file_id for file_id in listing.file_ids if could_name_a_file(file_id)]
-            ),
+            file_ids=listing.file_ids,
             ascending=listing.ascending,
             # One row past the page says whether another follows, without a count.
             limit=limit + 1,
@@ -289,10 +288,15 @@ class FileService:
             FileNotServedError: no such file is served to this caller.
             FileStorageError: the file is still served because the row would not change.
         """
-        record = await self.stored_file(file_id, scope)
-        storage_ref = record.storage_ref
+        self._require_enabled()
         try:
+            # One block for the read and the write, so nothing can discard the
+            # file between proving the caller is served it and stamping the row.
             async with self._uow:
+                record = await self._files.live(file_id, scope.user_id, workspace_id=scope.workspace_id)
+                if record is None:
+                    raise FileNotServedError
+                storage_ref = record.storage_ref
                 await self._files.soft_delete(record, datetime.now(UTC))
         except DATABASE_ERRORS as exc:
             logger.error("Failed to delete file %s: %s", file_id, exc)

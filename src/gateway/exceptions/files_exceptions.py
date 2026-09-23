@@ -41,7 +41,7 @@ class UploadTooLargeError(TenancyError):
 
     status_code = status.HTTP_413_CONTENT_TOO_LARGE
 
-    def __init__(self, max_bytes: int):
+    def __init__(self, max_bytes: int) -> None:
         super().__init__(f"File exceeds maximum upload size of {max_bytes // (1024 * 1024)} MB")
 
 
@@ -55,9 +55,11 @@ class UnknownPageCursorError(TenancyValidationError):
 class FileStorageError(TenancyError):
     """The bytes could not be written, read back or removed.
 
-    A 5xx, so the caller is told only that the deployment failed. The message
-    names the file, and reaches the operator through the log.
+    The caller is told only that the deployment failed. The message names the
+    file, and reaches the operator through the log.
     """
 
-    def __init__(self, message: str):
+    status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+
+    def __init__(self, message: str) -> None:
         super().__init__(message)
