@@ -22,6 +22,7 @@ import re
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
+from urllib.parse import urlsplit
 
 from any_llm import LLMProvider
 
@@ -120,6 +121,7 @@ class ProviderEndpointService:
         provider = _validated_provider(request.provider)
         await _check_api_base(request.api_base)
         default_params = _validated_default_params(request.default_params)
+        _require_https_for_a_key(request.api_base, has_key=bool(request.api_key))
         encrypted_api_key, last4 = _encrypt_api_key(request.api_key)
         try:
             async with self.uow:
@@ -165,6 +167,10 @@ class ProviderEndpointService:
             changes["default_params"] = _validated_default_params(restored)
         if "api_key" in fields:
             changes["encrypted_api_key"], changes["last4"] = _encrypt_api_key(fields["api_key"])
+        _require_https_for_a_key(
+            changes.get("api_base", row.api_base),
+            has_key=bool(fields["api_key"]) if "api_key" in fields else row.encrypted_api_key is not None,
+        )
 
         try:
             async with self.uow:
@@ -212,6 +218,12 @@ class ProviderEndpointService:
             await self.refresh_cache()
         except DATABASE_ERRORS:
             logger.warning("Provider endpoint cache refresh failed after a write; converges within the TTL")
+
+
+def _require_https_for_a_key(api_base: str, *, has_key: bool) -> None:
+    """A key travels in every request header, so it goes only over TLS. A keyless endpoint may use HTTP."""
+    if has_key and urlsplit(api_base).scheme.lower() != "https":
+        raise ProviderEndpointInvalidError("An endpoint with an API key must use an https api_base")
 
 
 def _validated_provider(provider: str) -> str:

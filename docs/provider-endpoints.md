@@ -89,4 +89,6 @@ URL whose host resolves to a private, loopback, link-local, shared or reserved
 address when the endpoint is saved. On every request it resolves the host
 again, refuses the request if any answer is not public, and connects to an
 address it checked rather than resolving the name a second time. Redirects are
-not followed. Requests to an endpoint do not use the environment's HTTP proxy.
+not followed. An endpoint with an API key must use `https`, since the key
+travels in every request. Requests to an endpoint do not use the environment's
+HTTP proxy.

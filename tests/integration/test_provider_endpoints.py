@@ -176,6 +176,7 @@ def test_one_name_per_owner(client: TestClient) -> None:
         ({"api_base": "http://100.100.100.200/"}, "api_base refused"),
         ({"default_params": {"api_base": "http://10.0.0.1"}}, "cannot be endpoint defaults"),
         ({"default_params": {"model": "other"}}, "cannot be endpoint defaults"),
+        ({"api_base": "http://1.1.1.1/v1", "api_key": "sk-plain"}, "must use an https api_base"),
     ],
 )
 def test_refused_endpoints(client: TestClient, fields: dict[str, Any], reason: str) -> None:
@@ -193,6 +194,14 @@ def test_an_update_is_held_to_the_same_rules(client: TestClient) -> None:
     created = _create(client).json()
     resp = client.patch(f"{ENDPOINTS}/{created['id']}", json={"api_base": "http://10.1.2.3/v1"}, headers=HEADERS)
     assert resp.status_code == 400
+
+
+def test_a_keyless_endpoint_may_use_http_until_it_is_given_a_key(client: TestClient) -> None:
+    created = _create(client, api_base="http://1.1.1.1/v1")
+    assert created.status_code == 201, created.text
+    resp = client.patch(f"{ENDPOINTS}/{created.json()['id']}", json={"api_key": "sk-plain"}, headers=HEADERS)
+    assert resp.status_code == 400
+    assert "https" in resp.json()["detail"]
 
 
 # ----------------------------------------------------------------------------
