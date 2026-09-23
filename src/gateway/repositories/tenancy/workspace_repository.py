@@ -314,26 +314,12 @@ class WorkspaceMemberRepository:
     ) -> tuple[list[uuid.UUID], int]:
         """Return a page of the IDs of a workspace's active memberships, plus how many there are.
 
-        Ordered by ID, which every membership has and none ties on, so paging cannot
-        repeat one row and omit another.
+        Ordered by ID, so two pages of an unchanged set neither repeat nor omit a row.
         """
-        count_result = await self.db.execute(
-            select(func.count())
-            .select_from(WorkspaceMember)
-            .where(
-                col(WorkspaceMember.workspace_id) == workspace_id,
-                col(WorkspaceMember.status) == "active",
-            )
-        )
+        active = (col(WorkspaceMember.workspace_id) == workspace_id, col(WorkspaceMember.status) == "active")
+        count_result = await self.db.execute(select(func.count()).select_from(WorkspaceMember).where(*active))
         result = await self.db.execute(
-            select(col(WorkspaceMember.id))
-            .where(
-                col(WorkspaceMember.workspace_id) == workspace_id,
-                col(WorkspaceMember.status) == "active",
-            )
-            .order_by(col(WorkspaceMember.id))
-            .offset(skip)
-            .limit(limit)
+            select(col(WorkspaceMember.id)).where(*active).order_by(col(WorkspaceMember.id)).offset(skip).limit(limit)
         )
         return list(result.scalars().all()), count_result.scalar_one()
 

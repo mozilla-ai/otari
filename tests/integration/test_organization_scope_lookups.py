@@ -174,12 +174,12 @@ async def test_a_workspace_pages_only_its_active_memberships(async_db: AsyncSess
     service = _service(async_db)
     active = sorted([acme.workspace_member.id, *(member.id for member in joined)])
 
-    page, count = await service.page_active_member_ids(acme.workspace.id, skip=0, limit=2)
+    page, count = await service.page_active_workspace_member_ids(acme.workspace.id, skip=0, limit=2)
     assert count == 3
-    rest, _ = await service.page_active_member_ids(acme.workspace.id, skip=2, limit=2)
+    rest, _ = await service.page_active_workspace_member_ids(acme.workspace.id, skip=2, limit=2)
     assert [*page, *rest] == active
-    assert await service.page_active_member_ids(globex.workspace.id, skip=0, limit=10) == (
+    assert await service.page_active_workspace_member_ids(globex.workspace.id, skip=0, limit=10) == (
         [globex.workspace_member.id],
         1,
     )
-    assert await service.page_active_member_ids(uuid.uuid4(), skip=0, limit=10) == ([], 0)
+    assert await service.page_active_workspace_member_ids(uuid.uuid4(), skip=0, limit=10) == ([], 0)
