@@ -293,6 +293,12 @@ class OrganizationService:
         """Return the ID of every membership in an organization's workspaces, whatever its status."""
         return await self.workspaces.get_ids_by_organization(organization_id)
 
+    async def page_active_member_ids(
+        self, workspace_id: uuid.UUID, *, skip: int, limit: int
+    ) -> tuple[list[uuid.UUID], int]:
+        """Return a page of the IDs of a workspace's active memberships, plus how many there are."""
+        return await self.workspaces.page_active_ids_for_workspace(workspace_id, skip=skip, limit=limit)
+
     async def _to_context(
         self,
         *,

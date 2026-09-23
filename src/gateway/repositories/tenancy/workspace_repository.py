@@ -309,6 +309,34 @@ class WorkspaceMemberRepository:
         )
         return list(result.scalars().all())
 
+    async def page_active_ids_for_workspace(
+        self, workspace_id: uuid.UUID, *, skip: int, limit: int
+    ) -> tuple[list[uuid.UUID], int]:
+        """Return a page of the IDs of a workspace's active memberships, plus how many there are.
+
+        Ordered by ID, which every membership has and none ties on, so paging cannot
+        repeat one row and omit another.
+        """
+        count_result = await self.db.execute(
+            select(func.count())
+            .select_from(WorkspaceMember)
+            .where(
+                col(WorkspaceMember.workspace_id) == workspace_id,
+                col(WorkspaceMember.status) == "active",
+            )
+        )
+        result = await self.db.execute(
+            select(col(WorkspaceMember.id))
+            .where(
+                col(WorkspaceMember.workspace_id) == workspace_id,
+                col(WorkspaceMember.status) == "active",
+            )
+            .order_by(col(WorkspaceMember.id))
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all()), count_result.scalar_one()
+
     async def get_workspace_id(self, workspace_member_id: uuid.UUID) -> uuid.UUID | None:
         """Return the ID of the workspace a membership belongs to, or None."""
         result = await self.db.execute(
