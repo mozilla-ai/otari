@@ -163,9 +163,10 @@ snapshots.
 ### providers
 
 Provider credentials: instances configured at runtime, organization-scoped
-provider keys, their health, and what a dispatch needs to reach a provider.
+provider keys, endpoints a workspace or a user owns, their health, and what a
+dispatch needs to reach a provider.
 
-- Routes: `providers.py`, `org_provider_keys.py`
+- Routes: `providers.py`, `org_provider_keys.py`, `provider_endpoints.py`
 - Services: `providers/`, `provider_store_service.py`,
   `provider_health_service.py`, `provider_metadata_service.py`,
   `provider_kwargs.py`, `bedrock_gateway_auth.py`,

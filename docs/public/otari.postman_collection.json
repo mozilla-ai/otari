@@ -6915,6 +6915,184 @@
     {
       "item": [
         {
+          "name": "List Provider Endpoints",
+          "request": {
+            "description": "List owned provider endpoints, narrowed by owner when given. Keys are never returned.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "provider-endpoints"
+              ],
+              "query": [
+                {
+                  "description": "Only endpoints this workspace owns.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "Only endpoints this user owns.",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/provider-endpoints?workspace_id=&user_id=&skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Provider Endpoint",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"string\",\n  \"provider\": \"string\",\n  \"api_base\": \"string\"\n}"
+            },
+            "description": "Register an endpoint for a workspace, or for one user in it.\n\nIt is reachable as ``<name>:<model>`` by its owner as soon as this returns on\nthis worker, and on the others within 30 seconds.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "provider-endpoints"
+              ],
+              "raw": "{{baseUrl}}/api/v1/provider-endpoints"
+            }
+          }
+        },
+        {
+          "name": "Get Provider Endpoint",
+          "request": {
+            "description": "Read one endpoint. The key is never returned, only its last four characters.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "provider-endpoints",
+                ":endpoint_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/provider-endpoints/:endpoint_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "endpoint_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Provider Endpoint",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"default_params\": {},\n  \"name\": \"string\",\n  \"provider\": \"string\"\n}"
+            },
+            "description": "Change an endpoint's name, provider, base URL, key or default fields. The owner cannot change.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "provider-endpoints",
+                ":endpoint_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/provider-endpoints/:endpoint_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "endpoint_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Provider Endpoint",
+          "request": {
+            "description": "Delete an endpoint. Its name stops resolving at once on this worker, within 30 seconds elsewhere.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "provider-endpoints",
+                ":endpoint_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/provider-endpoints/:endpoint_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "endpoint_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "provider-endpoints"
+    },
+    {
+      "item": [
+        {
           "name": "Create Rerank",
           "request": {
             "body": {

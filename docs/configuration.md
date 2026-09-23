@@ -341,6 +341,7 @@ and guardrail configuration. Common startup settings are:
 - `mcp_allow_loopback` and `mcp_allow_private_hosts`
 - `web_search_allow_private_hosts`
 - `provider_allow_private_hosts`
+- `provider_endpoints_enabled` (see [Provider endpoints](provider-endpoints.md))
 
 See [Built-in tools](tools.md), [MCP](mcp.md), and
 [Guardrails](guardrails.md) for behavior and security boundaries.

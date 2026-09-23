@@ -194,6 +194,14 @@ remain read-only through the management API.
 `secret_box.py` owns encryption through `OTARI_SECRET_KEY`. Public responses
 return metadata such as `last4`, never plaintext credentials.
 
+Endpoints a workspace or a user owns (`services/providers/`, table
+`provider_endpoints`) are a third, disjoint source, reached as `<name>:<model>`
+and only by callers passing `owned_endpoints=True` to
+`resolve_provider_selector`: the completion pipeline, which exempts them from
+budgets and dials them only through the pinned, no-redirect client in
+`_owned_endpoint_network.py`. Their `api_base` is a tenant's, so it is held to
+public addresses whatever `provider_allow_private_hosts` says.
+
 Provider resolution asks `ModelProviderPort` for a deployment-owned managed
 credential only after local and tenant BYO sources fail. Managed credentials
 must never move ahead of BYO or leave their trusted gateway.

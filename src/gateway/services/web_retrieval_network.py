@@ -17,7 +17,7 @@ from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from time import monotonic
-from typing import Protocol, TypeAlias, TypeVar
+from typing import ClassVar, Protocol, TypeAlias, TypeVar
 from urllib.request import getproxies_environment
 
 import httpx
@@ -311,6 +311,8 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
     fresh DNS resolution.
     """
 
+    allowed_methods: ClassVar[frozenset[str]] = frozenset({"GET"})
+
     def __init__(
         self,
         *,
@@ -392,15 +394,15 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
             if self._pools.get(key) is entry:
                 self._pools.move_to_end(key)
 
-    @staticmethod
-    def _target_from_request(request: httpx.Request) -> ValidatedTarget:
+    @classmethod
+    def _target_from_request(cls, request: httpx.Request) -> ValidatedTarget:
         target = request.extensions.get(PINNED_TARGET_EXTENSION)
         if not isinstance(target, ValidatedTarget):
             raise PinnedTransportError("request is missing its validated retrieval target")
         if request.url != target.url:
             raise PinnedTransportError("request URL does not match its validated retrieval target")
-        if request.method != "GET":
-            raise PinnedTransportError("web retrieval transport permits GET requests only")
+        if request.method not in cls.allowed_methods:
+            raise PinnedTransportError(f"this transport permits {', '.join(sorted(cls.allowed_methods))} requests only")
         if request.headers.get("host") != target.origin.authority:
             raise PinnedTransportError("request Host does not match its validated retrieval target")
         return target
