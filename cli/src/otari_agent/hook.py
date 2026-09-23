@@ -1864,13 +1864,20 @@ def hook(
 
 
 def _otari_binary_path() -> str:
-    """Absolute path to this otari install's own binary.
+    """Absolute path to the otari binary this process was started through.
 
     A hook subprocess (Claude Code's, Codex's) does not inherit an activated
-    shell's PATH, so a bare "otari" often will not resolve. otari's own console-script
-    wrapper sits next to the interpreter running it (same venv/bin), which is
-    what sys.executable already names.
+    shell's PATH, so the generated entry names the binary absolutely. argv[0]
+    is preferred and left unresolved: under Homebrew it is the stable
+    /opt/homebrew/bin/otari link, and resolving it would pin the entry to a
+    versioned Cellar path the next upgrade breaks. When argv[0] is not a file
+    named otari (python -m, a test runner), fall back to the console script
+    beside the running interpreter, which is where a venv install puts it.
     """
+    if sys.argv and sys.argv[0]:
+        invoked = Path(os.path.abspath(sys.argv[0]))
+        if invoked.name == "otari" and invoked.is_file():
+            return str(invoked)
     return str(Path(sys.executable).with_name("otari"))
 
 

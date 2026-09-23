@@ -3,12 +3,14 @@
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 import click
 import pytest
 from click.testing import CliRunner
 
 import gateway.cli as gateway_cli
+import otari_agent.hook as hook_cli
 from otari_agent.cli import cli
 
 # What a Homebrew install of the light CLI does not have. The gateway is the
@@ -63,6 +65,23 @@ def test_register_attaches_every_server_command() -> None:
     group = click.Group("probe")
     gateway_cli.register(group)
     assert set(group.commands) == _SERVER_COMMANDS
+
+
+def test_binary_path_prefers_the_invoked_link_unresolved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A Homebrew layout: bin/otari is a symlink into a versioned Cellar directory.
+    cellar = tmp_path / "Cellar" / "otari" / "1.2.3" / "libexec" / "bin"
+    cellar.mkdir(parents=True)
+    (cellar / "otari").write_text("#!/bin/sh\n")
+    (tmp_path / "bin").mkdir()
+    link = tmp_path / "bin" / "otari"
+    link.symlink_to(cellar / "otari")
+    monkeypatch.setattr(sys, "argv", [str(link), "hook", "setup"])
+    assert hook_cli._otari_binary_path() == str(link)
+
+
+def test_binary_path_falls_back_to_the_interpreter_sibling(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["pytest", "tests/unit"])
+    assert hook_cli._otari_binary_path() == str(Path(sys.executable).with_name("otari"))
 
 
 @pytest.mark.parametrize("entry", ["otari_agent.cli:main", "gateway.cli:main"])
