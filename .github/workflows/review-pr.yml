@@ -156,11 +156,17 @@ jobs:
           # the latest Opus without an edit here. Subagent models are named
           # per step in the prompt file.
           #
+          # --disallowed-tools covers what the env scrub cannot: the scrub only
+          # reaches subprocesses, so Claude's own Read (and Grep and Glob,
+          # which Read rules also govern) could otherwise open
+          # /proc/self/environ and find the OAuth token there.
+          #
           # The run link goes in --append-system-prompt because the URL needs
           # `github.run_id`, which the static prompt file cannot interpolate.
           claude_args: |
             --model opus
             --allowed-tools "Agent,Task,Bash,Read,Grep,Glob,TodoWrite,mcp__github_inline_comment__create_inline_comment"
+            --disallowed-tools "Read(//proc/**),Read(//home/runner/.claude/**),Read(//home/runner/work/_temp/**)"
             --append-system-prompt "Every comment you post on the pull request must end with this line, on its own, verbatim: [View job run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
         env:
           # Subagents are auto-backgrounded after ~2 minutes; the parent then

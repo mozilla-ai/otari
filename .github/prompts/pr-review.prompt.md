@@ -92,8 +92,9 @@ agent the PR title and body.
 
 - The code will fail to compile or parse (syntax errors, type errors, missing
   imports, unresolved references).
-- The code will definitely produce wrong results regardless of inputs (clear
-  logic errors).
+- The code will produce wrong results for a concrete, reproducible input or
+  state, with observable impact (clear logic errors, and security defects such
+  as an auth or budget check a specific request gets past).
 - A standards rule is unambiguously broken and you can quote the exact rule.
 - A generated artifact or manifest that CI drift-checks is demonstrably stale
   for this diff (e.g. a route docstring changed and `docs/public/openapi.json`
@@ -102,7 +103,7 @@ agent the PR title and body.
 Do NOT flag:
 
 - Code style or quality concerns.
-- Potential issues that depend on specific inputs or state.
+- Hypothetical issues with no concrete trigger or observable impact.
 - Subjective suggestions or improvements.
 
 If you are not certain an issue is real, do not flag it. False positives erode
@@ -167,7 +168,9 @@ hard-coded or inaccurate attribution.
 
 ## Notes
 
-- Use the `gh` CLI for all GitHub interaction. Do not use web fetch.
+- Use the `gh` CLI for GitHub interaction, except inline findings, which go
+  through `mcp__github_inline_comment__create_inline_comment`. Do not use web
+  fetch.
 - Complete every step in this one run. Subagents must run in the foreground:
   there is no later turn, so never wait on a background completion
   notification.
