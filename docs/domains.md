@@ -207,8 +207,10 @@ The bytes sit in a pluggable blob backend. The row holds the metadata and
 the reference to them.
 
 - Routes: `files.py`
-- Services: `files/`, `file_service.py`, `file_store.py`
+- Services: `files/`, `file_service.py`
 - Repositories: `files/`
+- Ports: `file_storage_port.py`
+- Adapters: `file_storage_adapter.py`
 
 The model never calls files, so it is not a tool. Inference normalizes an
 uploaded file into a request. Tools hands one to a sandbox and returns one
