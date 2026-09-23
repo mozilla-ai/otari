@@ -95,22 +95,19 @@ def _query_of(call: NativeCall) -> str:
 class MessagesWebSearchRendering:
     """Gateway-run searches as ``server_tool_use`` / ``web_search_tool_result`` pairs.
 
-    ``encrypted_content`` is required by the schema but is an Anthropic-signed blob
-    only Anthropic can mint, so the gateway sends it empty rather than forging one. A
-    client that echoes the block back through the gateway has it stripped before the
-    provider sees it; one that echoes it straight to Anthropic instead would be
-    rejected there, which is the same trade-off the Responses rendering accepts for
-    its minted ``web_search_call`` items.
+    ``encrypted_content`` is required by the schema but is an Anthropic-signed blob only
+    Anthropic can mint, so the gateway sends it empty rather than forging one. A block
+    echoed straight back to Anthropic is rejected there, which is the trade-off an
+    unsigned block accepts.
     """
 
     def declared(self, tool_entry: Mapping[str, Any] | None) -> bool:
         """Whether the caller asked in Anthropic's own words, which is what asks for the pair.
 
         A dated or preview keyword is what the Anthropic SDK, Claude Code and Claude
-        Desktop send, and it is what makes them expect these blocks and render
-        citations from them. ``otari_web_search`` and the bare ``web_search`` short
-        form imply no response shape, so those callers keep the plain-text result
-        they always have.
+        Desktop send, and it is what makes them expect these blocks and render citations
+        from them. ``otari_web_search`` and the bare ``web_search`` short form imply no
+        response shape, so a caller using one is owed only the plain-text result.
         """
         type_value = (tool_entry or {}).get("type")
         return isinstance(type_value, str) and type_value.startswith(WEB_SEARCH_NATIVE_TYPE_PREFIX)

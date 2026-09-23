@@ -32,6 +32,7 @@ from gateway.services.tenancy.workspace_code_execution_policy_service import (
     WorkspaceCodeExecutionPolicyUpdate,
 )
 from gateway.services.tool_settings_service import get_field_options, validate_value
+from gateway.services.tools import Dialect
 
 ANTHROPIC_DATED = {"type": "code_execution_20250825", "name": "code_execution"}
 OPENAI_INTERPRETER = {"type": "code_interpreter", "container": {"type": "auto"}}
@@ -145,35 +146,35 @@ def test_auto_leaves_the_provider_in_charge_when_there_is_no_sandbox() -> None:
 
 
 def test_anthropics_dated_keyword_is_native_on_messages_against_anthropic() -> None:
-    assert provider_runs_code_natively(ANTHROPIC_DATED, provider="anthropic", dialect="messages") is True
+    assert provider_runs_code_natively(ANTHROPIC_DATED, provider="anthropic", dialect=Dialect.MESSAGES) is True
 
 
 def test_openais_interpreter_is_native_on_responses_against_openai() -> None:
-    assert provider_runs_code_natively(OPENAI_INTERPRETER, provider="openai", dialect="responses") is True
+    assert provider_runs_code_natively(OPENAI_INTERPRETER, provider="openai", dialect=Dialect.RESPONSES) is True
 
 
 @pytest.mark.parametrize(
     ("entry", "provider", "dialect"),
     [
-        (ANTHROPIC_DATED, "mistral", "messages"),  # the model swap the executor exists for
-        (ANTHROPIC_DATED, "anthropic", "chat"),  # no native form on Chat Completions
-        (ANTHROPIC_DATED, "anthropic", "responses"),  # Anthropic's words in OpenAI's format
-        (OPENAI_INTERPRETER, "openai", "chat"),
-        (OPENAI_INTERPRETER, "anthropic", "responses"),
-        (BARE, "anthropic", "messages"),  # the bare short form is nobody's
-        (BARE, "openai", "responses"),
-        (ANTHROPIC_DATED, None, "messages"),  # provider unknown
-        (None, "anthropic", "messages"),
+        (ANTHROPIC_DATED, "mistral", Dialect.MESSAGES),  # the model swap the executor exists for
+        (ANTHROPIC_DATED, "anthropic", Dialect.CHAT),  # no native form on Chat Completions
+        (ANTHROPIC_DATED, "anthropic", Dialect.RESPONSES),  # Anthropic's words in OpenAI's format
+        (OPENAI_INTERPRETER, "openai", Dialect.CHAT),
+        (OPENAI_INTERPRETER, "anthropic", Dialect.RESPONSES),
+        (BARE, "anthropic", Dialect.MESSAGES),  # the bare short form is nobody's
+        (BARE, "openai", Dialect.RESPONSES),
+        (ANTHROPIC_DATED, None, Dialect.MESSAGES),  # provider unknown
+        (None, "anthropic", Dialect.MESSAGES),
     ],
 )
 def test_everything_else_is_not_natively_served(
-    entry: dict[str, str] | None, provider: str | None, dialect: str
+    entry: dict[str, str] | None, provider: str | None, dialect: Dialect
 ) -> None:
     assert provider_runs_code_natively(entry, provider=provider, dialect=dialect) is False
 
 
 def test_provider_name_is_matched_case_insensitively() -> None:
-    assert provider_runs_code_natively(ANTHROPIC_DATED, provider="Anthropic", dialect="messages") is True
+    assert provider_runs_code_natively(ANTHROPIC_DATED, provider="Anthropic", dialect=Dialect.MESSAGES) is True
 
 
 # --- which native result shape a caller expects back -----------------------------------
@@ -280,7 +281,7 @@ def _requested(
     tools: list[dict[str, Any]],
     *,
     provider: str | None,
-    dialect: str = "messages",
+    dialect: Dialect = Dialect.MESSAGES,
     header: str | None = None,
     pin: CodeExecutor | None = None,
     **config: Any,
@@ -327,7 +328,7 @@ def test_no_sandbox_means_nothing_is_staged() -> None:
             [BARE],
             config=GatewayConfig(),
             provider=LLMProvider("mistral"),
-            dialect="messages",
+            dialect=Dialect.MESSAGES,
             code_execution_header=None,
         )
         is False

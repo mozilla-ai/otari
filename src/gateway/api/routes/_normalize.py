@@ -32,6 +32,7 @@ from gateway.log_config import logger
 from gateway.models.tools import CodeExecutor
 from gateway.services.content_normalizer import NormalizationStats, WireFormat, normalize_messages
 from gateway.services.model_capabilities import resolve_capabilities
+from gateway.services.tools import Dialect
 
 
 def sandbox_requested(
@@ -39,7 +40,7 @@ def sandbox_requested(
     *,
     config: GatewayConfig,
     provider: LLMProvider | None,
-    dialect: str,
+    dialect: Dialect,
     code_execution_header: str | None,
     workspace_executor: CodeExecutor | None = None,
 ) -> bool:

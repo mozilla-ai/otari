@@ -17,8 +17,8 @@ class BuiltinTool:
     It is also the name a call is metered and priced under, so renaming a tool orphans its pricing and usage history.
     ``definition`` returns a new function definition in the Chat Completions shape on every call.
     ``configured`` answers whether this deployment has a backend that can run the tool.
-    ``native`` holds the tool's rendering for each dialect that can announce a gateway-run call
-    in the provider's own server-tool vocabulary, and omits every dialect that cannot.
+    ``native`` holds the tool's rendering for each dialect it is announced in, and omits the
+    rest. A dialect that is absent announces nothing through the registry.
     """
 
     name: str

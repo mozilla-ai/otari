@@ -108,10 +108,7 @@ async def _execute_function_calls(
     """
     out: list[dict[str, Any]] = []
     for item in items:
-        try:
-            args = json.loads(item.arguments or "{}")
-        except json.JSONDecodeError:
-            args = {}
+        args = _parsed_arguments(item.arguments)
         capped = is_capped_call(budget, pool, item.name)
         if capped and budget is not None and budget.exhausted():
             if refused_call_ids is not None:

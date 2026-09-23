@@ -26,9 +26,9 @@ class Dialect(StrEnum):
     RESPONSES = "responses"
 
 
-# Marks a Messages ``server_tool_use`` id as one this gateway minted. Anthropic
-# issues ``srvtoolu_``-prefixed ids of its own, so a reserved prefix is what lets an
-# echoed transcript be told apart from one describing a call the provider really ran.
+# Marks a Messages ``server_tool_use`` ID as one this gateway minted. Anthropic issues
+# ``srvtoolu_``-prefixed IDs of its own, so a reserved prefix is what lets an echoed
+# transcript be told apart from one describing a call the provider really ran.
 SERVER_TOOL_USE_ID_PREFIX = "otari_srvtoolu_"
 
 
@@ -36,8 +36,10 @@ SERVER_TOOL_USE_ID_PREFIX = "otari_srvtoolu_"
 class NativeCall:
     """One gateway-run tool call, as a rendering needs to describe it.
 
-    ``id`` is the id the caller's own transcript gave the call. A rendering that
-    needs an id of its own mints one carrying the gateway's prefix instead.
+    ``id`` is the ID the caller's own transcript gave the call. A rendering that needs an
+    ID of its own mints one carrying the gateway's prefix instead. ``failed`` is set only
+    by a dialect whose renderings read it, so a rendering must not take ``False`` as proof
+    that a call succeeded.
     """
 
     name: str

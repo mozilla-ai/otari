@@ -204,7 +204,7 @@ def native_code_execution_dialect(tool_entry: dict[str, Any] | None) -> Dialect 
     return None
 
 
-def provider_runs_code_natively(tool_entry: dict[str, Any] | None, *, provider: str | None, dialect: str) -> bool:
+def provider_runs_code_natively(tool_entry: dict[str, Any] | None, *, provider: str | None, dialect: Dialect) -> bool:
     """Whether the dispatched provider would run this declaration in its own sandbox.
 
     True only when the keyword is the provider's own vocabulary *and* the request
