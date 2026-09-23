@@ -4,6 +4,63 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.9.0](https://github.com/mozilla-ai/otari/releases/tag/v0.9.0) - 2026-09-23
+
+
+
+### Bug Fixes
+
+- **budgets:** Stop a spend ceiling outliving a concurrently deleted workspace in [#1538](https://github.com/mozilla-ai/otari/pull/1538) by [@peteski22](https://github.com/peteski22) ([`dc45c0e`](https://github.com/mozilla-ai/otari/commit/dc45c0e7f37c937cb9095eabdf134663119490d8))
+- **tools:** Read the code executor the same way on every input in [#1539](https://github.com/mozilla-ai/otari/pull/1539) by [@peteski22](https://github.com/peteski22) ([`9fc35f4`](https://github.com/mozilla-ai/otari/commit/9fc35f43ced667b889fd07ce4ffa2673c5022aa7))
+- **guardrails:** List only the guardrails a stored row can build by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`a7a90c9`](https://github.com/mozilla-ai/otari/commit/a7a90c93c9ad11ebf0b1cb13fe7fab00fcf56012))
+- **guardrails:** Regenerate the dashboard client for the validate_kwargs text in [#1495](https://github.com/mozilla-ai/otari/pull/1495) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`de02ea3`](https://github.com/mozilla-ai/otari/commit/de02ea3a9fdd42605bbd6a07774abe2404d51391))
+- **guardrails:** Retry a guardrail build that ran out of time by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`181f8a8`](https://github.com/mozilla-ai/otari/commit/181f8a818961993c1832d2d3b850c72c853f8ac8))
+- **dashboard:** Stop discard from submitting the form it discards in [#1546](https://github.com/mozilla-ai/otari/pull/1546) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`f574590`](https://github.com/mozilla-ai/otari/commit/f5745904d1abf5ae21184fce0eea18f901cadfee))
+- **catalog:** Withhold a hosted model the deployment no longer advertises in [#1564](https://github.com/mozilla-ai/otari/pull/1564) by [@tbille](https://github.com/tbille) ([`3919387`](https://github.com/mozilla-ai/otari/commit/39193878d5cdfc63f608b367784e2d000091e476))
+
+
+### Features
+
+- **guardrails:** Store an organization's own guardrail definition by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`fc397c1`](https://github.com/mozilla-ai/otari/commit/fc397c1ea4043c80af3479cd5b5ca9ac293fff7a))
+- **invitations:** Hand admins a shareable accept link and let invitees set a password on accept in [#1562](https://github.com/mozilla-ai/otari/pull/1562) by [@tbille](https://github.com/tbille) ([`d19dd96`](https://github.com/mozilla-ai/otari/commit/d19dd9676b0a1f1c6ccfae6f1eb148f1e7dae0de))
+- **guardrails:** Look up one built-in guardrail by name in [#1459](https://github.com/mozilla-ai/otari/pull/1459) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`336f9e4`](https://github.com/mozilla-ai/otari/commit/336f9e4e466eb52fb389be9d30af1dbb8baff87b))
+- **guardrails:** Deny any_llm to an organization's own store by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`8d355b2`](https://github.com/mozilla-ai/otari/commit/8d355b21909eb2c03d0e15d17df1eed321d80ed8))
+- **guardrails:** Write an organization's own guardrail definition by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`821e84e`](https://github.com/mozilla-ai/otari/commit/821e84e78b55666d3e58f772cac03568e3a636cc))
+- **api:** Serve an organization's guardrail definitions by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`1389549`](https://github.com/mozilla-ai/otari/commit/13895498fe5dcfb2f10dc21c36b93a1a830edee1))
+- **guardrails:** Refuse dropping a definition a mandate names by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`425ab36`](https://github.com/mozilla-ai/otari/commit/425ab3694a43acd1a1136ac17ef6eb9f18e4b592))
+- **guardrails:** Let an organization mandate a guardrail it defined by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`2e64713`](https://github.com/mozilla-ai/otari/commit/2e6471378367c898c00d7a87bdecad2d13064966))
+- **guardrails:** Check a definition's stored endpoint before it is saved by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`3bdb608`](https://github.com/mozilla-ai/otari/commit/3bdb6087b96d936c1899372f700c0ead5248c8e6))
+- **guardrails:** Read every enabled definition in one query by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`0fb9f7d`](https://github.com/mozilla-ai/otari/commit/0fb9f7dc149b164b6b565e90795e3c6152170781))
+- **guardrails:** Build an organization's definitions and hold them ready by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`5bdeacd`](https://github.com/mozilla-ai/otari/commit/5bdeacd3fa07f77492d5e78e62d29df3a5038cae))
+- **gateway:** Prime the guardrail runner at boot and keep it current by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`d83eee6`](https://github.com/mozilla-ai/otari/commit/d83eee681a93a4ccb862f8d9e8936de8921abad7))
+- **guardrails:** Carry a mandate's definition id to the request path by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`bef8cb7`](https://github.com/mozilla-ai/otari/commit/bef8cb761ff8cfd85a2b73d2fcc752d751bb342e))
+- **guardrails:** Keep the definition that serves a profile through the merge by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`eb3b0b9`](https://github.com/mozilla-ai/otari/commit/eb3b0b9e4cbfe891a3ba509acf30df8dc0d154dd))
+- **guardrails:** Answer a check with the guardrail this worker holds by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`dbeb131`](https://github.com/mozilla-ai/otari/commit/dbeb131814918b26b6c4aa17ad48130c91765814))
+- **gateway:** Run a mandated definition on the request path by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`4d8898d`](https://github.com/mozilla-ai/otari/commit/4d8898d282a6b59b506aa12e1de32d61cc315b7d))
+- **guardrails:** Answer which version of a definition this worker holds by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`a0428ec`](https://github.com/mozilla-ai/otari/commit/a0428ec0dc0d99b9aca399fdfcf74de547f8c578))
+- **api:** Report whether a guardrail definition is actually running by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`8d0ac86`](https://github.com/mozilla-ai/otari/commit/8d0ac868609d148d6a2fd326d4b2c277ef47bb59))
+- **api:** Rebuild a guardrail definition when it is written by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`0a2d924`](https://github.com/mozilla-ai/otari/commit/0a2d9249b19aac5d1b7cb771c395c0665d5bf250))
+- **config:** Size the guardrail thread pool from the deployment by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`60bc87f`](https://github.com/mozilla-ai/otari/commit/60bc87f6b7c64fb3f291f0ad2419f50188f9254a))
+- **api:** Publish the organization guardrails surface by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`37a2bc2`](https://github.com/mozilla-ai/otari/commit/37a2bc276fe108d59ba5dc9656b7ff6a9c91d356))
+- **dashboard:** Add hooks for the built-in guardrail catalog and definitions by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`0695b07`](https://github.com/mozilla-ai/otari/commit/0695b075f3e617524cd680491b36db6522a4d23f))
+- **dashboard:** Read the checks and fields a built-in guardrail offers in [#1545](https://github.com/mozilla-ai/otari/pull/1545) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`11494e3`](https://github.com/mozilla-ai/otari/commit/11494e360d0c46c277cc339eb75f8a8532ef9ad7))
+- **dashboard:** Keep a guardrail definition's secrets across an edit by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`f5f1e3c`](https://github.com/mozilla-ai/otari/commit/f5f1e3c3783e126d0ad543359c19dec1f9a1d876))
+- **dashboard:** Add the dialog that sets up a guardrail otari runs itself by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`3b5bf44`](https://github.com/mozilla-ai/otari/commit/3b5bf448b5350f83f1169fb864b7b61aa01d028e))
+- **dashboard:** Add the dialog that says where a guardrail runs by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`2a86206`](https://github.com/mozilla-ai/otari/commit/2a86206b2d28c721b240d6cf8f9f2bdafb68afed))
+- **dashboard:** Open the two guardrail dialogs from the organization card by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`f6b59b5`](https://github.com/mozilla-ai/otari/commit/f6b59b521ed93e0cc92a2a6a7657018e299bd3cd))
+- **dashboard:** Ask for a guardrail's JSON arguments as checkboxes by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`22200c0`](https://github.com/mozilla-ai/otari/commit/22200c0c133ae2df42c672374da5bf06b8447185))
+- **dashboard:** Call the definition action configure guardrail by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`825f043`](https://github.com/mozilla-ai/otari/commit/825f043cd33cde4ee7fab0f4e98beca7abaa33e6))
+- **dashboard:** Say when an organization guardrail is not running by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`33bbbd2`](https://github.com/mozilla-ai/otari/commit/33bbbd29a14933921ec7ba4baf00c2e0c4888969))
+- **dashboard:** Mark the card's mandates whose guardrail is not running in [#1547](https://github.com/mozilla-ai/otari/pull/1547) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`a23303e`](https://github.com/mozilla-ai/otari/commit/a23303e30662bcd354855b0656bb7fbd647bcc51))
+- **dashboard:** Add the organization guardrails page by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`fba88fc`](https://github.com/mozilla-ai/otari/commit/fba88fc94985c21a65c43810f0e79519972ce3c2))
+- **dashboard:** Say configure guardrail on the organization page in [#1548](https://github.com/mozilla-ai/otari/pull/1548) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`be6f82d`](https://github.com/mozilla-ai/otari/commit/be6f82db59c1ba74329f01ce3ee62b60c5494cfa))
+- **guardrails:** Test an organization's guardrail definition by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`cc5d552`](https://github.com/mozilla-ai/otari/commit/cc5d552f6eb332c09ae0a08a2a776fc4b016cb41))
+- **dashboard:** Test a configured guardrail from its row in [#1550](https://github.com/mozilla-ai/otari/pull/1550) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`233bada`](https://github.com/mozilla-ai/otari/commit/233bada3464d2081494fdc9da28de4d492a11aa0))
+- **dashboard:** Show a workspace the guardrails that apply to it in [#1551](https://github.com/mozilla-ai/otari/pull/1551) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`bb18e93`](https://github.com/mozilla-ai/otari/commit/bb18e930bfa747428cb95b12a266ef3900086d31))
+- Return request id and inline cost on standalone responses by [@daavoo](https://github.com/daavoo) ([`07f97db`](https://github.com/mozilla-ai/otari/commit/07f97dbed145757adb43809fd22808d7441a9d0c))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.8.0...v0.9.0
 ## [0.8.0](https://github.com/mozilla-ai/otari/releases/tag/v0.8.0) - 2026-09-22
 
 
