@@ -1361,3 +1361,102 @@ def test_a_request_without_a_container_is_untouched_by_the_gate(
 
     assert response.status_code == 200, response.text
     assert calls == ["None"]
+
+
+class _FakeSandboxBackend:
+    """SandboxBackend duck-type that resolves the tool loop in one round.
+
+    Takes every keyword the dispatch site passes, so a narrower double does not
+    surface as a 502 naming nothing.
+    """
+
+    def __init__(self, **_kwargs: Any) -> None:
+        pass
+
+    async def __aenter__(self) -> _FakeSandboxBackend:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [{"type": "function", "function": {"name": "code_execution", "description": "", "parameters": {}}}]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == "code_execution"
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        return "ok"
+
+
+def test_container_auto_for_the_gateway_sandbox_passes_a_managed_credential(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``auto`` names no provider container: it asks this gateway to hold its own
+    sandbox, so a managed route runs the request and the provider never sees it."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
+    calls: list[str] = []
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            attempt = _attempt(0, "3f1b6a1e-0000-4000-8000-0000000000e1", "claude-3-5-sonnet-20241022", "sk-managed")
+            attempt["managed"] = True
+            return httpx.Response(200, json=_resolve_payload([attempt]))
+        if url.endswith("/gateway/code-execution/resolve"):
+            return httpx.Response(200, json={"enabled": True})
+        return httpx.Response(204)
+
+    async def fake_loop_amessages(**kwargs: Any) -> MessageResponse:
+        calls.append(str(kwargs.get("container")))
+        return _message_response()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop_messages.amessages", fake_loop_amessages)
+
+    response = platform_client.post(
+        f"{API_ROOT}/messages",
+        json={
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+            "container": "auto",
+            "tools": [{"type": "otari_code_execution"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert calls == ["None"], "auto is the gateway's, never forwarded upstream"
+
+
+def test_container_auto_without_the_gateway_sandbox_is_still_refused(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Past the managed gate, ``auto`` on a provider-run request is refused as the
+    gateway word it is, so the exemption cannot put it on the shared account."""
+    calls: list[str] = []
+    _container_route(monkeypatch, managed=True, calls=calls)
+
+    response = platform_client.post(
+        f"{API_ROOT}/messages",
+        json={
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+            "container": "auto",
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "container names a sandbox this gateway holds" in response.json()["detail"]["error"]["message"]
+    assert calls == []

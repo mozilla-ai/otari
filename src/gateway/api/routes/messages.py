@@ -32,10 +32,12 @@ from gateway.api.deps import (
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
+    CONTAINER_AUTO,
     DB_UNAVAILABLE_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
     ErrorKind,
     RequestContext,
+    _requested_container,
     classify_provider_error,
     default_attempt_kwargs,
     prepare_gateway_tools,
@@ -709,7 +711,7 @@ CONTAINER_ON_MANAGED_CREDENTIAL_DETAIL = (
 )
 
 
-def _reject_container_on_managed_credential(ctx: RequestContext) -> None:
+def _reject_container_on_managed_credential(ctx: RequestContext, container: str) -> None:
     """Refuse a caller-chosen container id when the upstream account is not the caller's.
 
     A container id names an execution environment and the files uploaded into it,
@@ -731,7 +733,13 @@ def _reject_container_on_managed_credential(ctx: RequestContext) -> None:
     credentials are the deployment operator's own, and the managed rung
     (``_serve_from_hosted_credential``) answers ``None`` in every build that
     mounts this route.
+
+    ``auto`` passes: it names no container, only asks this gateway to hold its
+    own sandbox, and never reaches the provider (``prepare_gateway_tools`` either
+    consumes it or refuses it as a gateway value on a provider-run request).
     """
+    if _requested_container(container) == CONTAINER_AUTO:
+        return
     route = ctx.route
     if route is None or not any(attempt.managed for attempt in route.attempts):
         return
@@ -851,7 +859,7 @@ async def create_message(
 
     if request.container is not None and ctx.hybrid_mode:
         try:
-            _reject_container_on_managed_credential(ctx)
+            _reject_container_on_managed_credential(ctx, request.container)
         except HTTPException:
             # A no-op in hybrid, the only mode that reaches this gate, since
             # hybrid reserves nothing locally. Kept so this exit already settles
