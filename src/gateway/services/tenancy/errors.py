@@ -1148,6 +1148,34 @@ class OrganizationGuardrailDefinitionUnsafeUrlError(TenancyValidationError):
         super().__init__(f"'{argument}' is not an address this gateway may dial: {reason}")
 
 
+class OrganizationGuardrailDefinitionNotRunningError(TenancyConflictError):
+    """A test asked for a guardrail this worker does not hold built.
+
+    Disabled, failed to build, or not caught up with a write yet: the
+    definition's `build_state` says which, and that is where the fix is.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This guardrail is not running here, so it cannot be tested. Its status says why; fix that and try again."
+        )
+
+
+class OrganizationGuardrailDefinitionCheckFailedError(TenancyError):
+    """The vendor was called and the check did not come back.
+
+    A 502, because the fault is upstream of this gateway. The message names
+    neither the vendor's error nor its type: a vendor library may put the
+    credentials it was handed into its own message, so the reason is logged and
+    only the log carries it.
+    """
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+
+    def __init__(self) -> None:
+        super().__init__("The guardrail could not be evaluated. The reason is in the gateway's log.")
+
+
 class OrganizationGuardrailDefinitionInUseError(TenancyConflictError):
     """A mandate still names the definition the caller asked to drop.
 

@@ -3724,6 +3724,50 @@
               ]
             }
           }
+        },
+        {
+          "name": "Test Organization Guardrail Definition",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"text\": \"string\"\n}"
+            },
+            "description": "Run a definition's guardrail over some text and return its verdict.\n\nOrganization owners and admins only. The guardrail is the one the worker\nthat answered already holds built, so this tests what is running rather\nthan building it again. Nothing is stored and no mandate is involved;\n``validate_kwargs`` stands in for what a mandate would pass with each\ncheck.\n\nA definition this worker does not hold built answers 409, and its\n``build_state`` says why. A vendor call that fails answers 502, and the\nreason is in the gateway's log only: a vendor library may put the\ncredentials it was handed into its own message.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "guardrail-definitions",
+                ":definition_id",
+                "test"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/guardrail-definitions/:definition_id/test",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "definition_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
         }
       ],
       "name": "organization-guardrail-definitions"

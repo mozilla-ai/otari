@@ -89,6 +89,7 @@ def _service(db: AsyncSession) -> OrganizationGuardrailDefinitionService:
         uow=uow,
         build_state=runner.build_state,
         rebuild=runner.rebuild_definition,
+        handle=runner.handle,
     )
 
 

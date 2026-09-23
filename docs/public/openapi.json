@@ -9310,6 +9310,71 @@
         "title": "OrganizationGuardrailDefinitionPublic",
         "type": "object"
       },
+      "OrganizationGuardrailDefinitionTest": {
+        "additionalProperties": false,
+        "description": "Text to run one definition's guardrail over, as a request would.",
+        "properties": {
+          "text": {
+            "description": "The input to check, as a request's user text would reach it",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "validate_kwargs": {
+            "additionalProperties": true,
+            "description": "Per-check arguments, as a mandate's validate_kwargs would hand them to this guardrail",
+            "title": "Validate Kwargs",
+            "type": "object"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "OrganizationGuardrailDefinitionTest",
+        "type": "object"
+      },
+      "OrganizationGuardrailDefinitionTestResult": {
+        "description": "The guardrail's own verdict on the text, in the fields a request's check reports.",
+        "properties": {
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The vendor's reason, when it gives one",
+            "title": "Explanation"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The vendor's score, when it gives one",
+            "title": "Score"
+          },
+          "valid": {
+            "description": "False when the guardrail flagged the text",
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "valid",
+          "explanation",
+          "score"
+        ],
+        "title": "OrganizationGuardrailDefinitionTestResult",
+        "type": "object"
+      },
       "OrganizationGuardrailDefinitionUpdate": {
         "description": "Partial update. Only the fields the caller sets are applied.\n\n``create_kwargs`` replaces the arguments whole when sent, and an argument the\ncatalog marks secret keeps its stored value where the caller echoes back the\n``***`` a read gave them. Omitting it leaves both columns untouched *and\nreads neither*, which is what lets an admin on a deployment whose\n``OTARI_SECRET_KEY`` has moved still flip ``enabled`` and repair the row by\ntyping the credential again.\n\nChanging ``guardrail_name`` without sending ``create_kwargs`` re-splits the\nstored arguments under the new class, because the plain/secret split is the\nold class's answer and would otherwise go stale.",
         "example": {
@@ -23894,6 +23959,68 @@
           }
         ],
         "summary": "Update Organization Guardrail Definition",
+        "tags": [
+          "organization-guardrail-definitions"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/guardrail-definitions/{definition_id}/test": {
+      "post": {
+        "description": "Run a definition's guardrail over some text and return its verdict.\n\nOrganization owners and admins only. The guardrail is the one the worker\nthat answered already holds built, so this tests what is running rather\nthan building it again. Nothing is stored and no mandate is involved;\n``validate_kwargs`` stands in for what a mandate would pass with each\ncheck.\n\nA definition this worker does not hold built answers 409, and its\n``build_state`` says why. A vendor call that fails answers 502, and the\nreason is in the gateway's log only: a vendor library may put the\ncredentials it was handed into its own message.",
+        "operationId": "organization-guardrail-definitions-test_organization_guardrail_definition",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "definition_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Definition Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationGuardrailDefinitionTest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationGuardrailDefinitionTestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Organization Guardrail Definition",
         "tags": [
           "organization-guardrail-definitions"
         ]

@@ -2015,6 +2015,37 @@ export interface paths {
         patch: operations["organization-guardrail-definitions-update_organization_guardrail_definition"];
         trace?: never;
     };
+    "/api/v1/organizations/me/guardrail-definitions/{definition_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Organization Guardrail Definition
+         * @description Run a definition's guardrail over some text and return its verdict.
+         *
+         *     Organization owners and admins only. The guardrail is the one the worker
+         *     that answered already holds built, so this tests what is running rather
+         *     than building it again. Nothing is stored and no mandate is involved;
+         *     ``validate_kwargs`` stands in for what a mandate would pass with each
+         *     check.
+         *
+         *     A definition this worker does not hold built answers 409, and its
+         *     ``build_state`` says why. A vendor call that fails answers 502, and the
+         *     reason is in the gateway's log only: a vendor library may put the
+         *     credentials it was handed into its own message.
+         */
+        post: operations["organization-guardrail-definitions-test_organization_guardrail_definition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/guardrails": {
         parameters: {
             query?: never;
@@ -9753,6 +9784,45 @@ export interface components {
             updated_at: string;
         };
         /**
+         * OrganizationGuardrailDefinitionTest
+         * @description Text to run one definition's guardrail over, as a request would.
+         */
+        OrganizationGuardrailDefinitionTest: {
+            /**
+             * Text
+             * @description The input to check, as a request's user text would reach it
+             */
+            text: string;
+            /**
+             * Validate Kwargs
+             * @description Per-check arguments, as a mandate's validate_kwargs would hand them to this guardrail
+             */
+            validate_kwargs?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * OrganizationGuardrailDefinitionTestResult
+         * @description The guardrail's own verdict on the text, in the fields a request's check reports.
+         */
+        OrganizationGuardrailDefinitionTestResult: {
+            /**
+             * Explanation
+             * @description The vendor's reason, when it gives one
+             */
+            explanation: string | null;
+            /**
+             * Score
+             * @description The vendor's score, when it gives one
+             */
+            score: number | null;
+            /**
+             * Valid
+             * @description False when the guardrail flagged the text
+             */
+            valid: boolean;
+        };
+        /**
          * OrganizationGuardrailDefinitionUpdate
          * @description Partial update. Only the fields the caller sets are applied.
          *
@@ -16799,6 +16869,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrganizationGuardrailDefinitionPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-guardrail-definitions-test_organization_guardrail_definition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                definition_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationGuardrailDefinitionTest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationGuardrailDefinitionTestResult"];
                 };
             };
             /** @description Validation Error */

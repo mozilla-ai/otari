@@ -53,13 +53,14 @@ import json
 import uuid
 from collections.abc import Awaitable, Callable, Iterator
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Protocol
 
 from any_guardrail.base import GuardrailName
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.log_config import logger
 from gateway.models.guardrails import OrganizationGuardrailDefinition
 from gateway.models.secret_fields import REDACTED_VALUE, restore_redacted_values
 from gateway.models.tenancy import User
@@ -69,6 +70,7 @@ from gateway.services.guardrail_catalog import (
     builtin_guardrail_spec,
     definable_by_an_organization,
 )
+from gateway.services.guardrails import GuardrailsNotReachableError
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
@@ -78,9 +80,11 @@ from gateway.services.secret_box import (
 from gateway.services.tenancy.errors import (
     OrganizationGuardrailDefinitionAlreadyExistsError,
     OrganizationGuardrailDefinitionArgumentsError,
+    OrganizationGuardrailDefinitionCheckFailedError,
     OrganizationGuardrailDefinitionInUseError,
     OrganizationGuardrailDefinitionLimitReachedError,
     OrganizationGuardrailDefinitionNotFoundError,
+    OrganizationGuardrailDefinitionNotRunningError,
     OrganizationGuardrailDefinitionUnsafeUrlError,
     OrganizationGuardrailNotBuildableError,
     OrganizationGuardrailNotDefinableError,
@@ -243,6 +247,28 @@ RebuildDefinition = Callable[
 ]
 
 
+class _Verdict(Protocol):
+    # Read-only, because the runner's own verdict is a frozen dataclass.
+    @property
+    def valid(self) -> bool: ...
+    @property
+    def explanation(self) -> str | None: ...
+    @property
+    def score(self) -> float | None: ...
+
+
+class _BuiltGuardrail(Protocol):
+    async def check(self, prompt: str, **validate_kwargs: Any) -> _Verdict: ...
+
+
+# The guardrail this worker holds built for a definition, or None. Passed in for
+# the reason the two above are.
+HandleOf = Callable[[uuid.UUID, uuid.UUID], _BuiltGuardrail | None]
+
+# A test is one request's worth of text, not a document.
+_MAX_TEST_TEXT = 10_000
+
+
 class OrganizationGuardrailDefinitionPublic(BaseModel):
     """The API-facing shape. Carries the names of the stored secrets and none of their values."""
 
@@ -314,6 +340,28 @@ class OrganizationGuardrailDefinitionPublic(BaseModel):
 class OrganizationGuardrailDefinitionsPublic(BaseModel):
     data: list[OrganizationGuardrailDefinitionPublic]
     count: int
+
+
+class OrganizationGuardrailDefinitionTest(BaseModel):
+    """Text to run one definition's guardrail over, as a request would."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: Annotated[str, StringConstraints(min_length=1, max_length=_MAX_TEST_TEXT)] = Field(
+        description="The input to check, as a request's user text would reach it"
+    )
+    validate_kwargs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Per-check arguments, as a mandate's validate_kwargs would hand them to this guardrail",
+    )
+
+
+class OrganizationGuardrailDefinitionTestResult(BaseModel):
+    """The guardrail's own verdict on the text, in the fields a request's check reports."""
+
+    valid: bool = Field(description="False when the guardrail flagged the text")
+    explanation: str | None = Field(description="The vendor's reason, when it gives one")
+    score: float | None = Field(description="The vendor's score, when it gives one")
 
 
 def _names(values: list[str]) -> str:
@@ -655,12 +703,14 @@ class OrganizationGuardrailDefinitionService:
         uow: UnitOfWork,
         build_state: BuildStateOf,
         rebuild: RebuildDefinition,
+        handle: HandleOf,
     ) -> None:
         self._definitions = definitions
         self._organizations = organizations
         self._uow = uow
         self._build_state = build_state
         self._rebuild = rebuild
+        self._handle = handle
 
     async def _rebuilt(self, definition: OrganizationGuardrailDefinition) -> GuardrailBuildState:
         """Bring this worker in step with a row that just changed, and say what it holds.
@@ -803,6 +853,37 @@ class OrganizationGuardrailDefinitionService:
                 raise OrganizationGuardrailDefinitionAlreadyExistsError(attempted_name)
 
         return _public(definition, build_state=await self._rebuilt(definition))
+
+    async def test_definition(
+        self, *, user: User, definition_id: uuid.UUID, request: OrganizationGuardrailDefinitionTest
+    ) -> OrganizationGuardrailDefinitionTestResult:
+        """Run the guardrail this worker holds for a definition over some text.
+
+        The built guardrail a request would use, not a fresh build: a test is
+        there to answer "does what is running work", and building again would
+        test something else. The vendor call is made outside any transaction,
+        as a request's check is.
+        """
+        organization_id = await self._manageable_organization_id(user)
+        async with self._uow:
+            definition = await self._definitions.get_in_organization(definition_id, organization_id)
+            if definition is None:
+                raise OrganizationGuardrailDefinitionNotFoundError(definition_id)
+            enabled = definition.enabled
+
+        guardrail = self._handle(organization_id, definition_id) if enabled else None
+        if guardrail is None:
+            raise OrganizationGuardrailDefinitionNotRunningError()
+        try:
+            verdict = await guardrail.check(request.text, **request.validate_kwargs)
+        except GuardrailsNotReachableError as exc:
+            # Its message names the definition and the exception's type and
+            # nothing the vendor said, which is what makes it loggable.
+            logger.warning("Testing organization guardrail definition failed: %s", exc)
+            raise OrganizationGuardrailDefinitionCheckFailedError() from exc
+        return OrganizationGuardrailDefinitionTestResult(
+            valid=verdict.valid, explanation=verdict.explanation, score=verdict.score
+        )
 
     async def delete_definition(self, *, user: User, definition_id: uuid.UUID) -> None:
         """Drop a definition and the credentials it holds.

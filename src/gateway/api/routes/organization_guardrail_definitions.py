@@ -32,6 +32,8 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionCreate,
     OrganizationGuardrailDefinitionPublic,
     OrganizationGuardrailDefinitionsPublic,
+    OrganizationGuardrailDefinitionTest,
+    OrganizationGuardrailDefinitionTestResult,
     OrganizationGuardrailDefinitionUpdate,
 )
 
@@ -114,6 +116,29 @@ async def update_organization_guardrail_definition(
     on the next refresh.
     """
     return await service.update_definition(user=current_identity, definition_id=definition_id, request=body)
+
+
+@router.post("/{definition_id}/test")
+async def test_organization_guardrail_definition(
+    service: OrganizationGuardrailDefinitionServiceDep,
+    current_identity: CurrentIdentity,
+    definition_id: uuid.UUID,
+    body: OrganizationGuardrailDefinitionTest,
+) -> OrganizationGuardrailDefinitionTestResult:
+    """Run a definition's guardrail over some text and return its verdict.
+
+    Organization owners and admins only. The guardrail is the one the worker
+    that answered already holds built, so this tests what is running rather
+    than building it again. Nothing is stored and no mandate is involved;
+    ``validate_kwargs`` stands in for what a mandate would pass with each
+    check.
+
+    A definition this worker does not hold built answers 409, and its
+    ``build_state`` says why. A vendor call that fails answers 502, and the
+    reason is in the gateway's log only: a vendor library may put the
+    credentials it was handed into its own message.
+    """
+    return await service.test_definition(user=current_identity, definition_id=definition_id, request=body)
 
 
 @router.delete("/{definition_id}")
