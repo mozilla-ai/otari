@@ -34,7 +34,6 @@ from gateway.services.content_normalizer import InlineLimit, NormalizationStats,
 from gateway.services.files.provider_uploads import upload_attachment, uploads_attachments
 from gateway.services.model_capabilities import resolve_capabilities
 
-
 # The providers that cap the attachment bytes one request may carry inline.
 _INLINE_LIMITED_PROVIDERS = frozenset({LLMProvider.GEMINI, LLMProvider.VERTEXAI})
 

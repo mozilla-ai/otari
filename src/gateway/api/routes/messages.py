@@ -30,7 +30,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
-from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
+from gateway.api.routes._normalize import INLINE_LIMIT_DETAIL, normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     DB_UNAVAILABLE_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
@@ -803,6 +803,9 @@ async def create_message(
             ),
         )
         sandbox_inputs.extend(stats.sandbox_inputs)
+        if stats.oversized:
+            detail = INLINE_LIMIT_DETAIL.format(max_bytes=config.files_gemini_inline_max_bytes)
+            raise _ADAPTER.error(400, detail, ErrorKind.INVALID_REQUEST)
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()
 
     try:
@@ -944,7 +947,7 @@ async def create_message(
         resolved = await resolve_dispatch_provider(
             ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
         )
-        call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
+        call_kwargs = provider_attempt_kwargs({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model})
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
             ctx=ctx,
@@ -990,7 +993,7 @@ async def create_message(
     resolved = await resolve_dispatch_provider(
         ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
     )
-    call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
+    call_kwargs = provider_attempt_kwargs({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model})
     result = await run_standalone_non_stream(
         adapter=_ADAPTER,
         ctx=ctx,

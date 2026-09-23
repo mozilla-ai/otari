@@ -251,7 +251,9 @@ def provider_runs_code_natively(tool_entry: dict[str, Any] | None, *, provider: 
     return (provider.lower(), dialect) in _NATIVE_CODE_EXECUTION.get(key, frozenset())
 
 
-def with_native_code_execution_tool(tools: list[dict[str, Any]] | None, *, provider: str) -> list[dict[str, Any]] | None:
+def with_native_code_execution_tool(
+    tools: list[dict[str, Any]] | None, *, provider: str
+) -> list[dict[str, Any]] | None:
     """``tools`` with a provider-named code-execution keyword in Gemini's own form, for a Gemini attempt.
 
     Gemini declares the tool as ``{"code_execution": {}}``, and rejects the
@@ -286,7 +288,7 @@ def provider_attempt_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 - an unknown selector is left for the provider call to refuse
         return kwargs
     tools = kwargs.get("tools")
-    rewritten = with_native_code_execution_tool(tools, provider=provider.value)
+    rewritten = with_native_code_execution_tool(tools, provider=str(getattr(provider, "value", provider)))
     return kwargs if rewritten is tools else {**kwargs, "tools": rewritten}
 
 

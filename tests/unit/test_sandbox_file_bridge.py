@@ -393,3 +393,33 @@ async def test_a_blob_goes_when_its_row_cannot_be_built(monkeypatch: pytest.Monk
 
     assert db.added == []
     assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_a_provider_output_sent_inline_is_stored_as_a_new_file() -> None:
+    store = _MemoryStore()
+    db = _FakeDb()
+
+    file_id = await _bridge(store, _CommittingUnitOfWork(db)).store_provider_output(b"\x89PNG", "image/png")
+
+    assert file_id is not None and store.blobs == {file_id: b"\x89PNG"}
+    (record,) = db.added
+    assert record.filename.endswith(".png")
+
+
+@pytest.mark.asyncio
+async def test_inline_provider_outputs_draw_on_the_same_caps_as_copies() -> None:
+    db = _FakeDb()
+    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(db), files_output_max_files=2, files_output_max_bytes=5)
+
+    assert await bridge.store_provider_output(b"123456", "text/plain") is None
+    assert await bridge.store_provider_output(b"1234", "text/plain") is not None
+    assert await bridge.store_provider_output(b"12", "text/plain") is None
+    assert len(db.added) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_inline_provider_output_that_cannot_be_stored_never_raises() -> None:
+    bridge = _bridge(_MemoryStore(), _FailingUnitOfWork(_FakeDb()))
+
+    assert await bridge.store_provider_output(b"data", "text/plain") is None

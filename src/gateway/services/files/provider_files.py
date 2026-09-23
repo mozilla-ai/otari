@@ -7,9 +7,11 @@ The provider does not keep it for long: OpenAI discards a container 20 minutes a
 
 from __future__ import annotations
 
+import base64
+import binascii
 import os
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator, Iterable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -18,6 +20,7 @@ from urllib.parse import quote
 
 import httpx
 from anthropic import AnthropicError
+from anthropic.types import CodeExecutionOutputBlock
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
 from any_llm.types.files import AsyncFileDownload
@@ -133,6 +136,81 @@ def produced_files_for(dialect: str, obj: Any) -> list[ProviderFile]:
             return responses_produced_files(_field(obj, "response"))
         return responses_produced_files(obj)
     return []
+
+
+# Stores one inline output's bytes and returns the file ID it is served under, or ``None``.
+InlineOutputStore = Callable[[bytes, str], Awaitable[str | None]]
+
+
+def _decoded(data: Any) -> bytes | None:
+    if not isinstance(data, str) or not data:
+        return None
+    try:
+        return base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+
+async def _store_messages_outputs(block: Any, store: InlineOutputStore) -> None:
+    """Swap a ``code_execution_tool_result``'s ``inline_outputs`` for ``code_execution_output`` file blocks.
+
+    The Messages bridge carries what Gemini's code produced as bytes on an extra
+    field, because Anthropic's shape names a produced file by an ID only a file
+    store can mint. This is that store, so the caller gets the shape Anthropic's
+    own replies have.
+    """
+    if _field(block, "type") != "code_execution_tool_result":
+        return
+    result = _field(block, "content")
+    extra = result if isinstance(result, dict) else getattr(result, "__pydantic_extra__", None)
+    if not isinstance(extra, dict) or not isinstance(outputs := extra.pop("inline_outputs", None), list):
+        return
+    produced: list[Any] = []
+    for output in outputs:
+        data = _decoded(_field(output, "data"))
+        file_id = await store(data, str(_field(output, "mime_type") or "")) if data is not None else None
+        if file_id is not None:
+            produced.append(CodeExecutionOutputBlock(type="code_execution_output", file_id=file_id))
+    if not produced:
+        return
+    if isinstance(result, dict):
+        result["content"] = [*(result.get("content") or []), *(block.model_dump() for block in produced)]
+    else:
+        result.content = [*(result.content or []), *produced]
+
+
+async def _store_chat_outputs(extra_content: Any, store: InlineOutputStore) -> None:
+    """Swap the bytes on Gemini's ``code_execution_output`` items for the file ID they are stored under."""
+    google = extra_content.get("google") if isinstance(extra_content, dict) else None
+    items = google.get("code_execution") if isinstance(google, dict) else None
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict) or item.get("type") != "code_execution_output":
+            continue
+        data = _decoded(item.get("data"))
+        file_id = await store(data, str(item.get("mime_type") or "")) if data is not None else None
+        if file_id is not None:
+            item.pop("data", None)
+            item["file_id"] = file_id
+
+
+async def store_inline_outputs(dialect: str, obj: Any, store: InlineOutputStore) -> None:
+    """Store the files a completed reply, or one streamed event, of ``dialect`` carries inline, in place.
+
+    Only Gemini returns produced files as bytes, on Chat Completions (on the
+    ``code_execution`` items in ``extra_content``) and on Messages (on the
+    ``code_execution_tool_result`` blocks the bridge builds, whole in a stream's
+    ``content_block_start``).
+    """
+    if dialect == "messages":
+        blocks = (
+            [_field(obj, "content_block")] if _field(obj, "type") == "content_block_start" else _field(obj, "content")
+        )
+        for block in blocks or []:
+            await _store_messages_outputs(block, store)
+    elif dialect == "chat":
+        for choice in _field(obj, "choices") or []:
+            holder = _field(choice, "message") or _field(choice, "delta")
+            await _store_chat_outputs(_field(holder, "extra_content"), store)
 
 
 def serves_files(provider: str) -> bool:

@@ -196,8 +196,8 @@ def test_gemini_does_not_serve_other_pairings(entry: dict[str, str], dialect: st
 
 
 def test_gemini_attempt_gets_the_keyword_in_geminis_own_form() -> None:
-    function = {"type": "function", "function": {"name": "lookup", "parameters": {}}}
-    tools = [function, ANTHROPIC_DATED, BARE]
+    function: dict[str, Any] = {"type": "function", "function": {"name": "lookup", "parameters": {}}}
+    tools: list[dict[str, Any]] = [function, ANTHROPIC_DATED, BARE]
 
     assert with_native_code_execution_tool(tools, provider="gemini") == [function, {"code_execution": {}}]
     assert tools == [function, ANTHROPIC_DATED, BARE]

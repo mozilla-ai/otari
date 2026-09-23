@@ -233,9 +233,21 @@ serve, and refusing it would make the request fail purely because its model
 changed. On
 Responses a claimed `code_interpreter` is answered with a `code_interpreter_call`
 item. Chat Completions has no native shape, so a claimed declaration there
-resolves inside the tool loop and only the final message is returned. Nothing
-runs natively on Chat Completions, and the bare `code_execution` form is no
-provider's, so under `auto` both always run on the sandbox.
+resolves inside the tool loop and only the final message is returned.
+
+Gemini runs code natively on both Chat Completions and Messages, so under `auto`
+a Gemini model keeps the bare `code_execution` form on either format, and
+Anthropic's `code_execution_<date>` on Messages. Otari rewrites the declaration
+into Gemini's own `{"code_execution": {}}` for each attempt that goes to Gemini
+(a fallback to another provider still receives it as written), and a request
+may also send `{"code_execution": {}}` itself. On Messages the run comes back as
+the same `server_tool_use` and `code_execution_tool_result` blocks Anthropic
+returns. On Chat Completions, which has no native shape, it comes back on the
+assistant message as `extra_content.google.code_execution`: a list of
+`executable_code`, `code_execution_result` and `code_execution_output` items in
+the order Gemini produced them. For every other provider nothing runs natively
+on Chat Completions, and the bare form is no other provider's, so under `auto`
+those run on the sandbox.
 
 Three layers choose the executor. The workspace pin wins over both of the
 others; the header wins over the deployment default:
