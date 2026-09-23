@@ -110,6 +110,13 @@ uv run otari serve --config config.yml
 
 For hot reload: `make dev`.
 
+The `otari` command itself is owned by the workspace member at `cli/` (the
+`otari-agent` distribution), which holds the laptop-side commands (`hook`,
+`import`) and none of the server. `uv sync` installs it next to the gateway, and
+the gateway attaches `serve` and the other server commands to it, so the one
+`otari` in your venv has both sets. See [cli/README.md](cli/README.md) for
+building it alone.
+
 ## Making changes
 
 Branch naming: `feature/`, `fix/`, `docs/`, `refactor/`.
