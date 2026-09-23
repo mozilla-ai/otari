@@ -11,10 +11,10 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 
-from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
+from gateway.core.unit_of_work import create_unit_of_work
 from gateway.log_config import logger
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.repositories.files import delete_file_rows, reclaimable_files
+from gateway.repositories.files import FileRepositories, FileRepository
 
 # Passes one tick may make before waiting again, so a large backlog drains over
 # several ticks instead of holding one session open until it is done.
@@ -35,7 +35,7 @@ class SweepBatch:
 
 
 async def sweep_files(
-    uow: UnitOfWork,
+    files: FileRepository,
     file_store: FileStoragePort,
     *,
     batch_size: int,
@@ -49,7 +49,7 @@ async def sweep_files(
     leaves the row in place for a later tick rather than orphaning bytes
     nothing references.
     """
-    records = await reclaimable_files(uow, batch_size=batch_size, after=after)
+    records = await files.reclaimable(batch_size=batch_size, after=after)
     reclaimed: list[str] = []
     for record in records:
         try:
@@ -63,7 +63,7 @@ async def sweep_files(
             continue
         reclaimed.append(record.id)
     if reclaimed:
-        await delete_file_rows(uow, reclaimed)
+        await files.remove_all(reclaimed)
         logger.info("file sweep: reclaimed %d file(s)", len(reclaimed))
     cursor = (records[-1].created_at, records[-1].id) if records else None
     return SweepBatch(reclaimed=len(reclaimed), seen=len(records), cursor=cursor)
@@ -80,10 +80,11 @@ async def run_file_sweeper(interval: float, file_store: FileStoragePort, *, batc
         await asyncio.sleep(interval)
         try:
             async with create_unit_of_work() as uow:
+                files = FileRepositories.on(uow).files
                 cursor: tuple[datetime, str] | None = None
                 for _ in range(_MAX_SWEEP_PASSES):
                     async with uow:
-                        batch = await sweep_files(uow, file_store, batch_size=batch_size, after=cursor)
+                        batch = await sweep_files(files, file_store, batch_size=batch_size, after=cursor)
                     if batch.seen < batch_size:
                         break
                     cursor = batch.cursor

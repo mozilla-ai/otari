@@ -1,4 +1,4 @@
-"""Data access for the file rows the ``/v1/files`` API serves and reclaims."""
+"""Data access for the file rows the Files API serves and reclaims."""
 
 from __future__ import annotations
 
@@ -6,11 +6,13 @@ import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Never
 
 from sqlalchemy import and_, delete, or_, select
 
-from gateway.core.unit_of_work import UnitOfWork, session_for
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.files import FileObject
+from gateway.repositories.base_repository import BaseRepository
 
 
 @dataclass(frozen=True)
@@ -32,67 +34,69 @@ class OutputFileRow:
     provider_container_id: str | None = None
 
 
-async def existing_file_ids(uow: UnitOfWork, file_ids: Collection[str]) -> set[str]:
-    """Which of ``file_ids`` already have a row, recorded or uploaded."""
-    if not file_ids:
-        return set()
-    result = await session_for(uow).execute(select(FileObject.id).where(FileObject.id.in_(list(file_ids))))
-    return set(result.scalars())
+class FileRepository(BaseRepository[FileObject, Never, Never]):
+    """Query and stage file rows in the open block of a Unit of Work."""
 
+    def __init__(self, uow: UnitOfWork) -> None:
+        super().__init__(uow, FileObject)
 
-async def record_output_file(uow: UnitOfWork, row: OutputFileRow) -> None:
-    """Stage the row for a file a run wrote. Flushes; the caller's unit of work commits."""
-    db = session_for(uow)
-    db.add(
-        FileObject(
-            id=row.file_id,
-            user_id=row.user_id,
-            workspace_id=row.workspace_id,
-            filename=row.filename,
-            mime_type=row.mime_type,
-            bytes=row.bytes,
-            purpose=row.purpose,
-            storage_ref=row.storage_ref,
-            provider=row.provider,
-            provider_instance=row.provider_instance,
-            provider_container_id=row.provider_container_id,
-            created_at=datetime.now(UTC),
-            expires_at=row.expires_at,
-        )
-    )
-    await db.flush()
+    async def existing_ids(self, file_ids: Collection[str]) -> set[str]:
+        """Which of ``file_ids`` already have a row, recorded or uploaded."""
+        if not file_ids:
+            return set()
+        result = await self.db.execute(select(FileObject.id).where(FileObject.id.in_(list(file_ids))))
+        return set(result.scalars())
 
-
-async def reclaimable_files(
-    uow: UnitOfWork,
-    *,
-    batch_size: int,
-    after: tuple[datetime, str] | None = None,
-    now: datetime | None = None,
-) -> Sequence[FileObject]:
-    """One batch of soft-deleted or expired rows, in ``(created_at, id)`` order.
-
-    ``after`` is the previous batch's last key: paging by key rather than from
-    the top is what keeps a row whose blob keeps failing to delete from parking
-    at the head and hiding everything behind it.
-    """
-    stmt = select(FileObject).where(
-        or_(FileObject.deleted_at.is_not(None), FileObject.expires_at < (now or datetime.now(UTC)))
-    )
-    if after is not None:
-        created_at, file_id = after
-        stmt = stmt.where(
-            or_(
-                FileObject.created_at > created_at,
-                and_(FileObject.created_at == created_at, FileObject.id > file_id),
+    async def record_output(self, row: OutputFileRow) -> None:
+        """Stage the row for a file a run wrote."""
+        self.db.add(
+            FileObject(
+                id=row.file_id,
+                user_id=row.user_id,
+                workspace_id=row.workspace_id,
+                filename=row.filename,
+                mime_type=row.mime_type,
+                bytes=row.bytes,
+                purpose=row.purpose,
+                storage_ref=row.storage_ref,
+                provider=row.provider,
+                provider_instance=row.provider_instance,
+                provider_container_id=row.provider_container_id,
+                created_at=datetime.now(UTC),
+                expires_at=row.expires_at,
             )
         )
-    stmt = stmt.order_by(FileObject.created_at, FileObject.id).limit(batch_size)
-    return (await session_for(uow).execute(stmt)).scalars().all()
+        await self.db.flush()
 
+    async def reclaimable(
+        self,
+        *,
+        batch_size: int,
+        after: tuple[datetime, str] | None = None,
+        now: datetime | None = None,
+    ) -> Sequence[FileObject]:
+        """One batch of soft-deleted or expired rows, in ``(created_at, id)`` order.
 
-async def delete_file_rows(uow: UnitOfWork, file_ids: Collection[str]) -> None:
-    """Remove the rows whose blobs are gone. The caller's unit of work commits."""
-    if not file_ids:
-        return
-    await session_for(uow).execute(delete(FileObject).where(FileObject.id.in_(list(file_ids))))
+        ``after`` is the previous batch's last key: paging by key rather than from
+        the top is what keeps a row whose blob keeps failing to delete from parking
+        at the head and hiding everything behind it.
+        """
+        stmt = select(FileObject).where(
+            or_(FileObject.deleted_at.is_not(None), FileObject.expires_at < (now or datetime.now(UTC)))
+        )
+        if after is not None:
+            created_at, file_id = after
+            stmt = stmt.where(
+                or_(
+                    FileObject.created_at > created_at,
+                    and_(FileObject.created_at == created_at, FileObject.id > file_id),
+                )
+            )
+        stmt = stmt.order_by(FileObject.created_at, FileObject.id).limit(batch_size)
+        return (await self.db.execute(stmt)).scalars().all()
+
+    async def remove_all(self, file_ids: Collection[str]) -> None:
+        """Stage the deletion of the rows whose blobs are gone."""
+        if not file_ids:
+            return
+        await self.db.execute(delete(FileObject).where(FileObject.id.in_(list(file_ids))))

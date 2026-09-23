@@ -18,6 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.repositories.files import FileRepository
 from gateway.services import file_service
 from gateway.services.files import ProviderFile, SandboxFileBridge
 from gateway.services.files.provider_files import FileOverBudgetError, ProviderFileUnavailableError
@@ -90,11 +91,37 @@ async def _chunks(*parts: bytes) -> AsyncIterator[bytes]:
         yield part
 
 
-def _bridge(store: _MemoryStore, uow: Any = None, **config: Any) -> SandboxFileBridge:
+class _StubFiles(FileRepository):
+    """The repository's real write path over a fake session, with the ID lookup answered from a set.
+
+    ``existing_ids`` runs a query the fake session cannot serve.
+    """
+
+    def __init__(self, db: Any, *, known: Collection[str] = (), error: Exception | None = None) -> None:
+        super().__init__(cast(UnitOfWork, db))
+        self._known = set(known)
+        self._error = error
+
+    async def existing_ids(self, file_ids: Collection[str]) -> set[str]:
+        if self._error is not None:
+            raise self._error
+        return set(file_ids) & self._known
+
+
+def _bridge(
+    store: _MemoryStore,
+    uow: Any = None,
+    *,
+    known: Collection[str] = (),
+    lookup_error: Exception | None = None,
+    **config: Any,
+) -> SandboxFileBridge:
+    uow = uow if uow is not None else _CommittingUnitOfWork(_FakeDb())
     return SandboxFileBridge(
         file_store=store,
         config=GatewayConfig(**config),
-        uow=cast(UnitOfWork, uow if uow is not None else _CommittingUnitOfWork(_FakeDb())),
+        uow=cast(UnitOfWork, uow),
+        files=_StubFiles(uow._session, known=known, error=lookup_error),
         user_id="u1",
         workspace_id=uuid.uuid4(),
         inputs=[],
@@ -195,18 +222,12 @@ class _StubProviderClient:
 def _stub_provider(
     monkeypatch: pytest.MonkeyPatch,
     files: dict[str, bytes | Exception],
-    known: Collection[str] = (),
     delay: float = 0.0,
 ) -> _StubProviderClient:
     client = _StubProviderClient(files, delay)
     monkeypatch.setattr(
         "gateway.services.files.sandbox_bridge.ProviderFileClient.for_run", lambda *args, **kwargs: client
     )
-
-    async def _known(uow: Any, file_ids: Collection[str]) -> set[str]:
-        return set(file_ids) & set(known)
-
-    monkeypatch.setattr("gateway.services.files.sandbox_bridge.existing_file_ids", _known)
     return client
 
 
@@ -249,22 +270,20 @@ async def test_a_database_failure_setting_up_the_copy_still_releases_the_connect
 ) -> None:
     client = _stub_provider(monkeypatch, {"file_01chart": b"\x89PNG..."})
 
-    async def _fails(uow: Any, file_ids: Collection[str]) -> set[str]:
-        raise SQLAlchemyError
-
-    monkeypatch.setattr("gateway.services.files.sandbox_bridge.existing_file_ids", _fails)
-
-    await _copy(_bridge(_MemoryStore(), _CommittingUnitOfWork(_FakeDb())), "file_01chart")
+    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(_FakeDb()), lookup_error=SQLAlchemyError())
+    await _copy(bridge, "file_01chart")
 
     assert client.closed
 
 
 @pytest.mark.asyncio
 async def test_a_file_already_recorded_is_not_copied_again(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_provider(monkeypatch, {"file_01a": b"a", "file_01b": b"b"}, known={"file_01a"})
+    _stub_provider(monkeypatch, {"file_01a": b"a", "file_01b": b"b"})
     db = _FakeDb()
 
-    await _copy(_bridge(_MemoryStore(), _CommittingUnitOfWork(db)), "file_01a", "file_01b", "file_01b")
+    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(db), known={"file_01a"})
+
+    await _copy(bridge, "file_01a", "file_01b", "file_01b")
 
     assert [record.id for record in db.added] == ["file_01b"]
 

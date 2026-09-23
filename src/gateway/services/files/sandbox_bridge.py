@@ -12,7 +12,7 @@ from gateway.core.database import DATABASE_ERRORS
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.repositories.files import OutputFileRow, existing_file_ids, record_output_file
+from gateway.repositories.files import FileRepository, OutputFileRow
 from gateway.services.file_service import (
     CODE_EXECUTION_OUTPUT_PURPOSE,
     StagedFile,
@@ -57,6 +57,7 @@ class SandboxFileBridge:
         file_store: FileStoragePort,
         config: GatewayConfig,
         uow: UnitOfWork,
+        files: FileRepository,
         user_id: str,
         workspace_id: uuid.UUID,
         inputs: list[StagedFile],
@@ -65,6 +66,7 @@ class SandboxFileBridge:
         self._file_store = file_store
         self._config = config
         self._uow = uow
+        self._files = files
         self._user_id = user_id
         self._workspace_id = workspace_id
         self.inputs = inputs
@@ -137,7 +139,7 @@ class SandboxFileBridge:
                 )
                 await stack.enter_async_context(contextlib.aclosing(client))
                 async with self._uow:
-                    known = await existing_file_ids(self._uow, [file.file_id for file in new])
+                    known = await self._files.existing_ids([file.file_id for file in new])
             except _COPY_SETUP_ERRORS as exc:
                 logger.warning("Not copying %d %s file(s): %s", len(new), provider, exc)
                 return
@@ -214,7 +216,7 @@ class SandboxFileBridge:
         """Record ``row`` in a block of its own, and remove its blob when the row does not land."""
         try:
             async with self._uow:
-                await record_output_file(self._uow, row)
+                await self._files.record_output(row)
         except BaseException:
             await self._discard(row.storage_ref)
             raise

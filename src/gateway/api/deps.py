@@ -30,6 +30,7 @@ from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import BudgetRepositories
+from gateway.repositories.files import FileRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import OrganizationGuardrailDefinitionRepository, OrgProviderKeyRepository
@@ -662,6 +663,7 @@ def build_sandbox_file_bridge(
         file_store=file_store,
         config=config,
         uow=uow,
+        files=FileRepositories.on(uow).files,
         user_id=user_id,
         workspace_id=workspace_id,
         inputs=inputs,

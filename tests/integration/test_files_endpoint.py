@@ -757,6 +757,7 @@ def test_sweep_reclaims_expired_and_deleted_files(
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from gateway.core.unit_of_work import UnitOfWork
+    from gateway.repositories.files import FileRepository
     from gateway.services.files import sweep_files
 
     def _upload(name: str) -> str:
@@ -786,7 +787,7 @@ def test_sweep_reclaims_expired_and_deleted_files(
         engine = create_async_engine(make_url(test_config.database_url).set(drivername="postgresql+asyncpg"))
         try:
             async with async_sessionmaker(engine)() as db, UnitOfWork(db) as uow:
-                batch = await sweep_files(uow, store, batch_size=10)
+                batch = await sweep_files(FileRepository(uow), store, batch_size=10)
                 return batch.reclaimed
         finally:
             await engine.dispose()
@@ -815,6 +816,7 @@ def test_sweep_pages_past_rows_whose_blob_will_not_delete(
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from gateway.core.unit_of_work import UnitOfWork
+    from gateway.repositories.files import FileRepository
     from gateway.services.files import sweep_files
 
     ids = []
@@ -843,8 +845,8 @@ def test_sweep_pages_past_rows_whose_blob_will_not_delete(
         engine = create_async_engine(make_url(test_config.database_url).set(drivername="postgresql+asyncpg"))
         try:
             async with async_sessionmaker(engine)() as db, UnitOfWork(db) as uow:
-                first = await sweep_files(uow, store, batch_size=2)
-                second = await sweep_files(uow, store, batch_size=2, after=first.cursor)
+                first = await sweep_files(FileRepository(uow), store, batch_size=2)
+                second = await sweep_files(FileRepository(uow), store, batch_size=2, after=first.cursor)
                 return [(first.seen, first.reclaimed), (second.seen, second.reclaimed)]
         finally:
             await engine.dispose()
