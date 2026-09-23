@@ -8,7 +8,11 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import OutsideUnitOfWorkError, UnitOfWork
-from gateway.exceptions.budget_exceptions import BudgetStillReferencedError, SpendCeilingAlreadyExistsError
+from gateway.exceptions.budget_exceptions import (
+    BudgetStillReferencedError,
+    MemberBudgetPolicyAlreadyExistsError,
+    SpendCeilingAlreadyExistsError,
+)
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import (
     SCOPE_API_TOKEN,
@@ -21,10 +25,16 @@ from gateway.models.budgets import (
     ScopedBudget,
     WorkspaceBudgetDefault,
 )
-from gateway.models.tenancy import Organization, User
+from gateway.models.tenancy import Organization, User, Workspace
 from gateway.models.users import User as ApiUser
 from gateway.repositories.api_keys import ApiKeyRepository
-from gateway.repositories.budgets import BudgetRepositories, BudgetRepository, ScopedBudgetRepository, ScopeIdSets
+from gateway.repositories.budgets import (
+    BudgetRepositories,
+    BudgetRepository,
+    ScopedBudgetRepository,
+    ScopeIdSets,
+    WorkspaceBudgetDefaultRepository,
+)
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -93,6 +103,34 @@ async def _one_ceiling_per_scope(db: AsyncSession, budget: Budget, scopes: Scope
         await _ceiling(db, budget, scope_type=SCOPE_API_TOKEN, scope_id=scopes.api_key_ids[0]),
     ]
     return [ceiling.id for ceiling in ceilings]
+
+
+async def _workspace(db: AsyncSession, organization: Organization, *, name: str) -> Workspace:
+    owner = await UserRepository(db).create_local_identity(
+        full_name=f"{name} owner", active_organization_id=organization.id
+    )
+    return await WorkspaceRepository(db).create_workspace(
+        name=name, organization_id=organization.id, created_by_user_id=owner.id
+    )
+
+
+async def _policy(
+    db: AsyncSession,
+    workspace: Workspace,
+    budget: Budget,
+    *,
+    provider_key_id: str | None = None,
+    created_at: datetime | None = None,
+) -> WorkspaceBudgetDefault:
+    policy = WorkspaceBudgetDefault(
+        workspace_id=workspace.id,
+        budget_id=budget.budget_id,
+        provider_key_id=provider_key_id,
+        **({} if created_at is None else {"created_at": created_at}),
+    )
+    db.add(policy)
+    await db.flush()
+    return policy
 
 
 async def test_get_by_id_and_organization_answers_only_the_owners_budget(async_db: AsyncSession) -> None:
@@ -365,6 +403,107 @@ async def test_retime_for_budget_rewrites_the_window_and_keeps_the_counters(asyn
         assert (rows[0][0].period_start, rows[0][0].period_end) == (None, None)
 
 
+async def test_for_workspace_lists_only_that_workspaces_policies(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db, slug="acme")
+    budget = await _budget(async_db, acme, name="acme")
+    workspace = await _workspace(async_db, acme, name="acme one")
+    other = await _workspace(async_db, acme, name="acme two")
+    mine = [
+        await _policy(async_db, workspace, budget),
+        await _policy(async_db, workspace, budget, provider_key_id="pk-a"),
+    ]
+    await _policy(async_db, other, budget)
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        policies = WorkspaceBudgetDefaultRepository(uow)
+        assert sorted(policy.id for policy in await policies.for_workspace(workspace.id)) == sorted(
+            policy.id for policy in mine
+        )
+        assert await policies.for_workspace(uuid.uuid4()) == []
+
+
+async def test_page_for_workspace_pages_oldest_first_and_counts_every_policy(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db, slug="acme")
+    budget = await _budget(async_db, acme, name="acme")
+    workspace = await _workspace(async_db, acme, name="acme one")
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    expected = [
+        (await _policy(async_db, workspace, budget, provider_key_id=key, created_at=start + timedelta(days=offset))).id
+        for offset, key in enumerate([None, "pk-a", "pk-b"])
+    ]
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        policies = WorkspaceBudgetDefaultRepository(uow)
+        page, count = await policies.page_for_workspace(workspace.id, skip=0, limit=2)
+        assert [policy.id for policy in page] == expected[:2]
+        assert count == 3
+        rest, _ = await policies.page_for_workspace(workspace.id, skip=2, limit=2)
+        assert [policy.id for policy in rest] == expected[2:]
+        assert await policies.page_for_workspace(uuid.uuid4(), skip=0, limit=2) == ([], 0)
+
+
+async def test_get_in_workspace_answers_only_a_policy_on_that_workspace(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db, slug="acme")
+    budget = await _budget(async_db, acme, name="acme")
+    workspace = await _workspace(async_db, acme, name="acme one")
+    other = await _workspace(async_db, acme, name="acme two")
+    mine = await _policy(async_db, workspace, budget)
+    foreign = await _policy(async_db, other, budget)
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        policies = WorkspaceBudgetDefaultRepository(uow)
+        found = await policies.get_in_workspace(mine.id, workspace.id)
+        assert found is not None
+        assert found.id == mine.id
+        assert await policies.get_in_workspace(foreign.id, workspace.id) is None
+        assert await policies.get_in_workspace("missing", workspace.id) is None
+
+
+async def test_add_stages_a_policy_and_refuses_a_second_for_the_same_provider(async_db: AsyncSession) -> None:
+    """The refused block rolls back and expires every attached row, so the IDs are held as plain values."""
+    acme = await _organization(async_db, slug="acme")
+    budget_id = (await _budget(async_db, acme, name="acme")).budget_id
+    workspace_id = (await _workspace(async_db, acme, name="acme one")).id
+    await async_db.commit()
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        policy = await WorkspaceBudgetDefaultRepository(uow).add(
+            WorkspaceBudgetDefault(workspace_id=workspace_id, budget_id=budget_id)
+        )
+        assert policy.id
+        assert policy.created_at is not None
+    policy_id = policy.id
+
+    with pytest.raises(MemberBudgetPolicyAlreadyExistsError):
+        async with uow:
+            await WorkspaceBudgetDefaultRepository(uow).add(
+                WorkspaceBudgetDefault(workspace_id=workspace_id, budget_id=budget_id)
+            )
+
+    async with uow:
+        narrowed = await WorkspaceBudgetDefaultRepository(uow).add(
+            WorkspaceBudgetDefault(workspace_id=workspace_id, budget_id=budget_id, provider_key_id="pk-a")
+        )
+        assert narrowed.id != policy_id
+
+
+async def test_remove_deletes_a_policy(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db, slug="acme")
+    budget = await _budget(async_db, acme, name="acme")
+    workspace = await _workspace(async_db, acme, name="acme one")
+    policy = await _policy(async_db, workspace, budget)
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        policies = WorkspaceBudgetDefaultRepository(uow)
+        await policies.remove(policy)
+        assert await policies.for_workspace(workspace.id) == []
+
+
 async def test_on_builds_every_repository_on_the_unit_of_work(async_db: AsyncSession) -> None:
     acme = await _organization(async_db, slug="acme")
     uow = UnitOfWork(async_db)
@@ -374,7 +513,10 @@ async def test_on_builds_every_repository_on_the_unit_of_work(async_db: AsyncSes
         await repositories.budgets.count_by_organization(acme.id)
     with pytest.raises(OutsideUnitOfWorkError):
         await repositories.ceilings.count_for_budget("any")
+    with pytest.raises(OutsideUnitOfWorkError):
+        await repositories.member_policies.for_workspace(uuid.uuid4())
 
     async with uow:
         assert await repositories.budgets.count_by_organization(acme.id) == 0
         assert await repositories.ceilings.count_for_budget("any") == 0
+        assert await repositories.member_policies.for_workspace(uuid.uuid4()) == []
