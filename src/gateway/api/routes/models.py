@@ -36,7 +36,7 @@ from gateway.services.merged_catalog_service import (
     owner_from_key,
     pricing_info,
     pricing_key_candidates,
-    withheld_by_hosted_roster,
+    withheld_as_unadvertised,
 )
 from gateway.services.model_access import is_model_allowed
 from gateway.services.model_catalog_service import (
@@ -236,10 +236,7 @@ async def list_discoverable_models(
             discovery_unsupported=discovery.discovery_unsupported,
             checked_at=checked.isoformat() if (checked := cache.checked_at(discovery.provider)) else None,
             models=sorted(
-                (
-                    DiscoverableModel(id=model.id, key=f"{discovery.provider}:{model.id}")
-                    for model in discovery.models
-                ),
+                (DiscoverableModel(id=model.id, key=f"{discovery.provider}:{model.id}") for model in discovery.models),
                 key=lambda m: m.id,
             ),
         )
@@ -304,10 +301,8 @@ async def get_model(
         if not is_model_allowed(key_allowlist, normalize_pricing_key(config, target)):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{model_id}' not found")
     # A hosted model the deployment no longer advertises is withheld as the
-    # listing withholds it; an alias is a display name the roster does not gate.
-    if model_id not in aliases and withheld_by_hosted_roster(
-        config, scope.hosted_models, scope.byo_providers, normalize_pricing_key(config, model_id)
-    ):
+    # listing withholds it; an alias is a display name, not a hosted model.
+    if model_id not in aliases and withheld_as_unadvertised(config, scope, normalize_pricing_key(config, model_id)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{model_id}' not found")
 
     # An alias resolves to its own entry, with pricing read from the resolved
@@ -386,9 +381,7 @@ async def get_model(
             id=model_key,
             created=created_timestamp(discovered_model),
             owned_by=discovered_provider,
-            pricing=pricing_info(pricing)
-            if pricing
-            else None,
+            pricing=pricing_info(pricing) if pricing else None,
             pricing_source="configured" if pricing else "none",
             context_window=context_window_for_key(model_key),
         )

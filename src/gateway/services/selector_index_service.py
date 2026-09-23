@@ -232,8 +232,8 @@ async def rebuild_selector_index(
     own, so its callers reach those models by the same spellings and nobody
     else's do.
 
-    ``model_provider`` is the hosted port, so a hosted model the deployment has
-    switched off is not indexed as the offering a short spelling lands on.
+    ``model_provider`` is the hosted port, so a hosted model the deployment no
+    longer advertises is not indexed as the offering a short spelling lands on.
 
     ``fetch`` lets a request-time rebuild pull models.dev the way a page load
     does. The scheduled rebuild reads the cache as it stands instead: fetching

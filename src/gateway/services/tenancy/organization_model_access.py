@@ -94,7 +94,7 @@ class SessionCatalogScope:
 
 async def resolve_hosted_models(
     model_provider: ModelProviderPort | None, organization_id: uuid.UUID | None
-) -> dict[str, frozenset[str] | None]:
+) -> HostedModels:
     """What the hosted port advertises, keyed by wire provider name. Empty with no port."""
     if model_provider is None:
         return {}
@@ -105,32 +105,56 @@ async def resolve_hosted_models(
 def hosted_allowlist_entries(hosted_models: HostedModels, providers: frozenset[str]) -> set[str]:
     """The allow-list entries the hosted ``providers`` contribute.
 
-    A provider with a roster contributes each model on it, so a model the
-    deployment switched off leaves the catalog as it left dispatch; one with no
-    roster contributes ``provider:*``.
+    A provider contributes each model advertised on it, so a model the
+    deployment switched off leaves the catalog as it left dispatch; one that
+    advertises no particular models contributes ``provider:*``.
     """
     entries: set[str] = set()
     for provider in providers:
-        roster = hosted_models.get(provider)
-        if roster is None:
+        advertised = hosted_models.get(provider)
+        if advertised is None:
             entries.add(f"{provider}:*")
         else:
-            entries.update(f"{provider}:{model}" for model in roster)
+            entries.update(f"{provider}:{model}" for model in advertised)
     return entries
 
 
 async def resolve_organization_byo_providers(db: AsyncSession, organization_id: uuid.UUID | None) -> frozenset[str]:
     """The providers one organization holds a usable key of its own for, in any workspace.
 
-    Looser than ``OrgProviderKeyService.get_byo_providers``, which asks whether
-    *every* workspace calls the provider on its own key: this asks whether any
-    could, which is what decides that a hosted roster must not narrow the
-    organization's view of the provider.
+    For a caller answered from the whole organization, a deployment operator
+    acting in it. Looser than ``OrgProviderKeyService.get_byo_providers``, which
+    asks whether *every* workspace calls the provider on its own key: this asks
+    whether any could, which is what decides that what the deployment advertises
+    must not narrow the organization's view of the provider.
     """
     if organization_id is None:
         return frozenset()
     live = await OrgProviderKeyRepository(db).list_live_keys(organization_id)
     return frozenset(provider_key(key.provider) for key in live if key_is_usable(key))
+
+
+async def resolve_workspace_byo_providers(db: AsyncSession, workspace_id: uuid.UUID | None) -> frozenset[str]:
+    """The providers one workspace calls on a key of its own.
+
+    For a caller that dispatches from one workspace: an API key, or the master
+    key in the deployment's default workspace. Narrowed exactly as dispatch is:
+    the key active in that workspace, holding a credential, which is the one
+    condition under which dispatch never asks the hosted port. A key the
+    organization holds in another workspace does not count, because this
+    caller cannot reach the provider on it.
+    """
+    if workspace_id is None:
+        return frozenset()
+    organization_id = await organization_for_workspace_id(db, workspace_id)
+    if organization_id is None:
+        return frozenset()
+    active = await OrgProviderKeyService(db).get_active_keys(
+        organization_id=organization_id, workspace_ids=[workspace_id]
+    )
+    return frozenset(
+        provider_key(provider) for provider, key in active.get(workspace_id, {}).items() if has_credential(key)
+    )
 
 
 def _narrowed(
@@ -396,5 +420,6 @@ __all__ = [
     "resolve_organization_byo_providers",
     "resolve_session_catalog_scope",
     "resolve_session_model_allowlist",
+    "resolve_workspace_byo_providers",
     "workspace_organizations",
 ]

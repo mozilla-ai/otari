@@ -24,7 +24,7 @@ import importlib
 import inspect
 from collections.abc import Callable, ItemsView
 from dataclasses import dataclass
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar, cast, get_protocol_members
 
 from fastapi import APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -112,6 +112,10 @@ class BootstrapError(ContainerError):
     """Raised when the bootstrap module ``OTARI_BOOTSTRAP`` names cannot be loaded."""
 
 
+class PortShapeError(ContainerError):
+    """Raised when a bootstrap binds an adapter that lacks a method its port declares."""
+
+
 class Container:
     """A registry mapping each port to the adapter that satisfies it.
 
@@ -164,6 +168,26 @@ class Container:
     def router_contributions(self) -> tuple[RouterContribution, ...]:
         """Return the recorded router contributions, in contribution order."""
         return tuple(self._router_contributions)
+
+
+def _verify_port_shape(container: Container, port: type[Any]) -> None:
+    """Refuse to boot on an adapter that lacks a method ``port`` declares.
+
+    A port is a plain ``Protocol`` and a bind checks nothing, so an overlay
+    written against an older shape of the port binds cleanly and fails on the
+    first request that reaches the missing method, as a 500 with no startup
+    signal. Checked for the ports whose adapters build with no session, which
+    the hybrid data plane already requires of ``ModelProviderPort``.
+
+    Raises:
+        PortShapeError: the bound adapter lacks one of the port's methods.
+
+    """
+    adapter = container.resolve(port, None)
+    missing = sorted(name for name in get_protocol_members(port) if not hasattr(adapter, name))
+    if missing:
+        msg = f"{type(adapter).__name__}, bound to {_port_name(port)}, lacks {', '.join(missing)}"
+        raise PortShapeError(msg)
 
 
 def _api_key_format_adapter(session: AsyncSession | None) -> ApiKeyFormatPort:
@@ -362,6 +386,7 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
         )
         raise BootstrapError(msg)
     rebound = sorted(_port_name(port) for port, factory in container.bindings() if defaults.get(port) is not factory)
+    _verify_port_shape(container, ModelProviderPort)
     container.summary = f"{bootstrap_selector} rebound {', '.join(rebound) or 'no ports'}"
     contributed = ", ".join(contribution.capability for contribution in container.router_contributions())
     if contributed:

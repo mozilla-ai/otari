@@ -26,6 +26,7 @@ from gateway.container import (
     BootstrapError,
     Container,
     PortNotBoundError,
+    PortShapeError,
     RouterContribution,
     build_container,
 )
@@ -172,6 +173,38 @@ def register(container: Container) -> None:
     assert not isinstance(entitlements, BaseEntitlementAdapter)
     assert [contribution.capability for contribution in container.router_contributions()] == ["probe"]
     assert container.summary == ("probe_bootstrap:register rebound EntitlementPort, contributed routers for probe")
+
+
+def test_a_bootstrap_binding_an_adapter_of_the_wrong_shape_fails_at_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An adapter written against an older port fails the boot, not the first request that reaches it."""
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "stale_bootstrap",
+        """
+from gateway.ports.model_provider_port import ModelProviderPort
+
+
+class StaleModelProvider:
+    def __init__(self, session):
+        self.session = session
+
+    async def resolve_hosted_credential(self, **kwargs):
+        return None
+
+    async def get_hosted_providers(self, **kwargs):
+        return frozenset()
+
+
+def register(container):
+    container.bind(ModelProviderPort, StaleModelProvider)
+""",
+    )
+
+    with pytest.raises(PortShapeError, match="StaleModelProvider, bound to ModelProviderPort, lacks get_hosted_models"):
+        build_container("stale_bootstrap:register")
 
 
 def test_bootstrap_that_rebinds_nothing_leaves_the_core_defaults(

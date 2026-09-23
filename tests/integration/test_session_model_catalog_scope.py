@@ -208,7 +208,7 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
                 is_superuser=True,
             ),
             # An operator whose own organization holds no openai key, so the
-            # hosted roster is the only thing that says which openai models exist.
+            # deployment's advertised models are all that says which openai models exist.
             "beta_root": _identity(
                 session,
                 email="root@beta.test",
@@ -697,42 +697,42 @@ def test_an_operator_session_flags_no_hosted_model(client: TestClient, world: _W
     assert listed[_MISTRAL_MODEL]["deployment_managed"] is False
 
 
-_OPENAI_ROSTER = {"openai": {"gpt-4o-mini"}}
+_OPENAI_ADVERTISED = {"openai": {"gpt-4o-mini"}}
 """The deployment advertises one of its two priced openai models; the other was switched off."""
 
 
-def test_a_hosted_roster_narrows_the_catalog_to_the_models_it_advertises(client: TestClient, world: _World) -> None:
-    """Beta holds no openai key, so the roster is all it is shown of openai.
+def test_the_deployment_advertises_which_hosted_models_a_member_is_shown(client: TestClient, world: _World) -> None:
+    """Beta holds no openai key, so what the deployment advertises is all it is shown of openai.
 
     The switched-off model keeps its price rows, which is what listed it before:
-    a stored price lists a model discovery never heard of, and the roster is
-    what says the deployment no longer serves it.
+    a stored price lists a model discovery never heard of, and the port is what
+    says the deployment no longer advertises it.
     """
-    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ROSTER))
+    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ADVERTISED))
     listed = _listing_as(client, world, "beta_member")
     assert set(listed) == {_OPENAI_MODEL, _ANTHROPIC_MODEL}
     assert listed[_OPENAI_MODEL]["deployment_managed"] is True
 
 
-def test_an_organization_holding_its_own_key_is_not_narrowed_by_the_hosted_roster(
+def test_an_organization_holding_its_own_key_still_sees_an_unadvertised_model(
     client: TestClient, world: _World
 ) -> None:
     """Alpha calls openai on its own key, so a model the deployment switched off is still its to reach."""
-    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ROSTER))
+    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ADVERTISED))
     assert _OPENAI_OTHER in _catalog_as(client, world, "alpha_member")
     assert _OPENAI_OTHER in _catalog_as(client, world, "alpha_owner")
 
 
-def test_a_model_off_the_hosted_roster_is_withheld_from_the_operator_and_the_master_key(
+def test_an_unadvertised_model_is_withheld_from_the_operator_and_the_master_key(
     client: TestClient, master_key_header: dict[str, str], world: _World
 ) -> None:
-    """Unrestricted callers have no allow-list to narrow, so the roster is applied to the price list itself.
+    """Unrestricted callers have no allow-list to narrow, so the withhold is applied to the price list itself.
 
     The operator whose own organization holds an openai key still reaches the
     model on that key; the one whose organization holds none, and the master
     key, which acts for no organization, no longer see a model nothing serves.
     """
-    port = HostedModelProvider("openai", models=_OPENAI_ROSTER)
+    port = HostedModelProvider("openai", models=_OPENAI_ADVERTISED)
     bind_model_provider(client, port)
 
     assert _catalog_as(client, world, "superuser") == set(_ALL_MODELS)
@@ -742,13 +742,87 @@ def test_a_model_off_the_hosted_roster_is_withheld_from_the_operator_and_the_mas
     response = client.get(f"{API_ROOT}/models", headers=master_key_header)
     assert response.status_code == status.HTTP_200_OK, response.text
     assert {model["id"] for model in response.json()["data"]} == set(_ALL_MODELS) - {_OPENAI_OTHER}
-    assert port.asked_for[-1] is None, "the master key asks for the deployment-wide roster"
+    assert port.asked_for[-1] is None, "the master key asks for the deployment-wide answer"
 
 
-def test_the_single_model_read_agrees_with_the_listing_about_a_model_off_the_roster(
+def test_the_master_key_keeps_a_model_its_default_workspace_reaches_on_its_own_key(
+    client: TestClient, master_key_header: dict[str, str], world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """The master key dispatches from the deployment's default workspace, and so is exempted by its key.
+
+    A bare selector on a master-key request resolves through the default
+    workspace's own keys before the hosted port is asked, so a model the
+    deployment stopped advertising is still served there once that workspace
+    holds a key for the provider. The catalog says so too, and the single read
+    agrees.
+    """
+    session = db_session_factory()
+    try:
+        # The deployment's own organization: the one the world fixture did not create.
+        [deployment] = [org for org in session.query(Organization).all() if org.id not in (world.alpha, world.beta)]
+        _byo_key(session, organization_id=deployment.id, provider="openai")
+    finally:
+        session.close()
+    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ADVERTISED))
+
+    listing = client.get(f"{API_ROOT}/models", headers=master_key_header)
+    assert listing.status_code == status.HTTP_200_OK, listing.text
+    assert _OPENAI_OTHER in {model["id"] for model in listing.json()["data"]}
+    detail = client.get(f"{API_ROOT}/models/{_OPENAI_OTHER}", headers=master_key_header)
+    assert detail.status_code == status.HTTP_200_OK, detail.text
+
+
+def test_an_api_key_is_exempted_only_by_the_key_active_in_its_own_workspace(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """Alpha's openai key is disabled in alpha_two, so a key issued there reaches openai on the hosted port alone.
+
+    The exemption is per workspace because dispatch is: the key active in the
+    request's workspace decides whether the port is asked at all, so a key the
+    organization holds in another workspace cannot make an unadvertised model
+    reachable from this one.
+    """
+    session = db_session_factory()
+    try:
+        session.add(
+            WorkspaceProviderKeyOverride(
+                workspace_id=world.workspaces["alpha_two"],
+                organization_id=world.alpha,
+                org_provider_key_id=world.keys["alpha_openai"],
+                is_default=False,
+                disabled=True,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ADVERTISED))
+
+    def listing_with_key_in(workspace: str) -> set[str]:
+        # Minted by alpha's owner on the member surface: the deployment key
+        # cannot mint into another organization's workspace.
+        client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_owner"])
+        try:
+            minted = client.post(
+                f"{API_ROOT}/organizations/me/keys",
+                json={"key_name": f"{workspace} key", "workspace_id": str(world.workspaces[workspace])},
+            )
+        finally:
+            client.cookies.clear()
+        assert minted.status_code == status.HTTP_200_OK, minted.text
+        response = client.get(f"{API_ROOT}/models", headers={"Otari-Key": f"Bearer {minted.json()['key']}"})
+        assert response.status_code == status.HTTP_200_OK, response.text
+        return {model["id"] for model in response.json()["data"]}
+
+    assert _OPENAI_OTHER in listing_with_key_in("alpha_one")
+    assert _OPENAI_OTHER not in listing_with_key_in("alpha_two")
+    assert _OPENAI_MODEL in listing_with_key_in("alpha_two")
+
+
+def test_the_single_model_read_agrees_with_the_listing_about_an_unadvertised_model(
     client: TestClient, master_key_header: dict[str, str], world: _World
 ) -> None:
-    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ROSTER))
+    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ADVERTISED))
     for who, expected in (
         ("beta_member", status.HTTP_404_NOT_FOUND),
         ("beta_root", status.HTTP_404_NOT_FOUND),
@@ -764,8 +838,8 @@ def test_the_single_model_read_agrees_with_the_listing_about_a_model_off_the_ros
     assert withheld.status_code == status.HTTP_404_NOT_FOUND, withheld.text
 
 
-def test_the_grouped_catalog_omits_a_model_off_the_roster(client: TestClient, world: _World) -> None:
-    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ROSTER))
+def test_the_grouped_catalog_omits_an_unadvertised_model(client: TestClient, world: _World) -> None:
+    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ADVERTISED))
     client.cookies.set(SESSION_COOKIE_NAME, world.sessions["beta_member"])
     try:
         response = client.get(f"{API_ROOT}/catalog/models")
@@ -777,17 +851,17 @@ def test_the_grouped_catalog_omits_a_model_off_the_roster(client: TestClient, wo
         client.cookies.clear()
 
 
-def test_a_model_off_the_hosted_roster_is_not_indexed_as_an_offering(
+def test_an_unadvertised_model_is_not_indexed_as_an_offering(
     client: TestClient, master_key_header: dict[str, str], world: _World
 ) -> None:
-    """The short spellings are built from the deployment's view, which the roster narrows too.
+    """The short spellings are built from the deployment's view, which the withhold narrows too.
 
     Otherwise a pinned spelling could land on the cheapest offering of a model
     the deployment has switched off, and the request it rewrote would be refused.
     """
     from gateway.services import catalog_selectors as selectors
 
-    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ROSTER))
+    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ADVERTISED))
     try:
         rebuilt = client.post(f"{API_ROOT}/catalog/selectors/refresh", headers=master_key_header)
         assert rebuilt.status_code == status.HTTP_200_OK, rebuilt.text

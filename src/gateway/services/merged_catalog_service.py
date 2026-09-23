@@ -52,9 +52,10 @@ from gateway.services.tenancy.organization_model_access import (
     resolve_organization_byo_providers,
     resolve_organization_offered_keys,
     resolve_session_catalog_scope,
+    resolve_workspace_byo_providers,
     resolve_workspace_offered_keys,
 )
-from gateway.services.workspace_scope import organization_for_workspace_id
+from gateway.services.workspace_scope import lookup_default_workspace_id, organization_for_workspace_id
 
 if TYPE_CHECKING:
     from any_llm.types.model import Model
@@ -398,38 +399,42 @@ class CatalogScope:
     hosted_models: HostedModels = field(default_factory=dict)
     """What the hosted port advertises, for the phase-2 withhold.
 
-    Filled only for a caller no allow-list narrows. A session's roster already
-    lives in its allow-list, and narrowing it here as well would hide, from an
-    organization holding its own key for the provider, a model it reaches on
-    that key.
+    Filled for every API key and for an operator session, whose narrowing is
+    this or nothing. A non-operator session carries the same narrowing in its
+    allow-list instead and is left empty here: narrowing it twice would hide,
+    from an organization holding its own key for the provider, a model it
+    reaches on that key.
     """
 
     byo_providers: frozenset[str] = frozenset()
-    """Providers the caller's organization holds a usable key of its own for; see :func:`withheld_by_hosted_roster`."""
+    """Providers the caller reaches on a key of its own, which the withhold leaves alone.
+
+    Any workspace's key for an operator, who is answered from the whole
+    organization; the key active in the caller's own workspace for an API key
+    and for the master key, which dispatch from one workspace.
+    """
 
 
-def withheld_by_hosted_roster(
-    config: GatewayConfig, hosted_models: HostedModels, byo_providers: frozenset[str], model_key: str
-) -> bool:
+def withheld_as_unadvertised(config: GatewayConfig, scope: CatalogScope, model_key: str) -> bool:
     """Whether a priced key names a hosted model the deployment does not advertise.
 
     A stored price is what lists a model discovery never heard of, and a hosted
     deployment keeps a model's rates when it switches the model off, so the
     price list alone would keep listing a model no request can be served on.
-    The roster says which of a hosted provider's priced models are still
-    offered. It says nothing about a provider with no roster, about a
-    configured instance (dialed on the deployment's own credential, never the
-    port's), or about a provider the caller's organization holds its own key
-    for, which reaches the model on that key.
+    The port says which of a hosted provider's priced models are still
+    advertised. It says nothing about a provider that advertises no particular
+    models, about a configured instance (dialed on the deployment's own
+    credential, never the port's), or about a provider the caller reaches on a
+    key of its own.
     """
     split = split_selector(model_key)
     if split is None:
         return False
     provider, model = split
-    roster = hosted_models.get(provider)
-    if roster is None or is_deployment_instance_key(config, model_key) or provider in byo_providers:
+    advertised = scope.hosted_models.get(provider)
+    if advertised is None or is_deployment_instance_key(config, model_key) or provider in scope.byo_providers:
         return False
-    return model not in roster
+    return model not in advertised
 
 
 async def _operator_offered_keys(db: AsyncSession, identity: TenancyUser) -> frozenset[str]:
@@ -484,13 +489,18 @@ async def catalog_scope(
             # an empty set would hide the model they just adopted on Providers
             # from the catalog they were told it joined.
             organization_id: uuid.UUID | None = session_identity.active_organization_id
+            hosted_models = await resolve_hosted_models(model_provider, organization_id)
             return CatalogScope(
                 allowlist=None,
                 reads_workspace_layer=True,
                 deployment_supplied_providers=frozenset(),
                 offered_keys=await _operator_offered_keys(db, session_identity) if include_offered else frozenset(),
-                hosted_models=await resolve_hosted_models(model_provider, organization_id),
-                byo_providers=await resolve_organization_byo_providers(db, organization_id),
+                hosted_models=hosted_models,
+                # Read only once something is advertised: the withhold never
+                # consults it otherwise, and the keys cost a decryption each.
+                byo_providers=(
+                    await resolve_organization_byo_providers(db, organization_id) if hosted_models else frozenset()
+                ),
             )
         scope = await resolve_session_catalog_scope(db, config, user=session_identity, model_provider=model_provider)
         return CatalogScope(
@@ -501,9 +511,18 @@ async def catalog_scope(
         )
     api_key, is_master_key = auth
     # An API key's hosted models stay unflagged, because its organization is
-    # resolved for the roster alone and not for who pays the bill.
+    # resolved to ask the port and not to say who pays the bill.
     workspace_id = api_key.workspace_id if api_key is not None else None
     organization_id = None if workspace_id is None else await organization_for_workspace_id(db, workspace_id)
+    hosted_models = await resolve_hosted_models(model_provider, None if is_master_key else organization_id)
+    # The key active where this caller dispatches from, which for the master key
+    # is the deployment's default workspace, exactly as pricing resolves it. Read
+    # only once something is advertised, and never for the selector index's
+    # deployment-wide view, which must not depend on any organization's keys.
+    byo_providers: frozenset[str] = frozenset()
+    if hosted_models and include_offered:
+        dispatch_workspace_id = await lookup_default_workspace_id(db) if is_master_key else workspace_id
+        byo_providers = await resolve_workspace_byo_providers(db, dispatch_workspace_id)
     return CatalogScope(
         allowlist=None if is_master_key else await resolve_request_allowlist(db, api_key),
         reads_workspace_layer=True,
@@ -519,10 +538,8 @@ async def catalog_scope(
             if is_master_key
             else await resolve_workspace_offered_keys(db, workspace_id)
         ),
-        # A key with no allow-list of its own is narrowed by nothing else, so the
-        # roster is applied here; a master key gets the deployment-wide answer.
-        hosted_models=await resolve_hosted_models(model_provider, None if is_master_key else organization_id),
-        byo_providers=await resolve_organization_byo_providers(db, organization_id),
+        hosted_models=hosted_models,
+        byo_providers=byo_providers,
     )
 
 
@@ -672,7 +689,7 @@ async def build_merged_catalog(
     for model_key, pricing in pricing_map.items():
         if model_key in merged or normalize_pricing_key(config, model_key) in alias_targets:
             continue
-        if withheld_by_hosted_roster(config, scope.hosted_models, scope.byo_providers, model_key):
+        if withheld_as_unadvertised(config, scope, model_key):
             continue
         # A gateway-run tool is priced under the reserved ``otari:`` provider (see
         # ``gateway_tool_pricing_key``). It is not a model: publishing it would put a

@@ -25,8 +25,8 @@ from typing import Protocol
 HostedModels = Mapping[str, frozenset[str] | None]
 """The hosted providers a caller may use, each with the models the deployment advertises on it.
 
-``None`` advertises every priced model of the provider, for a build that keeps no
-per-model roster. A set advertises exactly those models, an empty set none.
+``None`` advertises every priced model of the provider, for a build that does not
+decide per model. A set advertises exactly those models, an empty set none.
 """
 
 
@@ -104,12 +104,15 @@ class ModelProviderPort(Protocol):
         Every key must be a provider :meth:`resolve_hosted_credential` returns a
         credential for, spelled as the ``provider`` that method receives, never
         its ``response_provider``. The value is what the catalog lists under it
-        (see :data:`HostedModels`). A roster is what is advertised, not a promise
-        about what the credential refuses: a build may still serve a name off it,
-        and a name on it that the build has since switched off is refused there.
+        (see :data:`HostedModels`). Advertised is not a promise about what the
+        credential refuses: a build may still serve a name it does not advertise,
+        and a name it advertises but has since switched off is refused there.
 
         ``organization_id`` is ``None`` for a caller acting for no organization,
         the deployment's own view or a master key, which wants the
         deployment-wide answer.
+
+        Asked on every catalog read, the data plane's model listing included, so
+        it is answered from the build's own store and never dials an upstream.
         """
         ...
