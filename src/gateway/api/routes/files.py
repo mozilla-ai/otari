@@ -41,7 +41,14 @@ from gateway.schemas.files import (
     OpenAIFileList,
     OpenAIFileObject,
 )
-from gateway.services.files import FileDialect, FileListing, FileScope, NewFile
+from gateway.services.files import (
+    DEFAULT_LIST_LIMIT,
+    MAX_LIST_LIMIT,
+    FileDialect,
+    FileListing,
+    FileScope,
+    NewFile,
+)
 
 _FILES_BETA = "files-api-2025-04-14"
 
@@ -62,10 +69,7 @@ router = APIRouter(tags=["files"], dependencies=[Depends(_refuse_files_beta)])
 # enum (forward-compat), but normalise the empty case to "user_data".
 _DEFAULT_PURPOSE = "user_data"
 
-# Listing page bounds. The default is OpenAI's; the ceiling is well under
-# OpenAI's 10000 because a page is one query and one JSON body.
-_DEFAULT_LIST_LIMIT = 100
-_MAX_LIST_LIMIT = 1000
+# The most files ``ids[]`` may name in one page.
 _MAX_LIST_IDS = 100
 
 _READ_CHUNK_BYTES = 1024 * 1024
@@ -206,7 +210,7 @@ async def list_files(
     user: str | None = None,
     purpose: str | None = None,
     workspace_id: uuid.UUID | None = None,
-    limit: Annotated[int, Query(ge=1, le=_MAX_LIST_LIMIT)] = _DEFAULT_LIST_LIMIT,
+    limit: Annotated[int, Query(ge=1, le=MAX_LIST_LIMIT)] = DEFAULT_LIST_LIMIT,
     after: str | None = None,
     order: Literal["asc", "desc"] = "desc",
     page: str | None = None,

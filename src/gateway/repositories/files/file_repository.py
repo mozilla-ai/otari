@@ -97,9 +97,7 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
         await self.db.refresh(record)
         return record
 
-    async def live(
-        self, file_id: str, user_id: str | None, *, workspace_id: uuid.UUID | None = None
-    ) -> FileObject | None:
+    async def live(self, file_id: str, user_id: str, *, workspace_id: uuid.UUID | None = None) -> FileObject | None:
         """Return the file this caller is still served, or None.
 
         None covers four facts on purpose: no such row, another user's row, a
@@ -114,7 +112,7 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
         return record
 
     async def any_owned(
-        self, file_id: str, user_id: str | None, *, workspace_id: uuid.UUID | None = None
+        self, file_id: str, user_id: str, *, workspace_id: uuid.UUID | None = None
     ) -> FileObject | None:
         """Return the row this caller owns under ``file_id``, served or not.
 

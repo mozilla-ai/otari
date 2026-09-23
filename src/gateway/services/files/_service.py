@@ -31,6 +31,11 @@ from gateway.services.files._staging import StagedFile
 # organizations domain, so files receives it rather than looking it up.
 DefaultWorkspace = Callable[[], Awaitable[uuid.UUID]]
 
+# Page bounds. The default is OpenAI's; the ceiling is well under OpenAI's 10000
+# because a page is one query and one JSON body.
+DEFAULT_LIST_LIMIT = 100
+MAX_LIST_LIMIT = 1000
+
 
 class FileDialect(StrEnum):
     """Which SDK's Files API a request speaks.
@@ -76,7 +81,8 @@ class FileListing:
 
     scope: FileScope
     dialect: FileDialect
-    limit: int
+    # Clamped to ``MAX_LIST_LIMIT``, so a caller that does not bound it cannot ask for the whole table.
+    limit: int = DEFAULT_LIST_LIMIT
     ascending: bool = False
     purpose: str | None = None
     # The files a caller named outright, which replaces paging through them.
@@ -143,7 +149,7 @@ class FileService:
         if size == 0:
             # The size is only known once the stream drains, so a zero-byte blob
             # is already in the store by the time the upload is refused.
-            await self._file_store.delete(storage_ref)
+            await self._drop_orphan(storage_ref, file_id)
             raise EmptyUploadError
 
         now = datetime.now(UTC)
@@ -163,10 +169,12 @@ class FileService:
             async with self._uow:
                 await self._files.add(record)
         except DATABASE_ERRORS as exc:
+            # Logged before the cleanup, so the failure that ended the upload is
+            # on the record whatever the cleanup then does.
+            logger.error("Failed to persist file metadata for %s: %s", file_id, exc)
             # The bytes were written before the row was staged; drop them so a
             # failed insert does not leak a blob nothing references.
-            await self._file_store.delete(storage_ref)
-            logger.error("Failed to persist file metadata for %s: %s", file_id, exc)
+            await self._drop_orphan(storage_ref, file_id)
             raise FileStorageError(f"Could not record the file {file_id}") from exc
 
         logger.info(
@@ -183,6 +191,7 @@ class FileService:
             FileNotServedError: an OpenAI cursor names no file the caller owns.
         """
         self._require_enabled()
+        limit = min(listing.limit, MAX_LIST_LIMIT)
         anthropic = listing.dialect is FileDialect.ANTHROPIC
         cursor_id = listing.cursor
         if anthropic and cursor_id is not None:
@@ -200,15 +209,15 @@ class FileService:
             ),
             ascending=listing.ascending,
             # One row past the page says whether another follows, without a count.
-            limit=listing.limit + 1,
+            limit=limit + 1,
         )
         async with self._uow:
             if cursor_id is not None:
                 query = replace(query, after=await self._position(cursor_id, listing))
             records = await self._files.page(query)
 
-        has_more = len(records) > listing.limit
-        files = records[: listing.limit]
+        has_more = len(records) > limit
+        files = records[:limit]
         if not has_more:
             return FilePage(files=files, next_cursor=None)
         last = files[-1].id
@@ -299,6 +308,18 @@ class FileService:
             except OSError as exc:
                 logger.warning("Discarded file %s but failed to remove its blob %s: %s", file_id, storage_ref, exc)
 
+    async def _drop_orphan(self, storage_ref: str, file_id: str) -> None:
+        """Remove bytes that no row points at, best effort.
+
+        A store that will not drop them leaves an orphan for an operator to
+        reclaim, which is a smaller failure than replacing the refusal that
+        caused the cleanup with a storage error.
+        """
+        try:
+            await self._file_store.delete(storage_ref)
+        except OSError as exc:
+            logger.warning("Could not remove the unreferenced blob %s for %s: %s", storage_ref, file_id, exc)
+
     async def _position(self, cursor_id: str, listing: FileListing) -> tuple[datetime, str]:
         """The ``(created_at, id)`` key a cursor resumes after.
 
@@ -310,7 +331,9 @@ class FileService:
             cursor_id, listing.scope.user_id, workspace_id=listing.scope.workspace_id
         )
         if cursor is None:
-            raise UnknownPageCursorError if listing.dialect is FileDialect.ANTHROPIC else FileNotServedError()
+            if listing.dialect is FileDialect.ANTHROPIC:
+                raise UnknownPageCursorError
+            raise FileNotServedError
         return cursor.created_at, cursor.id
 
     def _require_enabled(self) -> None:

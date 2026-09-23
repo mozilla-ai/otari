@@ -4,6 +4,8 @@ from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._provider_files import ProviderFile, produced_files_for
 from gateway.services.files._sandbox_bridge import SandboxFileBridge
 from gateway.services.files._service import (
+    DEFAULT_LIST_LIMIT,
+    MAX_LIST_LIMIT,
     FileContent,
     FileDialect,
     FileListing,
@@ -17,6 +19,8 @@ from gateway.services.files._sweeper import SweepBatch, run_file_sweeper, sweep_
 
 __all__ = [
     "CODE_EXECUTION_OUTPUT_PURPOSE",
+    "DEFAULT_LIST_LIMIT",
+    "MAX_LIST_LIMIT",
     "FileContent",
     "FileDialect",
     "FileListing",

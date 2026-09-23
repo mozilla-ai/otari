@@ -18,7 +18,6 @@ from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import (
     EmptyUploadError,
-    FilesDisabledError,
     FileStorageError,
     UnknownPageCursorError,
     UploadTooLargeError,
@@ -33,8 +32,9 @@ _DEFAULT_WORKSPACE = uuid.uuid4()
 
 
 class _MemoryStore:
-    def __init__(self) -> None:
+    def __init__(self, *, delete_error: Exception | None = None) -> None:
         self.blobs: dict[str, bytes] = {}
+        self._delete_error = delete_error
 
     async def put(self, file_id: str, data: bytes) -> str:
         self.blobs[file_id] = data
@@ -54,6 +54,8 @@ class _MemoryStore:
         yield self.blobs[storage_ref]
 
     async def delete(self, storage_ref: str) -> None:
+        if self._delete_error is not None:
+            raise self._delete_error
         self.blobs.pop(storage_ref, None)
 
 
@@ -168,10 +170,12 @@ async def test_a_page_token_this_gateway_did_not_issue_is_refused() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_deployment_that_does_not_serve_files_refuses_every_verb() -> None:
-    service = _service(_MemoryStore(), _StubFiles(), files_enabled=False)
+async def test_a_cleanup_that_fails_does_not_replace_the_refusal_it_follows() -> None:
+    """An orphaned blob is a smaller failure than losing why the upload was refused."""
+    store = _MemoryStore(delete_error=OSError("read-only store"))
 
-    with pytest.raises(FilesDisabledError):
-        await service.store(_upload(b"a,b\n"))
-    with pytest.raises(FilesDisabledError):
-        await service.stored_file("file-1", FileScope(user_id="u1"))
+    with pytest.raises(EmptyUploadError):
+        await _service(store, _StubFiles()).store(_upload())
+
+    with pytest.raises(FileStorageError):
+        await _service(store, _StubFiles(add_error=SQLAlchemyError())).store(_upload(b"a,b\n"))
