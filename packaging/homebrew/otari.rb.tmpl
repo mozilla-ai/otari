@@ -1,0 +1,36 @@
+# Rendered by scripts/homebrew_formula.py at release (otari-homebrew.yml) and
+# pushed to mozilla-ai/homebrew-tap as Formula/otari.rb. Edit this template,
+# never the tap's copy.
+class Otari < Formula
+  include Language::Python::Virtualenv
+
+  desc "Agent-side CLI for the Otari LLM gateway: Claude Code gates and usage import"
+  homepage "https://github.com/mozilla-ai/otari"
+  url "{{sdist_url}}"
+  sha256 "{{sdist_sha256}}"
+  license "Apache-2.0"
+
+  livecheck do
+    skip "Auto-generated on release."
+  end
+
+  # pyyaml builds its C extension against libyaml; every resource below is
+  # built from its sdist, which is what keeps this closure pure Python.
+  depends_on "libyaml"
+  depends_on "python@3.14"
+
+{{resources}}
+
+  def install
+    virtualenv_install_with_resources(using: "python@3.14")
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/otari --version")
+    # hook is fail-open: outside a git repository, with an empty payload, it exits 0 silently.
+    assert_empty pipe_output("#{bin}/otari hook", "{}", 0)
+    (testpath/"projects").mkpath
+    assert_match "Nothing to import",
+                 shell_output("#{bin}/otari import claude-code --dry-run --projects-dir #{testpath}/projects")
+  end
+end

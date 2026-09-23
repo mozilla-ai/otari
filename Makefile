@@ -83,3 +83,11 @@ postman-check:
 # and author links. Pin git-cliff so local output matches CI.
 changelog:
 	uvx git-cliff@2.13.1 --config cliff.toml
+
+# Local preview of the Homebrew formula otari-homebrew.yml renders at release,
+# from the committed lock and a freshly built sdist. The tap's copy is never
+# edited by hand; change packaging/homebrew/otari.rb.tmpl instead.
+homebrew-formula:
+	uv build --package otari-agent --sdist -o build/homebrew
+	uv run python scripts/homebrew_formula.py --version 0.0.0 --sdist build/homebrew/otari_agent-0.0.0.tar.gz --output build/homebrew/otari.rb
+	@echo "Rendered build/homebrew/otari.rb"
