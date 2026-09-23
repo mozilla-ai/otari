@@ -719,3 +719,20 @@ async def test_add_leaves_the_step_usable_after_it_refuses_a_duplicate(async_db:
 
     async with uow:
         assert len(await WorkspaceBudgetDefaultRepository(uow).for_workspace(workspace_id)) == 2
+
+
+async def test_add_raises_when_a_policy_names_no_budget(async_db: AsyncSession) -> None:
+    """Only a policy already in place is reported as a duplicate; any other refusal is the caller's to see."""
+    acme = await _organization(async_db, slug="acme")
+    workspace_id = (await _workspace(async_db, acme, name="acme one")).id
+    await async_db.commit()
+    uow = UnitOfWork(async_db)
+
+    with pytest.raises(IntegrityError):
+        async with uow:
+            await WorkspaceBudgetDefaultRepository(uow).add(
+                WorkspaceBudgetDefault(workspace_id=workspace_id, budget_id="no-such-budget")
+            )
+
+    async with uow:
+        assert await WorkspaceBudgetDefaultRepository(uow).for_workspace(workspace_id) == []
