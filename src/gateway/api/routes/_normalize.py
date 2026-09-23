@@ -30,8 +30,46 @@ from gateway.api.routes._tools import (
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.tools import CodeExecutor
-from gateway.services.content_normalizer import NormalizationStats, WireFormat, normalize_messages
+from gateway.services.content_normalizer import InlineLimit, NormalizationStats, WireFormat, normalize_messages
+from gateway.services.files.provider_uploads import upload_attachment, uploads_attachments
 from gateway.services.model_capabilities import resolve_capabilities
+
+
+# The providers that cap the attachment bytes one request may carry inline.
+_INLINE_LIMITED_PROVIDERS = frozenset({LLMProvider.GEMINI, LLMProvider.VERTEXAI})
+
+INLINE_LIMIT_DETAIL = (
+    "Invalid request: the attachments exceed the {max_bytes} bytes Gemini accepts inline in one request, "
+    "and they could not be moved to Gemini's file storage. Send fewer or smaller attachments."
+)
+
+
+def inline_limit_for(
+    config: GatewayConfig,
+    provider: LLMProvider,
+    fmt: WireFormat,
+    *,
+    instance: str | None,
+    workspace_id: uuid.UUID | None,
+) -> InlineLimit | None:
+    """The inline attachment limit for ``provider``, with an upload when Otari can move a file there."""
+    if provider not in _INLINE_LIMITED_PROVIDERS or fmt == "responses":
+        return None
+    upload = None
+    if uploads_attachments(provider):
+
+        async def upload(data: bytes, mime: str, filename: str) -> str:
+            return await upload_attachment(
+                config,
+                provider=provider,
+                instance=instance,
+                workspace_id=workspace_id,
+                data=data,
+                mime=mime,
+                filename=filename,
+            )
+
+    return InlineLimit(max_bytes=config.files_gemini_inline_max_bytes, upload=upload)
 
 
 def sandbox_requested(
@@ -116,6 +154,7 @@ async def normalize_request_messages(
             user_id=user_id,
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
+            inline_limit=inline_limit_for(config, provider, fmt, instance=instance, workspace_id=workspace_id),
         )
     except Exception as exc:  # noqa: BLE001 — never fail the request / leak the reservation
         logger.warning("content normalization failed; forwarding messages unchanged: %s", exc)

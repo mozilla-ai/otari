@@ -47,7 +47,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
-from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields
+from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields, provider_attempt_kwargs
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
@@ -336,17 +336,17 @@ class _ChatAdapter:
         attempt: ResolvedAttempt,
         base_request_fields: dict[str, Any],
     ) -> dict[str, Any]:
-        return default_attempt_kwargs(attempt, base_request_fields)
+        return provider_attempt_kwargs(default_attempt_kwargs(attempt, base_request_fields))
 
     def local_attempt_kwargs(
         self,
         attempt: Attempt,
         base_request_fields: dict[str, Any],
     ) -> dict[str, Any]:
-        return attempt.call_kwargs(base_request_fields)
+        return provider_attempt_kwargs(attempt.call_kwargs(base_request_fields))
 
     def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        return kwargs
+        return provider_attempt_kwargs(kwargs)
 
 
 _ADAPTER = _ChatAdapter()

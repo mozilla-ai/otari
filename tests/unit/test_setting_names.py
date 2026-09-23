@@ -49,6 +49,7 @@ _SETTING_NAMES = frozenset(
         "file_understanding_enabled",
         "files_backend",
         "files_enabled",
+        "files_gemini_inline_max_bytes",
         "files_local_dir",
         "files_max_bytes",
         "files_output_max_bytes",
