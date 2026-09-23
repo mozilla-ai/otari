@@ -269,7 +269,7 @@ export function OrganizationGuardrailsPage() {
           canEdit ? (
             <div className="flex flex-wrap gap-2">
               <Button onPress={() => openDialog("definition")}>
-                Set up guardrail
+                Configure guardrail
               </Button>
               <Button variant="primary" onPress={() => openDialog("mandate")}>
                 Mandate a guardrail
@@ -278,10 +278,10 @@ export function OrganizationGuardrailsPage() {
           ) : null
         }
       >
-        Checks that run on every request from the workspaces you choose, whether
-        the caller asked for them or not. Set up a guardrail for Otari to run
-        itself, then say where it runs. A guardrail can only make fewer requests
-        succeed.
+        The organization&rsquo;s own checks on what users send to a model, such
+        as prompt injection or personal data. Each one runs in the workspaces
+        you choose, and can block a request or only record it. Vendor keys are
+        encrypted at rest and never shown again.
       </PageIntro>
 
       <ErrorBanner
@@ -318,7 +318,7 @@ export function OrganizationGuardrailsPage() {
                 rows={defined}
                 getRowKey={(row) => row.id}
                 isLoading={isLoading}
-                emptyContent="None yet. Set up a guardrail to have Otari run a vendor's check itself."
+                emptyContent="None yet. Configure a guardrail to have Otari run a vendor's check itself."
               />
             </TableScrollFrame>
           </section>

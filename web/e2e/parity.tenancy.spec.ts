@@ -268,7 +268,7 @@ test.describe("standalone tenancy", () => {
     await openOrganization(page)
     await openPage(page, "Guardrails", "Guardrails")
 
-    await page.getByRole("button", { name: "Set up guardrail" }).click()
+    await page.getByRole("button", { name: "Configure guardrail" }).click()
     const setUp = page.getByRole("dialog", { name: "New guardrail" })
     await pickOption(
       page,
@@ -281,7 +281,7 @@ test.describe("standalone tenancy", () => {
     // No vendor is called here: whether the guardrail builds is not what this
     // flow checks, and CI has no Lakera account.
     await setUp.getByLabel("Api key").fill("parity-not-a-real-key")
-    await setUp.getByRole("button", { name: "Set up guardrail" }).click()
+    await setUp.getByRole("button", { name: "Configure guardrail" }).click()
     await expect(setUp).toBeHidden()
     const defined = guardrailRow(
       page,
