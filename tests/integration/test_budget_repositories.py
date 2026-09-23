@@ -696,3 +696,25 @@ async def test_insert_member_ceilings_raises_when_a_ceiling_names_no_budget(asyn
 
     async with uow:
         assert await ScopedBudgetRepository(uow).count_for_budget(budget_id) == 0
+
+
+async def test_add_leaves_the_step_usable_after_it_refuses_a_duplicate(async_db: AsyncSession) -> None:
+    """The refusal rolls back its own savepoint only, so the caller's step carries on and commits."""
+    acme = await _organization(async_db, slug="acme")
+    budget_id = (await _budget(async_db, acme, name="acme")).budget_id
+    workspace_id = (await _workspace(async_db, acme, name="acme one")).id
+    await async_db.commit()
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        policies = WorkspaceBudgetDefaultRepository(uow)
+        await policies.add(WorkspaceBudgetDefault(workspace_id=workspace_id, budget_id=budget_id))
+        with pytest.raises(MemberBudgetPolicyAlreadyExistsError):
+            await policies.add(WorkspaceBudgetDefault(workspace_id=workspace_id, budget_id=budget_id))
+        await policies.add(
+            WorkspaceBudgetDefault(workspace_id=workspace_id, budget_id=budget_id, provider_key_id="pk-a")
+        )
+        assert len(await policies.for_workspace(workspace_id)) == 2
+
+    async with uow:
+        assert len(await WorkspaceBudgetDefaultRepository(uow).for_workspace(workspace_id)) == 2

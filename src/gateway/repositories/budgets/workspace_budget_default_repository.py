@@ -19,16 +19,21 @@ class WorkspaceBudgetDefaultRepository(BaseRepository[WorkspaceBudgetDefault, Ne
     async def add(self, policy: WorkspaceBudgetDefault) -> WorkspaceBudgetDefault:
         """Stage a new policy and return it with its generated values.
 
-        The budget the policy names must exist, because every refusal of the insert is reported as a duplicate.
+        Precondition: the budget is one the workspace's organization may name, its own or a
+        deployment budget. The foreign key proves only that the budget exists, and every
+        refusal of the insert is reported as a duplicate.
 
         Raises:
             MemberBudgetPolicyAlreadyExistsError: a policy already caps this workspace's members for this provider.
         """
-        self.db.add(policy)
+        workspace_id, provider_key_id = policy.workspace_id, policy.provider_key_id
+        # The insert takes a savepoint of its own, so a refusal leaves the caller's step usable.
         try:
-            await self.db.flush()
+            async with self.db.begin_nested():
+                self.db.add(policy)
+                await self.db.flush()
         except IntegrityError:
-            raise MemberBudgetPolicyAlreadyExistsError(policy.workspace_id, policy.provider_key_id) from None
+            raise MemberBudgetPolicyAlreadyExistsError(workspace_id, provider_key_id) from None
         await self.db.refresh(policy)
         return policy
 
