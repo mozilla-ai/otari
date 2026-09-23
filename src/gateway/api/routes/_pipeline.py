@@ -46,7 +46,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum, auto
-from typing import Any, Generic, Literal, NamedTuple, NoReturn, Protocol, TypeVar
+from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar
 from urllib.parse import ParseResult, urlparse
 
 from any_llm import LLMProvider
@@ -114,10 +114,10 @@ from gateway.api.routes._tools import (
     resolve_code_executor_preference,
     web_search_max_results_baseline,
 )
-from gateway.core.config import GatewayConfig
+from gateway.core.config import REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.env import otari_env
-from gateway.core.metered_pricing import calculate_metered_cost
+from gateway.core.metered_pricing import calculate_metered_cost, quantize_cost
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import (
     cache_read_tokens_of,
@@ -134,7 +134,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
-from gateway.models.pricing import ModelPricing
+from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import CodeExecutor
 from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import CodeExecutionPort
@@ -177,6 +177,7 @@ from gateway.services.pricing_service import (
     no_pricing_error_detail,
     price_tool_calls,
     pricing_required_but_missing,
+    resolve_model_pricing,
 )
 from gateway.services.provider_kwargs import ResolvedProvider, credential_ladder_exhausted, resolve_provider_selector
 from gateway.services.routing import (
@@ -258,6 +259,7 @@ from gateway.types.session_principal import SessionPrincipal
 
 ResultT = TypeVar("ResultT")
 ChunkT = TypeVar("ChunkT")
+_P = ParamSpec("_P")
 
 TOKENS = PrometheusCounter(
     "gateway_tokens",
@@ -275,7 +277,7 @@ REQUEST_COST_DOLLARS = Histogram(
 
 INLINE_COST_SETTLEMENTS = PrometheusCounter(
     "gateway_inline_cost_settlements",
-    "Inline platform cost settlement outcomes on the hybrid response path",
+    "Inline cost settlement outcomes on the inference response path",
     ["outcome"],
     registry=REGISTRY,
 )
@@ -921,8 +923,12 @@ class RequestContext:
         organization_id: uuid.UUID | None = None,
         code_execution_policy: ResolvedCodeExecutionPolicy | None = None,
         code_execution_policy_loaded: bool = False,
+        request_id: str | None = None,
     ) -> None:
         self.config = config
+        # Sent to the client as ``X-Otari-Request-ID``: the platform's id in hybrid
+        # mode, one minted by this gateway in standalone.
+        self.request_id = request_id
         self.db = db
         # The Unit of Work the route resolved, over the session the route holds.
         # It is `None` where the request has none, which is every hybrid request.
@@ -1768,6 +1774,7 @@ async def resolve_request_context(
     resolved_provider: ResolvedProvider | None = None
     plan: CompiledPlan | None = None
     estimate_inputs: EstimateInputs | None = None
+    request_id: str
 
     if hybrid_mode:
         # Refuse a policy name before the resolve call rather than after. Hybrid
@@ -1789,7 +1796,8 @@ async def resolve_request_context(
             model_selector=model,
         )
         resolve_latency_ms = (time.perf_counter() - start_time) * 1000
-        response.headers["X-Otari-Request-ID"] = route.request_id
+        request_id = route.request_id
+        response.headers[REQUEST_ID_HEADER] = request_id
         logger.info(
             "Platform resolve succeeded request_id=%s attempts=%d fallback_enabled=%s resolve_latency_ms=%.2f",
             route.request_id,
@@ -1798,6 +1806,8 @@ async def resolve_request_context(
             resolve_latency_ms,
         )
     else:
+        request_id = str(uuid.uuid4())
+        response.headers[REQUEST_ID_HEADER] = request_id
         if db is None:
             raise adapter.error(500, DB_UNAVAILABLE_DETAIL, ErrorKind.API)
         # No session cookie is consulted *here*, and that is the point: this
@@ -2199,6 +2209,7 @@ async def resolve_request_context(
         estimate_inputs=estimate_inputs,
         request_group_id=str(uuid.uuid4()) if plan is not None else None,
         organization_id=organization_id,
+        request_id=request_id,
     )
 
 
@@ -3576,7 +3587,19 @@ def _stored_error_message(error: str | None) -> str | None:
     return _redacted_upstream_detail(error, PROVIDER_ERROR_DETAIL)
 
 
-async def log_usage(
+class LoggedUsage(NamedTuple):
+    """What :func:`record_usage` wrote: the row's total cost and its rate's source.
+
+    ``pricing_source`` is set only when the model's own tokens were priced, so a
+    row whose cost is tool charges alone (an unpriced model that still ran a
+    search) reports a cost with no source.
+    """
+
+    cost: Decimal | None
+    pricing_source: PriceSource | None
+
+
+async def record_usage(
     db: AsyncSession,
     log_writer: LogWriter,
     api_key_id: str | None,
@@ -3595,8 +3618,8 @@ async def log_usage(
     attribution: RoutingAttribution | None = None,
     tool_tally: ToolUsageTally | None = None,
     workspace_id: uuid.UUID | None = None,
-) -> Decimal | None:
-    """Log API usage to the database and return the computed cost.
+) -> LoggedUsage:
+    """Log API usage to the database and return the computed cost and its source.
 
     Spend is not written here; the budget reservation reconcile path owns
     ``users.spend``. This returns the cost it computed so the caller can
@@ -3648,9 +3671,11 @@ async def log_usage(
             avoids paying that twice on the same request.
 
     Returns:
-        The computed cost for this request, or None when usage/pricing is absent.
+        The computed cost for this request, or None when usage/pricing is absent,
+        with the source of the model rate that priced it.
 
     """
+    pricing_source: PriceSource | None = None
     usage_log = UsageLog(
         id=str(uuid.uuid4()),
         workspace_id=workspace_id if workspace_id is not None else await workspace_for_key_id(db, api_key_id),
@@ -3700,15 +3725,16 @@ async def log_usage(
         # gate estimated against. Both lookups are memoized on immutable columns,
         # so this is dictionary reads rather than queries after the first request
         # on a key.
-        pricing = await find_model_pricing(
+        resolved = await resolve_model_pricing(
             db,
             provider,
             model,
             as_of=usage_log.timestamp,
             organization_id=await organization_for_workspace_id(db, usage_log.workspace_id),
         )
-        if pricing:
-            cost, meters, breakdown = calculate_metered_cost(pricing, usage_data)
+        if resolved is not None:
+            cost, meters, breakdown = calculate_metered_cost(resolved.pricing, usage_data)
+            pricing_source = resolved.source
             usage_log.cost = cost
             usage_log.billing_meters = meters
             usage_log.pricing_breakdown = breakdown
@@ -3736,7 +3762,44 @@ async def log_usage(
         record_cost(str(provider or ""), model, float(usage_log.cost))
 
     await log_writer.put(usage_log)
-    return usage_log.cost
+    return LoggedUsage(usage_log.cost, pricing_source)
+
+
+def _cost_only(
+    record: Callable[_P, Coroutine[Any, Any, LoggedUsage]],
+) -> Callable[_P, Coroutine[Any, Any, Decimal | None]]:
+    async def cost_only(*args: _P.args, **kwargs: _P.kwargs) -> Decimal | None:
+        return (await record(*args, **kwargs)).cost
+
+    return cost_only
+
+
+log_usage = _cost_only(record_usage)
+"""Log API usage to the database and return the computed cost (see :func:`record_usage`)."""
+
+
+def standalone_settlement(logged: LoggedUsage) -> SettledCost | None:
+    """The inline cost a standalone response carries for ``logged``, if any.
+
+    Mirrors the hybrid rule: a priced result carries both fields, anything else
+    (unpriced model, fixed-amount estimate, no usage) carries neither.
+    """
+    if logged.cost is None or logged.pricing_source is None:
+        return None
+    return SettledCost(cost_usd=f"{quantize_cost(logged.cost):.6f}", pricing_source=logged.pricing_source)
+
+
+def _attach_standalone_cost(adapter: FormatAdapter[ResultT, Any], result: ResultT, logged: LoggedUsage) -> None:
+    """Put a priced non-streaming result's cost on its usage object, never failing the response."""
+    settlement = standalone_settlement(logged)
+    if settlement is None:
+        return
+    try:
+        attached = adapter.attach_cost(result, settlement)
+    except Exception as exc:
+        logger.warning("Failed to attach standalone inline cost: %s", exc)
+        attached = False
+    record_inline_cost_settlement("attached" if attached else "unattached")
 
 
 async def _apply_tool_charges(
@@ -4326,7 +4389,7 @@ def build_streaming_response(
     reservation: ReservationHandle | None,
     started_at: float | None = None,
     platform_correlation_id: str | None = None,
-    platform_request_id: str | None = None,
+    request_id: str | None = None,
     session_label: str | None = None,
     display_model: str | None = None,
     attribution: RoutingAttribution | None = None,
@@ -4355,6 +4418,9 @@ def build_streaming_response(
       reservation does not leak.
     """
     platform_active = platform_correlation_id is not None
+    # Both modes settle before the terminal suffix so its usage object can carry
+    # the cost: hybrid from the platform's report, standalone from its own row.
+    settles_inline = platform_active or (db is not None and log_writer is not None)
     first_chunk_at: float | None = None
 
     def _on_first_chunk() -> None:
@@ -4379,7 +4445,7 @@ def build_streaming_response(
             )
         if db is None or log_writer is None:
             return None
-        actual_cost = await log_usage(
+        logged = await record_usage(
             db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
@@ -4397,9 +4463,9 @@ def build_streaming_response(
         )
         if reservation is not None:
             await reconcile_reservation(
-                db, reservation, actual_cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
+                db, reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
             )
-        return None
+        return standalone_settlement(logged)
 
     async def _on_no_usage() -> None:
         # Stream completed but the provider sent no usage data. Report the
@@ -4572,8 +4638,8 @@ def build_streaming_response(
     headers: dict[str, str] = dict(rate_limit_headers(rate_limit_info)) if rate_limit_info else {}
     if platform_correlation_id:
         headers["X-Correlation-ID"] = platform_correlation_id
-    if platform_request_id:
-        headers["X-Otari-Request-ID"] = platform_request_id
+    if request_id:
+        headers[REQUEST_ID_HEADER] = request_id
     if extra_headers:
         headers.update(extra_headers)
 
@@ -4590,9 +4656,9 @@ def build_streaming_response(
             on_incomplete=_on_incomplete,
             display_model=display_model,
             keepalive_interval_seconds=config.streaming_keepalive_interval_ms / 1000,
-            settle_before_done=platform_active,
-            is_cost_carrier=adapter.is_stream_cost_carrier if platform_active else None,
-            attach_settlement=_attach_inline_cost if platform_active else None,
+            settle_before_done=settles_inline,
+            is_cost_carrier=adapter.is_stream_cost_carrier if settles_inline else None,
+            attach_settlement=_attach_inline_cost if settles_inline else None,
             on_first_chunk=_on_first_chunk,
         ),
         media_type="text/event-stream",
@@ -4676,7 +4742,6 @@ async def run_single_attempt_stream(
     provider: Any,
     model: str,
     platform_correlation_id: str | None = None,
-    platform_request_id: str | None = None,
     session_label: str | None = None,
     display_model: str | None = None,
     base_request_fields: dict[str, Any] | None = None,
@@ -4788,7 +4853,7 @@ async def run_single_attempt_stream(
         started_at=ctx.started_at,
         workspace_id=ctx.workspace_id,
         platform_correlation_id=platform_correlation_id,
-        platform_request_id=platform_request_id,
+        request_id=ctx.request_id,
         session_label=session_label,
         display_model=display_model,
         attribution=stream_attribution,
@@ -5016,7 +5081,7 @@ async def run_streaming_with_fallback(
         rate_limit_info=rate_limit_info,
         reservation=None,
         platform_correlation_id=chosen.attempt_id,
-        platform_request_id=route.request_id,
+        request_id=route.request_id,
         session_label=session_label,
         started_at=started_at,
     )
@@ -5426,12 +5491,12 @@ async def run_standalone_non_stream(
             response.headers[key] = value
         if ctx.db is not None:
             usage_data = adapter.extract_usage(result)
-            actual_cost: Decimal | None = None
+            logged = LoggedUsage(None, None)
             # A request whose provider reported no usage still owes for the tool
             # calls it ran, so a non-empty tally forces the row that
             # ``log_success_without_usage = False`` would otherwise suppress.
             if usage_data is not None or adapter.log_success_without_usage or not tool_ctx.tally.is_empty():
-                actual_cost = await log_usage(
+                logged = await record_usage(
                     db=ctx.db,
                     log_writer=ctx.log_writer,
                     api_key_id=ctx.api_key_id,
@@ -5448,8 +5513,9 @@ async def run_standalone_non_stream(
                 )
             if ctx.reservation is not None:
                 await reconcile_reservation(
-                    ctx.db, ctx.reservation, actual_cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
+                    ctx.db, ctx.reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
                 )
+            _attach_standalone_cost(adapter, result, logged)
             await _copy_provider_files(
                 ctx, tool_ctx.sandbox_files, produced_files_for(adapter.name, result), instance=provider
             )

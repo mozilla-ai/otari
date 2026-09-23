@@ -63,6 +63,26 @@ Standalone mode also serves embeddings, images, audio, files, batches,
 moderations, rerank, and search. Provider support differs by endpoint, so use
 `GET /api/v1/models` and the OpenAPI document for the deployment you are calling.
 
+### Request ID and inline cost
+
+Every Chat, Messages, and Responses response carries an `X-Otari-Request-ID`
+header, streaming or not. In hybrid mode it is the platform's id for the
+request; a standalone gateway mints its own.
+
+A priced response also carries its cost on the usage object it already returns,
+as `usage.cost_usd` (a six-decimal USD string) and `usage.pricing_source`. On a
+stream the fields ride the terminal usage event: the last usage chunk for Chat
+Completions, `message_delta` for Messages, and `response.completed` for
+Responses. The two fields always appear together, and an unpriced or
+unreported request carries neither.
+
+In standalone mode the amount is the one the gateway wrote to its own usage
+record, including any gateway-run tool charges, and `pricing_source` names the
+rate that priced the model: `organization` (an organization's override),
+`deployment` (a rate stored on this gateway), or `defaults` (the bundled
+genai-prices dataset). Hybrid mode attaches the platform's settlement instead;
+see [Hybrid mode protocol](hybrid-mode-protocol.md#inline-response-fields).
+
 ## Search
 
 `POST /api/v1/search` and `POST /api/v1/search/{search_tool_name}` run a configured

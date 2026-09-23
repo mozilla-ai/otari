@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import API_ROOT
 from gateway.core.metered_pricing import meter_cost, quantize_cost, to_decimal
 from gateway.log_config import logger
-from gateway.models.pricing import ModelPricing, OrganizationModelPricing
+from gateway.models.pricing import ModelPricing, OrganizationModelPricing, PriceSource
 
 # A zero-token usage is enough to resolve a model's per-million rates from
 # genai-prices without depending on real token counts.
@@ -735,6 +735,34 @@ async def find_model_pricing(
     charge line at the wrong unit for a rate nobody configured.
     """
 
+    resolved = await resolve_model_pricing(
+        db,
+        provider,
+        model,
+        as_of=as_of,
+        use_defaults=use_defaults,
+        organization_id=organization_id,
+    )
+    return resolved.pricing if resolved is not None else None
+
+
+class ResolvedPricing(NamedTuple):
+    """A resolved rate and which step of the lookup order supplied it."""
+
+    pricing: ModelPricing
+    source: PriceSource
+
+
+async def resolve_model_pricing(
+    db: AsyncSession,
+    provider: str | None,
+    model: str,
+    *,
+    as_of: datetime | None = None,
+    use_defaults: bool = True,
+    organization_id: uuid.UUID | None = None,
+) -> ResolvedPricing | None:
+    """:func:`find_model_pricing`, also reporting which source supplied the rate."""
     lookup_time = normalize_effective_at(as_of)
     model_key = f"{provider}:{model}" if provider else model
     key_forms = pricing_key_forms(model_key)
@@ -743,7 +771,7 @@ async def find_model_pricing(
     if organization_id is not None:
         override = await _find_organization_override(db, organization_id, key_forms, lookup_time)
         if override is not None:
-            return override
+            return ResolvedPricing(override, "organization")
 
     pricing = await _find_by_model_key(db, model_key, lookup_time)
 
@@ -751,11 +779,15 @@ async def find_model_pricing(
         if pricing is not None:
             break
         pricing = await _find_by_model_key(db, legacy_key, lookup_time)
+    if pricing is not None:
+        return ResolvedPricing(pricing, "deployment")
 
-    if pricing is None and use_defaults and default_pricing_enabled():
-        pricing = default_model_pricing(provider, model, lookup_time)
+    if use_defaults and default_pricing_enabled():
+        default = default_model_pricing(provider, model, lookup_time)
+        if default is not None:
+            return ResolvedPricing(default, "defaults")
 
-    return pricing
+    return None
 
 
 # ``ModelPricing`` only has per-million-token rate columns, so endpoints whose

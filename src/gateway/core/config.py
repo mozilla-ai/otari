@@ -69,6 +69,10 @@ CONVERSATION_HEADER = "Otari-Conversation-Id"
 # pass-through until that partition alone is warm; records from other tasks never
 # influence it. Submit the matching label via the /rank task_id.
 ROUTER_TASK_HEADER = "Otari-Router-Task"
+# Response header naming one inference request: the platform's id in hybrid mode,
+# minted by the gateway in standalone. Clients use it to correlate a response with
+# its usage record.
+REQUEST_ID_HEADER = "X-Otari-Request-ID"
 # The version this deployment's API is served under. The root is built from it
 # rather than parsed back out of it, so nothing has to guess where the version
 # segment sits in a path.

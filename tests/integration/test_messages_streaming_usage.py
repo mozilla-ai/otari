@@ -13,8 +13,10 @@ messages response that carries usage, the ``UsageLog`` row is non-zero.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import AsyncIterator, Callable
+from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -34,7 +36,7 @@ from any_llm.types.messages import (
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, REQUEST_ID_HEADER
 from gateway.models.usage import UsageLog
 
 from .conftest import MODEL_NAME
@@ -232,3 +234,43 @@ def test_messages_streaming_bills_compaction_iterations(
     assert row.prompt_tokens == _INPUT_TOKENS + _COMPACTION_INPUT_TOKENS
     assert row.completion_tokens == _OUTPUT_TOKENS + _COMPACTION_OUTPUT_TOKENS
     assert row.cost is not None and row.cost > 0.0
+
+
+def test_messages_streaming_carries_the_settled_cost_on_message_delta(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """The ``message_delta`` usage carries the same amount the usage row settled at."""
+    user_id = "stream-inline-cost-messages"
+    _seed_budgeted_user(client, master_key_header, user_id)
+    _configure_pricing(client, master_key_header, MODEL_NAME)
+
+    with patch("gateway.api.routes.messages.amessages", new=_stream_with_usage):
+        response = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 64,
+                "stream": True,
+                "metadata": {"user_id": user_id},
+            },
+            headers=master_key_header,
+        )
+        assert response.status_code == 200, response.text
+        body = response.text
+
+    assert response.headers[REQUEST_ID_HEADER]
+    deltas = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: ") and '"message_delta"' in line
+    ]
+    assert len(deltas) == 1
+    usage = deltas[0]["usage"]
+    assert usage["pricing_source"] == "deployment"
+
+    row = _poll_usage_row(db_session_factory, user_id)
+    assert row is not None and row.cost is not None
+    assert Decimal(usage["cost_usd"]) == row.cost

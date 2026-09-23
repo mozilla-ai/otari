@@ -34,10 +34,11 @@ API_ORIGIN = "api"
 
 # Which rung of the ladder answered for a rate a reader is shown, in the order
 # ``pricing_service.find_model_pricing`` walks. One vocabulary, because the
-# Models page and the offered-models panel name the same rungs to the same
-# reader, and two spellings of one rung read as two different facts. ``defaults``
-# is plural for the dataset it comes from, and is not the ``default`` that
-# ``ModelObject.pricing_source`` uses internally for the same rung.
+# Models page, the offered-models panel and a standalone response's inline
+# ``pricing_source`` name the same rungs, and two spellings of one rung read as
+# two different facts. ``defaults`` is plural for the dataset it comes from, and
+# is not the ``default`` that ``ModelObject.pricing_source`` uses internally for
+# the same rung.
 PriceSource = Literal["organization", "deployment", "defaults"]
 
 

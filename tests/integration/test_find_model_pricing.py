@@ -311,3 +311,48 @@ async def test_the_batch_ladder_answers_what_settlement_answers(async_db: AsyncS
     assert float(batch["openai:gpt-4o"].rates.input_price_per_million) == 1.0
     assert batch["openai:gpt-4o-mini"].source == "deployment"
     assert batch["anthropic:claude-sonnet-4"].source == "defaults"
+
+
+@pytest.mark.asyncio
+async def test_resolve_pricing_reports_the_rung_that_answered(async_db: AsyncSession) -> None:
+    """``resolve_model_pricing`` names the same rung ``find_model_pricing`` stops on."""
+    from gateway.models.money import to_usd
+    from gateway.models.pricing import API_ORIGIN, OrganizationModelPricing
+    from gateway.repositories.tenancy import OrganizationRepository
+    from gateway.services.pricing_service import normalize_effective_at, resolve_model_pricing
+
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Sources", slug="sources", created_by_user_id=None
+    )
+    as_of = normalize_effective_at(None)
+    configure_default_pricing(True)
+    async_db.add(
+        OrganizationModelPricing(
+            organization_id=organization.id,
+            model_key="openai:gpt-4o",
+            input_price_per_million=to_usd(1.0),
+            output_price_per_million=to_usd(2.0),
+            effective_from=as_of - timedelta(days=1),
+            origin=API_ORIGIN,
+        )
+    )
+    async_db.add(
+        ModelPricing(
+            model_key="openai:gpt-4o-mini",
+            effective_at=as_of - timedelta(days=1),
+            input_price_per_million=3.0,
+            output_price_per_million=4.0,
+        )
+    )
+    await async_db.commit()
+
+    async def source_of(provider: str, model: str) -> str | None:
+        resolved = await resolve_model_pricing(
+            async_db, provider, model, as_of=as_of, organization_id=organization.id
+        )
+        return resolved.source if resolved is not None else None
+
+    assert await source_of("openai", "gpt-4o") == "organization"
+    assert await source_of("openai", "gpt-4o-mini") == "deployment"
+    assert await source_of("anthropic", "claude-sonnet-4") == "defaults"
+    assert await source_of("openai", "nonexistent-model") is None

@@ -444,8 +444,9 @@ is the platform's exact six-decimal string, and its source is `organization`,
 and settlement failure never fails the model response. A priced zero includes
 both fields, while unavailable, pending, legacy, unpriced,
 or carrier-less results include neither. Provider token usage is otherwise
-unchanged, and standalone responses never include these fields. Use
-`GET /request-costs/{request_id}` when a durable value is required.
+unchanged. Use `GET /request-costs/{request_id}` when a durable value is
+required. A standalone gateway attaches the same fields from its own usage
+record; see [Request ID and inline cost](api-reference.md#request-id-and-inline-cost).
 
 `session_label` is an optional caller-supplied label for cost attribution (per
 run, experiment, or conversation). A caller sets it on the request body

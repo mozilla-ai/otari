@@ -15,6 +15,7 @@ platform-fallback streaming paths. These tests pin that contract:
 """
 
 import asyncio
+import json
 import re
 import time
 import uuid
@@ -41,6 +42,7 @@ import gateway.api.routes._pipeline as pipeline
 import gateway.streaming as streaming
 from gateway.api.routes import chat, messages, responses
 from gateway.api.routes._pipeline import (
+    LoggedUsage,
     RequestContext,
     ToolContext,
     build_streaming_response,
@@ -55,6 +57,7 @@ from gateway.api.routes._pipeline import (
 from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
 from gateway.core.config import GatewayConfig
 from gateway.models.mcp import McpServerConfig
+from gateway.models.pricing import PriceSource
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budgets import ReservationHandle
 from gateway.services.tenancy.errors import WorkspaceMcpServerNotFoundError
@@ -172,7 +175,7 @@ def test_all_settlement_callbacks_wired_for_every_format_and_path(
         rate_limit_info=None,
         reservation=None,
         platform_correlation_id="corr-1" if hybrid_path else None,
-        platform_request_id="req-1" if hybrid_path else None,
+        request_id="req-1" if hybrid_path else None,
     )
 
     for callback_name in ("on_complete", "on_error", "on_no_usage", "on_incomplete", "on_first_chunk"):
@@ -414,19 +417,23 @@ async def test_streaming_fallback_forwards_started_at_to_build_streaming_respons
 class _Settlement:
     """Records which settlement primitives the callbacks invoked."""
 
-    def __init__(self) -> None:
+    def __init__(self, pricing_source: PriceSource | None = "deployment") -> None:
+        self.pricing_source = pricing_source
         self.reconciled: list[float] = []
         self.settled_tokens: list[int] = []
         self.refunded = 0
         self.logged: list[dict[str, Any]] = []
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        async def fake_log_usage(**kwargs: Any) -> float | None:
+        async def fake_record_usage(**kwargs: Any) -> LoggedUsage:
             self.logged.append(kwargs)
             usage = kwargs.get("usage_override")
             if kwargs.get("cost_override") is not None:
-                return float(kwargs["cost_override"])
-            return 0.25 if usage else None
+                return LoggedUsage(Decimal(kwargs["cost_override"]), None)
+            return LoggedUsage(Decimal("0.25"), self.pricing_source) if usage else LoggedUsage(None, None)
+
+        async def fake_log_usage(**kwargs: Any) -> Decimal | None:
+            return (await fake_record_usage(**kwargs)).cost
 
         async def fake_reconcile(db: Any, handle: Any, actual_cost: float, *, actual_tokens: int = 0) -> None:
             self.reconciled.append(actual_cost)
@@ -436,6 +443,7 @@ class _Settlement:
             self.refunded += 1
 
         monkeypatch.setattr(pipeline, "log_usage", fake_log_usage)
+        monkeypatch.setattr(pipeline, "record_usage", fake_record_usage)
         monkeypatch.setattr(pipeline, "reconcile_reservation", fake_reconcile)
         monkeypatch.setattr(pipeline, "refund_reservation", fake_refund)
 
@@ -500,6 +508,48 @@ async def test_stream_with_usage_reconciles_actual_cost(monkeypatch: pytest.Monk
     # rather than at the estimate the request was admitted on.
     assert settlement.settled_tokens == [15]
     assert settlement.refunded == 0
+
+
+def _usage_payload(frames: list[str]) -> dict[str, Any]:
+    """The ``usage`` object of the one streamed chat frame that carries it."""
+    payloads = [json.loads(frame.removeprefix("data: ")) for frame in frames if frame.startswith("data: {")]
+    usages = [payload["usage"] for payload in payloads if payload.get("usage")]
+    assert len(usages) == 1
+    return cast(dict[str, Any], usages[0])
+
+
+@pytest.mark.asyncio
+async def test_standalone_stream_carries_priced_cost_on_terminal_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk()
+        yield _chunk(CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15))
+
+    frames = await _drain(_build(stream(), GatewayConfig()))
+
+    usage = _usage_payload(frames)
+    assert usage["cost_usd"] == "0.250000"
+    assert usage["pricing_source"] == "deployment"
+    # Settlement runs before the terminal suffix, so the done marker still ends the stream.
+    assert frames[-1] == "data: [DONE]\n\n"
+
+
+@pytest.mark.asyncio
+async def test_standalone_stream_omits_cost_when_the_model_is_unpriced(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement(pricing_source=None)
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15))
+
+    frames = await _drain(_build(stream(), GatewayConfig()))
+
+    usage = _usage_payload(frames)
+    assert "cost_usd" not in usage
+    assert "pricing_source" not in usage
+    assert settlement.reconciled == [0.25]
 
 
 @pytest.mark.asyncio
@@ -724,7 +774,7 @@ def _build_platform(
         rate_limit_info=None,
         reservation=None,
         platform_correlation_id="corr-1",
-        platform_request_id="req-1",
+        request_id="req-1",
         started_at=started_at,
     )
 
@@ -2133,6 +2183,30 @@ async def test_standalone_non_stream_success_logs_once_and_reconciles(monkeypatc
     assert len(settlement.logged) == 1
     assert settlement.reconciled == [0.25]
     assert settlement.refunded == 0
+
+
+@pytest.mark.asyncio
+async def test_standalone_non_stream_carries_priced_cost_inline(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    result, _ = await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=_reservation())
+
+    assert result.usage.cost_usd == "0.250000"
+    assert result.usage.pricing_source == "deployment"
+
+
+@pytest.mark.asyncio
+async def test_standalone_non_stream_omits_cost_when_the_model_is_unpriced(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cost with no model rate behind it (tool charges alone) is not presented as the request's price."""
+    settlement = _Settlement(pricing_source=None)
+    settlement.install(monkeypatch)
+
+    result, _ = await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=_reservation())
+
+    assert getattr(result.usage, "cost_usd", None) is None
+    assert getattr(result.usage, "pricing_source", None) is None
+    assert settlement.reconciled == [0.25]
 
 
 @pytest.mark.asyncio
