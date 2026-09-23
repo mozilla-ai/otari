@@ -1,0 +1,102 @@
+name: "PR Review"
+
+# On demand only. These runs draw on a Claude subscription, so rate limits are
+# the ceiling rather than a bill; a reviewer asking for a review is a better
+# signal that one is wanted than every push to every branch.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: read
+  # `gh pr view` reads statusCheckRollup, which 403s without these.
+  checks: read
+  actions: read
+  # Required by claude-code-action's default GitHub App authentication.
+  id-token: write
+
+jobs:
+  review:
+    # No draft or bot filter here, unlike a push-triggered review: someone
+    # asking for a review on a draft means they want it now. The action still
+    # rejects bot actors and users without write access on its own.
+    if: >-
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/review') &&
+      (
+        github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Job-level, not workflow-level: at workflow level every comment on the
+    # PR entered this group and cancelled a review in flight, because a job
+    # skipped by `if` still claims the slot, so the review's own comment
+    # killed the review.
+    concurrency:
+      group: pr-review-${{ github.event.issue.number }}
+      cancel-in-progress: true
+    steps:
+      # issue_comment checks out the default branch, so ask for the PR head
+      # explicitly. fetch-depth: 0 so the review can diff against the base.
+      - uses: actions/checkout@v6
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          fetch-depth: 0
+
+      - name: Run review
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The review flow is vendored at .github/prompts/pr-review.prompt.md
+          # rather than pulled from the upstream code-review plugin, so this
+          # repository owns it. The plugin stopped without reviewing whenever
+          # Claude had already commented on the PR, which made a re-review
+          # after new commits impossible; it also treated a
+          # draft as a stop condition, contradicting this workflow's trigger.
+          # A `with:` input is not shell-expanded, so the prompt points at the
+          # checked-out file rather than inlining it, and names the PR here.
+          prompt: "Read .github/prompts/pr-review.prompt.md and follow every instruction in it. The pull request to review is ${{ github.repository }}#${{ github.event.issue.number }}."
+          # --allowed-tools is the whole set the run gets: the SDK denies
+          # Bash by default.
+          #
+          # Bash is unscoped deliberately. Scoped `Bash(gh pr diff:*)` rules
+          # blocked what the review actually runs: `gh api` for comments,
+          # compound commands, and pipes into `head`/`sed`. No Edit or Write,
+          # so the tree still cannot be modified.
+          #
+          # Agent/Task must stay in the list: this review IS a subagent fan-out (context gathering, a summarizer, four
+          # parallel review agents, then per-finding validators), so blocking
+          # delegation disables the review entirely.
+          #
+          # `--model opus` is the alias, not a pinned id, so the review tracks
+          # the latest Opus without an edit here. Subagent models are named
+          # per step in the prompt file.
+          #
+          # The run link goes in --append-system-prompt because the URL needs
+          # `github.run_id`, which the static prompt file cannot interpolate.
+          claude_args: |
+            --model opus
+            --allowed-tools "Agent,Task,Bash,Read,Grep,Glob,TodoWrite,mcp__github_inline_comment__create_inline_comment"
+            --append-system-prompt "Every comment you post on the pull request must end with this line, on its own, verbatim: [View job run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+        env:
+          # THE fix for two silent failures. Subagents are auto-backgrounded
+          # after ~2 minutes; the parent then ends its turn waiting for
+          # completion notifications that a one-shot run never receives, and
+          # the job exits green having posted nothing. Both failed runs crossed
+          # that threshold (126s here, 165s for the dead-code review) and both
+          # ended on "I'll wait for their completion notifications". This
+          # forces subagents to stay in the foreground so their results come
+          # back inside the turn.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+
+      - name: Upload logs
+        if: always() && steps.claude.outputs.execution_file != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: claude-logs
+          path: ${{ steps.claude.outputs.execution_file }}
+          retention-days: 7
