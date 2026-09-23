@@ -2505,7 +2505,11 @@ def _gates_generate_read_choice(message: str, choices: str, default: str) -> str
             try:
                 raw = input()
             except EOFError:
-                raw = ""
+                # Nothing on stdin at all is not the same as someone pressing
+                # Enter: an empty line takes `default`, which for the
+                # "use this CLI?" prompt is "y", and nobody asked for a model
+                # call here. Decline instead wherever declining is a choice.
+                return "n" if "n" in choices else default
         key = raw.strip().lower()
         if key in ("", "\r", "\n"):
             return default
@@ -2514,18 +2518,42 @@ def _gates_generate_read_choice(message: str, choices: str, default: str) -> str
         click.secho(f"Press one of: {', '.join(choices)} (or Enter for {default!r}).", fg="red")
 
 
-def _gates_generate_render_list_item(gate_dict: dict[str, Any]) -> str:
-    """Render one accepted gate as an indented block-sequence item for `.otari-gates.yml`.
+def _gates_generate_render_list_item(gate_dict: dict[str, Any], indent: str = "  ") -> str:
+    """Render one accepted gate as a block-sequence item for `.otari-gates.yml`, its
+    `- ` marker at `indent`.
 
     Deliberately plain block style throughout (PyYAML's own default), not
     the inline `forbidden: [...]`/folded `message: >-` conventions this
     repo's hand-written gates use: those are a human author's own
     formatting choice, not something this command needs to reproduce to
     stay valid and readable.
+
+    `indent` is what the surrounding file already uses for its own items
+    (`_gates_generate_existing_item_indent`), not a fixed two spaces: YAML
+    wants every item of one block sequence at the same column, and a
+    sequence written in column 0 (PyYAML's own dump style, `gates:\\n- id:`)
+    is as valid as this repo's own indented one.
     """
     lines = _gates_generate_dump(gate_dict).rstrip("\n").split("\n")
-    rendered = [f"  - {lines[0]}", *(f"    {line}" for line in lines[1:])]
+    continuation = " " * (len(indent) + 2)
+    rendered = [f"{indent}- {lines[0]}", *(f"{continuation}{line}" for line in lines[1:])]
     return "\n".join(rendered) + "\n"
+
+
+def _gates_generate_existing_item_indent(lines: list[str], gates_line_idx: int) -> str:
+    """Indentation the file's own `gates:` items already use, for a new item to match.
+
+    Falls back to two spaces when the sequence is empty of items this can
+    see, which is this repo's own style and the one the scaffolded header
+    below writes.
+    """
+    for line in lines[gates_line_idx + 1 :]:
+        stripped = line.lstrip()
+        if stripped.startswith("- "):
+            return line[: len(line) - len(stripped)]
+        if stripped and not stripped.startswith("#") and not line.startswith((" ", "\t")):
+            break
+    return "  "
 
 
 def _gates_generate_find_source(root: Path, explicit: Path | None) -> Path:
@@ -2538,38 +2566,42 @@ def _gates_generate_find_source(root: Path, explicit: Path | None) -> Path:
     raise click.ClickException(f"No AGENTS.md or CLAUDE.md found in {root}. Pass --source to name a different file.")
 
 
-def _gates_generate_append(gates_file: Path, repo_name: str, gate_block: str) -> None:
-    """Append one already-validated gate block to `gates_file`'s `gates:` sequence.
+def _gates_generate_append(gates_file: Path, repo_name: str, gate_dict: dict[str, Any]) -> None:
+    """Append one already-validated gate to `gates_file`'s `gates:` sequence.
 
     Splices raw text rather than round-tripping the file through a YAML
     dump, so every hand-written comment already in it (as in this repo's
     own `.otari-gates.yml`) survives untouched. `schema_version`, `policy`,
     and `gates` are a policy's only top-level keys
     (domain/policy.py's `_TOP_LEVEL_FIELDS`), so the end of the `gates:`
-    sequence is wherever a following line returns to column 0; this appends
-    just before that line, or at end of file when nothing follows (the
-    common case, `gates:` declared last).
+    sequence is wherever a following line returns to column 0 without being
+    one of the sequence's own items; this appends just before that line, or
+    at end of file when nothing follows (the common case, `gates:` declared
+    last).
 
-    Known gap: this is a text heuristic, not a YAML parser, so it cannot
-    tell a real top-level key apart from a comment that a human wrote at
-    column 0 inside the `gates:` block itself (YAML permits either there).
-    Such a comment still leaves the file valid either way, no gate is ever
-    lost, but the new gate lands just before that comment rather than at
-    the true end of the sequence. Every hand-written comment in this repo's
-    own `.otari-gates.yml` is indented to its surrounding gate's own level
-    rather than column 0, which is why this has not come up in practice.
+    Splicing text is a heuristic where the policy loader is a parser, so
+    nothing here is written until `parse_policy` accepts the result: a
+    layout this misreads (a comment a human wrote at column 0 inside the
+    block, a sequence style this did not anticipate) then costs a refusal
+    with the file untouched, never a corrupted policy. That distinction
+    matters more than it looks: `otari hook` fails *open* on a policy it
+    cannot parse, so silently writing a broken one would quietly stop every
+    gate in it from being enforced, required ones included.
     """
     if not gates_file.is_file():
         header = (
             'schema_version: "1.0"\n'
             "policy:\n"
-            f"  id: {repo_name}/gates\n"
+            # Quoted, since a directory name is not guaranteed to be a bare
+            # YAML scalar: one containing ": " or leading with "*"/"&"/"@"
+            # parses as something else entirely, or not at all.
+            f"  id: {json.dumps(f'{repo_name}/gates')}\n"
             "  description: Rules this repo checks on its own working tree.\n"
             "\n"
             "gates:\n"
         )
         gates_file.parent.mkdir(parents=True, exist_ok=True)
-        gates_file.write_text(header + gate_block, encoding="utf-8")
+        _gates_generate_write_checked(gates_file, header + _gates_generate_render_list_item(gate_dict))
         return
 
     lines = gates_file.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -2577,16 +2609,32 @@ def _gates_generate_append(gates_file: Path, repo_name: str, gate_block: str) ->
     if gates_line_idx is None:
         raise click.ClickException(f"Could not find a top-level 'gates:' key in {gates_file}.")
 
+    item_indent = _gates_generate_existing_item_indent(lines, gates_line_idx)
     end_idx = len(lines)
     for i in range(gates_line_idx + 1, len(lines)):
         if lines[i].strip() == "":
             continue
-        if not lines[i].startswith((" ", "\t")):
+        # A column-0 line that is itself one of this sequence's items ends
+        # nothing: PyYAML's own dump style writes every item there.
+        if not lines[i].startswith((" ", "\t")) and not lines[i].lstrip().startswith("- "):
             end_idx = i
             break
 
+    gate_block = _gates_generate_render_list_item(gate_dict, item_indent)
     new_lines = [*lines[:end_idx], "\n", *gate_block.splitlines(keepends=True), *lines[end_idx:]]
-    gates_file.write_text("".join(new_lines), encoding="utf-8")
+    _gates_generate_write_checked(gates_file, "".join(new_lines))
+
+
+def _gates_generate_write_checked(gates_file: Path, new_text: str) -> None:
+    """Write `new_text` only once `parse_policy` accepts it; refuse, untouched, otherwise."""
+    try:
+        parse_policy(new_text, source=str(gates_file))
+    except PolicyError as exc:
+        raise click.ClickException(
+            f"Appending to {gates_file} would produce a policy that no longer parses ({exc}); "
+            "left it unchanged."
+        ) from exc
+    gates_file.write_text(new_text, encoding="utf-8")
 
 
 def _gates_generate_parse_edit(edited: str | None, *, fallback: dict[str, Any]) -> dict[str, Any]:
@@ -2667,7 +2715,10 @@ def gates_generate(
         raise click.ClickException("Not inside a Git repository.")
 
     source_path = _gates_generate_find_source(root, source)
-    source_text = source_path.read_text(encoding="utf-8")
+    try:
+        source_text = source_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise click.ClickException(f"Could not read {source_path} as UTF-8 text: {exc}") from exc
     if len(source_text.encode("utf-8")) > _GATES_GENERATE_MAX_SOURCE_BYTES:
         raise click.ClickException(
             f"{source_path} is larger than {_GATES_GENERATE_MAX_SOURCE_BYTES} bytes; "
@@ -2748,7 +2799,7 @@ def gates_generate(
             click.echo()
             choice = _gates_generate_read_choice("Add this gate? [y]es/[n]o/[e]dit/[q]uit: ", "yneq", "n")
             if choice == "y":
-                _gates_generate_append(target, root.name, _gates_generate_render_list_item(current))
+                _gates_generate_append(target, root.name, current)
                 existing_ids.add(gate_id)
                 accepted += 1
                 click.secho(f"Added {gate_id!r} to {target}.", fg="green")

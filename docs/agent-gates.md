@@ -633,9 +633,16 @@ hook actually runs.
 
 It only ever appends: existing gates and their comments are left untouched
 (the new gate is spliced into the `gates:` sequence as raw text, not a
-round-tripped YAML dump that would drop them), and a repo with no
-`.otari-gates.yml` yet gets a starter `schema_version`/`policy` header
-scaffolded around the first accepted gate. `--source` names a different doc,
+round-tripped YAML dump that would drop them, at whatever column that
+sequence's own items already use), and a repo with no `.otari-gates.yml`
+yet gets a starter `schema_version`/`policy` header scaffolded around the
+first accepted gate. Splicing text is a heuristic where the policy loader
+is a parser, so nothing is written until `parse_policy` accepts the result:
+a layout the splice misreads costs a refusal with the file left alone,
+never a corrupted policy. That is the difference that matters, because
+`otari hook` fails *open* on a policy it cannot parse, so quietly writing a
+broken one would stop every gate in it from being enforced, required ones
+included. `--source` names a different doc,
 `--gates-file` a different policy file, `--cli`/`--model`
 (`OTARI_GATES_GENERATE_CLI`/`OTARI_GATES_GENERATE_MODEL`) override which CLI
 backend and model make the one generation call. This is a one-shot proposal

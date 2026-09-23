@@ -275,7 +275,7 @@ def test_no_existing_gates_file_creates_one_named_after_the_repo_directory(
     result = _invoke(monkeypatch, keys="yy")
     assert result.exit_code == 0, result.output
     text = (repo / ".otari-gates.yml").read_text(encoding="utf-8")
-    assert f"id: {repo.name}/gates" in text
+    assert parse_policy(text, source="check").policy_id == f"{repo.name}/gates"
 
 
 def test_gates_file_flag_creates_missing_parent_directories(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -537,3 +537,92 @@ def test_describe_gate_does_not_dim_a_wrapped_values_own_continuation_lines() ->
 
     forbidden_item_line = next(line for line in lines if "CHANGELOG.md" in line)
     assert "\x1b[2m" in forbidden_item_line
+
+
+def test_appending_matches_the_files_own_column_zero_sequence_style(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `gates:` sequence written in column 0 (PyYAML's own dump style) is as valid as
+    this repo's indented one, and the appended item has to land at the same column: a
+    two-space item spliced in front of column-0 ones is invalid YAML, which `otari hook`
+    then fails *open* on, silently disabling every gate in the policy.
+    """
+    (repo / ".otari-gates.yml").write_text(
+        'schema_version: "1.0"\n'
+        "policy:\n"
+        "  id: demo/gates\n"
+        "gates:\n"
+        "- id: existing\n"
+        "  type: changed_path\n"
+        "  enforcement: required\n"
+        "  forbidden:\n"
+        "  - x\n"
+        "  message: m\n",
+        encoding="utf-8",
+    )
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([_VALID_PROPOSAL]))
+
+    result = _invoke(monkeypatch, keys="yy")
+    assert result.exit_code == 0, result.output
+
+    text = (repo / ".otari-gates.yml").read_text(encoding="utf-8")
+    spec = parse_policy(text, source="check")
+    assert {gate.id for gate in spec.gates} == {"existing", "no-hand-edited-changelog"}
+    assert "\n- id: no-hand-edited-changelog\n" in text, text
+
+
+def test_a_splice_that_would_not_parse_is_refused_with_the_file_untouched(tmp_path: Path) -> None:
+    """The splice is a text heuristic where the loader is a parser, so the write is gated
+    on `parse_policy` accepting the result rather than on the heuristic being right.
+    """
+    gates_file = tmp_path / ".otari-gates.yml"
+    original = 'schema_version: "1.0"\npolicy:\n  id: t\ngates:\n  - id: e\n'
+    gates_file.write_text(original, encoding="utf-8")
+
+    with pytest.raises(click.ClickException) as excinfo:
+        gateway_cli._gates_generate_write_checked(gates_file, "gates: [oops\n")
+
+    assert "no longer parses" in str(excinfo.value)
+    assert gates_file.read_text(encoding="utf-8") == original
+
+
+def test_scaffolded_policy_id_survives_an_unusual_directory_name(tmp_path: Path) -> None:
+    """A directory name is not guaranteed to be a bare YAML scalar; one containing ": "
+    would otherwise scaffold a header that does not parse at all.
+    """
+    gates_file = tmp_path / ".otari-gates.yml"
+    gateway_cli._gates_generate_append(gates_file, "weird: name", dict(_VALID_PROPOSAL))
+
+    spec = parse_policy(gates_file.read_text(encoding="utf-8"), source="check")
+    assert spec.policy_id == "weird: name/gates"
+
+
+def test_a_source_file_that_is_not_utf8_is_a_clean_error(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    binary_source = repo / "not-text.md"
+    binary_source.write_bytes(b"\xff\xfe\x00binary\x00")
+    _stub_claude_only(monkeypatch)
+
+    result = _invoke(monkeypatch, "--source", str(binary_source))
+    assert result.exit_code != 0
+    assert "as UTF-8 text" in result.output
+    assert not isinstance(result.exception, UnicodeDecodeError)
+
+
+def test_no_stdin_at_all_declines_rather_than_taking_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no controlling terminal *and* nothing on stdin, `input()` raises EOFError.
+    That is not someone pressing Enter, so it must not resolve to a "y" default and make
+    a model call nobody asked for.
+    """
+
+    def no_tty(echo: bool = False) -> str:
+        raise OSError(6, "Device not configured")
+
+    def no_stdin() -> str:
+        raise EOFError
+
+    monkeypatch.setattr(click, "getchar", no_tty)
+    monkeypatch.setattr("builtins.input", no_stdin)
+
+    assert gateway_cli._gates_generate_read_choice("Use claude? [Y/n]: ", "yn", "y") == "n"
+    assert gateway_cli._gates_generate_read_choice("Add this gate? ", "yneq", "n") == "n"

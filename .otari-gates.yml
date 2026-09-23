@@ -235,7 +235,10 @@ gates:
   - id: writing-style-violations
     type: judge
     enforcement: advisory
-    when_changed: ["**/*.md", "src/gateway/**", "web/src/**"]
+    # Both Markdown spellings, for the reason no-hand-edited-claude-md above
+    # gives: `**` consumes at least one path segment, so `**/*.md` alone
+    # reaches docs/ and web/ but never README.md at the root.
+    when_changed: ["*.md", "**/*.md", "src/gateway/**", "web/src/**"]
     rubric: >-
       Flag two things in prose (README, docs, doc comments, docstrings,
       commit messages, PR descriptions, user-visible UI copy), per AGENTS.md
