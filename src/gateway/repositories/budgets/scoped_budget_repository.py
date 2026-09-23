@@ -115,8 +115,9 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
     async def delete_for_workspace(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         """Delete every ceiling keyed on this workspace or on one of these memberships.
 
-        Precondition: the workspace's row lock is held, or a ceiling created on one of
-        these scopes lands after the sweep and outlives the workspace.
+        Precondition: ``member_ids`` is every membership of the workspace whatever its status,
+        and the workspace's row lock is held. An invited or suspended membership owns a ceiling
+        too, and one left behind is unreachable and refuses its budget's deletion for good.
         """
         await self.db.execute(
             delete(ScopedBudget)
@@ -146,6 +147,9 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
     async def insert_member_ceilings(self, ceilings: Sequence[ScopedBudget]) -> list[ScopedBudget]:
         """Stage these membership ceilings, skipping any the database already caps, and return those staged.
 
+        Precondition: every ceiling is keyed on a workspace membership, which is what the
+        duplicate check re-reads. That re-read sees another writer's committed row only
+        under read-committed isolation.
         A ceiling another writer placed first is skipped, because nothing locks the gap
         between deciding which memberships need one and inserting them. Any other refusal
         is raised, so a ceiling naming no budget is not reported as one already in place.
