@@ -1,8 +1,8 @@
 """Unit tests for `otari hook`, the native hook-protocol transport.
 
 Mocks the network boundary (httpx.post) and the Git boundary (subprocess.run)
-so these run with no server and no real repository; gateway.agent_runtime's
-own evaluation is covered separately in tests/unit/agent_runtime/ and
+so these run with no server and no real repository; otari_agent.domain's
+own evaluation is covered separately in tests/unit/agent_gates/ and
 tests/integration/test_hooks_route.py.
 """
 
@@ -774,7 +774,7 @@ def test_no_flags_evaluates_locally_with_no_credential_needed(monkeypatch: pytes
     """No `--api-key`/`--url` is the default now, not a missing-setup case:
 
     `otari hook` evaluates `.otari-gates.yml` in process
-    (`agent_runtime.domain.check.run_policy_check`) and calls `httpx.post`
+    (`otari_agent.domain.check.run_policy_check`) and calls `httpx.post`
     only when either flag opts into the other, HTTP-backed mode. A required
     gate still blocks with no credential, no config, and no server at all.
     """

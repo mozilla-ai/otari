@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from gateway.agent_runtime.domain.evaluators import (
+from otari_agent.domain.evaluators import (
     evaluate_changed_path,
     evaluate_check_passed,
     evaluate_command_if_changed,
@@ -22,8 +22,8 @@ from gateway.agent_runtime.domain.evaluators import (
     tokenize_commands,
     tokenize_phrases,
 )
-from gateway.agent_runtime.domain.policy import PolicyError, parse_policy
-from gateway.agent_runtime.domain.types import (
+from otari_agent.domain.policy import PolicyError, parse_policy
+from otari_agent.domain.types import (
     ChangedPathEvidence,
     ChangedPathGate,
     CheckEvidence,

@@ -10,7 +10,7 @@ rest of the repo does.
 This is core Otari, not a separate package or plugin. It is not
 [Guardrails](guardrails.md), which checks request input/output at inference
 time; a gate checks agent actions and repo diffs. It also needs no running
-`otari serve`: the evaluator (`gateway.agent_runtime.domain.check`) is pure
+`otari serve`: the evaluator (`otari_agent.domain.check`) is pure
 Python with no filesystem, network, subprocess, database, or clock access, so
 `otari hook` evaluates it in process by default, and `otari serve`'s own Hook
 Server (`POST /api/v1/hooks/check`) calls the exact same function. Pointing
@@ -1037,9 +1037,9 @@ neither depends on `PreToolUse` firing.
 
 `otari hook` is a thin, harness-specific evidence collector, not a second
 copy of the evaluator: it collects evidence and hands it to
-`agent_runtime.domain.check.run_policy_check`, the exact same function the
+`otari_agent.domain.check.run_policy_check`, the exact same function the
 Hook Server route calls; every actual decision comes from
-`gateway.agent_runtime`, whichever caller runs it. What neither command does
+`otari_agent.domain`, whichever caller runs it. What neither command does
 yet: uninstall itself, or probe whether it is correctly registered
 (`otari status`, not built).
 

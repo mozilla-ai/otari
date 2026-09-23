@@ -19,12 +19,12 @@ import uvicorn
 import yaml
 from uvicorn.config import logger
 
-from gateway.agent_runtime.domain.check import PolicyCheckError, run_policy_check
-from gateway.agent_runtime.domain.evaluators import matched_changed_paths
-from gateway.agent_runtime.domain.policy import PolicyError, parse_policy
-from gateway.agent_runtime.domain.types import CheckPassedGate, CheckVerdict, EvidenceScope, JudgeGate, JudgeVerdict
 from gateway.core.config import API_KEY_HEADER, API_ROOT, load_config
 from gateway.log_config import setup_logger
+from otari_agent.domain.check import PolicyCheckError, run_policy_check
+from otari_agent.domain.evaluators import matched_changed_paths
+from otari_agent.domain.policy import PolicyError, parse_policy
+from otari_agent.domain.types import CheckPassedGate, CheckVerdict, EvidenceScope, JudgeGate, JudgeVerdict
 
 _LOG_LEVEL_NAMES: dict[str, int] = {
     "DEBUG": logging.DEBUG,
@@ -296,7 +296,7 @@ def _hook_extract_patch_paths(patch_text: str) -> list[str]:
 
 
 # Mirrors the evaluator's own per-command bound
-# (agent_runtime.domain.check's _MAX_COMMAND_LENGTH). A literal rather than
+# (otari_agent.domain.check's _MAX_COMMAND_LENGTH). A literal rather than
 # an import: the opt-in remote mode talks to a gateway over HTTP that may be
 # a different build, so the number it truncates to is its own best guess at
 # the far side's limit, not a shared constant that would imply the two are
@@ -306,7 +306,7 @@ def _hook_extract_patch_paths(patch_text: str) -> list[str]:
 # its tail cut, rather than failing the whole check open.
 _HOOK_MAX_COMMAND_LENGTH = 4096
 
-# Mirror agent_runtime.domain.check's own _MAX_COMMANDS/_MAX_TOTAL_COMMAND_CHARS,
+# Mirror otari_agent.domain.check's own _MAX_COMMANDS/_MAX_TOTAL_COMMAND_CHARS,
 # for the same reason _HOOK_MAX_COMMAND_LENGTH does: per-command truncation
 # alone does not bound the total. A Stop event now submits every Bash
 # command the whole session ran, not the single command a PreToolUse call
@@ -631,7 +631,7 @@ _HOOK_JUDGE_TIMEOUT_SECONDS = 300
 # that count still queue in batches of the timeout above. Capped, with a
 # visible truncation message, the same "never let something scale unbounded
 # and silently" rule _bound_commands_for_submission and the evaluator's own
-# work-estimate budgets (agent_runtime.domain.check) already follow.
+# work-estimate budgets (otari_agent.domain.check) already follow.
 # Evaluated in declaration order, so the same gates run first every time
 # rather than an arbitrary subset.
 _HOOK_JUDGE_MAX_GATES_PER_RUN = 5
@@ -1679,7 +1679,7 @@ def hook(
     Reads one JSON hook payload on stdin, collects the evidence that payload
     carries (a PreToolUse call's own target path, or a Stop event's Git
     status), and evaluates it against the local `.otari-gates.yml` itself, in
-    process, through `agent_runtime.domain.check.run_policy_check`: no server,
+    process, through `otari_agent.domain.check.run_policy_check`: no server,
     no credential, needed for this by default. `--url`/`--api-key` (or
     `OTARI_URL`/`OTARI_API_KEY`) are the opt-in exception: give either and
     this instead calls a gateway's `POST /api/v1/hooks/check` over HTTP the
@@ -2088,8 +2088,8 @@ def _gates_file_allows_bash(gates_file: Path) -> bool:
     """
     if not gates_file.is_file():
         return False
-    from gateway.agent_runtime.domain.policy import PolicyError, parse_policy
-    from gateway.agent_runtime.domain.types import CommandMatchGate
+    from otari_agent.domain.policy import PolicyError, parse_policy
+    from otari_agent.domain.types import CommandMatchGate
 
     try:
         spec = parse_policy(gates_file.read_text(encoding="utf-8"), source=str(gates_file))
@@ -2438,7 +2438,7 @@ def _gates_generate_validate_gate(gate_dict: dict[str, Any]) -> None:
 
     Wraps it in a minimal policy skeleton and runs it through the exact
     parser a submitted `.otari-gates.yml`/Hook Server request goes through
-    (`agent_runtime.domain.policy.parse_policy`), so a hallucinated field,
+    (`otari_agent.domain.policy.parse_policy`), so a hallucinated field,
     type, or a `judge` gate proposed as `required` is caught here, before
     this ever gets appended to the real file, not the first time the hook
     actually runs against it.
@@ -2705,7 +2705,7 @@ def gates_generate(
     rejected or skipped proposal is never written; a proposal whose id
     already exists in the policy is skipped without asking. Every accepted
     gate (edited or not) is validated the same way a submitted policy is
-    (`agent_runtime.domain.policy.parse_policy`) before it is appended, so a
+    (`otari_agent.domain.policy.parse_policy`) before it is appended, so a
     hallucinated field or type is caught here, not the first time the hook
     actually runs. See docs/agent-gates.md for the gate schema this asks the
     model to stay inside.
@@ -3047,8 +3047,8 @@ def import_claude_code(
 
     import httpx
 
-    from gateway.services.claude_code_import import parse_since, scan_transcripts
     from gateway.services.external_usage_service import MAX_EVENTS_PER_BATCH
+    from otari_agent.claude_code_import import parse_since, scan_transcripts
 
     try:
         cutoff = parse_since(since) if since is not None else None

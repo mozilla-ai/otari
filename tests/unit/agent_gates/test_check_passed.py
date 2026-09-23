@@ -1,5 +1,5 @@
-from gateway.agent_runtime.domain.evaluators import evaluate_check_passed
-from gateway.agent_runtime.domain.types import (
+from otari_agent.domain.evaluators import evaluate_check_passed
+from otari_agent.domain.types import (
     ChangedPathEvidence,
     CheckEvidence,
     CheckPassedGate,

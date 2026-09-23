@@ -2,7 +2,7 @@
 
 Mocks the CLI boundary (shutil.which, subprocess.run) so these run with no
 `claude`/`codex` installed and no real model call; the schema every accepted
-gate must still pass is the real one, `agent_runtime.domain.policy.parse_policy`,
+gate must still pass is the real one, `otari_agent.domain.policy.parse_policy`,
 not a stub.
 """
 
@@ -17,7 +17,7 @@ import pytest
 from click.testing import CliRunner
 
 import gateway.cli as gateway_cli
-from gateway.agent_runtime.domain.policy import parse_policy
+from otari_agent.domain.policy import parse_policy
 
 _EXISTING_GATES_WITH_COMMENT = (
     'schema_version: "1.0"\n'

@@ -1,5 +1,5 @@
-from gateway.agent_runtime.domain.evaluators import evaluate_judge
-from gateway.agent_runtime.domain.types import ChangedPathEvidence, JudgeEvidence, JudgeGate, JudgeVerdict, Outcome
+from otari_agent.domain.evaluators import evaluate_judge
+from otari_agent.domain.types import ChangedPathEvidence, JudgeEvidence, JudgeGate, JudgeVerdict, Outcome
 
 
 def _gate(**overrides: object) -> JudgeGate:

@@ -52,7 +52,7 @@ test-integration:
 	uv run pytest -v tests/integration
 
 lint: check-architecture check-migrations
-	uv run ruff check src tests scripts
+	uv run ruff check src cli tests scripts
 
 # Enforce gateway layer rules. Pure stdlib; runs as part of `make lint` (which
 # otari-lint.yml calls on every PR) and stays independently runnable.

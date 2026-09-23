@@ -1,7 +1,7 @@
 import pytest
 
-from gateway.agent_runtime.domain.policy import MAX_GATE_ID_LENGTH, PolicyError, parse_policy
-from gateway.agent_runtime.domain.types import (
+from otari_agent.domain.policy import MAX_GATE_ID_LENGTH, PolicyError, parse_policy
+from otari_agent.domain.types import (
     ChangedPathGate,
     CheckPassedGate,
     CommandIfChangedGate,

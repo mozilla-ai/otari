@@ -291,10 +291,12 @@ scope and not only its filter set. Nothing else narrows it, and
 
 ## Agent Gates
 
-`agent_runtime/` evaluates a caller-submitted `.otari-gates.yml` policy
-against caller-submitted evidence. Everything under it is pure: no
-filesystem, network, subprocess, or clock access. Otari never reads a
-caller's repository itself. `agent_runtime/domain/check.py`'s
+`otari_agent.domain` (in the `otari-agent` workspace member, `cli/`) evaluates
+a caller-submitted `.otari-gates.yml` policy against caller-submitted evidence.
+Everything under it is pure: no filesystem, network, subprocess, or clock
+access. Otari never reads a caller's repository itself. It lives beside the CLI
+rather than in the gateway so `otari hook` installs without the server;
+`routes/hooks.py` imports it from there. `otari_agent.domain.check`'s
 `run_policy_check` is the shared orchestration (parse, budget-guard,
 dispatch to each gate's evaluator): `otari hook` (`cli.py`) calls it in
 process by default, needing no running gateway, and the Hook Server

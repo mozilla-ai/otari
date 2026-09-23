@@ -13,6 +13,10 @@ supported-markers = [
 ]
 
 [manifest]
+members = [
+    "gateway",
+    "otari-agent",
+]
 constraints = [{ name = "authlib", specifier = ">=1.7.2" }]
 
 [[package]]
@@ -1170,6 +1174,7 @@ dependencies = [
     { name = "mcp", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "opentelemetry-api", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "opentelemetry-proto", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "otari-agent", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pillow", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "prometheus-client", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "psycopg2-binary", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
@@ -1245,6 +1250,7 @@ requires-dist = [
     { name = "numpy", marker = "extra == 'ocr'", specifier = ">=1.26.0" },
     { name = "opentelemetry-api", specifier = ">=1.39.1" },
     { name = "opentelemetry-proto", specifier = ">=1.39.1" },
+    { name = "otari-agent", editable = "cli" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "prometheus-client", specifier = ">=0.20.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.9" },
@@ -2741,6 +2747,24 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/79/4e/453a36fe9d147daecae2932e128a687e18153763a3caf385f5c9ba70049b/otari-0.4.0.tar.gz", hash = "sha256:42d8bdc3e666f3ddca928a6fdbfec1bd0b4977699d13f5d8dc518bfdeef60fae", size = 430152, upload-time = "2026-09-16T07:06:44.015Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6b/91/165edde1b66d33c08539b582998a6cb40cee240556c0ddc12eaa52d62759/otari-0.4.0-py3-none-any.whl", hash = "sha256:3d7d2cc613d5c94a8e4b4c4fd44e0e62b2dc961f5e79fc436e74e885a44e4c08", size = 1128394, upload-time = "2026-09-16T07:06:42.035Z" },
+]
+
+[[package]]
+name = "otari-agent"
+source = { editable = "cli" }
+dependencies = [
+    { name = "click", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "httpx", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "python-dotenv", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "pyyaml", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.1.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
 ]
 
 [[package]]

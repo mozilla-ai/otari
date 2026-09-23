@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 import shlex
 
-from gateway.agent_runtime.domain.types import (
+from otari_agent.domain.types import (
     ChangedPathEvidence,
     ChangedPathGate,
     CheckEvidence,

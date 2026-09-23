@@ -268,8 +268,8 @@ evidence. The evaluator is pure policy code with no database, so the domain has
 a service package and no repository.
 
 - Routes: `hooks.py`
-- Outside the four layers: `agent_runtime/`, which becomes the domain's service
-  package
+- Outside the four layers: the evaluator is `otari_agent.domain`, in the
+  `otari-agent` workspace member (`cli/`), so `otari hook` can run without the gateway
 
 ### usage-and-telemetry
 
@@ -279,7 +279,8 @@ Usage rows, the usage log writer, OTLP ingest and coding-agent telemetry.
   helper `_billing_schemas.py`
 - Services: `usage_admin_service.py`, `external_usage_service.py`,
   `log_writer.py`, `agent_telemetry_service.py`,
-  `agent_telemetry_admin_service.py`, `claude_code_import.py`
+  `agent_telemetry_admin_service.py`; the Claude Code transcript parser is
+  `otari_agent.claude_code_import`, beside the CLI that uses it
 - Models: `usage.py`
 
 ### inference

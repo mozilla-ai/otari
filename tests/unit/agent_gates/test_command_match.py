@@ -2,14 +2,14 @@ import time
 
 import pytest
 
-from gateway.agent_runtime.domain.evaluators import (
+from otari_agent.domain.evaluators import (
     _command_segments,
     _contains_subsequence,
     _strip_shell_comment,
     evaluate_command_match,
     tokenize_commands,
 )
-from gateway.agent_runtime.domain.types import CommandEvidence, CommandMatchGate, Outcome
+from otari_agent.domain.types import CommandEvidence, CommandMatchGate, Outcome
 
 
 def _gate(**overrides: object) -> CommandMatchGate:

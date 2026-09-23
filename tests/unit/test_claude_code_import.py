@@ -12,7 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from gateway.cli import cli
-from gateway.services.claude_code_import import (
+from otari_agent.claude_code_import import (
     normalize_model,
     parse_since,
     provider_for_model,

@@ -1267,7 +1267,7 @@ export interface paths {
          *     gate never counts as a pass).
          *
          *     The actual parse-and-evaluate work is
-         *     ``agent_runtime.domain.check.run_policy_check``, shared with ``otari
+         *     ``otari_agent.domain.check.run_policy_check``, shared with ``otari
          *     hook``'s own local evaluation: this route's own job is authentication,
          *     translating that function's tri-state request fields into its own typed
          *     ones, and turning ``PolicyCheckError`` into a 422.

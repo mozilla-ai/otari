@@ -10,8 +10,8 @@ from collections.abc import Generator
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.agent_runtime.domain.evaluators import _command_segments, _contains_subsequence
 from gateway.core.config import API_ROOT, PLATFORM_TOKEN_ENV_VAR, GatewayConfig
+from otari_agent.domain.evaluators import _command_segments, _contains_subsequence
 
 from .conftest import build_test_client
 
@@ -43,7 +43,7 @@ def tokenized_commands(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls.append(command)
         return _command_segments(command)
 
-    monkeypatch.setattr("gateway.agent_runtime.domain.evaluators._command_segments", recording_command_segments)
+    monkeypatch.setattr("otari_agent.domain.evaluators._command_segments", recording_command_segments)
     return calls
 
 
@@ -178,7 +178,7 @@ def test_duplicated_globs_and_paths_resolve_quickly_instead_of_blocking(
     path_count * total_pattern_length is small when every string is one
     byte) yet, unmatched, cost 25,000,000 real match calls, which measured
     ~5s of synchronous blocking. Deduplicating at parse time and at the
-    evidence boundary (domain.policy, agent_runtime.domain.check.run_policy_check)
+    evidence boundary (domain.policy, otari_agent.domain.check.run_policy_check)
     collapses this to one pattern against one path.
 
     The budget below is deliberately far above what the deduplicated work
@@ -543,7 +543,7 @@ def test_separator_only_commands_are_never_compared_against_a_phrase(
         comparisons += 1
         return _contains_subsequence(segment, phrase)
 
-    monkeypatch.setattr("gateway.agent_runtime.domain.evaluators._contains_subsequence", counting_contains_subsequence)
+    monkeypatch.setattr("otari_agent.domain.evaluators._contains_subsequence", counting_contains_subsequence)
     forbidden = [f'"p{i}"' for i in range(500)]
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'

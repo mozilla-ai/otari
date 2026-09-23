@@ -37,6 +37,11 @@ Enforces:
 17. Unit of Work construction: only the request's factory builds one, outside
     the module that defines it and holds the worker factories, so a scope has
     exactly one and an inner block still joins the outer one.
+18. Light CLI: nothing under cli/src/otari_agent imports the gateway or the
+    server stack it drags in (uvicorn, any-llm, SQLAlchemy, pydantic,
+    FastAPI), so the `otari` command ships alone with a handful of pure-Python
+    dependencies. The member lives outside src/ on purpose: rule 10 keeps
+    src/ to the gateway, and this one keeps the CLI out of the gateway.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -55,6 +60,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = REPO_ROOT / "src"
 GATEWAY_ROOT = SRC_ROOT / "gateway"
 TESTS_ROOT = REPO_ROOT / "tests"
+# The otari-agent workspace member (cli/pyproject.toml); its files are checked
+# relative to this root so the "otari_agent" rule key matches them.
+CLI_ROOT = REPO_ROOT / "cli" / "src"
 
 
 # session_for hands out the Unit of Work's session, so the repositories package is
@@ -105,6 +113,23 @@ RULES: dict[str, LayerRule] = {
         "allowed": [],
         "forbidden": ["gateway.overlay", "overlay"],
         "description": "OSS test suite",
+    },
+    # The laptop CLI ships on its own (Homebrew) with a dozen pure-Python
+    # dependencies, so it may not reach the server stack. gateway is the whole
+    # reason the split exists; the rest are what gateway.core.config drags in.
+    "otari_agent": {
+        "allowed": [],
+        "forbidden": [
+            "gateway",
+            "uvicorn",
+            "any_llm",
+            "sqlalchemy",
+            "sqlmodel",
+            "pydantic",
+            "pydantic_settings",
+            "fastapi",
+        ],
+        "description": "Light CLI (otari-agent)",
     },
     "gateway/services": {
         "allowed": ["gateway.repositories", "gateway.models", "gateway.core", "gateway.auth", "gateway.ports"],
@@ -219,11 +244,11 @@ COMPOSITION_ROOT = "gateway/container.py"
 ADAPTERS_PACKAGE = "gateway/adapters/"
 ADAPTER_IMPORT = "gateway.adapters"
 
-# Entry-point discovery is banned everywhere under gateway/, with a message of
-# its own because "OSS base" would not say why: the feature registry in
-# gateway/features.py is a literal tuple on purpose (ARCHITECTURE.md), and these
-# are the modules discovery is written with.
-DISCOVERY_SCOPE = "gateway/"
+# Entry-point discovery is banned everywhere under gateway/ and otari_agent/,
+# with a message of its own because "OSS base" would not say why: the feature
+# registry in gateway/features.py is a literal tuple on purpose
+# (ARCHITECTURE.md), and these are the modules discovery is written with.
+DISCOVERY_SCOPE = ("gateway/", "otari_agent/")
 DISCOVERY_IMPORTS = ("importlib.metadata", "importlib_metadata", "pkg_resources")
 DISCOVERY_RULE = "OSS base (no entry-point discovery; the feature registry is a literal tuple)"
 
@@ -721,7 +746,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/bedrock_gateway_auth.py",
     "gateway/services/bootstrap_service.py",
     "gateway/services/catalog_selectors.py",
-    "gateway/services/claude_code_import.py",
     "gateway/services/content_normalizer.py",
     "gateway/services/dashboard_session_service.py",
     "gateway/services/external_usage_service.py",
@@ -810,10 +834,10 @@ def check_flat_modules(src_root: Path) -> list[str]:
 
 
 def main() -> int:
-    """Run the architecture checks over the gateway package and the OSS test suite."""
-    # Both must exist: silently skipping either would let its rules (including
+    """Run the architecture checks over the gateway package, the light CLI and the OSS test suite."""
+    # All must exist: silently skipping one would let its rules (including
     # the OSS/enterprise boundary) stop enforcing while the check stays green.
-    for required_root in (GATEWAY_ROOT, TESTS_ROOT):
+    for required_root in (GATEWAY_ROOT, TESTS_ROOT, CLI_ROOT):
         if not required_root.is_dir():
             print(f"❌ Expected directory not found at {required_root}")
             return 1
@@ -824,6 +848,12 @@ def main() -> int:
             continue
         import_violations.extend(
             (py_file, lineno, module, message) for lineno, module, message in check_file(py_file, SRC_ROOT)
+        )
+    for py_file in sorted(CLI_ROOT.rglob("*.py")):
+        if "__pycache__" in py_file.parts:
+            continue
+        import_violations.extend(
+            (py_file, lineno, module, message) for lineno, module, message in check_file(py_file, CLI_ROOT)
         )
     # tests/ sits beside src/, not under it, so its relative paths (and the
     # "tests" rule key above) are rooted at the repo root instead.

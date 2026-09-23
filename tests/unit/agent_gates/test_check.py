@@ -1,5 +1,5 @@
-from gateway.agent_runtime.domain.check import PolicyCheckError, run_policy_check
-from gateway.agent_runtime.domain.types import CheckVerdict, JudgeVerdict, Outcome
+from otari_agent.domain.check import PolicyCheckError, run_policy_check
+from otari_agent.domain.types import CheckVerdict, JudgeVerdict, Outcome
 
 _CHANGED_PATH_POLICY = (
     'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'

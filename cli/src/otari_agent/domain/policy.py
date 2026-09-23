@@ -13,8 +13,8 @@ from typing import Any, Literal, cast
 
 import yaml
 
-from gateway.agent_runtime.domain.evaluators import tokenize_phrase
-from gateway.agent_runtime.domain.types import (
+from otari_agent.domain.evaluators import tokenize_phrase
+from otari_agent.domain.types import (
     ChangedPathGate,
     CheckPassedGate,
     CommandIfChangedGate,

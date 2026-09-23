@@ -1,5 +1,5 @@
-from gateway.agent_runtime.domain.evaluators import evaluate_command_if_changed, tokenize_commands
-from gateway.agent_runtime.domain.types import ChangedPathEvidence, CommandEvidence, CommandIfChangedGate, Outcome
+from otari_agent.domain.evaluators import evaluate_command_if_changed, tokenize_commands
+from otari_agent.domain.types import ChangedPathEvidence, CommandEvidence, CommandIfChangedGate, Outcome
 
 
 def _gate(**overrides: object) -> CommandIfChangedGate:

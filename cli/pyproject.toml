@@ -1,0 +1,38 @@
+[build-system]
+# 77 is the first setuptools that accepts a PEP 639 SPDX string in `license`.
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# The laptop-side half of otari. `otari` and `otari-cli` on PyPI belong to
+# other Mozilla AI projects, so the distribution is otari-agent and the import
+# package otari_agent.
+name = "otari-agent"
+description = "otari's agent-side code: the Agent Gates evaluator and the Claude Code transcript parser"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dynamic = ["version"]
+# Floors match the gateway's pins for the same packages, so one lock satisfies
+# both. Nothing here may reach pydantic, sqlalchemy, any-llm or uvicorn: the
+# Homebrew formula builds every dependency from its sdist, and
+# scripts/check_architecture.py refuses the imports.
+dependencies = [
+    "click>=8.1.0",
+    "httpx>=0.28.1",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["otari_agent*"]
+
+[tool.setuptools.package-data]
+otari_agent = ["py.typed"]
+
+[tool.setuptools.dynamic]
+version = {attr = "otari_agent.__version__"}

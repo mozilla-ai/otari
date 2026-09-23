@@ -1,7 +1,7 @@
 import time
 
-from gateway.agent_runtime.domain.evaluators import _segment_matches, _segments_match, evaluate_changed_path
-from gateway.agent_runtime.domain.types import ChangedPathEvidence, ChangedPathGate, Outcome
+from otari_agent.domain.evaluators import _segment_matches, _segments_match, evaluate_changed_path
+from otari_agent.domain.types import ChangedPathEvidence, ChangedPathGate, Outcome
 
 
 def _gate(**overrides: object) -> ChangedPathGate:

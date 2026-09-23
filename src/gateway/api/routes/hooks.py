@@ -5,7 +5,7 @@ Otari never reads a caller's repository. The caller (an agent hook, e.g.
 own Git evidence, and submits both here in one request; this route parses
 and evaluates them and returns the per-gate results, exactly the way ``otari
 hook`` itself evaluates the same policy in process by default (see
-``agent_runtime.domain.check.run_policy_check``, which both call): this
+``otari_agent.domain.check.run_policy_check``, which both call): this
 route is the opt-in path for a caller that wants a gateway to be the one
 deciding instead. This is the integration mechanism that
 docs/otari-product-foundation.md calls the Hook Server; see
@@ -26,11 +26,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.agent_runtime.domain.check import PolicyCheckError, run_policy_check
-from gateway.agent_runtime.domain.policy import MAX_GATE_ID_LENGTH, MAX_POLICY_BYTES
-from gateway.agent_runtime.domain.types import CheckVerdict, EvidenceScope, JudgeVerdict
 from gateway.api.deps import extract_credential_token, get_config, get_db_if_needed, verify_api_key_or_master_key
 from gateway.core.config import GatewayConfig
+from otari_agent.domain.check import PolicyCheckError, run_policy_check
+from otari_agent.domain.policy import MAX_GATE_ID_LENGTH, MAX_POLICY_BYTES
+from otari_agent.domain.types import CheckVerdict, EvidenceScope, JudgeVerdict
 
 
 # ``AsyncSession`` and ``GatewayConfig`` are imported at runtime rather than
@@ -54,7 +54,7 @@ async def verify_hook_caller(
     does there. That is weaker on purpose and it is all this endpoint needs: it
     reads no tenant data, writes nothing, bills nothing, and evaluates only
     the policy and evidence the caller sent in the same request. What a
-    request can cost is bounded by ``agent_runtime.domain.check``'s own work
+    request can cost is bounded by ``otari_agent.domain.check``'s own work
     budgets, not by who sent it.
     """
     if config.is_hybrid_mode:
@@ -83,7 +83,7 @@ router = APIRouter(
 # rather than duplicated so the Pydantic-level and parser-level limits cannot
 # drift apart. The match-cost budgets that used to sit here (per-entry
 # length, and the total-work estimates for changed_path/command_match/
-# command_if_changed) moved to agent_runtime.domain.check.run_policy_check,
+# command_if_changed) moved to otari_agent.domain.check.run_policy_check,
 # since they guard the evaluator's own cost, not this route's: `otari hook`'s
 # own local evaluation needs them just as much as an HTTP caller does, and
 # sharing one place keeps the two from drifting apart.
@@ -244,7 +244,7 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
     gate never counts as a pass).
 
     The actual parse-and-evaluate work is
-    ``agent_runtime.domain.check.run_policy_check``, shared with ``otari
+    ``otari_agent.domain.check.run_policy_check``, shared with ``otari
     hook``'s own local evaluation: this route's own job is authentication,
     translating that function's tri-state request fields into its own typed
     ones, and turning ``PolicyCheckError`` into a 422.
