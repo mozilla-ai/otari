@@ -12,7 +12,7 @@ the same way.
 
 import asyncio
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from typing import Any
 
@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
+from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.catalog_selectors import (
     Identities,
     OfferingRow,
@@ -218,7 +219,9 @@ async def _organization_views(
     return views
 
 
-async def rebuild_selector_index(db: AsyncSession, config: GatewayConfig, *, fetch: bool = False) -> None:
+async def rebuild_selector_index(
+    db: AsyncSession, config: GatewayConfig, *, model_provider: ModelProviderPort | None = None, fetch: bool = False
+) -> None:
     """Index the spellings from the deployment's catalog view and each organization's offerings.
 
     The deployment's view is the master key's, which is every configured
@@ -228,6 +231,9 @@ async def rebuild_selector_index(db: AsyncSession, config: GatewayConfig, *, fet
     organization that offers models on its own keys then gets a view of its
     own, so its callers reach those models by the same spellings and nobody
     else's do.
+
+    ``model_provider`` is the hosted port, so a hosted model the deployment has
+    switched off is not indexed as the offering a short spelling lands on.
 
     ``fetch`` lets a request-time rebuild pull models.dev the way a page load
     does. The scheduled rebuild reads the cache as it stands instead: fetching
@@ -244,7 +250,7 @@ async def rebuild_selector_index(db: AsyncSession, config: GatewayConfig, *, fet
         auth=(None, True),
         session_identity=None,
         cached_only=not fetch,
-        model_provider=None,
+        model_provider=model_provider,
         include_offered=False,
     )
     catalog = (
@@ -273,18 +279,26 @@ async def rebuild_selector_index(db: AsyncSession, config: GatewayConfig, *, fet
 SELECTOR_INDEX_INTERVAL_SECONDS = 60.0
 
 
-async def run_selector_index_refresher(config: GatewayConfig, interval: float | None = None) -> None:
+async def run_selector_index_refresher(
+    config: GatewayConfig,
+    resolve_model_provider: Callable[[AsyncSession], ModelProviderPort] | None = None,
+    interval: float | None = None,
+) -> None:
     """Keep the selector index current with discovery, pricing and providers.
 
     Rebuilt on a short fixed interval rather than hooked into every writer that
     could change it (a price set, a provider added, a discovery tick): the
     build is one catalog read, and a spelling that lags a minute behind a
     change is a far smaller hazard than one hook missed.
+
+    ``resolve_model_provider`` hands each tick the hosted port for its session,
+    the way a request resolves it; the composition root is not named here.
     """
     while True:
         try:
             async with create_session() as session:
-                await rebuild_selector_index(session, config)
+                model_provider = None if resolve_model_provider is None else resolve_model_provider(session)
+                await rebuild_selector_index(session, config, model_provider=model_provider)
         except asyncio.CancelledError:
             raise
         except Exception:

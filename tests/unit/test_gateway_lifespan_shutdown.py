@@ -200,7 +200,7 @@ async def _started_worker_names(config: GatewayConfig, monkeypatch: pytest.Monke
         if attribute.startswith("run_"):
             monkeypatch.setattr(gateway_main, attribute, _recording_refresher(attribute, called))
 
-    workers = _start_lifespan_workers(config)
+    workers = _start_lifespan_workers(config, build_container())
     for task, _worker in workers:
         task.cancel()
     await asyncio.gather(*(task for task, _worker in workers), return_exceptions=True)

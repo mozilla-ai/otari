@@ -26,7 +26,7 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing, OrganizationModelPricing
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace
-from gateway.ports.model_provider_port import HostedAccessDeniedError, HostedCredential, ModelProviderPort
+from gateway.ports.model_provider_port import HostedAccessDeniedError, HostedCredential, HostedModels, ModelProviderPort
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -697,9 +697,9 @@ class _FakeHostedModelProvider:
             return HostedCredential(api_key="x", api_base=None, response_provider=provider)
         return None
 
-    async def get_hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
+    async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
         del organization_id
-        return frozenset({self._served} if self._served is not None else ())
+        return {} if self._served is None else {self._served: None}
 
 
 @pytest.mark.asyncio

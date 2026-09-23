@@ -36,6 +36,7 @@ from gateway.services.merged_catalog_service import (
     owner_from_key,
     pricing_info,
     pricing_key_candidates,
+    withheld_by_hosted_roster,
 )
 from gateway.services.model_access import is_model_allowed
 from gateway.services.model_catalog_service import (
@@ -302,6 +303,12 @@ async def get_model(
         target = aliases.get(model_id, model_id)
         if not is_model_allowed(key_allowlist, normalize_pricing_key(config, target)):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{model_id}' not found")
+    # A hosted model the deployment no longer advertises is withheld as the
+    # listing withholds it; an alias is a display name the roster does not gate.
+    if model_id not in aliases and withheld_by_hosted_roster(
+        config, scope.hosted_models, scope.byo_providers, normalize_pricing_key(config, model_id)
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{model_id}' not found")
 
     # An alias resolves to its own entry, with pricing read from the resolved
     # target so the underlying provider/model stays hidden. Only the target's own

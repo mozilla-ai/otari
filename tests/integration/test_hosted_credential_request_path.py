@@ -58,8 +58,8 @@ class FleetModelProviderAdapter:
             response_provider="together",
         )
 
-    async def get_hosted_providers(self, *, organization_id):
-        return frozenset({"openai"})
+    async def get_hosted_models(self, *, organization_id):
+        return {"openai": None}
 
 
 def register(container: Container) -> None:

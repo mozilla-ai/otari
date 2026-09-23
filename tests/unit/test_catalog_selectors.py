@@ -246,3 +246,5 @@ async def test_only_an_operator_triggered_rebuild_may_dial(fetch: bool, expected
     assert build.await_args.kwargs["cached_only"] is expected_cached_only
     # The deployment's view carries no organization's offerings; each gets a view of its own.
     assert build.await_args.kwargs["include_offered"] is False
+    # No port was handed in, so none is asked; the lifespan worker hands one in.
+    assert build.await_args.kwargs["model_provider"] is None

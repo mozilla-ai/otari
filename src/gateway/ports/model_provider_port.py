@@ -18,8 +18,16 @@ should pin a released tag and expect the shape to move.
 """
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
+
+HostedModels = Mapping[str, frozenset[str] | None]
+"""The hosted providers a caller may use, each with the models the deployment advertises on it.
+
+``None`` advertises every priced model of the provider, for a build that keeps no
+per-model roster. A set advertises exactly those models, an empty set none.
+"""
 
 
 @dataclass(frozen=True)
@@ -90,10 +98,18 @@ class ModelProviderPort(Protocol):
         """
         ...
 
-    async def get_hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
-        """Returns the hosted providers the organization may use.
+    async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
+        """Returns the hosted providers the organization may use, each with its advertised models.
 
-        These must be the providers :meth:`resolve_hosted_credential` returns a credential for.
-        Each name is the ``provider`` that method receives, never its ``response_provider``.
+        Every key must be a provider :meth:`resolve_hosted_credential` returns a
+        credential for, spelled as the ``provider`` that method receives, never
+        its ``response_provider``. The value is what the catalog lists under it
+        (see :data:`HostedModels`). A roster is what is advertised, not a promise
+        about what the credential refuses: a build may still serve a name off it,
+        and a name on it that the build has since switched off is refused there.
+
+        ``organization_id`` is ``None`` for a caller acting for no organization,
+        the deployment's own view or a master key, which wants the
+        deployment-wide answer.
         """
         ...

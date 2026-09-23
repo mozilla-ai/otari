@@ -13,7 +13,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.ports.model_provider_port import HostedCredential
+from gateway.ports.model_provider_port import HostedCredential, HostedModels
 
 
 class SelfHostedModelProviderAdapter:
@@ -38,5 +38,5 @@ class SelfHostedModelProviderAdapter:
     ) -> HostedCredential | None:
         return None
 
-    async def get_hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
-        return frozenset()
+    async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
+        return {}

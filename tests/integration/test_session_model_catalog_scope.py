@@ -207,6 +207,15 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
                 role="owner",
                 is_superuser=True,
             ),
+            # An operator whose own organization holds no openai key, so the
+            # hosted roster is the only thing that says which openai models exist.
+            "beta_root": _identity(
+                session,
+                email="root@beta.test",
+                organization_id=beta.id,
+                role="owner",
+                is_superuser=True,
+            ),
         }
         return built
     finally:
@@ -686,6 +695,107 @@ def test_an_operator_session_flags_no_hosted_model(client: TestClient, world: _W
     listed = _listing_as(client, world, "superuser")
     assert set(listed) == set(_ALL_MODELS)
     assert listed[_MISTRAL_MODEL]["deployment_managed"] is False
+
+
+_OPENAI_ROSTER = {"openai": {"gpt-4o-mini"}}
+"""The deployment advertises one of its two priced openai models; the other was switched off."""
+
+
+def test_a_hosted_roster_narrows_the_catalog_to_the_models_it_advertises(client: TestClient, world: _World) -> None:
+    """Beta holds no openai key, so the roster is all it is shown of openai.
+
+    The switched-off model keeps its price rows, which is what listed it before:
+    a stored price lists a model discovery never heard of, and the roster is
+    what says the deployment no longer serves it.
+    """
+    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ROSTER))
+    listed = _listing_as(client, world, "beta_member")
+    assert set(listed) == {_OPENAI_MODEL, _ANTHROPIC_MODEL}
+    assert listed[_OPENAI_MODEL]["deployment_managed"] is True
+
+
+def test_an_organization_holding_its_own_key_is_not_narrowed_by_the_hosted_roster(
+    client: TestClient, world: _World
+) -> None:
+    """Alpha calls openai on its own key, so a model the deployment switched off is still its to reach."""
+    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ROSTER))
+    assert _OPENAI_OTHER in _catalog_as(client, world, "alpha_member")
+    assert _OPENAI_OTHER in _catalog_as(client, world, "alpha_owner")
+
+
+def test_a_model_off_the_hosted_roster_is_withheld_from_the_operator_and_the_master_key(
+    client: TestClient, master_key_header: dict[str, str], world: _World
+) -> None:
+    """Unrestricted callers have no allow-list to narrow, so the roster is applied to the price list itself.
+
+    The operator whose own organization holds an openai key still reaches the
+    model on that key; the one whose organization holds none, and the master
+    key, which acts for no organization, no longer see a model nothing serves.
+    """
+    port = HostedModelProvider("openai", models=_OPENAI_ROSTER)
+    bind_model_provider(client, port)
+
+    assert _catalog_as(client, world, "superuser") == set(_ALL_MODELS)
+    assert _catalog_as(client, world, "beta_root") == set(_ALL_MODELS) - {_OPENAI_OTHER}
+    assert [world.alpha, world.beta] == port.asked_for
+
+    response = client.get(f"{API_ROOT}/models", headers=master_key_header)
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert {model["id"] for model in response.json()["data"]} == set(_ALL_MODELS) - {_OPENAI_OTHER}
+    assert port.asked_for[-1] is None, "the master key asks for the deployment-wide roster"
+
+
+def test_the_single_model_read_agrees_with_the_listing_about_a_model_off_the_roster(
+    client: TestClient, master_key_header: dict[str, str], world: _World
+) -> None:
+    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ROSTER))
+    for who, expected in (
+        ("beta_member", status.HTTP_404_NOT_FOUND),
+        ("beta_root", status.HTTP_404_NOT_FOUND),
+        ("alpha_member", status.HTTP_200_OK),
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
+        try:
+            assert client.get(f"{API_ROOT}/models/{_OPENAI_OTHER}").status_code == expected, who
+            assert client.get(f"{API_ROOT}/models/{_OPENAI_MODEL}").status_code == status.HTTP_200_OK, who
+        finally:
+            client.cookies.clear()
+    withheld = client.get(f"{API_ROOT}/models/{_OPENAI_OTHER}", headers=master_key_header)
+    assert withheld.status_code == status.HTTP_404_NOT_FOUND, withheld.text
+
+
+def test_the_grouped_catalog_omits_a_model_off_the_roster(client: TestClient, world: _World) -> None:
+    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ROSTER))
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["beta_member"])
+    try:
+        response = client.get(f"{API_ROOT}/catalog/models")
+        assert response.status_code == status.HTTP_200_OK, response.text
+        selectors = {selector for model in response.json()["models"] for selector in model["selectors"]}
+        assert _OPENAI_MODEL in selectors
+        assert _OPENAI_OTHER not in selectors
+    finally:
+        client.cookies.clear()
+
+
+def test_a_model_off_the_hosted_roster_is_not_indexed_as_an_offering(
+    client: TestClient, master_key_header: dict[str, str], world: _World
+) -> None:
+    """The short spellings are built from the deployment's view, which the roster narrows too.
+
+    Otherwise a pinned spelling could land on the cheapest offering of a model
+    the deployment has switched off, and the request it rewrote would be refused.
+    """
+    from gateway.services import catalog_selectors as selectors
+
+    bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ROSTER))
+    try:
+        rebuilt = client.post(f"{API_ROOT}/catalog/selectors/refresh", headers=master_key_header)
+        assert rebuilt.status_code == status.HTTP_200_OK, rebuilt.text
+        index = selectors.current_selector_index()
+        assert _OPENAI_MODEL in index.full
+        assert _OPENAI_OTHER not in index.full
+    finally:
+        selectors.reset_selector_index()
 
 
 def test_a_hosted_port_failure_fails_the_read(client: TestClient, world: _World) -> None:

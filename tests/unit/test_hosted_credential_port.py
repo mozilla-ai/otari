@@ -30,6 +30,7 @@ from gateway.core.config import GatewayConfig
 from gateway.ports.model_provider_port import (
     HostedAccessDeniedError,
     HostedCredential,
+    HostedModels,
     ModelProviderPort,
 )
 from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
@@ -91,8 +92,8 @@ class RecordingPort:
             raise self.error
         return self.credential
 
-    async def get_hosted_providers(self, *, organization_id: uuid.UUID) -> frozenset[str]:
-        raise AssertionError("dispatch must not ask for the hosted provider list")
+    async def get_hosted_models(self, *, organization_id: uuid.UUID | None) -> HostedModels:
+        raise AssertionError("dispatch must not ask for the hosted roster")
 
 
 def _plain_build_port() -> ModelProviderPort:
@@ -562,4 +563,4 @@ async def test_fresh_resolution_also_reaches_the_port() -> None:
 
 @pytest.mark.asyncio
 async def test_the_plain_build_serves_no_hosted_provider() -> None:
-    assert await _plain_build_port().get_hosted_providers(organization_id=ORGANIZATION_ID) == frozenset()
+    assert await _plain_build_port().get_hosted_models(organization_id=ORGANIZATION_ID) == {}

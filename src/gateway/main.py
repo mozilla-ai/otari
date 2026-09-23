@@ -17,7 +17,7 @@ from typing_extensions import override
 from gateway import features
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
-from gateway.container import build_container
+from gateway.container import Container, build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
 from gateway.core.feature import Worker
@@ -25,6 +25,7 @@ from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, ge
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
+from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.rate_limit import RateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
@@ -159,11 +160,11 @@ class _LifespanWorker:
     """
 
     name: str
-    start: Callable[[GatewayConfig], Coroutine[Any, Any, None] | None]
+    start: Callable[[GatewayConfig, Container], Coroutine[Any, Any, None] | None]
     reset: Callable[[], None] | None = None
 
 
-def _start_reservation_sweeper(config: GatewayConfig) -> Coroutine[Any, Any, None] | None:
+def _start_reservation_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:
     """Return the budget reservation sweep, or None when the interval disables it."""
     if config.budget_reservation_sweep_interval_sec <= 0:
         return None
@@ -174,14 +175,14 @@ def _start_reservation_sweeper(config: GatewayConfig) -> Coroutine[Any, Any, Non
     )
 
 
-def _start_file_sweeper(config: GatewayConfig) -> Coroutine[Any, Any, None] | None:
+def _start_file_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:
     """Return the file retention sweep, or None when files or the interval disable it."""
     if not config.files_enabled or config.files_sweep_interval_sec <= 0:
         return None
     return run_file_sweeper(config.files_sweep_interval_sec, build_file_store(config))
 
 
-def _start_container_sweeper(config: GatewayConfig) -> Coroutine[Any, Any, None] | None:
+def _start_container_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:
     """Return the sandbox container sweep, or None when no sandbox is held past its request."""
     if not config.sandbox_configured() or config.sandbox_container_idle_ttl_sec <= 0:
         return None
@@ -192,16 +193,17 @@ def _start_container_sweeper(config: GatewayConfig) -> Coroutine[Any, Any, None]
 # A new worker is one entry here.
 #
 # Each ``start`` resolves its refresher by name in this module when the lifespan
-# runs, so a refresher stays substitutable after import.
+# runs, so a refresher stays substitutable after import. It is handed the
+# container for the one worker that reads a port the way a request would.
 # Each ``reset`` holds the function object and binds at import, so a substitution
 # made after import does not reach it.
 _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
-    _LifespanWorker("alias", lambda _config: run_alias_refresher(), reset_alias_cache),
-    _LifespanWorker("policy", lambda _config: run_policy_refresher(), reset_policy_cache),
-    _LifespanWorker("provider", lambda config: run_provider_refresher(config), reset_provider_cache),
+    _LifespanWorker("alias", lambda _config, _container: run_alias_refresher(), reset_alias_cache),
+    _LifespanWorker("policy", lambda _config, _container: run_policy_refresher(), reset_policy_cache),
+    _LifespanWorker("provider", lambda config, _container: run_provider_refresher(config), reset_provider_cache),
     _LifespanWorker(
         "organization provider key",
-        lambda _config: run_org_provider_refresher(),
+        lambda _config, _container: run_org_provider_refresher(),
         reset_org_provider_cache,
     ),
     # Not a cache of rows like its neighbours: this holds constructed vendor
@@ -209,21 +211,34 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     # the threads back as well as dropping what was built.
     _LifespanWorker(
         "organization guardrail",
-        lambda _config: run_guardrail_runner_refresher(),
+        lambda _config, _container: run_guardrail_runner_refresher(),
         reset_guardrail_runner,
     ),
-    _LifespanWorker("search tool", lambda config: run_search_tool_refresher(config), reset_search_tool_cache),
-    _LifespanWorker("price snapshot", lambda _config: run_price_snapshot_refresher()),
+    _LifespanWorker(
+        "search tool", lambda config, _container: run_search_tool_refresher(config), reset_search_tool_cache
+    ),
+    _LifespanWorker("price snapshot", lambda _config, _container: run_price_snapshot_refresher()),
     # Started whatever ``pricing_refresh`` says, because that policy is
     # runtime-settable and each tick re-reads it.
-    _LifespanWorker("price update poll", lambda config: run_price_update_poller(config)),
+    _LifespanWorker("price update poll", lambda config, _container: run_price_update_poller(config)),
     # Started whatever ``model_cache_ttl_seconds`` says, for the same reason.
     # Gating on it would strand the gateway: the TTL is runtime-settable, and
     # raising it from 0 flips every read onto a cache nothing then fills.
-    _LifespanWorker("model discovery", lambda config: run_discovery_refresher(config), reset_discovery_cache),
-    _LifespanWorker("models.dev catalog", lambda config: run_catalog_refresher(config), clear_catalog_cache),
-    # The short model spellings, rebuilt from the deployment's catalog view.
-    _LifespanWorker("catalog selectors", lambda config: run_selector_index_refresher(config), reset_selector_index),
+    _LifespanWorker(
+        "model discovery", lambda config, _container: run_discovery_refresher(config), reset_discovery_cache
+    ),
+    _LifespanWorker(
+        "models.dev catalog", lambda config, _container: run_catalog_refresher(config), clear_catalog_cache
+    ),
+    # The short model spellings, rebuilt from the deployment's catalog view,
+    # with the hosted port resolved per tick as a request would resolve it.
+    _LifespanWorker(
+        "catalog selectors",
+        lambda config, container: run_selector_index_refresher(
+            config, lambda session: container.resolve(ModelProviderPort, session)
+        ),
+        reset_selector_index,
+    ),
     # Not a cache reload: this returns leaked budget holds. Without it a user
     # whose single request leaked would hold against their budget forever.
     _LifespanWorker("budget reservation sweep", _start_reservation_sweeper),
@@ -236,12 +251,14 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
 )
 
 
-def _start_lifespan_workers(config: GatewayConfig) -> list[tuple[asyncio.Task[None], _LifespanWorker]]:
+def _start_lifespan_workers(
+    config: GatewayConfig, container: Container
+) -> list[tuple[asyncio.Task[None], _LifespanWorker]]:
     """Start the workers this config runs, each paired with its registry entry."""
     return [
         (asyncio.create_task(coroutine), worker)
         for worker in _LIFESPAN_WORKERS
-        if (coroutine := worker.start(config)) is not None
+        if (coroutine := worker.start(config, container)) is not None
     ]
 
 
@@ -530,7 +547,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             await load_guardrail_runner_at_startup()
             log_writer = create_log_writer(config.log_writer_strategy)
             app.state.file_store = build_file_store(config)
-            workers = _start_lifespan_workers(config)
+            workers = _start_lifespan_workers(config, app.state.container)
             # Workers of the enabled features. Same supervisor as the registry
             # above: created here, cancelled together in ``finally`` under one
             # shared bound.

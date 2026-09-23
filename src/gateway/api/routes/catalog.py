@@ -403,9 +403,10 @@ class SelectorIndexResponse(BaseModel):
 async def refresh_selector_index(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    model_provider: ModelProviderPortDep,
 ) -> SelectorIndexResponse:
     """Re-index the short spellings now, rather than on the refresher's next tick."""
-    await rebuild_selector_index(db, config, fetch=True)
+    await rebuild_selector_index(db, config, model_provider=model_provider, fetch=True)
     index = current_selector_index()
     return SelectorIndexResponse(
         offerings=len(index.full), pinned_selectors=len(index.pinned), models=len(index.models)
