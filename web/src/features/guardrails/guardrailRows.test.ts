@@ -6,6 +6,7 @@ import {
   definitionChecks,
   guardrailLabel,
   ifItCantRunLabel,
+  mandatesFor,
   mandatesOn,
   runsOnLabel,
 } from "@/features/guardrails/guardrailRows"
@@ -111,6 +112,33 @@ describe("ifItCantRunLabel", () => {
         organizationGuardrail({ mode: "monitor", on_unavailable: "block" }),
       ),
     ).toBe("Serve it unchecked")
+  })
+})
+
+describe("mandatesFor", () => {
+  it("keeps the mandates that cover the workspace, by name or by covering all", () => {
+    const mandates = [
+      organizationGuardrail({
+        id: "a",
+        profile: "named",
+        workspace_ids: ["w1"],
+      }),
+      organizationGuardrail({
+        id: "b",
+        profile: "everywhere",
+        applies_to_all_workspaces: true,
+      }),
+      organizationGuardrail({
+        id: "c",
+        profile: "elsewhere",
+        workspace_ids: ["w2"],
+      }),
+      organizationGuardrail({ id: "d", profile: "nowhere", workspace_ids: [] }),
+    ]
+    expect(mandatesFor("w1", mandates).map((m) => m.profile)).toEqual([
+      "named",
+      "everywhere",
+    ])
   })
 })
 

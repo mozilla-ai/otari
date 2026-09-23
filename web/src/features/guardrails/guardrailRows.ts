@@ -88,6 +88,18 @@ export function ifItCantRunLabel(mandate: OrganizationGuardrail): string {
     : "Serve it unchecked"
 }
 
+/** The mandates that cover one workspace, whether by name or by covering all. */
+export function mandatesFor(
+  workspaceId: string,
+  mandates: readonly OrganizationGuardrail[],
+): OrganizationGuardrail[] {
+  return mandates.filter(
+    (mandate) =>
+      mandate.applies_to_all_workspaces ||
+      mandate.workspace_ids.includes(workspaceId),
+  )
+}
+
 /** The mandates that run a definition. */
 export function mandatesOn(
   definition: OrganizationGuardrailDefinition,
