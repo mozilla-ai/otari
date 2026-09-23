@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import OutsideUnitOfWorkError, UnitOfWork
@@ -131,6 +132,15 @@ async def _policy(
     db.add(policy)
     await db.flush()
     return policy
+
+
+def _member_ceiling(member_id: uuid.UUID, budget_id: str, *, provider_key_id: str | None = None) -> ScopedBudget:
+    return ScopedBudget(
+        scope_type=SCOPE_WORKSPACE_MEMBER,
+        scope_id=str(member_id),
+        provider_key_id=provider_key_id,
+        budget_id=budget_id,
+    )
 
 
 async def test_get_by_id_and_organization_answers_only_the_owners_budget(async_db: AsyncSession) -> None:
@@ -504,6 +514,155 @@ async def test_remove_deletes_a_policy(async_db: AsyncSession) -> None:
         assert await policies.for_workspace(workspace.id) == []
 
 
+async def test_get_many_returns_the_budgets_it_finds_keyed_on_id(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db, slug="acme")
+    first = await _budget(async_db, acme, name="first")
+    second = await _budget(async_db, acme, name="second")
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        budgets = BudgetRepository(uow)
+        found = await budgets.get_many([first.budget_id, second.budget_id, "missing"])
+        assert set(found) == {first.budget_id, second.budget_id}
+        assert found[first.budget_id].name == "first"
+        assert await budgets.get_many([]) == {}
+
+
+async def test_member_ceiling_is_per_membership_and_provider(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db, slug="acme")
+    budget = await _budget(async_db, acme, name="acme")
+    capped = uuid.uuid4()
+    narrowed = uuid.uuid4()
+    uncapped = uuid.uuid4()
+    async_db.add(_member_ceiling(capped, budget.budget_id))
+    async_db.add(_member_ceiling(narrowed, budget.budget_id, provider_key_id="pk-a"))
+    await async_db.flush()
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        ceilings = ScopedBudgetRepository(uow)
+        found = await ceilings.member_ceiling(capped, None)
+        assert found is not None
+        assert found.scope_id == str(capped)
+        assert await ceilings.member_ceiling(capped, "pk-a") is None
+        assert await ceilings.member_ceiling(narrowed, "pk-a") is not None
+        assert await ceilings.member_ceiling(narrowed, None) is None
+        assert await ceilings.member_ceiling(uncapped, None) is None
+
+
+async def test_members_with_ceiling_answers_only_those_capped_for_that_provider(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db, slug="acme")
+    budget = await _budget(async_db, acme, name="acme")
+    capped = uuid.uuid4()
+    narrowed = uuid.uuid4()
+    uncapped = uuid.uuid4()
+    async_db.add(_member_ceiling(capped, budget.budget_id))
+    async_db.add(_member_ceiling(narrowed, budget.budget_id, provider_key_id="pk-a"))
+    await async_db.flush()
+    members = [capped, narrowed, uncapped]
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        ceilings = ScopedBudgetRepository(uow)
+        assert await ceilings.members_with_ceiling(members, None) == {capped}
+        assert await ceilings.members_with_ceiling(members, "pk-a") == {narrowed}
+        assert await ceilings.members_with_ceiling(members, "pk-b") == set()
+        assert await ceilings.members_with_ceiling([], None) == set()
+
+
+async def test_insert_member_ceilings_skips_a_membership_already_capped(async_db: AsyncSession) -> None:
+    """A collision on one membership costs that row, not the batch, and is not reported to the caller."""
+    acme = await _organization(async_db, slug="acme")
+    budget = await _budget(async_db, acme, name="acme")
+    already = uuid.uuid4()
+    fresh = uuid.uuid4()
+    async_db.add(_member_ceiling(already, budget.budget_id))
+    await async_db.flush()
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        ceilings = ScopedBudgetRepository(uow)
+        inserted = await ceilings.insert_member_ceilings(
+            [_member_ceiling(already, budget.budget_id), _member_ceiling(fresh, budget.budget_id)]
+        )
+        assert [ceiling.scope_id for ceiling in inserted] == [str(fresh)]
+        assert await ceilings.count_for_budget(budget.budget_id) == 2
+        assert await ceilings.insert_member_ceilings([]) == []
+
+
+async def test_insert_member_ceilings_stages_the_whole_batch_when_nothing_collides(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db, slug="acme")
+    budget = await _budget(async_db, acme, name="acme")
+    members = [uuid.uuid4(), uuid.uuid4()]
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        ceilings = ScopedBudgetRepository(uow)
+        inserted = await ceilings.insert_member_ceilings(
+            [_member_ceiling(member, budget.budget_id) for member in members]
+        )
+        assert {ceiling.scope_id for ceiling in inserted} == {str(member) for member in members}
+        assert await ceilings.count_for_budget(budget.budget_id) == 2
+
+
+async def test_delete_for_member_removes_only_that_memberships_ceilings(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db, slug="acme")
+    budget = await _budget(async_db, acme, name="acme")
+    leaver = uuid.uuid4()
+    stayer = uuid.uuid4()
+    async_db.add(_member_ceiling(leaver, budget.budget_id))
+    async_db.add(_member_ceiling(leaver, budget.budget_id, provider_key_id="pk-a"))
+    async_db.add(_member_ceiling(stayer, budget.budget_id))
+    await async_db.flush()
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        ceilings = ScopedBudgetRepository(uow)
+        await ceilings.delete_for_member(leaver)
+        assert await ceilings.members_with_ceiling([leaver, stayer], None) == {stayer}
+        assert await ceilings.member_ceiling(leaver, "pk-a") is None
+        assert await ceilings.count_for_budget(budget.budget_id) == 1
+
+
+async def test_delete_for_workspace_removes_its_own_and_its_memberships_ceilings(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db, slug="acme")
+    budget = await _budget(async_db, acme, name="acme")
+    doomed = uuid.uuid4()
+    surviving = uuid.uuid4()
+    member = uuid.uuid4()
+    other_member = uuid.uuid4()
+    await _ceiling(async_db, budget, scope_type=SCOPE_WORKSPACE, scope_id=str(doomed))
+    await _ceiling(async_db, budget, scope_type=SCOPE_WORKSPACE, scope_id=str(surviving))
+    await _ceiling(async_db, budget, scope_type=SCOPE_ORGANIZATION, scope_id=str(doomed))
+    async_db.add(_member_ceiling(member, budget.budget_id))
+    async_db.add(_member_ceiling(other_member, budget.budget_id))
+    await async_db.flush()
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        ceilings = ScopedBudgetRepository(uow)
+        await ceilings.delete_for_workspace(doomed, [member])
+        assert not await ceilings.has_ceiling(SCOPE_WORKSPACE, str(doomed), None)
+        assert await ceilings.has_ceiling(SCOPE_WORKSPACE, str(surviving), None)
+        assert await ceilings.has_ceiling(SCOPE_ORGANIZATION, str(doomed), None)
+        assert await ceilings.members_with_ceiling([member, other_member], None) == {other_member}
+
+
+async def test_delete_for_workspace_removes_the_workspace_ceiling_with_no_members_named(
+    async_db: AsyncSession,
+) -> None:
+    acme = await _organization(async_db, slug="acme")
+    budget = await _budget(async_db, acme, name="acme")
+    doomed = uuid.uuid4()
+    await _ceiling(async_db, budget, scope_type=SCOPE_WORKSPACE, scope_id=str(doomed))
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        ceilings = ScopedBudgetRepository(uow)
+        await ceilings.delete_for_workspace(doomed, [])
+        assert not await ceilings.has_ceiling(SCOPE_WORKSPACE, str(doomed), None)
+
+
 async def test_on_builds_every_repository_on_the_unit_of_work(async_db: AsyncSession) -> None:
     acme = await _organization(async_db, slug="acme")
     uow = UnitOfWork(async_db)
@@ -520,3 +679,20 @@ async def test_on_builds_every_repository_on_the_unit_of_work(async_db: AsyncSes
         assert await repositories.budgets.count_by_organization(acme.id) == 0
         assert await repositories.ceilings.count_for_budget("any") == 0
         assert await repositories.member_policies.for_workspace(uuid.uuid4()) == []
+
+
+async def test_insert_member_ceilings_raises_when_a_ceiling_names_no_budget(async_db: AsyncSession) -> None:
+    """Only a membership already capped is skipped; any other refusal is the caller's to see."""
+    acme = await _organization(async_db, slug="acme")
+    budget_id = (await _budget(async_db, acme, name="acme")).budget_id
+    await async_db.commit()
+    uow = UnitOfWork(async_db)
+
+    with pytest.raises(IntegrityError):
+        async with uow:
+            await ScopedBudgetRepository(uow).insert_member_ceilings(
+                [_member_ceiling(uuid.uuid4(), budget_id), _member_ceiling(uuid.uuid4(), "no-such-budget")]
+            )
+
+    async with uow:
+        assert await ScopedBudgetRepository(uow).count_for_budget(budget_id) == 0
