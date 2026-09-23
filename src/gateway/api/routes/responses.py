@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     CodeExecutionPortDep,
     ModelProviderPortDep,
-    build_file_service,
+    OptionalFileServiceDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
@@ -521,6 +521,7 @@ async def create_response(
     request_body: ResponsesRequest,
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    files: OptionalFileServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
@@ -542,8 +543,6 @@ async def create_response(
     # Uploads the normalizer found for the code-execution sandbox, handed to the
     # sandbox session once the billed user and workspace are resolved.
     sandbox_inputs: list[StagedFile] = []
-
-    files = build_file_service(raw_request=raw_request, config=config, uow=uow, db=db)
 
     async def _normalize(
         user_id: str,

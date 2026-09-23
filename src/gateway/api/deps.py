@@ -639,24 +639,6 @@ async def get_db_if_needed(
             yield db
 
 
-def build_file_service(
-    *,
-    raw_request: Request,
-    config: GatewayConfig,
-    uow: UnitOfWork | None,
-    db: AsyncSession | None,
-) -> FileService | None:
-    """The files service a completion request resolves its attachments through, or ``None``.
-
-    ``None`` in hybrid mode, which has no local database and no file store, so a
-    stored ``file_id`` cannot be resolved there at all.
-    """
-    file_store = getattr(raw_request.app.state, "file_store", None)
-    if uow is None or db is None or file_store is None:
-        return None
-    return FileService(uow, FileRepositories.on(uow), file_store, config, lambda: default_workspace_id(db))
-
-
 def build_sandbox_file_bridge(
     *,
     raw_request: Request,
@@ -1063,6 +1045,39 @@ def get_file_service(
 FileServiceDep = Annotated[FileService, Depends(get_file_service)]
 
 
+def get_file_store_if_needed(request: Request) -> FileStoragePort | None:
+    """Return the configured blob store in standalone mode, otherwise ``None``.
+
+    The counterpart of ``get_file_store``, for a route that serves both modes. A
+    hybrid gateway binds none, so the attribute is absent rather than set to None.
+    """
+    store: FileStoragePort | None = getattr(request.app.state, "file_store", None)
+    return store
+
+
+def get_file_service_if_needed(
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    file_store: Annotated[FileStoragePort | None, Depends(get_file_store_if_needed)],
+) -> FileService | None:
+    """Return the request's files service in standalone mode, otherwise ``None``.
+
+    The counterpart of ``get_file_service``, for a completion route that serves both
+    modes. Hybrid mode has no local database and no blob store, so a stored
+    ``file_id`` cannot be resolved there at all.
+
+    NOTE: a route must take its session from ``get_db_if_needed`` as well, for the
+    reason ``get_unit_of_work_if_needed`` gives.
+    """
+    if uow is None or db is None or file_store is None:
+        return None
+    return FileService(uow, FileRepositories.on(uow), file_store, config, lambda: default_workspace_id(db))
+
+
+OptionalFileServiceDep = Annotated[FileService | None, Depends(get_file_service_if_needed)]
+
+
 async def _caller_organization_id(
     db: Annotated[AsyncSession, Depends(get_db)],
     identity: CurrentIdentity,
@@ -1093,6 +1108,7 @@ __all__ = [
     "CurrentIdentity",
     "EntitlementPortDep",
     "FileServiceDep",
+    "OptionalFileServiceDep",
     "OverviewServiceDep",
     "GrowthSignalPortDep",
     "IdentityProviderPortDep",
