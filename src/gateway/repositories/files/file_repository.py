@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from sqlalchemy import and_, delete, or_, select
 
 from gateway.core.unit_of_work import UnitOfWork, session_for
-from gateway.models.tools import FileObject
+from gateway.models.files import FileObject
 
 
 @dataclass(frozen=True)

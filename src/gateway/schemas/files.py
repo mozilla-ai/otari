@@ -10,7 +10,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel
 
-from gateway.models.tools import FileObject
+from gateway.models.files import FileObject
 
 
 def _epoch_seconds(value: datetime | None) -> int | None:

@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
-from gateway.models.tools import FileObject
+from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
 
 # The purpose stamped on a file the code-execution sandbox produced, so a

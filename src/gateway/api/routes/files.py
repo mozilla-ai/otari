@@ -39,7 +39,7 @@ from gateway.api.routes._helpers import resolve_user_id
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
-from gateway.models.tools import FileObject
+from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.schemas.files import (
     AnthropicFileDeleted,

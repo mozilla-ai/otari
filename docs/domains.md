@@ -67,7 +67,7 @@ since. A module "runs queries" when it imports a query builder (`select`,
 | Route modules | 73 |
 | Route modules that run queries | 17, plus 1 that only calls `session.get` |
 | Route modules that define Pydantic models inline | 40 |
-| Model modules | 19 |
+| Model modules | 20 |
 | Repository modules | 19: a base, `users_repository.py`, and the rest under `tenancy/`, `overview/`, `api_keys/`, `files/`, `budgets/`, `pricing/`, `providers/` and `code_execution/` |
 | Service packages per domain | 6: `services/tools/`, which holds the built-in tool registry and no service yet, `services/overview/`, `services/budgets/`, `services/api_keys/`, `services/files/` and `services/providers/`, which holds the organization-scoped half of providers. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
 | Repository packages per domain | 6: `repositories/overview/`, `repositories/api_keys/`, `repositories/files/`, `repositories/budgets/`, `repositories/pricing/` and `repositories/providers/`. `repositories/tenancy/` is an older subpackage |
@@ -211,12 +211,11 @@ the reference to them.
 - Repositories: `files/`
 - Ports: `file_storage_port.py`
 - Adapters: `file_storage_adapter.py`
+- Models: `files.py`
 
 The model never calls files, so it is not a tool. Inference normalizes an
 uploaded file into a request. Tools hands one to a sandbox and returns one
 from a tool call.
-
-Its table sits in `models/tools.py` today, which tools holds.
 
 ### tools
 
