@@ -1,0 +1,181 @@
+name: Publish Otari Homebrew Formula
+
+# Ships the agent-side CLI (cli/, distribution otari-agent) to the org tap,
+# mozilla-ai/homebrew-tap, the way mcpd and cq ship their casks: build in this
+# repo, upload the assets to the Release, render Formula/otari.rb from
+# packaging/homebrew/otari.rb.tmpl and the lock, prove it installs on macOS,
+# then commit it to the tap. The tap has no CI of its own, so the macOS job
+# here is the only gate between a rendered formula and `brew install`.
+#
+# The formula's resources are built from sdists, so the closure has to stay
+# pure Python; tests/unit/test_homebrew_formula.py refuses a heavy dependency
+# on every PR, long before this runs.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.9.0); its GitHub Release must exist"
+        required: true
+      skip_publish:
+        description: "Build and test the formula but do not push it to the tap"
+        required: false
+        default: "false"
+
+jobs:
+  build:
+    name: Build the sdist and render the formula
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - name: Resolve the release tag
+        id: ver
+        env:
+          TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.tag }}
+        run: |
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[-a-zA-Z0-9.]+)?$'; then
+            echo "::error::'$TAG' is not a release tag (vX.Y.Z)"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.ver.outputs.tag }}
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.14"
+
+      # The tree carries 0.0.0 (RELEASE.md: the version comes from the tag).
+      # The lock records the member's version as dynamic, so stamping it here
+      # does not invalidate --frozen.
+      - name: Stamp the release version into the light CLI
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          sed -i "s/^__version__ = \"0.0.0\"$/__version__ = \"${VERSION}\"/" cli/src/otari_agent/__init__.py
+          grep -q "^__version__ = \"${VERSION}\"$" cli/src/otari_agent/__init__.py
+
+      - name: Build the sdist and export its pinned closure
+        run: |
+          uv build --package otari-agent --sdist -o dist
+          uv export --frozen --package otari-agent --no-dev --no-emit-workspace -o dist/requirements.txt
+
+      # Globbed: setuptools normalizes the file name (1.2.3-alpha1 builds 1.2.3a1).
+      - name: Render the formula
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: >-
+          python scripts/homebrew_formula.py --version "$VERSION"
+          --sdist dist/otari_agent-*.tar.gz --output dist/otari.rb
+
+      # A clean venv holding only the exported closure plus the sdist: what a
+      # Homebrew install amounts to, minus Homebrew. Run from outside the
+      # checkout so `uv pip` does not pick up the workspace's constraints.
+      - name: Smoke the light install
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          DIST="$PWD/dist"
+          cd "$(mktemp -d)"
+          uv venv light --python 3.14
+          uv pip install --python light/bin/python --require-hashes -r "$DIST/requirements.txt"
+          uv pip install --python light/bin/python --no-deps "$DIST"/otari_agent-*.tar.gz
+          test "$(light/bin/otari --version)" = "otari, version ${VERSION}"
+          printf '{}' | light/bin/otari hook
+          light/bin/otari import claude-code --dry-run --projects-dir "$(mktemp -d)" | grep -q "Nothing to import"
+          ! light/bin/otari serve >/dev/null 2>&1
+          light/bin/python -c "import sys, otari_agent.cli; assert 'gateway' not in sys.modules"
+
+      - name: Upload the assets to the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: gh release upload "$TAG" dist/otari_agent-*.tar.gz dist/requirements.txt dist/otari.rb --clobber
+
+  test-formula:
+    name: Install and test the formula with Homebrew
+    needs: build
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Fetch the rendered formula from the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern otari.rb --dir dist
+
+      - name: Install the formula from a throwaway local tap
+        run: |
+          brew tap-new --no-git local/otari-test
+          cp dist/otari.rb "$(brew --repo local/otari-test)/Formula/otari.rb"
+          brew style "$(brew --repo local/otari-test)/Formula/otari.rb"
+          brew install --verbose local/otari-test/otari
+          brew test local/otari-test/otari
+          # Advisory: --strict encodes homebrew-core's policies, not a tap's.
+          brew audit --formula local/otari-test/otari || echo "::warning::brew audit reported findings (advisory)"
+
+  publish-tap:
+    name: Push the formula to mozilla-ai/homebrew-tap
+    needs: [build, test-formula]
+    if: github.event.inputs.skip_publish != 'true'
+    runs-on: ubuntu-latest
+    permissions: {}
+    concurrency:
+      group: otari-homebrew-tap
+      cancel-in-progress: false
+    steps:
+      - name: Fetch the rendered formula from the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern otari.rb --dir dist
+
+      # Same mechanics as cq's release-cli.yaml. HOMEBREW_TAP_GITHUB_TOKEN is
+      # the org secret mcpd and cq push with; RELEASE.md lists it.
+      # The concurrency group only serializes runs, not release order, so the
+      # tap's current version is compared first: an older release never
+      # replaces a newer formula.
+      - name: Commit the formula to the tap
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          FORMULA="$PWD/dist/otari.rb"
+          cd "$(mktemp -d)"
+          git clone --depth 1 "https://x-access-token:${HOMEBREW_TAP_GITHUB_TOKEN}@github.com/mozilla-ai/homebrew-tap.git" .
+          CURRENT=$(sed -nE 's|.*/releases/download/v([^/]+)/.*|\1|p' Formula/otari.rb 2>/dev/null | head -n 1)
+          if [ -n "$CURRENT" ] && ! python3 - "$CURRENT" "$VERSION" <<'EOF'
+          import sys
+
+          def key(v):
+              core, _, pre = v.partition("-")
+              parts = [(0, int(p), "") if p.isdigit() else (1, 0, p) for p in pre.split(".")] if pre else []
+              return tuple(int(p) for p in core.split(".")), not pre, parts
+
+          sys.exit(0 if key(sys.argv[2]) >= key(sys.argv[1]) else 1)
+          EOF
+          then
+            echo "::warning::The tap already has otari ${CURRENT}, newer than ${VERSION}; not replacing it"
+            exit 0
+          fi
+          mkdir -p Formula
+          cp "$FORMULA" Formula/otari.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/otari.rb
+          git diff --cached --quiet && echo "No changes to the otari formula" && exit 0
+          git commit -m "Update otari formula to ${TAG}"
+          git push

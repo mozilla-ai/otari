@@ -91,15 +91,34 @@ jobs:
     # discovered packages, an unsatisfiable pin) is invisible until someone tries
     # to ship the OSS edition, and otari-docker.yml only finds it after merge.
     #
-    # The artifacts are proof that the recipe works, and are deliberately not what
-    # gets booted below. A wheel install cannot migrate: alembic/ is not package
-    # data, and _run_migrations resolves it relative to the package
-    # (src/gateway/core/database.py), which only lands next to it in a source
-    # layout. The published image is that source layout (`uv sync` over COPY src,
-    # plus COPY alembic), so booting the same way is what makes this gate resemble
-    # the deployment rather than a distribution nobody ships.
+    # The gateway's artifacts are proof that the recipe works, and are
+    # deliberately not what gets booted below. A wheel install cannot migrate:
+    # alembic/ is not package data, and _run_migrations resolves it relative to
+    # the package (src/gateway/core/database.py), which only lands next to it in
+    # a source layout. The published image is that source layout (`uv sync` over
+    # COPY src, plus COPY alembic), so booting the same way is what makes this
+    # gate resemble the deployment rather than a distribution nobody ships.
     - name: Build the OSS distribution
       run: uv build --all-packages
+
+    # The light CLI's sdist is the one artifact that does ship (Homebrew installs
+    # it, otari-homebrew.yml), so it is installed alone, from its exported
+    # closure, into a venv outside the checkout (inside it, `uv pip` picks up
+    # the workspace constraints). A dependency that reached cli/ from the gateway
+    # fails here on the PR, not on the release.
+    - name: Install the light CLI alone and smoke it
+      run: |
+        uv export --frozen --package otari-agent --no-dev --no-emit-workspace -o dist/requirements.txt
+        DIST="$PWD/dist"
+        cd "$(mktemp -d)"
+        uv venv light --python 3.14
+        uv pip install --python light/bin/python --require-hashes -r "$DIST/requirements.txt"
+        uv pip install --python light/bin/python --no-deps "$DIST"/otari_agent-*.tar.gz
+        light/bin/otari --version
+        printf '{}' | light/bin/otari hook
+        light/bin/otari import claude-code --dry-run --projects-dir "$(mktemp -d)" | grep -q "Nothing to import"
+        ! light/bin/otari serve >/dev/null 2>&1
+        light/bin/python -c "import sys, otari_agent.cli; assert 'gateway' not in sys.modules"
 
     # Runtime dependencies only, no dev group: that is what lets the smoke detect
     # a dev-only or enterprise-only import on an OSS path.
