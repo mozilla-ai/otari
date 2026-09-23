@@ -1,10 +1,10 @@
-import {
-  Description,
-  RadioGroup as HeroRadioGroup,
-  Label,
-  Radio,
-} from "@heroui/react"
 import type { ReactNode } from "react"
+import {
+  Radio as AriaRadio,
+  RadioGroup as AriaRadioGroup,
+  Label,
+  Text,
+} from "react-aria-components"
 
 import { FieldMessages } from "./FieldMessages"
 
@@ -14,6 +14,30 @@ export interface RadioOption {
   label: string
   description?: string
   isDisabled?: boolean
+}
+
+/**
+ * The radio's indicator, square on the design tokens like `CheckboxVisual`.
+ *
+ * The whole product draws at `--radius: 0`, so this stays square and marks the
+ * selected option with a filled dot where the checkbox marks it with a check.
+ * The box fills with `--color-control-indicator` and the dot is
+ * `--color-accent-glyph`, the same pairing the checkbox uses.
+ */
+export function RadioVisual({ isSelected }: { isSelected: boolean }) {
+  return (
+    <span
+      className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center transition-colors ${
+        isSelected
+          ? "bg-control-indicator text-accent-glyph"
+          : "border border-control-border bg-background"
+      } group-data-[focus-visible]:otari-focus-ring`}
+    >
+      {isSelected ? (
+        <span className="h-2 w-2 bg-current" aria-hidden="true" />
+      ) : null}
+    </span>
+  )
 }
 
 /**
@@ -28,6 +52,10 @@ export interface RadioOption {
  * Not `Segmented`, either. That one is for a choice that filters what is on
  * screen right now, and it puts the options in a track shoulder to shoulder;
  * this is a form field the operator submits.
+ *
+ * react-aria rather than HeroUI's own `Radio`, for the reason `Checkbox` gives:
+ * HeroUI splits the control across subcomponents, so its `Radio` root renders no
+ * input and no indicator on its own.
  */
 export function RadioGroup({
   label,
@@ -59,7 +87,7 @@ export function RadioGroup({
   className?: string
 }) {
   return (
-    <HeroRadioGroup
+    <AriaRadioGroup
       value={value}
       onChange={onChange}
       orientation={orientation}
@@ -70,11 +98,11 @@ export function RadioGroup({
     >
       <Label className={hideLabel ? "sr-only" : "text-body"}>{label}</Label>
       {description ? (
-        // Outside `FieldMessages` and with no reserve: this describes the whole
-        // group and is never replaced by an error, so it is supporting text
-        // rather than the message line the error competes for. The reserve
-        // belongs to the line at the bottom, which is the one that changes.
-        <Description className="text-caption">{description}</Description>
+        // Supporting text for the whole group, so it sits outside the reserved
+        // message line the error competes for at the bottom.
+        <Text slot="description" className="text-caption">
+          {description}
+        </Text>
       ) : null}
       <div
         className={
@@ -84,18 +112,24 @@ export function RadioGroup({
         }
       >
         {options.map((option) => (
-          <Radio
+          <AriaRadio
             key={option.value}
             value={option.value}
             isDisabled={option.isDisabled}
+            className="group flex w-fit items-start gap-2 text-body"
           >
-            <span className="flex flex-col">
-              <span className="text-body">{option.label}</span>
-              {option.description ? (
-                <span className="text-caption">{option.description}</span>
-              ) : null}
-            </span>
-          </Radio>
+            {({ isSelected }) => (
+              <>
+                <RadioVisual isSelected={isSelected} />
+                <span className="flex flex-col">
+                  <span className="text-body">{option.label}</span>
+                  {option.description ? (
+                    <span className="text-caption">{option.description}</span>
+                  ) : null}
+                </span>
+              </>
+            )}
+          </AriaRadio>
         ))}
       </div>
       <FieldMessages shouldReserve={false}>
@@ -103,6 +137,6 @@ export function RadioGroup({
           <span className="text-danger">{errorMessage}</span>
         ) : null}
       </FieldMessages>
-    </HeroRadioGroup>
+    </AriaRadioGroup>
   )
 }
