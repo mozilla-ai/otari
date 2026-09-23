@@ -16,6 +16,8 @@ import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
 from fastapi.testclient import TestClient
+from openai.types.responses import Response, ResponseUsage
+from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 
@@ -188,3 +190,35 @@ def test_an_attachment_that_cannot_be_moved_is_refused_before_the_provider(
     assert response.status_code == 400, response.text
     assert "inline" in response.text
     assert seen == {}
+
+
+def test_gemini_is_served_on_responses(client: TestClient, api_key_header: dict[str, str]) -> None:
+    """any-llm serves Gemini's Responses API through Interactions, so the route no longer refuses it."""
+    seen: dict[str, Any] = {}
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        seen.update(kwargs)
+        return Response(
+            id="resp_test",
+            created_at=0.0,
+            model="gemini-2.5-flash",
+            object="response",
+            status=cast(Any, "completed"),
+            output=[],
+            parallel_tool_calls=False,
+            tool_choice="auto",
+            tools=[],
+            usage=ResponseUsage(
+                input_tokens=5,
+                input_tokens_details=InputTokensDetails(cached_tokens=0),
+                output_tokens=2,
+                output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
+                total_tokens=7,
+            ),
+        )
+
+    with patch("gateway.api.routes.responses.aresponses", new=fake_aresponses):
+        response = client.post(f"{API_ROOT}/responses", json={"model": _GEMINI, "input": "hi"}, headers=api_key_header)
+
+    assert response.status_code == 200, response.text
+    assert seen["provider"] == "gemini"
