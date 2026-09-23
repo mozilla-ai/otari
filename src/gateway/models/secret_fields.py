@@ -102,6 +102,26 @@ def _restore_node(incoming: Any, stored: Any, depth: int) -> Any:
     return incoming
 
 
+def _unchanged_fields(item: Any, form: Any) -> int:
+    """Count the non-secret fields an entry still shares with a stored entry's masked form.
+
+    Secret fields are left out: every entry echoes them as the same mask, so
+    they would make any two entries look related.
+    """
+    if not isinstance(item, dict) or not isinstance(form, dict):
+        return 0
+    return sum(1 for key, value in item.items() if not _looks_secret(key) and key in form and form[key] == value)
+
+
+def _only_best(scores: dict[int, int]) -> int | None:
+    """Return the key with the highest score, or None when that score is 0 or shared."""
+    if not scores:
+        return None
+    top = max(scores.values())
+    leaders = [key for key, score in scores.items() if score == top]
+    return leaders[0] if top > 0 and len(leaders) == 1 else None
+
+
 def _restore_list(incoming: list[Any], stored: list[Any], depth: int) -> list[Any]:
     """Pair each element with the stored element it IS, then restore within it.
 
@@ -114,8 +134,12 @@ def _restore_list(incoming: list[Any], stored: list[Any], depth: int) -> list[An
     An edited entry matches nothing. It still keeps its stored credential when
     it is the only unmatched entry, the only unclaimed stored entry sits at the
     same index, and the list kept its length: that is an in-place edit, and
-    nothing else fits. Anything less certain keeps the mask as submitted rather
-    than guess, and so do entries that mask to the same thing but hold
+    nothing else fits. With more than one edited entry, each is paired by the
+    fields the caller left alone: with the stored entry it shares the most of
+    them with, when each is the other's only best match. That holds whether or
+    not the entries also moved, which their index cannot tell. Anything less
+    certain keeps the mask as submitted rather than guess: a tie, an entry that
+    shares no unchanged field, and entries that mask to the same thing but hold
     different values.
 
     A bare element is masked only at the depth bound, where it has no content to
@@ -138,6 +162,15 @@ def _restore_list(incoming: list[Any], stored: list[Any], depth: int) -> list[An
     unclaimed = [pos for pos, item in enumerate(stored) if pos not in claimed and isinstance(item, (dict, list))]
     if same_length and len(unmatched) == 1 and unclaimed == unmatched:
         paired[unmatched[0]] = unmatched[0]
+    else:
+        shared = {
+            (index, pos): _unchanged_fields(incoming[index], masked[pos]) for index in unmatched for pos in unclaimed
+        }
+        for index in unmatched:
+            best = _only_best({pos: shared[index, pos] for pos in unclaimed})
+            # Mutual, so one stored credential is never handed to two entries.
+            if best is not None and _only_best({other: shared[other, best] for other in unmatched}) == index:
+                paired[index] = best
 
     out: list[Any] = []
     for index, item in enumerate(incoming):

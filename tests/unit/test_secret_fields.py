@@ -191,13 +191,94 @@ class TestListElementIdentity:
         }
 
     def test_two_edited_entries_are_not_paired_by_position(self) -> None:
-        # With every entry edited nothing shows whether they also moved, so
-        # neither is guessed at.
+        # Every visible field was edited, so nothing the entries still share
+        # shows whether they also moved, and neither is guessed at.
         submitted = {
             "extra_headers": [{"name": "y2", "token": REDACTED_VALUE}, {"name": "x2", "token": REDACTED_VALUE}]
         }
 
         assert restore_redacted_values(submitted, self.STORED) == submitted
+
+    LABELED = {
+        "extra_headers": [
+            {"name": "a", "token": "secretA", "label": "old-a"},
+            {"name": "b", "token": "secretB", "label": "old-b"},
+        ]
+    }
+
+    def test_editing_two_entries_in_place_keeps_both_credentials(self) -> None:
+        # The review on #1129: relabeling both entries lost both tokens, where
+        # pairing by index had kept them. The names they kept identify them.
+        submitted = {
+            "extra_headers": [
+                {"name": "a", "token": REDACTED_VALUE, "label": "new-a"},
+                {"name": "b", "token": REDACTED_VALUE, "label": "new-b"},
+            ]
+        }
+
+        assert restore_redacted_values(submitted, self.LABELED) == {
+            "extra_headers": [
+                {"name": "a", "token": "secretA", "label": "new-a"},
+                {"name": "b", "token": "secretB", "label": "new-b"},
+            ]
+        }
+
+    def test_two_edited_entries_that_also_moved_keep_their_own_credentials(self) -> None:
+        # Pairing the edited entries by index would cross the tokens here, as it
+        # did for the unedited swap this PR started from.
+        submitted = {
+            "extra_headers": [
+                {"name": "b", "token": REDACTED_VALUE, "label": "new-b"},
+                {"name": "a", "token": REDACTED_VALUE, "label": "new-a"},
+            ]
+        }
+
+        assert restore_redacted_values(submitted, self.LABELED) == {
+            "extra_headers": [
+                {"name": "b", "token": "secretB", "label": "new-b"},
+                {"name": "a", "token": "secretA", "label": "new-a"},
+            ]
+        }
+
+    def test_a_field_every_entry_shares_does_not_tell_edited_entries_apart(self) -> None:
+        stored = {
+            "extra_headers": [
+                {"scheme": "bearer", "name": "x", "token": "live-a"},
+                {"scheme": "bearer", "name": "y", "token": "live-b"},
+            ]
+        }
+        submitted = {
+            "extra_headers": [
+                {"scheme": "bearer", "name": "x2", "token": REDACTED_VALUE},
+                {"scheme": "bearer", "name": "y2", "token": REDACTED_VALUE},
+            ]
+        }
+
+        assert restore_redacted_values(submitted, stored) == submitted
+
+    def test_one_stored_credential_is_never_handed_to_two_entries(self) -> None:
+        # Both edited entries are closest to the first stored entry. Only the
+        # closer one takes its token; the other is not the second stored entry
+        # either, so it keeps the mask.
+        stored = {
+            "extra_headers": [
+                {"a": 1, "b": 1, "c": 1, "d": 1, "token": "live-a"},
+                {"a": 2, "b": 2, "c": 2, "d": 2, "token": "live-b"},
+            ]
+        }
+        submitted = {
+            "extra_headers": [
+                {"a": 1, "b": 1, "c": 7, "d": 7, "token": REDACTED_VALUE},
+                {"a": 1, "b": 1, "c": 1, "d": 9, "token": REDACTED_VALUE},
+            ]
+        }
+
+        assert restore_redacted_values(submitted, stored) == {
+            "extra_headers": [
+                {"a": 1, "b": 1, "c": 7, "d": 7, "token": REDACTED_VALUE},
+                {"a": 1, "b": 1, "c": 1, "d": 9, "token": "live-a"},
+            ]
+        }
 
     def test_duplicate_entries_with_different_credentials_are_not_guessed_between(self) -> None:
         stored = {"extra_headers": [{"name": "x", "token": "live-a"}, {"name": "x", "token": "live-b"}]}
