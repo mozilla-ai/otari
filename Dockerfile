@@ -39,7 +39,9 @@ RUN pip install --no-cache-dir --upgrade pip uv
 
 COPY pyproject.toml uv.lock ./
 COPY src ./src
-RUN uv sync --frozen --no-dev
+# The e2b extra lets `sandbox_provider: e2b` work from the published image; the
+# adapter imports it only when that provider is selected.
+RUN uv sync --frozen --no-dev --extra e2b
 
 FROM python:3.14-slim AS runtime
 
