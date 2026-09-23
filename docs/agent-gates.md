@@ -743,10 +743,13 @@ one job both this endpoint and `otari hook`'s own local evaluation share.
 
 ## Trying it against a real Claude Code session
 
-`otari hook` ships with this package: it reads a Claude Code hook payload on
-stdin, collects the evidence that payload carries, and calls
-`POST /api/v1/hooks/check` for you. Run `otari hook setup` to register it;
-nothing here needs copying out of this document.
+`otari hook` is part of the `otari` command: it reads a Claude Code hook
+payload on stdin, collects the evidence that payload carries, and evaluates
+the policy for you. Install it without the server with
+`brew install mozilla-ai/tap/otari` (the `otari-agent` distribution, see
+[cli/README.md](../cli/README.md)); a source checkout's venv has the same
+command. Run `otari hook setup` to register it; nothing here needs copying
+out of this document.
 
 `changed_path` needs a target path, not a finished diff, so on a
 `PreToolUse` event it checks the tool call's own arguments before they

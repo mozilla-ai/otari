@@ -80,6 +80,16 @@ OpenAI clients work by setting `base_url` to
 This container uses SQLite inside the container and is deleted when it stops.
 Use the Compose setup below for persistent data.
 
+The command a developer runs next to a coding agent (`otari hook`,
+`otari import claude-code`) installs on its own, without the server:
+
+```bash
+brew install mozilla-ai/tap/otari
+```
+
+See [Agent Gates](docs/agent-gates.md) and
+[Use with Claude Code](docs/use-with-claude-code.md).
+
 ## Run the full stack
 
 ```bash

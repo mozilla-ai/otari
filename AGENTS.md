@@ -110,6 +110,13 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   schema cannot carry; `tests/unit/test_code_execution_contract.py` fails when the two
   disagree, and `scripts/check_code_execution_conformance.py` checks a live backend
   against it.
+- The Homebrew formula in `mozilla-ai/homebrew-tap` (`Formula/otari.rb`) is rendered at
+  release by `otari-homebrew.yml` from `packaging/homebrew/otari.rb.tmpl` and `uv.lock`
+  (`scripts/homebrew_formula.py`, standard library only). Never edit the tap's copy; change
+  the template, and `make homebrew-formula` shows the result. Its resource stanzas are the
+  light CLI's dependency closure with each package's sdist URL and hash from the lock, so
+  `tests/unit/test_homebrew_formula.py` fails a PR that adds a heavy or wheel-only dependency
+  to `cli/`.
 - `CHANGELOG.md` and the GitHub Release body are generated from Conventional
   Commits by git-cliff (`cliff.toml`) at release time, not per-PR. Because PRs are
   squash-merged, the PR title is what git-cliff parses; `otari-pr-title.yml`

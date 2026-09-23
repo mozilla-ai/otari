@@ -11,6 +11,20 @@ coding agent. It talks HTTP to a running gateway and needs none of the server.
 | `otari import claude-code` | Backfills Claude Code usage from local transcripts into a gateway. |
 | `otari --version` | The version this distribution was built as, or `OTARI_VERSION` where a deployment sets it (the Docker image does). |
 
+## Install
+
+```bash
+brew install mozilla-ai/tap/otari
+```
+
+Every release publishes the formula to `mozilla-ai/homebrew-tap`
+(`otari-homebrew.yml`), together with the sdist and its pinned requirements as
+Release assets. Without Homebrew, install the sdist from a Release:
+
+```bash
+uv tool install https://github.com/mozilla-ai/otari/releases/download/vX.Y.Z/otari_agent-X.Y.Z.tar.gz
+```
+
 ## Layout
 
 This directory is a uv workspace member (`pyproject.toml` at the repository
