@@ -304,6 +304,22 @@ async def test_read_streams_the_file(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_download_that_redirects_is_followed(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The connection is handed to the provider SDK, which would otherwise have
+    # built one of its own that follows a redirect.
+    def _redirects(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "cdn.example":
+            return httpx.Response(200, content=b"chart")
+        return httpx.Response(302, headers={"location": "https://cdn.example/blob"})
+
+    _serving(monkeypatch, _redirects)
+
+    data = await _read_all(_client().read(ProviderFile(file_id="file_01abc"), budget_bytes=5))
+
+    assert data == b"chart"
+
+
+@pytest.mark.asyncio
 async def test_a_configured_api_base_is_where_the_download_goes(monkeypatch: pytest.MonkeyPatch) -> None:
     # An instance's api_base names the server, not a versioned prefix.
     seen = _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))

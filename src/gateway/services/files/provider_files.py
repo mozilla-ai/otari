@@ -215,7 +215,9 @@ class ProviderFileClient:
         self._provider_instance = provider_instance
         self._api_key = api_key
         self._api_base = api_base
-        self._connection = httpx.AsyncClient(timeout=_TIMEOUT)
+        # Handing this client to the provider SDK replaces the one it would have
+        # built, whose own default is to follow the redirect a download can answer with.
+        self._connection = httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True)
 
     @classmethod
     def for_run(
