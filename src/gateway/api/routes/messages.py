@@ -74,13 +74,12 @@ from gateway.services.mcp_loop_messages import (
     MAX_TOOL_ITERATIONS_CAP,
     MCP_ACTIVITY_ID_PREFIX,
     MCP_CLIENT_BETA,
-    SERVER_TOOL_USE_ID_PREFIX,
-    WEB_SEARCH_TOOL_USE_ID_PREFIX,
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
+from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX
 from gateway.services.web_search_budget import WebSearchBudget
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
@@ -221,7 +220,7 @@ def _is_gateway_minted_result(block: Any) -> bool:
     """Whether a ``web_search_tool_result`` block was minted by this gateway.
 
     Provenance is the reserved id prefix the gateway mints its ``server_tool_use``
-    with (``mcp_loop_messages.WEB_SEARCH_TOOL_USE_ID_PREFIX``), matched here on the
+    with (:data:`~gateway.services.tools.SERVER_TOOL_USE_ID_PREFIX`), matched here on the
     ``tool_use_id`` the result carries back. Anthropic issues ``srvtoolu_`` ids of its
     own and cannot produce that prefix, so a provider's blocks survive untouched
     whatever they contain, including a ``max_uses_exceeded`` error from its own capped
@@ -236,7 +235,7 @@ def _is_gateway_minted_result(block: Any) -> bool:
     """
     if not isinstance(block, dict) or block.get("type") != "web_search_tool_result":
         return False
-    if str(block.get("tool_use_id") or "").startswith(WEB_SEARCH_TOOL_USE_ID_PREFIX):
+    if str(block.get("tool_use_id") or "").startswith(SERVER_TOOL_USE_ID_PREFIX):
         return True
     hits = block.get("content")
     if not isinstance(hits, list):

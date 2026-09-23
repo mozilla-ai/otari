@@ -26,9 +26,6 @@ from anthropic.types import (
     CodeExecutionToolResultBlock,
     CodeExecutionToolResultError,
     ServerToolUseBlock,
-    WebSearchResultBlock,
-    WebSearchToolResultBlock,
-    WebSearchToolResultError,
 )
 from anthropic.types.beta import BetaMCPToolResultBlock, BetaMCPToolUseBlock
 from anthropic.types.beta.beta_container import BetaContainer
@@ -51,8 +48,7 @@ from gateway.services.mcp_loop import (
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecution
 from gateway.services.tool_format import openai_to_anthropic_tools
 from gateway.services.tool_usage import is_tool_error
-from gateway.services.web_retrieval_backend import WEB_RETRIEVAL_RESULT_MAX_BYTES, WEB_SEARCH_TOOL_NAME
-from gateway.services.web_retrieval_network import truncate_utf8
+from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, Dialect, NativeCall, native_rendering
 from gateway.services.web_search_budget import MAX_USES_EXCEEDED_ERROR, WebSearchBudget, is_capped_search
 
 if TYPE_CHECKING:
@@ -80,17 +76,10 @@ __all__ = [
     "MaxToolIterationsExceeded",
     "MCP_ACTIVITY_ID_PREFIX",
     "MCP_CLIENT_BETA",
-    "WEB_SEARCH_TOOL_USE_ID_PREFIX",
     "anthropic_tool_loop",
     "anthropic_tool_loop_stream",
 ]
 
-
-# A search result's recency, collapsed to one line and length-capped before it
-# goes on a native block. Same rendering hygiene the text formatter applies: the
-# value is whatever a search-API-fronting adapter forwarded, so one overlong or
-# multiline entry shouldn't be what makes a citations panel unreadable.
-_PAGE_AGE_MAX_CHARS = 128
 
 # Provenance marker for MCP activity blocks minted by this gateway. Clients may
 # echo the accumulated assistant message on their next request; the Messages
@@ -98,138 +87,18 @@ _PAGE_AGE_MAX_CHARS = 128
 # provider-native MCP blocks.
 MCP_ACTIVITY_ID_PREFIX = "otari_mcptoolu_"
 
-# The gateway's own ``server_tool_use`` ids, for web search and code execution
-# alike. Anthropic issues ``srvtoolu_``-prefixed ids of its own, so a reserved
-# prefix is what lets an echoed transcript be told apart from one describing a
-# call the provider really ran.
-SERVER_TOOL_USE_ID_PREFIX = "otari_srvtoolu_"
-WEB_SEARCH_TOOL_USE_ID_PREFIX = SERVER_TOOL_USE_ID_PREFIX
-
 # Anthropic beta capability a caller must declare before the Messages stream
 # includes the beta-only MCP activity block vocabulary.
 MCP_CLIENT_BETA = "mcp-client-2025-11-20"
 
-# Backend-supplied titles are unbounded. Generous for a real page title, and
-# small enough that a full result set of them cannot approach the tool-result
-# byte limit on its own.
-_CITATION_TITLE_MAX_BYTES = 512
 
-
-def _web_search_result_block(
-    tool_use_id: str,
-    citations: list[WebSearchResultBlock],
-) -> WebSearchToolResultBlock:
-    return WebSearchToolResultBlock(
-        tool_use_id=tool_use_id,
-        type="web_search_tool_result",
-        content=citations,
-    )
-
-
-def _web_search_result_size(tool_use_id: str, citations: list[WebSearchResultBlock]) -> int:
-    block = _web_search_result_block(tool_use_id, citations)
-    return len(block.model_dump_json(exclude_none=True).encode("utf-8"))
-
-
-def _append_bounded_citation(
-    citations: list[WebSearchResultBlock],
-    *,
-    tool_use_id: str,
-    url: str,
-    title: str,
-    page_age: str | None,
-) -> None:
-    """Append one citation, keeping the whole result block inside its byte limit.
-
-    Capping the title is what keeps a normal result set well under the limit,
-    since the backend bounds the hit count and ``page_age`` is already capped.
-    The size check is the backstop for the remaining unbounded field, the URL.
-    """
-    candidate = WebSearchResultBlock(
-        type="web_search_result",
-        url=url,
-        title=truncate_utf8(title, _CITATION_TITLE_MAX_BYTES, suffix="…").text,
-        page_age=page_age,
-        encrypted_content="",
-    )
-    if _web_search_result_size(tool_use_id, [*citations, candidate]) > WEB_RETRIEVAL_RESULT_MAX_BYTES:
-        return
-    citations.append(candidate)
-
-
-def _native_web_search_blocks(query: str, results: list[dict[str, Any]]) -> list[Any]:
-    """A ``server_tool_use`` / ``web_search_tool_result`` pair for one gateway search.
-
-    Emitted only for a caller that declared web search in Anthropic's native
-    vocabulary, which is the contract that makes a client expect these blocks and
-    render citations from them.
-
-    ``encrypted_content`` is required by the schema but is an Anthropic-signed blob
-    only Anthropic can mint, so the gateway sends it empty rather than forging one.
-    A client that echoes the block back through the gateway has it stripped before
-    the provider sees it (see ``routes/messages.py``); one that echoes it straight
-    to Anthropic instead would be rejected there, which is the same trade-off the
-    Responses path already accepts for its minted ``web_search_call`` items.
-    """
-    tool_use_id = f"{WEB_SEARCH_TOOL_USE_ID_PREFIX}{uuid.uuid4().hex}"
-    citations: list[WebSearchResultBlock] = []
-    for result in results:
-        url = str(result.get("url") or "").strip()
-        if not url:
-            # Nothing to cite. A hit with no URL is unusable to a citations panel.
-            continue
-        page_age = " ".join(str(result.get("published_date") or "").split())[:_PAGE_AGE_MAX_CHARS]
-        _append_bounded_citation(
-            citations,
-            tool_use_id=tool_use_id,
-            url=url,
-            title=str(result.get("title") or url).strip(),
-            page_age=page_age or None,
-        )
-    return [
-        ServerToolUseBlock(
-            id=tool_use_id,
-            # Anthropic types this field as a Literal of its own server-tool names.
-            # The gateway's tool name is one of them, but the shared constant is a
-            # plain ``str``, so narrow it here rather than duplicating the literal.
-            name=cast('Literal["web_search"]', WEB_SEARCH_TOOL_NAME),
-            input={"query": query},
-            type="server_tool_use",
-        ),
-        _web_search_result_block(tool_use_id, citations),
-    ]
-
-
-def _native_web_search_max_uses_error_blocks(query: str) -> list[Any]:
-    """Return native Anthropic blocks for a search rejected by ``max_uses``."""
-    tool_use_id = f"{WEB_SEARCH_TOOL_USE_ID_PREFIX}{uuid.uuid4().hex}"
-    return [
-        ServerToolUseBlock(
-            id=tool_use_id,
-            name=cast('Literal["web_search"]', WEB_SEARCH_TOOL_NAME),
-            input={"query": query},
-            type="server_tool_use",
-        ),
-        WebSearchToolResultBlock(
-            tool_use_id=tool_use_id,
-            type="web_search_tool_result",
-            content=WebSearchToolResultError(
-                type="web_search_tool_result_error",
-                error_code="max_uses_exceeded",
-            ),
-        ),
-    ]
-
-
-def _max_uses_exceeded_result(
-    tool_use_id: str,
-    query: str,
-    native_blocks: list[Any] | None,
-) -> dict[str, Any]:
-    """The tool_result for a search the cap refused, collecting its native pair."""
+def _max_uses_exceeded_result(call: NativeCall, native_blocks: list[Any] | None) -> dict[str, Any]:
+    """The tool_result for a call the use cap refused, collecting its native blocks."""
     if native_blocks is not None:
-        native_blocks.extend(_native_web_search_max_uses_error_blocks(query))
-    return {"type": "tool_result", "tool_use_id": tool_use_id, "content": MAX_USES_EXCEEDED_ERROR}
+        rendering = native_rendering(call.name, Dialect.MESSAGES)
+        if rendering is not None:
+            native_blocks.extend(rendering.refused(call))
+    return {"type": "tool_result", "tool_use_id": call.id, "content": MAX_USES_EXCEEDED_ERROR}
 
 
 def _native_code_execution_blocks(execution: CodeExecution) -> list[Any]:
@@ -272,26 +141,21 @@ def _native_code_execution_blocks(execution: CodeExecution) -> list[Any]:
     ]
 
 
-def _native_blocks_for_call(pool: ToolBackend, name: str, arguments: dict[str, Any], *, is_error: bool) -> list[Any]:
-    """Native blocks describing one gateway tool call, if its tool has any.
+def _native_blocks_for_call(pool: ToolBackend, call: NativeCall) -> list[Any]:
+    """Native blocks describing one gateway tool call, if its tool has any in this dialect.
 
-    A web search contributes a pair only when it succeeded: a failed search has
-    nothing to cite. A code execution contributes one either way, because a
-    program that exited non-zero is a result the vocabulary can carry, and one
-    the backend never ran has an error shape of its own. An MCP call has no
-    Anthropic block that would be honest to emit and stays invisible.
+    A code execution contributes blocks whether or not the program succeeded, because
+    a non-zero exit is a result the vocabulary can carry and a call the backend never
+    ran has an error shape of its own. An MCP call has no Anthropic block that would
+    be honest to emit and stays invisible.
     """
-    if name == CODE_EXECUTION_TOOL_NAME:
+    if call.name == CODE_EXECUTION_TOOL_NAME:
         take_executions = getattr(pool, "take_executions", None)
         if take_executions is None:
             return []
         return [block for execution in take_executions() for block in _native_code_execution_blocks(execution)]
-    if is_error or name != WEB_SEARCH_TOOL_NAME:
-        return []
-    take_last_results = getattr(pool, "take_last_results", None)
-    if take_last_results is None:
-        return []
-    return _native_web_search_blocks(str(arguments.get("query") or ""), take_last_results())
+    rendering = native_rendering(call.name, Dialect.MESSAGES)
+    return rendering.ran(call, pool) if rendering is not None else []
 
 
 def _split_tool_uses(
@@ -341,7 +205,7 @@ async def _execute_tool_uses(
         arguments = dict(block.input or {})
         capped = is_capped_search(budget, pool, block.name)
         if capped and budget is not None and budget.exhausted():
-            out.append(_max_uses_exceeded_result(block.id, str(arguments.get("query") or ""), native_blocks))
+            out.append(_max_uses_exceeded_result(NativeCall(block.name, block.id, arguments), native_blocks))
             continue
         try:
             text = await pool.call_tool(block.name, arguments)
@@ -354,7 +218,8 @@ async def _execute_tool_uses(
             if capped and budget is not None:
                 budget.record(text)
         if native_blocks is not None:
-            native_blocks.extend(_native_blocks_for_call(pool, block.name, arguments, is_error=is_tool_error(text)))
+            call = NativeCall(block.name, block.id, arguments, failed=is_tool_error(text))
+            native_blocks.extend(_native_blocks_for_call(pool, call))
         out.append({"type": "tool_result", "tool_use_id": block.id, "content": text})
     return out
 
@@ -566,9 +431,7 @@ async def _execute_stream_owned_events(
         parsed_input = _parsed_stream_input(state, spec)
         capped = is_capped_search(budget, pool, name)
         if capped and budget is not None and budget.exhausted():
-            results.append(
-                _max_uses_exceeded_result(spec["id"], str(parsed_input.get("query") or ""), native_blocks)
-            )
+            results.append(_max_uses_exceeded_result(NativeCall(name, spec["id"], parsed_input), native_blocks))
             continue
         mcp_backend = _as_mcp_tool_backend(pool)
         server_name = _mcp_server_name(mcp_backend, name)
@@ -594,7 +457,8 @@ async def _execute_stream_owned_events(
         if capped and budget is not None:
             budget.record(text)
         if native_blocks is not None:
-            native_blocks.extend(_native_blocks_for_call(pool, name, parsed_input, is_error=is_error))
+            call = NativeCall(name, spec["id"], parsed_input, failed=is_error)
+            native_blocks.extend(_native_blocks_for_call(pool, call))
         results.append({"type": "tool_result", "tool_use_id": spec["id"], "content": text})
 
         if activity_id is not None:
@@ -679,7 +543,7 @@ class _MessagesToolLoopStrategy:
             try:
                 result.content = [*acc["native_blocks"], *(result.content or [])]
             except (AttributeError, TypeError):
-                logger.warning("Could not add native web-search blocks to the response content")
+                logger.warning("Could not add native server-tool blocks to the response content")
 
     def exit_before_split(self, result: MessageResponse) -> bool:
         return False
