@@ -39,7 +39,7 @@ from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultServic
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.file_service import StagedFile
-from gateway.services.files import SandboxFileBridge
+from gateway.services.files import FileService, SandboxFileBridge
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.organization_pricing_service import OrganizationPricingService
@@ -54,6 +54,7 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
 )
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_service import WorkspaceService
+from gateway.services.workspace_scope import default_workspace_id
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -1032,6 +1033,19 @@ def get_file_store(request: Request) -> FileStoragePort:
     return store
 
 
+def get_file_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    file_store: Annotated[FileStoragePort, Depends(get_file_store)],
+) -> FileService:
+    """Build the request's files service on the request's Unit of Work."""
+    return FileService(uow, FileRepositories.on(uow), file_store, config, lambda: default_workspace_id(db))
+
+
+FileServiceDep = Annotated[FileService, Depends(get_file_service)]
+
+
 async def _caller_organization_id(
     db: Annotated[AsyncSession, Depends(get_db)],
     identity: CurrentIdentity,
@@ -1061,6 +1075,7 @@ __all__ = [
     "CallerOrganization",
     "CurrentIdentity",
     "EntitlementPortDep",
+    "FileServiceDep",
     "OverviewServiceDep",
     "GrowthSignalPortDep",
     "IdentityProviderPortDep",

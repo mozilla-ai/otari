@@ -1,0 +1,334 @@
+"""The files use cases: storing an upload, paging a caller's files, serving one back and discarding it."""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from enum import StrEnum
+
+from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.files_exceptions import (
+    EmptyUploadError,
+    FileNotServedError,
+    FilesDisabledError,
+    FileStorageError,
+    UnknownPageCursorError,
+    UploadTooLargeError,
+)
+from gateway.log_config import logger
+from gateway.models.files import FileObject
+from gateway.ports.file_storage_port import FileStoragePort
+from gateway.repositories.files import FilePageQuery, FileRepositories
+from gateway.services.file_service import expiry_for, guess_mime_type
+from gateway.services.files._file_ids import could_name_a_file, file_id_in, page_token
+
+# Resolves the workspace a deployment-wide write lands in. It belongs to the
+# organizations domain, so files receives it rather than looking it up.
+DefaultWorkspace = Callable[[], Awaitable[uuid.UUID]]
+
+
+class FileDialect(StrEnum):
+    """Which SDK's Files API a request speaks.
+
+    The two share their paths and verbs, and the gateway serves both from one
+    set of rows. They differ in how a page is resumed, so a listing says which
+    it is and gets its own cursor back.
+    """
+
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+
+
+@dataclass(frozen=True)
+class FileScope:
+    """The rows one files request may reach.
+
+    ``workspace_id`` is the workspace the authenticating key belongs to, and is
+    None for the master key, which is the operator acting deployment-wide and
+    sees every workspace.
+    """
+
+    user_id: str
+    workspace_id: uuid.UUID | None = None
+
+
+@dataclass(frozen=True)
+class NewFile:
+    """An upload as the request carried it, before the store has seen its bytes."""
+
+    user_id: str
+    # None for a master-key upload, which lands in the deployment's default workspace.
+    workspace_id: uuid.UUID | None
+    filename: str | None
+    content_type: str | None
+    purpose: str
+    chunks: AsyncIterator[bytes]
+
+
+@dataclass(frozen=True)
+class FileListing:
+    """One page of a caller's files, as the request asked for it."""
+
+    scope: FileScope
+    dialect: FileDialect
+    limit: int
+    ascending: bool = False
+    purpose: str | None = None
+    # The files a caller named outright, which replaces paging through them.
+    file_ids: Sequence[str] | None = None
+    cursor: str | None = None
+
+
+@dataclass(frozen=True)
+class FilePage:
+    """One page of a caller's files, with what resumes the listing after it."""
+
+    files: list[FileObject]
+    # The cursor a following request passes back, spelled for the listing's
+    # dialect, or None when this page is the last.
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class FileContent:
+    """A stored file's bytes, ready to be read out, and what describes them."""
+
+    chunks: AsyncGenerator[bytes, None]
+    filename: str
+    mime_type: str
+
+
+class FileService:
+    """Everything the Files API does with a caller's uploads.
+
+    The bytes go to a blob store behind :class:`FileStoragePort` and the
+    metadata to a row, and the two are kept in step: an upload whose row does
+    not land takes its bytes with it, and a discarded file loses its bytes
+    after the row says so.
+    """
+
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        repositories: FileRepositories,
+        file_store: FileStoragePort,
+        config: GatewayConfig,
+        default_workspace: DefaultWorkspace,
+    ) -> None:
+        self._uow = uow
+        self._files = repositories.files
+        self._file_store = file_store
+        self._config = config
+        self._default_workspace = default_workspace
+
+    async def store(self, upload: NewFile) -> FileObject:
+        """Store an upload's bytes and record the file, and return the row.
+
+        Raises:
+            FilesDisabledError: the deployment does not serve files.
+            UploadTooLargeError: the upload ran past the deployment's ceiling.
+            EmptyUploadError: the upload carried no bytes.
+            FileStorageError: the bytes were written but the row would not land.
+        """
+        self._require_enabled()
+        workspace_id = upload.workspace_id or await self._default_workspace()
+        file_id = f"file-{uuid.uuid4().hex}"
+        max_bytes = self._config.files_max_bytes
+        storage_ref, size = await self._file_store.put_stream(file_id, _capped(upload.chunks, max_bytes))
+        if size == 0:
+            # The size is only known once the stream drains, so a zero-byte blob
+            # is already in the store by the time the upload is refused.
+            await self._file_store.delete(storage_ref)
+            raise EmptyUploadError
+
+        now = datetime.now(UTC)
+        record = FileObject(
+            id=file_id,
+            user_id=upload.user_id,
+            workspace_id=workspace_id,
+            filename=upload.filename or file_id,
+            mime_type=guess_mime_type(upload.filename, upload.content_type),
+            bytes=size,
+            purpose=upload.purpose,
+            storage_ref=storage_ref,
+            created_at=now,
+            expires_at=expiry_for(self._config, now),
+        )
+        try:
+            async with self._uow:
+                await self._files.add(record)
+        except DATABASE_ERRORS as exc:
+            # The bytes were written before the row was staged; drop them so a
+            # failed insert does not leak a blob nothing references.
+            await self._file_store.delete(storage_ref)
+            logger.error("Failed to persist file metadata for %s: %s", file_id, exc)
+            raise FileStorageError(f"Could not record the file {file_id}") from exc
+
+        logger.info(
+            "Stored file %s (%d bytes) for user %s in workspace %s", file_id, size, upload.user_id, workspace_id
+        )
+        return record
+
+    async def page(self, listing: FileListing) -> FilePage:
+        """Return one page of the caller's files, and the cursor that resumes after it.
+
+        Raises:
+            FilesDisabledError: the deployment does not serve files.
+            UnknownPageCursorError: an Anthropic page token names no position this gateway issued.
+            FileNotServedError: an OpenAI cursor names no file the caller owns.
+        """
+        self._require_enabled()
+        anthropic = listing.dialect is FileDialect.ANTHROPIC
+        cursor_id = listing.cursor
+        if anthropic and cursor_id is not None:
+            cursor_id = file_id_in(cursor_id)
+            if cursor_id is None:
+                raise UnknownPageCursorError
+        query = FilePageQuery(
+            user_id=listing.scope.user_id,
+            workspace_id=listing.scope.workspace_id,
+            purpose=listing.purpose,
+            file_ids=(
+                None
+                if listing.file_ids is None
+                else [file_id for file_id in listing.file_ids if could_name_a_file(file_id)]
+            ),
+            ascending=listing.ascending,
+            # One row past the page says whether another follows, without a count.
+            limit=listing.limit + 1,
+        )
+        async with self._uow:
+            if cursor_id is not None:
+                query = replace(query, after=await self._position(cursor_id, listing))
+            records = await self._files.page(query)
+
+        has_more = len(records) > listing.limit
+        files = records[: listing.limit]
+        if not has_more:
+            return FilePage(files=files, next_cursor=None)
+        last = files[-1].id
+        return FilePage(files=files, next_cursor=page_token(last) if anthropic else last)
+
+    async def stored_file(self, file_id: str, scope: FileScope) -> FileObject:
+        """Return the file the caller is served under ``file_id``.
+
+        Raises:
+            FilesDisabledError: the deployment does not serve files.
+            FileNotServedError: no such file is served to this caller.
+        """
+        self._require_enabled()
+        async with self._uow:
+            record = await self._files.live(file_id, scope.user_id, workspace_id=scope.workspace_id)
+        if record is None:
+            raise FileNotServedError
+        return record
+
+    async def content(self, file_id: str, scope: FileScope) -> FileContent:
+        """Open the file's bytes for reading, having proved the caller is served it.
+
+        The first chunk is read here so that a blob that is gone or unreadable
+        fails now, while the failure can still be reported, rather than after
+        the caller has been told the read succeeded.
+
+        Raises:
+            FilesDisabledError: the deployment does not serve files.
+            FileNotServedError: no such file is served to this caller, or its row holds no bytes.
+            FileStorageError: the bytes could not be read.
+        """
+        record = await self.stored_file(file_id, scope)
+        if record.storage_ref is None:
+            logger.error("File %s has no stored bytes", file_id)
+            raise FileNotServedError
+        try:
+            chunks = await _primed(self._file_store.get_stream(record.storage_ref))
+        except OSError as exc:
+            logger.error("Failed to read blob for file %s (ref=%s): %s", file_id, record.storage_ref, exc)
+            raise FileStorageError(f"Could not read the bytes of {file_id}") from exc
+        return FileContent(chunks=chunks, filename=record.filename, mime_type=record.mime_type)
+
+    async def discard(self, file_id: str, scope: FileScope) -> None:
+        """Stop serving the file and give its bytes back.
+
+        Raises:
+            FilesDisabledError: the deployment does not serve files.
+            FileNotServedError: no such file is served to this caller.
+            FileStorageError: the file is still served because the row would not change.
+        """
+        record = await self.stored_file(file_id, scope)
+        storage_ref = record.storage_ref
+        try:
+            async with self._uow:
+                await self._files.soft_delete(record, datetime.now(UTC))
+        except DATABASE_ERRORS as exc:
+            logger.error("Failed to delete file %s: %s", file_id, exc)
+            raise FileStorageError(f"Could not discard the file {file_id}") from exc
+
+        # The row is already stored, so the file is gone from the caller's view.
+        # Removing the blob is best effort: a storage failure must not turn a
+        # completed delete into a failure, and only leaves an unreferenced blob
+        # for the sweep.
+        if storage_ref is not None:
+            try:
+                await self._file_store.delete(storage_ref)
+            except OSError as exc:
+                logger.warning("Discarded file %s but failed to remove its blob %s: %s", file_id, storage_ref, exc)
+
+    async def _position(self, cursor_id: str, listing: FileListing) -> tuple[datetime, str]:
+        """The ``(created_at, id)`` key a cursor resumes after.
+
+        Read with the tenant predicates only, so a cursor deleted or expired
+        between two pages still says where the next page starts. Another user's
+        ID names no position.
+        """
+        cursor = await self._files.any_owned(
+            cursor_id, listing.scope.user_id, workspace_id=listing.scope.workspace_id
+        )
+        if cursor is None:
+            raise UnknownPageCursorError if listing.dialect is FileDialect.ANTHROPIC else FileNotServedError()
+        return cursor.created_at, cursor.id
+
+    def _require_enabled(self) -> None:
+        if not self._config.files_enabled:
+            raise FilesDisabledError
+
+
+async def _capped(chunks: AsyncIterator[bytes], max_bytes: int) -> AsyncIterator[bytes]:
+    """Yield the upload's bytes, refusing it past ``max_bytes``.
+
+    The cap is applied as the bytes flow into the store rather than to a buffer
+    built first, so an oversized upload is never held whole.
+    """
+    total = 0
+    async for chunk in chunks:
+        total += len(chunk)
+        if total > max_bytes:
+            raise UploadTooLargeError(max_bytes)
+        yield chunk
+
+
+async def _primed(chunks: AsyncGenerator[bytes, None]) -> AsyncGenerator[bytes, None]:
+    """Read ``chunks``' first item eagerly so a read failure raises here, not later."""
+    try:
+        first: bytes | None = await chunks.__anext__()
+    except StopAsyncIteration:
+        first = None
+
+    async def _rest() -> AsyncGenerator[bytes, None]:
+        # A reader that stops early closes this outer generator, and that does
+        # not reach `chunks` on its own (there is no such thing for a bare
+        # `async for`). Without this try/finally the store's file handle stays
+        # open until the abandoned generator is collected, which under real
+        # traffic (cancelled downloads, closed tabs) means fds pile up.
+        try:
+            if first is not None:
+                yield first
+                async for chunk in chunks:
+                    yield chunk
+        finally:
+            await chunks.aclose()
+
+    return _rest()
