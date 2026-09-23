@@ -1,7 +1,7 @@
 """The shape of a tool the gateway runs itself, as the tool registry lists it."""
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
@@ -24,4 +24,4 @@ class BuiltinTool:
     name: str
     definition: Callable[[], dict[str, Any]]
     configured: Callable[[GatewayConfig], bool]
-    native: Mapping[Dialect, NativeRendering] = MappingProxyType({})
+    native: Mapping[Dialect, NativeRendering] = field(default=MappingProxyType({}), compare=False)

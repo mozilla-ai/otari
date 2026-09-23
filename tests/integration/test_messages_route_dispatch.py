@@ -859,6 +859,34 @@ def test_code_execution_combined_with_mcp_servers_returns_400(
     )
 
 
+def test_web_search_combined_with_mcp_servers_returns_400(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The use cap reads ownership off the pool, which only tells a gateway call from an
+    MCP server's own because the two never share a request.
+    """
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    resp = client.post(
+        f"{API_ROOT}/messages",
+        json={
+            "model": "anthropic:claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+            "tools": [{"type": "otari_web_search", "max_uses": 1}],
+            "mcp_servers": [{"name": "x", "url": "http://127.0.0.1:9999/mcp"}],
+        },
+        headers=api_key_header,
+    )
+    assert resp.status_code == 400
+    _assert_anthropic_error(
+        resp.json(),
+        error_type="invalid_request_error",
+        message_substr="cannot be combined with otari_code_execution",
+    )
+
+
 def test_code_execution_combined_with_a_provider_native_tool_returns_400(
     client: TestClient,
     api_key_header: dict[str, str],

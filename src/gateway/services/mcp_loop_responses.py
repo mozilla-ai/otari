@@ -349,7 +349,7 @@ async def _execute_stream_owned(
     results: list[dict[str, Any]] = []
     for spec in state.owned_specs:
         args = _parsed_arguments(spec.get("arguments"))
-        call = NativeCall(str(spec["name"]), str(spec["call_id"]), args)
+        call = NativeCall(str(spec["name"]), str(spec.get("call_id") or ""), args)
         capped = is_capped_call(budget, pool, call.name)
         if capped and budget is not None and budget.exhausted():
             state.native_items.extend(_native_items(call, pool, tools, refused=True))

@@ -39,7 +39,10 @@ class ToolUseBudget:
         """Whether ``name`` on ``pool`` is the gateway-run call this budget bounds.
 
         A call the pool does not own is the caller's own to dispatch and spends nothing
-        here. Ownership is what keeps a same-named tool from an MCP server out of the cap.
+        here. Ownership alone does not tell the gateway's tool from an MCP server's tool
+        of the same name, and it does not have to: a request declaring a built-in tool
+        alongside an MCP server is refused, so a request holding a budget reaches one
+        built-in backend and no MCP pool.
         """
         return name == self._tool and pool.owns_tool(name)
 

@@ -71,6 +71,11 @@ def test_a_definition_names_its_tool_and_is_new_on_every_call(tool: BuiltinTool)
     assert tool.definition() is not definition, "a caller mutating one definition must not change the next"
 
 
+def test_a_listed_tool_can_be_put_in_a_set() -> None:
+    """A tool is identified by its name, so its renderings must not cost it its hash."""
+    assert len(set(BUILTIN_TOOLS)) == len(BUILTIN_TOOLS)
+
+
 def _backend_for(tool: BuiltinTool) -> ToolBackend:
     """The backend that runs ``tool``, built without opening a connection."""
     if tool.name == WEB_SEARCH_TOOL_NAME:
