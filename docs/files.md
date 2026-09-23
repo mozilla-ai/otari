@@ -156,19 +156,27 @@ a later request can name it in a `file_id` block.
 
 Otari copies a file before the caller sees its ID: before the reply returns,
 or, on a stream, before the event that names the file is sent. The cost is
-time: the reply, or the stream, waits for the download, for at most 60 seconds
-in all. One reply copies at most `files_output_max_files` files and
-`files_output_max_bytes` in total, the caps in the next paragraph.
+time. The reply, or the stream, waits for the download, for at most
+`files_provider_copy_max_sec` (60 seconds by default) across the whole request.
+A stream keeps emitting its usual keepalive while it waits
+(`streaming_keepalive_interval_ms`), so an intermediary with a read timeout
+does not sever the connection during a copy.
 
-Some files are not copied: one past a cap or past the time limit, one the
-provider will not serve, and any file from a provider other than Anthropic or
-OpenAI. Such a file's ID still appears in the reply, and Otari answers 404 for
-it.
+Some files are not copied: one past an allowance below or past the time limit,
+one the provider will not serve, and any file from a provider other than
+Anthropic or OpenAI. Such a file's ID still appears in the reply, and Otari
+answers 404 for it. A provider that merely refused is retried on a later event
+naming the same file, where the response offers one; an allowance it ran past
+is not, because the allowance only shrinks.
 
-One call may store at most `files_output_max_files` files and
-`files_output_max_bytes` in total (20 files and 64 MB by default, the latter also
-bounded by `files_max_bytes`). What a run writes is untrusted, so a file past
-either cap is named in the tool result without an id rather than stored. A
+`files_output_max_files` and `files_output_max_bytes` (20 files and 64 MB by
+default, the latter also bounded by `files_max_bytes`) are each spent twice
+over, once per source: one call may store that many files from Otari's own
+sandbox, and one request may copy that many from a provider's. A request that
+uses both has an allowance of each rather than one between them. What a run
+writes is untrusted, so a file past either is named without an id rather than
+stored. Only a file that actually lands spends from an allowance, so a provider
+having a bad minute does not cost the files named after it their place. A
 produced file is streamed from the sandbox into the store and never held whole.
 
 > The reference `otari-sandbox-container` leaves the result block's
@@ -229,9 +237,10 @@ See [config.example.yml](../config.example.yml) for the full list. Key knobs:
 
 - `files_enabled`, `files_backend`, `files_max_bytes`, `files_retention_hours`:
 upload storage (see [Storage backends](#storage-backends)).
-`files_output_max_files` and `files_output_max_bytes` bound what one
-code-execution call may store from its sandbox, and what one reply may copy
-from a provider's (see above). An expired file answers 404 at once, and the
+`files_output_max_files` and `files_output_max_bytes` each bound what one
+code-execution call may store from its sandbox and, separately, what one
+request may copy from a provider's, and `files_provider_copy_max_sec` bounds
+how long that copying may take (see above). An expired file answers 404 at once, and the
 background sweep (`files_sweep_interval_sec`, hourly by default, `0` to
 disable) then reclaims its bytes and row along with those of deleted files.
 - `file_understanding_enabled`: master switch for content normalization.

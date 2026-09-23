@@ -941,18 +941,29 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         default=20,
         ge=0,
         description=(
-            "Most files one code-execution call may have stored from its sandbox workspace, "
-            "and most files one reply may have copied from a provider's own sandbox. "
-            "Files past the count are not stored."
+            "Most files one code-execution call may have stored from its sandbox workspace. "
+            "The same count separately bounds how many files one request may copy from a "
+            "provider's own sandbox, so a request that uses both has one allowance of each. "
+            "Files past a count are not stored."
         ),
     )
     files_output_max_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
         default=64 * 1024 * 1024,
         ge=1,
         description=(
-            "Total bytes one code-execution call may have stored from its sandbox workspace, or one reply "
-            "may have copied from a provider's own sandbox, across all the files produced. "
-            "A file that would go past it is not stored."
+            "Total bytes one code-execution call may have stored from its sandbox workspace, across "
+            "all the files it produced. The same total separately bounds what one request may copy "
+            "from a provider's own sandbox. A file that would go past an allowance is not stored."
+        ),
+    )
+    files_provider_copy_max_sec: Annotated[float, Shown(SettingsGroup.FILES)] = Field(
+        default=60.0,
+        gt=0,
+        description=(
+            "How long one request may spend copying the files a provider's own sandbox produced, "
+            "across every call it makes. The copy runs before the caller sees a file id, so this "
+            "is time the reply or the stream waits; a stream emits its usual keepalive meanwhile "
+            "(streaming_keepalive_interval_ms). A file the limit cuts short is not stored."
         ),
     )
     files_retention_hours: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(

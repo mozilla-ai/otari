@@ -167,7 +167,8 @@ class _StubProviderClient:
     provider_instance = "anthropic-eu"
 
     def __init__(self, files: dict[str, bytes | Exception], delay: float = 0.0) -> None:
-        self._files = files
+        # Public so a test can make a refused file available again between calls.
+        self.files = files
         self._delay = delay
         self.reads: list[str] = []
 
@@ -179,7 +180,7 @@ class _StubProviderClient:
     async def read(self, file: ProviderFile, *, budget_bytes: int) -> AsyncGenerator[bytes, None]:
         self.reads.append(file.file_id)
         await asyncio.sleep(self._delay)
-        body = self._files[file.file_id]
+        body = self.files[file.file_id]
         if isinstance(body, Exception):
             raise body
         if len(body) > budget_bytes:
@@ -281,8 +282,23 @@ async def test_the_caps_hold_across_calls_in_one_request(monkeypatch: pytest.Mon
     await _copy(bridge, "file_01b")
     await _copy(bridge, "file_01c")
 
-    # file_01b is past the bytes left, and file_01c is past the file count.
-    assert [record.id for record in db.added] == ["file_01a"]
+    # file_01b is past the bytes left. It is not stored, so it spends none of the
+    # count either, and file_01c still has both a slot and the one byte it needs.
+    assert [record.id for record in db.added] == ["file_01a", "file_01c"]
+
+
+@pytest.mark.asyncio
+async def test_a_file_the_provider_refused_does_not_spend_the_file_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only a stored file spends a slot, so a provider having a bad minute costs the rest nothing."""
+    gone = ProviderFileUnavailableError("anthropic could not serve file file_01gone")
+    _stub_provider(monkeypatch, {"file_01gone": gone, "file_01b": b"b"})
+    db = _FakeDb()
+    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(db), files_output_max_files=1)
+
+    await _copy(bridge, "file_01gone")
+    await _copy(bridge, "file_01b")
+
+    assert [record.id for record in db.added] == ["file_01b"]
 
 
 @pytest.mark.asyncio
@@ -332,29 +348,43 @@ async def test_a_provider_otari_cannot_read_from_is_not_copied(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
-async def test_a_file_cited_again_in_one_request_is_tried_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A stream names one file in several events, and a failed copy must not be retried or recharged."""
-    gone = ProviderFileUnavailableError("anthropic could not serve file file_01gone")
-    client = _stub_provider(monkeypatch, {"file_01gone": gone, "file_01b": b"b"})
+async def test_a_file_the_provider_refused_is_retried_on_a_later_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Responses stream names one file in up to four events, so a refusal gets a free retry."""
+    gone = ProviderFileUnavailableError("anthropic could not serve file file_01flaky")
+    client = _stub_provider(monkeypatch, {"file_01flaky": gone})
     db = _FakeDb()
-    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(db), files_output_max_files=2)
+    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(db))
+
+    await _copy(bridge, "file_01flaky")
+    client.files["file_01flaky"] = b"chart"
+    await _copy(bridge, "file_01flaky")
+
+    assert client.reads == ["file_01flaky", "file_01flaky"]
+    assert [record.id for record in db.added] == ["file_01flaky"]
+
+
+@pytest.mark.asyncio
+async def test_a_file_already_copied_in_this_request_is_not_read_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The other half: once it is stored, the events that repeat its id cost nothing."""
+    client = _stub_provider(monkeypatch, {"file_01chart": b"chart"})
+    db = _FakeDb()
+    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(db))
 
     for _ in range(3):
-        await _copy(bridge, "file_01gone")
-    await _copy(bridge, "file_01b")
+        await _copy(bridge, "file_01chart")
 
-    assert client.reads == ["file_01gone", "file_01b"]
-    assert [record.id for record in db.added] == ["file_01b"]
+    assert client.reads == ["file_01chart"]
+    assert [record.id for record in db.added] == ["file_01chart"]
 
 
 @pytest.mark.asyncio
 async def test_the_copy_stops_at_the_time_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("gateway.services.files.sandbox_bridge._PROVIDER_COPY_SECONDS", 0.05)
     _stub_provider(monkeypatch, {"file_01slow": b"a", "file_01next": b"b"}, delay=1.0)
     store = _MemoryStore()
     db = _FakeDb()
+    bridge = _bridge(store, _CommittingUnitOfWork(db), files_provider_copy_max_sec=0.05)
 
-    await _copy(_bridge(store, _CommittingUnitOfWork(db)), "file_01slow", "file_01next")
+    await _copy(bridge, "file_01slow", "file_01next")
 
     assert db.added == []
     assert store.blobs == {}

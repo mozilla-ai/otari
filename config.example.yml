@@ -93,6 +93,7 @@ providers:
 # files_max_bytes: 536870912
 # files_output_max_files: 20
 # files_output_max_bytes: 67108864
+# files_provider_copy_max_sec: 60
 # files_retention_hours: 168
 # files_sweep_interval_sec: 3600
 # vision_strategy: describe
