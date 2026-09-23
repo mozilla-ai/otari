@@ -75,14 +75,16 @@ jobs:
     concurrency:
       group: pr-review-${{ github.event.issue.number }}
       cancel-in-progress: true
+    # These are the whole of what the review can do on GitHub: the action is
+    # handed this job's token rather than the Claude GitHub App's, whose
+    # installation can write contents, tags and releases.
     permissions:
       contents: read
-      pull-requests: read
+      # Inline comments and the "no issues" comment.
+      pull-requests: write
       # `gh pr view` reads statusCheckRollup, which 403s without these.
       checks: read
       actions: read
-      # Required by claude-code-action's default GitHub App authentication.
-      id-token: write
     steps:
       # The working tree is main, which is where the prompt and every
       # standards file are read from. A checkout of the PR would let a fork
@@ -109,6 +111,12 @@ jobs:
         uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de # v1.0.231
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The action writes this token into the git remote config and the
+          # environment, where the review's shell can read it, so it must be
+          # one that can do no harm: scoped to the permissions above, expired
+          # when the job ends, and unable to trigger other workflows. Posts
+          # come from github-actions[bot] as a result.
+          github_token: ${{ github.token }}
           # The review flow is vendored at .github/prompts/pr-review.prompt.md
           # rather than pulled from the upstream code-review plugin, so this
           # repository owns it. The plugin stopped without reviewing whenever
