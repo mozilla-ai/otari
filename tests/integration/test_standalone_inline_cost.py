@@ -7,8 +7,9 @@ request needs neither a second lookup nor a price table of its own.
 """
 
 import json
+import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
@@ -100,8 +101,16 @@ def _chat(client: TestClient, headers: dict[str, str], *, stream: bool = False) 
         )
 
 
-def _logged_cost(db_session: Session) -> Decimal | None:
-    return db_session.execute(select(UsageLog.cost).where(UsageLog.user_id == "inline-cost-user")).scalar_one()
+def _logged_cost(make_session: Callable[[], Session], *, timeout: float = 3.0) -> Decimal | None:
+    """The request's row cost, polled with a fresh session so a background log writer cannot race the read."""
+    deadline = time.monotonic() + timeout
+    while True:
+        with make_session() as db:
+            row = db.execute(select(UsageLog).where(UsageLog.user_id == "inline-cost-user")).scalar_one_or_none()
+            if row is not None:
+                return row.cost
+        assert time.monotonic() < deadline, "the usage row was never written"
+        time.sleep(0.1)
 
 
 def _create_user(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -112,7 +121,7 @@ def _create_user(client: TestClient, master_key_header: dict[str, str]) -> None:
 def test_non_streaming_response_carries_its_request_id_and_settled_cost(
     client: TestClient,
     master_key_header: dict[str, str],
-    db_session: Session,
+    db_session_factory: Callable[[], Session],
 ) -> None:
     _price_model(client, master_key_header)
     _create_user(client, master_key_header)
@@ -124,13 +133,13 @@ def test_non_streaming_response_carries_its_request_id_and_settled_cost(
     usage = response.json()["usage"]
     assert usage["cost_usd"] == "0.300000"
     assert usage["pricing_source"] == "deployment"
-    assert _logged_cost(db_session) == Decimal(usage["cost_usd"])
+    assert _logged_cost(db_session_factory) == Decimal(usage["cost_usd"])
 
 
 def test_streaming_response_carries_cost_on_its_terminal_usage_chunk(
     client: TestClient,
     master_key_header: dict[str, str],
-    db_session: Session,
+    db_session_factory: Callable[[], Session],
 ) -> None:
     _price_model(client, master_key_header)
     _create_user(client, master_key_header)
@@ -145,7 +154,7 @@ def test_streaming_response_carries_cost_on_its_terminal_usage_chunk(
     assert len(usages) == 1
     assert usages[0]["cost_usd"] == "0.300000"
     assert usages[0]["pricing_source"] == "deployment"
-    assert _logged_cost(db_session) == Decimal("0.300000")
+    assert _logged_cost(db_session_factory) == Decimal("0.300000")
 
 
 def test_unpriced_model_response_has_a_request_id_and_no_cost(
