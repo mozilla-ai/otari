@@ -36,13 +36,9 @@ from gateway.services.tenancy import authorization
 from gateway.services.tenancy.errors import SandboxImageNotAllowedError, SandboxToolsUnrunnableError
 from gateway.services.tenancy.organization_service import OrganizationService
 
-# The two ceilings a workspace value is floored against, which are also the
-# largest values worth storing: a policy may only narrow, so a number above the
-# deployment's own ceiling would read as a configured limit and do nothing. The
-# hosted service instead accepts any positive value and clamps it at resolve
-# time; refusing it at the write is the better answer for a deployment whose
-# operator is the same person, because a 422 says the invariant out loud where a
-# silent clamp leaves a stored value nobody's request will ever see.
+# A policy may only narrow, so a value above either ceiling would read as a
+# configured limit and change nothing. The write refuses it rather than clamping
+# it, so every stored limit is one a request can actually reach.
 _MAX_ITERATIONS = MAX_TOOL_ITERATIONS_CAP
 _MAX_EXEC_TIMEOUT_S = int(DEFAULT_EXEC_TIMEOUT_S)
 # Matches the hosted column's own bound. An image reference longer than this is
