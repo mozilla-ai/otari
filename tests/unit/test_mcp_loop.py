@@ -24,6 +24,7 @@ from any_llm.types.completion import (
     ChoiceDeltaToolCallFunction as DeltaFn,
 )
 
+from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
 from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
@@ -633,6 +634,7 @@ async def test_loop_handles_duck_typed_tool_calls(monkeypatch: pytest.MonkeyPatc
 
 @pytest.mark.asyncio
 async def test_loop_tool_execution_failure_appears_as_tool_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The model is told the call failed; the exception's text reaches neither it nor the log."""
     responses = iter(
         [
             _completion(finish="tool_calls", tool_calls=[("c", "fetch_url", "{}")]),
@@ -649,8 +651,10 @@ async def test_loop_tool_execution_failure_appears_as_tool_message(monkeypatch: 
 
     class FailingPool(_FakePool):
         async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-            raise RuntimeError("upstream down")
+            raise RuntimeError("GET https://search.internal/?api_key=sk-do-not-leak failed")
 
+    warnings: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(logger, "warning", lambda message, *args: warnings.append((message, *args)))
     pool = FailingPool(tool_names=["fetch_url"])
     out = await mcp_tool_loop(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
@@ -660,8 +664,9 @@ async def test_loop_tool_execution_failure_appears_as_tool_message(monkeypatch: 
     assert out.choices[0].message.content == "recovered"
     tool_msg = captured[1][-1]
     assert tool_msg["role"] == "tool"
-    assert "tool error" in tool_msg["content"]
-    assert "upstream down" in tool_msg["content"]
+    assert tool_msg["content"] == "[tool error] Gateway tool execution failed"
+    assert warnings == [("Gateway tool %s execution failed: %s", "fetch_url", "RuntimeError")]
+    assert "sk-do-not-leak" not in str(captured) + str(warnings)
 
 
 # ---------- streaming loop ----------

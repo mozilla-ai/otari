@@ -27,6 +27,7 @@ from openai.types.responses import (
 )
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
+from gateway.log_config import logger
 from gateway.services import mcp_loop_responses as responses_loop_module
 from gateway.services.mcp_loop_responses import (
     CODE_INTERPRETER_CALL_ID_PREFIX,
@@ -448,6 +449,7 @@ async def test_loop_mixed_capped_search_hides_refusal_and_returns_foreign_call(
 
 @pytest.mark.asyncio
 async def test_loop_tool_failure_appears_as_function_call_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The model is told the call failed; the exception's text reaches neither it nor the log."""
     responses = iter(
         [
             _response(output=[_function_call("c", "fetch_url", "{}")]),
@@ -465,8 +467,10 @@ async def test_loop_tool_failure_appears_as_function_call_output(monkeypatch: py
 
     class FailingPool(_FakePool):
         async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-            raise RuntimeError("upstream down")
+            raise RuntimeError("GET https://search.internal/?api_key=sk-do-not-leak failed")
 
+    warnings: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(logger, "warning", lambda message, *args: warnings.append((message, *args)))
     pool = FailingPool(tool_names=["fetch_url"])
     await responses_tool_loop(
         completion_kwargs={"model": "fake", "input_data": "go"},
@@ -477,8 +481,9 @@ async def test_loop_tool_failure_appears_as_function_call_output(monkeypatch: py
     output_item = next(
         item for item in second_input if isinstance(item, dict) and item.get("type") == "function_call_output"
     )
-    assert "tool error" in output_item["output"]
-    assert "upstream down" in output_item["output"]
+    assert output_item["output"] == "[tool error] Gateway tool execution failed"
+    assert warnings == [("Gateway tool %s execution failed: %s", "fetch_url", "RuntimeError")]
+    assert "sk-do-not-leak" not in str(captured_inputs) + str(warnings)
 
 
 @pytest.mark.asyncio
@@ -807,6 +812,52 @@ async def test_stream_runs_owned_function_call_and_continues(monkeypatch: pytest
     seqs = [e.sequence_number for e in events if getattr(e, "sequence_number", None) is not None]
     assert seqs == list(range(len(seqs)))
     assert pool.calls == [("fetch_url", {"u": "x"})]
+
+
+@pytest.mark.asyncio
+async def test_stream_tool_failure_keeps_the_exception_out_of_the_output_and_the_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, _function_call("call_1", "fetch_url", "")),
+                _function_call_args_done(0, "fc_item_1", "fetch_url", "{}"),
+                _output_item_done(0, _function_call("call_1", "fetch_url", "{}")),
+                _response_completed(),
+            ),
+            _async_iter(_text_delta("msg_1", 0, "recovered"), _response_completed()),
+        ]
+    )
+    captured_inputs: list[Any] = []
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        captured_inputs.append(list(kwargs["input_data"]))
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    class FailingPool(_FakePool):
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+            raise RuntimeError("GET https://search.internal/?api_key=sk-do-not-leak failed")
+
+    warnings: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(logger, "warning", lambda message, *args: warnings.append((message, *args)))
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, FailingPool(tool_names=["fetch_url"])),
+            max_iterations=5,
+        )
+    ]
+
+    output_item = next(
+        item for item in captured_inputs[1] if isinstance(item, dict) and item.get("type") == "function_call_output"
+    )
+    assert output_item["output"] == "[tool error] Gateway tool execution failed"
+    assert warnings == [("Gateway tool %s execution failed: %s", "fetch_url", "RuntimeError")]
+    assert "sk-do-not-leak" not in str(captured_inputs) + str(warnings) + str(events)
 
 
 @pytest.mark.asyncio

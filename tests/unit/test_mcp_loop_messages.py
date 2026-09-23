@@ -466,6 +466,7 @@ async def test_loop_mixed_tools_executes_owned_and_returns_only_foreign(monkeypa
 
 @pytest.mark.asyncio
 async def test_loop_tool_execution_failure_appears_as_tool_result_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The model is told the call failed; the exception's text reaches neither it nor the log."""
     responses = iter(
         [
             _message_response(stop_reason="tool_use", content=[_tool_use("tu", "fetch_url", {})]),
@@ -482,8 +483,10 @@ async def test_loop_tool_execution_failure_appears_as_tool_result_message(monkey
 
     class FailingPool(_FakePool):
         async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-            raise RuntimeError("upstream down")
+            raise RuntimeError("GET https://search.internal/?api_key=sk-do-not-leak failed")
 
+    warnings: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(logger, "warning", lambda message, *args: warnings.append((message, *args)))
     pool = FailingPool(tool_names=["fetch_url"])
     out = await anthropic_tool_loop(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
@@ -495,8 +498,9 @@ async def test_loop_tool_execution_failure_appears_as_tool_result_message(monkey
     tool_result_msg = captured[1][-1]
     assert tool_result_msg["role"] == "user"
     assert tool_result_msg["content"][0]["type"] == "tool_result"
-    assert "tool error" in tool_result_msg["content"][0]["content"]
-    assert "upstream down" in tool_result_msg["content"][0]["content"]
+    assert tool_result_msg["content"][0]["content"] == "[tool error] Gateway tool execution failed"
+    assert warnings == [("Gateway tool %s execution failed: %s", "fetch_url", "RuntimeError")]
+    assert "sk-do-not-leak" not in str(captured) + str(warnings)
 
 
 @pytest.mark.asyncio

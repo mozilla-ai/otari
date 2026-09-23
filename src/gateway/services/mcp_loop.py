@@ -53,6 +53,7 @@ __all__ = [
     "inject_purpose_hints",
     "mcp_tool_loop",
     "mcp_tool_loop_stream",
+    "tool_failure_result",
 ]
 
 
@@ -178,6 +179,17 @@ def _execute_split(tool_calls: list[dict[str, Any]], pool: ToolBackend) -> tuple
     return mcp_calls, has_foreign
 
 
+def tool_failure_result(name: str, exc: Exception) -> str:
+    """Log a tool call that raised, and return the ``[tool error]`` result the model reads.
+
+    A backend exception can carry a URL with a query credential, a header value,
+    or an internal hostname, so only its type is logged and none of it reaches
+    the model or the caller's transcript.
+    """
+    logger.warning("Gateway tool %s execution failed: %s", name, type(exc).__name__)
+    return "[tool error] Gateway tool execution failed"
+
+
 async def _execute_mcp_calls(
     pool: ToolBackend,
     mcp_calls: list[dict[str, Any]],
@@ -214,8 +226,7 @@ async def _execute_mcp_calls(
         except MaxToolIterationsExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 — see docstring
-            logger.warning("MCP tool %s execution failed: %s", name, exc)
-            text = f"[tool error] {exc}"
+            text = tool_failure_result(name, exc)
         else:
             if capped and budget is not None:
                 budget.record(text)

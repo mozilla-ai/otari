@@ -43,6 +43,7 @@ from gateway.services.mcp_loop import (
     MAX_TOOL_ITERATIONS_CAP,
     MaxToolIterationsExceeded,
     ToolBackend,
+    tool_failure_result,
 )
 from gateway.services.sandbox_backend import CodeExecution
 from gateway.services.tool_format import openai_to_responses_tools
@@ -120,8 +121,7 @@ async def _execute_function_calls(
         except MaxToolIterationsExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 — see docstring
-            logger.warning("MCP tool %s execution failed: %s", item.name, exc)
-            text = f"[tool error] {exc}"
+            text = tool_failure_result(item.name, exc)
         else:
             if capped and budget is not None:
                 budget.record(text)
@@ -364,8 +364,7 @@ async def _execute_stream_owned(
         except MaxToolIterationsExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 (same tool-error-as-message idiom as the non-stream loop)
-            logger.warning("MCP tool %s execution failed: %s", spec["name"], exc)
-            text = f"[tool error] {exc}"
+            text = tool_failure_result(spec["name"], exc)
         else:
             if capped and budget is not None:
                 budget.record(text)
