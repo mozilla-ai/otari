@@ -37,6 +37,7 @@ on:
     branches: [ main, develop ]
     paths:
       - 'src/gateway/**'
+      - 'cli/**'
       - 'alembic/**'
       - 'alembic.ini'
       - 'scripts/oss_edition_smoke.py'
@@ -47,6 +48,7 @@ on:
     branches: [ main ]
     paths:
       - 'src/gateway/**'
+      - 'cli/**'
       - 'alembic/**'
       - 'alembic.ini'
       - 'scripts/oss_edition_smoke.py'
@@ -97,7 +99,7 @@ jobs:
     # plus COPY alembic), so booting the same way is what makes this gate resemble
     # the deployment rather than a distribution nobody ships.
     - name: Build the OSS distribution
-      run: uv build
+      run: uv build --all-packages
 
     # Runtime dependencies only, no dev group: that is what lets the smoke detect
     # a dev-only or enterprise-only import on an OSS path.

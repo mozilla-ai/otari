@@ -6,6 +6,7 @@ on:
       - 'main'
     paths:
       - 'src/gateway/**'
+      - 'cli/**'
       - 'alembic/**'
       # The image builds the dashboard bundle in its web stage rather than
       # shipping a committed one, so these are image inputs too. docs/dashboard.md

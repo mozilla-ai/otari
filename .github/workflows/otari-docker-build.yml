@@ -13,7 +13,8 @@ name: Otari Docker Build
 # sources, and dependency resolution. src/gateway/** is left out on purpose. A
 # Python source change cannot fail the build (nothing compiles it) and
 # otari-tests.yml already covers it, so including it would add a multi-minute
-# image build to nearly every PR for no signal.
+# image build to nearly every PR for no signal. cli/src/** is the exception: the
+# liveness check asserts what `otari --version` reports inside the image.
 #
 # Single-platform on purpose too: this proves the recipe works and the container
 # boots. The publish workflow still builds linux/arm64 under QEMU, which is
@@ -28,6 +29,8 @@ on:
       - 'web/**'
       - 'docs/dashboard.md'
       - 'pyproject.toml'
+      - 'cli/pyproject.toml'
+      - 'cli/src/**'
       - 'uv.lock'
       - 'scripts/docker_liveness_check.sh'
       - '.github/workflows/otari-docker-build.yml'
