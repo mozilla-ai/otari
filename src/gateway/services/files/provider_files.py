@@ -247,11 +247,21 @@ class ProviderFileClient:
             api_base=self._api_base,
             http_client=self._connection,
             timeout=_TIMEOUT,
+            # A caller shares one deadline across every file it reads, so a retry
+            # here spends the time the files after this one need.
+            max_retries=0,
         )
 
     async def aclose(self) -> None:
-        """Release the connection this client reads over."""
-        await self._connection.aclose()
+        """Release the connection this client reads over.
+
+        A release that fails is logged rather than raised, because the caller has
+        already read whatever it came for and can do nothing about it.
+        """
+        try:
+            await self._connection.aclose()
+        except (httpx.HTTPError, RuntimeError):
+            logger.exception("Could not release the %s connection", self.provider)
 
     async def get_filename(self, file_id: str) -> str | None:
         """The file's name, from Anthropic's file metadata.

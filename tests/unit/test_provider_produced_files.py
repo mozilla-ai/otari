@@ -200,6 +200,30 @@ async def test_both_providers_read_under_one_timeout(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_a_failed_read_is_tried_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The copy shares one deadline across every file of a request, so retrying
+    # here spends the time the remaining files need. The OpenAI path never retries.
+    seen = _serving(monkeypatch, lambda request: httpx.Response(500))
+
+    with pytest.raises(ProviderFileUnavailableError):
+        await _read_all(_client().read(ProviderFile(file_id="file_01abc"), budget_bytes=5))
+
+    assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_connection_that_will_not_close_does_not_reach_the_caller(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _client()
+
+    async def _refuses() -> None:
+        raise RuntimeError("event loop is closed")
+
+    monkeypatch.setattr(client._connection, "aclose", _refuses)
+
+    await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_aclose_releases_the_connection(monkeypatch: pytest.MonkeyPatch) -> None:
     _serving(monkeypatch, lambda request: httpx.Response(200, content=b"chart"))
     client = _client()
