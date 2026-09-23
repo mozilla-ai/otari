@@ -14,6 +14,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Collection
 from typing import Any, cast
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -239,6 +240,22 @@ async def test_a_provider_file_is_copied_under_the_providers_id(monkeypatch: pyt
     assert record.storage_ref != "file_01chart"
     assert store.blobs == {record.storage_ref: b"\x89PNG..."}
     # The client holds the provider connection, so the copy owns closing it.
+    assert client.closed
+
+
+@pytest.mark.asyncio
+async def test_a_database_failure_setting_up_the_copy_still_releases_the_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _stub_provider(monkeypatch, {"file_01chart": b"\x89PNG..."})
+
+    async def _fails(uow: Any, file_ids: Collection[str]) -> set[str]:
+        raise SQLAlchemyError
+
+    monkeypatch.setattr("gateway.services.files.sandbox_bridge.existing_file_ids", _fails)
+
+    await _copy(_bridge(_MemoryStore(), _CommittingUnitOfWork(_FakeDb())), "file_01chart")
+
     assert client.closed
 
 

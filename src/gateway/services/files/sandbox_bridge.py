@@ -125,19 +125,25 @@ class SandboxFileBridge:
         self._provider_files_handled.update(file.file_id for file in new)
         if not new or not serves_files(provider):
             return
-        try:
-            client = ProviderFileClient.for_run(
-                self._config, provider=provider, provider_instance=provider_instance, workspace_id=self._workspace_id
-            )
-            async with self._uow:
-                known = await existing_file_ids(self._uow, [file.file_id for file in new])
-        except _COPY_SETUP_ERRORS as exc:
-            logger.warning("Not copying %d %s file(s): %s", len(new), provider, exc)
-            return
-        except Exception:  # noqa: BLE001 - a copy failure must not fail the reply
-            logger.exception("Not copying %d %s file(s)", len(new), provider)
-            return
-        async with contextlib.aclosing(client):
+        # The client holds a provider connection from the moment it is built, so
+        # it is registered for closing before anything that can fail after it.
+        async with contextlib.AsyncExitStack() as stack:
+            try:
+                client = ProviderFileClient.for_run(
+                    self._config,
+                    provider=provider,
+                    provider_instance=provider_instance,
+                    workspace_id=self._workspace_id,
+                )
+                await stack.enter_async_context(contextlib.aclosing(client))
+                async with self._uow:
+                    known = await existing_file_ids(self._uow, [file.file_id for file in new])
+            except _COPY_SETUP_ERRORS as exc:
+                logger.warning("Not copying %d %s file(s): %s", len(new), provider, exc)
+                return
+            except Exception:  # noqa: BLE001 - a copy failure must not fail the reply
+                logger.exception("Not copying %d %s file(s)", len(new), provider)
+                return
             await self._copy_batch(client, [file for file in new if file.file_id not in known], provider)
 
     async def _copy_batch(self, client: ProviderFileClient, pending: list[ProviderFile], provider: str) -> None:
