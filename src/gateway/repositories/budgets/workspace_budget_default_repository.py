@@ -3,11 +3,19 @@ from typing import Never
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql.elements import ColumnElement
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import MemberBudgetPolicyAlreadyExistsError
 from gateway.models.budgets import WorkspaceBudgetDefault
 from gateway.repositories.base_repository import BaseRepository
+
+
+def _for_provider(provider_key_id: str | None) -> ColumnElement[bool]:
+    """Match a policy's provider, where None matches the policy that covers every provider."""
+    if provider_key_id is None:
+        return WorkspaceBudgetDefault.provider_key_id.is_(None)
+    return WorkspaceBudgetDefault.provider_key_id == provider_key_id
 
 
 class WorkspaceBudgetDefaultRepository(BaseRepository[WorkspaceBudgetDefault, Never, Never]):
@@ -19,20 +27,23 @@ class WorkspaceBudgetDefaultRepository(BaseRepository[WorkspaceBudgetDefault, Ne
     async def add(self, policy: WorkspaceBudgetDefault) -> WorkspaceBudgetDefault:
         """Stage a new policy and return it with its generated values.
 
-        Precondition: the budget is one the workspace's organization may name, its own or a
-        deployment budget. The foreign key proves only that the budget exists, and every
-        refusal of the insert is reported as a duplicate.
+        Precondition: the budget is one the workspace's organization may name, its own or a deployment budget.
+        The foreign key proves only that the budget exists.
+        Any refusal that is not a duplicate fails the step rather than being reported as one.
 
         Raises:
             MemberBudgetPolicyAlreadyExistsError: a policy already caps this workspace's members for this provider.
         """
+        # A failed flush expires the row, so the IDs are read before it.
         workspace_id, provider_key_id = policy.workspace_id, policy.provider_key_id
-        # The insert takes a savepoint of its own, so a refusal leaves the caller's step usable.
+        # Isolated in a savepoint, so a refusal does not abort the caller's step.
         try:
             async with self.db.begin_nested():
                 self.db.add(policy)
                 await self.db.flush()
         except IntegrityError:
+            if not await self.has_policy(workspace_id, provider_key_id):
+                raise
             raise MemberBudgetPolicyAlreadyExistsError(workspace_id, provider_key_id) from None
         await self.db.refresh(policy)
         return policy
@@ -53,6 +64,15 @@ class WorkspaceBudgetDefaultRepository(BaseRepository[WorkspaceBudgetDefault, Ne
             )
         )
         return result.scalar_one_or_none()
+
+    async def has_policy(self, workspace_id: uuid.UUID, provider_key_id: str | None) -> bool:
+        """Report whether a policy already caps this workspace's members for this provider."""
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(WorkspaceBudgetDefault)
+            .where(WorkspaceBudgetDefault.workspace_id == workspace_id, _for_provider(provider_key_id))
+        )
+        return result.scalar_one() > 0
 
     async def page_for_workspace(
         self, workspace_id: uuid.UUID, *, skip: int, limit: int
