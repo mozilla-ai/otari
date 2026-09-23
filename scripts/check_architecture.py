@@ -40,8 +40,10 @@ Enforces:
 18. Light CLI: nothing under cli/src/otari_agent imports the gateway or the
     server stack it drags in (uvicorn, any-llm, SQLAlchemy, pydantic,
     FastAPI), so the `otari` command ships alone with a handful of pure-Python
-    dependencies. The member lives outside src/ on purpose: rule 10 keeps
-    src/ to the gateway, and this one keeps the CLI out of the gateway.
+    dependencies. The one exemption is otari_agent/cli.py, which names
+    gateway.cli inside a find_spec guard to attach the server commands when
+    the gateway is installed too. The member lives outside src/ on purpose:
+    rule 10 keeps src/ to the gateway, and this one keeps the CLI out of it.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -244,6 +246,12 @@ COMPOSITION_ROOT = "gateway/container.py"
 ADAPTERS_PACKAGE = "gateway/adapters/"
 ADAPTER_IMPORT = "gateway.adapters"
 
+# The one light-CLI module that may name gateway.cli, and nothing else of the
+# gateway: it attaches the server commands when
+# `importlib.util.find_spec("gateway")` finds one installed.
+LIGHT_CLI_ATTACH_POINT = "otari_agent/cli.py"
+LIGHT_CLI_ATTACH_IMPORT = "gateway.cli"
+
 # Entry-point discovery is banned everywhere under gateway/ and otari_agent/,
 # with a message of its own because "OSS base" would not say why: the feature
 # registry in gateway/features.py is a literal tuple on purpose
@@ -329,6 +337,8 @@ def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
         if not isinstance(node, ast.Import | ast.ImportFrom):
             continue
         for module in _imported_modules(node, file_path, src_root):
+            if relative_path == LIGHT_CLI_ATTACH_POINT and _matches(module, LIGHT_CLI_ATTACH_IMPORT):
+                continue
             offended = next((description for prefix, description in forbidden if _matches(module, prefix)), None)
             if offended is not None:
                 violations.append((node.lineno, module, f"Forbidden import in {offended}"))

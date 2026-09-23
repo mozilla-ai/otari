@@ -170,7 +170,7 @@ Some pages bind code rather than describe it:
 - If you touched API routes or schemas, run relevant integration tests first.
 - If you touched DB models/repositories, run related integration tests and migration paths.
 - If you touched config loading, run config/env tests in `tests/integration`.
-- If you touched CLI behavior, run `tests/unit/test_gateway_cli.py`.
+- If you touched CLI behavior, run `tests/unit/test_gateway_cli.py`, `tests/unit/test_otari_agent_cli.py`, `tests/unit/test_hook_cli.py` and `tests/unit/test_hook_setup_cli.py`.
 - If you touched auth headers or key handling, run key-management and auth-related tests.
 - If OpenAPI-affecting code changed, including a route docstring, regenerate and commit **both**
   generated artifacts (see Generated Artifacts above).

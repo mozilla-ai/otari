@@ -163,9 +163,6 @@ dev = [
     "testcontainers[postgres]>=4.0.0",
 ]
 
-[project.scripts]
-otari = "gateway.cli:main"
-
 [tool.uv]
 # Otari is deployed as a Linux server and developed on Linux / macOS; it is
 # never packaged for Windows. Pinning the resolution environments keeps the

@@ -44,10 +44,12 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
-# Bounds. Batch size mirrors the /v1/usage list `limit` cap; the error list is
-# capped so one bad batch can't return an unbounded payload; the IN() list is
-# chunked to stay under SQLite's default variable limit (999).
-MAX_EVENTS_PER_BATCH = 1000
+# Bounds. The batch cap is owned by the CLI's distribution (see
+# otari_agent.usage_import) and re-exported here for the OTLP route; the error
+# list is capped so one bad batch can't return an unbounded payload; the IN()
+# list is chunked to stay under SQLite's default variable limit (999).
+from otari_agent.usage_import import MAX_EVENTS_PER_BATCH as MAX_EVENTS_PER_BATCH
+
 _MAX_ERRORS = 100
 _IN_CHUNK = 500
 # Slug pattern for a source: keep provenance identifiers boring so they are safe to

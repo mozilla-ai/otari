@@ -18,8 +18,8 @@ import httpx
 import pytest
 from click.testing import CliRunner
 
-import gateway.cli as gateway_cli
-from gateway.core.config import GatewayConfig
+import otari_agent.hook as hook_cli
+from otari_agent.settings import HookSettings
 
 
 class _FakeResponse:
@@ -35,13 +35,13 @@ class _FakeResponse:
 
 @pytest.fixture(autouse=True)
 def _judge_log_in_tmp_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(gateway_cli, "_hook_judge_log_path", lambda: tmp_path / "judge-calls.log")
+    monkeypatch.setattr(hook_cli, "_hook_judge_log_path", lambda: tmp_path / "judge-calls.log")
 
 
 @pytest.fixture(autouse=True)
 def _config_stub(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        gateway_cli, "load_config", lambda config_path=None: GatewayConfig(master_key="test-master-key")
+        hook_cli, "load_settings", lambda config_path=None: HookSettings(master_key="test-master-key")
     )
 
 
@@ -79,7 +79,7 @@ def _git_status_and_diff_run() -> Callable[..., subprocess.CompletedProcess[str]
 
 def _invoke(payload: dict[str, Any], *, harness: str = "claude-code", extra: list[str] | None = None) -> Any:
     args = ["--api-key", "test-key", "--harness", harness, *(extra or [])]
-    return CliRunner().invoke(gateway_cli.hook, args, input=json.dumps(payload))
+    return CliRunner().invoke(hook_cli.hook, args, input=json.dumps(payload))
 
 
 def _capture_post(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
@@ -156,7 +156,7 @@ def test_codex_exec_is_invoked_read_only_and_non_interactive(monkeypatch: pytest
         assert "--skip-git-repo-check" in cmd, "the judge workdir is a plain directory, not a Git repo"
         assert "--ephemeral" in cmd, "a one-shot judge call must not leave a rollout file behind"
         assert "input" in kwargs, "the prompt is piped over stdin, matching claude -p's own choice"
-        assert kwargs.get("cwd") == gateway_cli._hook_judge_workdir()
+        assert kwargs.get("cwd") == hook_cli._hook_judge_workdir()
         return subprocess.CompletedProcess(
             args=cmd, returncode=0, stdout=json.dumps({"outcome": "fail", "reasoning": "no"}), stderr=""
         )
@@ -176,7 +176,7 @@ def test_claude_gets_the_haiku_default_model_with_no_override(monkeypatch: pytes
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[0] == "git":
             return _git_status_and_diff_run()(cmd, **kwargs)
-        assert cmd[cmd.index("--model") + 1] == gateway_cli._HOOK_JUDGE_DEFAULT_MODEL
+        assert cmd[cmd.index("--model") + 1] == hook_cli._HOOK_JUDGE_DEFAULT_MODEL
         return subprocess.CompletedProcess(
             args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
         )
@@ -361,7 +361,7 @@ def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.Monke
         for i in range(gate_count)
     )
 
-    monkeypatch.setattr(gateway_cli, "_hook_collect_diff", lambda repo_root: "diff")
+    monkeypatch.setattr(hook_cli, "_hook_collect_diff", lambda repo_root: "diff")
 
     def fake_run_judge(
         rubric: str,
@@ -376,10 +376,10 @@ def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.Monke
         time.sleep(per_gate_seconds)
         return "pass", f"checked {rubric}"
 
-    monkeypatch.setattr(gateway_cli, "_hook_run_judge", fake_run_judge)
+    monkeypatch.setattr(hook_cli, "_hook_run_judge", fake_run_judge)
 
     start = time.monotonic()
-    results = gateway_cli._hook_collect_judge_verdicts(
+    results = hook_cli._hook_collect_judge_verdicts(
         gates_yaml,
         repo / ".otari-gates.yml",
         repo,

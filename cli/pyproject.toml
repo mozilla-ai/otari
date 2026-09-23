@@ -4,11 +4,14 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-# The laptop-side half of otari. `otari` and `otari-cli` on PyPI belong to
-# other Mozilla AI projects, so the distribution is otari-agent and the import
-# package otari_agent.
+# The laptop-side half of otari: `otari hook`, `otari hook setup` and
+# `otari import`. `otari` and `otari-cli` on PyPI belong to other Mozilla AI
+# projects, so the distribution is otari-agent and the import package
+# otari_agent. It is the one distribution that owns the `otari` console script:
+# the gateway (../pyproject.toml) declares none and attaches its server
+# commands to this CLI when both are installed (gateway.cli.register).
 name = "otari-agent"
-description = "otari's agent-side code: the Agent Gates evaluator and the Claude Code transcript parser"
+description = "otari's agent-side CLI: Agent Gates hooks and Claude Code usage import"
 requires-python = ">=3.13"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -23,6 +26,9 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0",
 ]
+
+[project.scripts]
+otari = "otari_agent.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

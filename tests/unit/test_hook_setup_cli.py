@@ -13,8 +13,8 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-import gateway.cli as gateway_cli
-from gateway.core.config import GatewayConfig
+import otari_agent.hook as hook_cli
+from otari_agent.settings import HookSettings
 
 _FAKE_OTARI_PATH = "/opt/otari/.venv/bin/otari"
 
@@ -33,7 +33,7 @@ _COMMAND_MATCH_GATES = (
 
 @pytest.fixture(autouse=True)
 def _fixed_otari_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gateway_cli, "_otari_binary_path", lambda: _FAKE_OTARI_PATH)
+    monkeypatch.setattr(hook_cli, "_otari_binary_path", lambda: _FAKE_OTARI_PATH)
 
 
 @pytest.fixture
@@ -44,7 +44,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _invoke(*args: str, input: str | None = None) -> Any:  # noqa: A002 - matches CliRunner's own kwarg name
-    return CliRunner().invoke(gateway_cli.hook, ["setup", *args], input=input)
+    return CliRunner().invoke(hook_cli.hook, ["setup", *args], input=input)
 
 
 def _read_settings(repo: Path) -> dict[str, Any]:
@@ -107,10 +107,10 @@ def test_an_unparseable_policy_defaults_to_the_narrower_matcher(repo: Path) -> N
 def test_explicit_api_key_flag_skips_resolution_and_prompting(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (repo / ".otari-gates.yml").write_text(_CHANGED_PATH_ONLY_GATES, encoding="utf-8")
 
-    def fail_if_called(config_path: str | None = None) -> GatewayConfig:
-        raise AssertionError("load_config should not be called when --api-key is given")
+    def fail_if_called(config_path: str | None = None) -> HookSettings:
+        raise AssertionError("load_settings should not be called when --api-key is given")
 
-    monkeypatch.setattr(gateway_cli, "load_config", fail_if_called)
+    monkeypatch.setattr(hook_cli, "load_settings", fail_if_called)
     result = _invoke("--api-key", "explicit-key")
     assert result.exit_code == 0, result.output
     settings = _read_settings(repo)
@@ -127,10 +127,10 @@ def test_no_api_key_means_no_credential_resolution_or_prompt(repo: Path, monkeyp
     """
     (repo / ".otari-gates.yml").write_text(_CHANGED_PATH_ONLY_GATES, encoding="utf-8")
 
-    def fail_if_called(config_path: str | None = None) -> GatewayConfig:
-        raise AssertionError("load_config should not be called when --api-key is not given either")
+    def fail_if_called(config_path: str | None = None) -> HookSettings:
+        raise AssertionError("load_settings should not be called when --api-key is not given either")
 
-    monkeypatch.setattr(gateway_cli, "load_config", fail_if_called)
+    monkeypatch.setattr(hook_cli, "load_settings", fail_if_called)
     result = _invoke()  # no --api-key, and no prompt input provided: must not be asked for one
     assert result.exit_code == 0, result.output
     settings = _read_settings(repo)

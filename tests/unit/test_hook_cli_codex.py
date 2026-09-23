@@ -18,7 +18,7 @@ import httpx
 import pytest
 from click.testing import CliRunner
 
-import gateway.cli as gateway_cli
+import otari_agent.hook as hook_cli
 
 _GATES_YAML = "schema_version: '1.0'\npolicy:\n  id: test\ngates: []\n"
 
@@ -38,7 +38,7 @@ class _FakeResponse:
 
 @pytest.fixture(autouse=True)
 def _judge_log_in_tmp_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(gateway_cli, "_hook_judge_log_path", lambda: tmp_path / "judge-calls.log")
+    monkeypatch.setattr(hook_cli, "_hook_judge_log_path", lambda: tmp_path / "judge-calls.log")
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ def _invoke(payload: dict[str, Any], **extra_args: str) -> Any:
     args = ["--api-key", "test-key", "--harness", "codex"]
     for key, value in extra_args.items():
         args += [f"--{key.replace('_', '-')}", value]
-    return CliRunner().invoke(gateway_cli.hook, args, input=json.dumps(payload))
+    return CliRunner().invoke(hook_cli.hook, args, input=json.dumps(payload))
 
 
 # --- PreToolUse: apply_patch (Codex's own edit tool) ------------------------
@@ -443,11 +443,11 @@ def test_codex_judge_transcript_extraction_keeps_only_assistant_output_text(tmp_
         + "\n",
         encoding="utf-8",
     )
-    assert gateway_cli._hook_extract_codex_judge_transcript(transcript) == "Reviewing now.\nFound an issue."
+    assert hook_cli._hook_extract_codex_judge_transcript(transcript) == "Reviewing now.\nFound an issue."
 
 
 def test_codex_judge_transcript_extraction_returns_empty_for_an_unreadable_file(tmp_path: Path) -> None:
-    assert gateway_cli._hook_extract_codex_judge_transcript(tmp_path / "missing.jsonl") == ""
+    assert hook_cli._hook_extract_codex_judge_transcript(tmp_path / "missing.jsonl") == ""
 
 
 # --- otari hook setup --harness codex ---------------------------------------
@@ -455,11 +455,11 @@ def test_codex_judge_transcript_extraction_returns_empty_for_an_unreadable_file(
 
 @pytest.fixture(autouse=True)
 def _fixed_otari_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gateway_cli, "_otari_binary_path", lambda: _FAKE_OTARI_PATH)
+    monkeypatch.setattr(hook_cli, "_otari_binary_path", lambda: _FAKE_OTARI_PATH)
 
 
 def _invoke_setup(*args: str, input: str | None = None) -> Any:  # noqa: A002 - matches CliRunner's own kwarg name
-    return CliRunner().invoke(gateway_cli.hook, ["setup", "--harness", "codex", *args], input=input)
+    return CliRunner().invoke(hook_cli.hook, ["setup", "--harness", "codex", *args], input=input)
 
 
 def test_setup_writes_codex_hooks_json_not_claude_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

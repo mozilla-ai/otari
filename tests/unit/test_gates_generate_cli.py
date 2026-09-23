@@ -16,7 +16,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
-import gateway.cli as gateway_cli
+import otari_agent.hook as hook_cli
 from otari_agent.domain.policy import parse_policy
 
 _EXISTING_GATES_WITH_COMMENT = (
@@ -98,7 +98,7 @@ def _stub_getchar(monkeypatch: pytest.MonkeyPatch, keys: str) -> None:
 
 def _invoke(monkeypatch: pytest.MonkeyPatch, *args: str, keys: str = "") -> Any:
     _stub_getchar(monkeypatch, keys)
-    return CliRunner().invoke(gateway_cli.gates, ["generate", *args])
+    return CliRunner().invoke(hook_cli.gates, ["generate", *args])
 
 
 def test_fails_outside_a_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -154,7 +154,7 @@ def test_fails_when_no_cli_is_found_on_path(repo: Path, monkeypatch: pytest.Monk
 
 
 def test_oversize_source_is_rejected_before_any_cli_call(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (repo / "AGENTS.md").write_text("x" * (gateway_cli._GATES_GENERATE_MAX_SOURCE_BYTES + 1), encoding="utf-8")
+    (repo / "AGENTS.md").write_text("x" * (hook_cli._GATES_GENERATE_MAX_SOURCE_BYTES + 1), encoding="utf-8")
 
     def fail_if_called(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         raise AssertionError("subprocess.run should not be called for an oversize source")
@@ -509,7 +509,7 @@ def test_runs_from_the_isolated_judge_workdir_not_the_repo(repo: Path, monkeypat
 
     result = _invoke(monkeypatch)
     assert result.exit_code == 0, result.output
-    assert captured_cwd == [gateway_cli._hook_judge_workdir()]
+    assert captured_cwd == [hook_cli._hook_judge_workdir()]
 
 
 def test_describe_gate_does_not_dim_a_wrapped_values_own_continuation_lines() -> None:
@@ -525,7 +525,7 @@ def test_describe_gate_does_not_dim_a_wrapped_values_own_continuation_lines() ->
         "message": "m",
         "forbidden": ["CHANGELOG.md"],
     }
-    rendered = gateway_cli._gates_generate_describe_gate(gate)
+    rendered = hook_cli._gates_generate_describe_gate(gate)
     lines = rendered.split("\n")
 
     rubric_lines = [i for i, line in enumerate(lines) if "rubric" in line or "one two three" in line]
@@ -581,7 +581,7 @@ def test_a_splice_that_would_not_parse_is_refused_with_the_file_untouched(tmp_pa
     gates_file.write_text(original, encoding="utf-8")
 
     with pytest.raises(click.ClickException) as excinfo:
-        gateway_cli._gates_generate_write_checked(gates_file, "gates: [oops\n")
+        hook_cli._gates_generate_write_checked(gates_file, "gates: [oops\n")
 
     assert "no longer parses" in str(excinfo.value)
     assert gates_file.read_text(encoding="utf-8") == original
@@ -592,7 +592,7 @@ def test_scaffolded_policy_id_survives_an_unusual_directory_name(tmp_path: Path)
     would otherwise scaffold a header that does not parse at all.
     """
     gates_file = tmp_path / ".otari-gates.yml"
-    gateway_cli._gates_generate_append(gates_file, "weird: name", dict(_VALID_PROPOSAL))
+    hook_cli._gates_generate_append(gates_file, "weird: name", dict(_VALID_PROPOSAL))
 
     spec = parse_policy(gates_file.read_text(encoding="utf-8"), source="check")
     assert spec.policy_id == "weird: name/gates"
@@ -624,5 +624,5 @@ def test_no_stdin_at_all_declines_rather_than_taking_the_default(monkeypatch: py
     monkeypatch.setattr(click, "getchar", no_tty)
     monkeypatch.setattr("builtins.input", no_stdin)
 
-    assert gateway_cli._gates_generate_read_choice("Use claude? [Y/n]: ", "yn", "y") == "n"
-    assert gateway_cli._gates_generate_read_choice("Add this gate? ", "yneq", "n") == "n"
+    assert hook_cli._gates_generate_read_choice("Use claude? [Y/n]: ", "yn", "y") == "n"
+    assert hook_cli._gates_generate_read_choice("Add this gate? ", "yneq", "n") == "n"

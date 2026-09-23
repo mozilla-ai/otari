@@ -18,8 +18,8 @@ import httpx
 import pytest
 from click.testing import CliRunner
 
-import gateway.cli as gateway_cli
-from gateway.core.config import GatewayConfig
+import otari_agent.hook as hook_cli
+from otari_agent.settings import HookSettings
 
 _GATES_YAML = "schema_version: '1.0'\npolicy:\n  id: test\ngates: []\n"
 
@@ -38,7 +38,7 @@ class _FakeResponse:
 @pytest.fixture(autouse=True)
 def _judge_log_in_tmp_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Redirect the judge-call audit log away from the real ~/.otari/, for every test in this module."""
-    monkeypatch.setattr(gateway_cli, "_hook_judge_log_path", lambda: tmp_path / "judge-calls.log")
+    monkeypatch.setattr(hook_cli, "_hook_judge_log_path", lambda: tmp_path / "judge-calls.log")
 
 
 @pytest.fixture
@@ -50,17 +50,17 @@ def repo(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def config_stub(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_load_config(config_path: str | None = None) -> GatewayConfig:
-        return GatewayConfig(master_key="test-master-key")
+    def fake_load_settings(config_path: str | None = None) -> HookSettings:
+        return HookSettings(master_key="test-master-key")
 
-    monkeypatch.setattr(gateway_cli, "load_config", fake_load_config)
+    monkeypatch.setattr(hook_cli, "load_settings", fake_load_settings)
 
 
 def _invoke(payload: dict[str, Any], **extra_args: str) -> Any:
     args = ["--api-key", "test-key"]
     for key, value in extra_args.items():
         args += [f"--{key.replace('_', '-')}", value]
-    return CliRunner().invoke(gateway_cli.hook, args, input=json.dumps(payload))
+    return CliRunner().invoke(hook_cli.hook, args, input=json.dumps(payload))
 
 
 def test_pretooluse_blocks_a_forbidden_edit(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -169,7 +169,7 @@ def test_an_oversize_bash_command_is_truncated_rather_than_rejected(
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
     sent = captured["json"]["commands"]
-    assert len(sent[0]) == gateway_cli._HOOK_MAX_COMMAND_LENGTH
+    assert len(sent[0]) == hook_cli._HOOK_MAX_COMMAND_LENGTH
     assert sent[0].startswith("npm install ")
     assert "checking only the first" in result.output
 
@@ -269,7 +269,7 @@ def test_stop_event_evaluates_locally_and_blocks_on_git_status(monkeypatch: pyte
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     payload = {"hook_event_name": "Stop", "cwd": str(repo)}
-    result = CliRunner().invoke(gateway_cli.hook, [], input=json.dumps(payload))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(payload))
     assert result.exit_code == 2, result.output
     assert "forbidden" in result.output
 
@@ -506,7 +506,7 @@ def test_stop_event_submits_no_commands_when_there_are_too_many(
     monkeypatch.setattr(subprocess, "run", fake_run)
     transcript = tmp_path / "session.jsonl"
     lines = [
-        _transcript_line(command=f"cmd{i}", tool_use_id=f"toolu_{i}") for i in range(gateway_cli._HOOK_MAX_COMMANDS + 1)
+        _transcript_line(command=f"cmd{i}", tool_use_id=f"toolu_{i}") for i in range(hook_cli._HOOK_MAX_COMMANDS + 1)
     ]
     transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
     captured: dict[str, Any] = {}
@@ -766,7 +766,7 @@ def test_outside_a_git_repo_is_a_no_op(tmp_path: Path) -> None:
 
 
 def test_malformed_stdin_is_a_no_op() -> None:
-    result = CliRunner().invoke(gateway_cli.hook, ["--api-key", "test-key"], input="not json")
+    result = CliRunner().invoke(hook_cli.hook, ["--api-key", "test-key"], input="not json")
     assert result.exit_code == 0, result.output
 
 
@@ -795,7 +795,7 @@ def test_no_flags_evaluates_locally_with_no_credential_needed(monkeypatch: pytes
         "tool_name": "Edit",
         "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
     }
-    result = CliRunner().invoke(gateway_cli.hook, [], input=json.dumps(payload))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(payload))
     assert result.exit_code == 2, result.output
     assert "forbidden" in result.output
 
@@ -814,7 +814,7 @@ def test_malformed_local_policy_does_not_block(monkeypatch: pytest.MonkeyPatch, 
         "tool_name": "Edit",
         "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
     }
-    result = CliRunner().invoke(gateway_cli.hook, [], input=json.dumps(payload))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(payload))
     assert result.exit_code == 0, result.output
     assert "could not evaluate" in result.output
 
@@ -827,34 +827,33 @@ def test_url_alone_without_a_resolvable_credential_does_not_block(monkeypatch: p
     that must fail open rather than block.
     """
 
-    def fake_load_config(config_path: str | None = None) -> GatewayConfig:
-        return GatewayConfig(master_key=None)
+    def fake_load_settings(config_path: str | None = None) -> HookSettings:
+        return HookSettings(master_key=None)
 
-    monkeypatch.setattr(gateway_cli, "load_config", fake_load_config)
+    monkeypatch.setattr(hook_cli, "load_settings", fake_load_settings)
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
         "tool_name": "Edit",
         "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
     }
-    result = CliRunner().invoke(gateway_cli.hook, ["--url", "http://gw.example:9000"], input=json.dumps(payload))
+    result = CliRunner().invoke(hook_cli.hook, ["--url", "http://gw.example:9000"], input=json.dumps(payload))
     assert result.exit_code == 0, result.output
     assert "no API key or master key resolved" in result.output
 
 
 def test_invalid_config_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    """load_config runs GatewayConfig.validate_mode_selection(), which raises
+    """load_settings raises ValueError on an unreadable or malformed config file.
 
-    ValueError on a real misconfiguration (e.g. OTARI_MODE=hybrid with no
-    OTARI_AI_TOKEN set). That is a setup problem, not a required gate
-    failing, so it must fail open like every other setup failure this
-    command handles, not surface as an unhandled traceback.
+    That is a setup problem, not a required gate failing, so it must fail
+    open like every other setup failure this command handles, not surface as
+    an unhandled traceback.
     """
 
-    def fake_load_config(config_path: str | None = None) -> GatewayConfig:
+    def fake_load_settings(config_path: str | None = None) -> HookSettings:
         raise ValueError("Hybrid mode (legacy value 'platform') requires OTARI_AI_TOKEN to be set.")
 
-    monkeypatch.setattr(gateway_cli, "load_config", fake_load_config)
+    monkeypatch.setattr(hook_cli, "load_settings", fake_load_settings)
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
@@ -973,7 +972,7 @@ def test_api_key_alone_opts_into_remote_and_falls_back_to_configured_localhost(
         "tool_name": "Edit",
         "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
     }
-    result = CliRunner().invoke(gateway_cli.hook, ["--api-key", "given-key"], input=json.dumps(payload))
+    result = CliRunner().invoke(hook_cli.hook, ["--api-key", "given-key"], input=json.dumps(payload))
     assert result.exit_code == 0, result.output
     assert captured["url"] == "http://localhost:8000/api/v1/hooks/check"
     assert captured["headers"]["Otari-Key"] == "given-key"
@@ -1001,7 +1000,7 @@ def test_url_alone_opts_into_remote_and_falls_back_to_configured_master_key(
         "tool_name": "Edit",
         "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
     }
-    result = CliRunner().invoke(gateway_cli.hook, ["--url", "http://gw.example:9000"], input=json.dumps(payload))
+    result = CliRunner().invoke(hook_cli.hook, ["--url", "http://gw.example:9000"], input=json.dumps(payload))
     assert result.exit_code == 0, result.output
     assert captured["url"] == "http://gw.example:9000/api/v1/hooks/check"
     # The bare token, not a ``Bearer `` prefix: deps.extract_credential_token
@@ -1012,17 +1011,17 @@ def test_url_alone_opts_into_remote_and_falls_back_to_configured_master_key(
 
 def test_strip_judge_code_fence_recovers_json_wrapped_in_a_json_fence() -> None:
     fenced = '```json\n{"outcome": "pass", "reasoning": "fine"}\n```'
-    assert gateway_cli._hook_strip_judge_code_fence(fenced) == '{"outcome": "pass", "reasoning": "fine"}'
+    assert hook_cli._hook_strip_judge_code_fence(fenced) == '{"outcome": "pass", "reasoning": "fine"}'
 
 
 def test_strip_judge_code_fence_recovers_json_wrapped_in_a_bare_fence() -> None:
     fenced = '```\n{"outcome": "pass", "reasoning": "fine"}\n```'
-    assert gateway_cli._hook_strip_judge_code_fence(fenced) == '{"outcome": "pass", "reasoning": "fine"}'
+    assert hook_cli._hook_strip_judge_code_fence(fenced) == '{"outcome": "pass", "reasoning": "fine"}'
 
 
 def test_strip_judge_code_fence_leaves_unfenced_json_unchanged() -> None:
     unfenced = '{"outcome": "pass", "reasoning": "fine"}'
-    assert gateway_cli._hook_strip_judge_code_fence(unfenced) == unfenced
+    assert hook_cli._hook_strip_judge_code_fence(unfenced) == unfenced
 
 
 _JUDGE_GATES_YAML = (
@@ -1064,7 +1063,7 @@ def test_stop_event_submits_a_judge_verdict_from_claude_p(
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="+ changed line\n", stderr="")
         if cmd[0] == "/usr/bin/claude":
-            assert cmd[1:3] == ["--model", gateway_cli._HOOK_JUDGE_DEFAULT_MODEL], (
+            assert cmd[1:3] == ["--model", hook_cli._HOOK_JUDGE_DEFAULT_MODEL], (
                 "a judge call defaults to the cheaper model, not the session's own"
             )
             assert cmd[3:6] == ["--tools", "", "--strict-mcp-config"], (
@@ -1076,7 +1075,7 @@ def test_stop_event_submits_a_judge_verdict_from_claude_p(
                 "NUL byte (which a diff or transcript can carry) raises ValueError as an argv "
                 "element but not as stdin input"
             )
-            assert kwargs.get("cwd") == gateway_cli._hook_judge_workdir(), (
+            assert kwargs.get("cwd") == hook_cli._hook_judge_workdir(), (
                 "must run outside the repo it is judging, or its own Stop hook "
                 "(this same otari hook command) recurses into itself"
             )
@@ -1151,7 +1150,7 @@ def test_stop_event_locally_evaluates_a_judge_verdict_and_warns(
     transcript.write_text(_transcript_line(text="did some work") + "\n", encoding="utf-8")
 
     payload = {"hook_event_name": "Stop", "cwd": str(judge_repo), "transcript_path": str(transcript)}
-    result = CliRunner().invoke(gateway_cli.hook, [], input=json.dumps(payload))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(payload))
     assert result.exit_code == 0, result.output
     stdout_payload = json.loads(result.stdout)
     assert "does not match" in stdout_payload["systemMessage"]
@@ -1213,7 +1212,7 @@ def test_judge_dry_run_never_calls_claude_but_still_counts_and_logs(
     monkeypatch.setattr(httpx, "post", fake_post)
     args = ["--api-key", "test-key", "--judge-dry-run"]
     result = CliRunner().invoke(
-        gateway_cli.hook, args, input=json.dumps({"hook_event_name": "Stop", "cwd": str(judge_repo)})
+        hook_cli.hook, args, input=json.dumps({"hook_event_name": "Stop", "cwd": str(judge_repo)})
     )
     assert result.exit_code == 0, result.output
 
@@ -1223,7 +1222,7 @@ def test_judge_dry_run_never_calls_claude_but_still_counts_and_logs(
     assert "--judge-dry-run" in judge_result["reasoning"]
     assert "tokens estimated" in judge_result["reasoning"]
 
-    log_lines = gateway_cli._hook_judge_log_path().read_text(encoding="utf-8").splitlines()
+    log_lines = hook_cli._hook_judge_log_path().read_text(encoding="utf-8").splitlines()
     assert sum(1 for line in log_lines if "outcome=invoking" in line) == 1
     assert sum(1 for line in log_lines if "detail=" in line) == 1
 
@@ -1326,7 +1325,7 @@ def test_stop_event_reports_error_when_claude_p_output_is_not_valid_json(
 
 
 def test_stop_event_warns_when_the_diff_is_truncated(monkeypatch: pytest.MonkeyPatch, judge_repo: Path) -> None:
-    oversize_diff = "x" * (gateway_cli._HOOK_JUDGE_MAX_DIFF_CHARS + 1)
+    oversize_diff = "x" * (hook_cli._HOOK_JUDGE_MAX_DIFF_CHARS + 1)
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
@@ -1356,7 +1355,7 @@ def test_stop_event_warns_when_the_transcript_is_truncated(
     monkeypatch: pytest.MonkeyPatch, judge_repo: Path, tmp_path: Path
 ) -> None:
     transcript = tmp_path / "session.jsonl"
-    big_text = "x" * (gateway_cli._HOOK_JUDGE_MAX_TRANSCRIPT_CHARS + 1)
+    big_text = "x" * (hook_cli._HOOK_JUDGE_MAX_TRANSCRIPT_CHARS + 1)
     transcript.write_text(_transcript_line(text=big_text) + "\n", encoding="utf-8")
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -1404,12 +1403,12 @@ def test_judge_transcript_extraction_keeps_only_assistant_text(tmp_path: Path) -
         encoding="utf-8",
     )
 
-    extracted = gateway_cli._hook_extract_judge_transcript(transcript)
+    extracted = hook_cli._hook_extract_judge_transcript(transcript)
     assert extracted == "Adding a helper for p95 latency."
 
 
 def test_judge_transcript_extraction_returns_empty_for_an_unreadable_file(tmp_path: Path) -> None:
-    assert gateway_cli._hook_extract_judge_transcript(tmp_path / "missing.jsonl") == ""
+    assert hook_cli._hook_extract_judge_transcript(tmp_path / "missing.jsonl") == ""
 
 
 def test_judge_workdir_is_not_the_repo_being_judged(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1420,7 +1419,7 @@ def test_judge_workdir_is_not_the_repo_being_judged(monkeypatch: pytest.MonkeyPa
     hook is this same command triggers it again.
     """
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    workdir = gateway_cli._hook_judge_workdir()
+    workdir = hook_cli._hook_judge_workdir()
     assert workdir == tmp_path / ".otari" / "judge-workdir"
     assert workdir.is_dir()
     assert workdir != tmp_path
@@ -1441,7 +1440,7 @@ def test_stop_event_bounds_judge_reasoning_and_a_required_gate_still_blocks(
     independently): a bug that dropped the whole request on the floor would
     never reach that response at all.
     """
-    oversize_reasoning = "x" * (gateway_cli._HOOK_MAX_JUDGE_REASONING_LENGTH + 1)
+    oversize_reasoning = "x" * (hook_cli._HOOK_MAX_JUDGE_REASONING_LENGTH + 1)
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
@@ -1483,7 +1482,7 @@ def test_stop_event_bounds_judge_reasoning_and_a_required_gate_still_blocks(
     assert result.exit_code == 2, result.output
 
     [judge_result] = captured["json"]["judge_results"]
-    assert len(judge_result["reasoning"]) == gateway_cli._HOOK_MAX_JUDGE_REASONING_LENGTH
+    assert len(judge_result["reasoning"]) == hook_cli._HOOK_MAX_JUDGE_REASONING_LENGTH
 
 
 def test_stop_event_survives_a_judge_setup_failure_and_still_blocks(
@@ -1513,7 +1512,7 @@ def test_stop_event_survives_a_judge_setup_failure_and_still_blocks(
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
-    monkeypatch.setattr(gateway_cli, "_hook_judge_workdir", fake_workdir)
+    monkeypatch.setattr(hook_cli, "_hook_judge_workdir", fake_workdir)
 
     captured: dict[str, Any] = {}
 
@@ -1836,7 +1835,7 @@ def test_stop_event_with_a_non_utf8_diff_still_blocks_a_required_gate(
 
     monkeypatch.setattr(httpx, "post", fake_post)
     result = CliRunner().invoke(
-        gateway_cli.hook,
+        hook_cli.hook,
         ["--api-key", "test-key", "--judge-dry-run"],
         input=json.dumps({"hook_event_name": "Stop", "cwd": str(tmp_path)}),
     )
@@ -1885,7 +1884,7 @@ def test_stop_event_caps_the_number_of_judge_gates_evaluated(monkeypatch: pytest
     call; the rest are skipped with a stderr message naming which.
     """
     (tmp_path / ".git").mkdir()
-    gate_count = gateway_cli._HOOK_JUDGE_MAX_GATES_PER_RUN + 2
+    gate_count = hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN + 2
     gates_yaml = "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n" + "".join(
         f"  - id: judge-{i}\n    type: judge\n    enforcement: advisory\n    rubric: r{i}\n    message: m{i}\n"
         for i in range(gate_count)
@@ -1921,10 +1920,10 @@ def test_stop_event_caps_the_number_of_judge_gates_evaluated(monkeypatch: pytest
     assert result.exit_code == 0, result.output
 
     submitted_ids = [entry["gate_id"] for entry in captured["json"]["judge_results"]]
-    assert submitted_ids == [f"judge-{i}" for i in range(gateway_cli._HOOK_JUDGE_MAX_GATES_PER_RUN)]
-    assert claude_call_count == gateway_cli._HOOK_JUDGE_MAX_GATES_PER_RUN
+    assert submitted_ids == [f"judge-{i}" for i in range(hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN)]
+    assert claude_call_count == hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN
     assert "over the" in result.output
-    for skipped_id in (f"judge-{i}" for i in range(gateway_cli._HOOK_JUDGE_MAX_GATES_PER_RUN, gate_count)):
+    for skipped_id in (f"judge-{i}" for i in range(hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN, gate_count)):
         assert skipped_id in result.output
 
 
@@ -2259,14 +2258,14 @@ def _write_verifier(tmp_path: Path, name: str, body: str) -> Path:
 def test_hook_run_check_verifier_passes_on_real_exit_zero(tmp_path: Path) -> None:
     """No mocking: a real script, run as a real subprocess, exiting 0."""
     _write_verifier(tmp_path, "v.sh", "exit 0")
-    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
     assert outcome == "pass"
     assert detail == ""
 
 
 def test_hook_run_check_verifier_fails_on_real_exit_one_and_captures_stdout(tmp_path: Path) -> None:
     _write_verifier(tmp_path, "v.sh", 'echo "conflicted.txt:2"\nexit 1')
-    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
     assert outcome == "fail"
     assert detail == "conflicted.txt:2\n"
 
@@ -2274,12 +2273,12 @@ def test_hook_run_check_verifier_fails_on_real_exit_one_and_captures_stdout(tmp_
 @pytest.mark.parametrize("exit_code", [2, 7, 255])
 def test_hook_run_check_verifier_errors_on_other_exit_codes(tmp_path: Path, exit_code: int) -> None:
     _write_verifier(tmp_path, "v.sh", f"exit {exit_code}")
-    outcome, _detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    outcome, _detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
     assert outcome == "error"
 
 
 def test_hook_run_check_verifier_errors_when_the_script_does_not_exist(tmp_path: Path) -> None:
-    outcome, detail = gateway_cli._hook_run_check_verifier(
+    outcome, detail = hook_cli._hook_run_check_verifier(
         tmp_path, "does-not-exist.sh", deadline=time.monotonic() + 10
     )
     assert outcome == "error"
@@ -2290,7 +2289,7 @@ def test_hook_run_check_verifier_errors_when_the_script_is_not_executable(tmp_pa
     script = tmp_path / "v.sh"
     script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     # Deliberately not chmod +x: exec must raise PermissionError (an OSError).
-    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
     assert outcome == "error"
     assert "v.sh" in detail
 
@@ -2309,7 +2308,7 @@ def test_hook_run_check_verifier_rejects_a_verifier_that_resolves_outside_the_re
     outside.chmod(0o755)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    outcome, detail = gateway_cli._hook_run_check_verifier(
+    outcome, detail = hook_cli._hook_run_check_verifier(
         repo_root, f"../{outside.name}", deadline=time.monotonic() + 10
     )
     assert outcome == "error"
@@ -2318,7 +2317,7 @@ def test_hook_run_check_verifier_rejects_a_verifier_that_resolves_outside_the_re
 
 def test_hook_run_check_verifier_errors_when_the_deadline_has_already_passed(tmp_path: Path) -> None:
     _write_verifier(tmp_path, "v.sh", "exit 0")
-    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() - 1)
+    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() - 1)
     assert outcome == "error"
     assert "budget exhausted" in detail
 
@@ -2327,7 +2326,7 @@ def test_hook_run_check_verifier_times_out_on_a_real_slow_script(tmp_path: Path)
     _write_verifier(tmp_path, "v.sh", "sleep 5\nexit 0")
     # A near-zero remaining budget forces subprocess.run's own `timeout=` well
     # under the script's real 5s sleep, without waiting for _HOOK_CHECK_TIMEOUT_SECONDS.
-    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 0.05)
+    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 0.05)
     assert outcome == "error"
     assert "did not respond" in detail
 
@@ -2345,7 +2344,7 @@ def test_hook_run_check_verifier_timeout_also_kills_a_background_child(tmp_path:
     # A whole second, not the 0.05s the plain timeout test uses: the script has
     # to reach `echo $!` before the kill, or there is no recorded child to
     # assert about.
-    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 1)
+    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 1)
     assert outcome == "error"
     assert "did not respond" in detail
 
@@ -2368,7 +2367,7 @@ def test_hook_run_check_verifier_replaces_undecodable_output(tmp_path: Path) -> 
     escape and take every other gate in the policy down with it.
     """
     _write_verifier(tmp_path, "v.sh", r"""printf 'bad: \xff\xfe'""" + "\nexit 1")
-    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
     assert outcome == "fail"
     assert detail.startswith("bad: ")
     assert "\ufffd" in detail
@@ -2376,9 +2375,9 @@ def test_hook_run_check_verifier_replaces_undecodable_output(tmp_path: Path) -> 
 
 def test_hook_run_check_verifier_caps_detail_length(tmp_path: Path) -> None:
     _write_verifier(tmp_path, "v.sh", 'printf "%0.sx" {1..10000}\nexit 1')
-    outcome, detail = gateway_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
     assert outcome == "fail"
-    assert len(detail) == gateway_cli._HOOK_MAX_CHECK_DETAIL_LENGTH
+    assert len(detail) == hook_cli._HOOK_MAX_CHECK_DETAIL_LENGTH
 
 
 def test_check_passed_gates_run_concurrently_not_sequentially(tmp_path: Path) -> None:
@@ -2399,7 +2398,7 @@ def test_check_passed_gates_run_concurrently_not_sequentially(tmp_path: Path) ->
     )
 
     start = time.monotonic()
-    results = gateway_cli._hook_collect_check_verdicts(gates_yaml, tmp_path / ".otari-gates.yml", tmp_path, [])
+    results = hook_cli._hook_collect_check_verdicts(gates_yaml, tmp_path / ".otari-gates.yml", tmp_path, [])
     elapsed = time.monotonic() - start
 
     assert [result["gate_id"] for result in results] == [f"g{i}" for i in range(gate_count)]
@@ -2580,17 +2579,17 @@ def test_collect_check_verdicts_skips_gates_over_the_per_run_limit(tmp_path: Pat
     gates_yaml = ["schema_version: '1.0'\npolicy:\n  id: test\ngates:"]
     gates_yaml.extend(
         f"  - id: g{i}\n    type: check_passed\n    enforcement: required\n    verifier: verify.sh\n    message: m"
-        for i in range(gateway_cli._HOOK_CHECK_MAX_GATES_PER_RUN + 1)
+        for i in range(hook_cli._HOOK_CHECK_MAX_GATES_PER_RUN + 1)
     )
     gates_file = tmp_path / ".otari-gates.yml"
     policy_yaml = "\n".join(gates_yaml) + "\n"
     gates_file.write_text(policy_yaml, encoding="utf-8")
 
-    results = gateway_cli._hook_collect_check_verdicts(policy_yaml, gates_file, tmp_path, [])
-    assert len(results) == gateway_cli._HOOK_CHECK_MAX_GATES_PER_RUN
+    results = hook_cli._hook_collect_check_verdicts(policy_yaml, gates_file, tmp_path, [])
+    assert len(results) == hook_cli._HOOK_CHECK_MAX_GATES_PER_RUN
     assert {r["outcome"] for r in results} == {"pass"}
 
 
 def test_collect_check_verdicts_returns_empty_for_an_unparseable_policy(tmp_path: Path) -> None:
     gates_file = tmp_path / ".otari-gates.yml"
-    assert gateway_cli._hook_collect_check_verdicts("not: valid: yaml: at: all:", gates_file, tmp_path, []) == []
+    assert hook_cli._hook_collect_check_verdicts("not: valid: yaml: at: all:", gates_file, tmp_path, []) == []

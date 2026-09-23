@@ -349,6 +349,25 @@ def test_light_cli_may_import_its_own_dependencies(tmp_path: Path) -> None:
     assert check.check_file(file_path, tmp_path) == []
 
 
+def test_the_light_cli_attach_point_may_name_the_gateway_cli(tmp_path: Path) -> None:
+    file_path = _write(tmp_path, "otari_agent/cli.py", "from gateway.cli import register\n")
+    assert check.check_file(file_path, tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    ("statement", "module"),
+    [("from gateway.core.config import load_config", "gateway.core.config"), ("import gateway", "gateway")],
+)
+def test_the_attach_point_may_not_import_the_rest_of_the_gateway(tmp_path: Path, statement: str, module: str) -> None:
+    file_path = _write(tmp_path, "otari_agent/cli.py", f"{statement}\n")
+    assert check.check_file(file_path, tmp_path) == [(1, module, "Forbidden import in Light CLI (otari-agent)")]
+
+
+def test_the_light_cli_attach_point_still_may_not_import_the_server_stack(tmp_path: Path) -> None:
+    file_path = _write(tmp_path, "otari_agent/cli.py", "import uvicorn\n")
+    assert check.check_file(file_path, tmp_path) == [(1, "uvicorn", "Forbidden import in Light CLI (otari-agent)")]
+
+
 def test_light_cli_may_not_discover_entry_points(tmp_path: Path) -> None:
     file_path = _write(tmp_path, "otari_agent/cli.py", "from importlib.metadata import version\n")
     assert check.check_file(file_path, tmp_path) == [(1, "importlib.metadata", _DISCOVERY_MESSAGE)]

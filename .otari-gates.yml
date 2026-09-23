@@ -101,6 +101,16 @@ gates:
       You touched the CLI; run tests/unit/test_gateway_cli.py before
       finishing (see AGENTS.md, "Change Validation Checklist").
 
+  - id: agent-cli-changed-needs-tests
+    type: command_if_changed
+    enforcement: required
+    when_changed: ["cli/src/otari_agent/**"]
+    require: ["tests/unit/test_otari_agent_cli.py"]
+    message: >-
+      You touched the otari-agent CLI; run tests/unit/test_otari_agent_cli.py
+      and the hook tests before finishing (see AGENTS.md, "Change Validation
+      Checklist").
+
   # Not a changed_path gate, for the same reason as the Postman one above:
   # `uv add` is what writes this file, so forbidding any change to it would
   # refuse the very command the rule asks for. `uv lock` is on the list
@@ -141,7 +151,7 @@ gates:
     # A judge gate costs one real model call per applicable Stop event, so
     # this is scoped to source, not every path in the repo: a session that
     # only touches docs, config, or generated files pays nothing.
-    when_changed: ["src/gateway/**", "web/src/**"]
+    when_changed: ["src/gateway/**", "cli/src/otari_agent/**", "web/src/**"]
     rubric: >-
       Check whether this diff adds or rewrites a comment or docstring that
       restates what the code already says, narrates the change being made
@@ -238,7 +248,7 @@ gates:
     # Both Markdown spellings, for the reason no-hand-edited-claude-md above
     # gives: `**` consumes at least one path segment, so `**/*.md` alone
     # reaches docs/ and web/ but never README.md at the root.
-    when_changed: ["*.md", "**/*.md", "src/gateway/**", "web/src/**"]
+    when_changed: ["*.md", "**/*.md", "src/gateway/**", "cli/src/otari_agent/**", "web/src/**"]
     rubric: >-
       Flag two things in prose (README, docs, doc comments, docstrings,
       commit messages, PR descriptions, user-visible UI copy), per AGENTS.md
@@ -259,17 +269,17 @@ gates:
   - id: architecture-layer-rules-check
     type: command_if_changed
     enforcement: required
-    when_changed: ["src/gateway/**"]
+    when_changed: ["src/gateway/**", "cli/src/otari_agent/**"]
     require: ["make check-architecture", "make lint"]
     message: >-
-      You touched src/gateway/; run `make check-architecture` (or `make lint`,
+      You touched src/gateway/ or cli/src/otari_agent/; run `make check-architecture` (or `make lint`,
       which includes it) and fix any reported import/layering violation
       before finishing (see AGENTS.md, "Lint / Typecheck").
 
   - id: no-leaked-secrets-in-logs-or-errors
     type: judge
     enforcement: advisory
-    when_changed: ["src/gateway/**"]
+    when_changed: ["src/gateway/**", "cli/src/otari_agent/**"]
     rubric: Flag any log statement, error message, or public-facing error response that
       includes a secret, token, or raw API key, or that otherwise leaks internal details
       (stack traces, internal file paths, header contents) to a client. The one-time bootstrap
