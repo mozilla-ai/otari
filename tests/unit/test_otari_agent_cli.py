@@ -1,5 +1,6 @@
 """The `otari` console script as the otari-agent distribution ships it."""
 
+import os
 import re
 import subprocess
 import sys
@@ -10,6 +11,7 @@ import pytest
 from click.testing import CliRunner
 
 import gateway.cli as gateway_cli
+import otari_agent
 import otari_agent.hook as hook_cli
 from otari_agent.cli import cli
 
@@ -19,8 +21,21 @@ _SERVER_STACK = ("gateway", "uvicorn", "any_llm", "sqlalchemy", "sqlmodel", "fas
 _SERVER_COMMANDS = {"serve", "init-db", "migrate", "gen-secret-key", "routing"}
 
 
-def _run_isolated(code: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60, check=False)
+def _run_isolated(code: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=60, check=False, env=env
+    )
+
+
+# `--version` is bound when otari_agent.cli is imported, so each version test
+# gets an interpreter of its own with the environment it asserts on.
+_VERSION_CODE = (
+    "from click.testing import CliRunner\n"
+    "from otari_agent.cli import cli\n"
+    "result = CliRunner().invoke(cli, ['--version'])\n"
+    "assert result.exit_code == 0, result.output\n"
+    "print(result.output, end='')\n"
+)
 
 
 def test_importing_the_light_cli_loads_no_server_stack() -> None:
@@ -59,6 +74,20 @@ def test_a_server_command_resolves_through_the_light_group() -> None:
     result = CliRunner().invoke(cli, ["serve", "--help"])
     assert result.exit_code == 0, result.output
     assert "Start the Otari server" in result.output
+
+
+def test_version_reads_the_stamp_when_the_deployment_names_none() -> None:
+    env = {name: value for name, value in os.environ.items() if name != "OTARI_VERSION"}
+    result = _run_isolated(_VERSION_CODE, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == f"otari, version {otari_agent.__version__}"
+
+
+def test_version_prefers_the_deployment_version() -> None:
+    # The Docker image installs the CLI unstamped and sets OTARI_VERSION to its tag.
+    result = _run_isolated(_VERSION_CODE, env={**os.environ, "OTARI_VERSION": "v9.9.9"})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "otari, version v9.9.9"
 
 
 def test_register_attaches_every_server_command() -> None:

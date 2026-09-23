@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from typing import Any
 
 import click
 
+from otari_agent import __version__
 from otari_agent.hook import gates, hook
 from otari_agent.usage_import import import_group
 
@@ -48,7 +50,14 @@ class OtariGroup(click.Group):
         return command
 
 
+# The Docker image installs from the tree, where __version__ is the unstamped
+# 0.0.0, and names its version in OTARI_VERSION instead, the variable
+# src/gateway/version.py reads. A stamped build (Homebrew) sets no such variable.
+_REPORTED_VERSION = os.environ.get("OTARI_VERSION") or __version__
+
+
 @click.group(cls=OtariGroup)
+@click.version_option(_REPORTED_VERSION, "--version", prog_name="otari")
 def cli() -> None:
     """Otari CLI."""
 
