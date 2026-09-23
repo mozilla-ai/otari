@@ -208,8 +208,10 @@ describe("createFieldLayout", () => {
       "url",
       "project_id",
       "space_id",
+      // Optional to the catalog, and still one must be ticked: out of Advanced.
+      "detectors",
     ])
-    expect(layout.advanced.map((p) => p.name)).toEqual(["detectors"])
+    expect(layout.advanced).toEqual([])
     expect(layout.unstorable).toEqual(["api_client"])
   })
 

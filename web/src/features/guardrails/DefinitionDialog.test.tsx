@@ -32,7 +32,7 @@ function guardrail(
   } as BuiltInGuardrailSpec
 }
 
-// Shaped as the installed library reports these two, trimmed.
+// Shaped as the installed library reports these, trimmed.
 const CATALOG: BuiltInGuardrailCatalog = {
   guardrails: [
     guardrail({
@@ -84,6 +84,51 @@ const CATALOG: BuiltInGuardrailCatalog = {
           required: false,
           secret: true,
           storable: false,
+        },
+      ],
+    }),
+    // Both take a required JSON argument, which the form draws as checkboxes.
+    guardrail({
+      guardrail_name: "alinia",
+      display_name: "Alinia",
+      vendor: "Alinia AI",
+      categories: ["content_safety", "prompt_injection"],
+      create_parameters: [
+        {
+          name: "detection_config",
+          type: "json",
+          required: true,
+          secret: false,
+          storable: true,
+        },
+        {
+          name: "api_key",
+          type: "string",
+          required: true,
+          secret: true,
+          storable: true,
+        },
+      ],
+    }),
+    guardrail({
+      guardrail_name: "patronus",
+      display_name: "Patronus",
+      vendor: "Patronus AI",
+      categories: ["prompt_injection", "hallucination"],
+      create_parameters: [
+        {
+          name: "evaluators",
+          type: "json",
+          required: true,
+          secret: false,
+          storable: true,
+        },
+        {
+          name: "api_key",
+          type: "string",
+          required: true,
+          secret: true,
+          storable: true,
         },
       ],
     }),
@@ -181,6 +226,7 @@ describe("DefinitionDialog, setting one up", () => {
     renderDialog()
     expect(await listedOptions("What do you want checked?")).toEqual([
       "Content safety",
+      "Hallucination",
       "Personally identifiable information",
       "Prompt injection",
     ])
@@ -263,6 +309,51 @@ describe("DefinitionDialog, setting one up", () => {
 
     expect(dialog().getByLabelText("Api key")).toBeInTheDocument()
     expect(dialog().queryByRole("button", { name: "Advanced" })).toBeNull()
+  })
+
+  it("asks for Alinia's detections as checkboxes, the chosen check already ticked", async () => {
+    const calls = mockApi()
+    const { onSaved } = renderDialog()
+    const user = userEvent.setup()
+
+    await pickOption(user, "What do you want checked?", "Prompt injection")
+    await pickOption(user, "Which guardrail?", "Alinia · Alinia AI")
+    // Picked for prompt injection, which Alinia calls "security".
+    expect(dialog().getByRole("checkbox", { name: "Security" })).toBeChecked()
+    await user.click(dialog().getByRole("checkbox", { name: "Safety" }))
+    await user.type(dialog().getByLabelText("Api key"), "al-secret")
+    await user.click(dialog().getByRole("button", { name: "Set up guardrail" }))
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(calls.find((call) => call.method === "POST")?.body).toMatchObject({
+      guardrail_name: "alinia",
+      create_kwargs: {
+        api_key: "al-secret",
+        detection_config: { security: true, safety: true },
+      },
+    })
+  })
+
+  it("asks for Patronus's evaluators as checkboxes, and sends the list it takes", async () => {
+    const calls = mockApi()
+    const { onSaved } = renderDialog()
+    const user = userEvent.setup()
+
+    await pickOption(user, "What do you want checked?", "Prompt injection")
+    await pickOption(user, "Which guardrail?", "Patronus · Patronus AI")
+    await user.click(dialog().getByRole("checkbox", { name: "Lynx" }))
+    await user.type(dialog().getByLabelText("Api key"), "pa-secret")
+    await user.click(dialog().getByRole("button", { name: "Set up guardrail" }))
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(calls.find((call) => call.method === "POST")?.body).toMatchObject({
+      create_kwargs: {
+        evaluators: [
+          { evaluator: "judge", criteria: "patronus:prompt-injection" },
+          { evaluator: "lynx" },
+        ],
+      },
+    })
   })
 
   it("draws no control for an argument it cannot store, and names it", async () => {

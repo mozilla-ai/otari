@@ -6,6 +6,7 @@ import { Field } from "@/design-system/forms/Field"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
+import { GuardrailJsonField } from "@/features/guardrails/GuardrailJsonField"
 import {
   type ParameterErrors,
   type ParameterValues,
@@ -33,6 +34,8 @@ function ParameterControl({
   value,
   error,
   disabled,
+  guardrailName,
+  operation,
   onChange,
 }: {
   spec: GuardrailParameterSpec
@@ -41,6 +44,8 @@ function ParameterControl({
   value: ParameterValues[string]
   error: string | undefined
   disabled: boolean
+  guardrailName?: string
+  operation?: string
   onChange: (next: ParameterValues[string]) => void
 }) {
   const label = parameterLabel(spec.name)
@@ -109,6 +114,25 @@ function ParameterControl({
     )
   }
 
+  // A guardrail's own constructor argument, where this build knows what the
+  // JSON holds: checkboxes first, with the JSON beside them.
+  if (spec.type === "json" && guardrailName) {
+    return (
+      <div className="sm:col-span-2">
+        <GuardrailJsonField
+          spec={spec}
+          guardrailName={guardrailName}
+          operation={operation}
+          value={String(value ?? "")}
+          error={error}
+          disabled={disabled}
+          description={description}
+          onChange={onChange}
+        />
+      </div>
+    )
+  }
+
   if (spec.type === "json") {
     return (
       <TextField
@@ -163,6 +187,8 @@ export function GuardrailParameterFields({
   values,
   errors,
   disabled,
+  guardrailName,
+  operation,
   onChange,
 }: {
   specs: GuardrailParameterSpec[]
@@ -170,11 +196,26 @@ export function GuardrailParameterFields({
   values: ParameterValues
   errors: ParameterErrors
   disabled: boolean
+  /**
+   * The built-in guardrail these are the constructor arguments of. Given, a
+   * JSON argument this build knows the shape of is drawn as checkboxes.
+   */
+  guardrailName?: string
+  /** The check the guardrail was picked for, which a JSON field can pre-tick. */
+  operation?: string
   onChange: (name: string, next: ParameterValues[string]) => void
 }) {
+  // A JSON argument drawn as checkboxes spans both columns. Drawn between two
+  // plain fields it leaves each alone on its own row, so it goes after them.
+  const isFullWidth = (spec: GuardrailParameterSpec) =>
+    guardrailName !== undefined && guardrailName !== "" && spec.type === "json"
+  const ordered = [
+    ...specs.filter((spec) => !isFullWidth(spec)),
+    ...specs.filter(isFullWidth),
+  ]
   return (
     <div className="flex flex-col gap-3 sm:grid sm:grid-cols-2">
-      {specs.map((spec) => (
+      {ordered.map((spec) => (
         <ParameterControl
           key={spec.name}
           spec={spec}
@@ -182,6 +223,8 @@ export function GuardrailParameterFields({
           value={values[spec.name]}
           error={errors[spec.name]}
           disabled={disabled}
+          guardrailName={guardrailName}
+          operation={operation}
           onChange={(next) => onChange(spec.name, next)}
         />
       ))}

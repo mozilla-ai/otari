@@ -25,6 +25,7 @@ import {
   seedableArguments,
 } from "@/features/guardrails/definitionForm"
 import { GuardrailParameterFields } from "@/features/guardrails/GuardrailParameterFields"
+import { suggestedCreateKwargs } from "@/features/guardrails/guardrailFieldSuggestions"
 import {
   parameterLabel,
   seedParameters,
@@ -95,7 +96,11 @@ export function DefinitionDialog({
   const fields = definitionFieldSpecs(layout.fields, held)
   const advanced = definitionFieldSpecs(layout.advanced, held)
   const specs = [...fields, ...advanced]
-  const seed = seedableArguments(specs, definition)
+  // A new definition starts with the check just picked already ticked, where
+  // the vendor documents which of its own keys means that check.
+  const seed = definition
+    ? seedableArguments(specs, definition)
+    : suggestedCreateKwargs(specs, guardrailName, check)
   const parameters = useGuardrailParameterForm(specs, seed, guardrailName)
   const { isDirty } = useDirtySnapshot({
     check,
@@ -240,6 +245,8 @@ export function DefinitionDialog({
           values={parameters.values}
           errors={parameters.issues}
           disabled={isPending}
+          guardrailName={guardrailName}
+          operation={check}
           onChange={parameters.setValue}
         />
       ) : null}
@@ -254,6 +261,8 @@ export function DefinitionDialog({
               values={parameters.values}
               errors={parameters.issues}
               disabled={isPending}
+              guardrailName={guardrailName}
+              operation={check}
               onChange={parameters.setValue}
             />
             {layout.unstorable.length > 0 ? (

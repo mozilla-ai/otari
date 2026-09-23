@@ -14,6 +14,7 @@ import type {
   BuiltInGuardrailSpec,
   GuardrailParameterSpec,
 } from "@/client"
+import { jsonFieldSpec } from "@/features/guardrails/guardrailFieldSuggestions"
 import { parameterLabel } from "@/features/guardrails/guardrailParameters"
 
 // Mirrors `_NOT_DEFINABLE_BY_AN_ORGANIZATION` in
@@ -91,9 +92,10 @@ export type CreateFieldLayout = {
  * what waits behind Advanced.
  *
  * Secrets first, then members of an either/or group, then the other required
- * ones. Not required-first: watsonx Guardian marks nothing required, because
- * each of its credentials is one member of a group whose other member is a live
- * client object, so a required-first rule would hide its API key.
+ * ones, then any set of checkboxes. Not required-first: watsonx Guardian marks
+ * nothing required, because each of its credentials is one member of a group
+ * whose other member is a live client object, so a required-first rule would
+ * hide its API key.
  *
  * An argument the catalog marks unstorable (a live object, not configuration)
  * gets no control at all.
@@ -114,7 +116,17 @@ export function createFieldLayout(
     (parameter) =>
       !parameter.secret && !grouped.has(parameter.name) && parameter.required,
   )
-  const fields = [...secrets, ...members, ...required]
+  // A switch set the form draws as checkboxes is what the guardrail is told to
+  // check, whatever the catalog's required flag says: watsonx Guardian marks
+  // its detectors optional and runs nothing without one.
+  const switches = storable.filter(
+    (parameter) =>
+      !parameter.secret &&
+      !grouped.has(parameter.name) &&
+      !parameter.required &&
+      isSwitchSet(spec, parameter),
+  )
+  const fields = [...secrets, ...members, ...required, ...switches]
   const asked = new Set(fields.map((parameter) => parameter.name))
   return {
     fields,
@@ -123,6 +135,15 @@ export function createFieldLayout(
       .filter((parameter) => !parameter.storable)
       .map((parameter) => parameter.name),
   }
+}
+
+function isSwitchSet(
+  spec: BuiltInGuardrailSpec | undefined,
+  parameter: GuardrailParameterSpec,
+): boolean {
+  if (spec === undefined || parameter.type !== "json") return false
+  const kind = jsonFieldSpec(spec.guardrail_name, parameter)?.kind
+  return kind === "flags" || kind === "presets"
 }
 
 /** A name for a new definition that the organization does not use yet. */
