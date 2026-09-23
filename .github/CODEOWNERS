@@ -10,3 +10,8 @@
 /.github/CODEOWNERS             @mozilla-ai/otari-team
 /src/gateway/container.py       @mozilla-ai/otari-team
 /src/gateway/features.py        @mozilla-ai/otari-team
+
+# The /review workflow holds a Claude token and runs on fork PRs; its prompt is
+# the instructions that token acts on.
+/.github/workflows/review-pr.yml  @mozilla-ai/otari-team
+/.github/prompts/                 @mozilla-ai/otari-team

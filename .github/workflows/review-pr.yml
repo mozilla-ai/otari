@@ -106,6 +106,19 @@ jobs:
           git fetch --no-tags origin "refs/pull/$PR/head"
           git cat-file -e "$HEAD_SHA^{commit}"
 
+      # Without a PID namespace, a scrubbed variable is still readable from
+      # the parent process through /proc, so the scrub below needs bubblewrap
+      # to mean anything. The action installs it only for
+      # allowed_non_write_users, hence this step; the sysctl lifts Ubuntu
+      # 24.04's AppArmor block on unprivileged user namespaces.
+      - name: Install subprocess isolation
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap socat
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
       - name: Run review
         id: claude
         uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de # v1.0.231
@@ -156,6 +169,10 @@ jobs:
           # This keeps subagents in the foreground so their results come back
           # inside the turn.
           CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+          # Strips Anthropic and cloud credentials, the OAuth token among them,
+          # from every command the review runs. GH_TOKEN is not on the list,
+          # so `gh` still works, with the job token scoped above.
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
 
       # The execution file is the full transcript, tool output included, and
       # artifacts on a public repo are downloadable by anyone signed in. So
