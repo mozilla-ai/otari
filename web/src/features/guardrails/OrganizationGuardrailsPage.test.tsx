@@ -258,6 +258,29 @@ describe("OrganizationGuardrailsPage", () => {
     )
   })
 
+  it("tests a configured guardrail from its row, and offers no switch", async () => {
+    mockApi({ definitions: [lakera] })
+    renderPage()
+
+    const definition = await row(
+      "Guardrails you have configured",
+      "prod-lakera",
+    )
+    expect(definition.queryByRole("button", { name: /Switch/ })).toBeNull()
+    expect(
+      definition
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Test prod-lakera", "Edit prod-lakera", "Remove prod-lakera"])
+    await userEvent.click(
+      definition.getByRole("button", { name: "Test prod-lakera" }),
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: "Test guardrail" }),
+    ).toBeInTheDocument()
+  })
+
   it("says what removing a blocking mandate serves", async () => {
     mockApi({
       mandates: [

@@ -8,6 +8,7 @@ import {
   useCreateOrganizationGuardrailDefinition,
   useDeleteOrganizationGuardrailDefinition,
   useOrganizationGuardrailDefinitions,
+  useTestOrganizationGuardrailDefinition,
   useUpdateOrganizationGuardrailDefinition,
 } from "@/shared/api/guardrails"
 import {
@@ -133,6 +134,26 @@ describe("definition writes", () => {
       method: "PATCH",
     })
     expect(keys()).toContainEqual([ORGANIZATION_GUARDRAIL_DEFINITIONS])
+  })
+
+  it("test posts the text to the named definition and refreshes nothing", async () => {
+    const fetch = respond({ valid: false, explanation: "injection", score: 1 })
+    const { wrapper, keys } = harness()
+
+    const { result } = renderHook(
+      () => useTestOrganizationGuardrailDefinition(),
+      { wrapper },
+    )
+    result.current.mutate({ definitionId: "d1", body: { text: "hello" } })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(requested(fetch)).toEqual({
+      url: expect.stringMatching(/\/guardrail-definitions\/d1\/test$/),
+      method: "POST",
+    })
+    expect(result.current.data?.valid).toBe(false)
+    // A test stores nothing, so no read is stale after one.
+    expect(keys()).toEqual([])
   })
 
   it("delete removes the named definition", async () => {

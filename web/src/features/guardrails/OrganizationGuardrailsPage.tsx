@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { FiEdit2, FiPause, FiPlay, FiTrash2 } from "react-icons/fi"
+import { FiEdit2, FiPause, FiPlay, FiTrash2, FiZap } from "react-icons/fi"
 
 import type {
   OrganizationGuardrail,
@@ -18,6 +18,7 @@ import {
   mandateConsequence,
 } from "@/features/guardrails/buildState"
 import { DefinitionDialog } from "@/features/guardrails/DefinitionDialog"
+import { DefinitionTestDialog } from "@/features/guardrails/DefinitionTestDialog"
 import {
   DefinitionStatus,
   MandateConsequenceMark,
@@ -59,7 +60,9 @@ import { useWorkspaces } from "@/shared/api/workspaces"
 // guardrails service. Rows here are keyed on the organization, which is why a
 // hosted deployment publishes this page too.
 
-type Open = { kind: "" } | { kind: "definition" | "mandate"; editingId: string }
+type Open =
+  | { kind: "" }
+  | { kind: "definition" | "mandate" | "test"; editingId: string }
 
 export function OrganizationGuardrailsPage() {
   const context = useOrganizationContext()
@@ -85,7 +88,10 @@ export function OrganizationGuardrailsPage() {
   const [pendingMandateDelete, setPendingMandateDelete] =
     useState<OrganizationGuardrail>()
 
-  const openDialog = (kind: "definition" | "mandate", editingId = "") => {
+  const openDialog = (
+    kind: "definition" | "mandate" | "test",
+    editingId = "",
+  ) => {
     setOpenCount((count) => count + 1)
     setOpen({ kind, editingId })
   }
@@ -101,6 +107,10 @@ export function OrganizationGuardrailsPage() {
   const editingMandate =
     open.kind === "mandate"
       ? entries.find((row) => row.id === open.editingId)
+      : undefined
+  const testing =
+    open.kind === "test"
+      ? defined.find((row) => row.id === open.editingId)
       : undefined
   const blockingDelete = pendingDefinitionDelete
     ? mandatesOn(pendingDefinitionDelete, entries)
@@ -152,6 +162,12 @@ export function OrganizationGuardrailsPage() {
         align: "end",
         cell: (row) => (
           <RowActionRow>
+            <RowAction
+              icon={FiZap}
+              label="Test"
+              ariaLabel={`Test ${row.name}`}
+              onPress={() => openDialog("test", row.id)}
+            />
             <RowAction
               icon={FiEdit2}
               label="Edit"
@@ -350,6 +366,16 @@ export function OrganizationGuardrailsPage() {
             takenNames={defined.map((row) => row.name)}
             onSaved={() => {}}
           />
+          {/* Only while one is being tested, since it needs the row. */}
+          {testing ? (
+            <DefinitionTestDialog
+              key={`test-${openCount}`}
+              isOpen
+              onClose={close}
+              definition={testing}
+              catalog={builtInCatalog.data}
+            />
+          ) : null}
           <MandateDialog
             key={`mandate-${openCount}`}
             isOpen={open.kind === "mandate"}

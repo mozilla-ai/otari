@@ -630,6 +630,14 @@ export type CreateOrganizationGuardrailDefinitionRequest = Defaulted<
 >
 export type UpdateOrganizationGuardrailDefinitionRequest =
   Schemas["OrganizationGuardrailDefinitionUpdate"]
+// Running one definition's built guardrail over some text, which stores nothing.
+// `validate_kwargs` carries a schema default, so the form may leave it out.
+export type TestOrganizationGuardrailDefinitionRequest = Defaulted<
+  Schemas["OrganizationGuardrailDefinitionTest"],
+  "validate_kwargs"
+>
+export type GuardrailTestResult =
+  Schemas["OrganizationGuardrailDefinitionTestResult"]
 
 // The MCP servers a workspace has registered, which a request names by id in
 // `mcp_server_ids`; see

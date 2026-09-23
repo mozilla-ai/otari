@@ -12,6 +12,7 @@ import {
   formatRate,
   formatRelative,
   formatReleaseDate,
+  formatScore,
   formatTokens,
   formatUnitRate,
   formatUsd,
@@ -45,6 +46,14 @@ describe("formatUsdHeadline", () => {
   it("keeps them below $100, where they are a quarter of the number", () => {
     expect(formatUsdHeadline(99.99)).toBe("$99.99")
     expect(formatUsdHeadline(4.2)).toBe("$4.20")
+  })
+})
+
+describe("formatScore", () => {
+  it("keeps a vendor's scale and trims it to three places", () => {
+    expect(formatScore(0.97)).toBe("0.97")
+    expect(formatScore(0.123456)).toBe("0.123")
+    expect(formatScore(87)).toBe("87")
   })
 })
 

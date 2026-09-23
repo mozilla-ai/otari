@@ -211,6 +211,14 @@ export function formatTokens(value: number): string {
   return String(value)
 }
 
+const scoreFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 })
+
+// A guardrail vendor's score, which is whatever scale that vendor uses: shown
+// as given, to three places, and never as a percentage it may not be.
+export function formatScore(value: number): string {
+  return scoreFormat.format(value)
+}
+
 // Period-over-period change. null when there is no comparable previous value
 // (unbounded range, or a previous value of zero which would divide by zero).
 export function deltaFraction(

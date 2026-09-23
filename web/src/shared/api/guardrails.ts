@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   BuiltInGuardrailCatalog,
   CreateOrganizationGuardrailDefinitionRequest,
+  GuardrailTestResult,
   OrganizationGuardrailDefinition,
+  TestOrganizationGuardrailDefinitionRequest,
   UpdateOrganizationGuardrailDefinitionRequest,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
@@ -79,6 +81,24 @@ export function useUpdateOrganizationGuardrailDefinition() {
         { method: "PATCH", body: JSON.stringify(body) },
       ),
     onSuccess,
+  })
+}
+
+// Runs the guardrail the answering worker holds built. It stores nothing, so it
+// invalidates nothing.
+export function useTestOrganizationGuardrailDefinition() {
+  return useMutation({
+    mutationFn: ({
+      definitionId,
+      body,
+    }: {
+      definitionId: string
+      body: TestOrganizationGuardrailDefinitionRequest
+    }) =>
+      apiFetch<GuardrailTestResult>(
+        `${DEFINITIONS}/${encodeURIComponent(definitionId)}/test`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
   })
 }
 
