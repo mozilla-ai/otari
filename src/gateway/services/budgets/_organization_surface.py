@@ -189,7 +189,7 @@ class _OrganizationSurface:
         organization = await self._get_managed_organization(user)
         budget = await self._require_own_budget(organization=organization, budget_id=budget_id)
         ceilings = await self._repositories.ceilings.count_for_budget(budget.budget_id)
-        defaults = await self._repositories.budgets.count_member_policies_for_budget(budget.budget_id)
+        defaults = await self._repositories.member_policies.count_for_budget(budget.budget_id)
         if ceilings or defaults:
             raise OrganizationBudgetInUseError(budget.budget_id, ceilings=ceilings, defaults=defaults)
         if await self._repositories.budgets.count_users_for_budget(budget.budget_id):

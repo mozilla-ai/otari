@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import BudgetStillReferencedError
-from gateway.models.budgets import Budget, WorkspaceBudgetDefault
+from gateway.models.budgets import Budget
 from gateway.models.users import User
 from gateway.repositories.base_repository import BaseRepository
 
@@ -29,15 +29,6 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         """Count the organization's budgets."""
         result = await self.db.execute(
             select(func.count()).select_from(Budget).where(Budget.organization_id == organization_id)
-        )
-        return result.scalar_one()
-
-    async def count_member_policies_for_budget(self, budget_id: str) -> int:
-        """Count the workspace member budget policies that name this budget."""
-        result = await self.db.execute(
-            select(func.count())
-            .select_from(WorkspaceBudgetDefault)
-            .where(WorkspaceBudgetDefault.budget_id == budget_id)
         )
         return result.scalar_one()
 

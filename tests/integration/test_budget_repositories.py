@@ -207,8 +207,9 @@ async def test_count_member_policies_and_users_for_budget(async_db: AsyncSession
 
     async with uow:
         budgets = BudgetRepository(uow)
-        assert await budgets.count_member_policies_for_budget(held.budget_id) == 1
-        assert await budgets.count_member_policies_for_budget(free.budget_id) == 0
+        policies = WorkspaceBudgetDefaultRepository(uow)
+        assert await policies.count_for_budget(held.budget_id) == 1
+        assert await policies.count_for_budget(free.budget_id) == 0
         assert await budgets.count_users_for_budget(held.budget_id) == 2
         assert await budgets.count_users_for_budget(free.budget_id) == 0
 

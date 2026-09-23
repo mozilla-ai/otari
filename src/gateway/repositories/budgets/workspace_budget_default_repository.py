@@ -48,6 +48,15 @@ class WorkspaceBudgetDefaultRepository(BaseRepository[WorkspaceBudgetDefault, Ne
         await self.db.refresh(policy)
         return policy
 
+    async def count_for_budget(self, budget_id: str) -> int:
+        """Count the policies that hand out this budget."""
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(WorkspaceBudgetDefault)
+            .where(WorkspaceBudgetDefault.budget_id == budget_id)
+        )
+        return result.scalar_one()
+
     async def for_workspace(self, workspace_id: uuid.UUID) -> list[WorkspaceBudgetDefault]:
         """Return every policy on a workspace."""
         result = await self.db.execute(
