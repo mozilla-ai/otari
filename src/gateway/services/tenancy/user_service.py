@@ -60,8 +60,6 @@ from gateway.repositories.tenancy import UserRepository
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
 from gateway.services.mail import Mailer
 from gateway.services.password_service import (
-    MAX_PASSWORD_BYTES,
-    MIN_PASSWORD_LENGTH,
     hash_password_async,
     verify_absent_password_async,
     verify_password_async,
@@ -73,7 +71,6 @@ from gateway.services.tenancy.errors import (
     EmailNotVerifiedError,
     InvalidCredentialsError,
     PasswordNotSetError,
-    PasswordPolicyError,
     ResetTokenInvalidError,
     SignInAddressRequiredError,
     UnmodifiedPasswordError,
@@ -81,6 +78,7 @@ from gateway.services.tenancy.errors import (
 )
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.password_policy import validate_new_password
 from gateway.services.tenancy.password_reset_email import render_password_reset_email
 from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
 from gateway.services.tenancy.tokens import generate_token, hash_token
@@ -200,7 +198,7 @@ async def set_password(
     change elsewhere (the operator recovers the account before the link is
     opened, say) would still work, letting whoever holds it undo the change.
     """
-    _validate_password(new_password)
+    validate_new_password(new_password)
     vouches_for_the_address = email is not None or identity.hashed_password is None
     if email is not None:
         identity.email = await _claimable_email(db, identity, email)
@@ -313,7 +311,7 @@ async def create_user_for_signup(
     """
     mailer = Mailer(config)
     mailer.require_ready()
-    _validate_password(password)
+    validate_new_password(password)
 
     address = validated_email(email)
     identity = await UserRepository(db).get_by_email(address)
@@ -338,9 +336,7 @@ async def create_user_for_signup(
         # committed here and nowhere else would be live, password-less and
         # unverifiable.
         try:
-            identity = await OrganizationService(
-                db, membership_listener=membership_listener
-            ).provision_signup_tenancy(
+            identity = await OrganizationService(db, membership_listener=membership_listener).provision_signup_tenancy(
                 email=address,
                 full_name=full_name,
             )
@@ -533,7 +529,7 @@ async def reset_password(db: AsyncSession, *, token: str, new_password: str) -> 
         raise ResetTokenInvalidError
     if identity.password_reset_token_expires_at < datetime.now(UTC):
         raise ResetTokenInvalidError
-    _validate_password(new_password)
+    validate_new_password(new_password)
 
     identity.hashed_password = await hash_password_async(new_password)
     identity.password_reset_token_hash = None
@@ -590,17 +586,6 @@ async def password_sign_in_possible(db: AsyncSession) -> bool:
     answer, and the master-key branch of the sign-in screen is the only one.
     """
     return await UserRepository(db).any_active_with_password()
-
-
-def _validate_password(password: str) -> None:
-    """Refuse a password bcrypt would reject or that is too short to be one."""
-    if len(password) < MIN_PASSWORD_LENGTH:
-        raise PasswordPolicyError(f"A password must be at least {MIN_PASSWORD_LENGTH} characters")
-    if len(password.encode()) > MAX_PASSWORD_BYTES:
-        raise PasswordPolicyError(
-            f"A password must be at most {MAX_PASSWORD_BYTES} bytes; "
-            "accented and non-Latin characters count for more than one each"
-        )
 
 
 def _is_email_conflict(exc: IntegrityError) -> bool:

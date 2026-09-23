@@ -66,6 +66,7 @@ from gateway.repositories.users_repository import (
     live_attribution_user_ids,
 )
 from gateway.services.mail import Mailer
+from gateway.services.password_service import hash_password_async
 from gateway.services.secret_box import secret_box_configured
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.email_address import validated_email as _validated_email
@@ -74,6 +75,7 @@ from gateway.services.tenancy.errors import (
     InvitationAlreadyUsedError,
     InvitationExpiredError,
     InvitationNotFoundError,
+    InvitationPasswordNotAcceptedError,
     MembershipUpdateError,
     NotAuthorizedError,
     OrganizationMemberAlreadyExistsError,
@@ -92,6 +94,7 @@ from gateway.services.tenancy.invitation_email import render_invitation_email
 # dependency is the safe one; ``tests/unit/test_service_module_imports.py``
 # pins it.
 from gateway.services.tenancy.membership_listener import MembershipListener
+from gateway.services.tenancy.password_policy import validate_new_password
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME, password_claims_deployment
 
 
@@ -117,6 +120,16 @@ def _hash_invitation_token(token: str) -> str:
     as a password, so it is hashed at rest and compared by hash.
     """
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _has_never_signed_in(user: User) -> bool:
+    """Whether an identity has no way in yet: no password, and no verified address.
+
+    The verified address is what a provider sign-in leaves behind on an identity
+    that never set a password, so checking the password alone would treat an
+    account someone signs in to with Google as unclaimed.
+    """
+    return user.is_active and user.hashed_password is None and user.email_verified_at is None
 
 
 def _invitation_accept_path(token: str) -> str:
@@ -1133,23 +1146,48 @@ class OrganizationService:
         return invitation, membership, organization
 
     async def get_invitation_preview(self, token: str) -> InvitationPreviewPublic:
-        """Look up a pending invitation by token, for the accept page. No auth: the token is the proof."""
+        """Look up a pending invitation by token, for the accept page. No auth: the token is the proof.
+
+        ``needs_password`` tells the token's holder whether the invited address
+        can already sign in. That is only ever said to someone holding this
+        invitation, which already names the address, so it widens nothing
+        signup's enumeration-safety protects.
+        """
         invitation, membership, organization = await self._resolve_pending_invitation(token)
+        invitee = await self.users.get(membership.user_id)
         return InvitationPreviewPublic(
             email=invitation.email,
             organization_name=organization.name,
             role=membership.role,
             expires_at=invitation.expires_at,
+            needs_password=invitee is not None and _has_never_signed_in(invitee),
         )
 
-    async def accept_invitation(self, token: str) -> AcceptInvitationResultPublic:
-        """Resolve a pending invitation to an active membership.
+    async def accept_invitation(
+        self,
+        token: str,
+        *,
+        password: str | None = None,
+        full_name: str | None = None,
+        terms_accepted: bool = False,
+    ) -> AcceptInvitationResultPublic:
+        """Resolve a pending invitation to an active membership, optionally setting a first password.
 
-        No session is minted (see ``AcceptInvitationResultPublic``): this only
+        No session is minted (see ``AcceptInvitationResultPublic``): this
         flips the paired membership to ``active`` and applies the parked
         workspace assignments, the same way immediate ones are applied on
         ``POST /me/members``.
+
+        ``password`` is what lets a deployment with no mail let an invitee in:
+        signup has to mail a verification link, but the invitation link already
+        proves what that link would, since it reached the invitee either by
+        email or from an admin who vouches for the address. It is accepted only
+        for an identity that has never signed in, so a forwarded link can claim
+        an unclaimed seat and never take over an account.
         """
+        if password is not None:
+            # Before the lookup, so a policy refusal says nothing about the token.
+            validate_new_password(password)
         _, _, organization = await self._resolve_pending_invitation(token)
         # Locked, then re-resolved, before any write: two concurrent accepts of
         # the same token could otherwise both pass the pending check above
@@ -1163,7 +1201,21 @@ class OrganizationService:
         # no longer pending, so it raises InvitationAlreadyUsedError instead.
         await self.organizations.lock(organization.id)
         invitation, membership, organization = await self._resolve_pending_invitation(token)
-        return await self._resolve_invitation_to_active_membership(invitation, membership, organization)
+        if password is not None:
+            invitee = await self.users.get(membership.user_id)
+            if invitee is None or not _has_never_signed_in(invitee):
+                raise InvitationPasswordNotAcceptedError
+            # Staged, not committed: it lands in the same commit as the
+            # membership below, so a failed accept never leaves a claimed
+            # identity outside the organization it was claimed for.
+            invitee.hashed_password = await hash_password_async(password)
+            invitee.email_verified_at = datetime.now(UTC)
+            invitee.full_name = invitee.full_name or (full_name or "").strip() or None
+            if terms_accepted:
+                invitee.terms_accepted_at = datetime.now(UTC)
+            self.db.add(invitee)
+        result = await self._resolve_invitation_to_active_membership(invitation, membership, organization)
+        return result.model_copy(update={"password_set": password is not None})
 
     async def _resolve_invitation_to_active_membership(
         self,

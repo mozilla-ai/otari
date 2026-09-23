@@ -539,6 +539,10 @@ export type InviteOrganizationMemberRequest = Defaulted<
 export type InviteOrganizationMemberResult =
   Schemas["InviteOrganizationMemberResultPublic"]
 export type InvitationPreview = Schemas["InvitationPreviewPublic"]
+export type AcceptInvitationRequest = Defaulted<
+  Schemas["AcceptInvitationRequest"],
+  "terms_accepted"
+>
 export type AcceptInvitationResult = Schemas["AcceptInvitationResultPublic"]
 
 // The invitee's side of the same flow: what is waiting on the signed-in

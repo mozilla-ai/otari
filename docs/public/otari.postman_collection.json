@@ -2113,7 +2113,7 @@
               },
               "raw": "{\n  \"token\": \"string\"\n}"
             },
-            "description": "Accept a pending invitation, resolving it to an active membership.",
+            "description": "Accept a pending invitation, resolving it to an active membership and optionally setting a first password.",
             "header": [
               {
                 "key": "Content-Type",

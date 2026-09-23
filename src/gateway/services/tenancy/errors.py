@@ -831,6 +831,18 @@ class InvitationAlreadyUsedError(TenancyValidationError):
         super().__init__("This invitation has already been used or is no longer valid")
 
 
+class InvitationPasswordNotAcceptedError(TenancyValidationError):
+    """A password sent with an accept for an address that already has a way to sign in.
+
+    Refused rather than applied: an invitation link can be handed over by hand,
+    so letting it replace an existing credential would let whoever holds a
+    forwarded link take over the account it names.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("This address can already sign in; accept without a password and sign in as usual")
+
+
 class VerificationTokenInvalidError(TenancyValidationError):
     """A verification token that is unknown, expired, or already consumed.
 
@@ -1068,6 +1080,7 @@ __all__ = [
     "InvitationAlreadyUsedError",
     "InvitationExpiredError",
     "InvitationNotFoundError",
+    "InvitationPasswordNotAcceptedError",
     "LastWorkspaceError",
     "MembershipUpdateError",
     "NotAnOrganizationMemberError",

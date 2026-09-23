@@ -289,8 +289,10 @@ an HTTPS `api_base`; a keyless local SearXNG endpoint may use HTTP.
 
 ## Mail
 
-Mail is optional. Invitations still return an accept link when no transport is
-configured.
+Mail is optional. Invitations always return an accept link, and the invitee
+sets their password when they open it, so members can join a deployment with no
+transport configured. Without mail, signup, email verification, and password
+reset are unavailable.
 
 SMTP needs the deployment's public URL, a host, and a sender:
 

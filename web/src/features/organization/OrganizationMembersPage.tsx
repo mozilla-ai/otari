@@ -10,7 +10,6 @@ import {
 
 import type {
   Budget,
-  CreateOrganizationMemberRequest,
   InviteOrganizationMemberRequest,
   InviteOrganizationMemberResult,
   MemberAttribution,
@@ -52,7 +51,6 @@ import {
   useUpdateScopedBudget,
 } from "@/shared/api/budgets"
 import {
-  useAddOrganizationMember,
   useInviteOrganizationMember,
   useOrganizationContext,
   useOrganizationMembersPage,
@@ -68,7 +66,8 @@ import {
   useUpdateWorkspaceMemberRole,
   useWorkspaces,
 } from "@/shared/api/workspaces"
-import { formatUsd } from "@/shared/helpers/format"
+import { absoluteDashboardLink } from "@/shared/helpers/dashboardLink"
+import { formatDateTime, formatUsd } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -172,37 +171,33 @@ function StatusMark({ status }: { status: string }) {
 }
 
 // Adding someone is an address plus a role, and optionally the workspaces to
-// drop them into in the same request. A local identity is created for an address
-// nothing else knows yet, which is the handle a future sign-in flow claims it
-// by; until then the row is a place to hang a role, which is the point.
-//
-// The form a deployment with no mail transport gets, and the only one it gets:
-// an invitation nobody can be sent is an acceptance step with no way through.
-function AddMemberForm({
+// drop them into once they accept. The membership lands `invited`, and every
+// deployment gets an accept link to share: emailed as well where mail can be
+// sent, and the only way in where it cannot, since claiming an identity through
+// signup needs mail and accepting with a password does not.
+function InviteMemberForm({
   isOpen,
   onClose,
 }: {
   isOpen: boolean
   onClose: () => void
 }) {
-  const add = useAddOrganizationMember()
+  const invite = useInviteOrganizationMember()
+  const { mail_ready } = useDeployment()
   const workspaces = useWorkspaces()
   const { selected } = useSelectedWorkspace()
   const [email, setEmail] = useState("")
   const [role, setRole] = useState<MembershipRole>("member")
   const [workspaceIds, setWorkspaceIds] = useState<string[]>([])
+  const [result, setResult] = useState<InviteOrganizationMemberResult>()
   const trimmed = email.trim()
 
   // Seeded once the workspace list answers, and only then: the default is a
   // starting point the operator can clear, not a value re-imposed on every
-  // render. Nothing was checked before, so an organization member could be
-  // created belonging to no workspace at all, which reads as a working account
-  // and behaves like one with nothing in it.
+  // render.
   const rows = workspaces.data
   const [seeded, setSeeded] = useState(false)
   // Everything the operator can change, against what the form was seeded with.
-  // A list of fields drifts: this one read the address alone, so a role or a
-  // workspace change with no address typed closed unguarded.
   const { isDirty, reset: reseed } = useDirtySnapshot({
     email,
     role,
@@ -235,146 +230,11 @@ function AddMemberForm({
     )
 
   const submit = () => {
-    const body: CreateOrganizationMemberRequest = {
-      email: trimmed,
-      role,
-      // Omitted rather than sent empty: no assignment is not the same request
-      // as an empty list of them. The role is stated rather than left to the
-      // server's default, so what this form grants is visible in the request
-      // it sends and in the copy above it.
-      workspace_assignments:
-        workspaceIds.length > 0
-          ? workspaceIds.map(
-              (workspace_id): WorkspaceAssignment => ({
-                workspace_id,
-                role: "member",
-              }),
-            )
-          : null,
-    }
-    add.mutate(body, { onSuccess: onClose })
-  }
-
-  return (
-    <FormDialog
-      isOpen={isOpen}
-      onOpenChange={(open) => {
-        if (!open) onClose()
-      }}
-      title="New member"
-      submitLabel="Add member"
-      onSubmit={submit}
-      isPending={add.isPending}
-      isSubmitDisabled={trimmed === ""}
-      isDirty={isDirty}
-      error={add.error}
-    >
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field
-          label="Email address"
-          value={email}
-          onChange={setEmail}
-          placeholder="alice@example.com"
-          isRequired
-          autoFocus
-          description="The handle this identity is claimed by. This deployment cannot send mail, so nothing is emailed and the membership is active straight away."
-        />
-        <Select
-          label="Role"
-          value={role}
-          onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
-          options={ROLE_OPTIONS}
-          shouldReserveMessage={false}
-        />
-      </div>
-      {workspaces.data && workspaces.data.length > 0 ? (
-        <fieldset className="flex flex-col gap-2">
-          <legend className="text-body">Workspaces (optional)</legend>
-          <span className="text-xs text-muted">
-            Joined as a member of each, in the same request, so someone never
-            exists without the access they were added for. Workspace roles are
-            changed afterwards on the Workspaces page.
-          </span>
-          {workspaceIds.length === 0 ? (
-            <span className="text-caption text-warning">
-              With none selected they join the organization but no workspace,
-              and will see nothing until someone assigns them one.
-            </span>
-          ) : null}
-          {workspaces.data.map((workspace) => (
-            <Checkbox
-              key={workspace.id}
-              isSelected={workspaceIds.includes(workspace.id)}
-              onChange={(isSelected) =>
-                toggleWorkspace(workspace.id, isSelected)
-              }
-            >
-              {workspace.name}
-            </Checkbox>
-          ))}
-        </fieldset>
-      ) : null}
-    </FormDialog>
-  )
-}
-
-// Invites rather than adds: the membership lands `invited`, not `active`, and
-// an email with an accept link goes out. The form a deployment that can send
-// mail gets, and the only one it gets. Kept separate from AddMemberForm rather
-// than a toggle on it: the two produce different results (`mail_sent`,
-// `accept_link`) and this one has something to show after it succeeds, which
-// AddMemberForm's immediate close does not.
-function InviteMemberForm({
-  isOpen,
-  onClose,
-}: {
-  isOpen: boolean
-  onClose: () => void
-}) {
-  const invite = useInviteOrganizationMember()
-  const workspaces = useWorkspaces()
-  const { selected } = useSelectedWorkspace()
-  const [email, setEmail] = useState("")
-  const [role, setRole] = useState<MembershipRole>("member")
-  const [workspaceIds, setWorkspaceIds] = useState<string[]>([])
-  const [result, setResult] = useState<InviteOrganizationMemberResult>()
-  const trimmed = email.trim()
-
-  const rows = workspaces.data
-  const [seeded, setSeeded] = useState(false)
-  // Same snapshot as the add form beside it, and the same reason.
-  const { isDirty, reset: reseed } = useDirtySnapshot({
-    email,
-    role,
-    workspaceIds,
-  })
-  if (!seeded && rows && rows.length > 0) {
-    setSeeded(true)
-    const preferred = rows.find(
-      (workspace) => workspace.id === selected?.workspace_id,
-    )
-    const defaults = [(preferred ?? rows[0]).id]
-    setWorkspaceIds(defaults)
-    // Part of the seed, not a change: this lands after mount, so a snapshot
-    // taken at first render would report the form dirty the moment the roster
-    // answers, and Escape would ask before closing an untouched form.
-    //
-    // The mount values, not `email` and `role` as they stand: the roster pages
-    // through `fetchAllPaged`, so on a cold cache this can fire after the
-    // operator has typed an address, and seeding what they typed would make the
-    // guard forget it.
-    reseed({ email: "", role: "member", workspaceIds: defaults })
-  }
-
-  const toggleWorkspace = (id: string, checked: boolean) =>
-    setWorkspaceIds((current) =>
-      checked ? [...current, id] : current.filter((one) => one !== id),
-    )
-
-  const submit = () => {
     const body: InviteOrganizationMemberRequest = {
       email: trimmed,
       role,
+      // Omitted rather than sent empty: no assignment is not the same request
+      // as an empty list of them.
       workspace_assignments:
         workspaceIds.length > 0
           ? workspaceIds.map(
@@ -388,9 +248,10 @@ function InviteMemberForm({
     invite.mutate(body, { onSuccess: setResult })
   }
 
-  // After a successful invite: whether it was actually emailed, and the link
-  // to share by hand when it was not (or when mail is unconfigured entirely).
+  // After a successful invite: whether it was emailed, and the link either way,
+  // so an operator can forward it even when the email did go out.
   if (result) {
+    const acceptLink = absoluteDashboardLink(result.accept_link)
     return (
       <FormDialog
         isOpen={isOpen}
@@ -406,26 +267,31 @@ function InviteMemberForm({
         onSubmit={onClose}
         isPending={false}
       >
-        {result.mail_sent ? (
-          <InfoBanner>
-            An email with an accept link was sent to{" "}
-            <strong>{result.email}</strong>.
-          </InfoBanner>
-        ) : (
-          <InfoBanner>
-            {/* Not "mail isn't configured": mail_sent is also false when a
-                configured transport's send failed, and that copy would send
-                an operator to debug a configuration that may be fine. */}
-            Otari did not send the email. Share this link with{" "}
-            <strong>{result.email}</strong> yourself; it works the same either
-            way.
-            <div className="mt-2">
-              <CopyableValue value={result.accept_link} label="Accept link">
-                <span className="break-all text-xs">{result.accept_link}</span>
-              </CopyableValue>
-            </div>
-          </InfoBanner>
-        )}
+        <InfoBanner>
+          {result.mail_sent ? (
+            <>
+              An email with an accept link was sent to{" "}
+              <strong>{result.email}</strong>. You can also share the link
+              yourself.
+            </>
+          ) : (
+            // Not "mail isn't configured": mail_sent is also false when a
+            // configured transport's send failed, and that copy would send an
+            // operator to debug a configuration that may be fine.
+            <>
+              Otari did not send the email. Share this link with{" "}
+              <strong>{result.email}</strong> yourself.
+            </>
+          )}
+        </InfoBanner>
+        <CopyableValue value={acceptLink} label="Accept link">
+          <span className="break-all text-xs">{acceptLink}</span>
+        </CopyableValue>
+        <p className="text-xs text-muted">
+          Whoever opens it can join as {result.email} and set its password, so
+          send it only to them. It works once, until{" "}
+          {formatDateTime(result.expires_at)}.
+        </p>
       </FormDialog>
     )
   }
@@ -452,7 +318,11 @@ function InviteMemberForm({
           placeholder="alice@example.com"
           isRequired
           autoFocus
-          description="An email with an accept link is sent here; the membership becomes active once they follow it."
+          description={
+            mail_ready
+              ? "An email with an accept link is sent here, and you get the same link to share. The membership becomes active once they follow it."
+              : "This deployment sends no mail, so you get an accept link to share with them. The membership becomes active once they follow it."
+          }
         />
         <Select
           label="Role"
@@ -468,6 +338,12 @@ function InviteMemberForm({
           <span className="text-xs text-muted">
             Granted once the invitation is accepted, not before.
           </span>
+          {workspaceIds.length === 0 ? (
+            <span className="text-caption text-warning">
+              With none selected they join the organization but no workspace,
+              and will see nothing until someone assigns them one.
+            </span>
+          ) : null}
           {workspaces.data.map((workspace) => (
             <Checkbox
               key={workspace.id}
@@ -861,8 +737,6 @@ export function OrganizationMembersPage() {
   // The roster row carries where its member is and what they may spend there,
   // and the operator-only spend figures with it (otari#1381). The page used to
   // assemble that from five more reads, two of them fanning out per workspace.
-  // Which of the two ways in this deployment offers: see the header action.
-  const { mail_ready } = useDeployment()
 
   const [editingMember, setEditingMember] = useState<string>()
   const [removing, setRemoving] = useState<OrganizationMember>()
@@ -1219,9 +1093,6 @@ export function OrganizationMembersPage() {
         title="Members"
         action={
           manages ? (
-            // One way in: an invitation is an email plus an acceptance step,
-            // and neither exists without a mail transport, so offering both
-            // asked the operator to choose on a fact the page already knows.
             // It stays on screen while its dialog is open, which sits over the
             // page rather than in place of it.
             <Button
@@ -1231,7 +1102,7 @@ export function OrganizationMembersPage() {
                 setJoining(true)
               }}
             >
-              {mail_ready ? "Invite member" : "Add member"}
+              Invite member
             </Button>
           ) : null
         }
@@ -1273,19 +1144,11 @@ export function OrganizationMembersPage() {
       {/* Keyed on the open count, so each open remounts a blank form. Clearing
           the draft on close instead would blank the fields while the dialog is
           still animating away. */}
-      {mail_ready ? (
-        <InviteMemberForm
-          key={`invite-${joinCount}`}
-          isOpen={joining}
-          onClose={() => setJoining(false)}
-        />
-      ) : (
-        <AddMemberForm
-          key={`add-${joinCount}`}
-          isOpen={joining}
-          onClose={() => setJoining(false)}
-        />
-      )}
+      <InviteMemberForm
+        key={`invite-${joinCount}`}
+        isOpen={joining}
+        onClose={() => setJoining(false)}
+      />
 
       {/* Keyed on the row: its fields seed from the member on mount only, so
           the next Edit has to arrive at a fresh form. */}

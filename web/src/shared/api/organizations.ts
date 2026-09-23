@@ -6,11 +6,10 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type {
+  AcceptInvitationRequest,
   AcceptInvitationResult,
   CallerOrganizationMembership,
   CreateOrganizationDomainRequest,
-  CreateOrganizationMemberRequest,
-  CreateOrganizationMemberResult,
   CreateOrganizationRequest,
   CreateOrgProviderKeyRequest,
   InvitationPreview,
@@ -222,31 +221,6 @@ export function useUpdateOrganization() {
     },
   })
 }
-// One of two write paths that put a second row on the roster: this one lands
-// the membership `active` immediately, with nothing emailed.
-// `useInviteOrganizationMember` below is the other, which lands `invited` and
-// emails an accept link.
-export function useAddOrganizationMember() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: CreateOrganizationMemberRequest) =>
-      apiFetch<CreateOrganizationMemberResult>("/organizations/me/members", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
-      // A request may place the new member into workspaces in the same
-      // transaction, so their rosters move with it.
-      void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
-      // The switcher reads its list from `workspace_memberships` on the
-      // organization context, not from this key, so a roster change that moves
-      // the caller in or out of a workspace has to refresh it too.
-      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
-    },
-  })
-}
-
 export function useUpdateOrganizationMember() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -290,9 +264,9 @@ export function useRemoveOrganizationMember() {
   })
 }
 
-// The other write path onto the roster: lands `invited` rather than `active`,
-// and the response always carries `accept_link` (whether or not `mail_sent`
-// is true), so the caller can offer "share this link yourself" when it isn't.
+// The dashboard's one write path onto the roster: lands `invited`, and the
+// response always carries `accept_link` (whether or not `mail_sent` is true),
+// so the operator can share it themselves.
 export function useInviteOrganizationMember() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -414,10 +388,10 @@ export function useValidateInvitation(token: string) {
 
 export function useAcceptInvitation() {
   return useMutation({
-    mutationFn: (token: string) =>
+    mutationFn: (body: AcceptInvitationRequest) =>
       apiFetch<AcceptInvitationResult>("/invitations/accept", {
         method: "POST",
-        body: JSON.stringify({ token }),
+        body: JSON.stringify(body),
       }),
   })
 }

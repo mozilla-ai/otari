@@ -64,7 +64,7 @@ from gateway.services.tenancy.user_service import set_password, update_password
 # A deliberately generous ceiling, and deliberately *not* ``MAX_PASSWORD_BYTES``.
 # The real limit is counted in bytes, so the readable refusal ("at most 72 bytes;
 # accented characters count for more than one") has to come from
-# ``_validate_password`` in the service rather than from a character count here.
+# ``validate_new_password`` in the service rather than from a character count here.
 # A schema bound of 72 would pre-empt it with a less useful 422 and would refuse
 # a 73-character password with the wrong explanation. This bound exists only to
 # stop an absurd body being buffered and hashed, which is a different job from

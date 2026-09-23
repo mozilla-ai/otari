@@ -49,15 +49,14 @@ import {
  * `terms_accepted_at` column throughout. Where there is a document, accepting
  * it is required, which is what makes the recorded acceptance mean anything.
  *
- * `?email=…` prefills the address, which is how the accept-invitation page
- * hands an invitee straight here (otari#835). It arrives read-only, because
- * the invitation is bound to that address and claiming a different one would
- * answer with the same enumeration-safe sentence while doing nothing at all,
- * which is the failure this whole handoff exists to remove. The footer offers
+ * `?email=…` prefills the address for a link that names an invited one
+ * (otari#835); the accept-invitation page sets a first password itself, so
+ * it no longer sends anyone here. It arrives read-only, because the invitation
+ * is bound to that address and claiming a different one would answer with the
+ * same enumeration-safe sentence while doing nothing at all. The footer offers
  * the plain page for anyone who does need another address. Not a credential
- * and not treated as one: the token that proved anything was spent on the
- * accept, and `POST /v1/auth/signup` checks this address against the roster
- * itself.
+ * and not treated as one: `POST /v1/auth/signup` checks this address against
+ * the roster itself.
  */
 export function SignupPage({ hash }: { hash: string }) {
   const signup = useSignup()

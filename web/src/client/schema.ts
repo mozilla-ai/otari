@@ -1309,7 +1309,7 @@ export interface paths {
         put?: never;
         /**
          * Accept Invitation
-         * @description Accept a pending invitation, resolving it to an active membership.
+         * @description Accept a pending invitation, resolving it to an active membership and optionally setting a first password.
          */
         post: operations["invitations-accept_invitation"];
         delete?: never;
@@ -5253,6 +5253,22 @@ export interface components {
     schemas: {
         /** AcceptInvitationRequest */
         AcceptInvitationRequest: {
+            /**
+             * Full Name
+             * @description Filled in only if not already set.
+             */
+            full_name?: string | null;
+            /**
+             * Password
+             * @description Sets the invited identity's password in the same step, when the preview reported needs_password. Needs no mail: the link is the proof, whether it was emailed or an admin handed it over.
+             */
+            password?: string | null;
+            /**
+             * Terms Accepted
+             * @description Whether the caller accepted this deployment's terms.
+             * @default false
+             */
+            terms_accepted: boolean;
             /** Token */
             token: string;
         };
@@ -5260,14 +5276,19 @@ export interface components {
          * AcceptInvitationResultPublic
          * @description What accepting produces: enough for the accept page to say where the visitor landed.
          *
-         *     No session and no token: accepting resolves the membership to ``active``
-         *     and stops there. The identity it resolves to is password-less on the roster
-         *     until it is claimed, so the next step is a sign-up on the
-         *     invited address, not a sign-in.
+         *     No session and no token. When the request carried a password, the identity
+         *     can sign in straight away; otherwise it stays password-less until claimed by
+         *     signup or a provider sign-in.
          */
         AcceptInvitationResultPublic: {
             /** Organization Name */
             organization_name: string;
+            /**
+             * Password Set
+             * @description Whether this accept set the identity's password.
+             * @default false
+             */
+            password_set: boolean;
             /** Role */
             role: string;
         };
@@ -8122,6 +8143,11 @@ export interface components {
              * Format: date-time
              */
             expires_at: string;
+            /**
+             * Needs Password
+             * @description Whether the invited address has never signed in here, so accepting should also set its password. False when the address already has a way in, and then accept refuses one.
+             */
+            needs_password: boolean;
             /** Organization Name */
             organization_name: string;
             /** Role */

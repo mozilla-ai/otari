@@ -5,12 +5,12 @@ key and no session, and the token in the link is their whole proof of
 anything here. Both routes therefore take no ``CurrentIdentity`` and are
 scoped to exactly the one invitation the token names.
 
-No session is minted on accept: the token proves possession of an emailed
-link, not of a password, so accepting only resolves the membership to
+No session is minted on accept: accepting resolves the membership to
 ``active``, the same place ``POST /me/members`` already lands a member added
-directly. The identity it resolves to is password-less on the roster until it
-is claimed, and claiming it is ``POST /api/v1/auth/signup``, which the dashboard's
-accept page hands the recipient straight to (otari#835).
+directly. An invitee who has never signed in can set a password in the same
+call, which is the only way in on a deployment that sends no mail; without one,
+the identity stays password-less until ``POST /api/v1/auth/signup`` or a
+provider sign-in claims it.
 """
 
 from typing import Annotated
@@ -91,6 +91,11 @@ async def accept_invitation(
     service: OrganizationServiceDep,
     body: AcceptInvitationRequest,
 ) -> AcceptInvitationResultPublic:
-    """Accept a pending invitation, resolving it to an active membership."""
+    """Accept a pending invitation, resolving it to an active membership and optionally setting a first password."""
     _throttle(request)
-    return await service.accept_invitation(body.token)
+    return await service.accept_invitation(
+        body.token,
+        password=body.password,
+        full_name=body.full_name,
+        terms_accepted=body.terms_accepted,
+    )

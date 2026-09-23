@@ -3,6 +3,38 @@
     "schemas": {
       "AcceptInvitationRequest": {
         "properties": {
+          "full_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filled in only if not already set.",
+            "title": "Full Name"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sets the invited identity's password in the same step, when the preview reported needs_password. Needs no mail: the link is the proof, whether it was emailed or an admin handed it over.",
+            "title": "Password"
+          },
+          "terms_accepted": {
+            "default": false,
+            "description": "Whether the caller accepted this deployment's terms.",
+            "title": "Terms Accepted",
+            "type": "boolean"
+          },
           "token": {
             "title": "Token",
             "type": "string"
@@ -15,11 +47,17 @@
         "type": "object"
       },
       "AcceptInvitationResultPublic": {
-        "description": "What accepting produces: enough for the accept page to say where the visitor landed.\n\nNo session and no token: accepting resolves the membership to ``active``\nand stops there. The identity it resolves to is password-less on the roster\nuntil it is claimed, so the next step is a sign-up on the\ninvited address, not a sign-in.",
+        "description": "What accepting produces: enough for the accept page to say where the visitor landed.\n\nNo session and no token. When the request carried a password, the identity\ncan sign in straight away; otherwise it stays password-less until claimed by\nsignup or a provider sign-in.",
         "properties": {
           "organization_name": {
             "title": "Organization Name",
             "type": "string"
+          },
+          "password_set": {
+            "default": false,
+            "description": "Whether this accept set the identity's password.",
+            "title": "Password Set",
+            "type": "boolean"
           },
           "role": {
             "title": "Role",
@@ -6198,6 +6236,11 @@
             "title": "Expires At",
             "type": "string"
           },
+          "needs_password": {
+            "description": "Whether the invited address has never signed in here, so accepting should also set its password. False when the address already has a way in, and then accept refuses one.",
+            "title": "Needs Password",
+            "type": "boolean"
+          },
           "organization_name": {
             "title": "Organization Name",
             "type": "string"
@@ -6211,7 +6254,8 @@
           "email",
           "organization_name",
           "role",
-          "expires_at"
+          "expires_at",
+          "needs_password"
         ],
         "title": "InvitationPreviewPublic",
         "type": "object"
@@ -21532,7 +21576,7 @@
     },
     "/api/v1/invitations/accept": {
       "post": {
-        "description": "Accept a pending invitation, resolving it to an active membership.",
+        "description": "Accept a pending invitation, resolving it to an active membership and optionally setting a first password.",
         "operationId": "invitations-accept_invitation",
         "requestBody": {
           "content": {

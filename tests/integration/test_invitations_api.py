@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
-from gateway.models.tenancy import Invitation, Organization, OrganizationMember
+from gateway.models.tenancy import Invitation, Organization, OrganizationMember, User
 
 
 def _invite(
@@ -42,6 +42,9 @@ def _invite(
 
 def _token_from(accept_link: str) -> str:
     return accept_link.split("token=")[1]
+
+
+PASSWORD = "correct-horse-battery"  # pragma: allowlist secret
 
 
 def _roster_row(client: TestClient, headers: dict[str, str], email: str) -> dict[str, Any]:
@@ -262,6 +265,89 @@ def test_expired_invitation_cannot_be_accepted(
 
     db_session.refresh(invitation)
     assert invitation.status == "expired"
+
+
+def test_a_shared_link_lets_the_invitee_set_a_password_and_sign_in_without_mail(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """With no mail transport, the link an operator hands over is the whole way in."""
+    result = _invite(client, master_key_header, email="grace@example.com")
+    assert result["mail_sent"] is False
+    token = _token_from(result["accept_link"])
+
+    preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token})
+    assert preview.json()["needs_password"] is True
+
+    accept = client.post(
+        f"{API_ROOT}/invitations/accept",
+        json={"token": token, "password": PASSWORD, "full_name": "Grace Hopper"},
+    )
+    assert accept.status_code == 200, accept.text
+    assert accept.json()["password_set"] is True
+
+    signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "grace@example.com", "password": PASSWORD})
+    assert signed_in.status_code == 200, signed_in.text
+    row = _roster_row(client, master_key_header, "grace@example.com")
+    assert row["status"] == "active"
+    assert row["full_name"] == "Grace Hopper"
+
+
+def test_accepting_without_a_password_still_works_and_sets_none(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    result = _invite(client, master_key_header, email="hedy@example.com")
+
+    accept = client.post(f"{API_ROOT}/invitations/accept", json={"token": _token_from(result["accept_link"])})
+
+    assert accept.status_code == 200, accept.text
+    assert accept.json()["password_set"] is False
+    signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "hedy@example.com", "password": PASSWORD})
+    assert signed_in.status_code == 401
+
+
+def test_a_forwarded_link_cannot_set_a_password_on_an_address_that_can_already_sign_in(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """A verified address is one someone already signs in to, whether by password or by provider."""
+    result = _invite(client, master_key_header, email="ida@example.com")
+    token = _token_from(result["accept_link"])
+    invitee = db_session.get(User, uuid.UUID(_roster_row(client, master_key_header, "ida@example.com")["user_id"]))
+    assert invitee is not None
+    invitee.email_verified_at = datetime.now(UTC)
+    db_session.add(invitee)
+    db_session.commit()
+
+    preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token})
+    assert preview.json()["needs_password"] is False
+
+    refused = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD})
+    assert refused.status_code == 400, refused.text
+    db_session.refresh(invitee)
+    assert invitee.hashed_password is None
+    # Refused as a whole: the invitation is still there to accept without a password.
+    assert _roster_row(client, master_key_header, "ida@example.com")["status"] == "invited"
+    accept = client.post(f"{API_ROOT}/invitations/accept", json={"token": token})
+    assert accept.status_code == 200, accept.text
+
+
+def test_a_password_that_breaks_the_policy_is_refused_before_anything_is_accepted(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    result = _invite(client, master_key_header, email="joan@example.com")
+
+    refused = client.post(
+        f"{API_ROOT}/invitations/accept",
+        json={"token": _token_from(result["accept_link"]), "password": "short"},
+    )
+
+    assert refused.status_code == 400, refused.text
+    assert "at least" in refused.json()["detail"]
+    assert _roster_row(client, master_key_header, "joan@example.com")["status"] == "invited"
 
 
 def test_revoke_suspends_the_membership_and_the_token_stops_working(
@@ -557,7 +643,7 @@ def test_accepting_from_the_inbox_activates_the_membership(
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
-    assert response.json() == {"organization_name": "Second", "role": "member"}
+    assert response.json() == {"organization_name": "Second", "role": "member", "password_set": False}
 
     db_session.refresh(membership)
     db_session.refresh(invitation)

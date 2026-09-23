@@ -1,5 +1,5 @@
 /**
- * The page an emailed accept link lands on: `#/accept-invitation?token=...`.
+ * The page an accept link lands on: `#/accept-invitation?token=...`.
  *
  * Deliberately not one of `src/routes/`'s files. Every route there lives
  * behind `App.tsx`'s auth gate (`DeploymentRoot` renders `<Login/>` instead
@@ -8,42 +8,41 @@
  * key. `App.tsx` renders this component directly, ahead of that gate, the
  * same way it renders `<Login/>` as a plain component rather than a route.
  *
- * No session is minted on accept: accepting only resolves their membership to
- * `active`, and the identity it resolves to is password-less on the roster
- * until it is claimed. So the page hands off to the claim flow (`#/signup`,
- * otari#835) with the invited address prefilled, rather than saying there is
- * nothing further to do, which was true only before per-user sign-in existed
- * and left every invitee stranded on the sign-in screen.
+ * The link reaches the invitee by email or from an admin who copied it, and
+ * this page works the same either way. When the preview says the invited
+ * address has never signed in (`needs_password`), accepting also sets its
+ * password, so the invitee can sign in straight away with no verification
+ * email: the link already proves what that email would, and it is the only
+ * way in on a deployment that sends no mail. When the address can already
+ * sign in, accepting is one button and the next step is signing in.
  *
- * Which ending the visitor gets is decided from what this browser and this
- * deployment can do, never from anything the server says about the address. A
- * gateway that cannot send mail cannot run signup at all
- * (`create_user_for_signup` refuses before writing), and where it also
- * configures no OAuth provider that ending is a genuine dead end, so it names
- * the setting an operator has to fill in rather than an action nobody can
- * take. Nothing here asks whether the invited identity has a password yet, and
- * nothing may: that is the enumeration answer `POST /api/v1/auth/signup` withholds
- * by design, so the claim and the sign-in are both offered and the visitor
- * picks. A session is treated the same way, as this browser's state rather
- * than proof of who is reading: accepting takes no identity, so a signed-in
- * visitor is offered the dashboard *and* the claim.
+ * A session is treated as this browser's state rather than proof of who is
+ * reading: accepting takes no identity, so a signed-in visitor still gets the
+ * page the link was meant for.
  */
 
 import { Button, Link } from "@heroui/react"
 import { useState } from "react"
+import type { InvitationPreview } from "@/client"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Checkbox } from "@/design-system/forms/Checkbox"
 import { useAuth } from "@/features/auth/AuthContext"
+import { AuthPasswordField, AuthTextField } from "@/features/auth/AuthFields"
 import { LoginPageShell } from "@/features/auth/LoginPageShell"
 import {
   goToPublicAuthPage,
   PublicAuthLink,
 } from "@/features/auth/PublicAuthLayout"
-import { isPublicAuthPageAvailable } from "@/features/auth/publicAuthPaths"
 import {
   useAcceptInvitation,
   useValidateInvitation,
 } from "@/shared/api/organizations"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
+import {
+  MAX_PASSWORD_BYTES,
+  MIN_PASSWORD_LENGTH,
+  newPasswordProblem,
+} from "@/shared/helpers/password"
 import { welcomeGuideHref } from "@/shared/helpers/welcomeGuide"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -59,36 +58,14 @@ export function AcceptInvitationPage() {
   const accept = useAcceptInvitation()
   const { isAuthenticated } = useAuth()
   const deployment = useDeployment()
-  const { mail_ready, oauth_providers } = deployment
   // Absent on a hosted deployment, which serves no such page; see
   // `welcomeGuideHref`. The rule above it goes with it, since a card ending in
   // a bordered empty row reads as something that failed to load.
   const welcomeHref = welcomeGuideHref(deployment)
-  // Asked of `publicAuthPaths`' table rather than of `mail_ready` directly, so
-  // this page follows the destination it is sending someone to if signup's
-  // requirement ever moves. The gate exists because the claim mails a
-  // verification link and refuses with a 503 where this deployment has no
-  // transport (otari#648): an invitation shared by hand on such a gateway has
-  // to say so rather than offer a button whose only outcome is that refusal.
-  const offersClaim = isPublicAuthPageAvailable("/signup", {
-    mailReady: mail_ready,
-    oauthProviders: oauth_providers,
-  })
-  // A provider sign-in is the other way in, and it needs no mail: a
-  // provider-verified address stamps `email_verified_at` and resolves a
-  // rostered identity that has no password at all
-  // (`adapters/identity_provider_adapter.py`, which calls it "the one way a
-  // deployment that cannot send mail can still let a member in"). So the
-  // no-mail ending is only a dead end where there is no provider either.
-  const offersProviderSignIn = oauth_providers.length > 0
-
-  // Still in the query cache behind the accept. Why the claim is bound to this
-  // address is `SignupPage`'s docstring; absent only if the preview were
-  // somehow gone, and then the form asks for it.
-  const invitedEmail = preview.data?.email
-  const signupHash = invitedEmail
-    ? `#/signup?${new URLSearchParams({ email: invitedEmail }).toString()}`
-    : "#/signup"
+  // A provider-verified address resolves a rostered identity that has no
+  // password (`adapters/identity_provider_adapter.py`), so where there is a
+  // provider, setting a password here is one way in rather than the only one.
+  const offersProviderSignIn = deployment.oauth_providers.length > 0
 
   return (
     <LoginPageShell>
@@ -103,11 +80,9 @@ export function AcceptInvitationPage() {
               )
             }
           />
-          {/* A refusal is not a handoff, and this page deliberately offers
-                  none here. It still owes a door: with forward navigation on
-                  the success branch, Back onto a spent token lands here, and a
-                  card whose only other link is the welcome guide strands
-                  whoever reads it. */}
+          {/* A refusal still owes a door: Back onto a spent token lands here,
+              and a card whose only other link is the welcome guide strands
+              whoever reads it. */}
           <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
         </>
       ) : accept.isSuccess ? (
@@ -117,13 +92,13 @@ export function AcceptInvitationPage() {
         // "already used" and take the next step away with it.
         <>
           {/* No article before the role: two of the three ("a owner", "a
-                  admin") read wrong, and the roles are the server's words. */}
+              admin") read wrong, and the roles are the server's words. */}
           <p className="text-sm text-foreground">
             You're now a member of{" "}
             <strong>{accept.data.organization_name}</strong>, with the{" "}
             <strong>{accept.data.role}</strong> role.
           </p>
-          {isAuthenticated ? (
+          {isAuthenticated && !accept.data.password_set ? (
             <>
               <p className="text-center text-xs text-muted">
                 You're already signed in, so there is nothing left to set up.
@@ -135,46 +110,15 @@ export function AcceptInvitationPage() {
               >
                 Go to the dashboard
               </Button>
-              {/* Offered, not assumed: `accept` takes no identity and this
-                      session may belong to someone else in a shared browser, so
-                      the claim stays reachable rather than this ending being the
-                      one with no route to it. */}
-              {offersClaim && invitedEmail ? (
-                <PublicAuthLink to={signupHash}>
-                  Not you? Set a password for {invitedEmail}
-                </PublicAuthLink>
-              ) : null}
-            </>
-          ) : offersClaim ? (
-            <>
-              <p className="text-center text-xs text-muted">
-                Next, set your password to sign in.
-              </p>
-              <Button
-                variant="primary"
-                fullWidth
-                onPress={() => goToPublicAuthPage(signupHash)}
-              >
-                Set your password
-              </Button>
-              {/* The other half of the same fork, offered rather than
-                      decided: an address that already has a password has
-                      nothing to claim, and asking the server which case this is
-                      would be the enumeration answer signup withholds. */}
-              <PublicAuthLink to="#/">
-                Already have a password? Sign in
-              </PublicAuthLink>
             </>
           ) : (
             <>
-              {/* Never "ask an administrator to set your password": there is
-                      no endpoint for that. `PUT /api/v1/auth/password` only ever
-                      acts on the caller's own identity, so that advice named
-                      something nobody on this deployment can do. */}
               <p className="text-center text-xs text-muted">
-                {offersProviderSignIn
-                  ? "Setting a password works by emailing you a link, and this deployment sends no mail. Sign in with one of the providers on the sign-in screen instead."
-                  : "Setting a password works by emailing you a link, and this deployment sends no mail. An operator can turn that on by configuring outgoing mail and a public base URL for this gateway."}
+                {accept.data.password_set
+                  ? `Your password is set. Sign in as ${preview.data?.email ?? "the invited address"} to get started.`
+                  : preview.data?.needs_password && offersProviderSignIn
+                    ? "Sign in with one of the providers on the sign-in screen to get started."
+                    : "Sign in to get started."}
               </p>
               <Button
                 variant="primary"
@@ -200,17 +144,26 @@ export function AcceptInvitationPage() {
             <strong>{preview.data.email}</strong> to join with the{" "}
             <strong>{preview.data.role}</strong> role.
           </p>
-          <ErrorBanner error={accept.error} />
-          <Button
-            variant="primary"
-            fullWidth
-            isPending={accept.isPending}
-            onPress={() => {
-              if (token) accept.mutate(token)
-            }}
-          >
-            Accept invitation
-          </Button>
+          {preview.data.needs_password ? (
+            <ClaimForm
+              token={token}
+              preview={preview.data}
+              accept={accept}
+              offersProviderSignIn={offersProviderSignIn}
+            />
+          ) : (
+            <>
+              <ErrorBanner error={accept.error} />
+              <Button
+                variant="primary"
+                fullWidth
+                isPending={accept.isPending}
+                onPress={() => accept.mutate({ token })}
+              >
+                Accept invitation
+              </Button>
+            </>
+          )}
         </>
       ) : null}
 
@@ -225,5 +178,124 @@ export function AcceptInvitationPage() {
         </div>
       ) : null}
     </LoginPageShell>
+  )
+}
+
+// Accepts and sets the first password in one call, for an address that has
+// never signed in. Kept apart from `SignupPage`: that form ends in a
+// verification email, and this one ends ready to sign in.
+function ClaimForm({
+  token,
+  preview,
+  accept,
+  offersProviderSignIn,
+}: {
+  token: string
+  preview: InvitationPreview
+  accept: ReturnType<typeof useAcceptInvitation>
+  offersProviderSignIn: boolean
+}) {
+  const { terms_url } = useDeployment()
+  const [fullName, setFullName] = useState("")
+  const [password, setPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [isTermsAccepted, setIsTermsAccepted] = useState(false)
+
+  const problem = newPasswordProblem(password, confirmPassword)
+  const canSubmit =
+    password !== "" &&
+    confirmPassword !== "" &&
+    problem === null &&
+    (terms_url === null || isTermsAccepted)
+
+  const submit = () => {
+    if (!canSubmit || accept.isPending) return
+    accept.mutate({
+      token,
+      password,
+      full_name: fullName.trim() || null,
+      // Present only where a document was actually shown, as on signup.
+      ...(terms_url !== null ? { terms_accepted: true } : {}),
+    })
+  }
+
+  return (
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={(event) => {
+        event.preventDefault()
+        submit()
+      }}
+    >
+      <p className="text-xs text-muted">
+        Set a password to sign in as {preview.email}.
+      </p>
+      <AuthTextField
+        label="Full name (optional)"
+        value={fullName}
+        onChange={setFullName}
+        autoComplete="name"
+      />
+      <AuthPasswordField
+        label="Password"
+        value={password}
+        onChange={setPassword}
+        autoComplete="new-password"
+        description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
+        errorMessage={problem ?? undefined}
+      />
+      <AuthPasswordField
+        label="Confirm password"
+        value={confirmPassword}
+        onChange={setConfirmPassword}
+        autoComplete="new-password"
+      />
+      {/* Beside the checkbox rather than inside its label, for the reason
+          `SignupPage` gives: nested, the link only ticked the box. */}
+      {terms_url !== null ? (
+        <div className="flex flex-wrap items-center gap-x-1 text-caption">
+          <Checkbox
+            isSelected={isTermsAccepted}
+            onChange={setIsTermsAccepted}
+            ariaLabel="I accept the terms of service"
+          >
+            <span className="text-caption">I accept the</span>
+          </Checkbox>
+          <span>
+            <a
+              href={terms_url}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-link hover:text-link-hover"
+            >
+              terms of service
+            </a>
+            .
+          </span>
+        </div>
+      ) : null}
+
+      <ErrorBanner error={accept.error} />
+
+      <Button
+        type="submit"
+        variant="primary"
+        fullWidth
+        isPending={accept.isPending}
+        isDisabled={!canSubmit}
+      >
+        Accept and set password
+      </Button>
+      {offersProviderSignIn ? (
+        <Button
+          variant="ghost"
+          fullWidth
+          isDisabled={accept.isPending}
+          onPress={() => accept.mutate({ token })}
+        >
+          Accept and sign in with a provider instead
+        </Button>
+      ) : null}
+    </form>
   )
 }

@@ -1055,6 +1055,12 @@ class InvitationPreviewPublic(SQLModel):
     organization_name: str
     role: str
     expires_at: datetime
+    needs_password: bool = Field(
+        description=(
+            "Whether the invited address has never signed in here, so accepting should also set its "
+            "password. False when the address already has a way in, and then accept refuses one."
+        )
+    )
 
 
 class InviteOrganizationMemberRequest(SQLModel):
@@ -1106,21 +1112,40 @@ class ValidateInvitationRequest(SQLModel):
     token: str
 
 
+# The same sanity ceiling signup and the password routes put on a submitted
+# password; the policy itself is ``validate_new_password``'s, so its readable
+# refusal survives rather than a 422 from a schema bound.
+_MAX_SUBMITTED_PASSWORD = 1024
+
+
 class AcceptInvitationRequest(SQLModel):
     token: str
+    password: str | None = Field(
+        default=None,
+        max_length=_MAX_SUBMITTED_PASSWORD,
+        description=(
+            "Sets the invited identity's password in the same step, when the preview reported "
+            "needs_password. Needs no mail: the link is the proof, whether it was emailed or an "
+            "admin handed it over."
+        ),
+    )
+    full_name: str | None = Field(
+        default=None, max_length=MAX_FULL_NAME_LENGTH, description="Filled in only if not already set."
+    )
+    terms_accepted: bool = Field(default=False, description="Whether the caller accepted this deployment's terms.")
 
 
 class AcceptInvitationResultPublic(SQLModel):
     """What accepting produces: enough for the accept page to say where the visitor landed.
 
-    No session and no token: accepting resolves the membership to ``active``
-    and stops there. The identity it resolves to is password-less on the roster
-    until it is claimed, so the next step is a sign-up on the
-    invited address, not a sign-in.
+    No session and no token. When the request carried a password, the identity
+    can sign in straight away; otherwise it stays password-less until claimed by
+    signup or a provider sign-in.
     """
 
     organization_name: str
     role: str
+    password_set: bool = Field(default=False, description="Whether this accept set the identity's password.")
 
 
 class PendingOrganizationInvitationPublic(SQLModel):
