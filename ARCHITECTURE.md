@@ -248,6 +248,8 @@ A service imports its own domain's repositories, the services of other domains, 
 
 ## Where new code goes
 
+**Before this table applies, decide whether the feature is part of the open-source product.** The table says where code goes once that is settled; it does not settle it. A feature released here cannot be withdrawn, every deployment inherits it, and the project carries its schema, tests and maintenance from then on. So the decision belongs to the project's product and engineering leads together, not to whoever writes the code. Open an issue that says what the feature is and who it is for, and wait for that confirmation before building it. A feature that is not confirmed for the open-source product belongs in an overlay, and may move here later. The reverse move is not possible.
+
 Choose the mechanism by what you are adding, not by the extension point you already know.
 
 | You are adding | Home | Mechanism |
@@ -285,12 +287,23 @@ A recipe for an optional feature the core ships. [The modular monolith](#the-mod
 
 1. **Write the feature's modules** in its domain's shape, as [The modular monolith](#the-modular-monolith) lays it out. One of them declares the feature's `CoreFeature` (`src/gateway/core/feature.py`). None of them imports `src/gateway/features.py`: the boundary check refuses a service or a route that imports the registry. Its queries go in its repository package, and its service is built with its own repositories and a Unit of Work, never the database session. The boundary check refuses a service or a route that imports `sqlalchemy` or `sqlmodel`, so neither can build a query or name the session type.
 2. **Add its settings.** A setting goes in its domain's module under `src/gateway/core/settings/`. A domain with no module there adds one, and adds its class to the bases of `GatewayConfig` in `src/gateway/core/config.py`. Every field declares its settings view (`src/gateway/core/settings_view.py`). The feature's switch is one of these settings, and it stays out of `_SPECS` in `src/gateway/services/runtime_settings_service.py`, because `enabled` is asked once when the app is built and a dashboard override would never take effect.
-3. **Add its tables.** A table goes in its domain's model module under `src/gateway/models/`, and a new module joins the import list in `src/gateway/models/__init__.py`. Its migration goes in `alembic/versions/`, chained to the current head. The tables live on core's metadata and core's chain, so switching the feature off leaves its tables and rows in place, and switching it back on changes no schema.
+3. **Add its tables.** A table goes in its domain's model module under `src/gateway/models/`, and a new module joins the import list in `src/gateway/models/__init__.py`. Its migration goes in `alembic/versions/`, chained to the current head. The tables live on core's metadata and core's chain, so switching the feature off leaves its tables and rows in place, and switching it back on changes no schema. [Why a feature's switch never touches its schema](#why-a-features-switch-never-touches-its-schema) gives the reasoning.
 4. **Declare its metrics** in the module that increments them, on `REGISTRY` from `src/gateway/metrics.py`.
 5. **List it.** Add the feature's `CoreFeature` to `CORE_FEATURES` in `src/gateway/features.py`. The entry gives the feature's name, its `surface` (a `Surface` from `src/gateway/core/surface.py`, or `None` for a feature with no page), its `enabled` check, its routers and an optional worker. Its routers mount beside the management routers and its worker runs under the lifespan, in standalone and hosted mode only; a hybrid gateway runs neither.
 6. **Add its page.** Its nav entry in `web/src/app/nav/registry.ts` names the feature's surface, so wherever the feature is off the dashboard hides the entry and answers its route with a panel rather than a page. A surface whose name is not its route prefix needs an entry in `SURFACE_ROUTE_PREFIXES` (`tests/unit/test_deployment_bootstrap.py`), which checks that every published surface names a mounted route.
 7. **Regenerate the artifacts** a new route owes, as "Generated Artifacts" in [AGENTS.md](AGENTS.md) lists them.
 8. **Verify it switched on and switched off:** `make lint`, the tests, and `uv run --frozen --no-dev python scripts/oss_edition_smoke.py`.
+
+### Why a feature's switch never touches its schema
+
+A feature's switch is configuration, and a configuration change has to be safe to make and safe to undo. Giving each optional feature its own migrations, run only where the feature is on, would give up four things.
+
+- **A configuration change would run DDL.** Migrations run in-process at startup when `auto_migrate` is on, with no lock around them, so every replica that booted with the new setting would run the feature's first migration at once. With `auto_migrate` off the gateway does not inspect the schema, so it would start without the tables the feature needs, or would have to learn to refuse to start until an operator migrated by hand.
+- **The schema would depend on history, not on the release.** With one chain and one head, two deployments migrated to the same release hold the same schema and the same `alembic_version`. With a branch per feature, what `alembic_version` holds depends on when each switch was flipped relative to each release, and two identical deployments can disagree.
+- **A rollback would depend on features nobody uses.** `alembic/env.py` refuses a database stamped with a revision the running image does not know, whichever feature wrote it. A feature switched on once and off ever since would still leave its revision behind, and an older image would refuse that database because of it.
+- **The suite would stop testing the deployed schema.** With one chain the schema under test is the schema every deployment has. With N independent features there are 2^N schemas in the field, and the suite runs one of them.
+
+An empty table costs a few kilobytes and holds no data. If a feature's schema ever becomes heavy enough to matter, that feature is the evidence to revisit this with.
 
 ## Glossary
 
