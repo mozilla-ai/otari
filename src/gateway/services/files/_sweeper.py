@@ -10,6 +10,8 @@ from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.services.files._service import FileService, SweepBatch
 
+# Bound work per tick so a large backlog drains across ticks rather than
+# keeping one job's session open until every candidate has been scanned.
 _MAX_SWEEP_PASSES = 10
 
 
@@ -41,4 +43,5 @@ async def run_file_sweeper(
         except asyncio.CancelledError:
             raise
         except Exception:
+            # An escaping error would end this worker, and nothing restarts it.
             logger.warning("File sweep failed; retrying in %ss", interval, exc_info=True)

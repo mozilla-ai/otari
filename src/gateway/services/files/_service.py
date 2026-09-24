@@ -115,7 +115,10 @@ class SweepBatch:
     """One cleanup batch and the key that resumes scanning after it."""
 
     reclaimed: int
+    # Rows inspected, including failed deletions. A short batch ends this scan.
     seen: int
+    # Last inspected (created_at, id), or None for an empty batch. Advance past
+    # failed deletions so they do not block later candidates in the same tick.
     cursor: tuple[datetime, str] | None
 
 
@@ -359,6 +362,8 @@ class FileService:
 
     async def discard_output_bytes(self, storage_ref: str) -> None:
         """Best-effort cleanup of output bytes that could not be registered."""
+        # Wait for deletion unless the caller is cancelled during the await;
+        # shielding lets deletion continue without the caller waiting for it.
         with contextlib.suppress(Exception):
             await asyncio.shield(self._file_store.delete(storage_ref))
 

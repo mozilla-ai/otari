@@ -41,6 +41,7 @@ class SandboxFileBridge:
     produced. ``base_url`` is where those downloads are served from, for a loop
     that announces a produced file to the caller as a URL.
 
+    Standalone only: it needs the local database that hybrid mode does not have.
     Persistence goes through the Files service, which owns the request's
     database transactions. Transfers run outside those transactions.
     """
