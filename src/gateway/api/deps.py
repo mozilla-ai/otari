@@ -23,6 +23,7 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdi
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
+from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
@@ -38,7 +39,6 @@ from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
-from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileService, SandboxFileBridge, StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
@@ -1121,13 +1121,14 @@ async def _caller_organization_id(
 CallerOrganization = Annotated[uuid.UUID, Depends(_caller_organization_id)]
 
 
-async def get_feedback_service(
+async def get_feedback_delivery_port(
     db: Annotated[AsyncSession, Depends(get_db)],
     _authenticated: Annotated[str | None, Depends(verify_master_key)],
-) -> FeedbackService:
-    """Finish authentication's database work before waiting for the receiver."""
+    container: ContainerDep,
+) -> FeedbackDeliveryPort:
+    """Finish authentication's database work, then resolve delivery with no session to hold."""
     await release_session(db)
-    return FeedbackService()
+    return container.resolve(FeedbackDeliveryPort, None)
 
 
 __all__ = [
@@ -1153,7 +1154,7 @@ __all__ = [
     "reset_config",
     "set_config",
     "get_db_if_needed",
-    "get_feedback_service",
+    "get_feedback_delivery_port",
     "get_file_store",
     "get_log_writer",
     "is_valid_master_key",

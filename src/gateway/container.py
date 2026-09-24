@@ -33,6 +33,7 @@ from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.code_execution_adapter import build_code_execution_port, verify_code_execution_ready
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
+from gateway.adapters.feedback_delivery_adapter import HttpFeedbackDeliveryAdapter
 from gateway.adapters.file_storage_adapter import build_file_storage_port
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
@@ -44,11 +45,13 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
+from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.version import __version__
 
 T = TypeVar("T")
 
@@ -300,6 +303,18 @@ def _code_execution_adapter_factory(config: GatewayConfig | None) -> PortFactory
     return factory
 
 
+def _feedback_delivery_factory(config: GatewayConfig | None) -> PortFactory[FeedbackDeliveryPort]:
+    """The core ``FeedbackDeliveryPort`` factory, naming the build and deployment kind it posts as."""
+    kind = "hosted" if config is not None and config.is_hosted_mode else "standalone"
+    user_agent = f"otari/{__version__} ({kind})"
+
+    def factory(session: AsyncSession | None) -> FeedbackDeliveryPort:
+        del session
+        return HttpFeedbackDeliveryAdapter(user_agent=user_agent)
+
+    return factory
+
+
 def _file_storage_port_factory(config: GatewayConfig | None) -> PortFactory[FileStoragePort]:
     """The core ``FileStoragePort`` factory, closed over this app's config.
 
@@ -377,6 +392,10 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # bucket or any fsspec filesystem, whichever ``files_backend`` names. An
     # overlay binds a store of its own and changes nothing above the port.
     container.bind(FileStoragePort, _file_storage_port_factory(config))
+    # A person's message to the Otari team: the base posts it to the otari.ai
+    # intake. otari.ai's hosted control plane binds an in-process adapter, so
+    # its users are not one source address at the receiver.
+    container.bind(FeedbackDeliveryPort, _feedback_delivery_factory(config))
     if config is not None:
         # Asked once, at build, rather than per request: selecting a hosted
         # provider is itself what publishes code execution on ``/v1/tools``, in

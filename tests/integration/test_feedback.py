@@ -12,11 +12,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
-from gateway.api import deps
+from gateway import container as container_module
+from gateway.adapters.feedback_delivery_adapter import HttpFeedbackDeliveryAdapter
+from gateway.container import Container
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.tenancy import DashboardSession, User
+from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
-from gateway.services.feedback import FeedbackService
+from gateway.version import __version__
 
 from .conftest import build_test_client
 
@@ -34,7 +37,13 @@ def deliveries(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
         calls.append(request)
         return httpx.Response(204)
 
-    monkeypatch.setattr(deps, "FeedbackService", partial(FeedbackService, transport=httpx.MockTransport(receive)))
+    # The class the container's core factory builds, so every app a test boots
+    # delivers into this list, whenever its container was built.
+    monkeypatch.setattr(
+        container_module,
+        "HttpFeedbackDeliveryAdapter",
+        partial(HttpFeedbackDeliveryAdapter, transport=httpx.MockTransport(receive)),
+    )
     return calls
 
 
@@ -55,6 +64,7 @@ def test_operator_submission_is_explicit(
     assert str(request.url) == f"https://api.otari.ai{API_ROOT}/feedback/submissions"
     assert json.loads(request.content) == {"message": "Useful"}
     assert not {"authorization", "x-api-key", "cookie", "referer", "origin", "x-forwarded-for"} & set(request.headers)
+    assert request.headers["user-agent"] == f"otari/{__version__} (standalone)"
 
 
 def test_ordinary_member_can_submit(
@@ -153,6 +163,41 @@ def test_each_caller_is_limited_to_five_sends_per_window(
     client.cookies.set(SESSION_COOKIE_NAME, token)
     assert client.post(f"{API_ROOT}/feedback", json={"message": "Mine"}).status_code == 204
     assert len(deliveries) == 6
+
+
+def test_a_bound_delivery_port_receives_the_message_and_its_submitter(
+    client: TestClient, db_session: Session, master_key_header: dict[str, str]
+) -> None:
+    received: list[tuple[str, str]] = []
+
+    class InProcessDelivery:
+        async def submit(self, message: str, submitter: str) -> None:
+            received.append((message, submitter))
+
+    # What an overlay's bootstrap does for the hosted control plane.
+    container: Container = client.app.state.container  # type: ignore[attr-defined]
+    container.bind(FeedbackDeliveryPort, lambda session: InProcessDelivery())
+    assert (
+        client.post(f"{API_ROOT}/feedback", json={"message": " Keyed "}, headers=master_key_header).status_code == 204
+    )
+    added = client.post(
+        f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=master_key_header
+    )
+    assert added.status_code == 201, added.text
+    user = db_session.scalars(select(User).where(col(User.email) == "member@example.com")).one()
+    token = "feedback-port-member"
+    db_session.add(
+        DashboardSession(
+            token_hash=hash_session_token(token),
+            user_id=user.id,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+    )
+    db_session.commit()
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    assert client.post(f"{API_ROOT}/feedback", json={"message": "Mine"}).status_code == 204
+    assert received == [("Keyed", "master"), ("Mine", str(user.id))]
 
 
 def test_chunked_body_limit(

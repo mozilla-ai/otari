@@ -6,13 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import ValidationError
 from starlette.requests import ClientDisconnect
 
-from gateway.api.deps import get_feedback_service, get_session_identity, verify_master_key
+from gateway.api.deps import get_feedback_delivery_port, get_session_identity, verify_master_key
 from gateway.core.feature import CoreFeature
 from gateway.exceptions.feedback_exceptions import FeedbackDeliveryError
 from gateway.models.tenancy import User
+from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.rate_limit import RateLimiter
 from gateway.schemas.feedback import FeedbackSubmission
-from gateway.services.feedback import FeedbackService
 
 router = APIRouter(prefix="/feedback", tags=["feedback"], dependencies=[Depends(verify_master_key)])
 MAX_BODY_BYTES = 32 * 1024
@@ -56,22 +56,23 @@ async def _read_submission(request: Request) -> FeedbackSubmission:
 )
 async def submit_feedback(
     request: Request,
-    service: Annotated[FeedbackService, Depends(get_feedback_service)],
+    delivery: Annotated[FeedbackDeliveryPort, Depends(get_feedback_delivery_port)],
     session_identity: Annotated[User | None, Depends(get_session_identity)],
 ) -> Response:
     """Send feedback privately to the Otari team."""
     body = await _read_submission(request)
+    submitter = str(session_identity.id) if session_identity else "master"
     # After validation, so a body that never leaves the gateway costs no send.
     limiter: RateLimiter | None = getattr(request.app.state, "feedback_rate_limiter", None)
     if limiter is not None:
         try:
-            limiter.check(str(session_identity.id) if session_identity else "master")
+            limiter.check(submitter)
         except HTTPException as exc:
             raise HTTPException(
                 status.HTTP_429_TOO_MANY_REQUESTS, "Please wait before sending more feedback.", headers=exc.headers
             ) from None
     try:
-        await service.submit(body)
+        await delivery.submit(body.message, submitter)
     except FeedbackDeliveryError as exc:
         detail = {
             413: "Feedback is too large.",

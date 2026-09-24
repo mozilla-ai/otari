@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
+from gateway.adapters.feedback_delivery_adapter import HttpFeedbackDeliveryAdapter
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
@@ -36,11 +37,13 @@ from gateway.core.config import GatewayConfig
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.entitlement_port import EntitlementPort
+from gateway.ports.feedback_delivery_port import FeedbackDeliveryPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.version import __version__
 
 # The core adapters ignore the session, so a placeholder stands in for one; a
 # unit test of the wiring has no database and needs none.
@@ -98,6 +101,7 @@ def test_core_defaults_are_bound_for_every_port() -> None:
     assert isinstance(container.resolve(TelemetryStoragePort, NO_SESSION), DatabaseTelemetryStorageAdapter)
     assert isinstance(container.resolve(IdentityProviderPort, NO_SESSION), RosterIdentityProviderAdapter)
     assert isinstance(container.resolve(ApiKeyFormatPort, NO_SESSION), DefaultApiKeyFormatAdapter)
+    assert isinstance(container.resolve(FeedbackDeliveryPort, NO_SESSION), HttpFeedbackDeliveryAdapter)
 
 
 def test_no_selector_contributes_no_routers_and_says_so() -> None:
@@ -358,3 +362,11 @@ def test_router_contributions_keep_their_order() -> None:
     container.contribute_router(second)
 
     assert container.router_contributions() == (first, second)
+
+
+@pytest.mark.parametrize(("mode", "kind"), [("standalone", "standalone"), ("hosted", "hosted")])
+def test_feedback_delivery_names_the_build_and_the_deployment_kind(mode: str, kind: str, tmp_path: Path) -> None:
+    config = GatewayConfig(mode=mode, database_url=f"sqlite:///{tmp_path / 'x.db'}")
+    adapter = build_container(config=config).resolve(FeedbackDeliveryPort, NO_SESSION)
+    assert isinstance(adapter, HttpFeedbackDeliveryAdapter)
+    assert adapter._headers["User-Agent"] == f"otari/{__version__} ({kind})"
