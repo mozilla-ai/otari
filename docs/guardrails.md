@@ -474,8 +474,12 @@ nothing else. A workspace cannot opt out of an entry scoped to it: the scope is
 the organization's to set.
 
 Organization guardrails are managed by standalone and hosted control planes.
-They do not currently apply on a [hybrid gateway](modes.md), because the
-platform does not expose a guardrail-resolution endpoint to the gateway.
+On a [hybrid gateway](modes.md) they apply when the platform names them on
+resolve: the gateway asks the platform to run them, in one call per request,
+and applies each mandate's `mode` and `on_unavailable` to the answer. No
+guardrail endpoint, credential or vendor secret reaches the gateway, and the
+request's user text reaches the platform. The wire contract is in
+[the hybrid-mode protocol](hybrid-mode-protocol.md#guardrail-evaluation).
 
 ## Runnable walkthrough
 
