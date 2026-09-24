@@ -191,11 +191,6 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // Auth gates the router rather than living inside it: signing in is the one
   // decision no route gets to make. The route table and the shell it renders
   // into are in src/routes, wired up in src/app/router.tsx.
-  //
-  // The selected workspace wraps the router because the shell's switcher and the
-  // pages below it read the same selection, and it is seeded from the
-  // organization context, which needs a session: inside the auth gate, never
-  // above it.
   return <SignedInRoot />
 }
 
@@ -213,6 +208,10 @@ function SignedInRoot() {
       router.history.replace(publicCatalogHref(modelId).replace(/^#/, ""))
     }
   })
+  // The selected workspace wraps the router because the shell's switcher and the
+  // pages below it read the same selection, and it is seeded from the
+  // organization context, which needs a session: inside the auth gate, never
+  // above it.
   return (
     <SelectedWorkspaceProvider>
       <RouterProvider router={router} />

@@ -75,7 +75,7 @@ describe("App", () => {
     expect(takeRememberedModel()).toBeNull()
   })
 
-  it("lets a deep link win over the remembered model", async () => {
+  it("lets a deep link win over the remembered model", () => {
     window.localStorage.setItem("otari.dashboard.hasSession", "1")
     vi.mocked(siteFetch).mockResolvedValue({
       build: "test-build",
@@ -87,7 +87,7 @@ describe("App", () => {
 
     renderApp(bootstrap())
 
-    await waitFor(() => expect(document.title).toContain("Otari"))
+    // Decided on the first render, before the router mounts.
     expect(window.location.hash).toBe("#/keys")
     // Forgotten all the same: it was this session's to use or lose.
     expect(takeRememberedModel()).toBeNull()
