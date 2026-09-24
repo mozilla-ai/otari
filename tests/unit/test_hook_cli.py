@@ -2766,3 +2766,121 @@ def test_collect_check_verdicts_skips_gates_over_the_per_run_limit(tmp_path: Pat
 def test_collect_check_verdicts_returns_empty_for_an_unparseable_policy(tmp_path: Path) -> None:
     gates_file = tmp_path / ".otari-guardrails.yml"
     assert hook_cli._hook_collect_check_verdicts("not: valid: yaml: at: all:", gates_file, tmp_path, []) == []
+
+
+def _read_payload(repo: Path, target: str) -> dict[str, Any]:
+    return {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Read",
+        "tool_input": {"file_path": target},
+    }
+
+
+@pytest.mark.parametrize("spelling", ["{repo}/.env", ".env", "./.env"])
+def test_a_symlink_out_of_the_repo_does_not_carry_the_gate_with_it(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, spelling: str
+) -> None:
+    """CWE-59: resolving before matching let the commonest .env layout escape every glob.
+
+    A checkout whose `.env` is a link to a shared or home secrets file is the
+    ordinary arrangement, not an exotic one. Resolving first put the target
+    outside the repo root, `relative_to` raised, and the hook returned without
+    evaluating a single gate, so the rule silently did nothing in exactly the
+    case it was written for. The lexical spelling is submitted beside the
+    resolved one now, and it is the one that matches a glob naming `.env`.
+    """
+    outside = repo.parent / "shared-secrets.env"
+    outside.write_text("OPENAI_API_KEY=sk-leaked\n", encoding="utf-8")
+    (repo / ".env").symlink_to(outside)
+    (repo / ".otari-guardrails.yml").write_text(
+        'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+        "  - id: no-secret-reads\n    type: path\n    runs: [pre_tool_use.read_target]\n"
+        '    enforcement: required\n    forbidden: [".env"]\n    message: no\n',
+        encoding="utf-8",
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse(
+            {
+                "blocked": True,
+                "results": [
+                    {"gate_id": "no-secret-reads", "enforcement": "required", "outcome": "fail", "message": "no"}
+                ],
+            }
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke(_read_payload(repo, spelling.format(repo=repo)))
+    assert result.exit_code == 2, result.output
+    assert ".env" in captured["json"]["paths"]
+
+
+def test_an_edit_through_a_symlink_out_of_the_repo_is_checked_too(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """The same hole on the write side, which predates the read source.
+
+    Fixed in the same place rather than left alone: it is one helper, and a
+    `stop.working_tree` backstop does not cover it either, since a write
+    through a link to somewhere outside the repo changes nothing `git status`
+    reports.
+    """
+    outside = repo.parent / "real-changelog.md"
+    outside.write_text("x\n", encoding="utf-8")
+    (repo / "CHANGELOG.md").symlink_to(outside)
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(repo / "CHANGELOG.md"), "content": "x"},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert "CHANGELOG.md" in captured["json"]["paths"]
+
+
+def test_an_alias_to_a_secret_is_caught_by_the_resolved_spelling(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """The other direction, which the lexical spelling alone cannot see.
+
+    Both candidates are submitted precisely because neither answers on its
+    own: the lexical one answers "what did the policy name", the resolved one
+    answers "what does this actually reach".
+    """
+    (repo / ".env").write_text("SECRET=1\n", encoding="utf-8")
+    (repo / "notes.md").symlink_to(repo / ".env")
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    _invoke(_read_payload(repo, str(repo / "notes.md")))
+    assert set(captured["json"]["paths"]) == {"notes.md", ".env"}
+
+
+def test_a_target_outside_the_repo_under_both_spellings_submits_nothing(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """Neither candidate is nameable by a repo-relative glob, so there is nothing to check."""
+    called = False
+
+    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
+        nonlocal called
+        called = True
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    outside = repo.parent / "elsewhere.env"
+    outside.write_text("SECRET=1\n", encoding="utf-8")
+    result = _invoke(_read_payload(repo, str(outside)))
+    assert result.exit_code == 0, result.output
+    assert not called

@@ -275,10 +275,26 @@ would also refuse `grep -n SECRET .env`, which is the mitigation a read
 gate's own message should be recommending. `otari guardrails validate` warns
 about a one-token `forbidden` phrase for this reason.
 
-The `path` gate has no equivalent hole, because it globs a **resolved** path:
-`.env`, `./.env`, `/abs/path/.env` and `web/../.env` all normalize to the
-same repo-relative string before matching. A pattern rule over the shell side
-is #1532 (`command_regex`), not this.
+The `path` gate has no equivalent hole, because it does not match the
+spelling it was handed. It submits two repo-relative candidates per target,
+and a gate fires when **either** matches:
+
+- the **lexical** path, with `.` and `..` collapsed but links left alone.
+  This is the name the glob was written against: `.env` is `.env` whatever it
+  points at.
+- the **resolved** path, links followed. This is the file actually reached.
+
+Both are needed, and a symlink is what makes them different questions.
+Matching only the resolved path meant a `.env` symlinked to a shared or home
+secrets file, which is an ordinary layout rather than an exotic one, resolved
+outside the repo and escaped every glob naming it. Matching only the lexical
+path would miss the reverse, an innocuous name aliased to a real secret. A
+candidate landing outside the repo is dropped rather than abandoning the
+check, since the other spelling is usually still nameable.
+
+So `.env`, `./.env`, `/abs/path/.env`, `web/../.env` and a `.env` that is a
+link out of the repo entirely all reach a gate forbidding `.env`. A pattern
+rule over the shell side is #1532 (`command_regex`), not this.
 
 Put plainly: this refuses the agent's own file-reading tool, which is how an
 agent actually reads a file. It is not a containment boundary against one

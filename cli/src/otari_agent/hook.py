@@ -86,6 +86,47 @@ _CODEX_PATCH_TOOL_NAME = "apply_patch"
 _PATCH_HEADER_RE = re.compile(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$", re.MULTILINE)
 
 
+def _hook_evidence_paths(target: str, repo: Path, root: Path) -> list[str]:
+    """Repo-relative spellings of a tool's declared target: the name asked for, and the file reached.
+
+    Two candidates, because a symlink makes those different questions and a
+    gate needs both answered.
+
+    The lexical spelling is what a policy author wrote a glob against: `.env`
+    is `.env` whatever it points at. Resolving first, and only, is what let a
+    `.env` symlinked outside the repo escape every glob naming it, since the
+    resolved path then sits outside the root and the whole check was
+    abandoned. That is the ordinary layout where a checkout's `.env` points at
+    a shared or home secrets file, so it failed open in exactly the case the
+    rule was written for (CWE-59).
+
+    The resolved spelling catches the other direction, which the lexical one
+    cannot: an innocuous name aliased to a real secret.
+
+    Either may land outside the repo, and one that does is dropped rather than
+    abandoning the collection: a policy can only name paths inside the repo,
+    but the other spelling is often still nameable. An empty list means
+    neither was, and there is genuinely nothing for a gate to match.
+
+    as_posix() throughout (via `_guardrails_relative_to`), not str(): a
+    forbidden glob is a repo-relative POSIX path and the evaluator splits it
+    on "/", so a WindowsPath's native "docs\\foo.md" spelling matches
+    nothing, and that failure is silent and open too.
+    """
+    requested = Path(target)
+    # normpath, not resolve: it collapses "." and ".." lexically, which is what
+    # keeps a link's own name intact. Anchored to `repo`, the call's own
+    # working directory, so a relative target does not silently resolve
+    # against this process's cwd instead.
+    lexical = Path(os.path.normpath(requested if requested.is_absolute() else repo / requested))
+    candidates = [
+        relative
+        for candidate in (lexical, lexical.resolve())
+        if (relative := _guardrails_relative_to(candidate, root)) is not None
+    ]
+    return list(dict.fromkeys(candidates))
+
+
 def _hook_extract_patch_paths(patch_text: str) -> list[str]:
     """Target path(s) named in an apply_patch envelope's own header lines.
 
@@ -1599,53 +1640,41 @@ def hook(
             patch_text = tool_input.get("command")
             if not patch_text:
                 return
-            resolved_paths = []
-            for patch_path in _hook_extract_patch_paths(patch_text):
-                try:
-                    # Joined onto `repo` (the call's own cwd), not resolved
-                    # bare: an apply_patch header names its target relative to
-                    # the tool call's own working directory, unlike Edit/
-                    # Write's always-absolute file_path. `Path.__truediv__`
-                    # discards `repo` on its own if `patch_path` is already
-                    # absolute, so both shapes resolve correctly here. See the
-                    # Windows as_posix() note below: the same reason applies
-                    # here, one target at a time.
-                    resolved_paths.append((repo / patch_path).resolve().relative_to(root).as_posix())
-                except ValueError:
-                    continue  # Outside the repo: nothing this policy can name.
+            # An apply_patch header names its target relative to the tool
+            # call's own working directory, unlike Edit/Write's
+            # always-absolute file_path; _hook_evidence_paths anchors both
+            # shapes on `repo` and submits each target's lexical and resolved
+            # spellings, one header at a time.
+            resolved_paths = [
+                candidate
+                for patch_path in _hook_extract_patch_paths(patch_text)
+                for candidate in _hook_evidence_paths(patch_path, repo, root)
+            ]
             if not resolved_paths:
                 return
-            paths = resolved_paths
+            paths = list(dict.fromkeys(resolved_paths))
             path_source = "pre_tool_use.edit_target"
         elif path_field:
             target = tool_input.get(path_field)
             if not target:
                 return
-            try:
-                # as_posix(), not str(): a forbidden glob is a repo-relative
-                # POSIX path and the evaluator splits it on "/", so a
-                # WindowsPath's native "docs\\foo.md" spelling matches
-                # nothing. That fails open and silently, a passing gate being
-                # indistinguishable from no forbidden change, so every
-                # PreToolUse gate would pass on Windows.
-                paths = [Path(target).resolve().relative_to(root).as_posix()]
-                path_source = "pre_tool_use.edit_target"
-            except ValueError:
-                return  # Outside the repo: nothing this policy can name.
+            paths = _hook_evidence_paths(target, repo, root)
+            if not paths:
+                return  # Outside the repo under both spellings: nothing a policy can name.
+            path_source = "pre_tool_use.edit_target"
         elif read_field:
             target = tool_input.get(read_field)
             if not target:
                 return
-            try:
-                # Resolved and made repo-relative exactly the way the edit
-                # branch above does, as_posix() included and for the identical
-                # reason: a WindowsPath's native "docs\\foo.md" spelling
-                # matches no repo-relative POSIX glob, and that failure is
-                # silent and open.
-                paths = [Path(target).resolve().relative_to(root).as_posix()]
-                path_source = "pre_tool_use.read_target"
-            except ValueError:
-                return  # Outside the repo: nothing this policy can name.
+            # Collected exactly the way the edit branch above collects its
+            # own target, and for a reason that bites harder here: the
+            # symlinked-out-of-the-repo case _hook_evidence_paths exists to
+            # close is the ordinary layout for the very file a read gate is
+            # written about.
+            paths = _hook_evidence_paths(target, repo, root)
+            if not paths:
+                return  # Outside the repo under both spellings: nothing a policy can name.
+            path_source = "pre_tool_use.read_target"
         elif command_field:
             command = tool_input.get(command_field)
             if not command:
@@ -2796,10 +2825,12 @@ def _guardrails_relative_to(path: Path, base: Path) -> str | None:
         return None
 
 
-def _guardrails_repo_relative(repo_root: Path, path: str) -> tuple[str | None, str]:
+def _guardrails_repo_relative(repo_root: Path, path: str) -> tuple[str, str]:
     """Spell one dry-run path the way `hook` spells it at each moment: (edit target, working tree).
 
-    The edit target is ``None`` when no PreToolUse check arises for it at all.
+    Both are always present: a path with no spelling inside the repo is
+    refused outright above, and every other path has a PreToolUse moment now
+    that `hook` submits the lexical spelling as well as the resolved one.
 
     A gate's globs are repo-relative POSIX, and matching `--path`
     literally would report `quiet` for the absolute or `./`-prefixed spelling a
@@ -2839,11 +2870,14 @@ def _guardrails_repo_relative(repo_root: Path, path: str) -> tuple[str | None, s
         raise click.ClickException(
             f"--path {path!r} is outside {repo_root}; a guardrail can only name paths inside the repo."
         )
-    # No fallback to the working-tree spelling: `hook`'s own PreToolUse branch
-    # returns without evaluating anything when a target resolves out of the
-    # repo, so a preview that matched the link's own name here would promise a
-    # refusal that never happens. None means that moment does not arise.
-    return _guardrails_relative_to(resolved, root_resolved), working_tree
+    # Falls back to the working-tree spelling, because `hook`'s own PreToolUse
+    # branch no longer abandons a target that resolves out of the repo: it
+    # submits the lexical spelling too (see _hook_evidence_paths), so the
+    # link's own name really is evaluated and a preview that skipped it would
+    # promise silence where a real session refuses. None is now reachable only
+    # when neither spelling lands inside the repo, and `working_tree` being
+    # non-None means at least one did.
+    return _guardrails_relative_to(resolved, root_resolved) or working_tree, working_tree
 
 
 def _guardrails_dry_run(
@@ -3025,14 +3059,6 @@ def guardrails_validate(
     checks_reads = _policy_checks_reads(spec)
     dry_run_targets = [_guardrails_repo_relative(root, path) for path in dry_run_paths]
     for edit_target, working_tree in dry_run_targets:
-        if edit_target is None:
-            click.echo()
-            click.echo(f"PreToolUse: {working_tree}")
-            click.echo(
-                "  not checked  this path resolves outside the repo, so the hook evaluates no gate "
-                "for the edit or the read at all. Only the Stop block below covers it."
-            )
-            continue
         _guardrails_dry_run(
             policy_yaml,
             spec,

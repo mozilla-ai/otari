@@ -373,14 +373,18 @@ def test_an_absolute_path_through_a_repo_alias_keeps_the_symlink_name(
     assert "fires      no-hand-edited-claude-md (required)" in stop_block
 
 
-def test_an_edit_resolving_out_of_the_repo_reports_no_pretooluse_check(
+def test_a_path_resolving_out_of_the_repo_is_still_checked_by_its_own_name(
     repo: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    """`hook` returns without evaluating anything there, so claiming a refusal would be a lie.
+    """A symlink escaping the repo does not take the gate with it.
 
-    The opposite failure to the false clean: here the preview would promise
-    protection the real session never applies. Verified against `hook` itself,
-    which exits 0 having evaluated no gate for such an edit.
+    This test previously asserted the opposite, on the reasoning that `hook`
+    evaluated nothing for such a target so a preview promising a refusal would
+    be lying. That was true and was the bug: a guardrail forbidding `.env` did
+    nothing when `.env` was a link to a shared secrets file, which is the
+    ordinary layout for the very file such a rule is written about. `hook` now
+    submits the lexical spelling beside the resolved one, so the link's own
+    name is enforced and the preview says so.
     """
     outside = tmp_path_factory.mktemp("elsewhere") / "outside.md"
     outside.write_text("x\n", encoding="utf-8")
@@ -393,8 +397,7 @@ def test_an_edit_resolving_out_of_the_repo_reports_no_pretooluse_check(
     )
     result = _invoke("--path", "escape.md")
     pre_block, stop_block = result.output.split("Stop, the finished turn:")
-    assert "not checked" in pre_block
-    assert "resolves outside the repo" in pre_block
-    assert "fires" not in pre_block
-    # Git reports the link itself, so Stop still covers it.
+    assert "fires      no-escape-md (required)" in pre_block
+    assert "not checked" not in pre_block
+    # Git reports the link itself, so Stop covered this even before the fix.
     assert "fires      no-escape-md (required)" in stop_block
