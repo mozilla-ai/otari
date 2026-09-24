@@ -3,11 +3,12 @@ import re
 import shutil
 import sys
 import zlib
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
+import httpx
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -16,6 +17,17 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 if "gateway" in sys.modules:
     del sys.modules["gateway"]
+
+
+class ControlPlaneHandler(Protocol):
+    """One call to a control plane, as a test answers it."""
+
+    async def __call__(
+        self, *, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response: ...
+
+
+InstallControlPlane = Callable[[ControlPlaneHandler], None]
 
 
 @dataclass(frozen=True)
@@ -160,6 +172,25 @@ def _start_new_sqlite_databases_migrated(monkeypatch: pytest.MonkeyPatch, _migra
         run_migrations(database_url)
 
     monkeypatch.setattr(database, "_run_migrations", run_migrations_from_template)
+
+
+@pytest.fixture
+def control_plane_transport(monkeypatch: pytest.MonkeyPatch) -> InstallControlPlane:
+    """Answer a hybrid gateway's control plane calls with ``handler``.
+
+    ``handler`` receives the request the gateway would have sent and returns the
+    response it should read back, so a test states the answers it wants rather
+    than where the call is made.
+
+    NOTE: this is the only place the suite names the transport. A test that
+    reaches for it directly pins the call to wherever it lives today, and a
+    later move leaves that test passing while intercepting nothing.
+    """
+
+    def install(handler: ControlPlaneHandler) -> None:
+        monkeypatch.setattr("gateway.api.routes._platform._post_platform", handler)
+
+    return install
 
 
 def _new_sqlite_file(database_url: str) -> Path | None:
