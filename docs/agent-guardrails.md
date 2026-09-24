@@ -52,6 +52,9 @@ This is the first slice. It ships:
   repo's own AGENTS.md/CLAUDE.md: one model call to draft candidate gates,
   then an interactive accept/reject/edit pass over each one before it is
   appended. See "Generating gates from AGENTS.md/CLAUDE.md" below.
+- `otari guardrails validate`, which checks a guardrail without running it and
+  dry-runs it against a command or path you supply. Offline: no server, no
+  credential, no model call. See "Checking a guardrail before it runs" below.
 
 This is a hook protocol, not a local filesystem reader: Otari never opens a
 caller's repository itself. The caller (an agent hook today; a native
@@ -741,6 +744,125 @@ backend and model make the one generation call. This is a one-shot proposal
 tool, not a sync: rerunning it after AGENTS.md changes proposes again from
 scratch and still asks about every candidate, including ones a prior run
 already declined.
+
+## Checking a guardrail before it runs
+
+A guardrail is otherwise only checked when it runs, which is the worst moment
+to learn something about it: a gate that silently does not match looks exactly
+like a clean result. `otari guardrails validate` reads the file and reports
+what running it would have taught, without running anything and without
+contacting a gateway.
+
+```
+otari guardrails validate
+otari guardrails validate --command "npm install lodash"
+otari guardrails validate --changed-path CHANGELOG.md
+```
+
+An **error** is a gate that provably cannot do its job, whatever the session
+does. Everything `parse_policy` already refuses (an unsupported
+`schema_version`, an unknown gate `type` or field, a duplicate key or gate id,
+a `judge` gate declared `required`, an illegal `runs` value for its type)
+arrives here as readable output rather than as a 422 mid-session, and three
+more are added that a parser does not see:
+
+- A `verifier` gate whose script is missing, is not executable, or resolves
+  outside the repo root. Validate stats that script; it never runs it.
+- A glob with an empty, `.` or `..` path segment, which covers a leading `/`
+  and a leading `./`. A repo-relative path never has one, so the pattern
+  matches nothing at all.
+- A phrase carrying a shell separator (`&&`, `||`, `;`, `|`, `&`, `(`, `)`).
+  A phrase is matched within one separator-delimited segment of a command, so
+  such a phrase spans a boundary no segment has and never matches, not even
+  the command it was copied from. On a `command` gate that is silent
+  non-enforcement. On `command_if_changed`'s `require` it is worse: nothing
+  can satisfy the gate, so a `required` one blocks every turn that touches a
+  matching path, and running the very command it asks for does not clear it.
+  The repair differs by field, and the finding says which. Splitting a
+  `forbidden` list is the fix, since any one entry matching refuses the call.
+  Splitting a `require` list is the opposite of the fix, since any one entry
+  *satisfies* the gate: `["make a", "make b"]` passes once `make a` has run.
+  Give each required command a gate of its own, the way
+  `openapi-changed-needs-postman` and `openapi-changed-needs-generator` do in
+  this repo's own guardrail.
+
+A **warning** is a gate that parses, runs, and may not mean what its author
+intended:
+
+- A `**` glob whose shallower depth nothing else in the same field covers.
+  `**` must consume at least one path segment, so `**/CLAUDE.md` reaches
+  `web/CLAUDE.md` and never the root file, and `src/**/conftest.py` never
+  reaches `src/conftest.py`. Coverage, not an identical twin string: a list
+  of `["*.md", "**/CLAUDE.md"]` already reaches the root file through `*.md`
+  and is left alone. A trailing `**` is not warned about either, since its
+  twin would name a bare directory, which Git never reports as a changed path.
+- A glob containing a backslash, which is a warning rather than an error
+  because a POSIX filename may legally contain one; globs are matched against
+  repo-relative POSIX paths split on `/`.
+- A single-token `forbidden` phrase on a `command` gate. A phrase matches a
+  token run in any position, so `npm` also refuses `grep -rn npm web/`. A
+  single-token `require` phrase on a `command_if_changed` gate is left alone:
+  over-matching there accepts a session sooner rather than refusing real work,
+  and it is usually what the author wants, since a required command can be
+  spelled several ways.
+- A `path` gate that runs only at `pre_tool_use.edit_target`. It sees the path
+  an edit tool declares and nothing a shell command writes (a redirect,
+  `sed -i`, a heredoc, `cp`, a script). Adding `stop.working_tree` is the
+  backstop. A gate that runs only at `stop.working_tree` is not warned about:
+  after the fact, but complete over the tree.
+- More `judge` or `verifier` gates than one `Stop` event evaluates (five and
+  twenty respectively), naming which ones fall past the cap in declaration
+  order. Both caps apply after `when_changed` filtering, so this is the worst
+  case: a session where every one of them applies at once.
+
+None of these blocks on its own, because each has a legitimate exception.
+`--strict` makes a warning non-zero too, which is what a CI invocation wants.
+
+`--command` and `--changed-path` (both repeatable) answer the other question,
+"does it say what I think it says". Each is evaluated at every moment a real
+session would offer it, with the same evidence shape `otari hook` itself
+submits for that event: one `PreToolUse` block per command or path, then one
+`Stop` block with all of them together. A path is spelled the way each moment
+spells it, which differs only for a symlink: a `PreToolUse` edit target is
+resolved (that is how an absolute tool-call path becomes repo-relative, and it
+follows a link on the way), while a `Stop` path comes from `git status`, which
+reports the tracked name, link and all. A repo named through a directory
+symlink (`/tmp/repo` where the repo really sits at `/private/tmp/repo`, which
+is every macOS temp path) is normalized without following the file's own link. Every gate that can resolve there is
+reported as `fires` or `quiet`, and the rest are counted in one line. `judge`
+and `verifier` gates in the `Stop` block are reported as `would run` or
+`skipped` instead, by whether their `when_changed` selects them: each needs
+something actually run that validate deliberately does not run, and for a
+judge gate that is one model call, which is worth knowing the cost of before
+the session pays it. The per-Stop caps are applied here too, to the gates
+`when_changed` selected and in declaration order, so a gate the hook would
+drop reads `skipped` rather than promising a call that never happens. A gate firing in a dry run is the answer to the question
+asked, not a failure, so it does not change the exit status.
+
+```
+$ otari guardrails validate --changed-path docs/public/openapi.json --command "make postman"
+.otari-guardrails.yml: otari/repo-quality, 22 gate(s), schema 1.0.
+0 error(s), 0 warning(s).
+
+PreToolUse, Bash: make postman
+  quiet      use-pnpm-not-npm (required)
+  quiet      no-force-push (advisory)
+  20 gate(s) do not apply here.
+
+PreToolUse, Edit/Write: docs/public/openapi.json
+  quiet      no-hand-edited-changelog (required)
+  ...
+
+Stop, the finished turn: 1 changed path(s), 1 command(s)
+  quiet      openapi-changed-needs-postman (required)
+  fires      openapi-changed-needs-generator (required)
+  would run  no-leftover-conflict-markers (verifier, required)
+  skipped    no-narrative-comments (judge, when_changed does not match)
+  ...
+```
+
+`--guardrail-file` checks a file other than `.otari-guardrails.yml` in the repo
+root.
 
 ## Calling the Hook Server
 

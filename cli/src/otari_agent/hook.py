@@ -1,4 +1,4 @@
-"""`otari hook`, `otari hook setup` and `otari guardrails generate`: the agent-side half of Agent Guardrails.
+"""`otari hook`, `otari hook setup` and the `otari guardrails` group: the agent-side half of Agent Guardrails.
 
 Reads one hook payload from a supported coding agent, collects the evidence it
 names, evaluates the repository's `.otari-guardrails.yml` in process (or, when opted
@@ -33,9 +33,12 @@ from otari_agent.domain.types import (
     EvidenceScope,
     JudgeGate,
     JudgeVerdict,
+    Outcome,
+    PolicySpec,
     RunsAt,
     VerifierGate,
 )
+from otari_agent.domain.validation import validate_policy
 from otari_agent.settings import API_KEY_HEADER, API_ROOT, load_settings
 
 # Claude Code's own edit tools and the tool_input field naming their target.
@@ -2123,8 +2126,7 @@ def hook_setup(harness: str, api_key: str | None) -> None:
     pretooluse_created = _merge_hook_entry(settings_path, "PreToolUse", command, matcher=matcher)
     click.echo(f"{'Added' if pretooluse_created else 'Updated'} the PreToolUse hook in {settings_path}.")
     click.echo(
-        f"Matcher: {matcher}"
-        + ("" if include_bash else f" (add a command gate to also cover {setup.command_matcher})")
+        f"Matcher: {matcher}" + ("" if include_bash else f" (add a command gate to also cover {setup.command_matcher})")
     )
 
     # Registered unconditionally, not only when the policy has a gate that
@@ -2496,8 +2498,7 @@ def _gates_generate_write_checked(gates_file: Path, new_text: str) -> None:
         parse_policy(new_text, source=str(gates_file))
     except PolicyError as exc:
         raise click.ClickException(
-            f"Appending to {gates_file} would produce a guardrail that no longer parses ({exc}); "
-            "left it unchanged."
+            f"Appending to {gates_file} would produce a guardrail that no longer parses ({exc}); left it unchanged."
         ) from exc
     gates_file.write_text(new_text, encoding="utf-8")
 
@@ -2678,3 +2679,300 @@ def guardrails_generate(
             break
 
     click.secho(f"Added {accepted} gate(s) to {target}.", fg="green" if accepted else None)
+
+
+# Wide enough for the longest dry-run label ("would run"), so every gate id
+# starts in the same column whichever moment is being reported.
+_VALIDATE_LABEL_WIDTH = 9
+
+
+def _guardrails_probe_verifier(repo_root: Path, verifier: str) -> str | None:
+    """Report why `otari hook` could not run this verifier gate's script, or None if it could.
+
+    Mirrors `_hook_run_check_verifier`'s own resolution, containment check
+    included, so validate and the real run agree on which scripts are
+    reachable. The one thing it adds is the executable bit: the real run
+    learns that from a failed exec and reports `error`, which blocks a
+    required gate, and an author would rather hear it here.
+    """
+    resolved_root = repo_root.resolve()
+    script_path = (repo_root / verifier).resolve()
+    try:
+        script_path.relative_to(resolved_root)
+    except ValueError:
+        return f"verifier {verifier!r} resolves outside the repo root, so the hook refuses to run it."
+    if not script_path.is_file():
+        return f"verifier {verifier!r} does not exist."
+    if not os.access(script_path, os.X_OK):
+        return f"verifier {verifier!r} is not executable; `chmod +x {verifier}`."
+    return None
+
+
+def _guardrails_relative_to(path: Path, base: Path) -> str | None:
+    """``path`` as a repo-relative POSIX string, or ``None`` when it is not under ``base``."""
+    try:
+        return path.relative_to(base).as_posix()
+    except ValueError:
+        return None
+
+
+def _guardrails_repo_relative(repo_root: Path, path: str) -> tuple[str | None, str]:
+    """Spell one dry-run path the way `hook` spells it at each moment: (edit target, working tree).
+
+    The edit target is ``None`` when no PreToolUse check arises for it at all.
+
+    A gate's globs are repo-relative POSIX, and matching `--changed-path`
+    literally would report `quiet` for the absolute or `./`-prefixed spelling a
+    person naturally types while a real session matches it: a silent false
+    clean, which is the failure this whole command exists to remove.
+
+    The two spellings differ only for a symlink, and differ for a reason.
+    `hook`'s PreToolUse branch calls `.resolve()`, which is how an absolute
+    `file_path` becomes repo-relative and which follows a link on the way. Its
+    Stop branch reads `git status`, which reports the tracked name, link and
+    all. Using one spelling for both reports a gate forbidding the link's own
+    name as `quiet` at Stop, where a real session fails it.
+
+    Three spellings are tried for the working tree, in order, because a repo
+    can be named through an alias: purely lexical, then with the directory
+    resolved but the final name kept, then fully resolved. The middle one is
+    what an absolute path through an alias needs (`/tmp/repo/CLAUDE.md` where
+    the repo is really at `/private/tmp/repo`): without it the lexical attempt
+    fails, the fully resolved fallback follows the file's own link too, and
+    the Stop spelling silently becomes the link's target again.
+    """
+    candidate = repo_root / path
+    # normpath, not resolve: it collapses `.` and `..` lexically, which is what
+    # keeps a link's own name intact for the Stop spelling.
+    lexical = Path(os.path.normpath(candidate))
+    # The directory resolved, the final name left alone: normalizes the repo's
+    # own alias without turning a symlinked file into its target.
+    anchored = lexical.parent.resolve() / lexical.name
+    resolved = candidate.resolve()
+    root_resolved = repo_root.resolve()
+    working_tree = (
+        _guardrails_relative_to(lexical, repo_root)
+        or _guardrails_relative_to(anchored, root_resolved)
+        or _guardrails_relative_to(resolved, root_resolved)
+    )
+    if working_tree is None:
+        raise click.ClickException(
+            f"--changed-path {path!r} is outside {repo_root}; a guardrail can only name paths inside the repo."
+        )
+    # No fallback to the working-tree spelling: `hook`'s own PreToolUse branch
+    # returns without evaluating anything when a target resolves out of the
+    # repo, so a preview that matched the link's own name here would promise a
+    # refusal that never happens. None means that moment does not arise.
+    return _guardrails_relative_to(resolved, root_resolved), working_tree
+
+
+def _guardrails_dry_run(
+    policy_yaml: str,
+    spec: PolicySpec,
+    source: str,
+    *,
+    heading: str,
+    changed_paths: list[str],
+    changed_path_source: RunsAt | None,
+    commands: list[str],
+    command_scope: EvidenceScope,
+) -> None:
+    """Evaluate one hypothetical moment and print what each gate does there.
+
+    The evidence shape mirrors, field for field, what the matching branch of
+    `hook` submits for that event, so a gate that fires here fires there.
+
+    Judge and verifier gates at Stop are reported by whether `when_changed`
+    selects them, not by an outcome: each needs something actually run (a
+    model call, a script) that validate deliberately does not run. Naming
+    them anyway is the point, since a judge gate's cost is one model call per
+    session it applies to.
+
+    Both of those types carry a per-Stop cap, applied to the gates
+    `when_changed` selected, in declaration order. The preview applies the
+    same caps for the same reason it mirrors the evidence shape: a preview
+    that promises six model calls where the hook makes five is wrong about
+    exactly the number it exists to report.
+    """
+    try:
+        check = run_policy_check(
+            policy_yaml,
+            source=source,
+            changed_paths=changed_paths,
+            commands=commands,
+            changed_path_source=changed_path_source,
+            command_scope=command_scope,
+        )
+    except PolicyCheckError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo()
+    click.echo(heading)
+    changed = tuple(changed_paths)
+    # Which gates survive each cap, resolved up front so the loop below can
+    # report a gate `when_changed` selected but the cap then dropped. Mirrors
+    # _hook_collect_judge_verdicts/_hook_collect_check_verdicts: filter by
+    # when_changed, then take the first N in declaration order.
+    running: set[str] = set()
+    for gate_type, limit in ((JudgeGate, _HOOK_JUDGE_MAX_GATES_PER_RUN), (VerifierGate, _HOOK_CHECK_MAX_GATES_PER_RUN)):
+        applicable = [
+            gate
+            for gate in spec.gates
+            if isinstance(gate, gate_type)
+            and (not gate.when_changed or matched_changed_paths(gate.when_changed, changed))
+        ]
+        running.update(gate.id for gate in applicable[:limit])
+
+    elsewhere = 0
+    for gate, result in zip(spec.gates, check.results, strict=True):
+        if isinstance(gate, JudgeGate | VerifierGate) and command_scope == "session":
+            kind = "judge" if isinstance(gate, JudgeGate) else "verifier"
+            limit = _HOOK_JUDGE_MAX_GATES_PER_RUN if kind == "judge" else _HOOK_CHECK_MAX_GATES_PER_RUN
+            if gate.when_changed and not matched_changed_paths(gate.when_changed, changed):
+                click.echo(f"  {'skipped':<{_VALIDATE_LABEL_WIDTH}}  {gate.id} ({kind}, when_changed does not match)")
+            elif gate.id not in running:
+                click.secho(
+                    f"  {'skipped':<{_VALIDATE_LABEL_WIDTH}}  {gate.id} ({kind}, past the {limit}-gate cap "
+                    "for one Stop event)",
+                    fg="yellow",
+                )
+            else:
+                cost = ", one model call" if kind == "judge" else ""
+                click.echo(f"  {'would run':<{_VALIDATE_LABEL_WIDTH}}  {gate.id} ({kind}, {gate.enforcement}{cost})")
+        elif result.outcome is Outcome.FAIL:
+            click.secho(f"  {'fires':<{_VALIDATE_LABEL_WIDTH}}  {gate.id} ({gate.enforcement})", fg="yellow")
+        elif result.outcome is Outcome.PASS:
+            click.echo(f"  {'quiet':<{_VALIDATE_LABEL_WIDTH}}  {gate.id} ({gate.enforcement})")
+        else:
+            elsewhere += 1
+    if elsewhere:
+        click.echo(f"  {elsewhere} gate(s) do not apply here.")
+
+
+@guardrails.command(name="validate")
+@click.option(
+    "--guardrail-file",
+    "guardrail_file_option",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Guardrail file to check. Defaults to .otari-guardrails.yml in the repo root.",
+)
+@click.option(
+    "--command",
+    "dry_run_commands",
+    multiple=True,
+    help="Dry run this shell command against the guardrail. Repeatable.",
+)
+@click.option(
+    "--changed-path",
+    "dry_run_paths",
+    multiple=True,
+    help="Dry run this repo-relative path against the guardrail. Repeatable.",
+)
+@click.option("--strict", is_flag=True, help="Exit non-zero on a warning too, not only on an error.")
+def guardrails_validate(
+    guardrail_file_option: Path | None,
+    dry_run_commands: tuple[str, ...],
+    dry_run_paths: tuple[str, ...],
+    strict: bool,
+) -> None:
+    """Check `.otari-guardrails.yml` without running it, and try it against a command or a path.
+
+    Offline and gateway-free: it parses the guardrail the same way a
+    submitted one is parsed, then reports what running it would have taught
+    the hard way. An error is a gate that cannot do its job (a missing or
+    unrunnable verifier script). A warning is a gate that runs and may not
+    mean what its author intended: a `**` glob that cannot reach the
+    repository root, a one-token forbidden phrase that also refuses commands
+    merely mentioning the word, a path gate blind to every shell write, more
+    judge gates than one Stop event evaluates. A warning never fails on its
+    own, since each has a legitimate exception; `--strict` is what makes one
+    non-zero, for CI.
+
+    `--command` and `--changed-path` answer the other question, "does it say
+    what I think it says", by evaluating the guardrail against evidence you
+    supply at each moment a real session would offer it: one PreToolUse call
+    per command or path, then the Stop event with all of them together. A
+    gate firing there is the answer, not a failure, so it does not change the
+    exit status.
+
+    See docs/agent-guardrails.md.
+    """
+    root = _hook_find_repo_root(Path.cwd())
+    if root is None:
+        raise click.ClickException("Not inside a Git repository.")
+
+    target = guardrail_file_option if guardrail_file_option is not None else root / ".otari-guardrails.yml"
+    if not target.is_file():
+        raise click.ClickException(f"No guardrail file at {target}. `otari guardrails generate` starts one.")
+    try:
+        policy_yaml = target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise click.ClickException(f"Could not read {target} as UTF-8 text: {exc}") from exc
+    try:
+        spec = parse_policy(policy_yaml, source=str(target))
+    except PolicyError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    findings = validate_policy(
+        spec,
+        judge_gate_limit=_HOOK_JUDGE_MAX_GATES_PER_RUN,
+        verifier_gate_limit=_HOOK_CHECK_MAX_GATES_PER_RUN,
+        probe_verifier=lambda verifier: _guardrails_probe_verifier(root, verifier),
+    )
+    click.echo(f"{target}: {spec.policy_id}, {len(spec.gates)} gate(s), schema {spec.schema_version}.")
+    for finding in findings:
+        where = f"{finding.gate_id}: " if finding.gate_id is not None else ""
+        click.secho(
+            f"  {finding.severity}: {where}{finding.message}",
+            fg="red" if finding.severity == "error" else "yellow",
+        )
+    errors = sum(1 for finding in findings if finding.severity == "error")
+    warnings = len(findings) - errors
+    click.echo(f"{errors} error(s), {warnings} warning(s).")
+
+    for command in dry_run_commands:
+        _guardrails_dry_run(
+            policy_yaml,
+            spec,
+            str(target),
+            heading=f"PreToolUse, Bash: {command}",
+            changed_paths=[],
+            changed_path_source="pre_tool_use.command",
+            commands=[command],
+            command_scope="call",
+        )
+    paths = [_guardrails_repo_relative(root, path) for path in dry_run_paths]
+    for edit_target, working_tree in paths:
+        if edit_target is None:
+            click.echo()
+            click.echo(f"PreToolUse, Edit/Write: {working_tree}")
+            click.echo(
+                "  not checked  this path resolves outside the repo, so the hook evaluates no gate "
+                "for the edit at all. Only the Stop block below covers it."
+            )
+            continue
+        _guardrails_dry_run(
+            policy_yaml,
+            spec,
+            str(target),
+            heading=f"PreToolUse, Edit/Write: {edit_target}",
+            changed_paths=[edit_target],
+            changed_path_source="pre_tool_use.edit_target",
+            commands=[],
+            command_scope="call",
+        )
+    if dry_run_commands or dry_run_paths:
+        _guardrails_dry_run(
+            policy_yaml,
+            spec,
+            str(target),
+            heading=(f"Stop, the finished turn: {len(paths)} changed path(s), {len(dry_run_commands)} command(s)"),
+            changed_paths=[working_tree for _edit_target, working_tree in paths],
+            changed_path_source="stop.working_tree",
+            commands=list(dry_run_commands),
+            command_scope="session",
+        )
+
+    if errors or (strict and warnings):
+        raise SystemExit(1)
