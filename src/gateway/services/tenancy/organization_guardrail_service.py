@@ -68,6 +68,11 @@ from gateway.models.guardrails import (
 )
 from gateway.models.secret_fields import redact_secret_like_values, restore_redacted_values
 from gateway.models.tenancy import User
+from gateway.ports.hosted_guardrail_port import (
+    HostedGuardrailPort,
+    HostedGuardrailUnavailableError,
+    HostedGuardrailUnfundedError,
+)
 from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
 from gateway.services.secret_box import (
@@ -80,12 +85,15 @@ from gateway.services.tenancy.errors import (
     OrganizationGuardrailCheckFailedError,
     OrganizationGuardrailCredentialNeedsUrlError,
     OrganizationGuardrailDefinitionNotFoundError,
+    OrganizationGuardrailHostedAloneError,
+    OrganizationGuardrailHostedNotFoundError,
     OrganizationGuardrailLimitReachedError,
     OrganizationGuardrailNoEndpointError,
     OrganizationGuardrailNotFoundError,
     OrganizationGuardrailScopeConflictError,
     OrganizationGuardrailSingleBackendError,
     OrganizationGuardrailTestsItsDefinitionError,
+    OrganizationGuardrailUnfundedError,
     OrganizationGuardrailUnsafeUrlError,
     SecretBoxUnavailableTenancyError,
     WorkspaceNotFoundError,
@@ -197,6 +205,13 @@ class OrganizationGuardrailCreate(BaseModel):
             "and credential, which name a service"
         ),
     )
+    hosted_guardrail_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "A guardrail the deployment hosts, from the organization's hosted guardrails list, to run "
+            "this check. It brings its own backend, so url, credential and definition_id stay unset"
+        ),
+    )
     mode: Literal["block", "monitor"] = Field(
         default="monitor",
         description="block rejects a flagged request with 403; monitor annotates the response and forwards it",
@@ -252,7 +267,7 @@ class OrganizationGuardrailUpdate(BaseModel):
 
     ``workspace_ids`` replaces the scope whole when sent; ``[]`` clears it.
 
-    ``definition_id`` diverges: an explicit ``null`` **clears** it. The rule
+    ``definition_id`` and ``hosted_guardrail_id`` diverge: an explicit ``null`` **clears** them. The rule
     above protects a field the client was never shown, and this one is returned
     on every read, so a form sending ``null`` is sending back a field it was
     given rather than an empty box it never filled in. Omitting it still leaves
@@ -286,6 +301,13 @@ class OrganizationGuardrailUpdate(BaseModel):
         description=(
             "The organization's own definition this mandate runs. Unlike url and credential, "
             "an explicit null clears the link; omit the field to leave it as it is"
+        ),
+    )
+    hosted_guardrail_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "The hosted guardrail this mandate runs. Like definition_id, an explicit null clears it; "
+            "omit the field to leave it as it is"
         ),
     )
     mode: Literal["block", "monitor"] | SkipJsonSchema[None] = None
@@ -341,6 +363,7 @@ class OrganizationGuardrailPublic(BaseModel):
     # Returned in clear, which is what makes an explicit null on the update
     # schema a clear rather than the "leave it alone" the fields above it mean.
     definition_id: uuid.UUID | None
+    hosted_guardrail_id: uuid.UUID | None
     mode: str
     on_unavailable: str
     validate_kwargs: dict[str, Any] | None = Field(
@@ -371,6 +394,7 @@ class OrganizationGuardrailPublic(BaseModel):
             url=guardrail.url,
             has_credential=guardrail.encrypted_credential is not None,
             definition_id=guardrail.definition_id,
+            hosted_guardrail_id=guardrail.hosted_guardrail_id,
             mode=guardrail.mode,
             on_unavailable=guardrail.on_unavailable,
             validate_kwargs=redact_secret_like_values(guardrail.validate_kwargs),
@@ -431,12 +455,14 @@ class ResolvedOrganizationGuardrail:
     and it is the whole of what the request path needs: the runner holds the
     built guardrail under that id, so nothing here reads the definition row or
     decrypts anything it stores. An entry that names one carries no ``url`` and
-    no credential, which the write path enforces.
+    no credential, which the write path enforces. ``hosted_guardrail_id`` is the
+    same for a guardrail the deployment hosts, which the port runs.
     """
 
     config: GuardrailConfig
     credential: str | None
     definition_id: uuid.UUID | None
+    hosted_guardrail_id: uuid.UUID | None = None
 
 
 async def resolve_organization_guardrails(
@@ -497,6 +523,7 @@ async def resolve_organization_guardrails(
             ),
             credential=decrypt_secret(row.encrypted_credential) if row.encrypted_credential else None,
             definition_id=row.definition_id,
+            hosted_guardrail_id=row.hosted_guardrail_id,
         )
         for row in rows
     ]
@@ -534,7 +561,12 @@ def _require_url_for_credential(url: str | None, has_credential: bool) -> None:
         raise OrganizationGuardrailCredentialNeedsUrlError()
 
 
-def _require_single_backend(url: str | None, has_credential: bool, definition_id: uuid.UUID | None) -> None:
+def _require_single_backend(
+    url: str | None,
+    has_credential: bool,
+    definition_id: uuid.UUID | None,
+    hosted_guardrail_id: uuid.UUID | None = None,
+) -> None:
     """Refuse a mandate that names both a guardrails service and a definition.
 
     Both unset stays the ordinary row, the one falling back to the deployment's
@@ -547,6 +579,8 @@ def _require_single_backend(url: str | None, has_credential: bool, definition_id
     credential needs a url", sending the caller to add the very field that makes
     the contradiction explicit.
     """
+    if hosted_guardrail_id is not None and (url is not None or has_credential or definition_id is not None):
+        raise OrganizationGuardrailHostedAloneError()
     if definition_id is not None and (url is not None or has_credential):
         raise OrganizationGuardrailSingleBackendError()
 
@@ -576,9 +610,11 @@ def _encrypted(credential: str) -> str:
 class OrganizationGuardrailService:
     """CRUD for the caller's organization's guardrails. Writes are management-gated."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, *, hosted_guardrails: HostedGuardrailPort | None = None):
         self.db = db
         self.organizations = OrganizationService(db, membership_listener=None)
+        # ``None`` is a build with nothing hosted, so no hosted id is ever offered.
+        self.hosted_guardrails = hosted_guardrails
 
     async def _manageable_organization_id(self, user: User) -> uuid.UUID:
         """The caller's organization, having checked they may manage its guardrails.
@@ -628,6 +664,25 @@ class OrganizationGuardrailService:
         ).scalar_one_or_none()
         if found is None:
             raise OrganizationGuardrailDefinitionNotFoundError(definition_id)
+
+    async def _require_hosted_guardrail_offered(
+        self, organization_id: uuid.UUID, hosted_guardrail_id: uuid.UUID
+    ) -> None:
+        """Refuse a mandate naming a hosted guardrail this organization is not offered.
+
+        The only scope a hosted id has: the column has no foreign key, so this
+        check is what keeps an organization from naming a guardrail offered
+        elsewhere.
+        """
+        offered = (
+            await self.hosted_guardrails.get_hosted_guardrail(
+                organization_id=organization_id, hosted_guardrail_id=hosted_guardrail_id
+            )
+            if self.hosted_guardrails is not None
+            else None
+        )
+        if offered is None:
+            raise OrganizationGuardrailHostedNotFoundError(hosted_guardrail_id)
 
     async def _scope_ids(self, guardrail_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[uuid.UUID]]:
         """The scoped workspace ids for a page of guardrails, in one query.
@@ -744,12 +799,14 @@ class OrganizationGuardrailService:
 
         url = _blank_to_none(request.url)
         credential = _blank_to_none(request.credential)
-        _require_single_backend(url, credential is not None, request.definition_id)
+        _require_single_backend(url, credential is not None, request.definition_id, request.hosted_guardrail_id)
         _require_url_for_credential(url, credential is not None)
         if url is not None:
             await _validate_url(url, has_credential=credential is not None)
         if request.definition_id is not None:
             await self._require_definition_in_organization(organization_id, request.definition_id)
+        if request.hosted_guardrail_id is not None:
+            await self._require_hosted_guardrail_offered(organization_id, request.hosted_guardrail_id)
         workspace_ids = await self._require_workspaces_in_organization(
             organization_id, [] if request.applies_to_all_workspaces else request.workspace_ids
         )
@@ -760,6 +817,7 @@ class OrganizationGuardrailService:
             url=url,
             encrypted_credential=_encrypted(credential) if credential else None,
             definition_id=request.definition_id,
+            hosted_guardrail_id=request.hosted_guardrail_id,
             mode=request.mode,
             on_unavailable=request.on_unavailable,
             # Nothing stored to restore from, so this keeps whatever was sent:
@@ -808,17 +866,21 @@ class OrganizationGuardrailService:
         # here a sent null is the clear: see this request model's docstring.
         new_definition_id: Any = request.definition_id if "definition_id" in fields else _UNSET
         effective_definition_id = new_definition_id if new_definition_id is not _UNSET else guardrail.definition_id
+        new_hosted_id: Any = request.hosted_guardrail_id if "hosted_guardrail_id" in fields else _UNSET
+        effective_hosted_id = new_hosted_id if new_hosted_id is not _UNSET else guardrail.hosted_guardrail_id
         # Checked against the *pair* rather than either half, so the two ways in
         # are both closed: adding a credential to an entry that has no endpoint,
         # and clearing the endpoint from one that keeps its credential. Same for
         # the backends: a request naming one of them is refused against the one
         # already stored, which the request alone cannot see.
-        _require_single_backend(effective_url, effective_has_credential, effective_definition_id)
+        _require_single_backend(effective_url, effective_has_credential, effective_definition_id, effective_hosted_id)
         _require_url_for_credential(effective_url, effective_has_credential)
         if effective_url is not None:
             await _validate_url(effective_url, has_credential=effective_has_credential)
         if new_definition_id is not _UNSET and new_definition_id is not None:
             await self._require_definition_in_organization(organization_id, new_definition_id)
+        if new_hosted_id is not _UNSET and new_hosted_id is not None:
+            await self._require_hosted_guardrail_offered(organization_id, new_hosted_id)
 
         applies_to_all = (
             request.applies_to_all_workspaces
@@ -844,6 +906,8 @@ class OrganizationGuardrailService:
             guardrail.encrypted_credential = _encrypted(new_credential) if new_credential else None
         if new_definition_id is not _UNSET:
             guardrail.definition_id = new_definition_id
+        if new_hosted_id is not _UNSET:
+            guardrail.hosted_guardrail_id = new_hosted_id
         if request.profile is not None:
             guardrail.profile = request.profile
         if request.mode is not None:
@@ -907,6 +971,8 @@ class OrganizationGuardrailService:
         guardrail = await self._get_or_404(organization_id, guardrail_id)
         if guardrail.definition_id is not None:
             raise OrganizationGuardrailTestsItsDefinitionError()
+        if guardrail.hosted_guardrail_id is not None:
+            return await self._test_hosted(organization_id, guardrail, request)
         url = guardrail.url
         if url is None and not default_url:
             raise OrganizationGuardrailNoEndpointError()
@@ -946,6 +1012,45 @@ class OrganizationGuardrailService:
             score=float(result.score)
             if isinstance(result.score, int | float) and not isinstance(result.score, bool)
             else None,
+        )
+
+    async def _test_hosted(
+        self, organization_id: uuid.UUID, guardrail: OrganizationGuardrail, request: OrganizationGuardrailTest
+    ) -> OrganizationGuardrailTestResult:
+        """Run a hosted mandate's check once, through the port, as a request would.
+
+        A test is a real check, so the build meters it; its key is unique per
+        test, so each one counts once.
+        """
+        hosted_guardrail_id = guardrail.hosted_guardrail_id
+        assert hosted_guardrail_id is not None
+        profile = guardrail.profile
+        stored_kwargs = guardrail.validate_kwargs
+        validate_kwargs = (
+            restore_redacted_values(request.validate_kwargs, stored_kwargs)
+            if "validate_kwargs" in request.model_fields_set
+            else stored_kwargs
+        ) or {}
+        # Ends the read, so no transaction idles over the vendor call.
+        await self.db.rollback()
+        if self.hosted_guardrails is None:
+            raise OrganizationGuardrailCheckFailedError()
+        try:
+            verdict = await self.hosted_guardrails.evaluate(
+                organization_id=organization_id,
+                workspace_id=None,
+                hosted_guardrail_id=hosted_guardrail_id,
+                text=request.text,
+                validate_kwargs=validate_kwargs,
+                idempotency_key=f"test:{uuid.uuid4()}",
+            )
+        except HostedGuardrailUnfundedError as exc:
+            raise OrganizationGuardrailUnfundedError() from exc
+        except HostedGuardrailUnavailableError as exc:
+            logger.warning("Testing hosted guardrail mandate %s failed: %s", profile, type(exc).__name__)
+            raise OrganizationGuardrailCheckFailedError() from exc
+        return OrganizationGuardrailTestResult(
+            valid=verdict.valid, explanation=verdict.explanation, score=verdict.score
         )
 
     async def delete_guardrail(self, *, user: User, guardrail_id: uuid.UUID) -> None:

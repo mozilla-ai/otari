@@ -635,10 +635,12 @@ export function organizationGuardrail(
     profile: "prompt-injection",
     // The ordinary entry: no endpoint of its own, so it is sent to the
     // deployment's guardrails URL, no credential to authenticate with, and no
-    // definition of the organization's own for Otari to build and run.
+    // definition of the organization's own for Otari to build and run, and
+    // no hosted guardrail of the deployment's.
     url: null,
     has_credential: false,
     definition_id: null,
+    hosted_guardrail_id: null,
     mode: "monitor",
     on_unavailable: "block",
     validate_kwargs: null,
