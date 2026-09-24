@@ -18,6 +18,7 @@ Otari calls these endpoints, all rooted at the configured platform base URL:
 | `POST {base}/gateway/usage`                 | Report the outcome of an attempt back to the platform |
 | `POST {base}/gateway/mcp-servers/resolve`   | Authorize MCP access and swap workspace-scoped MCP server ids for inline server configs |
 | `POST {base}/gateway/web-search/resolve`    | Resolve the workspace's Web Access policy when a request uses `otari_web_search` or `otari_web_fetch` |
+| `POST {base}/gateway/guardrails/evaluate`   | Run the guardrails the organization mandates for the workspace, when resolve names any |
 
 `{base}` means Otari platform `base_url` setting. Otari concatenates literally. The peer service is responsible for including any API-version prefix it exposes its own routes under. For the reference otari deployment that prefix is `/api/v1`, so the base URL is `http://backend:8000/api/v1` and Otari ends up POSTing to `http://backend:8000/api/v1/gateway/provider-keys/resolve`.
 
@@ -25,7 +26,7 @@ Otari calls these endpoints, all rooted at the configured platform base URL:
 
 Every endpoint requires `X-Gateway-Token: <gw_...>` in the request headers. This
 proves the caller is an Otari instance configured against this platform
-deployment. The three resolve endpoints additionally require `X-User-Token:
+deployment. The three resolve endpoints and guardrail evaluation additionally require `X-User-Token:
 <tk_...>`, which is the workspace API token forwarded opaquely from the end
 user's credential header (`Authorization: Bearer`, `Otari-Key`, or
 `x-api-key`). The usage endpoint sends only the gateway token.
@@ -209,6 +210,36 @@ field entirely. `workspace_id` and `organization_id` are read here too, from
 the same top level, since a peer that still answers flat may nonetheless know
 its own tenant.
 
+### Guardrail descriptors
+
+Either shape may carry a top-level `guardrails` list: the guardrails the
+organization mandates for this workspace, which the gateway must run on the
+request's input before any attempt.
+
+```json
+{
+  "guardrails": [
+    {"id": "5f0c...", "profile": "prompt-injection", "mode": "block", "on_unavailable": "block"}
+  ]
+}
+```
+
+`id` is opaque and names the mandate on the peer. `profile`, `mode` and
+`on_unavailable` mean what they mean on a request-body guardrail. A descriptor
+carries no URL, credential, parameter or backend kind, because the peer runs the
+check (see [Guardrail evaluation](#guardrail-evaluation)); nothing about where it
+runs or what it is keyed with reaches the gateway.
+
+Absent means the organization mandates nothing, which is also what a peer that
+predates this field answers, so an older peer behaves as it always has. An
+explicit `null` or a malformed list fails the request closed with `502`, for the
+reason a malformed `authorized_tools` does: dropping a mandate the peer meant to
+send would serve a request it meant to check.
+
+A descriptor merges with the caller's own request-body guardrails by profile,
+exactly as a standalone mandate does: it may add a check or tighten one and
+never weaken it.
+
 ### Failure
 
 | Status | Behavior |
@@ -380,6 +411,69 @@ informational: the active Search backend is configured on the gateway itself.
 > become the contract of record once the consumer-side fixtures land
 > ([#146](https://github.com/mozilla-ai/otari/issues/146)); until then this
 > document is authoritative.
+
+## Guardrail evaluation
+
+Called once per request, before the first attempt, when resolve returned at
+least one guardrail descriptor. The peer runs every named guardrail and answers
+one result per id.
+
+### Request
+
+```http
+POST /gateway/guardrails/evaluate
+X-Gateway-Token: gw_...
+X-User-Token: tk_...
+Content-Type: application/json
+
+{"request_id": "01HXY...", "guardrail_ids": ["5f0c..."], "input_text": "..."}
+```
+
+`request_id` is the one resolve returned. `guardrail_ids` are descriptor ids from
+that resolve, each at most once. `input_text` is the request's user text, the
+same text a standalone gateway checks. The peer must check that every id is
+mandated for the workspace `X-User-Token` belongs to, and answer one it is not
+as `unavailable`.
+
+**The input text leaves the gateway.** A deployment whose mandates are all
+evaluated by the peer sends the peer each request's user text. That is the cost
+of the peer holding every guardrail secret.
+
+### Response
+
+```json
+{
+  "results": [
+    {"id": "5f0c...", "status": "evaluated", "valid": false, "explanation": null, "score": 0.97}
+  ]
+}
+```
+
+| `status` | Meaning |
+|---|---|
+| `evaluated` | The guardrail returned a verdict. `valid: false` is a flag; `null` is inconclusive and never blocks. |
+| `unavailable` | No verdict. The descriptor's `mode` and `on_unavailable` decide the request. |
+| `unfunded` | No verdict, because the organization cannot pay for a metered check. As `unavailable`, except that a mandate that fails closed answers `402` instead of `502`. |
+
+An id missing from `results`, or a result the gateway cannot read, is
+`unavailable`. The gateway applies `mode` and `on_unavailable` from the
+descriptor, never from this response.
+
+**Metering.** A peer may charge for a check that returned a verdict. It must
+charge at most once per `(request_id, id)`, so a gateway that retries the call
+is not charged twice.
+
+**Hosted guardrails.** A guardrail the deployment hosts with its own vendor
+secret runs only for the deployment's default gateway. For any other gateway the
+peer answers it `unavailable`, so a self-hosted gateway never spends the
+deployment's secret.
+
+### Failure
+
+Any failure of the call itself (a non-`2xx` status, a body the gateway cannot
+read, a network error or `PLATFORM_GUARDRAIL_TIMEOUT_MS` passing) makes every
+id `unavailable`. Each descriptor's `on_unavailable` then decides, so an outage
+refuses only the requests an organization asked to fail closed.
 
 ## Usage report
 
@@ -625,6 +719,7 @@ flag.
 | `PLATFORM_HEALTH_URL` | none | Full URL probed instead of `base_url` + `PLATFORM_HEALTH_PATH`, for a peer whose health route does not live under `base_url`'s own path (the peer's unversioned `/health` beside a versioned `/v1` API, say). Takes precedence over `PLATFORM_HEALTH_PATH` when set. |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Per-resolve timeout. |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Per-usage-report timeout. |
+| `PLATFORM_GUARDRAIL_TIMEOUT_MS` | `15000` | Timeout for one guardrail evaluation call, which covers every mandated check. Longer than a resolve, because the peer calls each guardrail's vendor. |
 | `PLATFORM_USAGE_INLINE_TIMEOUT_MS` | `1500` | Budget for the one usage report the response path waits on to attach inline cost. Expiry ships the response without cost; the report itself continues. |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage-report failures. |
 | `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS` | `2000` | Per-attempt budget for the streaming first-chunk gate. Forwarded provider-tool requests retain it on non-final attempts. |
