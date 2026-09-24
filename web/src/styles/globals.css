@@ -1926,6 +1926,13 @@ main {
 .list-box-item[data-focus-visible="true"] {
   box-shadow: none;
 }
+/* On the row that is both selected and focused the selected fill wins, so
+   that row keeps a cue of its own: an outline drawn inside the box, where the
+   scrolling list cannot clip it. */
+.list-box-item[data-selected="true"][data-focus-visible="true"] {
+  outline: 2px solid var(--focus-ring-ink, var(--color-focus));
+  outline-offset: -2px;
+}
 .list-box-item[data-selected="true"] {
   background-color: var(--color-surface-subtle);
   color: var(--color-text);
