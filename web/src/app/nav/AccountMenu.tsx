@@ -10,7 +10,7 @@ import {
   FiFileText,
   FiHardDrive,
   FiLogOut,
-  FiMessageSquare,
+  FiMessageCircle,
   FiMoon,
   FiSettings,
   FiShield,
@@ -488,7 +488,7 @@ export function AccountMenu({
           {feedback_enabled && onOpenFeedback ? (
             <MenuItem
               label="Feedback"
-              icon={FiMessageSquare}
+              icon={FiMessageCircle}
               className="md:hidden"
               onPress={() => {
                 setOpen(false)
