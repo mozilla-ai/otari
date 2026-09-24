@@ -1,4 +1,4 @@
-"""ORM table for the files the Files API stores, and the metadata that outlives their bytes."""
+"""ORM tables for the files the Files API stores, and for the copies a provider holds of them."""
 
 import uuid
 from datetime import UTC, datetime
@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import JSON, DateTime, ForeignKey, Index, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
-from gateway.models.base import Base
+from gateway.models.base import Base, UtcDateTime
 
 
 class FileObject(Base):
@@ -64,3 +64,37 @@ class FileObject(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
 
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+
+
+class FileProviderCopy(Base):
+    """A copy of a stored file that a provider holds, so a provider-native feature can name it.
+
+    Otari's store stays the source of truth.
+    The copy is a cache the provider expires on its own, and ``expires_at`` is
+    when it stops being usable, so a later request can tell without asking.
+
+    The key identifies the account the copy is in, because a provider file ID
+    exists only inside the account of the credential that uploaded it, and a
+    request resolving a different credential can neither name that copy nor
+    delete it.
+    Two things select that credential: the configured instance, and the
+    workspace, whose organization may hold a provider key of its own that a bare
+    ``provider:model`` selector resolves to.
+    """
+
+    __tablename__ = "file_provider_copies"
+    # The workspace foreign key cascades, and the primary key indexes it only as
+    # a trailing column, so a workspace deletion would scan the table.
+    __table_args__ = (Index("ix_file_provider_copies_credential_workspace_id", "credential_workspace_id"),)
+
+    file_id: Mapped[str] = mapped_column(ForeignKey("file_objects.id", ondelete="CASCADE"), primary_key=True)
+    provider: Mapped[str] = mapped_column(primary_key=True)
+    provider_instance: Mapped[str] = mapped_column(primary_key=True)
+    # CASCADE rather than the RESTRICT a file uses: a copy is a cache, and
+    # holding up a workspace deletion for one would be the only thing it ever did.
+    credential_workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    provider_file_id: Mapped[str] = mapped_column()
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(UTC))

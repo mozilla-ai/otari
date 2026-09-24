@@ -28,7 +28,12 @@ from gateway.exceptions.files_exceptions import (
 )
 from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.repositories.files import FilePageQuery, FileRepositories, FileRepository
+from gateway.repositories.files import (
+    FilePageQuery,
+    FileProviderCopyRepository,
+    FileRepositories,
+    FileRepository,
+)
 from gateway.services.files import FileDialect, FileListing, FileScope, FileService, NewFile
 
 _WORKSPACE = uuid.uuid4()
@@ -136,7 +141,7 @@ def _service(
 
     return FileService(
         cast(UnitOfWork, _FakeUnitOfWork()),
-        FileRepositories(files=cast(FileRepository, files)),
+        FileRepositories(files=cast(FileRepository, files), provider_copies=cast(FileProviderCopyRepository, None)),
         cast(FileStoragePort, store),
         GatewayConfig(**config),
         _default_workspace,
