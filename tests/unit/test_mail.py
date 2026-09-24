@@ -434,6 +434,12 @@ def test_a_query_on_the_interface_address_travels_ahead_of_the_hash_route() -> N
     assert mailer.link("/x?y=1") == "https://app.example.com/ui/x?y=1&edge=eu"
 
 
+def test_a_trailing_slash_inside_a_query_value_survives_the_link() -> None:
+    mailer = Mailer(_ready(ui_base_url="https://app.example.com/ui/?edge=team/"))
+
+    assert mailer.link("/#/verify-email?token=abc") == "https://app.example.com/ui/?edge=team/#/verify-email?token=abc"
+
+
 def test_link_does_not_double_a_trailing_slash() -> None:
     assert Mailer(_ready(public_base_url="https://otari.example.com/")).link("/x") == "https://otari.example.com/x"
 

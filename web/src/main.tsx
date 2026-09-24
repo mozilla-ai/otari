@@ -2,6 +2,7 @@ import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 
 import App from "@/app/App"
+import { loadDeployment } from "@/app/boot"
 import { Provider } from "@/app/provider"
 import { apiFetch } from "@/shared/api/client"
 import { prepareRequests } from "@/shared/api/overlayRequestPolicy"
@@ -38,11 +39,9 @@ function loadBootstrap(): Promise<WireBootstrap | null> {
 }
 
 // Settled before the bootstrap is asked for, because the answer can change
-// where that request goes. A build that cannot decide keeps the origin the page
-// was served from, which is the answer this build gives without being asked.
-const prepared = prepareRequests().catch(() => undefined)
-
-void prepared.then(loadBootstrap).then((bootstrap) => {
+// where that request goes; a preparation that fails lands on the same screen
+// as a bootstrap that never arrived (see `app/boot.ts`).
+void loadDeployment(prepareRequests, loadBootstrap).then((bootstrap) => {
   createRoot(container).render(
     <StrictMode>
       <Provider>

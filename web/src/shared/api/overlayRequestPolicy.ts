@@ -11,10 +11,11 @@
  *
  * `prepareRequests` runs once, before the bootstrap is read, so a replacing
  * module can settle its answer (a stored choice, a directory it has to fetch)
- * ahead of the first request that depends on it. It must resolve rather than
- * reject: `main.tsx` treats a rejection as "same origin" and carries on, since
- * a dashboard that cannot decide where its API is still has the origin it was
- * served from.
+ * ahead of the first request that depends on it. Resolving means the answer is
+ * settled; rejecting means no deployment could be chosen, and the dashboard
+ * then shows the gateway as unreachable rather than reading a bootstrap from
+ * wherever the policy happened to point (`app/boot.ts`). A replacing module
+ * that wants the page's own origin as its fallback resolves with it.
  *
  * **Reached by its `@/shared/api/overlayRequestPolicy` specifier and never
  * relatively**, which is the seam rule and not a style call; `overlaySeams.test.ts`

@@ -305,6 +305,16 @@ class ModelCapabilityConfig(BaseModel):
     )
 
 
+def _strip_path_slashes(url: str) -> str:
+    """Drop trailing slashes from a URL's path, leaving any query as written.
+
+    A slash at the end of a query value (``?edge=team/``) is part of that value,
+    and stripping the whole string would hand every link a different one.
+    """
+    location, separator, query = url.partition("?")
+    return f"{location.rstrip('/')}{separator}{query}"
+
+
 def _host_of(url: str | None) -> str:
     """The bare hostname of an absolute URL, or "" if there isn't one.
 
@@ -1361,11 +1371,13 @@ class GatewayConfig(BudgetSettings, PricingSettings, FeedbackSettings, BaseSetti
 
     @property
     def effective_ui_base_url(self) -> str:
-        """Where a browser reaches this deployment's interface, with no trailing slash.
+        """Where a browser reaches this deployment's interface, with no trailing slash on its path.
 
         ``ui_base_url`` when set, ``public_base_url`` otherwise, empty when neither is.
         """
-        return (self.ui_base_url or "").strip().rstrip("/") or (self.public_base_url or "").strip().rstrip("/")
+        return _strip_path_slashes((self.ui_base_url or "").strip()) or _strip_path_slashes(
+            (self.public_base_url or "").strip()
+        )
 
     def ui_link(self, path: str) -> str:
         """An absolute link into the interface, or ``path`` itself when the address is unknown.
@@ -2106,7 +2118,7 @@ class GatewayConfig(BudgetSettings, PricingSettings, FeedbackSettings, BaseSetti
         stripped = (value or "").strip()
         if not stripped:
             return None
-        normalized = stripped.rstrip("/")
+        normalized = _strip_path_slashes(stripped)
         if not normalized:
             # Slashes alone, which would otherwise strip to empty and read as
             # unset. Refused rather than silently answered by public_base_url.

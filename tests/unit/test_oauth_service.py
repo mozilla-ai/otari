@@ -306,6 +306,22 @@ class TestRejectingAUiBaseUrlABrowserCouldNotFollow:
         with pytest.raises(ValidationError, match="fragment"):
             GatewayConfig(ui_base_url=value)
 
+    def test_a_trailing_slash_inside_a_query_value_is_kept(self) -> None:
+        # Only the path is normalized: a slash ending a query value is part of
+        # the value, and every link built from here has to carry it unchanged.
+        config = configured(ui_base_url="https://app.example.com/ui/?edge=team/")
+
+        # The path's own trailing slash still goes, as it always has; the query
+        # is carried as written and the link puts the slash back before it.
+        assert config.ui_base_url == "https://app.example.com/ui?edge=team/"
+        assert config.effective_ui_base_url == "https://app.example.com/ui?edge=team/"
+        assert oauth_service.callback_landing_target(config, "google", "code=x") == (
+            "https://app.example.com/ui/?edge=team/#/auth/google/callback?code=x"
+        )
+        assert GatewayConfig(public_base_url="https://otari.example.com/?edge=team/").effective_ui_base_url == (
+            "https://otari.example.com?edge=team/"
+        )
+
     def test_a_query_string_is_kept(self) -> None:
         # An edge serving one interface for several deployments tags each
         # link through it; ``ui_link`` is what keeps it ahead of the hash route.

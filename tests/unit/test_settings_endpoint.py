@@ -344,7 +344,7 @@ def test_the_ui_base_url_keeps_a_query_and_refuses_a_fragment() -> None:
     # A query is how an edge serving one interface for several deployments
     # tells each link apart; a fragment would collide with the hash route.
     assert GatewayConfig(ui_base_url="https://app.example.com/ui/?edge=eu").ui_base_url == (
-        "https://app.example.com/ui/?edge=eu"
+        "https://app.example.com/ui?edge=eu"
     )
     with pytest.raises(ValidationError, match="no fragment"):
         GatewayConfig(ui_base_url="https://app.example.com/ui#/login")
