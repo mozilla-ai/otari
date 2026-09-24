@@ -28,12 +28,13 @@ from otari_agent.domain.check import PolicyCheckError, run_policy_check
 from otari_agent.domain.evaluators import matched_changed_paths
 from otari_agent.domain.policy import PolicyError, parse_policy
 from otari_agent.domain.types import (
-    CheckPassedGate,
     CheckVerdict,
-    CommandMatchGate,
+    CommandGate,
     EvidenceScope,
     JudgeGate,
     JudgeVerdict,
+    RunsAt,
+    VerifierGate,
 )
 from otari_agent.settings import API_KEY_HEADER, API_ROOT, load_settings
 
@@ -42,7 +43,7 @@ _HOOK_EDIT_TOOL_PATH_FIELDS = {"Edit": "file_path", "Write": "file_path", "Noteb
 
 # Claude Code's shell tool and the tool_input field naming the command it is
 # about to run. A PreToolUse call for this tool is the only evidence a
-# command_match gate gets before the command runs; see docs/agent-gates.md.
+# command gate gets before the command runs; see docs/agent-gates.md.
 _HOOK_COMMAND_TOOL_FIELDS = {"Bash": "command"}
 
 # Codex hook-dispatches its own shell tool under the same canonical name
@@ -52,7 +53,7 @@ _HOOK_COMMAND_TOOL_FIELDS = {"Bash": "command"}
 # tools.apply_patch() calls rather than naming a single command ("exec" is
 # also accepted, in case a build reports the pre-canonicalization name). That
 # whole snippet is kept as "the command" here rather than parsed apart: a
-# forbidden phrase a command_match gate looks for still matches wherever it
+# forbidden phrase a command gate looks for still matches wherever it
 # appears in it, and Code Mode's own PreToolUse dispatch is not complete yet
 # (openai/codex#23411), so there is no reliable per-argument shape to parse
 # even if it were worth the fragility.
@@ -81,7 +82,7 @@ def _hook_extract_patch_paths(patch_text: str) -> list[str]:
     not how many headers happened to name each one. A rename's own "*** Move
     to: <path>" line is matched too, alongside the "Update File:" line naming
     its old path that always precedes one: both the vacated and the landed-on
-    path are evidence a changed_path gate could care about, and reporting
+    path are evidence a path gate could care about, and reporting
     only one would silently miss whichever gate is scoped to the other.
     """
     seen: dict[str, None] = {}
@@ -112,7 +113,7 @@ _HOOK_MAX_COMMAND_LENGTH = 4096
 # truncated to _HOOK_MAX_COMMAND_LENGTH each already clears 2,000,000
 # characters). Left unbounded, the evaluator (local or remote) 422s/raises
 # on the whole request, and that failure is total: it takes every gate in
-# the policy with it, changed_path included, not just the command-evidence
+# the policy with it, path included, not just the command-evidence
 # ones.
 _HOOK_MAX_COMMANDS = 10_000
 _HOOK_MAX_TOTAL_COMMAND_CHARS = 2_000_000
@@ -130,7 +131,7 @@ def _bound_commands_for_submission(commands: list[str]) -> list[str] | None:
     one would read as a false fail. Evidence the caller could not submit in
     full is None, the same principle `evaluators.py`'s own module docstring
     already states for a missing evidence list altogether: a required
-    `command_match`/`command_if_changed` gate then resolves `unknown` and
+    `command`/`command_if_changed` gate then resolves `unknown` and
     blocks, rather than risking either outcome on data known to be
     incomplete.
 
@@ -171,16 +172,16 @@ def _hook_find_repo_root(start: Path) -> Path | None:
 
 
 def _hook_collect_changed_paths(repo_root: Path) -> list[str] | None:
-    """Evidence for a `changed_path` gate on a Stop event: what Git sees changed.
+    """Evidence for a `path` gate on a Stop event: what Git sees changed.
 
     Claude Code's Stop payload carries no file list of its own (unlike
     PreToolUse, whose tool_input already names a target), so a Stop-time
-    changed_path check has nothing to evaluate unless something goes and
+    path check has nothing to evaluate unless something goes and
     finds out what changed. Git status is that something: harness-agnostic
     (the same command regardless of which tool wrote the change, unlike
     parsing Claude Code's own transcript format) and ground truth for the
     working tree, including a change a `Bash` call made that no tool_input
-    ever named. Specific to changed_path: a future gate type collects its
+    ever named. Specific to path: a future gate type collects its
     own evidence in its own way, not through this function.
     """
     try:
@@ -249,7 +250,7 @@ def _tool_result_text(content: object) -> str:
 
 
 def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None:
-    """Evidence for a `command_match`/`command_if_changed` gate on a Stop event.
+    """Evidence for a `command`/`command_if_changed` gate on a Stop event.
 
     Claude Code's own Stop payload names no commands either, same as it
     names no changed files (see `_hook_collect_changed_paths`), but it does
@@ -331,7 +332,7 @@ _CODEX_COMMAND_TOOL_NAMES = frozenset({"Bash", "shell", "local_shell", "exec_com
 
 
 def _hook_collect_codex_transcript_commands(transcript_path: Path) -> list[str] | None:
-    """Evidence for a `command_match`/`command_if_changed` gate on a Codex Stop event.
+    """Evidence for a `command`/`command_if_changed` gate on a Codex Stop event.
 
     Codex's own rollout file (its `transcript_path`) is a JSONL log of
     `response_item` records, a different shape from Claude Code's own
@@ -436,7 +437,7 @@ _HOOK_JUDGE_MAX_GATES_PER_RUN = 5
 # Shared by _hook_collect_judge_verdicts and _hook_collect_check_verdicts: how
 # many of one run's applicable gates that function invokes at once. Independent
 # of either gate type's own per-run count cap above/below: those bound how many
-# gates a policy may apply at all (check_passed's own is 20), this bounds how
+# gates a policy may apply at all (verifier's own is 20), this bounds how
 # many of that count run at the same time, so one Stop event does not fork 20
 # subprocesses simultaneously.
 _HOOK_GATE_MAX_WORKERS = 8
@@ -1197,13 +1198,13 @@ def _hook_collect_judge_verdicts(
 # something is wrong, not a slow-but-normal case to accommodate.
 _HOOK_CHECK_TIMEOUT_SECONDS = 30
 
-# Mirrors _HOOK_JUDGE_MAX_GATES_PER_RUN's own reasoning: each check_passed
+# Mirrors _HOOK_JUDGE_MAX_GATES_PER_RUN's own reasoning: each verifier
 # gate costs one subprocess run, not a near-instant pattern match, so an
 # unbounded gate count must not turn one Stop event into unbounded
 # wall-clock.
 _HOOK_CHECK_MAX_GATES_PER_RUN = 20
 
-# One shared elapsed-time budget across every check_passed gate in one run,
+# One shared elapsed-time budget across every verifier gate in one run,
 # the same shape _HOOK_JUDGE_TOTAL_BUDGET_SECONDS takes, scaled down for the
 # same reason _HOOK_CHECK_TIMEOUT_SECONDS is: verifier scripts are expected
 # to run in seconds, not minutes, and this budget still has to leave margin
@@ -1219,7 +1220,7 @@ _HOOK_MAX_CHECK_DETAIL_LENGTH = 4_096
 
 
 def _hook_run_check_verifier(repo_root: Path, verifier: str, *, deadline: float) -> tuple[str, str]:
-    """Run one check_passed gate's verifier script; return (outcome, detail).
+    """Run one verifier gate's verifier script; return (outcome, detail).
 
     The exit-code contract is fixed, not something a caller or this command
     decides: 0 is "pass", 1 is "fail", anything else -- a different exit
@@ -1237,7 +1238,7 @@ def _hook_run_check_verifier(repo_root: Path, verifier: str, *, deadline: float)
     repo-local script".
 
     No sandboxing beyond that check, and no guard requiring the script to
-    predate the diff under check, deliberately: see CheckPassedGate's own
+    predate the diff under check, deliberately: see VerifierGate's own
     docstring and docs/agent-gates.md for why. `cwd` is the repo root, so a
     verifier that wants to inspect the working tree (`git diff`, `git
     status`, a plain file scan) can do so exactly the way a Makefile target
@@ -1339,11 +1340,11 @@ def _hook_collect_check_verdicts(
     repo_root: Path,
     changed_paths: list[str],
 ) -> list[dict[str, str]]:
-    """Run every applicable check_passed gate's verifier locally; return check_results.
+    """Run every applicable verifier gate's verifier locally; return check_results.
 
     Structured exactly like `_hook_collect_judge_verdicts`: parses the policy
     locally with the same pure `domain.policy.parse_policy` `run_policy_check`
-    itself uses below, purely to find which gates are check_passed gates and
+    itself uses below, purely to find which gates are verifier gates and
     read their `verifier`/`when_changed`; that later call re-parses and
     validates the same `policy_yaml` on its own, so a mismatch here only
     means check evidence for a gate that call would reject anyway. A local
@@ -1354,7 +1355,7 @@ def _hook_collect_check_verdicts(
     A gate with `when_changed` is skipped locally, before ever running its
     verifier, when none of `changed_paths` matches its globs
     (`domain.evaluators.matched_changed_paths`, the same grammar
-    `evaluate_check_passed`'s own applicability check uses server-side): the
+    `evaluate_verifier`'s own applicability check uses server-side): the
     same local optimization `_hook_collect_judge_verdicts` already applies to
     a judge gate's own `when_changed`. A gate with no `when_changed` at all
     keeps its unconditional, every-Stop-event behavior.
@@ -1365,7 +1366,7 @@ def _hook_collect_check_verdicts(
     already runs each verifier in its own subprocess with its own timeout, so
     nothing here needs a lock the way judge gates' shared audit log does.
     This does shift a real assumption onto verifier authors, though: two or
-    more `check_passed` gates applicable to the same Stop event now run at
+    more `verifier` gates applicable to the same Stop event now run at
     the same time against the same working tree, not one after another, so a
     verifier that is not safe under that (one that writes to a fixed
     temporary path another verifier might also use, or that mutates the
@@ -1384,7 +1385,7 @@ def _hook_collect_check_verdicts(
     check_gates = [
         gate
         for gate in spec.gates
-        if isinstance(gate, CheckPassedGate)
+        if isinstance(gate, VerifierGate)
         and (not gate.when_changed or matched_changed_paths(gate.when_changed, changed_paths_tuple))
     ]
     if not check_gates:
@@ -1392,7 +1393,7 @@ def _hook_collect_check_verdicts(
     if len(check_gates) > _HOOK_CHECK_MAX_GATES_PER_RUN:
         skipped = [gate.id for gate in check_gates[_HOOK_CHECK_MAX_GATES_PER_RUN:]]
         click.echo(
-            f"otari hook: {len(check_gates):,} check_passed gates in this policy, over the "
+            f"otari hook: {len(check_gates):,} verifier gates in this policy, over the "
             f"{_HOOK_CHECK_MAX_GATES_PER_RUN:,} limit; skipping: {', '.join(skipped)}.",
             err=True,
         )
@@ -1403,7 +1404,7 @@ def _hook_collect_check_verdicts(
     # does not bound the total.
     deadline = time.monotonic() + _HOOK_CHECK_TOTAL_BUDGET_SECONDS
 
-    def run_one(gate: CheckPassedGate) -> dict[str, str]:
+    def run_one(gate: VerifierGate) -> dict[str, str]:
         outcome, detail = _hook_run_check_verifier(repo_root, gate.verifier, deadline=deadline)
         return {"gate_id": gate.id, "outcome": outcome, "detail": detail}
 
@@ -1496,7 +1497,7 @@ def hook(
     `_HOOK_COMMAND_TOOL_FIELDS_BY_HARNESS`, `_CODEX_PATCH_TOOL_NAME`); Codex's
     own Code Mode wraps shell/apply_patch calls in a JS snippet rather than
     naming one tool, and its PreToolUse dispatch does not yet cover that
-    surface at all (openai/codex#23411), so a `changed_path`/`command_match`
+    surface at all (openai/codex#23411), so a `path`/`command`
     gate scoped to `PreToolUse` will not see a Code Mode edit until upstream
     fixes that; `Stop`'s own Git-status fallback and transcript scan still do.
 
@@ -1544,6 +1545,11 @@ def hook(
     # session: this is what tells the evaluator which command-evidence gates
     # can resolve at all, rather than leaving each to guess from an empty list.
     command_scope: EvidenceScope = "call"
+    # Which moment the submitted paths were read at, the counterpart to a
+    # gate's own `runs`. Set in every branch below that submits a path list;
+    # run_policy_check refuses a path list without one, because a gate cannot
+    # otherwise tell a PreToolUse call from a Stop event on a clean tree.
+    changed_path_source: RunsAt | None = None
     # None, not [], by default: a PreToolUse call has neither a full diff nor
     # a finished transcript to judge against yet, and never runs
     # _hook_collect_judge_verdicts at all, so submitting None (rather than an
@@ -1556,9 +1562,9 @@ def hook(
     # None, not [], by default, for exactly the same reason judge_results is:
     # a PreToolUse call has no finished session for a verifier to check yet,
     # and never runs _hook_collect_check_verdicts at all, so submitting None
-    # resolves every check_passed gate not_applicable rather than the
-    # unknown a caller that does run check_passed gates but is missing one
-    # gets (see PolicyCheckRequest.check_results, evaluate_check_passed).
+    # resolves every verifier gate not_applicable rather than the
+    # unknown a caller that does run verifier gates but is missing one
+    # gets (see PolicyCheckRequest.check_results, evaluate_verifier).
     # Only the Stop branch below ever reassigns this.
     check_results: list[dict[str, str]] | None = None
     if event == "PreToolUse":
@@ -1594,6 +1600,7 @@ def hook(
             if not resolved_paths:
                 return
             changed_paths = resolved_paths
+            changed_path_source = "pre_tool_use.edit_target"
         elif path_field:
             target = tool_input.get(path_field)
             if not target:
@@ -1606,6 +1613,7 @@ def hook(
                 # indistinguishable from no forbidden change, so every
                 # PreToolUse gate would pass on Windows.
                 changed_paths = [Path(target).resolve().relative_to(root).as_posix()]
+                changed_path_source = "pre_tool_use.edit_target"
             except ValueError:
                 return  # Outside the repo: nothing this policy can name.
         elif command_field:
@@ -1614,7 +1622,7 @@ def hook(
                 return
             # Truncated rather than sent whole: the Hook Server rejects an
             # oversize command with a 422, and a 422 fails the *whole* check
-            # open, taking every changed_path gate in the same policy with it.
+            # open, taking every path gate in the same policy with it.
             # A Bash call carrying a heredoc clears this limit routinely, so
             # that is the common case rather than a pathological one. A tool
             # name is argv[0], so keeping the head is what preserves detection
@@ -1627,6 +1635,7 @@ def hook(
                 )
                 command = command[:_HOOK_MAX_COMMAND_LENGTH]
             commands = [command]
+            changed_path_source = "pre_tool_use.command"
         else:
             return  # A tool this harness integration does not check yet.
     elif event == "Stop":
@@ -1635,11 +1644,12 @@ def hook(
             click.echo("otari hook: could not read Git state, not blocking.", err=True)
             return
         changed_paths = collected
+        changed_path_source = "stop.working_tree"
 
         # transcript_path is the session's JSONL transcript on disk (each
         # harness's own name/format for it). Absent, or unreadable, submits
         # None rather than `[]`: `[]` means "collected, and there is none",
-        # which would let a required command_match/command_if_changed gate
+        # which would let a required command/command_if_changed gate
         # read a failed collection as a clean pass instead of the unresolved
         # `unknown` it actually is (see docs/agent-gates.md).
         transcript_path = payload.get("transcript_path")
@@ -1692,6 +1702,7 @@ def hook(
                 source=str(gates_file),
                 changed_paths=changed_paths,
                 commands=commands,
+                changed_path_source=changed_path_source,
                 command_scope=command_scope,
                 judge_results=(
                     None
@@ -1764,6 +1775,7 @@ def hook(
                     "policy_yaml": policy_yaml,
                     "changed_paths": changed_paths,
                     "commands": commands,
+                    "changed_path_source": changed_path_source,
                     "command_scope": command_scope,
                     "judge_results": judge_results,
                     "check_results": check_results,
@@ -1811,7 +1823,7 @@ def hook(
     # must not raise KeyError here, outside that protection, and surface as a
     # traceback in place of the fail-open message this command promises.
     # detail carries the specific "why" behind message's generic, fixed
-    # policy text (a judge gate's own model reasoning, a changed_path gate's
+    # policy text (a judge gate's own model reasoning, a path gate's
     # matched paths, ...); without it, every gate of the same id shows the
     # exact same static line no matter what a judge model actually found
     # (confirmed: a real verdict naming "src/module.py:42" surfaced only the
@@ -1882,12 +1894,20 @@ def _otari_binary_path() -> str:
 
 
 def _gates_file_allows_bash(gates_file: Path) -> bool:
-    """Whether the matcher should include Bash: only if a command_match gate exists.
+    """Whether the matcher should include Bash: only if a command gate exists.
 
     Parses gates_file the same way the Hook Server does. A missing or
     unparseable policy defaults to False, the narrower matcher: setup cannot
     know what a broken policy would have wanted, and the round trip is
     otherwise harmless but pointless to pay for nothing.
+
+    Deliberately does not consult any gate's `runs`, which looks like it
+    should matter and does not: no `runs` value a path gate can name
+    is collectable from a Bash call. `pre_tool_use.edit_target` needs a tool
+    that declares a path, and a Bash call declares none; `stop.working_tree`
+    is not readable at PreToolUse at all. Only a command gate gives the
+    Bash matcher anything to do. That changes the day a source for shell write
+    targets exists, and not before.
     """
     if not gates_file.is_file():
         return False
@@ -1896,24 +1916,62 @@ def _gates_file_allows_bash(gates_file: Path) -> bool:
         spec = parse_policy(gates_file.read_text(encoding="utf-8"), source=str(gates_file))
     except PolicyError:
         return False
-    return any(isinstance(gate, CommandMatchGate) for gate in spec.gates)
+    return any(isinstance(gate, CommandGate) for gate in spec.gates)
 
 
-def _starter_gates_yaml(repo_name: str) -> str:
+def _policy_header(repo_name: str) -> str:
+    """The `schema_version`/`policy` preamble both policy writers emit.
+
+    One function rather than two near-identical strings, so a schema bump is
+    one edit. The id is quoted because a directory name is not guaranteed to
+    be a bare YAML scalar: one containing ": " or leading with "*"/"&"/"@"
+    parses as something else entirely, or not at all.
+    """
     return (
         'schema_version: "1.0"\n'
         "policy:\n"
-        f"  id: {repo_name}/gates\n"
+        f"  id: {json.dumps(f'{repo_name}/gates')}\n"
         "  description: Rules this repo checks on its own working tree.\n"
         "\n"
         "gates:\n"
+    )
+
+
+def _starter_gates_yaml(repo_name: str) -> str:
+    """A two-gate starter policy, chosen to teach `runs` rather than to be useful.
+
+    One gate of each shape a `runs` value can take: a command gate, which can
+    only ever refuse a call before it happens, and a path gate naming both
+    moments, which is what most real rules want. Between them a reader sees
+    that the field is a real choice and that the two halves of an entry say
+    different things.
+    """
+    return _policy_header(repo_name) + (
         "  - id: no-force-push\n"
-        "    type: command_match\n"
+        "    type: command\n"
+        "    runs: [pre_tool_use.command]\n"
         "    enforcement: advisory\n"
         '    forbidden: ["git push --force"]\n'
         "    message: >-\n"
         "      Force-pushing rewrites shared history. Use --force-with-lease\n"
         "      if you must.\n"
+        "\n"
+        "  - id: no-committed-env-file\n"
+        "    type: path\n"
+        # Both moments: the first refuses an edit tool before it writes, the
+        # second catches anything else (a shell redirect, a script) once the
+        # turn is over. Neither alone covers a path.
+        #
+        # A path nothing legitimately generates, on purpose. A gate over a
+        # generated file warns on the very command that regenerates it, which
+        # is the trap this repo's own policy documents twice (see the
+        # postman-collection and pyproject gates in .otari-gates.yml).
+        "    runs: [pre_tool_use.edit_target, stop.working_tree]\n"
+        "    enforcement: advisory\n"
+        '    forbidden: [".env", "**/.env"]\n'
+        "    message: >-\n"
+        "      A .env file holds secrets and does not belong in the repo.\n"
+        "      Keep it untracked and out of commits.\n"
     )
 
 
@@ -2066,13 +2124,13 @@ def hook_setup(harness: str, api_key: str | None) -> None:
     click.echo(f"{'Added' if pretooluse_created else 'Updated'} the PreToolUse hook in {settings_path}.")
     click.echo(
         f"Matcher: {matcher}"
-        + ("" if include_bash else f" (add a command_match gate to also cover {setup.command_matcher})")
+        + ("" if include_bash else f" (add a command gate to also cover {setup.command_matcher})")
     )
 
     # Registered unconditionally, not only when the policy has a gate that
-    # benefits: changed_path already falls back to `git status` on Stop
+    # benefits: path already falls back to `git status` on Stop
     # (catching a Bash-written change PreToolUse never saw coming), and
-    # command_if_changed/command_match now read real command evidence there
+    # command_if_changed/command now read real command evidence there
     # too (from the session's own transcript; see docs/agent-gates.md). A
     # PreToolUse-only install left both silently unreachable.
     stop_created = _merge_hook_entry(settings_path, "Stop", command)
@@ -2095,20 +2153,36 @@ _GATES_GENERATE_SCHEMA_REFERENCE = """A gate is one YAML mapping with these fiel
 
 Common to every gate: `id` (unique, short, kebab-case, at most 200 characters),
 `type`, `enforcement` (`required` or `advisory`), `message` (shown when it
-fails; should point back at the rule/section it came from).
+fails; should point back at the rule/section it came from), and `runs`, a
+non-empty list naming when the gate runs and what it can see there. Each gate
+type accepts only certain `runs` values, and there is no default:
 
-- changed_path: fails when a changed path matches one of `forbidden`, a list
+- path: `pre_tool_use.edit_target`, `stop.working_tree`, or both
+- command: `pre_tool_use.command`
+- command_if_changed: `stop.session`
+- judge: `stop.session`
+- verifier: `stop.verifier`
+
+`pre_tool_use.edit_target` is the path an Edit/Write/NotebookEdit call names
+before it runs, so a match refuses the write. It cannot see a path a shell
+command writes (a redirect, sed -i, cp, a script). `stop.working_tree` is what
+git status reports once the turn is over: complete whatever wrote the file, but
+always after the fact. Propose both for a path gate unless the path is
+only ever written by a build or a generator, in which case propose
+`[stop.working_tree]` alone, because no tool call will ever name it.
+
+- path: fails when a changed path matches one of `forbidden`, a list
   of repo-relative POSIX globs (`*` within one path segment, at most one `**`
   crossing segments per glob). Use for "this generated/forbidden file must
   never be hand-edited".
-- command_match: fails when a run command matches one of `forbidden`, a list
+- command: fails when a run command matches one of `forbidden`, a list
   of shell phrases (e.g. "npm install", "git push --force"), matched as a
   contiguous token run, not a substring. Use for "use tool X, not tool Y".
 - command_if_changed: fails when a path matching `when_changed` (same glob
-  grammar as changed_path) changed but none of `require` (same phrase
-  grammar as command_match) ran. Use for "if this generated artifact
+  grammar as path) changed but none of `require` (same phrase
+  grammar as command) ran. Use for "if this generated artifact
   changed, its generator command must have run".
-- check_passed: a repo-local verifier script's own exit code decides the
+- verifier: a repo-local verifier script's own exit code decides the
   outcome (0 pass, 1 fail, anything else error). Needs `verifier`, a
   repo-relative path. Only propose this when the doc names, or clearly
   implies, a script that already exists in the repo; never invent a path.
@@ -2118,8 +2192,8 @@ fails; should point back at the rule/section it came from).
   prefer one of the other four types whenever the rule is checkable
   mechanically.
 
-Optional on command_if_changed/judge/check_passed: `when_changed` (same glob
-grammar as changed_path's `forbidden`) scopes when the gate applies; required
+Optional on command_if_changed/judge/verifier: `when_changed` (same glob
+grammar as path's `forbidden`) scopes when the gate applies; required
 for command_if_changed, optional (defaults to "always") for the other two.
 """
 
@@ -2390,17 +2464,7 @@ def _gates_generate_append(gates_file: Path, repo_name: str, gate_dict: dict[str
     gate in it from being enforced, required ones included.
     """
     if not gates_file.is_file():
-        header = (
-            'schema_version: "1.0"\n'
-            "policy:\n"
-            # Quoted, since a directory name is not guaranteed to be a bare
-            # YAML scalar: one containing ": " or leading with "*"/"&"/"@"
-            # parses as something else entirely, or not at all.
-            f"  id: {json.dumps(f'{repo_name}/gates')}\n"
-            "  description: Rules this repo checks on its own working tree.\n"
-            "\n"
-            "gates:\n"
-        )
+        header = _policy_header(repo_name)
         gates_file.parent.mkdir(parents=True, exist_ok=True)
         _gates_generate_write_checked(gates_file, header + _gates_generate_render_list_item(gate_dict))
         return

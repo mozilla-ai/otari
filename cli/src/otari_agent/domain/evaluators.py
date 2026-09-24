@@ -14,16 +14,16 @@ import shlex
 
 from otari_agent.domain.types import (
     ChangedPathEvidence,
-    ChangedPathGate,
     CheckEvidence,
-    CheckPassedGate,
     CommandEvidence,
+    CommandGate,
     CommandIfChangedGate,
-    CommandMatchGate,
     GateResult,
     JudgeEvidence,
     JudgeGate,
     Outcome,
+    PathGate,
+    VerifierGate,
 )
 
 # Tokens that separate one simple command from the next within a shell
@@ -158,7 +158,7 @@ def _matches_any(path: str, patterns: tuple[str, ...]) -> str | None:
 def matched_changed_paths(patterns: tuple[str, ...], changed_paths: tuple[str, ...]) -> tuple[str, ...]:
     """Every one of `changed_paths` that matches any of `patterns`, sorted.
 
-    `patterns` is the same repo-relative POSIX glob grammar `ChangedPathGate.forbidden`/
+    `patterns` is the same repo-relative POSIX glob grammar `PathGate.forbidden`/
     `CommandIfChangedGate.when_changed` use. Shared, rather than reimplemented, by
     `evaluate_judge`'s own `when_changed` applicability check and by `cli.py`'s local
     judge-gate filtering (skipping a `claude -p` call for a gate that plainly does not
@@ -465,7 +465,7 @@ def _command_segments(command: str) -> list[list[str]]:
 def tokenize_phrase(phrase: str) -> list[str]:
     """Tokenize one forbidden phrase, comment-aware and consistent with commands.
 
-    Shared by evaluation (`evaluate_command_match`), parse-time validation
+    Shared by evaluation (`evaluate_command`), parse-time validation
     (`domain.policy`), and the Hook Server route's cost estimate, so a
     phrase is judged the same way everywhere it is tokenized. Raises
     `ValueError` on an unbalanced quote outside any comment, exactly what
@@ -481,7 +481,7 @@ def tokenize_phrases(phrases: tuple[str, ...]) -> dict[str, list[str]]:
 
     The phrase-side counterpart to `tokenize_commands`, and shared the same
     way (`phrase_cache`): without it hooks.py tokenizes every phrase for its
-    cost estimate, discards the result, and each `evaluate_command_match`
+    cost estimate, discards the result, and each `evaluate_command`
     call then tokenizes that gate's phrases again. Bounded by policy size
     rather than by evidence, so the cost is small either way; sharing it
     keeps the estimate and the evaluation reading from one set of tokens
@@ -491,16 +491,16 @@ def tokenize_phrases(phrases: tuple[str, ...]) -> dict[str, list[str]]:
 
 
 def tokenize_commands(commands: tuple[str, ...]) -> dict[str, list[list[str]]]:
-    """Tokenize every command once, for every command_match gate to share.
+    """Tokenize every command once, for every command gate to share.
 
-    `evaluate_command_match` is called once per command_match gate against
+    `evaluate_command` is called once per command gate against
     the same evidence; without this, each call would re-tokenize every
     command from scratch, multiplying `shlex`'s per-character cost (real,
     not negligible: ~100-350ns/char regardless of content) by the number of
     gates. A request well within every per-request budget in hooks.py, since
     none of them accounted for that multiplication, measured several seconds
     of synchronous blocking before this existed. Pass the result to every
-    `evaluate_command_match` call for one request via `segment_cache`.
+    `evaluate_command` call for one request via `segment_cache`.
     """
     return {command: _command_segments(command) for command in commands}
 
@@ -543,8 +543,8 @@ def _contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
     return False
 
 
-def evaluate_command_match(
-    gate: CommandMatchGate,
+def evaluate_command(
+    gate: CommandGate,
     evidence: CommandEvidence | None,
     *,
     segment_cache: dict[str, list[list[str]]] | None = None,
@@ -555,7 +555,7 @@ def evaluate_command_match(
     `segment_cache` and `phrase_cache` are both optional and default to
     tokenizing locally, so a caller evaluating a single gate in isolation (a
     unit test, a one-off check) needs nothing extra. A caller evaluating
-    several command_match gates against the same evidence, like hooks.py's
+    several command gates against the same evidence, like hooks.py's
     ``check_policy``, should build each cache once (``tokenize_commands``,
     ``tokenize_phrases``) and pass the same dicts to every call, so
     tokenizing costs once per request rather than once per gate.
@@ -576,7 +576,7 @@ def evaluate_command_match(
         # refused (or already run, and by then unrunnable in reverse) with no
         # action left that could clear it. The call-scoped check is not
         # weakened by skipping this: `otari hook setup` puts Bash in the
-        # PreToolUse matcher precisely when the policy has a command_match
+        # PreToolUse matcher precisely when the policy has a command
         # gate, so every command this would have seen was already judged
         # before it ran.
         return GateResult(
@@ -668,7 +668,7 @@ def evaluate_command_if_changed(
     both arrive as an empty list and the gate has to read the honest
     failure as non-applicable.
 
-    ``segment_cache`` and ``phrase_cache`` both mirror ``evaluate_command_match``'s
+    ``segment_cache`` and ``phrase_cache`` both mirror ``evaluate_command``'s
     own parameters: a caller evaluating several command-evidence gates
     against the same evidence (``hooks.py``'s ``check_policy``) builds each
     once (``tokenize_commands``, ``tokenize_phrases``) and passes the same
@@ -721,7 +721,7 @@ def evaluate_command_if_changed(
         )
 
     # A cache built for a different gate is tolerated rather than a KeyError,
-    # mirroring evaluate_command_match's own guard: the parameter is optional
+    # mirroring evaluate_command's own guard: the parameter is optional
     # and a caller that passes a partial one should get a slower evaluation,
     # not a 500.
     phrases_by_text = phrase_cache if phrase_cache is not None else {}
@@ -749,7 +749,7 @@ def evaluate_command_if_changed(
     )
 
 
-def evaluate_changed_path(gate: ChangedPathGate, evidence: ChangedPathEvidence | None) -> GateResult:
+def evaluate_path(gate: PathGate, evidence: ChangedPathEvidence | None) -> GateResult:
     """Fail when a changed path matches one of the gate's forbidden globs."""
     if evidence is None:
         return GateResult(
@@ -759,8 +759,22 @@ def evaluate_changed_path(gate: ChangedPathGate, evidence: ChangedPathEvidence |
             message="Change evidence was not submitted.",
         )
 
+    if evidence.source is not None and evidence.source not in gate.runs:
+        # Checked before the empty-list branch below on purpose: both resolve
+        # NOT_APPLICABLE, so enforcement is identical either way, but "this
+        # gate does not look at this moment's evidence" is the more specific
+        # and more debuggable reason than "nothing was submitted". This is the
+        # line that keeps a `stop.working_tree`-only gate from reading a
+        # PreToolUse call as a clean result.
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.NOT_APPLICABLE,
+            message=f"This gate does not run at {evidence.source}.",
+        )
+
     if not evidence.changed_paths:
-        # Mirrors evaluate_command_match: a caller submits an empty list for
+        # Mirrors evaluate_command: a caller submits an empty list for
         # exactly the events that carry no path evidence at all (a PreToolUse
         # call for Bash rather than an edit tool), and PASS there reads as a
         # check that ran and found nothing when this gate never had anything
@@ -893,14 +907,14 @@ def evaluate_judge(
     )
 
 
-def evaluate_check_passed(
-    gate: CheckPassedGate, changed_path_evidence: ChangedPathEvidence | None, evidence: CheckEvidence | None
+def evaluate_verifier(
+    gate: VerifierGate, changed_path_evidence: ChangedPathEvidence | None, evidence: CheckEvidence | None
 ) -> GateResult:
     """Relay the caller's own verifier verdict for this gate; Otari never runs a verifier itself.
 
     Structured exactly like ``evaluate_judge``, including the same
-    ``evidence is None`` (this event never runs check_passed gates, resolves
-    ``not_applicable``) vs. "ran check_passed gates but is missing this
+    ``evidence is None`` (this event never runs verifier gates, resolves
+    ``not_applicable``) vs. "ran verifier gates but is missing this
     one's verdict" (resolves ``unknown``) distinction; see that function's
     own docstring and docs/agent-gates.md for why both matter here too.
 
@@ -914,7 +928,7 @@ def evaluate_check_passed(
             gate_id=gate.id,
             enforcement=gate.enforcement,
             outcome=Outcome.NOT_APPLICABLE,
-            message="This event does not evaluate check_passed gates.",
+            message="This event does not evaluate verifier gates.",
         )
 
     if gate.when_changed:

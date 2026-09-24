@@ -4,6 +4,7 @@ from otari_agent.domain.types import ChangedPathEvidence, JudgeEvidence, JudgeGa
 
 def _gate(**overrides: object) -> JudgeGate:
     defaults: dict[str, object] = {
+        "runs": ("stop.session",),
         "id": "follows-error-handling-pattern",
         "enforcement": "advisory",
         "rubric": "Does this change follow the repository's error-handling conventions?",

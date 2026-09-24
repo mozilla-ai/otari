@@ -4,6 +4,7 @@ from otari_agent.domain.types import ChangedPathEvidence, CommandEvidence, Comma
 
 def _gate(**overrides: object) -> CommandIfChangedGate:
     defaults: dict[str, object] = {
+        "runs": ("stop.session",),
         "id": "openapi-needs-postman",
         "enforcement": "required",
         "when_changed": ("docs/public/openapi.json",),
@@ -14,7 +15,7 @@ def _gate(**overrides: object) -> CommandIfChangedGate:
     return CommandIfChangedGate(**defaults)  # type: ignore[arg-type]
 
 
-def test_pass_when_changed_path_matches_and_required_command_ran() -> None:
+def test_pass_when_path_matches_and_required_command_ran() -> None:
     result = evaluate_command_if_changed(
         _gate(),
         ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
@@ -24,7 +25,7 @@ def test_pass_when_changed_path_matches_and_required_command_ran() -> None:
     assert not result.outcome.is_blocking
 
 
-def test_fail_when_changed_path_matches_and_required_command_did_not_run() -> None:
+def test_fail_when_path_matches_and_required_command_did_not_run() -> None:
     result = evaluate_command_if_changed(
         _gate(),
         ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
@@ -34,7 +35,7 @@ def test_fail_when_changed_path_matches_and_required_command_did_not_run() -> No
     assert "docs/public/openapi.json" in (result.detail or "")
 
 
-def test_not_applicable_under_call_scope_even_when_a_changed_path_matches() -> None:
+def test_not_applicable_under_call_scope_even_when_a_path_matches() -> None:
     """A PreToolUse call cannot answer this gate, so it must not try.
 
     Such a call submits its own edited path as changed_paths and its one
@@ -71,7 +72,7 @@ def test_fail_when_session_scope_collected_no_commands_at_all() -> None:
     assert "docs/public/openapi.json" in (result.detail or "")
 
 
-def test_not_applicable_when_no_changed_path_matches() -> None:
+def test_not_applicable_when_no_path_matches() -> None:
     result = evaluate_command_if_changed(
         _gate(),
         ChangedPathEvidence(changed_paths=("README.md",)),
@@ -134,7 +135,7 @@ def test_advisory_gate_does_not_block_required() -> None:
 
 
 def test_shares_a_precomputed_segment_cache() -> None:
-    """Mirrors evaluate_command_match's own segment_cache contract: a caller
+    """Mirrors evaluate_command's own segment_cache contract: a caller
 
     evaluating several command-evidence gates against the same evidence
     tokenizes once via tokenize_commands and passes the same cache to every

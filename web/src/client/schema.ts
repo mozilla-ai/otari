@@ -7037,7 +7037,7 @@ export interface components {
         };
         /**
          * CheckVerdictRequest
-         * @description One check_passed gate's verdict, as the caller's own verifier run produced it.
+         * @description One verifier gate's verdict, as the caller's own verifier run produced it.
          *
          *     Mirrors ``JudgeVerdictRequest`` field-for-field: ``gate_id`` echoes back
          *     the gate the policy itself named (same bound, same reason), ``outcome``
@@ -10996,13 +10996,18 @@ export interface components {
          */
         PolicyCheckRequest: {
             /**
+             * Changed Path Source
+             * @description Which moment `changed_paths` was read at, matching the `runs` values a gate declares: `pre_tool_use.edit_target` for a tool call's own target before it runs, `stop.working_tree` for `git status` once the turn is over. Required whenever `changed_paths` is present.
+             */
+            changed_path_source?: ("pre_tool_use.edit_target" | "pre_tool_use.command" | "stop.working_tree" | "stop.session" | "stop.verifier") | null;
+            /**
              * Changed Paths
              * @description Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).
              */
             changed_paths?: string[] | null;
             /**
              * Check Results
-             * @description Verifier verdicts the caller collected for this request's check_passed gates.
+             * @description Verifier verdicts the caller collected for this request's verifier gates.
              */
             check_results?: components["schemas"]["CheckVerdictRequest"][] | null;
             /**

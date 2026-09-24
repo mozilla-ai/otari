@@ -53,6 +53,7 @@ def _gates_yaml(judge_cli: str | None = None) -> str:
         "gates:\n"
         "  - id: g\n"
         "    type: judge\n"
+        "    runs: [stop.session]\n"
         "    enforcement: advisory\n"
         "    rubric: r\n"
         f"{judge_cli_line}"
@@ -357,7 +358,8 @@ def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.Monke
     gate_count = 5
     per_gate_seconds = 0.3
     gates_yaml = "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n" + "".join(
-        f"  - id: g{i}\n    type: judge\n    enforcement: advisory\n    rubric: r{i}\n    message: m{i}\n"
+        f"  - id: g{i}\n    type: judge\n"
+        "    runs: [stop.session]\n    enforcement: advisory\n    rubric: r{i}\n    message: m{i}\n"
         for i in range(gate_count)
     )
 

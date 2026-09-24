@@ -16,6 +16,36 @@ Enforcement = Literal["required", "advisory"]
 # What a submitted command list covers. See CommandEvidence.scope.
 EvidenceScope = Literal["call", "session"]
 
+# Where a gate runs and what it can see there, as ``<event>.<evidence>``. A
+# gate declares these in its own ``runs`` field, and a caller labels the
+# evidence it submits with the matching value.
+#
+# Both halves are load-bearing, and neither alone is enough. The event alone
+# invites the reading that ``pre_tool_use`` means "prevented", which is false
+# for every write a shell command makes; the evidence name alone does not say
+# when the gate gets a chance to run. Spelled together, a reader of one line
+# knows both the moment and the limit.
+#
+# No value covers a path written by a shell command before it runs: there is
+# no such evidence to collect, only the command text (``pre_tool_use.command``)
+# or the tree afterwards (``stop.working_tree``).
+RunsAt = Literal[
+    # The path an Edit/Write/NotebookEdit call (or a Codex apply_patch) names
+    # in its own tool_input, read before the tool runs. Matching here refuses
+    # the call, so the write never happens. Blind to a shell write.
+    "pre_tool_use.edit_target",
+    # The literal text of a Bash call about to run. Matching refuses the call.
+    # Cannot see inside a script the command invokes.
+    "pre_tool_use.command",
+    # Every path `git status --porcelain` reports once the turn is over.
+    # Complete over the tree, whatever wrote it, and always after the fact.
+    "stop.working_tree",
+    # The finished turn: the working tree plus the session's own transcript.
+    "stop.session",
+    # A repo-local verifier script's exit code, run once the turn is over.
+    "stop.verifier",
+]
+
 # Gate results that mean "no objection". Every other outcome blocks a required
 # gate: unknown and error are deliberately on the blocking side, not the
 # passing one, so a check that could not run is never mistaken for one that
@@ -45,25 +75,46 @@ class Outcome(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class ChangedPathGate:
+class PathGate:
     """A gate that fails when a caller-submitted path matches a forbidden glob.
 
-    The caller decides what "changed" means for the evidence it submits: a
-    Git diff after a turn, or a single tool call's target path before it
-    runs. ``forbidden`` entries are repo-relative POSIX globs: ``*`` matches
-    within one path segment, ``**`` crosses segment boundaries. This is the
-    v0 glob grammar; the full symlink/monorepo/rename grammar is AG-005.
+    ``forbidden`` entries are repo-relative POSIX globs: ``*`` matches within
+    one path segment, ``**`` crosses segment boundaries. This is the v0 glob
+    grammar; the full symlink/monorepo/rename grammar is AG-005.
+
+    This is the one gate type with a real choice of ``runs``, because a path
+    can be known at two different moments that are not interchangeable:
+
+    ``pre_tool_use.edit_target`` is the path a tool call names before it runs,
+    so a match refuses the call and the write never happens. It covers only
+    tools whose input declares a path (``Edit``/``Write``/``NotebookEdit``,
+    Codex's ``apply_patch``). A ``Bash`` call declares none, so **every path a
+    shell command writes is invisible to this source**: a redirect, ``sed -i``,
+    a heredoc, ``cp``, a script. Prevention for those lives on
+    :class:`CommandGate`, which refuses the command itself.
+
+    ``stop.working_tree`` is what ``git status`` reports once the turn is over.
+    It is complete over the tree, whatever wrote the file, and it is always
+    after the fact: the gate blocks the turn rather than the write.
+
+    Most rules want both, and that is usually the right answer even for a path
+    a build generates: "nothing legitimately writes this by hand" is exactly
+    when an agent writing it by hand is worth refusing, and naming
+    ``pre_tool_use.edit_target`` costs nothing when no tool call ever names
+    the path. Drop it only when you positively want such a write allowed
+    through to be judged against the finished tree instead.
     """
 
     id: str
     enforcement: Enforcement
+    runs: tuple[RunsAt, ...]
     forbidden: tuple[str, ...]
     message: str
-    type: Literal["changed_path"] = "changed_path"
+    type: Literal["path"] = "path"
 
 
 @dataclass(frozen=True, slots=True)
-class CommandMatchGate:
+class CommandGate:
     """A gate that fails when a caller-submitted command matches a forbidden phrase.
 
     A ``forbidden`` entry is a shell phrase (``"git push --force"``,
@@ -88,9 +139,10 @@ class CommandMatchGate:
 
     id: str
     enforcement: Enforcement
+    runs: tuple[RunsAt, ...]
     forbidden: tuple[str, ...]
     message: str
-    type: Literal["command_match"] = "command_match"
+    type: Literal["command"] = "command"
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,8 +150,8 @@ class CommandIfChangedGate:
     """A gate that fails when a changed path matches but no required command ran.
 
     ``when_changed`` is a tuple of repo-relative POSIX globs, the same
-    grammar ``ChangedPathGate.forbidden`` uses. ``require`` is a tuple of
-    shell phrases, the same grammar ``CommandMatchGate.forbidden`` uses,
+    grammar ``PathGate.forbidden`` uses. ``require`` is a tuple of
+    shell phrases, the same grammar ``CommandGate.forbidden`` uses,
     matched the same token-based way; any one of them satisfies the gate
     (an OR, same as a ``forbidden`` list matching any one entry). This is
     what expresses "if this changed, that must have run" (e.g. regenerating
@@ -115,6 +167,7 @@ class CommandIfChangedGate:
 
     id: str
     enforcement: Enforcement
+    runs: tuple[RunsAt, ...]
     when_changed: tuple[str, ...]
     require: tuple[str, ...]
     message: str
@@ -148,7 +201,7 @@ class JudgeGate:
 
     ``when_changed`` is optional and, like ``CommandIfChangedGate``'s own
     field of the same name, the same repo-relative POSIX glob grammar
-    ``ChangedPathGate.forbidden`` uses. Empty (the default) means this gate
+    ``PathGate.forbidden`` uses. Empty (the default) means this gate
     always applies, the only behavior a judge gate had before this field
     existed. Non-empty scopes the model call to a session that actually
     touched a matching path, so a rubric about, say, error-handling
@@ -171,6 +224,7 @@ class JudgeGate:
 
     id: str
     enforcement: Literal["advisory"]
+    runs: tuple[RunsAt, ...]
     rubric: str
     message: str
     when_changed: tuple[str, ...] = ()
@@ -179,7 +233,7 @@ class JudgeGate:
 
 
 @dataclass(frozen=True, slots=True)
-class CheckPassedGate:
+class VerifierGate:
     """A gate whose verdict comes from a repo-local verifier script's own exit status.
 
     ``verifier`` is a repo-relative path to an executable script in the
@@ -194,7 +248,7 @@ class CheckPassedGate:
 
     Unlike :class:`JudgeGate`, ``enforcement`` is not restricted to
     ``advisory``: a verifier's exit code is reproducible the way a glob or
-    phrase match is, not a model's opinion, so a ``required`` check_passed
+    phrase match is, not a model's opinion, so a ``required`` verifier
     gate can genuinely block. This is also the first gate type that *runs*
     something the policy names, rather than matching text or prompting a
     model, so its trust boundary is the repo: a script checked into the repo
@@ -210,21 +264,22 @@ class CheckPassedGate:
 
     ``when_changed`` is optional and, like ``JudgeGate``'s own field of the
     same name, the same repo-relative POSIX glob grammar
-    ``ChangedPathGate.forbidden`` uses. Empty (the default) means this gate
+    ``PathGate.forbidden`` uses. Empty (the default) means this gate
     always applies.
     """
 
     id: str
     enforcement: Enforcement
+    runs: tuple[RunsAt, ...]
     verifier: str
     message: str
     when_changed: tuple[str, ...] = ()
-    type: Literal["check_passed"] = "check_passed"
+    type: Literal["verifier"] = "verifier"
 
 
 # Extend this alias as a new gate type lands; do not let one skip it, or the
 # policy loader's dispatch on ``type`` silently stops covering it.
-GateSpec = ChangedPathGate | CommandMatchGate | CommandIfChangedGate | JudgeGate | CheckPassedGate
+GateSpec = PathGate | CommandGate | CommandIfChangedGate | JudgeGate | VerifierGate
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,9 +296,23 @@ class ChangedPathEvidence:
     """Repo-relative paths the caller reports as changed or about to change.
 
     Otari does not collect or verify this itself; see the module docstring.
+
+    ``source`` says which of the two moments these paths come from, and is the
+    counterpart to the gate's own ``runs``: a gate that does not list this
+    source resolves ``not_applicable`` rather than reading the list as a clean
+    result. Without it, a ``PreToolUse`` call for ``Bash`` (which declares no
+    path, so submits ``[]``) is indistinguishable from a ``Stop`` event on a
+    clean tree, and a gate meant to check the finished tree quietly passes on
+    every tool call instead.
+
+    Distinct from :attr:`CommandEvidence.scope`, which answers a different
+    question: scope says how much of the session a *command* list covers,
+    while this says which moment a *path* list was read at. Two fields because
+    two questions, not an oversight.
     """
 
     changed_paths: tuple[str, ...]
+    source: RunsAt | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,7 +378,7 @@ class JudgeEvidence:
 
 @dataclass(frozen=True, slots=True)
 class CheckVerdict:
-    """One check_passed gate's verifier-produced verdict, as the caller observed it.
+    """One verifier gate's verifier-produced verdict, as the caller observed it.
 
     ``outcome`` mirrors :class:`JudgeVerdict`'s own shape: the caller's own
     report, not a value Otari computed. ``"error"`` means the verifier
@@ -327,17 +396,17 @@ class CheckVerdict:
 
 @dataclass(frozen=True, slots=True)
 class CheckEvidence:
-    """Verdicts the caller collected for this request's check_passed gates.
+    """Verdicts the caller collected for this request's verifier gates.
 
     Structured exactly like :class:`JudgeEvidence`, for the same reason: a
     verdict already names the one gate it checked, so there is no
     "collected, and there is none for this gate" case beyond a missing gate
     id. What *is* a tri-state, the same as :class:`JudgeEvidence`'s own, is
-    ``evaluate_check_passed``'s ``evidence`` parameter being ``None`` at
-    all: a caller whose event type never runs check_passed gates
+    ``evaluate_verifier``'s ``evidence`` parameter being ``None`` at
+    all: a caller whose event type never runs verifier gates
     (``otari hook`` on `PreToolUse`) submits no ``CheckEvidence`` rather
     than an empty one, and resolves ``not_applicable`` rather than the
-    ``unknown`` a caller that does run check_passed gates but is genuinely
+    ``unknown`` a caller that does run verifier gates but is genuinely
     missing a verdict for this one gets.
     """
 

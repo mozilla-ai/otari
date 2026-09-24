@@ -28,7 +28,8 @@ _EXISTING_GATES_WITH_COMMENT = (
     "gates:\n"
     "  # a hand-written comment that must survive\n"
     "  - id: no-force-push\n"
-    "    type: command_match\n"
+    "    type: command\n"
+    "    runs: [pre_tool_use.command]\n"
     "    enforcement: advisory\n"
     '    forbidden: ["git push --force"]\n'
     "    message: >-\n"
@@ -37,7 +38,16 @@ _EXISTING_GATES_WITH_COMMENT = (
 
 _VALID_PROPOSAL = {
     "id": "no-hand-edited-changelog",
-    "type": "changed_path",
+    "type": "path",
+    "runs": ["pre_tool_use.edit_target", "stop.working_tree"],
+    "enforcement": "required",
+    "forbidden": ["CHANGELOG.md"],
+    "message": "CHANGELOG.md is generated; do not hand-edit it.",
+}
+
+_PROPOSAL_WITHOUT_RUNS = {
+    "id": "no-hand-edited-changelog",
+    "type": "path",
     "enforcement": "required",
     "forbidden": ["CHANGELOG.md"],
     "message": "CHANGELOG.md is generated; do not hand-edit it.",
@@ -46,6 +56,7 @@ _VALID_PROPOSAL = {
 _INVALID_PROPOSAL = {
     "id": "bad-judge",
     "type": "judge",
+    "runs": ["stop.session"],
     "enforcement": "required",  # judge gates may only be advisory
     "rubric": "some rubric",
     "message": "bad",
@@ -233,9 +244,7 @@ def test_appending_preserves_existing_comments_and_gates(repo: Path, monkeypatch
     assert {gate.id for gate in spec.gates} == {"no-force-push", "no-hand-edited-changelog"}
 
 
-def test_appending_inserts_before_a_later_top_level_key_not_at_eof(
-    repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_appending_inserts_before_a_later_top_level_key_not_at_eof(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`gates:` need not be the last top-level key (unusual, but schema_version/policy/gates
     carry no order requirement): the new gate must land inside the `gates:` sequence, before
     whatever top-level key follows it, not appended after that key at end of file.
@@ -244,7 +253,8 @@ def test_appending_inserts_before_a_later_top_level_key_not_at_eof(
         'schema_version: "1.0"\n'
         "gates:\n"
         "  - id: existing\n"
-        "    type: changed_path\n"
+        "    type: path\n"
+        "    runs: [pre_tool_use.edit_target, stop.working_tree]\n"
         "    enforcement: required\n"
         '    forbidden: ["x"]\n'
         "    message: m\n"
@@ -305,7 +315,7 @@ def test_editing_an_invalid_proposal_can_fix_and_accept_it(repo: Path, monkeypat
     _stub_claude_only(monkeypatch)
     _stub_cli_output(monkeypatch, json.dumps([_INVALID_PROPOSAL]))
     fixed_yaml = (
-        "id: bad-judge\ntype: judge\nenforcement: advisory\nrubric: some rubric\nmessage: bad\n"
+        "id: bad-judge\ntype: judge\nruns: [stop.session]\nenforcement: advisory\nrubric: some rubric\nmessage: bad\n"
     )
     monkeypatch.setattr(click, "edit", lambda text: fixed_yaml)
 
@@ -325,7 +335,9 @@ def test_edit_choice_on_a_valid_proposal_lets_you_change_it_before_accepting(
     _stub_claude_only(monkeypatch)
     _stub_cli_output(monkeypatch, json.dumps([_VALID_PROPOSAL]))
     renamed_yaml = (
-        'id: renamed-gate\ntype: changed_path\nenforcement: required\nforbidden:\n- CHANGELOG.md\nmessage: "m"\n'
+        "id: renamed-gate\ntype: path\n"
+        "runs: [pre_tool_use.edit_target, stop.working_tree]\n"
+        'enforcement: required\nforbidden:\n- CHANGELOG.md\nmessage: "m"\n'
     )
     monkeypatch.setattr(click, "edit", lambda text: renamed_yaml)
 
@@ -520,6 +532,7 @@ def test_describe_gate_does_not_dim_a_wrapped_values_own_continuation_lines() ->
     gate = {
         "id": "g",
         "type": "judge",
+        "runs": ["stop.session"],
         "enforcement": "advisory",
         "rubric": "one two three four five six seven eight nine ten " * 6,
         "message": "m",
@@ -553,7 +566,8 @@ def test_appending_matches_the_files_own_column_zero_sequence_style(
         "  id: demo/gates\n"
         "gates:\n"
         "- id: existing\n"
-        "  type: changed_path\n"
+        "  type: path\n"
+        "  runs: [pre_tool_use.edit_target, stop.working_tree]\n"
         "  enforcement: required\n"
         "  forbidden:\n"
         "  - x\n"
@@ -626,3 +640,26 @@ def test_no_stdin_at_all_declines_rather_than_taking_the_default(monkeypatch: py
 
     assert hook_cli._gates_generate_read_choice("Use claude? [Y/n]: ", "yn", "y") == "n"
     assert hook_cli._gates_generate_read_choice("Add this gate? ", "yneq", "n") == "n"
+
+
+def test_a_proposal_missing_runs_is_refused_before_anything_is_written(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The likeliest real failure: a model that learned the schema before `runs` existed.
+
+    The prompt asks for the field, but a model is free to ignore it, so the
+    parser is the thing that has to catch it. A refusal naming the legal values
+    is the difference between an author fixing one line and a policy file that
+    silently stops enforcing every gate in it.
+    """
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([_PROPOSAL_WITHOUT_RUNS]))
+
+    result = _invoke(monkeypatch, keys="yn")
+
+    assert result.exit_code == 0, result.output
+    assert "does not pass validation" in result.output
+    assert "needs a non-empty 'runs'" in result.output
+    assert "pre_tool_use.edit_target, stop.working_tree" in result.output
+    assert "Added 0 gate(s)" in result.output
+    assert not (repo / ".otari-gates.yml").exists()

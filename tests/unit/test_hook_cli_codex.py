@@ -475,14 +475,14 @@ def test_setup_writes_codex_hooks_json_not_claude_settings(tmp_path: Path, monke
     assert settings["hooks"]["Stop"][0]["hooks"][0]["command"] == f"{_FAKE_OTARI_PATH} hook --harness codex --api-key k"
 
 
-def test_setup_matcher_covers_bash_and_exec_when_a_command_match_gate_exists(
+def test_setup_matcher_covers_bash_and_exec_when_a_command_gate_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".otari-gates.yml").write_text(
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: command_match\n    enforcement: required\n"
+        "  - id: g\n    type: command\n    runs: [pre_tool_use.command]\n    enforcement: required\n"
         '    forbidden: ["npm"]\n    message: m\n',
         encoding="utf-8",
     )

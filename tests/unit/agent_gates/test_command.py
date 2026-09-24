@@ -6,37 +6,38 @@ from otari_agent.domain.evaluators import (
     _command_segments,
     _contains_subsequence,
     _strip_shell_comment,
-    evaluate_command_match,
+    evaluate_command,
     tokenize_commands,
 )
-from otari_agent.domain.types import CommandEvidence, CommandMatchGate, Outcome
+from otari_agent.domain.types import CommandEvidence, CommandGate, Outcome
 
 
-def _gate(**overrides: object) -> CommandMatchGate:
+def _gate(**overrides: object) -> CommandGate:
     defaults: dict[str, object] = {
+        "runs": ("pre_tool_use.command",),
         "id": "no-force-push",
         "enforcement": "required",
         "forbidden": ("git push --force", "git push -f"),
         "message": "Force-pushing is not allowed.",
     }
     defaults.update(overrides)
-    return CommandMatchGate(**defaults)  # type: ignore[arg-type]
+    return CommandGate(**defaults)  # type: ignore[arg-type]
 
 
 def test_pass_when_no_forbidden_command_run() -> None:
-    result = evaluate_command_match(_gate(), CommandEvidence(commands=("git status", "npm test")))
+    result = evaluate_command(_gate(), CommandEvidence(commands=("git status", "npm test")))
     assert result.outcome is Outcome.PASS
     assert not result.outcome.is_blocking
 
 
 def test_fail_when_a_forbidden_phrase_matches() -> None:
-    result = evaluate_command_match(_gate(), CommandEvidence(commands=("git push --force",)))
+    result = evaluate_command(_gate(), CommandEvidence(commands=("git push --force",)))
     assert result.outcome is Outcome.FAIL
     assert "git push --force" in (result.detail or "")
 
 
 def test_unknown_when_evidence_was_not_collected() -> None:
-    result = evaluate_command_match(_gate(), None)
+    result = evaluate_command(_gate(), None)
     assert result.outcome is Outcome.UNKNOWN
     assert result.outcome.is_blocking, "unknown must block a required gate, never pass silently"
 
@@ -48,14 +49,14 @@ def test_not_applicable_when_evidence_is_an_explicit_empty_list() -> None:
     "checked, none forbidden". A required gate must not read this as a clean
     pass, since nothing was actually checked.
     """
-    result = evaluate_command_match(_gate(), CommandEvidence(commands=()))
+    result = evaluate_command(_gate(), CommandEvidence(commands=()))
     assert result.outcome is Outcome.NOT_APPLICABLE
     assert not result.outcome.is_blocking
 
 
 def test_advisory_gate_does_not_block_required() -> None:
     gate = _gate(enforcement="advisory")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("git push --force",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("git push --force",)))
     assert result.outcome is Outcome.FAIL
     assert result.enforcement == "advisory"
 
@@ -66,13 +67,13 @@ def test_advisory_gate_does_not_block_required() -> None:
 def test_pnpm_is_not_flagged_by_a_forbidden_npm_phrase() -> None:
     """'pnpm install' contains the substring 'npm ' but not the token 'npm'."""
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("pnpm install",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("pnpm install",)))
     assert result.outcome is Outcome.PASS
 
 
 def test_npm_invocation_is_flagged() -> None:
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("npm install",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("npm install",)))
     assert result.outcome is Outcome.FAIL
 
 
@@ -82,7 +83,7 @@ def test_force_with_lease_is_not_flagged_by_a_forbidden_force_phrase() -> None:
     not a string containing the substring "--force".
     """
     gate = _gate(forbidden=("git push --force",))
-    result = evaluate_command_match(gate, CommandEvidence(commands=("git push --force-with-lease",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("git push --force-with-lease",)))
     assert result.outcome is Outcome.PASS
 
 
@@ -91,13 +92,13 @@ def test_force_with_lease_is_not_flagged_by_a_forbidden_force_phrase() -> None:
 
 def test_sudo_prefixed_command_is_still_matched() -> None:
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("sudo npm install",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("sudo npm install",)))
     assert result.outcome is Outcome.FAIL
 
 
 def test_extra_trailing_flags_do_not_prevent_a_match() -> None:
     gate = _gate(forbidden=("git push --force",))
-    result = evaluate_command_match(gate, CommandEvidence(commands=("git push --force --no-verify",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("git push --force --no-verify",)))
     assert result.outcome is Outcome.FAIL
 
 
@@ -106,13 +107,13 @@ def test_extra_trailing_flags_do_not_prevent_a_match() -> None:
 
 def test_compound_command_with_and_operator_is_caught() -> None:
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("cd frontend && npm install",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("cd frontend && npm install",)))
     assert result.outcome is Outcome.FAIL
 
 
 def test_piped_command_is_caught() -> None:
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("echo hi | npm install",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("echo hi | npm install",)))
     assert result.outcome is Outcome.FAIL
 
 
@@ -124,7 +125,7 @@ def test_quoted_argument_containing_operator_text_is_not_split() -> None:
     forbidden phrase is not itself a forbidden invocation of it.
     """
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(gate, CommandEvidence(commands=('git commit -m "npm && build"',)))
+    result = evaluate_command(gate, CommandEvidence(commands=('git commit -m "npm && build"',)))
     assert result.outcome is Outcome.PASS
 
 
@@ -138,14 +139,10 @@ def test_unbalanced_quotes_do_not_crash_and_still_match_bare_words() -> None:
     does not equal the phrase's own `--force`.
     """
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
-    assert evaluate_command_match(gate, CommandEvidence(commands=('npm install "unterminated',))).outcome is (
-        Outcome.FAIL
-    )
+    assert evaluate_command(gate, CommandEvidence(commands=('npm install "unterminated',))).outcome is (Outcome.FAIL)
 
     force_gate = _gate(forbidden=("git push --force",))
-    assert evaluate_command_match(force_gate, CommandEvidence(commands=('git push "--force',))).outcome is (
-        Outcome.PASS
-    )
+    assert evaluate_command(force_gate, CommandEvidence(commands=('git push "--force',))).outcome is (Outcome.PASS)
 
 
 def test_an_unparseable_heredoc_does_not_block_an_unrelated_command() -> None:
@@ -157,7 +154,7 @@ def test_an_unparseable_heredoc_does_not_block_an_unrelated_command() -> None:
     """
     gate = _gate(id="use-pnpm", forbidden=("npm install",), message="Use pnpm, not npm.")
     heredoc = "python3 - <<'EOF'\ns = \"it's fine\"\nprint(s)\nEOF"
-    assert evaluate_command_match(gate, CommandEvidence(commands=(heredoc,))).outcome is Outcome.PASS
+    assert evaluate_command(gate, CommandEvidence(commands=(heredoc,))).outcome is Outcome.PASS
 
 
 @pytest.mark.parametrize(
@@ -179,7 +176,7 @@ def test_a_separator_glued_to_a_word_still_splits(command: str) -> None:
     phrase. A trailing ';' is the common one, not an evasion.
     """
     gate = _gate(id="use-pnpm", forbidden=("npm install",), message="Use pnpm, not npm.")
-    assert evaluate_command_match(gate, CommandEvidence(commands=(command,))).outcome is Outcome.FAIL
+    assert evaluate_command(gate, CommandEvidence(commands=(command,))).outcome is Outcome.FAIL
 
 
 def test_a_redirect_ampersand_is_not_a_separator() -> None:
@@ -197,7 +194,7 @@ def test_a_comment_after_a_metacharacter_is_still_a_comment() -> None:
     """
     gate = _gate(id="use-pnpm", forbidden=("npm install",), message="Use pnpm, not npm.")
     for command in ("ls;# npm install", "ls &# npm install", "ls|# npm install"):
-        assert evaluate_command_match(gate, CommandEvidence(commands=(command,))).outcome is Outcome.PASS
+        assert evaluate_command(gate, CommandEvidence(commands=(command,))).outcome is Outcome.PASS
 
 
 # --- _command_segments / _contains_subsequence: direct unit coverage -------
@@ -280,7 +277,7 @@ def test_a_comment_on_an_earlier_line_does_not_swallow_a_later_real_command() ->
         "# install dependencies\nnpm install",
         "echo ready # setup\nnpm install",
     ]:
-        result = evaluate_command_match(gate, CommandEvidence(commands=(command,)))
+        result = evaluate_command(gate, CommandEvidence(commands=(command,)))
         assert result.outcome is Outcome.FAIL, command
 
 
@@ -293,7 +290,7 @@ def test_an_escaped_quote_does_not_end_double_quoting_early() -> None:
     word-start, discarding "&& npm install" as a bogus comment.
     """
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(gate, CommandEvidence(commands=('echo "a\\" # b" && npm install',)))
+    result = evaluate_command(gate, CommandEvidence(commands=('echo "a\\" # b" && npm install',)))
     assert result.outcome is Outcome.FAIL
 
 
@@ -308,7 +305,7 @@ def test_ansi_c_quoted_escaped_apostrophe_does_not_evade_the_gate() -> None:
     discarding "&& npm install" as a bogus comment.
     """
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("echo $'a\\' # b' && npm install",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("echo $'a\\' # b' && npm install",)))
     assert result.outcome is Outcome.FAIL
 
 
@@ -317,13 +314,13 @@ def test_ansi_c_quoted_escaped_apostrophe_does_not_evade_the_gate() -> None:
 
 def test_path_qualified_command_matches_the_bare_phrase() -> None:
     gate = _gate(id="use-pnpm", forbidden=("npm install",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("/usr/bin/npm install",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("/usr/bin/npm install",)))
     assert result.outcome is Outcome.FAIL
 
 
 def test_relative_path_qualified_command_matches_the_bare_phrase() -> None:
     gate = _gate(id="use-pnpm", forbidden=("npm install",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("./node_modules/.bin/npm install",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("./node_modules/.bin/npm install",)))
     assert result.outcome is Outcome.FAIL
 
 
@@ -336,13 +333,13 @@ def test_path_qualified_phrase_still_matches_the_identical_path_qualified_comman
     other's literal spelling any more.
     """
     gate = _gate(id="no-release-script", forbidden=("./scripts/release.sh",), message="m")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("./scripts/release.sh",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("./scripts/release.sh",)))
     assert result.outcome is Outcome.FAIL
 
 
 def test_path_qualified_phrase_still_matches_in_argument_position() -> None:
     gate = _gate(id="no-release-script", forbidden=("./scripts/release.sh",), message="m")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("bash ./scripts/release.sh",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("bash ./scripts/release.sh",)))
     assert result.outcome is Outcome.FAIL
 
 
@@ -353,7 +350,7 @@ def test_argument_position_path_does_not_get_basename_equivalence() -> None:
     must not reach into it and match just its tail.
     """
     gate = _gate(id="g", forbidden=("local-package",), message="m")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("npm install ./local-package",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("npm install ./local-package",)))
     assert result.outcome is Outcome.PASS
 
 
@@ -365,7 +362,7 @@ def test_sudo_prefixed_path_qualified_command_is_a_documented_gap() -> None:
     indirection this evaluator does not resolve.
     """
     gate = _gate(id="use-pnpm", forbidden=("npm install",), message="m")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("sudo /usr/bin/npm install",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("sudo /usr/bin/npm install",)))
     assert result.outcome is Outcome.PASS
 
 
@@ -382,7 +379,7 @@ def test_cross_line_merge_no_longer_creates_a_false_positive() -> None:
     """
     assert _command_segments("git\npush") == [["git"], ["push"]]
     gate = _gate(id="no-bare-push", forbidden=("git push",), message="m")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("git\npush",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("git\npush",)))
     assert result.outcome is Outcome.PASS
 
 
@@ -394,7 +391,7 @@ def test_newline_split_is_load_bearing_for_basename_equivalence() -> None:
     newline gives that invocation its own segment, and its own position 0.
     """
     gate = _gate(id="use-pnpm", forbidden=("npm install",), message="m")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("echo hi\n/usr/bin/npm install",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("echo hi\n/usr/bin/npm install",)))
     assert result.outcome is Outcome.FAIL
 
 
@@ -424,7 +421,7 @@ def test_backslash_escaped_newline_is_deleted_not_embedded_in_the_next_token() -
     """
     assert _command_segments("git \\\npush --force") == [["git", "push", "--force"]]
     gate = _gate(forbidden=("git push --force",))
-    result = evaluate_command_match(gate, CommandEvidence(commands=("git \\\npush --force",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("git \\\npush --force",)))
     assert result.outcome is Outcome.FAIL
 
 
@@ -472,7 +469,7 @@ def test_many_separators_with_no_real_content_resolve_quickly() -> None:
     commands = tuple("; " * 500 + " " * i for i in range(100))
     evidence = CommandEvidence(commands=commands)
     start = time.perf_counter()
-    result = evaluate_command_match(gate, evidence, segment_cache=tokenize_commands(commands))
+    result = evaluate_command(gate, evidence, segment_cache=tokenize_commands(commands))
     elapsed = time.perf_counter() - start
     assert elapsed < 1.0
     assert result.outcome is Outcome.PASS
@@ -487,13 +484,13 @@ def test_apostrophe_in_a_trailing_comment_no_longer_evades_the_gate() -> None:
     passed a required gate forbidding 'npm'.
     """
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(gate, CommandEvidence(commands=("npm install # don't use yarn",)))
+    result = evaluate_command(gate, CommandEvidence(commands=("npm install # don't use yarn",)))
     assert result.outcome is Outcome.FAIL
 
 
 def test_unmatched_quote_inside_a_comment_does_not_crash_or_evade() -> None:
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(gate, CommandEvidence(commands=('npm install # a comment with a stray " quote',)))
+    result = evaluate_command(gate, CommandEvidence(commands=('npm install # a comment with a stray " quote',)))
     assert result.outcome is Outcome.FAIL
 
 
@@ -505,7 +502,7 @@ def test_quoted_literal_hash_is_preserved_not_treated_as_a_comment() -> None:
     word "npm", the same way a real shell keeps a quoted argument intact.
     """
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
-    result = evaluate_command_match(gate, CommandEvidence(commands=('git commit -m "fix #123 with npm"',)))
+    result = evaluate_command(gate, CommandEvidence(commands=('git commit -m "fix #123 with npm"',)))
     assert result.outcome is Outcome.PASS
 
 
@@ -516,25 +513,23 @@ def test_mid_word_hash_does_not_swallow_a_later_forbidden_command() -> None:
     still be visible to this gate.
     """
     gate = _gate(forbidden=("git push --force",))
-    result = evaluate_command_match(
-        gate, CommandEvidence(commands=("curl https://x.com/page#frag && git push --force",))
-    )
+    result = evaluate_command(gate, CommandEvidence(commands=("curl https://x.com/page#frag && git push --force",)))
     assert result.outcome is Outcome.FAIL
 
 
-# --- Tokenizing once per request, shared across command_match gates --------
+# --- Tokenizing once per request, shared across command gates --------
 
 
 def test_segment_cache_produces_the_same_result_as_computing_internally() -> None:
     gate = _gate(forbidden=("git push --force",))
     evidence = CommandEvidence(commands=("git push --force", "git status"))
-    without_cache = evaluate_command_match(gate, evidence)
-    with_cache = evaluate_command_match(gate, evidence, segment_cache=tokenize_commands(evidence.commands))
+    without_cache = evaluate_command(gate, evidence)
+    with_cache = evaluate_command(gate, evidence, segment_cache=tokenize_commands(evidence.commands))
     assert without_cache == with_cache
 
 
 def test_shared_segment_cache_avoids_retokenizing_per_gate() -> None:
-    """Review's P1 repro: 100 command_match gates forbidding "npm" against
+    """Review's P1 repro: 100 command gates forbidding "npm" against
 
     250 distinct, mostly-whitespace ~4,000-character commands passed every
     request-level budget (low token content, few phrases) yet measured ~7s,
@@ -550,7 +545,7 @@ def test_shared_segment_cache_avoids_retokenizing_per_gate() -> None:
     cache = tokenize_commands(commands)
     start = time.perf_counter()
     for gate in gates:
-        evaluate_command_match(gate, evidence, segment_cache=cache)
+        evaluate_command(gate, evidence, segment_cache=cache)
     elapsed = time.perf_counter() - start
     assert elapsed < 1.0
 
@@ -562,19 +557,20 @@ def test_session_scoped_evidence_is_not_this_gates_to_judge() -> None:
     matching against it would fail every remaining check of the session over
     one command already run, with nothing left that could clear it. Nothing
     is lost by skipping it: `otari hook setup` puts Bash in the PreToolUse
-    matcher exactly when the policy carries a command_match gate, so every
+    matcher exactly when the policy carries a command gate, so every
     command this would see was already judged before it ran.
     """
-    gate = CommandMatchGate(
+    gate = CommandGate(
+        runs=("pre_tool_use.command",),
         id="no-npm",
         enforcement="required",
         forbidden=("npm install",),
         message="Use pnpm.",
     )
-    result = evaluate_command_match(gate, CommandEvidence(commands=("npm install",), scope="session"))
+    result = evaluate_command(gate, CommandEvidence(commands=("npm install",), scope="session"))
     assert result.outcome is Outcome.NOT_APPLICABLE
     assert not result.outcome.is_blocking
 
     # Same evidence at call scope is exactly what this gate does judge.
-    blocked = evaluate_command_match(gate, CommandEvidence(commands=("npm install",), scope="call"))
+    blocked = evaluate_command(gate, CommandEvidence(commands=("npm install",), scope="call"))
     assert blocked.outcome is Outcome.FAIL

@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -117,7 +118,7 @@ def test_pretooluse_ignores_unhandled_tools(monkeypatch: pytest.MonkeyPatch, rep
     assert not called, "a tool call this integration does not name must never reach the Hook Server"
 
 
-def test_pretooluse_submits_a_bash_command_for_command_match(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+def test_pretooluse_submits_a_bash_command_for_command(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     captured: dict[str, Any] = {}
 
     def fake_post(url: str, **kwargs: object) -> _FakeResponse:
@@ -148,7 +149,7 @@ def test_an_oversize_bash_command_is_truncated_rather_than_rejected(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
     """The Hook Server 422s a command over its limit, and a 422 fails the whole
-    check open, taking every changed_path gate in the same policy with it. A
+    check open, taking every path gate in the same policy with it. A
     Bash call carrying a heredoc clears that limit routinely, so the head is
     sent (where a tool name lives) instead of the request being lost.
     """
@@ -258,7 +259,8 @@ def test_stop_event_evaluates_locally_and_blocks_on_git_status(monkeypatch: pyte
     """
     (repo / ".otari-gates.yml").write_text(
         'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
-        "  - id: g\n    type: changed_path\n    enforcement: required\n"
+        "  - id: g\n    type: path\n"
+        "    runs: [pre_tool_use.edit_target, stop.working_tree]\n    enforcement: required\n"
         '    forbidden: ["CHANGELOG.md"]\n    message: forbidden\n',
         encoding="utf-8",
     )
@@ -422,7 +424,7 @@ def test_stop_event_includes_a_command_that_ran_but_exited_nonzero(
     """A command that actually ran, and merely failed, is not a PreToolUse
 
     denial: excluding every is_error tool_result regardless of content would
-    let a forbidden command that happened to also fail evade command_match,
+    let a forbidden command that happened to also fail evade command,
     the opposite of what excluding a denial is for.
     """
 
@@ -464,7 +466,7 @@ def test_stop_event_submits_no_commands_when_aggregate_evidence_is_oversize(
     (dropping the oldest) risks a false pass or false fail on whichever
     command that subset happened to lose, so this submits no command
     evidence at all (None) rather than a partial one: a required
-    command_match/command_if_changed gate then resolves unknown and blocks,
+    command/command_if_changed gate then resolves unknown and blocks,
     instead of risking either outcome on data known to be incomplete.
     """
 
@@ -785,7 +787,8 @@ def test_no_flags_evaluates_locally_with_no_credential_needed(monkeypatch: pytes
     monkeypatch.setattr(httpx, "post", fail_if_called)
     (repo / ".otari-gates.yml").write_text(
         'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
-        "  - id: g\n    type: changed_path\n    enforcement: required\n"
+        "  - id: g\n    type: path\n"
+        "    runs: [pre_tool_use.edit_target, stop.working_tree]\n    enforcement: required\n"
         '    forbidden: ["CHANGELOG.md"]\n    message: forbidden\n',
         encoding="utf-8",
     )
@@ -1030,6 +1033,7 @@ _JUDGE_GATES_YAML = (
     "gates:\n"
     "  - id: follows-pattern\n"
     "    type: judge\n"
+    "    runs: [stop.session]\n"
     "    enforcement: advisory\n"
     "    rubric: Does this change follow the repository's error-handling conventions?\n"
     "    message: Does not follow the pattern.\n"
@@ -1706,19 +1710,28 @@ def test_stop_event_bounds_total_judge_time_so_a_required_gate_still_reaches_the
     timeout (~600s, past which it kills `otari hook` and discards its output
     entirely) and take a required mechanical gate down with them by keeping
     the request from ever reaching `/hooks/check`. Modeled with a fake clock
-    rather than a real sleep: the first gate's own check finds time left and
-    runs for real; by the second gate's check the deadline has already
-    passed, so it (and every gate after it) reports "error" without ever
-    calling `claude -p`.
+    rather than a real sleep: one gate's own check finds time left and runs
+    for real; by the next check the deadline has already passed, so that gate
+    and every one after it reports "error" without ever calling `claude -p`.
+
+    Which gate wins the race is deliberately not asserted. Judge gates run
+    concurrently (`_hook_collect_judge_verdicts`), so the gate that draws the
+    before-deadline reading is whichever thread reaches the clock first. The
+    contract under test is that the shared budget bounds the run to exactly
+    one real call, not that a particular gate makes it.
     """
     (tmp_path / ".git").mkdir()
     gates_yaml = (
         "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n"
-        "  - id: no-hand-edited-changelog\n    type: changed_path\n    enforcement: required\n"
+        "  - id: no-hand-edited-changelog\n    type: path\n"
+        "    runs: [pre_tool_use.edit_target, stop.working_tree]\n    enforcement: required\n"
         '    forbidden: ["CHANGELOG.md"]\n    message: do not hand-edit\n'
-        "  - id: judge-0\n    type: judge\n    enforcement: advisory\n    rubric: r0\n    message: m0\n"
-        "  - id: judge-1\n    type: judge\n    enforcement: advisory\n    rubric: r1\n    message: m1\n"
-        "  - id: judge-2\n    type: judge\n    enforcement: advisory\n    rubric: r2\n    message: m2\n"
+        "  - id: judge-0\n    type: judge\n"
+        "    runs: [stop.session]\n    enforcement: advisory\n    rubric: r0\n    message: m0\n"
+        "  - id: judge-1\n    type: judge\n"
+        "    runs: [stop.session]\n    enforcement: advisory\n    rubric: r1\n    message: m1\n"
+        "  - id: judge-2\n    type: judge\n"
+        "    runs: [stop.session]\n    enforcement: advisory\n    rubric: r2\n    message: m2\n"
     )
     (tmp_path / ".otari-gates.yml").write_text(gates_yaml, encoding="utf-8")
 
@@ -1740,11 +1753,19 @@ def test_stop_event_bounds_total_judge_time_so_a_required_gate_still_reaches_the
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
 
-    # One call to compute the shared deadline, then one per gate's own remaining-time
-    # check: [deadline base, gate-0 check (budget left), gate-1 check (past deadline),
-    # gate-2 check (still past deadline)].
+    # One call to compute the shared deadline, then one per gate's own
+    # remaining-time check: [deadline base, budget left, past deadline, still
+    # past deadline]. Locked because the gates draw from it on separate
+    # threads; the lock keeps the sequence intact without pretending to fix
+    # the order they arrive in, which is what the assertions below allow for.
     fake_clock = iter([0.0, 100.0, 600.0, 700.0])
-    monkeypatch.setattr(time, "monotonic", lambda: next(fake_clock))
+    clock_lock = threading.Lock()
+
+    def fake_monotonic() -> float:
+        with clock_lock:
+            return next(fake_clock)
+
+    monkeypatch.setattr(time, "monotonic", fake_monotonic)
 
     captured: dict[str, Any] = {}
 
@@ -1769,13 +1790,10 @@ def test_stop_event_bounds_total_judge_time_so_a_required_gate_still_reaches_the
     assert result.exit_code == 2, result.output
 
     assert claude_call_count == 1, "only the gate whose check ran before the deadline should call claude -p"
-    outcomes = {entry["gate_id"]: entry["outcome"] for entry in captured["json"]["judge_results"]}
-    assert outcomes["judge-0"] == "pass"
-    assert outcomes["judge-1"] == "error"
-    assert outcomes["judge-2"] == "error"
-    assert "budget" in next(
-        entry["reasoning"] for entry in captured["json"]["judge_results"] if entry["gate_id"] == "judge-1"
-    )
+    verdicts = captured["json"]["judge_results"]
+    assert sorted(entry["outcome"] for entry in verdicts) == ["error", "error", "pass"]
+    starved = [entry["reasoning"] for entry in verdicts if entry["outcome"] == "error"]
+    assert all("budget" in reasoning for reasoning in starved), starved
     assert captured["json"]["changed_paths"] == ["CHANGELOG.md"]
 
 
@@ -1789,7 +1807,7 @@ def test_stop_event_with_a_non_utf8_diff_still_blocks_a_required_gate(
     reproduces the actual `UnicodeDecodeError` `subprocess.run(...,
     encoding="utf-8")` raises from inside itself on such a file, which used
     to crash `otari hook` before it ever reached `httpx.post`, taking the
-    unrelated required `changed_path` gate down with it. `--judge-dry-run`
+    unrelated required `path` gate down with it. `--judge-dry-run`
     keeps this test from needing a real (or mocked) `claude` call: it still
     runs the real diff collection this bug lives in, only skipping the
     model call itself.
@@ -1808,9 +1826,10 @@ def test_stop_event_with_a_non_utf8_diff_still_blocks_a_required_gate(
 
     gates_yaml = (
         "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n"
-        "  - id: no-hand-edited-changelog\n    type: changed_path\n    enforcement: required\n"
+        "  - id: no-hand-edited-changelog\n    type: path\n"
+        "    runs: [pre_tool_use.edit_target, stop.working_tree]\n    enforcement: required\n"
         '    forbidden: ["CHANGELOG.md"]\n    message: do not hand-edit\n'
-        "  - id: follows-pattern\n    type: judge\n    enforcement: advisory\n"
+        "  - id: follows-pattern\n    type: judge\n    runs: [stop.session]\n    enforcement: advisory\n"
         '    rubric: r\n    when_changed: ["src/**"]\n    message: m\n'
     )
     (tmp_path / ".otari-gates.yml").write_text(gates_yaml, encoding="utf-8")
@@ -1886,7 +1905,8 @@ def test_stop_event_caps_the_number_of_judge_gates_evaluated(monkeypatch: pytest
     (tmp_path / ".git").mkdir()
     gate_count = hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN + 2
     gates_yaml = "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n" + "".join(
-        f"  - id: judge-{i}\n    type: judge\n    enforcement: advisory\n    rubric: r{i}\n    message: m{i}\n"
+        f"  - id: judge-{i}\n    type: judge\n"
+        f"    runs: [stop.session]\n    enforcement: advisory\n    rubric: r{i}\n    message: m{i}\n"
         for i in range(gate_count)
     )
     (tmp_path / ".otari-gates.yml").write_text(gates_yaml, encoding="utf-8")
@@ -1940,7 +1960,7 @@ def test_stop_event_skips_a_when_changed_judge_gate_that_does_not_apply(
     (tmp_path / ".git").mkdir()
     gates_yaml = (
         "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n"
-        "  - id: judge-src-only\n    type: judge\n    enforcement: advisory\n"
+        "  - id: judge-src-only\n    type: judge\n    runs: [stop.session]\n    enforcement: advisory\n"
         "    rubric: r\n    when_changed: [src/**]\n    message: m\n"
     )
     (tmp_path / ".otari-gates.yml").write_text(gates_yaml, encoding="utf-8")
@@ -1975,7 +1995,7 @@ def test_stop_event_runs_a_when_changed_judge_gate_that_applies(
     (tmp_path / ".git").mkdir()
     gates_yaml = (
         "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n"
-        "  - id: judge-src-only\n    type: judge\n    enforcement: advisory\n"
+        "  - id: judge-src-only\n    type: judge\n    runs: [stop.session]\n    enforcement: advisory\n"
         "    rubric: r\n    when_changed: [src/**]\n    message: m\n"
     )
     (tmp_path / ".otari-gates.yml").write_text(gates_yaml, encoding="utf-8")
@@ -2151,7 +2171,7 @@ def test_advisory_warning_includes_the_judge_models_own_reasoning(monkeypatch: p
 def test_pretooluse_submits_call_scoped_evidence(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     """One tool call's own command is call-scoped, which is what lets the
 
-    server judge it with command_match and skip command_if_changed, rather
+    server judge it with command and skip command_if_changed, rather
     than inferring either from an empty list.
     """
     captured: dict[str, Any] = {}
@@ -2176,7 +2196,7 @@ def test_stop_event_submits_session_scoped_evidence(
 ) -> None:
     """A Stop event really has seen every command the session ran, and saying
 
-    so is what lets command_if_changed resolve at all and takes command_match
+    so is what lets command_if_changed resolve at all and takes command
     out of the picture (where a cumulative match could never be cleared).
     """
 
@@ -2196,6 +2216,62 @@ def test_stop_event_submits_session_scoped_evidence(
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     assert _invoke(payload).exit_code == 0
     assert captured["json"]["command_scope"] == "session"
+
+
+def test_pretooluse_labels_each_branch_with_the_moment_it_really_is(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """An edit tool declares a path; a Bash call declares a command, and says so.
+
+    Labeling the Bash branch is what lets a `stop.working_tree`-only gate say
+    "this gate does not run here" rather than the vaguer "no changed paths
+    were submitted". Labeling it `pre_tool_use.edit_target` would deliver the
+    same non-blocking outcome while naming a moment that did not happen, and
+    send whoever debugs the quiet gate to the wrong place.
+    """
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    cases = [
+        ("Bash", {"command": "npm install"}, "pre_tool_use.command"),
+        ("Write", {"file_path": str(repo / "CHANGELOG.md")}, "pre_tool_use.edit_target"),
+    ]
+    for tool_name, tool_input, expected in cases:
+        payload = {
+            "hook_event_name": "PreToolUse",
+            "cwd": str(repo),
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+        }
+        assert _invoke(payload).exit_code == 0
+        assert captured["json"]["changed_path_source"] == expected, tool_name
+
+
+def test_stop_event_labels_its_paths_as_the_working_tree(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    """Git status is the working tree after the fact, and the label says so."""
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(_transcript_line(command="make postman") + "\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    assert _invoke(payload).exit_code == 0
+    assert captured["json"]["changed_path_source"] == "stop.working_tree"
 
 
 def test_a_repeat_stop_block_says_the_block_is_finite(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -2278,9 +2354,7 @@ def test_hook_run_check_verifier_errors_on_other_exit_codes(tmp_path: Path, exit
 
 
 def test_hook_run_check_verifier_errors_when_the_script_does_not_exist(tmp_path: Path) -> None:
-    outcome, detail = hook_cli._hook_run_check_verifier(
-        tmp_path, "does-not-exist.sh", deadline=time.monotonic() + 10
-    )
+    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "does-not-exist.sh", deadline=time.monotonic() + 10)
     assert outcome == "error"
     assert "does not exist" in detail
 
@@ -2308,9 +2382,7 @@ def test_hook_run_check_verifier_rejects_a_verifier_that_resolves_outside_the_re
     outside.chmod(0o755)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    outcome, detail = hook_cli._hook_run_check_verifier(
-        repo_root, f"../{outside.name}", deadline=time.monotonic() + 10
-    )
+    outcome, detail = hook_cli._hook_run_check_verifier(repo_root, f"../{outside.name}", deadline=time.monotonic() + 10)
     assert outcome == "error"
     assert "outside the repo root" in detail
 
@@ -2380,8 +2452,8 @@ def test_hook_run_check_verifier_caps_detail_length(tmp_path: Path) -> None:
     assert len(detail) == hook_cli._HOOK_MAX_CHECK_DETAIL_LENGTH
 
 
-def test_check_passed_gates_run_concurrently_not_sequentially(tmp_path: Path) -> None:
-    """Five check_passed gates, each a real script sleeping ~0.3s, must finish in
+def test_verifier_gates_run_concurrently_not_sequentially(tmp_path: Path) -> None:
+    """Five verifier gates, each a real script sleeping ~0.3s, must finish in
     well under 5 * 0.3s: `_hook_collect_check_verdicts` runs verifiers through a
     `ThreadPoolExecutor` (`_HOOK_GATE_MAX_WORKERS`), not one after another. No
     mocking: real scripts, run as real subprocesses, the same as the
@@ -2392,7 +2464,7 @@ def test_check_passed_gates_run_concurrently_not_sequentially(tmp_path: Path) ->
     for i in range(gate_count):
         _write_verifier(tmp_path, f"v{i}.sh", f"sleep {per_gate_seconds}\nexit 0")
     gates_yaml = "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n" + "".join(
-        f"  - id: g{i}\n    type: check_passed\n    enforcement: required\n"
+        f"  - id: g{i}\n    type: verifier\n    runs: [stop.verifier]\n    enforcement: required\n"
         f"    verifier: v{i}.sh\n    message: m{i}\n"
         for i in range(gate_count)
     )
@@ -2417,7 +2489,8 @@ _CHECK_GATES_YAML_TEMPLATE = (
     "policy:\n  id: test\n"
     "gates:\n"
     "  - id: no-leftover-conflict-markers\n"
-    "    type: check_passed\n"
+    "    type: verifier\n"
+    "    runs: [stop.verifier]\n"
     "    enforcement: required\n"
     "    verifier: {verifier}\n"
     "    message: A tracked file still carries a Git merge-conflict marker.\n"
@@ -2438,7 +2511,7 @@ def _git_status_only_run(git_status_stdout: str = "") -> Any:
     """Fake `git status`; every other call (the verifier script itself) runs for real.
 
     Unlike the judge tests' own dispatchers, which mock every subprocess.run
-    call including `claude -p`, this leaves the check_passed verifier's own
+    call including `claude -p`, this leaves the verifier verifier's own
     execution real: the point of these tests is to exercise a real script
     under a real subprocess, not a second copy of `_hook_run_check_verifier`
     that just returns a canned result.
@@ -2458,7 +2531,7 @@ def test_stop_event_submits_a_check_verdict_from_the_verifier_script(
 ) -> None:
     """End to end through `hook()`, with a real verifier script actually executed
 
-    (only `git status` is mocked): the Stop event runs the check_passed
+    (only `git status` is mocked): the Stop event runs the verifier
     gate's verifier and submits its real exit-code-derived verdict as
     `check_results`.
     """
@@ -2515,7 +2588,7 @@ def test_stop_event_submits_a_failing_check_verdict_and_blocks(monkeypatch: pyte
 def test_pretooluse_submits_no_check_results(monkeypatch: pytest.MonkeyPatch, check_repo: Path) -> None:
     """A PreToolUse call has no finished session for a verifier to check yet: `check_results`
 
-    must be omitted (None), not an empty list, so a required check_passed
+    must be omitted (None), not an empty list, so a required verifier
     gate resolves not_applicable rather than the unknown a genuinely missing
     verdict would (see docs/agent-gates.md).
     """
@@ -2537,7 +2610,7 @@ def test_pretooluse_submits_no_check_results(monkeypatch: pytest.MonkeyPatch, ch
     assert captured["json"]["check_results"] is None
 
 
-def test_stop_event_skips_check_passed_gates_that_when_changed_excludes(
+def test_stop_event_skips_verifier_gates_that_when_changed_excludes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A local `when_changed` skip means the verifier is never even run, not just excluded
@@ -2553,7 +2626,8 @@ def test_stop_event_skips_check_passed_gates_that_when_changed_excludes(
         "policy:\n  id: test\n"
         "gates:\n"
         "  - id: g\n"
-        "    type: check_passed\n"
+        "    type: verifier\n"
+        "    runs: [stop.verifier]\n"
         "    enforcement: required\n"
         "    verifier: verify.sh\n"
         "    when_changed: ['src/**']\n"
@@ -2578,7 +2652,8 @@ def test_collect_check_verdicts_skips_gates_over_the_per_run_limit(tmp_path: Pat
     _write_verifier(tmp_path, "verify.sh", "exit 0")
     gates_yaml = ["schema_version: '1.0'\npolicy:\n  id: test\ngates:"]
     gates_yaml.extend(
-        f"  - id: g{i}\n    type: check_passed\n    enforcement: required\n    verifier: verify.sh\n    message: m"
+        f"  - id: g{i}\n    type: verifier\n"
+        "    runs: [stop.verifier]\n    enforcement: required\n    verifier: verify.sh\n    message: m"
         for i in range(hook_cli._HOOK_CHECK_MAX_GATES_PER_RUN + 1)
     )
     gates_file = tmp_path / ".otari-gates.yml"

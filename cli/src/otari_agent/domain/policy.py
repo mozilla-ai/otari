@@ -15,14 +15,15 @@ import yaml
 
 from otari_agent.domain.evaluators import tokenize_phrase
 from otari_agent.domain.types import (
-    ChangedPathGate,
-    CheckPassedGate,
+    CommandGate,
     CommandIfChangedGate,
-    CommandMatchGate,
     Enforcement,
     GateSpec,
     JudgeGate,
+    PathGate,
     PolicySpec,
+    RunsAt,
+    VerifierGate,
 )
 
 # A policy body is a developer-edited text file, not a data export; this bounds
@@ -45,7 +46,21 @@ MAX_POLICY_BYTES = 256 * 1024
 MAX_GATE_ID_LENGTH = 200
 
 _SUPPORTED_SCHEMA_VERSIONS = {"1.0"}
-_SUPPORTED_GATE_TYPES = {"changed_path", "command_match", "command_if_changed", "judge", "check_passed"}
+
+# Which `runs` values each gate type may declare. Four of the five admit
+# exactly one, because only a path can be known at two different moments (see
+# PathGate). Requiring the field anyway, rather than defaulting the
+# single-choice types, is deliberate: a reader never has to know which types
+# have a choice to know when a gate runs, and a wrong value is a parse error
+# that says so instead of a gate that quietly never fires.
+_LEGAL_RUNS_BY_GATE_TYPE = {
+    "path": ("pre_tool_use.edit_target", "stop.working_tree"),
+    "command": ("pre_tool_use.command",),
+    "command_if_changed": ("stop.session",),
+    "judge": ("stop.session",),
+    "verifier": ("stop.verifier",),
+}
+_SUPPORTED_GATE_TYPES = {"path", "command", "command_if_changed", "judge", "verifier"}
 _SUPPORTED_ENFORCEMENTS = {"required", "advisory"}
 
 # A model's verdict is not reproducible the way a glob or phrase match is, so
@@ -74,17 +89,17 @@ _MAX_DOUBLE_STAR_PER_GLOB = 1
 
 _TOP_LEVEL_FIELDS = {"schema_version", "policy", "gates"}
 _POLICY_FIELDS = {"id", "description"}
-_COMMON_GATE_FIELDS = {"id", "type", "enforcement", "message"}
+_COMMON_GATE_FIELDS = {"id", "type", "enforcement", "message", "runs"}
 # Each gate type accepts only the common fields plus its own: a
-# changed_path gate submitting when_changed, or a command_if_changed gate
+# path gate submitting when_changed, or a command_if_changed gate
 # submitting forbidden, is an unknown-field error like any other, not a
 # silently-ignored one.
 _GATE_FIELDS_BY_TYPE = {
-    "changed_path": _COMMON_GATE_FIELDS | {"forbidden"},
-    "command_match": _COMMON_GATE_FIELDS | {"forbidden"},
+    "path": _COMMON_GATE_FIELDS | {"forbidden"},
+    "command": _COMMON_GATE_FIELDS | {"forbidden"},
     "command_if_changed": _COMMON_GATE_FIELDS | {"when_changed", "require"},
     "judge": _COMMON_GATE_FIELDS | {"rubric", "when_changed", "judge_cli"},
-    "check_passed": _COMMON_GATE_FIELDS | {"verifier", "when_changed"},
+    "verifier": _COMMON_GATE_FIELDS | {"verifier", "when_changed"},
 }
 
 # A rubric is prompt text, not a glob or phrase; bounded generously since it
@@ -203,6 +218,37 @@ def _parse_phrase_list(gate_id: str, field: str, phrases: list[str]) -> list[str
     return phrases
 
 
+def _parse_runs(gate_id: str, gate_type: str, raw: dict[str, Any]) -> list[str]:
+    """Validate ``runs`` as the moments this gate's own type can actually run at.
+
+    Accepts a bare string as the one-entry case, the same shape ``judge_cli``
+    allows, since a gate naming a single moment should not have to spell it as
+    a one-item list. Deduplicated first-seen like every other list field, and
+    an empty list is rejected for the reason ``when_changed: []`` is: it means
+    a gate that can never fire, which is worse than deleting it.
+    """
+    legal = _LEGAL_RUNS_BY_GATE_TYPE[gate_type]
+    value = raw.get("runs")
+    if isinstance(value, str):
+        candidates = [value] if value else []
+    elif isinstance(value, list) and all(isinstance(item, str) for item in value):
+        candidates = list(dict.fromkeys(value))
+    else:
+        candidates = []
+    if not candidates:
+        raise PolicyError(
+            f"Gate {gate_id!r} (type {gate_type!r}) needs a non-empty 'runs', "
+            f"naming when it runs and what it sees there. Legal for this type: {', '.join(legal)}."
+        )
+    unsupported = [item for item in candidates if item not in legal]
+    if unsupported:
+        raise PolicyError(
+            f"Gate {gate_id!r} (type {gate_type!r}) cannot run at {', '.join(unsupported)}. "
+            f"Legal for this type: {', '.join(legal)}."
+        )
+    return candidates
+
+
 def _parse_gate(raw: Any) -> GateSpec:
     if not isinstance(raw, dict):
         raise PolicyError(f"Each entry under 'gates' must be a mapping, got {type(raw).__name__}.")
@@ -246,27 +292,33 @@ def _parse_gate(raw: Any) -> GateSpec:
     if not isinstance(message, str) or not message:
         raise PolicyError(f"Gate {gate_id!r} is missing a non-empty 'message'.")
 
-    if gate_type == "changed_path":
+    # Parsed once here rather than per branch: every gate type carries it, and
+    # the legal set is keyed on the already-validated gate_type.
+    runs = tuple(cast(list[RunsAt], _parse_runs(gate_id, gate_type, raw)))
+
+    if gate_type == "path":
         forbidden = _parse_glob_list(gate_id, "forbidden", _require_string_list(raw, "forbidden", gate_id, gate_type))
-        return ChangedPathGate(
+        return PathGate(
             id=gate_id,
+            runs=runs,
             enforcement=enforcement_value,
             forbidden=tuple(forbidden),
             message=message,
         )
 
-    if gate_type == "command_match":
+    if gate_type == "command":
         forbidden = _parse_phrase_list(gate_id, "forbidden", _require_string_list(raw, "forbidden", gate_id, gate_type))
-        return CommandMatchGate(
+        return CommandGate(
             id=gate_id,
+            runs=runs,
             enforcement=enforcement_value,
             forbidden=tuple(forbidden),
             message=message,
         )
 
     if gate_type == "command_if_changed":
-        # when_changed is the same glob grammar changed_path's forbidden
-        # uses; require is the same shell-phrase grammar command_match's
+        # when_changed is the same glob grammar path's forbidden
+        # uses; require is the same shell-phrase grammar command's
         # forbidden uses, just under different field names because both
         # evidence kinds apply to the same gate at once.
         when_changed = _parse_glob_list(
@@ -275,16 +327,17 @@ def _parse_gate(raw: Any) -> GateSpec:
         require = _parse_phrase_list(gate_id, "require", _require_string_list(raw, "require", gate_id, gate_type))
         return CommandIfChangedGate(
             id=gate_id,
+            runs=runs,
             enforcement=enforcement_value,
             when_changed=tuple(when_changed),
             require=tuple(require),
             message=message,
         )
 
-    if gate_type == "check_passed":
+    if gate_type == "verifier":
         verifier = raw.get("verifier")
         if not isinstance(verifier, str) or not verifier.strip():
-            raise PolicyError(f"Gate {gate_id!r} (type 'check_passed') needs a non-empty 'verifier'.")
+            raise PolicyError(f"Gate {gate_id!r} (type 'verifier') needs a non-empty 'verifier'.")
         if len(verifier) > _MAX_VERIFIER_LENGTH:
             raise PolicyError(f"Gate {gate_id!r}: verifier is longer than {_MAX_VERIFIER_LENGTH} characters.")
         if verifier.startswith("/"):
@@ -301,8 +354,9 @@ def _parse_gate(raw: Any) -> GateSpec:
             check_when_changed = _parse_glob_list(
                 gate_id, "when_changed", _require_string_list(raw, "when_changed", gate_id, gate_type)
             )
-        return CheckPassedGate(
+        return VerifierGate(
             id=gate_id,
+            runs=runs,
             enforcement=enforcement_value,
             verifier=verifier,
             when_changed=tuple(check_when_changed),
@@ -358,6 +412,7 @@ def _parse_gate(raw: Any) -> GateSpec:
     # Enforcement cast above documents its own.
     return JudgeGate(
         id=gate_id,
+        runs=runs,
         enforcement=cast(Literal["advisory"], enforcement_value),
         rubric=rubric,
         when_changed=tuple(judge_when_changed),

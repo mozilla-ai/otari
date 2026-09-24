@@ -21,8 +21,8 @@ Server (`POST /api/v1/hooks/check`) calls the exact same function. Pointing
 
 This is the first slice. It ships:
 
-- Five gate types: `changed_path`, `command_match`, `command_if_changed`,
-  `judge`, and `check_passed`.
+- Five gate types: `path`, `command`, `command_if_changed`,
+  `judge`, and `verifier`.
 - `otari hook --harness claude-code` and `otari hook --harness codex`, real
   installed commands that read a Claude Code or Codex hook payload, collect
   the evidence it implies, and evaluate the repo's own `.otari-gates.yml`
@@ -61,7 +61,8 @@ policy:
 
 gates:
   - id: no-hand-edited-changelog
-    type: changed_path
+    type: path
+    runs: [pre_tool_use.edit_target, stop.working_tree]
     enforcement: required
     forbidden: ["CHANGELOG.md"]
     message: >-
@@ -69,13 +70,21 @@ gates:
       hand-edit it in a PR.
 
   - id: no-force-push
-    type: command_match
+    type: command
+    runs: [pre_tool_use.command]
     enforcement: required
     forbidden: ["git push --force", "git push -f"]
     message: Force-pushing is not allowed; use --force-with-lease if you must.
 ```
 
 - `schema_version`: currently only `"1.0"`.
+
+> **A policy written before `runs` existed no longer parses.** Every gate now
+> needs the field, and there is no default. Because `otari hook` fails open on
+> a policy it cannot parse, an unmigrated file stops enforcing *every* gate in
+> it, `required` ones included, with only a line on stderr that Claude Code
+> shows in debug mode alone. Run `otari hook` once by hand after upgrading and
+> read the error, which names the legal values for each gate's own type.
 - `policy.id`: a name for the policy, echoed back in the response.
 - `gates`: a non-empty list. Every gate needs a unique `id` (at most
   `MAX_GATE_ID_LENGTH`, 200 characters; shared with
@@ -83,28 +92,99 @@ gates:
   echoes back the id the policy itself named, so any id this build accepts
   must be one a verdict can round-trip rather than 422 on that one field
   later), a `type`, an `enforcement` (`required` blocks; `advisory` only
-  warns), and a `message` shown on failure.
+  warns), a `runs` list (below), and a `message` shown on failure.
 
 Parsing is strict on purpose: duplicate keys, unknown fields, and an
 unsupported `schema_version` or gate `type` all fail loudly (`422`) rather
 than being silently ignored. A policy the parser could not fully understand
 must never evaluate as "no gates".
 
+## When a gate runs: `runs`
+
+Every gate declares a non-empty `runs` list. Each entry is
+`<event>.<evidence>`: the left half is the harness hook the gate runs at, the
+right half is what it can actually see there. Both halves are load-bearing.
+The event alone invites reading `pre_tool_use` as "prevented", which is false
+for everything a shell command writes; the evidence name alone does not say
+when the gate gets a chance to run at all.
+
+| entry | runs at | sees | can it refuse the action? | is it complete? |
+|---|---|---|---|---|
+| `pre_tool_use.edit_target` | before a tool call | the path an `Edit`/`Write`/`NotebookEdit` (or Codex `apply_patch`) call names in its own `tool_input` | yes, the write never happens | no: a `Bash` call declares no path, so every shell write is invisible |
+| `pre_tool_use.command` | before a tool call | the literal text of a `Bash` command | yes, the command never runs | no: it cannot see inside a script the command invokes |
+| `stop.working_tree` | after the turn | every path `git status --porcelain` reports | no, the file already changed | yes, over the tree, whatever wrote it |
+| `stop.session` | after the turn | the working tree plus the session's own transcript | no | yes |
+| `stop.verifier` | after the turn | a repo-local verifier script's exit code | no | whatever the script checks |
+
+Each gate type accepts only certain entries, because only a path is knowable
+at two different moments:
+
+| gate type | legal `runs` |
+|---|---|
+| `path` | `pre_tool_use.edit_target`, `stop.working_tree`, or both |
+| `command` | `pre_tool_use.command` |
+| `command_if_changed` | `stop.session` |
+| `judge` | `stop.session` |
+| `verifier` | `stop.verifier` |
+
+Four of the five therefore have exactly one legal value, and must still write
+it. That redundancy is deliberate: a reader should never have to already know
+which gate types have a choice in order to know when a gate runs, and a wrong
+value is a parse error that names the legal set rather than a gate that
+quietly never fires.
+
+**There is no entry covering a path a shell command is about to write.** No
+such evidence exists to collect: before the command runs there is only its
+text, and enumerating what an arbitrary shell line will touch is not
+decidable. So a `path` gate cannot prevent `echo x >> CHANGELOG.md`;
+it catches it at `stop.working_tree`, after the file changed. If you need that
+command refused before it runs, that is what `command` is for.
+
 ## Gate types
 
-### `changed_path` (available now)
+### `path` (available now)
 
 Fails when a submitted path matches one of `forbidden`'s globs. `*` matches
 within one path segment; `**` crosses segment boundaries.
 
-Evidence is whatever `changed_paths` list the caller submits, typically the
-output of `git status --porcelain` on their machine: Otari does no Git I/O of
-its own, so it only sees what the caller reports (`client_reported`
-provenance, never confused with something Otari observed directly). Renames
-should be submitted as their destination path. This is the v0 glob grammar;
-broader symlink/monorepo/rename semantics are not built yet.
+```yaml
+  - id: no-hand-edited-changelog
+    type: path
+    runs: [pre_tool_use.edit_target, stop.working_tree]
+    enforcement: required
+    forbidden: ["CHANGELOG.md"]
+    message: CHANGELOG.md is generated by git-cliff; do not hand-edit it.
+```
 
-### `command_match` (available now)
+This is the only gate type with a real choice of `runs`, and the choice is
+what the field exists for. `pre_tool_use.edit_target` refuses a write before
+it happens but sees only tools that declare a path; `stop.working_tree` sees
+everything but only once it has happened. Most rules want both, as above.
+
+Both is usually right even for a path a build generates. It is tempting to
+reason that no tool call will ever name a generated bundle, so
+`[stop.working_tree]` alone is the honest declaration; in practice "nothing
+legitimately writes this by hand" is exactly the case where an agent writing
+it by hand should be refused, and the extra entry costs nothing when the
+moment never arrives. This repo's own `no-committed-dashboard-bundle` names
+both for that reason, and it earns it: a direct `Write` to the bundle path is
+refused before it lands.
+
+Name only `pre_tool_use.edit_target` when you want the write refused and
+deliberately do not want the turn blocked over a change that is already in
+the tree. Name only `stop.working_tree` when you want the finished state
+judged and are content for the write itself to go through.
+
+Evidence is whatever `changed_paths` list the caller submits, together with
+the `changed_path_source` saying which moment it was read at: Otari does no
+Git I/O of its own, so it only sees what the caller reports
+(`client_reported` provenance, never confused with something Otari observed
+directly). A path list submitted without a source is refused rather than
+guessed at, because either guess silently disables one half of every path
+gate. Renames should be submitted as their destination path. This is the v0
+glob grammar; broader symlink/monorepo/rename semantics are not built yet.
+
+### `command` (available now)
 
 Fails when a submitted command matches one of `forbidden`'s phrases, e.g.
 `"git push --force"` or `"npm"`.
@@ -162,8 +242,8 @@ Two things this gate does not do, on purpose, for now:
 
 Fails when a submitted path matches one of `when_changed`'s globs but no
 submitted command matches one of `require`'s phrases. `when_changed` is the
-same glob grammar `changed_path`'s `forbidden` uses; `require` is the same
-shell-phrase grammar `command_match`'s `forbidden` uses, matched the same
+same glob grammar `path`'s `forbidden` uses; `require` is the same
+shell-phrase grammar `command`'s `forbidden` uses, matched the same
 token-based way (any one of `require`'s phrases satisfies the gate). This is
 what expresses "if this changed, that must have run", a correlation neither
 of the other two gate types can: each checks one independent condition.
@@ -171,6 +251,7 @@ of the other two gate types can: each checks one independent condition.
 ```yaml
   - id: openapi-changed-needs-postman
     type: command_if_changed
+    runs: [stop.session]
     enforcement: required
     when_changed: ["docs/public/openapi.json"]
     require: ["make postman"]
@@ -219,6 +300,7 @@ suppresses a warning, never a block.
 ```yaml
   - id: follows-error-handling-pattern
     type: judge
+    runs: [stop.session]
     enforcement: advisory
     rubric: Does this change follow the repository's error-handling conventions?
     message: This change may not follow the error-handling conventions; take a look.
@@ -232,11 +314,12 @@ a matching path, resolving `not_applicable` on a `Stop` event that changed
 nothing the gate cares about, without ever spending a model call to find
 that out: `otari hook` checks this locally, before reading the diff or
 transcript or shelling out to `claude -p`, against the same `git status`
-evidence it already collected for `changed_path` gates.
+evidence it already collected for `path` gates.
 
 ```yaml
   - id: follows-error-handling-pattern
     type: judge
+    runs: [stop.session]
     enforcement: advisory
     rubric: Does this change follow the repository's error-handling conventions?
     when_changed: ["src/**"]
@@ -261,6 +344,7 @@ shape.
 ```yaml
   - id: follows-error-handling-pattern
     type: judge
+    runs: [stop.session]
     enforcement: advisory
     rubric: Does this change follow the repository's error-handling conventions?
     judge_cli: [claude, codex]
@@ -411,7 +495,7 @@ per `Stop` event (declaration order; the rest are skipped with a stderr
 message naming which) rather than letting one event's resource use grow
 without bound as a policy gains judge gates. Applicable gates run
 concurrently, not one after another (a bounded thread pool,
-`_HOOK_GATE_MAX_WORKERS` in `cli.py`, shared with `check_passed`'s own
+`_HOOK_GATE_MAX_WORKERS` in `cli.py`, shared with `verifier`'s own
 verifier runs below): N applicable gates cost close to one gate's own
 wall-clock, not N times it.
 
@@ -428,7 +512,7 @@ for the git evidence collection and the `/hooks/check` request that still
 have to happen afterward; a gate whose turn comes up after the deadline has
 already passed reports `error` without attempting the call at all.
 
-### `check_passed` (available now)
+### `verifier` (available now)
 
 A gate whose verdict comes from a verifier script's own exit status, not a
 glob, a phrase, or a model. `verifier` is a repo-relative path to an
@@ -438,11 +522,12 @@ otari-shipped implementations: anyone can write one and add the gate that
 runs it, without an otari code change or release. Unlike `judge`,
 `enforcement` is not restricted to `advisory`: a verifier's exit code is
 reproducible the way a glob or phrase match is, not a model's opinion, so a
-`required` `check_passed` gate can genuinely block.
+`required` `verifier` gate can genuinely block.
 
 ```yaml
   - id: no-leftover-conflict-markers
-    type: check_passed
+    type: verifier
+    runs: [stop.verifier]
     enforcement: required
     verifier: .otari-gates/verifiers/no-conflict-markers.sh
     message: >-
@@ -474,9 +559,9 @@ human-readable reason to stdout.
 
 **No sandboxing, and no guard requiring the verifier to predate the diff
 under check, deliberately.** Be precise about what this adds, because it is
-not nothing: `check_passed` is the first gate type that *executes* something
-the policy names. `command_match` and `command_if_changed` inspect the
-command text the agent submitted, `changed_path` matches globs, and `judge`
+not nothing: `verifier` is the first gate type that *executes* something
+the policy names. `command` and `command_if_changed` inspect the
+command text the agent submitted, `path` matches globs, and `judge`
 sends a prompt to `claude -p`; none of them runs a script the repo supplies.
 The boundary this sits behind is the repo itself. A script checked into the
 repo, named by that repo's own `.otari-gates.yml`, is the same trust level
@@ -532,11 +617,11 @@ repository for any other gate: the caller (`otari hook`) runs the named
 script locally and submits the resulting verdict as `check_results` (see the
 field table below). This route only relays that verdict into a `GateResult`.
 
-`otari hook` is the reference caller, and only runs a check_passed gate's
+`otari hook` is the reference caller, and only runs a verifier gate's
 verifier on a `Stop` event, the same as `judge`: a `PreToolUse` call has no
 finished session for a verifier to check yet, and submits no `check_results`
 at all rather than an empty one (see the field table below for why that
-distinction matters). For every applicable `check_passed` gate in the local
+distinction matters). For every applicable `verifier` gate in the local
 policy (`when_changed` filtered locally first, exactly like a `judge` gate's
 own filtering), it resolves `verifier` against the repo root, confirms the
 resolved path still lands inside the repo (a relative path with enough `..`
@@ -550,7 +635,7 @@ way every other evidence collection in `otari hook` is: each call has its own
 timeout (`_HOOK_CHECK_TIMEOUT_SECONDS`, 30s, an order of magnitude tighter
 than `judge`'s own per-call timeout, since a verifier script is expected to
 be fast and deterministic, not a model call), and `otari hook` evaluates at
-most `_HOOK_CHECK_MAX_GATES_PER_RUN` (20) check_passed gates per `Stop` event
+most `_HOOK_CHECK_MAX_GATES_PER_RUN` (20) verifier gates per `Stop` event
 within one shared `_HOOK_CHECK_TOTAL_BUDGET_SECONDS` (60s) budget, the same
 shape `judge`'s own per-run cap and total budget take. Applicable verifiers
 run concurrently, the same bounded thread pool `judge` gates share (see
@@ -560,7 +645,7 @@ past its own deadline.
 
 Concurrency is why a verifier should only ever *read* the working tree
 (`git status`/`git diff`, a file scan), the way both this repo's own
-verifiers below do: two or more applicable `check_passed` gates now run at
+verifiers below do: two or more applicable `verifier` gates now run at
 the same time against the same tree, not one after another, so a verifier
 that writes to a fixed temporary path, or that mutates the tree itself
 (`git stash` and similar), can race against another verifier doing the same
@@ -669,6 +754,7 @@ $ python3 -c '
 import json, urllib.request
 body = json.dumps({
     "policy_yaml": open(".otari-gates.yml").read(),
+    "changed_path_source": "stop.working_tree",
     "changed_paths": ["CHANGELOG.md"],
     "commands": ["git push --force"],
 }).encode()
@@ -705,7 +791,7 @@ print(urllib.request.urlopen(request).read().decode())
 }
 ```
 
-The example policy has one `changed_path` gate and one `command_match` gate,
+The example policy has one `path` gate and one `command` gate,
 so the response carries one result per gate. A non-empty `changed_paths`/
 `commands` list that names nothing forbidden resolves every gate `pass`;
 an empty list instead resolves that field's gates `not_applicable`
@@ -719,12 +805,13 @@ required gate rather than passing it. Request/response fields:
 | Field | Meaning |
 | --- | --- |
 | `policy_yaml` | The full text of the caller's `.otari-gates.yml`, read and submitted by the caller. |
-| `changed_paths` | Repo-relative paths the caller observed changed. Send `[]` if evidence was collected and there is none (a `changed_path` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects path evidence at all (a required `changed_path` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
-| `commands` | Shell commands the caller observed run or is about to run. Send `[]` if evidence was collected and there is none right now (a `command_match` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects command evidence at all (a required `command_match` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
-| `command_scope` | What `commands` covers: `call` (the default) for the single tool call about to run, `session` for every command the session has run so far. This decides which gates can resolve at all: `command_match` judges only `call` scope, `command_if_changed` only `session` scope. A caller that omits it keeps the `call` semantics it was written against. |
+| `changed_path_source` | Which moment `changed_paths` was read at, matching the `runs` values a gate declares: `pre_tool_use.edit_target` for a tool call's own target before it runs, `stop.working_tree` for `git status` once the turn is over. Required whenever `changed_paths` is present, and refused rather than defaulted if absent: `pre_tool_use.edit_target` would make a Stop event's Git evidence silently disable every working-tree gate, and `stop.working_tree` would fail a working-tree gate over a write that has not happened. |
+| `changed_paths` | Repo-relative paths the caller observed changed. Send `[]` if evidence was collected and there is none (a `path` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects path evidence at all (a required `path` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
+| `commands` | Shell commands the caller observed run or is about to run. Send `[]` if evidence was collected and there is none right now (a `command` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects command evidence at all (a required `command` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
+| `command_scope` | What `commands` covers: `call` (the default) for the single tool call about to run, `session` for every command the session has run so far. This decides which gates can resolve at all: `command` judges only `call` scope, `command_if_changed` only `session` scope. A caller that omits it keeps the `call` semantics it was written against. |
 | `judge_results` | Model verdicts the caller collected for this request's `judge` gates: a list of `{gate_id, outcome, reasoning}`, one entry per gate it judged. Tri-state, but for a different reason than `changed_paths`/`commands`: a verdict already names the one gate it judged, so there is no "collected, and there is none for this gate" case an empty list needs beyond a missing gate id, but omitting the field entirely (or an explicit `null`) means this caller's event type never runs judge gates at all (`otari hook` on `PreToolUse`) and resolves every judge gate `not_applicable` rather than the `unknown` a caller that does run judge gates but is genuinely missing one gets. `outcome` is one of `pass`, `fail`, or `error` (the caller's own model call failed or returned something it could not parse as a verdict). |
-| `check_results` | Verifier verdicts the caller collected for this request's `check_passed` gates: a list of `{gate_id, outcome, detail}`, one entry per gate it checked. Tri-state exactly like `judge_results`, for the same reason: omitting the field (or sending `null`) means this caller's event type never runs check_passed gates at all and resolves every such gate `not_applicable` rather than the `unknown` a caller that does run them but is missing one gets. `outcome` is one of `pass`, `fail`, or `error` (the verifier script exited 0, 1, or anything else, including a crash). |
-| `blocked` | `true` when a `required` gate's outcome is not `pass`/`not_applicable`. An unresolved gate never counts as a pass. A `judge` gate can never set this: its `enforcement` is always `advisory`. A `check_passed` gate can, unlike `judge`: its `enforcement` may be `required`. |
+| `check_results` | Verifier verdicts the caller collected for this request's `verifier` gates: a list of `{gate_id, outcome, detail}`, one entry per gate it checked. Tri-state exactly like `judge_results`, for the same reason: omitting the field (or sending `null`) means this caller's event type never runs verifier gates at all and resolves every such gate `not_applicable` rather than the `unknown` a caller that does run them but is missing one gets. `outcome` is one of `pass`, `fail`, or `error` (the verifier script exited 0, 1, or anything else, including a crash). |
+| `blocked` | `true` when a `required` gate's outcome is not `pass`/`not_applicable`. An unresolved gate never counts as a pass. A `judge` gate can never set this: its `enforcement` is always `advisory`. A `verifier` gate can, unlike `judge`: its `enforcement` may be `required`. |
 | `results[].outcome` | `pass`, `fail`, `unknown`, `error`, `not_applicable`, or `not_run`. |
 
 HTTP status codes:
@@ -751,20 +838,20 @@ the policy for you. Install it without the server with
 command. Run `otari hook setup` to register it; nothing here needs copying
 out of this document.
 
-`changed_path` needs a target path, not a finished diff, so on a
+`path` needs a target path, not a finished diff, so on a
 `PreToolUse` event it checks the tool call's own arguments before they
 execute rather than the Git working tree after: it covers
 `Edit`/`Write`/`NotebookEdit`, whose `tool_input` names the file they are
-about to touch. `command_match` needs the command itself, which is exactly
+about to touch. `command` needs the command itself, which is exactly
 what a `Bash` call's `tool_input` names; a single `PreToolUse` call is either
 an edit or a shell command, never both, so it submits whichever evidence that
-one call can produce, never both kinds. `command_match` therefore also
+one call can produce, never both kinds. `command` therefore also
 resolves `not_applicable`, not `pass`, on an edit call: it has no command to
-check either way, and the distinction is what keeps a required command_match
+check either way, and the distinction is what keeps a required command
 gate from reading every unrelated `Edit`/`Write`/`NotebookEdit` call as a
 clean pass.
 
-On a `Stop` event, `changed_path` instead submits `git status
+On a `Stop` event, `path` instead submits `git status
 --porcelain`'s output, which does cover shell-written file changes (anything
 a `Bash` call touched), at the cost of only catching them after the fact
 rather than preventing them. Alongside it `otari hook` submits every `Bash`
@@ -773,14 +860,14 @@ command it finds in the session's own transcript (see below), marked
 "did the required command ever run" is a question only a whole session can
 answer.
 
-`command_match` deliberately does not evaluate against that list. A
+`command` deliberately does not evaluate against that list. A
 forbidden command is judged where it can still be refused, at the
 `PreToolUse` call about to run it. Session evidence only grows, so matching
 against it would fail every remaining check of the session over one command
 already run, with no action left that could clear it: the session would
 dead-end. Nothing is lost by skipping it, because `otari hook setup` puts
 `Bash` in the `PreToolUse` matcher exactly when the policy carries a
-`command_match` gate, so every command this would have seen was already
+`command` gate, so every command this would have seen was already
 judged before it ran.
 
 `otari hook` collects both kinds of Stop-time evidence itself, because
@@ -794,7 +881,7 @@ collects each one's `input.command`, skipping a record marked
 If the transcript cannot be read at all, `otari hook` submits no command
 evidence (`commands: null`, not `[]`): the difference between "collected,
 and there is none" and "could not collect" is what keeps a required
-`command_match`/`command_if_changed` gate from reading a failed read as a
+`command`/`command_if_changed` gate from reading a failed read as a
 clean pass (it resolves `unknown`, and blocks, instead).
 
 **A blocking `Stop` gate has a finite budget.** Claude Code overrides a
@@ -817,11 +904,11 @@ itself to find each `judge` gate's `rubric`, then makes one local `claude -p`
 call per gate (not through `otari serve`; see the `judge` gate type above)
 and submits the resulting verdicts as `judge_results`.
 
-A `check_passed` gate also only ever runs on `Stop`, for the same reason: a
+A `verifier` gate also only ever runs on `Stop`, for the same reason: a
 `PreToolUse` call has no finished session for a verifier to check yet.
-`otari hook` parses the local policy to find each `check_passed` gate's
+`otari hook` parses the local policy to find each `verifier` gate's
 `verifier`, resolves it against the repo root, and runs it locally as a
-subprocess (not through `otari serve`; see the `check_passed` gate type
+subprocess (not through `otari serve`; see the `verifier` gate type
 above), submitting the resulting verdicts as `check_results`.
 
 **The judge gate's own inner `claude -p` call does fire this same repo's own
@@ -858,7 +945,7 @@ a blocking `Stop` hook the same way headless (`claude -p "do the task"`) and
 interactive sessions do is a separate question, still worth testing against
 an interactive session specifically: a `-p` run that exits cleanly without
 blocking proves nothing about whether an interactive session's own
-`command_match`/`command_if_changed` gate is genuinely blocking.
+`command`/`command_if_changed` gate is genuinely blocking.
 
 1. Run `otari hook setup`. It writes both a `PreToolUse` hook entry and a
    `Stop` hook entry into `.claude/settings.local.json` (personal, and this
@@ -872,11 +959,11 @@ blocking proves nothing about whether an interactive session's own
    passes.
 
    The `PreToolUse` `matcher` it writes only includes `Bash` when the policy
-   actually has a `command_match` gate to check a command against: the round
+   actually has a `command` gate to check a command against: the round
    trip is otherwise harmless (nothing in `tool_input` matches a
-   `changed_path` gate, so it always passes), but there is no reason to pay
+   `path` gate, so it always passes), but there is no reason to pay
    it. `Stop` carries no `matcher` at all; it is registered unconditionally,
-   since `changed_path` always benefits from its Git-status fallback there
+   since `path` always benefits from its Git-status fallback there
    and a `command_if_changed` gate has no other event it can resolve on.
 
    With no `--api-key`, the generated command carries no credential at all:
@@ -1023,7 +1110,7 @@ any number of shell/apply_patch calls in one JS snippet under a tool named
 `code_mode_exec` (Codex's own docs say a matcher may instead say `exec`, an
 alias for that wire name; unconfirmed against a real dispatch, so the
 generated matcher names both rather than depend on it); that whole snippet
-is submitted as "the command" rather than parsed apart, so a `command_match`
+is submitted as "the command" rather than parsed apart, so a `command`
 gate still finds a forbidden phrase wherever it appears in it. As of this
 writing, Code Mode's
 own `PreToolUse` dispatch does not cover that surface at all
@@ -1047,7 +1134,7 @@ yet: uninstall itself, or probe whether it is correctly registered
 ## What's next
 
 `otari status`, to probe whether a hook is correctly registered without
-re-running setup; and sharing or distributing a `check_passed` verifier
+re-running setup; and sharing or distributing a `verifier` verifier
 across repos (a registry, reusable "packs"), deliberately deferred rather
 than built alongside this first one
 (see that gate type's own section above).

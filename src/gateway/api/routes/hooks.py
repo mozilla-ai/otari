@@ -30,7 +30,7 @@ from gateway.api.deps import extract_credential_token, get_config, get_db_if_nee
 from gateway.core.config import GatewayConfig
 from otari_agent.domain.check import PolicyCheckError, run_policy_check
 from otari_agent.domain.policy import MAX_GATE_ID_LENGTH, MAX_POLICY_BYTES
-from otari_agent.domain.types import CheckVerdict, EvidenceScope, JudgeVerdict
+from otari_agent.domain.types import CheckVerdict, EvidenceScope, JudgeVerdict, RunsAt
 
 
 # ``AsyncSession`` and ``GatewayConfig`` are imported at runtime rather than
@@ -82,7 +82,7 @@ router = APIRouter(
 # The policy_yaml bound is domain.policy's own MAX_POLICY_BYTES, reused here
 # rather than duplicated so the Pydantic-level and parser-level limits cannot
 # drift apart. The match-cost budgets that used to sit here (per-entry
-# length, and the total-work estimates for changed_path/command_match/
+# length, and the total-work estimates for path/command/
 # command_if_changed) moved to otari_agent.domain.check.run_policy_check,
 # since they guard the evaluator's own cost, not this route's: `otari hook`'s
 # own local evaluation needs them just as much as an HTTP caller does, and
@@ -98,10 +98,10 @@ _MAX_COMMANDS = 10_000
 _MAX_JUDGE_RESULTS = 1_000
 _MAX_REASONING_LENGTH = 4_096
 
-# A check_passed verdict is the same small, fixed-shape record shape as a
+# A verifier verdict is the same small, fixed-shape record shape as a
 # judge verdict (see CheckVerdictRequest), bounded the same way and for the
 # same reason: looking a verdict up by gate_id is O(n) in the number of
-# check_passed gates in the policy, not a cross product.
+# verifier gates in the policy, not a cross product.
 _MAX_CHECK_RESULTS = 1_000
 _MAX_CHECK_DETAIL_LENGTH = 4_096
 
@@ -122,7 +122,7 @@ class JudgeVerdictRequest(BaseModel):
 
 
 class CheckVerdictRequest(BaseModel):
-    """One check_passed gate's verdict, as the caller's own verifier run produced it.
+    """One verifier gate's verdict, as the caller's own verifier run produced it.
 
     Mirrors ``JudgeVerdictRequest`` field-for-field: ``gate_id`` echoes back
     the gate the policy itself named (same bound, same reason), ``outcome``
@@ -149,18 +149,18 @@ class PolicyCheckRequest(BaseModel):
     policy_yaml: str = Field(min_length=1, max_length=MAX_POLICY_BYTES)
     # Tri-state, for the same reason `commands` below is: None (omitted, or an
     # explicit `null`) means this caller never collects path evidence at all,
-    # and evaluate_changed_path reports `unknown`, blocking a required gate
+    # and evaluate_path reports `unknown`, blocking a required gate
     # rather than reading absent evidence as a pass; `[]` means it was
     # collected and there is none (`not_applicable`). This used to default to
     # `[]`, which collapsed the two and let an omitted field certify every
-    # changed_path gate as passing.
+    # path gate as passing.
     changed_paths: list[str] | None = Field(
         default=None,
         max_length=_MAX_CHANGED_PATHS,
         description="Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).",
     )
     # None (omitted, or an explicit `null`) is distinct from `[]`: None means
-    # this caller never collects command evidence at all (evaluate_command_match
+    # this caller never collects command evidence at all (evaluate_command
     # reports `unknown`, blocking a required gate rather than reading absent
     # evidence as a pass); `[]` means it was collected and there is none right
     # now (`not_applicable`). Unlike changed_paths, an omitted commands field
@@ -171,11 +171,28 @@ class PolicyCheckRequest(BaseModel):
         max_length=_MAX_COMMANDS,
         description="Shell commands the caller observed run or is about to run.",
     )
+    # No default, unlike command_scope below, and required whenever
+    # changed_paths is present: a path list that does not say which moment it
+    # was read at is one no gate can resolve against, because a gate's own
+    # `runs` names both the moment and the evidence. Either default would be
+    # wrong rather than merely lossy: "pre_tool_use.edit_target" would make a
+    # Stop event's git evidence silently disable every working-tree gate, and
+    # "stop.working_tree" would fail a working-tree gate for a write that has
+    # not happened yet. run_policy_check rejects the combination.
+    changed_path_source: RunsAt | None = Field(
+        default=None,
+        description=(
+            "Which moment `changed_paths` was read at, matching the `runs` values a gate "
+            "declares: `pre_tool_use.edit_target` for a tool call's own target before it runs, "
+            "`stop.working_tree` for `git status` once the turn is over. Required whenever "
+            "`changed_paths` is present."
+        ),
+    )
     # Defaults to "call" so a client written before this field existed keeps
     # the semantics it was written against: one tool call's own command,
-    # judged by command_match. Only a caller that really can see the whole
+    # judged by command. Only a caller that really can see the whole
     # session (otari hook on a Stop event) says "session", and saying it is
-    # what lets command_if_changed resolve and what takes command_match out
+    # what lets command_if_changed resolve and what takes command out
     # of the picture. See CommandEvidence.scope.
     command_scope: EvidenceScope = Field(
         default="call",
@@ -204,16 +221,16 @@ class PolicyCheckRequest(BaseModel):
     # already names the one gate its verifier checked, so there is no
     # "collected, and there is none for this gate" case an empty list needs
     # to express beyond a missing gate id. None (omitted, or an explicit
-    # `null`) means this caller's event type never runs check_passed gates
+    # `null`) means this caller's event type never runs verifier gates
     # at all (otari hook on PreToolUse, which has no finished session for a
-    # verifier to check yet) and resolves every check_passed gate
+    # verifier to check yet) and resolves every verifier gate
     # not_applicable rather than the unknown a caller that does run them but
     # is genuinely missing one gets (see CheckEvidence's and
-    # evaluate_check_passed's own docstrings).
+    # evaluate_verifier's own docstrings).
     check_results: list[CheckVerdictRequest] | None = Field(
         default=None,
         max_length=_MAX_CHECK_RESULTS,
-        description="Verifier verdicts the caller collected for this request's check_passed gates.",
+        description="Verifier verdicts the caller collected for this request's verifier gates.",
     )
 
 
@@ -255,6 +272,7 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
             source="request body",
             changed_paths=request.changed_paths,
             commands=request.commands,
+            changed_path_source=request.changed_path_source,
             command_scope=request.command_scope,
             judge_results=(
                 None

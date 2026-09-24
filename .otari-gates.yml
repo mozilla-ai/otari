@@ -4,8 +4,15 @@ policy:
   description: Rules this repo checks on its own working tree.
 
 gates:
+
+# ---------------------------------------------------------------------------
+# Path gates: refuse an edit tool before it writes, and catch anything
+# else (a shell redirect, a build, a script) in the working tree afterwards.
+# ---------------------------------------------------------------------------
+
   - id: no-hand-edited-changelog
-    type: changed_path
+    type: path
+    runs: [pre_tool_use.edit_target, stop.working_tree]
     enforcement: required
     forbidden: ["CHANGELOG.md"]
     message: >-
@@ -16,7 +23,8 @@ gates:
   # one path segment, so `**/CLAUDE.md` alone catches web/ and src/gateway/
   # but never the root file.
   - id: no-hand-edited-claude-md
-    type: changed_path
+    type: path
+    runs: [pre_tool_use.edit_target, stop.working_tree]
     enforcement: required
     forbidden: ["CLAUDE.md", "**/CLAUDE.md"]
     message: >-
@@ -24,8 +32,33 @@ gates:
       a symlink so Windows clones survive. Edit the AGENTS.md beside it
       instead (see AGENTS.md, top).
 
+  - id: no-static-pwa-manifest
+    type: path
+    runs: [pre_tool_use.edit_target, stop.working_tree]
+    enforcement: required
+    forbidden: ["web/public/pwa/manifest*"]
+    message: >-
+      The PWA manifest is generated at build time by web/pwaManifest.ts;
+      only icons live under web/public/pwa/ (see web/AGENTS.md, "PWA
+      manifest").
+
+  - id: no-committed-dashboard-bundle
+    type: path
+    runs: [pre_tool_use.edit_target, stop.working_tree]
+    enforcement: required
+    forbidden:
+    - src/gateway/static/dashboard/**
+    message: 'AGENTS.md Generated Artifacts: the dashboard bundle (src/gateway/static/dashboard/)
+      is generated and not committed; do not commit changes under this path.'
+
+# ---------------------------------------------------------------------------
+# Command gates: refuse the command itself, before it runs. The only
+# gates here that can stop a shell write.
+# ---------------------------------------------------------------------------
+
   - id: use-pnpm-not-npm
-    type: command_match
+    type: command
+    runs: [pre_tool_use.command]
     enforcement: required
     # Narrowed to real invocations rather than the bare tool name: a phrase
     # matches a token in any position, so "npm" alone also refused ordinary
@@ -35,8 +68,24 @@ gates:
       web/ is pnpm, not npm (see web/AGENTS.md, "Use pnpm as pinned in
       package.json"). Use pnpm --dir web ... instead.
 
+  - id: no-force-push
+    type: command
+    runs: [pre_tool_use.command]
+    enforcement: advisory
+    forbidden: ["git push --force", "git push -f"]
+    message: >-
+      Force-pushing rewrites shared history; use --force-with-lease if you
+      must. (main is already protected server-side; this covers other
+      branches.)
+
+# ---------------------------------------------------------------------------
+# Correlation gates: "if this changed, that must have run". Need the
+# finished session, so they only ever resolve at Stop.
+# ---------------------------------------------------------------------------
+
   - id: openapi-changed-needs-postman
     type: command_if_changed
+    runs: [stop.session]
     enforcement: required
     when_changed: ["docs/public/openapi.json"]
     require: ["make postman"]
@@ -51,6 +100,7 @@ gates:
   # commands, so each is its own required gate.
   - id: openapi-changed-needs-generator
     type: command_if_changed
+    runs: [stop.session]
     enforcement: required
     when_changed: ["docs/public/openapi.json"]
     require: ["scripts/generate_openapi.py"]
@@ -59,13 +109,14 @@ gates:
       `uv run python scripts/generate_openapi.py` rather than editing the
       spec by hand (see AGENTS.md, "Generated Artifacts").
 
-  # Not a changed_path gate: `make postman` is what writes this file, so
+  # Not a path gate: `make postman` is what writes this file, so
   # forbidding any change to it would deadlock against the gate above, which
   # requires running exactly that. What is actually forbidden is changing it
   # by hand, and "the generator ran" is the only evidence that separates the
   # two.
   - id: postman-collection-changed-needs-make
     type: command_if_changed
+    runs: [stop.session]
     enforcement: required
     when_changed: ["docs/public/otari.postman_collection.json"]
     require: ["make postman"]
@@ -74,26 +125,9 @@ gates:
       AGENTS.md, "Generated Artifacts"). Run `make postman` instead of
       hand-editing it.
 
-  - id: no-static-pwa-manifest
-    type: changed_path
-    enforcement: required
-    forbidden: ["web/public/pwa/manifest*"]
-    message: >-
-      The PWA manifest is generated at build time by web/pwaManifest.ts;
-      only icons live under web/public/pwa/ (see web/AGENTS.md, "PWA
-      manifest").
-
-  - id: no-force-push
-    type: command_match
-    enforcement: advisory
-    forbidden: ["git push --force", "git push -f"]
-    message: >-
-      Force-pushing rewrites shared history; use --force-with-lease if you
-      must. (main is already protected server-side; this covers other
-      branches.)
-
   - id: cli-changed-needs-tests
     type: command_if_changed
+    runs: [stop.session]
     enforcement: required
     when_changed: ["src/gateway/cli.py"]
     require: ["tests/unit/test_gateway_cli.py"]
@@ -103,6 +137,7 @@ gates:
 
   - id: agent-cli-changed-needs-tests
     type: command_if_changed
+    runs: [stop.session]
     enforcement: required
     when_changed: ["cli/src/otari_agent/**"]
     require: ["tests/unit/test_otari_agent_cli.py"]
@@ -111,7 +146,7 @@ gates:
       and the hook tests before finishing (see AGENTS.md, "Change Validation
       Checklist").
 
-  # Not a changed_path gate, for the same reason as the Postman one above:
+  # Not a path gate, for the same reason as the Postman one above:
   # `uv add` is what writes this file, so forbidding any change to it would
   # refuse the very command the rule asks for. `uv lock` is on the list
   # because pyproject.toml also carries ruff, mypy and packaging config: a
@@ -119,6 +154,7 @@ gates:
   # is the cheap proof that uv.lock still matches whatever it did change.
   - id: pyproject-changed-needs-uv
     type: command_if_changed
+    runs: [stop.session]
     enforcement: required
     when_changed: ["pyproject.toml"]
     require: ["uv add", "uv remove", "uv lock"]
@@ -131,6 +167,7 @@ gates:
 
   - id: dashboard-client-changed-needs-codegen
     type: command_if_changed
+    runs: [stop.session]
     enforcement: required
     when_changed: ["web/src/client/schema.ts"]
     require: ["client:generate"]
@@ -140,13 +177,95 @@ gates:
       `pnpm --dir web run client:generate` rather than editing it by hand
       (see web/AGENTS.md, "Data and generated files").
 
-  # judge and check_passed gates (this one and the two below) only ever
-  # evaluate on a Stop event: otari hook has no finished diff or session for
+  - id: routes-changed-needs-sdk-manifest
+    type: command_if_changed
+    runs: [stop.session]
+    enforcement: required
+    when_changed: ["src/gateway/api/routes/**", "docs/public/openapi.json"]
+    require: ["tests/unit/test_sdk_endpoint_coverage.py", "make test-unit"]
+    message: >-
+      A new/changed route owes an entry in scripts/sdk_codegen/sdk-endpoints.txt
+      under [covered] or [excluded]; run tests/unit/test_sdk_endpoint_coverage.py
+      and fix any drift (see AGENTS.md, "Generated Artifacts").
+
+  - id: frontend-standards-changed-needs-coverage
+    type: command_if_changed
+    runs: [stop.session]
+    enforcement: required
+    when_changed:
+      [
+        ".github/skills/frontend-standards/**",
+        ".github/instructions/frontend-standards.instructions.md",
+        "scripts/rule_coverage/frontend-standards.txt",
+      ]
+    require: ["tests/unit/test_frontend_rule_coverage.py", "make test-unit"]
+    message: >-
+      A heading added to the frontend-standards skill or its instructions
+      counterpart owes a manifest line in scripts/rule_coverage/frontend-standards.txt;
+      run tests/unit/test_frontend_rule_coverage.py (see AGENTS.md, "Skills &
+      Scoped Instructions").
+
+  - id: code-execution-spec-changed-needs-contract-check
+    type: command_if_changed
+    runs: [stop.session]
+    enforcement: required
+    when_changed: ["docs/public/code-execution-openapi.yaml", "docs/code-execution-protocol.md"]
+    require: ["tests/unit/test_code_execution_contract.py", "make test-unit"]
+    message: >-
+      docs/public/code-execution-openapi.yaml (hand-maintained) and
+      docs/code-execution-protocol.md must stay in sync; run
+      tests/unit/test_code_execution_contract.py (see AGENTS.md, "Generated
+      Artifacts").
+
+  - id: architecture-layer-rules-check
+    type: command_if_changed
+    runs: [stop.session]
+    enforcement: required
+    when_changed: ["src/gateway/**", "cli/src/otari_agent/**"]
+    require: ["make check-architecture", "make lint"]
+    message: >-
+      You touched src/gateway/ or cli/src/otari_agent/; run `make check-architecture` (or `make lint`,
+      which includes it) and fix any reported import/layering violation
+      before finishing (see AGENTS.md, "Lint / Typecheck").
+
+# ---------------------------------------------------------------------------
+# Verifier gates: a repo-local script's exit code decides. Stop only.
+# ---------------------------------------------------------------------------
+
+  - id: no-leftover-conflict-markers
+    type: verifier
+    runs: [stop.verifier]
+    enforcement: required
+    verifier: .otari-gates/verifiers/no-conflict-markers.sh
+    message: >-
+      A tracked file still carries a Git merge-conflict marker
+      (<<<<<<</=======/>>>>>>>). Resolve the conflict and remove the
+      markers before finishing.
+
+  - id: no-stranded-docblocks
+    type: verifier
+    runs: [stop.verifier]
+    enforcement: required
+    verifier: .otari-gates/verifiers/no-stranded-docblocks.py
+    when_changed: ["web/src/**"]
+    message: >-
+      A docblock in web/src sits directly above a declaration it does not
+      document. See AGENTS.md, "Repository Conventions": a docblock belongs
+      immediately above the declaration it describes, and the way it stops
+      doing so is an insertion beside it.
+
+# ---------------------------------------------------------------------------
+# Judge gates: a model verdict against a rubric. Advisory by construction,
+# and one real model call each, so they are scoped with when_changed.
+# ---------------------------------------------------------------------------
+
+  # judge and verifier gates only ever evaluate on a Stop event: otari hook has no finished diff or session for
   # either a model or a verifier to check against on a PreToolUse call. See
-  # docs/agent-gates.md, "judge"/"check_passed" and "Trying it against a
+  # docs/agent-gates.md, "judge"/"verifier" and "Trying it against a
   # real Claude Code session".
   - id: no-narrative-comments
     type: judge
+    runs: [stop.session]
     enforcement: advisory
     # A judge gate costs one real model call per applicable Stop event, so
     # this is scoped to source, not every path in the repo: a session that
@@ -171,71 +290,6 @@ gates:
       WHY (see AGENTS.md, "Repository Conventions"): that belongs in the
       commit message, not left in the code.
 
-  - id: no-leftover-conflict-markers
-    type: check_passed
-    enforcement: required
-    verifier: .otari-gates/verifiers/no-conflict-markers.sh
-    message: >-
-      A tracked file still carries a Git merge-conflict marker
-      (<<<<<<</=======/>>>>>>>). Resolve the conflict and remove the
-      markers before finishing.
-
-  - id: no-stranded-docblocks
-    type: check_passed
-    enforcement: required
-    verifier: .otari-gates/verifiers/no-stranded-docblocks.py
-    when_changed: ["web/src/**"]
-    message: >-
-      A docblock in web/src sits directly above a declaration it does not
-      document. See AGENTS.md, "Repository Conventions": a docblock belongs
-      immediately above the declaration it describes, and the way it stops
-      doing so is an insertion beside it.
-
-  - id: no-committed-dashboard-bundle
-    type: changed_path
-    enforcement: required
-    forbidden:
-    - src/gateway/static/dashboard/**
-    message: 'AGENTS.md Generated Artifacts: the dashboard bundle (src/gateway/static/dashboard/)
-      is generated and not committed; do not commit changes under this path.'
-
-  - id: routes-changed-needs-sdk-manifest
-    type: command_if_changed
-    enforcement: required
-    when_changed: ["src/gateway/api/routes/**", "docs/public/openapi.json"]
-    require: ["tests/unit/test_sdk_endpoint_coverage.py", "make test-unit"]
-    message: >-
-      A new/changed route owes an entry in scripts/sdk_codegen/sdk-endpoints.txt
-      under [covered] or [excluded]; run tests/unit/test_sdk_endpoint_coverage.py
-      and fix any drift (see AGENTS.md, "Generated Artifacts").
-
-  - id: frontend-standards-changed-needs-coverage
-    type: command_if_changed
-    enforcement: required
-    when_changed:
-      [
-        ".github/skills/frontend-standards/**",
-        ".github/instructions/frontend-standards.instructions.md",
-        "scripts/rule_coverage/frontend-standards.txt",
-      ]
-    require: ["tests/unit/test_frontend_rule_coverage.py", "make test-unit"]
-    message: >-
-      A heading added to the frontend-standards skill or its instructions
-      counterpart owes a manifest line in scripts/rule_coverage/frontend-standards.txt;
-      run tests/unit/test_frontend_rule_coverage.py (see AGENTS.md, "Skills &
-      Scoped Instructions").
-
-  - id: code-execution-spec-changed-needs-contract-check
-    type: command_if_changed
-    enforcement: required
-    when_changed: ["docs/public/code-execution-openapi.yaml", "docs/code-execution-protocol.md"]
-    require: ["tests/unit/test_code_execution_contract.py", "make test-unit"]
-    message: >-
-      docs/public/code-execution-openapi.yaml (hand-maintained) and
-      docs/code-execution-protocol.md must stay in sync; run
-      tests/unit/test_code_execution_contract.py (see AGENTS.md, "Generated
-      Artifacts").
-
   # Merged from two separately generated gates (no-em-dash-prose,
   # use-us-english-spelling): both are the same AGENTS.md "Writing style"
   # section, and each applicable judge gate still costs its own model call
@@ -244,6 +298,7 @@ gates:
   # session touching the same files.
   - id: writing-style-violations
     type: judge
+    runs: [stop.session]
     enforcement: advisory
     # Both Markdown spellings, for the reason no-hand-edited-claude-md above
     # gives: `**` consumes at least one path segment, so `**/*.md` alone
@@ -266,18 +321,9 @@ gates:
       and spell prose in US English (identifiers, wire values, and third-party names
       borrowed from elsewhere keep their original spelling).'
 
-  - id: architecture-layer-rules-check
-    type: command_if_changed
-    enforcement: required
-    when_changed: ["src/gateway/**", "cli/src/otari_agent/**"]
-    require: ["make check-architecture", "make lint"]
-    message: >-
-      You touched src/gateway/ or cli/src/otari_agent/; run `make check-architecture` (or `make lint`,
-      which includes it) and fix any reported import/layering violation
-      before finishing (see AGENTS.md, "Lint / Typecheck").
-
   - id: no-leaked-secrets-in-logs-or-errors
     type: judge
+    runs: [stop.session]
     enforcement: advisory
     when_changed: ["src/gateway/**", "cli/src/otari_agent/**"]
     rubric: Flag any log statement, error message, or public-facing error response that
@@ -288,3 +334,4 @@ gates:
     message: 'Possible secret/token/API-key leak in logs or an internal detail exposed
       in a public error response (AGENTS.md § Repository Conventions: ''Preserve security-relevant
       behavior ... never log secrets, tokens, or raw API keys'').'
+

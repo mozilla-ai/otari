@@ -3528,7 +3528,7 @@
       },
       "CheckVerdictRequest": {
         "additionalProperties": false,
-        "description": "One check_passed gate's verdict, as the caller's own verifier run produced it.\n\nMirrors ``JudgeVerdictRequest`` field-for-field: ``gate_id`` echoes back\nthe gate the policy itself named (same bound, same reason), ``outcome``\nis the caller's own report of the verifier's exit code (0/1/anything\nelse, mapped by the caller to pass/fail/error), and ``detail`` is the\nverifier's captured stdout, capped the same way ``reasoning`` is.",
+        "description": "One verifier gate's verdict, as the caller's own verifier run produced it.\n\nMirrors ``JudgeVerdictRequest`` field-for-field: ``gate_id`` echoes back\nthe gate the policy itself named (same bound, same reason), ``outcome``\nis the caller's own report of the verifier's exit code (0/1/anything\nelse, mapped by the caller to pass/fail/error), and ``detail`` is the\nverifier's captured stdout, capped the same way ``reasoning`` is.",
         "properties": {
           "detail": {
             "default": "",
@@ -11454,6 +11454,25 @@
         "additionalProperties": false,
         "description": "A policy body plus the evidence to check it against, both caller-supplied.",
         "properties": {
+          "changed_path_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pre_tool_use.edit_target",
+                  "pre_tool_use.command",
+                  "stop.working_tree",
+                  "stop.session",
+                  "stop.verifier"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which moment `changed_paths` was read at, matching the `runs` values a gate declares: `pre_tool_use.edit_target` for a tool call's own target before it runs, `stop.working_tree` for `git status` once the turn is over. Required whenever `changed_paths` is present.",
+            "title": "Changed Path Source"
+          },
           "changed_paths": {
             "anyOf": [
               {
@@ -11483,7 +11502,7 @@
                 "type": "null"
               }
             ],
-            "description": "Verifier verdicts the caller collected for this request's check_passed gates.",
+            "description": "Verifier verdicts the caller collected for this request's verifier gates.",
             "title": "Check Results"
           },
           "command_scope": {
