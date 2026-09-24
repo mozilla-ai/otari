@@ -2,7 +2,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
-from any_llm import LLMProvider, acompletion
+from any_llm import acompletion
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -56,7 +56,6 @@ from gateway.core.usage_source import PLAYGROUND_USAGE_ENDPOINT
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.models.tools import CodeExecutor
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.files import FileService, StagedFile
@@ -71,6 +70,7 @@ from gateway.services.mcp_loop import (
 from gateway.services.tools import Dialect, ToolUseBudget
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
+from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.session_principal import SessionPrincipal
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -469,14 +469,7 @@ async def run_chat_completion(
     # sandbox session once the billed user and workspace are resolved.
     sandbox_inputs: list[StagedFile] = []
 
-    async def _normalize(
-        user_id: str,
-        provider: LLMProvider | None,
-        model: str,
-        instance: str | None,
-        workspace_id: uuid.UUID | None,
-        workspace_executor: CodeExecutor | None,
-    ) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the wire payload (extract to
         # text for text-only models, inline for natively-capable ones) before
         # the cost estimate. Standalone only; no-op when the files feature is
@@ -485,19 +478,19 @@ async def run_chat_completion(
             request.messages,
             fmt="openai",
             config=config,
-            provider=provider,
-            model=model,
+            provider=target.provider,
+            model=target.model,
             files=files,
-            user_id=user_id,
-            instance=instance,
-            workspace_id=workspace_id,
+            user_id=target.user_id,
+            instance=target.instance,
+            workspace_id=target.file_workspace_id,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
-                provider=provider,
+                provider=target.provider,
                 dialect=adapter.name,
                 code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-                workspace_executor=workspace_executor,
+                workspace_executor=target.workspace_executor,
             ),
         )
         sandbox_inputs.extend(stats.sandbox_inputs)

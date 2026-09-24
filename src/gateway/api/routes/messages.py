@@ -3,7 +3,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any, Literal
 
-from any_llm import AnyLLM, LLMProvider, amessages
+from any_llm import AnyLLM, amessages
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.messages import (
     MessageDeltaEvent,
@@ -21,6 +21,7 @@ from gateway.api.deps import (
     CodeExecutionPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
+    build_provider_file_uploader,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     extract_credential_token,
@@ -31,7 +32,11 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
-from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
+from gateway.api.routes._normalize import (
+    normalize_request_messages,
+    provider_container_requested,
+    sandbox_requested,
+)
 from gateway.api.routes._pipeline import (
     CONTAINER_AUTO,
     DB_UNAVAILABLE_DETAIL,
@@ -66,9 +71,8 @@ from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.models.tools import CodeExecutor
 from gateway.services.code_execution import ContainerLease
-from gateway.services.files import StagedFile
+from gateway.services.files import ProviderFileUploader, StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_messages import (
@@ -83,6 +87,7 @@ from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_
 from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, Dialect, ToolUseBudget
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
+from gateway.types.normalization_target import NormalizationTarget
 
 router = APIRouter(tags=["messages"])
 
@@ -786,35 +791,47 @@ async def create_message(
     # sandbox session once the billed user and workspace are resolved.
     sandbox_inputs: list[StagedFile] = []
 
-    async def _normalize(
-        user_id: str,
-        provider: LLMProvider | None,
-        model: str,
-        instance: str | None,
-        workspace_id: uuid.UUID | None,
-        workspace_executor: CodeExecutor | None,
-    ) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Anthropic wire payload
         # before the cost estimate. Standalone only; no-op when the files
         # feature is off or the request has no attachments.
+        code_execution_header = raw_request.headers.get(CODE_EXECUTION_HEADER)
+        uploader: ProviderFileUploader | None = None
+        if provider_container_requested(
+            request.tools,
+            config=config,
+            provider=target.provider,
+            dialect=_ADAPTER.name,
+            code_execution_header=code_execution_header,
+            workspace_executor=target.workspace_executor,
+        ):
+            uploader = build_provider_file_uploader(
+                raw_request=raw_request,
+                config=config,
+                uow=uow,
+                provider=target.provider,
+                provider_instance=target.instance,
+                workspace_id=target.credential_workspace_id,
+            )
         request.messages, stats = await normalize_request_messages(
             request.messages,
             fmt="anthropic",
             config=config,
-            provider=provider,
-            model=model,
+            provider=target.provider,
+            model=target.model,
             files=files,
-            user_id=user_id,
-            instance=instance,
-            workspace_id=workspace_id,
+            user_id=target.user_id,
+            instance=target.instance,
+            workspace_id=target.file_workspace_id,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
-                provider=provider,
+                provider=target.provider,
                 dialect=_ADAPTER.name,
-                code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-                workspace_executor=workspace_executor,
+                code_execution_header=code_execution_header,
+                workspace_executor=target.workspace_executor,
             ),
+            container_uploads=uploader,
         )
         sandbox_inputs.extend(stats.sandbox_inputs)
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()

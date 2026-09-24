@@ -237,6 +237,13 @@ resolves inside the tool loop and only the final message is returned. Nothing
 runs natively on Chat Completions, and the bare `code_execution` form is no
 provider's, so under `auto` both always run on the sandbox.
 
+The executor also decides where an attached file goes. Code running on Otari's
+sandbox is given the file from Otari's own store, and code running in the
+provider's container is given a short-lived copy at that provider, because such
+a container reads only files that provider holds. Either way the file reaches
+the code rather than only the model. See
+[Files and code execution](files.md#files-and-code-execution).
+
 Three layers choose the executor. The workspace pin wins over both of the
 others; the header wins over the deployment default:
 

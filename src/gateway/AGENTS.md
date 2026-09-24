@@ -166,8 +166,9 @@ resolved in `api/routes/_tools.py`): a workspace pin wins over everything, the
 `Otari-Code-Execution` header wins over the deployment default, and `auto`
 claims a declaration only when the dispatched provider does not run it
 natively. The workspace policy is read once, in the request preamble, and
-reused at admission; the same decision says whether a referenced upload is
-staged for the sandbox. The tool loop is in
+reused at admission; the same decision says where a referenced upload goes,
+staged for the gateway's sandbox or copied to the provider whose container will
+read it (`services/files/_provider_uploads.py`). The tool loop is in
 `services/mcp_loop.py`, sandbox and search backends under `services/`, and
 outbound URL checks in `services/url_safety.py`.
 

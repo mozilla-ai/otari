@@ -13,7 +13,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from any_llm import LLMProvider
 from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +21,7 @@ import gateway.api.routes._pipeline as pipeline
 from gateway.api.routes import chat
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.budgets import ReservationHandle, estimate_tokens
+from gateway.types.normalization_target import NormalizationTarget
 
 _VISION_USAGE = CompletionUsage(prompt_tokens=200, completion_tokens=50, total_tokens=250)
 
@@ -96,14 +96,7 @@ class _Recorder:
         monkeypatch.setattr(pipeline, "refund_reservation", fake_refund)
 
 
-async def _normalize_with_vision(
-    user_id: str,
-    provider: LLMProvider | None,
-    model: str,
-    instance: str | None,
-    workspace_id: uuid.UUID | None,
-    workspace_executor: object = None,
-) -> tuple[int, CompletionUsage | None]:
+async def _normalize_with_vision(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
     return 5000, _VISION_USAGE
 
 
