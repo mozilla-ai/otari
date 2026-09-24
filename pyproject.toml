@@ -24,7 +24,7 @@ dependencies = [
     # local-model guardrails, which run in the sidecar and never here. Bounded
     # below 0.8 rather than trusting a 0.x minor to keep the registry's shape.
     "any-guardrail[azure-content-safety,bedrock,openai,watsonx]>=0.7.7,<0.8.0",
-    "alembic>=1.13.0",
+    "alembic>=1.20.0",
     "aiosqlite>=0.19.0",
     # OAuth protocol mechanics for dashboard sign-in: provider endpoints, the
     # code exchange, and the userinfo fetch that normalizes a provider response
@@ -32,7 +32,7 @@ dependencies = [
     # this edition follows, so the two do not keep separate copies of a protocol
     # neither of us owns. What stays ours is which providers are configured,
     # which scopes are asked for, and how a fetched identity maps onto a user.
-    "apron-auth>=0.15.1,<0.16.0",
+    "apron-auth>=0.15.2,<0.16.0",
     "asyncpg>=0.29.0",
     # Password hashing for the dashboard sign-in (docs/access-control.md).
     # The library directly rather than passlib, which the platform wraps it in:
@@ -43,15 +43,15 @@ dependencies = [
     # over 72 bytes instead of truncating it, which is the behavior
     # `gateway.services.password_service` documents and relies on.
     "bcrypt>=5.0.0",
-    "click>=8.1.0",
-    "cryptography>=50.0.0",
+    "click>=8.5.0",
+    "cryptography>=50.0.1",
     # DNS lookups for the email-domain ownership proof
     # (`services.tenancy.domain_verification`). The async resolver specifically:
     # a claimed domain whose nameservers are gone takes the full timeout, and the
     # blocking resolver would hold the event loop for it.
     "dnspython>=2.7.0",
-    "fastapi>=0.115.0",
-    "genai-prices>=0.1.0",
+    "fastapi>=0.141.1",
+    "genai-prices>=0.1.7",
     # Direct dependency for gateway-managed HTTP clients and the public
     # transport API used by pinned web retrieval.
     "httpx>=0.28.1",
@@ -60,7 +60,7 @@ dependencies = [
     # transitive dependency, because the standard library's own "idna" codec
     # is IDNA2003 and folds `faß.de` into `fass.de`, which would let a proof
     # taken on one domain admit addresses at another.
-    "idna>=3.10",
+    "idna>=3.20",
     "markitdown[docx,pptx,xlsx,pdf]>=0.1.0",
     # Pinned to one minor line, not just below the next major. The major
     # ceiling is #689: mcp 2.0 removed
@@ -79,22 +79,22 @@ dependencies = [
     # public artifacts and the dashboard client (see AGENTS.md, "Generated
     # Artifacts").
     "mcp>=1.28.1,<1.29.0",
-    "opentelemetry-api>=1.39.1",
+    "opentelemetry-api>=1.44.0",
     # The laptop-side CLI, a workspace member at cli/. The gateway needs it for
     # the Agent Gates evaluator the Hook Server runs (otari_agent.domain) and
     # so that `uv sync` installs the `otari` console script it owns.
     "otari-agent",
     "pillow>=12.3.0",
-    "pypdfium2>=4.30.0",
-    "prometheus-client>=0.20.0",
-    "psycopg2-binary>=2.9.9",
-    "pydantic-settings>=2.14.2",
-    "python-dotenv>=1.0.0",
-    "python-multipart>=0.0.31",
+    "pypdfium2>=5.13.0",
+    "prometheus-client>=0.26.0",
+    "psycopg2-binary>=2.9.13",
+    "pydantic-settings>=2.15.0",
+    "python-dotenv>=1.2.3",
+    "python-multipart>=0.0.32",
     "pyyaml>=6.0",
     "sqlalchemy[asyncio]>=2.0.0",
-    "sqlmodel>=0.0.24",
-    "trafilatura>=2.0.0",
+    "sqlmodel>=0.0.44",
+    "trafilatura>=2.2.0",
     "uvicorn[standard]>=0.30.0",
     "opentelemetry-proto>=1.39.1",
     "webauthn>=2.5.0",
@@ -105,7 +105,7 @@ dependencies = [
 # so it's opt-in; the gateway degrades to vision-describe / drop when absent.
 ocr = [
     "rapidocr-onnxruntime>=1.3.0",
-    "numpy>=1.26.0",
+    "numpy>=2.5.3",
 ]
 # S3-compatible (AWS S3 or MinIO/any S3-compatible endpoint) files backend.
 # boto3 is already present transitively via any-llm-sdk[all] (Bedrock), but
@@ -121,7 +121,7 @@ s3 = [
 # on that implementation detail. The protocol's own package (gcsfs, adlfs, s3fs,
 # paramiko, ...) is the operator's to install.
 fsspec = [
-    "fsspec>=2024.6.0",
+    "fsspec>=2026.9.0",
 ]
 # Hosted sandboxes through E2B, for a deployment that cannot run the reference
 # code-execution container with the isolation untrusted code needs. Selected
@@ -150,13 +150,13 @@ dev = [
     # [project.dependencies], in the regression test for #689, instead of
     # relying on packaging being pulled in transitively.
     "packaging>=24.0",
-    "pytest>=9.0.3,<10",
-    "pytest-asyncio>=0.26.0",
+    "pytest>=9.1.1,<10",
+    "pytest-asyncio>=1.4.0",
     "pytest-cov>=6.2.1,<8",
-    "pytest-rerunfailures>=16.0",
+    "pytest-rerunfailures>=16.7",
     "pytest-timeout",
     "pytest-xdist>=3.6.1",
-    "ruff>=0.15.9",
+    "ruff>=0.16.8",
     # The fsspec file store test reaches a real S3-compatible store through s3fs.
     # Its aiobotocore dependency pins botocore, so it also bounds the boto3 this lock can take.
     "s3fs>=2026.3.0",

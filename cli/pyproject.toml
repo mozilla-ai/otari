@@ -21,7 +21,7 @@ dynamic = ["version"]
 # Homebrew formula builds every dependency from its sdist, and
 # scripts/check_architecture.py refuses the imports.
 dependencies = [
-    "click>=8.1.0",
+    "click>=8.5.0",
     "httpx>=0.28.1",
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0",
