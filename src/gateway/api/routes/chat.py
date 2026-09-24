@@ -25,7 +25,7 @@ from gateway.api.deps import (
     get_unit_of_work_if_needed,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
-from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
+from gateway.api.routes._normalize import INLINE_LIMIT_DETAIL, normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
     PROVIDER_ERROR_DETAIL,
@@ -47,7 +47,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
-from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields
+from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields, provider_attempt_kwargs
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
@@ -221,6 +221,7 @@ class _ChatAdapter:
             total_tokens=chunk.usage.total_tokens or 0,
             prompt_tokens_details=details,
             cache_read_tokens=(details.cached_tokens or 0) if details is not None else 0,
+            cache_write_tokens=(details.cache_write_tokens or 0) if details is not None else 0,
         )
 
     def extract_usage(self, result: ChatCompletion) -> CompletionUsage | None:
@@ -336,17 +337,17 @@ class _ChatAdapter:
         attempt: ResolvedAttempt,
         base_request_fields: dict[str, Any],
     ) -> dict[str, Any]:
-        return default_attempt_kwargs(attempt, base_request_fields)
+        return provider_attempt_kwargs(default_attempt_kwargs(attempt, base_request_fields))
 
     def local_attempt_kwargs(
         self,
         attempt: Attempt,
         base_request_fields: dict[str, Any],
     ) -> dict[str, Any]:
-        return attempt.call_kwargs(base_request_fields)
+        return provider_attempt_kwargs(attempt.call_kwargs(base_request_fields))
 
     def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        return kwargs
+        return provider_attempt_kwargs(kwargs)
 
 
 _ADAPTER = _ChatAdapter()
@@ -500,6 +501,9 @@ async def run_chat_completion(
             ),
         )
         sandbox_inputs.extend(stats.sandbox_inputs)
+        if stats.oversized:
+            detail = INLINE_LIMIT_DETAIL.format(max_bytes=config.files_gemini_inline_max_bytes)
+            raise adapter.error(400, detail, ErrorKind.INVALID_REQUEST)
         return len(str(request.messages)), stats.vision_usage()
 
     output_cap = _effective_output_cap(request.max_tokens, request.max_completion_tokens)
@@ -615,7 +619,7 @@ async def run_chat_completion(
         resolved = await resolve_dispatch_provider(
             ctx, config, request.model, adapter=adapter, model_provider=model_provider
         )
-        call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
+        call_kwargs = provider_attempt_kwargs({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model})
         return await run_single_attempt_stream(
             adapter=adapter,
             ctx=ctx,
@@ -655,7 +659,7 @@ async def run_chat_completion(
     resolved = await resolve_dispatch_provider(
         ctx, config, request.model, adapter=adapter, model_provider=model_provider
     )
-    call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
+    call_kwargs = provider_attempt_kwargs({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model})
     return await run_standalone_non_stream(
         adapter=adapter,
         ctx=ctx,

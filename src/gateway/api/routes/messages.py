@@ -30,7 +30,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
-from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
+from gateway.api.routes._normalize import INLINE_LIMIT_DETAIL, normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     CONTAINER_AUTO,
     DB_UNAVAILABLE_DETAIL,
@@ -58,7 +58,7 @@ from gateway.api.routes._platform import (
     _resolve_platform_credentials,
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
-from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields
+from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields, provider_attempt_kwargs
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
@@ -102,30 +102,19 @@ def _merge_anthropic_betas(body_betas: list[str] | None, raw_request: Request) -
 def _serves_messages_natively(dispatch_model: Any) -> bool:
     """Whether the dispatched provider has an Anthropic Messages API of its own.
 
-    The same question any-llm asks before refusing ``betas``, asked the same
-    way: a provider that serves Messages natively overrides ``_amessages``,
-    while a bridged one inherits the base implementation that converts
-    Messages to Completions (and refuses what cannot survive the conversion).
-    ``SUPPORTS_MESSAGES`` does not answer it, being true for every provider the
-    bridge covers.
+    The same question any-llm asks before refusing ``betas``: a bridged
+    provider converts Messages to Completions and refuses what cannot survive
+    the conversion. ``SUPPORTS_MESSAGES`` does not answer it, being true for
+    every provider the bridge covers.
 
     An unknown or unparseable selector answers yes, so nothing is stripped on a
-    guess; any-llm then refuses the beta itself, as it did before.
-
-    This reads a private any-llm attribute, which nothing public answers today
-    (``SUPPORTS_MESSAGES`` is true for every bridged provider). It is a shim in
-    the sense of CONTRIBUTING's "when the fix is upstream": the durable answer
-    is a public capability flag on the any-llm provider class, asked for in
-    https://github.com/mozilla-ai/any-llm/issues/1418, and this goes when that
-    lands. ``getattr`` keeps a renamed attribute from breaking a request; it
-    degrades to forwarding the betas, the pre-shim behavior.
+    guess; any-llm then refuses the beta itself.
     """
     if not isinstance(dispatch_model, str) or not dispatch_model:
         return True
     try:
         provider, _ = AnyLLM.split_model_provider(dispatch_model)
-        native = getattr(AnyLLM.get_provider_class(provider), "_amessages", None)
-        return native is not getattr(AnyLLM, "_amessages", None)
+        return AnyLLM.get_provider_class(provider).SUPPORTS_MESSAGES_NATIVE
     except Exception:  # noqa: BLE001 - any-llm raises its own types for an unknown provider
         return True
 
@@ -691,17 +680,17 @@ class _MessagesAdapter:
         attempt: ResolvedAttempt,
         base_request_fields: dict[str, Any],
     ) -> dict[str, Any]:
-        return default_attempt_kwargs(attempt, base_request_fields)
+        return provider_attempt_kwargs(default_attempt_kwargs(attempt, base_request_fields))
 
     def local_attempt_kwargs(
         self,
         attempt: Attempt,
         base_request_fields: dict[str, Any],
     ) -> dict[str, Any]:
-        return attempt.call_kwargs(base_request_fields)
+        return provider_attempt_kwargs(attempt.call_kwargs(base_request_fields))
 
     def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        return kwargs
+        return provider_attempt_kwargs(kwargs)
 
 
 CONTAINER_ON_MANAGED_CREDENTIAL_DETAIL = (
@@ -822,6 +811,9 @@ async def create_message(
             ),
         )
         sandbox_inputs.extend(stats.sandbox_inputs)
+        if stats.oversized:
+            detail = INLINE_LIMIT_DETAIL.format(max_bytes=config.files_gemini_inline_max_bytes)
+            raise _ADAPTER.error(400, detail, ErrorKind.INVALID_REQUEST)
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()
 
     try:
@@ -963,7 +955,7 @@ async def create_message(
         resolved = await resolve_dispatch_provider(
             ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
         )
-        call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
+        call_kwargs = provider_attempt_kwargs({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model})
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
             ctx=ctx,
@@ -1009,7 +1001,7 @@ async def create_message(
     resolved = await resolve_dispatch_provider(
         ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
     )
-    call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
+    call_kwargs = provider_attempt_kwargs({**resolved.kwargs, **request_fields, "model": resolved.dispatch_model})
     result = await run_standalone_non_stream(
         adapter=_ADAPTER,
         ctx=ctx,

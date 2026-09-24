@@ -6,7 +6,7 @@ layout rule took effect.
 """
 
 from gateway.services.files.file_sweeper import SweepBatch, run_file_sweeper, sweep_files
-from gateway.services.files.provider_files import ProviderFile, produced_files_for
+from gateway.services.files.provider_files import ProviderFile, produced_files_for, store_inline_outputs
 from gateway.services.files.sandbox_bridge import SandboxFileBridge
 
 __all__ = [
@@ -15,5 +15,6 @@ __all__ = [
     "SweepBatch",
     "produced_files_for",
     "run_file_sweeper",
+    "store_inline_outputs",
     "sweep_files",
 ]

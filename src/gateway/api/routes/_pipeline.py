@@ -159,7 +159,7 @@ from gateway.services.code_execution import (
     ContainerNotFoundError,
     SandboxContainerRegistry,
 )
-from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for
+from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for, store_inline_outputs
 from gateway.services.guardrails import InProcessGuardrail
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
@@ -3498,13 +3498,18 @@ async def _copy_provider_files(
 
 
 async def _copying_produced_files(
-    stream: AsyncIterator[ChunkT], dialect: str, copy: Callable[[list[ProviderFile]], Awaitable[None]]
+    stream: AsyncIterator[ChunkT],
+    dialect: str,
+    copy: Callable[[list[ProviderFile]], Awaitable[None]],
+    files_bridge: SandboxFileBridge,
 ) -> AsyncIterator[ChunkT]:
-    """Forward ``stream`` unchanged, copying the provider-held files an event cites before that event goes on.
+    """Forward ``stream``, copying the provider-held files an event cites before that event goes on.
 
-    So the caller never sees a file ID before Otari holds the file's bytes.
+    So the caller never sees a file ID before Otari holds the file's bytes. A file
+    the provider sent inline (Gemini) is stored and the event rewritten to name it.
     """
     async for chunk in stream:
+        await store_inline_outputs(dialect, chunk, files_bridge.store_provider_output)
         if files := produced_files_for(dialect, chunk):
             await copy(files)
         yield chunk
@@ -4875,7 +4880,7 @@ async def run_single_attempt_stream(
         async def _copy(files: list[ProviderFile]) -> None:
             await _copy_provider_files(ctx, files_bridge, files, instance=provider)
 
-        stream = _copying_produced_files(stream, adapter.name, _copy)
+        stream = _copying_produced_files(stream, adapter.name, _copy, files_bridge)
 
     return build_streaming_response(
         adapter=adapter,
@@ -5556,6 +5561,8 @@ async def run_standalone_non_stream(
                     ctx.db, ctx.reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
                 )
             _attach_standalone_cost(adapter, result, logged)
+            if tool_ctx.sandbox_files is not None:
+                await store_inline_outputs(adapter.name, result, tool_ctx.sandbox_files.store_provider_output)
             await _copy_provider_files(
                 ctx, tool_ctx.sandbox_files, produced_files_for(adapter.name, result), instance=provider
             )

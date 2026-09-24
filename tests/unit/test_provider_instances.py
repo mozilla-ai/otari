@@ -220,8 +220,10 @@ def test_credential_env_names_splits_alternatives() -> None:
 
 
 def test_credential_env_names_empty_for_keyless_backends() -> None:
-    # any-llm spells "no credential" as the literal string "None".
-    for keyless in ("ollama", "llamacpp", "llamafile"):
+    # any-llm spells "no credential" as the literal string "None". llamacpp
+    # declares LLAMACPP_API_KEY but does not insist on it, so it is classified by
+    # hand in KEYLESS_SELF_HOSTED_PROVIDERS instead.
+    for keyless in ("ollama", "llamafile"):
         assert provider_credential_env_names(keyless) == ()
 
 

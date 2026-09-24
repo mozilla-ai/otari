@@ -91,6 +91,7 @@ providers:
 # files_url: "gcs://my-bucket/otari-files"
 # files_storage_options: { project: "my-project" }
 # files_max_bytes: 536870912
+# files_gemini_inline_max_bytes: 20971520
 # files_output_max_files: 20
 # files_output_max_bytes: 67108864
 # files_retention_hours: 168

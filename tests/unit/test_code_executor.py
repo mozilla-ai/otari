@@ -23,8 +23,10 @@ from gateway.api.routes._tools import (
     first_provider_code_execution_tool,
     native_code_execution_dialect,
     parse_code_execution_header,
+    provider_attempt_kwargs,
     provider_runs_code_natively,
     resolve_code_executor_preference,
+    with_native_code_execution_tool,
 )
 from gateway.core.config import GatewayConfig
 from gateway.models.tools import CodeExecutor
@@ -174,6 +176,51 @@ def test_everything_else_is_not_natively_served(
 
 def test_provider_name_is_matched_case_insensitively() -> None:
     assert provider_runs_code_natively(ANTHROPIC_DATED, provider="Anthropic", dialect="messages") is True
+
+
+@pytest.mark.parametrize("provider", ["gemini", "vertexai"])
+@pytest.mark.parametrize(
+    ("entry", "dialect"),
+    [(BARE, "chat"), (BARE, "messages"), (ANTHROPIC_DATED, "messages")],
+)
+def test_gemini_runs_code_natively_on_chat_and_messages(entry: dict[str, str], dialect: str, provider: str) -> None:
+    assert provider_runs_code_natively(entry, provider=provider, dialect=dialect) is True
+
+
+@pytest.mark.parametrize(
+    ("entry", "dialect"),
+    [(ANTHROPIC_DATED, "chat"), (OPENAI_INTERPRETER, "chat"), (BARE, "responses"), (OPENAI_INTERPRETER, "responses")],
+)
+def test_gemini_does_not_serve_other_pairings(entry: dict[str, str], dialect: str) -> None:
+    assert provider_runs_code_natively(entry, provider="gemini", dialect=dialect) is False
+
+
+def test_gemini_attempt_gets_the_keyword_in_geminis_own_form() -> None:
+    function: dict[str, Any] = {"type": "function", "function": {"name": "lookup", "parameters": {}}}
+    tools: list[dict[str, Any]] = [function, ANTHROPIC_DATED, BARE]
+
+    assert with_native_code_execution_tool(tools, provider="gemini") == [function, {"code_execution": {}}]
+    assert tools == [function, ANTHROPIC_DATED, BARE]
+
+
+def test_non_gemini_attempt_keeps_the_keyword_as_written() -> None:
+    tools = [ANTHROPIC_DATED]
+
+    assert with_native_code_execution_tool(tools, provider="anthropic") is tools
+
+
+def test_provider_attempt_kwargs_reads_the_provider_from_the_selector() -> None:
+    kwargs = {"model": "gemini:gemini-2.5-flash", "tools": [BARE]}
+
+    assert provider_attempt_kwargs(kwargs)["tools"] == [{"code_execution": {}}]
+    assert provider_attempt_kwargs(provider_attempt_kwargs(kwargs)) == provider_attempt_kwargs(kwargs)
+
+
+@pytest.mark.parametrize("model", ["openai:gpt-5", "not-a-provider:x", ""])
+def test_provider_attempt_kwargs_leaves_other_selectors_alone(model: str) -> None:
+    kwargs = {"model": model, "tools": [BARE]}
+
+    assert provider_attempt_kwargs(kwargs) is kwargs
 
 
 # --- which native result shape a caller expects back -----------------------------------

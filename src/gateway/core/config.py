@@ -247,11 +247,18 @@ def _get_platform_token_from_env() -> str | None:
     return token or None
 
 
+# Local and LAN backends that never require a key, although each declares a
+# credential variable: any-llm resolves a missing key to a placeholder and
+# defaults to a localhost or LAN base URL, so a bare ``vllm:my-model`` reaches a
+# self-hosted server with nothing configured in otari at all.
+KEYLESS_SELF_HOSTED_PROVIDERS = frozenset({"vllm", "lmstudio", "cascadia", "llamacpp", "otari"})
+
+
 def provider_credential_env_names(provider_type: str) -> tuple[str, ...] | None:
     """Environment variables any-llm reads for a provider's credential.
 
     Returns an empty tuple when the provider needs no API key: the keyless local
-    backends (ollama, llamacpp, llamafile) declare the literal string ``"None"``,
+    backends ollama and llamafile declare the literal string ``"None"``,
     and a provider authenticating through a cloud SDK (Vertex AI) declares an
     empty name. Returns ``None`` when the provider cannot be inspected at all
     (not a known implementation, or an optional SDK dependency that is not
@@ -941,6 +948,16 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         default=512 * 1024 * 1024,
         ge=1,
         description="Maximum size in bytes for a single uploaded file.",
+    )
+    files_gemini_inline_max_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=20 * 1024 * 1024,
+        ge=1,
+        description=(
+            "Most attachment bytes one request to a Gemini model carries inline. Past it, each further "
+            "attachment is uploaded to Gemini's file storage with the instance's own key and referenced by "
+            "URI, and where that cannot happen (Vertex AI, hybrid mode) the request is refused up front "
+            "rather than by Gemini."
+        ),
     )
     files_output_max_files: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
         default=20,
@@ -1771,9 +1788,9 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         instance name is the implementation the credential question is asked of.
         """
         env_names = provider_credential_env_names(instance)
-        # Empty: a keyless backend, nothing to warn about. None: a provider we
-        # cannot inspect, so we do not know that a credential is needed.
-        if not env_names:
+        # Empty or self-hosted: a keyless backend, nothing to warn about. None: a
+        # provider we cannot inspect, so we do not know that a credential is needed.
+        if not env_names or instance in KEYLESS_SELF_HOSTED_PROVIDERS:
             return
         if any(os.getenv(name) for name in env_names):
             return

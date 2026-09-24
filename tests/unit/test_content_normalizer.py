@@ -434,3 +434,118 @@ async def test_two_uploads_named_alike_are_both_staged_and_the_model_learns_both
     assert "data.csv" in markers[0]
     assert "data-2.csv" in markers[1]
     assert "data.csv" in markers[2] and "data-2" not in markers[2]
+
+
+def _document_msg(size: int, *, filename: str | None = "report.pdf", fmt: str = "openai") -> dict[str, Any]:
+    data = base64.b64encode(b"x" * size).decode("ascii")
+    if fmt == "anthropic":
+        block: dict[str, Any] = {
+            "type": "document",
+            "source": {"type": "base64", "media_type": "application/pdf", "data": data},
+        }
+    else:
+        file_obj: dict[str, Any] = {"file_data": f"data:application/pdf;base64,{data}"}
+        if filename:
+            file_obj["filename"] = filename
+        block = {"type": "file", "file": file_obj}
+    return {"role": "user", "content": [block]}
+
+
+class _Uploads:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[tuple[int, str, str]] = []
+
+    async def __call__(self, data: bytes, mime: str, filename: str) -> str:
+        self.calls.append((len(data), mime, filename))
+        if self.fail:
+            raise RuntimeError("upload refused")
+        return f"https://generativelanguage.googleapis.com/v1beta/files/f{len(self.calls)}"
+
+
+@pytest.mark.asyncio
+async def test_attachments_within_the_inline_limit_stay_inline() -> None:
+    uploads = _Uploads()
+    msgs = [_document_msg(40), _document_msg(40)]
+
+    out, stats = await normalize_messages(
+        msgs,
+        config=GatewayConfig(),
+        caps=_NATIVE,
+        fmt="openai",
+        db=None,
+        file_store=None,
+        user_id="u",
+        inline_limit=cn.InlineLimit(max_bytes=100, upload=uploads),
+    )
+
+    assert out == msgs
+    assert uploads.calls == []
+    assert (stats.inline_bytes, stats.uploaded, stats.oversized) == (80, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_an_attachment_past_the_inline_limit_is_uploaded_and_referenced_by_uri() -> None:
+    uploads = _Uploads()
+    msgs = [_document_msg(60), _document_msg(60, filename=None)]
+
+    out, stats = await normalize_messages(
+        msgs,
+        config=GatewayConfig(),
+        caps=_NATIVE,
+        fmt="openai",
+        db=None,
+        file_store=None,
+        user_id="u",
+        inline_limit=cn.InlineLimit(max_bytes=100, upload=uploads),
+    )
+
+    assert out[0] == msgs[0]
+    assert out[1]["content"][0] == {
+        "type": "file",
+        "file": {
+            "file_data": "https://generativelanguage.googleapis.com/v1beta/files/f1",
+            "filename": "attachment.pdf",
+        },
+    }
+    assert uploads.calls == [(60, "application/pdf", "")]
+    assert (stats.uploaded, stats.oversized) == (1, 0)
+    assert stats.to_metadata()["uploaded"] == 1
+
+
+@pytest.mark.asyncio
+async def test_an_anthropic_attachment_is_uploaded_as_a_file_part_the_bridge_forwards() -> None:
+    out, stats = await normalize_messages(
+        [_document_msg(200, fmt="anthropic")],
+        config=GatewayConfig(),
+        caps=_NATIVE,
+        fmt="anthropic",
+        db=None,
+        file_store=None,
+        user_id="u",
+        inline_limit=cn.InlineLimit(max_bytes=100, upload=_Uploads()),
+    )
+
+    assert out[0]["content"][0]["type"] == "file"
+    assert out[0]["content"][0]["file"]["filename"] == "attachment.pdf"
+    assert stats.uploaded == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("upload", [None, _Uploads(fail=True)])
+async def test_an_attachment_that_cannot_be_moved_is_left_and_counted_as_oversized(upload: Any) -> None:
+    msgs = [_document_msg(200)]
+
+    out, stats = await normalize_messages(
+        msgs,
+        config=GatewayConfig(),
+        caps=_NATIVE,
+        fmt="openai",
+        db=None,
+        file_store=None,
+        user_id="u",
+        inline_limit=cn.InlineLimit(max_bytes=100, upload=upload),
+    )
+
+    assert out == msgs
+    assert (stats.uploaded, stats.oversized) == (0, 1)
