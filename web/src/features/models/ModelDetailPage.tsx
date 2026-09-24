@@ -20,7 +20,10 @@ import {
   MODALITY_LABELS,
   priceSourceLabel,
 } from "@/features/models/catalog"
-import { publicCatalogHref } from "@/features/models/publicCatalog"
+import {
+  publicCatalogHref,
+  rememberModel,
+} from "@/features/models/publicCatalog"
 import { UseModelDrawer } from "@/features/models/UseModelDrawer"
 import { canManage, isDeploymentOperator } from "@/features/organization/roles"
 import { useCatalogModel } from "@/shared/api/models"
@@ -476,9 +479,11 @@ export function ModelDetailView({
               </Link>
             ) : null}
             {model.offerings.length === 0 ? null : publicView ? (
-              // Signup where the deployment offers it, sign-in otherwise.
+              // Signup where the deployment offers it, sign-in otherwise; the
+              // model is reopened once the new session starts.
               <a
                 href={open_signup ? "#/signup" : "#/"}
+                onClick={() => rememberModel(model.id)}
                 className={buttonVariants({ variant: "primary" })}
               >
                 Use this model

@@ -14,7 +14,11 @@ import {
   publicAuthPath,
 } from "@/features/auth/publicAuthPaths"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
-import { publicCatalogPath } from "@/features/models/publicCatalog"
+import {
+  publicCatalogHref,
+  publicCatalogPath,
+  takeRememberedModel,
+} from "@/features/models/publicCatalog"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import { normalizeBootstrap } from "@/shared/helpers/bootstrap"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
@@ -192,6 +196,23 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // pages below it read the same selection, and it is seeded from the
   // organization context, which needs a session: inside the auth gate, never
   // above it.
+  return <SignedInRoot />
+}
+
+/**
+ * The router, for a session. On its first render it reopens the model a
+ * visitor chose on the public catalog before signing in, and only where the
+ * session landed on the home page: a deep link the caller followed wins.
+ * Done before the router mounts, so the home page never flashes first.
+ */
+function SignedInRoot() {
+  useState(() => {
+    const modelId = takeRememberedModel()
+    const path = window.location.hash.replace(/^#/, "")
+    if (modelId && (path === "" || path === "/")) {
+      router.history.replace(publicCatalogHref(modelId).replace(/^#/, ""))
+    }
+  })
   return (
     <SelectedWorkspaceProvider>
       <RouterProvider router={router} />
