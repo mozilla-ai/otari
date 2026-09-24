@@ -8,6 +8,7 @@ or will not delete.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -126,7 +127,7 @@ def _row(file_id: str = "file-1", *, storage_ref: str | None = "blob-1") -> File
 
 
 def _service(
-    store: _MemoryStore, files: _StubFiles, *, workspace_error: Exception | None = None, **config: Any
+    store: _MemoryStore, files: _StubFiles, *, workspace_error: BaseException | None = None, **config: Any
 ) -> FileService:
     async def _default_workspace() -> uuid.UUID:
         if workspace_error is not None:
@@ -268,6 +269,18 @@ async def test_an_upload_whose_workspace_will_not_resolve_takes_its_blob_with_it
     service = _service(store, _StubFiles(), workspace_error=RuntimeError("no default workspace"))
 
     with pytest.raises(RuntimeError, match="no default workspace"):
+        await service.store(_upload(b"a,b\n", workspace_id=None))
+
+    assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_an_upload_cancelled_before_its_commit_takes_its_blob_with_it() -> None:
+    """Cancellation inside the block is knowably pre-commit, so no row can be stranded."""
+    store = _MemoryStore()
+    service = _service(store, _StubFiles(), workspace_error=asyncio.CancelledError())
+
+    with pytest.raises(asyncio.CancelledError):
         await service.store(_upload(b"a,b\n", workspace_id=None))
 
     assert store.blobs == {}

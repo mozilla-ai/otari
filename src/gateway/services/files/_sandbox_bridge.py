@@ -211,15 +211,23 @@ class SandboxFileBridge:
     async def _record(self, row: OutputFileRow) -> None:
         """Record ``row`` in a block of its own, and remove its blob when the row does not land.
 
-        A cancellation is deliberately not caught: it derives from
-        ``BaseException``, and one arriving while the block commits leaves the
-        outcome unknown, so removing the bytes could strand a row that did land.
-        An orphan the reclaim pass can find is the smaller failure.
+        A cancellation raised inside the block is cleaned up, because the
+        commit cannot have run yet. One arriving while the block commits is not:
+        its outcome is unknown, and removing the bytes could strand a row that
+        did land. An orphan the reclaim pass can find is the smaller failure.
         """
         try:
             async with self._uow:
-                await self._files.record_output(row)
+                try:
+                    await self._files.record_output(row)
+                except BaseException:
+                    # Raised inside the block, so the commit has not been
+                    # reached and no row can have landed. Cancellation included.
+                    await self._discard(row.storage_ref)
+                    raise
         except Exception:
+            # The commit itself failed and rolled back. Cancellation stays
+            # uncaught here, where its outcome is unknown.
             await self._discard(row.storage_ref)
             raise
 

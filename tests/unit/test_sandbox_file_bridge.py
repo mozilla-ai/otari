@@ -18,7 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.repositories.files import FileRepository
+from gateway.repositories.files import FileRepository, OutputFileRow
 from gateway.services.files import CODE_EXECUTION_OUTPUT_PURPOSE, ProviderFile, SandboxFileBridge
 from gateway.services.files._provider_files import FileOverBudgetError, ProviderFileUnavailableError
 
@@ -103,15 +103,28 @@ class _StubFiles(FileRepository):
     ``existing_ids`` runs a query the fake session cannot serve.
     """
 
-    def __init__(self, db: Any, *, known: Collection[str] = (), error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        db: Any,
+        *,
+        known: Collection[str] = (),
+        error: Exception | None = None,
+        record_error: BaseException | None = None,
+    ) -> None:
         super().__init__(cast(UnitOfWork, db))
         self._known = set(known)
         self._error = error
+        self._record_error = record_error
 
     async def existing_ids(self, file_ids: Collection[str]) -> set[str]:
         if self._error is not None:
             raise self._error
         return set(file_ids) & self._known
+
+    async def record_output(self, row: OutputFileRow) -> None:
+        if self._record_error is not None:
+            raise self._record_error
+        await super().record_output(row)
 
 
 def _bridge(
@@ -120,6 +133,7 @@ def _bridge(
     *,
     known: Collection[str] = (),
     lookup_error: Exception | None = None,
+    record_error: BaseException | None = None,
     **config: Any,
 ) -> SandboxFileBridge:
     uow = uow if uow is not None else _CommittingUnitOfWork(_FakeDb())
@@ -127,7 +141,7 @@ def _bridge(
         file_store=store,
         config=GatewayConfig(**config),
         uow=cast(UnitOfWork, uow),
-        files=_StubFiles(uow._session, known=known, error=lookup_error),
+        files=_StubFiles(uow._session, known=known, error=lookup_error, record_error=record_error),
         user_id="u1",
         workspace_id=uuid.uuid4(),
         inputs=[],
@@ -432,3 +446,15 @@ async def test_a_cancelled_commit_keeps_the_bytes() -> None:
         await _bridge(store, _CancellingUnitOfWork(_FakeDb())).store_output("out.csv", _chunks(b"a,b\n"))
 
     assert list(store.blobs.values()) == [b"a,b\n"]
+
+
+@pytest.mark.asyncio
+async def test_an_output_cancelled_before_its_commit_takes_its_blob_with_it() -> None:
+    """The other side of the previous test: cancelled inside the block, no row can have landed."""
+    store = _MemoryStore()
+    bridge = _bridge(store, _CommittingUnitOfWork(_FakeDb()), record_error=asyncio.CancelledError())
+
+    with pytest.raises(asyncio.CancelledError):
+        await bridge.store_output("chart.png", _chunks(b"\x89PNG"))
+
+    assert store.blobs == {}

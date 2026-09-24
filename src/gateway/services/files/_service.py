@@ -154,23 +154,32 @@ class FileService:
         now = datetime.now(UTC)
         try:
             async with self._uow:
-                # Resolved here rather than before the upload: it reads the
-                # database, and doing that first would hold the session's
-                # transaction open for as long as the bytes take to store.
-                workspace_id = upload.workspace_id or await self._default_workspace()
-                record = FileObject(
-                    id=file_id,
-                    user_id=upload.user_id,
-                    workspace_id=workspace_id,
-                    filename=upload.filename or file_id,
-                    mime_type=guess_mime_type(upload.filename, upload.content_type),
-                    bytes=size,
-                    purpose=upload.purpose,
-                    storage_ref=storage_ref,
-                    created_at=now,
-                    expires_at=expiry_for(self._config, now),
-                )
-                await self._files.add(record)
+                try:
+                    # Resolved here rather than before the upload: it reads the
+                    # database, and doing that first would hold the session's
+                    # transaction open for as long as the bytes take to store.
+                    workspace_id = upload.workspace_id or await self._default_workspace()
+                    record = FileObject(
+                        id=file_id,
+                        user_id=upload.user_id,
+                        workspace_id=workspace_id,
+                        filename=upload.filename or file_id,
+                        mime_type=guess_mime_type(upload.filename, upload.content_type),
+                        bytes=size,
+                        purpose=upload.purpose,
+                        storage_ref=storage_ref,
+                        created_at=now,
+                        expires_at=expiry_for(self._config, now),
+                    )
+                    await self._files.add(record)
+                except BaseException:
+                    # Raised inside the block, so the Unit of Work has not
+                    # reached its commit and the bytes are certainly
+                    # unreferenced. A cancellation is caught here for that
+                    # reason: it cannot strand a row that landed, because none
+                    # can have landed yet.
+                    await self._drop_orphan(storage_ref, file_id)
+                    raise
         except DATABASE_ERRORS as exc:
             # Logged before the cleanup, so the failure that ended the upload is
             # on the record whatever the cleanup then does.
@@ -180,12 +189,12 @@ class FileService:
             await self._drop_orphan(storage_ref, file_id)
             raise FileStorageError(f"Could not record the file {file_id}") from exc
         except Exception:
-            # Anything else that stopped the row from landing, the workspace
-            # lookup above included. The block has rolled back, so the bytes have
-            # nothing pointing at them and the sweep, which walks rows, will
-            # never see them. A cancellation is deliberately not caught here:
-            # its commit outcome is unknown, and dropping the bytes of a row
-            # that did land is the worse failure.
+            # The commit itself failed, so the block rolled back and the row did
+            # not land. A cancellation is deliberately not caught out here: it
+            # can arrive while the commit is in flight, where the outcome is
+            # unknown and dropping the bytes of a row that did land is worse.
+            # The inner handler has already dropped the blob for anything that
+            # failed before the commit, and dropping twice is a no-op.
             await self._drop_orphan(storage_ref, file_id)
             raise
 
