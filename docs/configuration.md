@@ -465,8 +465,12 @@ logging or tracing you configure.
 
 Feedback is on by default. To turn it off, set `feedback_enabled: false` in
 YAML or `OTARI_FEEDBACK_ENABLED=false`, then restart. Off, the endpoint is not
-mounted and the Feedback entry is hidden. Hybrid gateways never offer the form.
-This setting is visible in Settings but cannot be changed there at runtime.
+mounted and the Feedback entry is hidden. Standalone and hosted deployments
+offer it; hybrid gateways never do. This setting is visible in Settings but
+cannot be changed there at runtime.
+
+The otari.ai intake is not live yet, so until it is, every send fails with the
+form's "didn't reach us" message and the gateway logs the receiver's status.
 
 Each signed-in person (and the master key) can send five messages every ten
 minutes; past that the gateway answers `429` with `Retry-After`.
