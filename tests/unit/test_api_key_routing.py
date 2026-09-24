@@ -15,8 +15,8 @@ import httpx
 import pytest
 from fastapi import HTTPException, status
 
+from conftest import InstallControlPlane
 from gateway.api.deps import _verify_and_update_api_key, misdirected_key_detail
-from gateway.api.routes import _platform as platform_module
 from gateway.api.routes._platform import _post_resolve
 from gateway.metrics import REGISTRY
 from gateway.ports.api_key_format_port import KeyRoute, Local, Malformed, Misdirected
@@ -108,14 +108,16 @@ def _hybrid_config() -> Any:
 
 
 @pytest.mark.asyncio
-async def test_hybrid_mode_forwards_the_platforms_421_and_its_host(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_hybrid_mode_forwards_the_platforms_421_and_its_host(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     """A user token for another region is the platform's call; the gateway relays it."""
     detail = misdirected_key_detail(EU_HOST)
 
     async def fake_post(**_: Any) -> httpx.Response:
         return httpx.Response(status.HTTP_421_MISDIRECTED_REQUEST, json={"detail": detail})
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     with pytest.raises(HTTPException) as exc_info:
         await _post_resolve(

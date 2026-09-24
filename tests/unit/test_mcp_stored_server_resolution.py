@@ -16,7 +16,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from gateway.api.routes import _platform as platform_module
+from conftest import InstallControlPlane
 from gateway.api.routes._platform import _resolve_platform_mcp_server
 from gateway.services.mcp_stateless import ExecutionState, McpExecutionError
 
@@ -45,7 +45,11 @@ def _entry(**overrides: Any) -> dict[str, Any]:
     return entry
 
 
-def _platform_returns(payload: Any, monkeypatch: pytest.MonkeyPatch, status_code: int = 200) -> dict[str, Any]:
+def _platform_returns(
+    payload: Any,
+    control_plane_transport: InstallControlPlane,
+    status_code: int = 200,
+) -> dict[str, Any]:
     captured: dict[str, Any] = {}
 
     async def fake_post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> Any:
@@ -53,13 +57,16 @@ def _platform_returns(payload: Any, monkeypatch: pytest.MonkeyPatch, status_code
         captured["url"] = url
         return httpx.Response(status_code, json=payload)
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
     return captured
 
 
 @pytest.mark.asyncio
-async def test_the_matching_entry_is_resolved(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured = _platform_returns({"servers": [_entry()]}, monkeypatch)
+async def test_the_matching_entry_is_resolved(
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    captured = _platform_returns({"servers": [_entry()]}, control_plane_transport)
 
     server = await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
 
@@ -72,11 +79,14 @@ async def test_the_matching_entry_is_resolved(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.asyncio
-async def test_a_legacy_entry_is_bound_to_the_only_requested_id(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_legacy_entry_is_bound_to_the_only_requested_id(
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
     entry = _entry()
     del entry["id"]
     del entry["enabled"]
-    _platform_returns({"servers": [entry]}, monkeypatch)
+    _platform_returns({"servers": [entry]}, control_plane_transport)
 
     server = await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
 
@@ -85,9 +95,12 @@ async def test_a_legacy_entry_is_bound_to_the_only_requested_id(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
-async def test_a_disabled_server_resolves_and_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_disabled_server_resolves_and_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
     """The 404 belongs to the route's outcome ladder, which both modes share."""
-    _platform_returns({"servers": [_entry(enabled=False)]}, monkeypatch)
+    _platform_returns({"servers": [_entry(enabled=False)]}, control_plane_transport)
 
     server = await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
 
@@ -95,9 +108,12 @@ async def test_a_disabled_server_resolves_and_says_so(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_a_legacy_empty_answer_is_server_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_legacy_empty_answer_is_server_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
     """Legacy peers omit a disabled server, which has the same public outcome."""
-    _platform_returns({"servers": []}, monkeypatch)
+    _platform_returns({"servers": []}, control_plane_transport)
 
     with pytest.raises(McpExecutionError) as raised:
         await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
@@ -108,11 +124,14 @@ async def test_a_legacy_empty_answer_is_server_not_found(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
-async def test_an_absent_allowlist_stays_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_an_absent_allowlist_stays_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
     """``null`` and a missing key both mean "every live tool" (R-RES-4)."""
     entry = _entry()
     del entry["allowed_tools"]
-    _platform_returns({"servers": [entry]}, monkeypatch)
+    _platform_returns({"servers": [entry]}, control_plane_transport)
 
     server = await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
 
@@ -137,8 +156,9 @@ async def test_an_absent_allowlist_stays_absent(monkeypatch: pytest.MonkeyPatch)
 async def test_anything_but_one_matching_entry_is_a_resolution_failure(
     payload: Any,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
-    _platform_returns(payload, monkeypatch)
+    _platform_returns(payload, control_plane_transport)
 
     with pytest.raises(McpExecutionError) as raised:
         await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
@@ -151,8 +171,9 @@ async def test_anything_but_one_matching_entry_is_a_resolution_failure(
 @pytest.mark.asyncio
 async def test_the_platforms_own_refusal_is_left_for_the_route_to_classify(
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
-    _platform_returns({"detail": "no such server"}, monkeypatch, status_code=404)
+    _platform_returns({"detail": "no such server"}, control_plane_transport, status_code=404)
 
     with pytest.raises(HTTPException) as raised:
         await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)

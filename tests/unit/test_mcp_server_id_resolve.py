@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from gateway.api.routes import _platform as platform_module
+from conftest import InstallControlPlane
 from gateway.api.routes._platform import _resolve_platform_mcp_servers
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.tenancy.workspace_mcp_server_service import MAX_MCP_SERVERS_PER_WORKSPACE
@@ -27,7 +27,9 @@ def _ok_response(servers: list[dict[str, Any]]) -> httpx.Response:
 
 
 @pytest.mark.asyncio
-async def test_repeated_ids_are_sent_once_in_request_order(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_repeated_ids_are_sent_once_in_request_order(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     """Hybrid de-duplicates ids like the standalone path, so a repeat cannot resolve twice.
 
     Two resolved servers sharing a name are a 500 in `prepare_gateway_tools`,
@@ -43,7 +45,7 @@ async def test_repeated_ids_are_sent_once_in_request_order(monkeypatch: pytest.M
         captured["body"] = body
         return _ok_response([])
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     first = uuid.UUID("11111111-1111-1111-1111-111111111111")
     second = uuid.UUID("22222222-2222-2222-2222-222222222222")
@@ -53,7 +55,9 @@ async def test_repeated_ids_are_sent_once_in_request_order(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
-async def test_resolve_returns_configs(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_returns_configs(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     captured: dict[str, Any] = {}
 
     async def fake_post(
@@ -75,7 +79,7 @@ async def test_resolve_returns_configs(monkeypatch: pytest.MonkeyPatch) -> None:
             ]
         )
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     ids = [uuid.UUID("11111111-1111-1111-1111-111111111111")]
     out = await _resolve_platform_mcp_servers(_config(), "tk_user", ids)
@@ -93,21 +97,25 @@ async def test_resolve_returns_configs(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_empty_servers_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_empty_servers_returns_empty(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return _ok_response([])
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
     out = await _resolve_platform_mcp_servers(_config(), "tk", [uuid.uuid4()])
     assert out == []
 
 
 @pytest.mark.asyncio
-async def test_resolve_404_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_404_passes_through(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(404, json={"detail": "MCPServer not found"})
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     from fastapi import HTTPException
 
@@ -118,11 +126,13 @@ async def test_resolve_404_passes_through(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_resolve_5xx_maps_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_5xx_maps_to_502(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(503, text="busy")
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     from fastapi import HTTPException
 
@@ -132,11 +142,13 @@ async def test_resolve_5xx_maps_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_network_error_maps_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_network_error_maps_to_502(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         raise httpx.NetworkError("connection refused")
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     from fastapi import HTTPException
 
@@ -155,14 +167,16 @@ async def test_resolve_misconfigured_platform_500() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_429_passthrough_with_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_429_passthrough_with_retry_after(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     """A platform 429 should forward verbatim (status + Retry-After header)
     so clients can back off correctly, matching `_resolve_platform_credentials`."""
 
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "30"})
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     from fastapi import HTTPException
 
@@ -174,14 +188,16 @@ async def test_resolve_429_passthrough_with_retry_after(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_resolve_402_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_402_passthrough(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     """402 (payment required / quota) should forward verbatim, matching
     `_resolve_platform_credentials`'s behavior for the same code."""
 
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(402, json={"detail": "quota exhausted"})
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     from fastapi import HTTPException
 
@@ -192,7 +208,9 @@ async def test_resolve_402_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_422_collapses_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_422_collapses_to_502(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     """422 from the platform indicates a gateway↔platform schema mismatch,
     not something the caller can usefully act on — collapse to 502 like
     `_resolve_platform_credentials` does."""
@@ -200,7 +218,7 @@ async def test_resolve_422_collapses_to_502(monkeypatch: pytest.MonkeyPatch) -> 
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(422, json={"detail": "schema mismatch"})
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     from fastapi import HTTPException
 
