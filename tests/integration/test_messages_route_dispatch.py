@@ -35,6 +35,7 @@ from any_llm.types.messages import (
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from gateway.api.routes._tools import WEB_SEARCH_HEADER
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, MCP_CLIENT_BETA
@@ -1852,13 +1853,13 @@ def test_intercept_off_still_forwards_provider_keywords(
     assert [tool["type"] for tool in captured.get("tools") or []] == ["web_search_20250305"]
 
 
-def test_a_search_keyword_the_provider_cannot_run_is_claimed_with_native_blocks(
+def test_auto_claims_a_search_keyword_the_provider_cannot_run_with_native_blocks(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Without interception, a dated keyword sent for a model whose provider has no
-    search runs on the gateway backend and still answers in Anthropic's blocks."""
+    """With `Otari-Web-Search: auto`, a dated keyword sent for a model whose provider
+    has no search runs on the gateway backend and still answers in Anthropic's blocks."""
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
     monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
     seen: list[tuple[Any, frozenset[str]]] = []
@@ -1892,20 +1893,31 @@ def test_a_search_keyword_the_provider_cannot_run_is_claimed_with_native_blocks(
                 "max_tokens": 100,
                 "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 2}],
             },
-            headers=api_key_header,
+            headers={**api_key_header, WEB_SEARCH_HEADER: "auto"},
         )
 
     assert resp.status_code == 200, resp.text
     assert seen == [(fake_backend, frozenset({WEB_SEARCH_TOOL_NAME}))]
 
 
-def test_a_search_keyword_the_provider_cannot_run_is_forwarded_without_a_backend(
+@pytest.mark.parametrize(
+    ("backend_url", "header"),
+    [(None, "auto"), ("http://127.0.0.1:9999/search", None)],
+    ids=["auto-without-a-backend", "backend-without-the-header"],
+)
+def test_a_search_keyword_the_provider_cannot_run_is_forwarded(
     client: TestClient,
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
+    backend_url: str | None,
+    header: str | None,
 ) -> None:
-    """With nothing to run it on, the keyword passes through as it always has."""
-    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    """With nothing to run it on, or no header asking for `auto`, the keyword passes
+    through as it always has."""
+    if backend_url is None:
+        monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    else:
+        monkeypatch.setenv("OTARI_WEB_SEARCH_URL", backend_url)
     monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
     captured: dict[str, Any] = {}
 
@@ -1922,11 +1934,30 @@ def test_a_search_keyword_the_provider_cannot_run_is_forwarded_without_a_backend
                 "max_tokens": 100,
                 "tools": [{"type": "web_search_20250305"}],
             },
-            headers=api_key_header,
+            headers={**api_key_header, **({WEB_SEARCH_HEADER: header} if header else {})},
         )
 
     assert resp.status_code == 200, resp.text
     assert [tool["type"] for tool in captured.get("tools") or []] == ["web_search_20250305"]
+
+
+def test_an_unknown_web_search_header_value_is_rejected(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    resp = client.post(
+        f"{API_ROOT}/messages",
+        json={
+            "model": MODEL_NAME,
+            "messages": [{"role": "user", "content": "search"}],
+            "max_tokens": 100,
+            "tools": [{"type": "web_search_20250305"}],
+        },
+        headers={**api_key_header, WEB_SEARCH_HEADER: "gateway"},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "Otari-Web-Search must be one of auto, otari, provider" in resp.text
 
 
 def test_intercept_without_a_backend_forwards_rather_than_400s(

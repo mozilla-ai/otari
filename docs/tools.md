@@ -23,8 +23,8 @@ Unavailable but recognized tools remain in the response with
 ## Who runs a tool
 
 An `otari_*` type is executed by Otari. A provider-native web-search type is
-forwarded to a provider that runs it natively, and run on Otari's search backend
-otherwise (see [web-search interception](#web-search-interception)).
+forwarded to the provider unless [interception](#web-search-interception) or the
+request's `Otari-Web-Search` header says otherwise.
 A provider-native code-execution type is decided by the request's
 [executor](#code-execution-executor). Function tools remain the caller's
 responsibility.
@@ -32,21 +32,31 @@ responsibility.
 ### Web-search interception
 
 Some clients can declare only provider-native search types: `web_search`,
-`web_search_<date>`, and `web_search_preview`. With a search backend configured,
-Otari runs such a declaration itself whenever the dispatched provider cannot:
-only Anthropic's dated keyword on `/api/v1/messages` against an Anthropic model,
-and OpenAI's keywords on `/api/v1/responses` against an OpenAI model, are
-forwarded. So a request written for Claude's search keeps searching when its
-model is swapped for one with no search of its own, and on Messages a dated
-keyword is still answered with `server_tool_use` / `web_search_tool_result`
-blocks.
+`web_search_<date>`, and `web_search_preview`. By default such a declaration is
+forwarded to the provider. Set `web_search_intercept: true` to run every one of
+them on Otari's configured backend instead. Interception is off by default
+because enabling it changes who performs searches for providers that already
+support a native search tool.
 
-Set `web_search_intercept: true` to run every such declaration on Otari's
-backend, including the ones a provider would have served. Interception is off by
-default because enabling it changes who performs searches for providers that
-already support a native search tool. Both behaviors require a search backend
-(`web_search_provider` or `web_search_url`); without one, the declaration is
-forwarded unchanged. A function named `web_search` is never claimed.
+A request can choose for itself with the `Otari-Web-Search` header, which wins
+over the deployment setting:
+
+- `auto` runs the declaration on Otari's backend only when the dispatched
+  provider cannot run it. Only Anthropic's dated keyword on `/api/v1/messages`
+  against an Anthropic model, and OpenAI's keywords on `/api/v1/responses`
+  against an OpenAI model, are forwarded. So a request written for Claude's
+  search keeps searching when its model is swapped for one with no search of its
+  own, and on Messages a dated keyword is still answered with
+  `server_tool_use` / `web_search_tool_result` blocks.
+- `otari` always runs it on Otari's backend.
+- `provider` always forwards it.
+
+Whenever Otari runs the search, the rules for a gateway-run search apply: the
+workspace's web-search policy, tool pricing, and the restriction on combining it
+with gateway code execution or `mcp_servers` in one request. All of this
+requires a search backend (`web_search_provider` or `web_search_url`); without
+one, the declaration is forwarded unchanged. A function named `web_search` is
+never claimed.
 
 ### Bounding the searches one request runs
 
