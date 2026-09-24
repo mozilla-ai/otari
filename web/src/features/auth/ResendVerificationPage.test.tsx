@@ -48,7 +48,21 @@ afterEach(() => {
   window.location.hash = ""
 })
 
+vi.mock("@/features/auth/overlayPublicAuthFields", () => ({
+  PublicAuthFields: ({ page, isBusy }: { page: string; isBusy: boolean }) => (
+    <p>{`fields for ${page}, ${isBusy ? "busy" : "idle"}`}</p>
+  ),
+}))
+
 describe("ResendVerificationPage", () => {
+  it("renders the edition's own fields ahead of the address", () => {
+    renderPage()
+
+    expect(
+      screen.getByText("fields for resend-verification, idle"),
+    ).toBeInTheDocument()
+  })
+
   it("sends a fresh link and lands on the check-email page", async () => {
     vi.mocked(apiFetch).mockResolvedValue({ message: "…" } as never)
     const user = userEvent.setup()

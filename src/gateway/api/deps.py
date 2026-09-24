@@ -303,8 +303,28 @@ def _header_credentials_present(request: Request) -> bool:
 # Sec-Fetch-Site values under which a cookie may authenticate a request:
 # same-origin fetches (the dashboard itself) and non-site-initiated requests
 # ("none", e.g. a direct navigation). "same-site" is deliberately excluded, so a
-# sibling-subdomain page cannot ride the cookie.
+# sibling-subdomain page cannot ride the cookie; ``cookie_may_authenticate``
+# admits it only from an origin the deployment itself listed.
 _COOKIE_SAFE_FETCH_SITES = ("same-origin", "none")
+
+
+def cookie_may_authenticate(request: Request, config: GatewayConfig) -> bool:
+    """Whether the session cookie on this request may authenticate it.
+
+    A same-site request is admitted only when its ``Origin`` is one of
+    ``cors_allow_origins``: that list is where an operator names the origin an
+    edge serves the dashboard from, so a dashboard on a sibling host of this
+    process can hold a session here while every other sibling stays refused.
+    A ``*`` entry never matches, since a wildcard is not an origin and CORS
+    sends no credentials under one either.
+    """
+    fetch_site = request.headers.get("Sec-Fetch-Site")
+    if fetch_site is None or fetch_site in _COOKIE_SAFE_FETCH_SITES:
+        return True
+    if fetch_site != "same-site":
+        return False
+    origin = request.headers.get("Origin", "")
+    return bool(origin) and origin != "*" and origin in config.cors_allow_origins
 
 
 async def get_session_identity(
@@ -333,8 +353,7 @@ async def get_session_identity(
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
         return None
-    fetch_site = request.headers.get("Sec-Fetch-Site")
-    if fetch_site is not None and fetch_site not in _COOKIE_SAFE_FETCH_SITES:
+    if not cookie_may_authenticate(request, config):
         record_auth_failure("cross_site_cookie")
         return None
     try:

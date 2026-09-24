@@ -78,7 +78,23 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
+vi.mock("@/features/auth/overlayPublicAuthFields", () => ({
+  PublicAuthFields: ({ page, isBusy }: { page: string; isBusy: boolean }) => (
+    <p>{`fields for ${page}, ${isBusy ? "busy" : "idle"}`}</p>
+  ),
+}))
+
 describe("Login", () => {
+  it("renders the edition's own fields ahead of the credential, idle until a request is out", () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Login />
+      </Mounted>,
+    )
+
+    expect(screen.getByText("fields for login, idle")).toBeInTheDocument()
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
     window.localStorage.clear()

@@ -398,8 +398,16 @@ ui_base_url: "https://app.example.com/dashboard"
 
 Unset, `public_base_url` answers for it. Supply an absolute http(s) URL with no
 trailing slash; a relative one would survive the redirect and mean nothing in an
-inbox. Credentials, query strings and fragments are refused: this value travels
-in a redirect and into outgoing mail.
+inbox. Credentials and fragments are refused: this value travels in a redirect
+and into outgoing mail. A query string is kept and placed ahead of the hash
+route in every link (`https://app.example.com/dashboard/?edge=a#/verify-email?token=…`),
+for an edge that serves one interface for several deployments and needs each
+link to say which one built it.
+
+A dashboard served from a sibling host of this process may hold a session here
+only when that host is listed in `cors_allow_origins`: the session cookie is
+`SameSite=Strict`, and a same-site request from any origin not on that list is
+refused.
 
 Left unset on a split deployment, an OAuth callback lands the browser on an
 origin holding none of the sign-in state it started with, and the sign-in fails

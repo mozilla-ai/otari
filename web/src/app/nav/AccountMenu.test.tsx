@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react"
+import { screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -13,6 +13,20 @@ import {
 } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
 import { renderWithRouter } from "@/tests/router"
+
+// The badge seam, kept real unless a case sets a label: the cases about the
+// name and the rows see this build's monogram, and the one about the seam
+// sees what a build that draws something else there would.
+const badge = vi.hoisted(() => ({ label: "" }))
+vi.mock("@/app/nav/overlayAccountBadge", async (importOriginal) => {
+  const real =
+    await importOriginal<typeof import("@/app/nav/overlayAccountBadge")>()
+  return {
+    AccountBadge: (props: { initials: string }) =>
+      badge.label ? <span>EU</span> : <real.AccountBadge {...props} />,
+    useAccountBadgeLabel: () => badge.label,
+  }
+})
 
 // The trigger names the person, and the person is a field on the membership
 // context, so it is stubbed at fetch like the sidebar's own read of it. Every
@@ -377,4 +391,31 @@ it("hides the feedback row when the deployment has feedback off", async () => {
   expect(
     screen.queryByRole("button", { name: "Feedback" }),
   ).not.toBeInTheDocument()
+})
+
+describe("the badge seam", () => {
+  afterEach(() => {
+    badge.label = ""
+  })
+
+  it("draws this build's monogram and adds nothing to the name", async () => {
+    mockCaller({ full_name: "Ada Lovelace" })
+    await renderMenu()
+
+    const trigger = await screen.findByRole("button", {
+      name: "Account: Ada Lovelace",
+    })
+    expect(within(trigger).queryByText("EU")).toBeNull()
+  })
+
+  it("draws what a build contributes and folds its words into the name", async () => {
+    badge.label = "Europe region"
+    mockCaller({ full_name: "Ada Lovelace" })
+    await renderMenu()
+
+    const trigger = await screen.findByRole("button", {
+      name: "Account: Ada Lovelace, Europe region",
+    })
+    expect(within(trigger).getByText("EU")).toBeInTheDocument()
+  })
 })

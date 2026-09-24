@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client"
 import App from "@/app/App"
 import { Provider } from "@/app/provider"
 import { apiFetch } from "@/shared/api/client"
+import { prepareRequests } from "@/shared/api/overlayRequestPolicy"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import "@/styles/globals.css"
 
@@ -36,7 +37,12 @@ function loadBootstrap(): Promise<WireBootstrap | null> {
   }).catch(() => null)
 }
 
-void loadBootstrap().then((bootstrap) => {
+// Settled before the bootstrap is asked for, because the answer can change
+// where that request goes. A build that cannot decide keeps the origin the page
+// was served from, which is the answer this build gives without being asked.
+const prepared = prepareRequests().catch(() => undefined)
+
+void prepared.then(loadBootstrap).then((bootstrap) => {
   createRoot(container).render(
     <StrictMode>
       <Provider>

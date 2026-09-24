@@ -261,6 +261,19 @@ class TestWhereTheBrowserLands:
 
         assert config.effective_ui_base_url == "https://otari.example.com"
 
+    def test_a_query_on_the_ui_base_url_lands_ahead_of_the_hash_route(self) -> None:
+        # The same composition ``Mailer.link`` uses: the interface's own query
+        # stays in the page's location, and the provider's query stays on the
+        # route, so the state check reads the one it stored.
+        config = configured(ui_base_url="https://app.example.com/ui/?edge=eu")
+
+        assert oauth_service.callback_landing_target(config, "google", "code=x&state=s") == (
+            "https://app.example.com/ui/?edge=eu#/auth/google/callback?code=x&state=s"
+        )
+        assert oauth_service.callback_landing_target(config, "google", "") == (
+            "https://app.example.com/ui/?edge=eu#/auth/google/callback"
+        )
+
     def test_a_trailing_slash_on_the_ui_base_url_does_not_double_up(self) -> None:
         config = configured(ui_base_url="https://app.example.com/")
 
@@ -293,9 +306,12 @@ class TestRejectingAUiBaseUrlABrowserCouldNotFollow:
         with pytest.raises(ValidationError, match="fragment"):
             GatewayConfig(ui_base_url=value)
 
-    def test_a_query_string_is_refused(self) -> None:
-        with pytest.raises(ValidationError, match="query string"):
-            GatewayConfig(ui_base_url="https://app.example.com?trace=1")
+    def test_a_query_string_is_kept(self) -> None:
+        # An edge serving one interface for several deployments tags each
+        # link through it; ``ui_link`` is what keeps it ahead of the hash route.
+        assert GatewayConfig(ui_base_url="https://app.example.com?trace=1").ui_base_url == (
+            "https://app.example.com?trace=1"
+        )
 
     def test_an_at_sign_in_the_path_is_not_userinfo(self) -> None:
         # '@' delimits userinfo only in the authority. A handle-shaped path is an

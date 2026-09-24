@@ -16,10 +16,13 @@ import {
   FiShield,
 } from "react-icons/fi"
 
+import {
+  AccountBadge,
+  useAccountBadgeLabel,
+} from "@/app/nav/overlayAccountBadge"
 import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
 import { useSurfaceVisibility } from "@/app/nav/useNavVisibility"
 import type { OrganizationContext } from "@/client"
-import { Avatar } from "@/design-system/indicators/Avatar"
 import { useAuth } from "@/features/auth/AuthContext"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -335,6 +338,10 @@ export function AccountMenu({
   const organization = useOrganizationContext()
   const [open, setOpen] = useState(false)
   const identity = sessionIdentity(organization.data?.caller)
+  const badgeLabel = useAccountBadgeLabel()
+  const triggerLabel = badgeLabel
+    ? `Account: ${identity.name}, ${badgeLabel}`
+    : `Account: ${identity.name}`
 
   return (
     <Popover isOpen={open} onOpenChange={setOpen}>
@@ -350,8 +357,9 @@ export function AccountMenu({
         // otherwise hears "Account" and never who is signed in. On the
         // collapsed rail the name is not rendered at all, so this is the only
         // place it could reach anybody there. `AppearanceControl` folds its own
-        // visible state in for the same reason.
-        aria-label={`Account: ${identity.name}`}
+        // visible state in for the same reason. What the badge shows follows
+        // the name when a build gives it words of its own.
+        aria-label={triggerLabel}
         // `expandedJustify` rather than a `justify-start` appended here: this is
         // a HeroUI `Button`, which arrives centered, and the collapsed rail
         // wants the monogram in the icon column instead.
@@ -361,7 +369,7 @@ export function AccountMenu({
           expandedJustify: "start",
         })}
       >
-        <Avatar initials={identity.initials} />
+        <AccountBadge initials={identity.initials} />
         {isCollapsed ? null : (
           <>
             <span className="min-w-0 flex-1 truncate text-left text-foreground">

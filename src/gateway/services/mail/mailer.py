@@ -91,8 +91,7 @@ class Mailer:
         is only worthless *in an email*, which is why ``can_send_links`` and not
         this is what gates a send.
         """
-        base = self._config.effective_ui_base_url
-        return f"{base}{path}" if base else path
+        return self._config.ui_link(path)
 
     async def send(self, *, to: str, message: MailMessage) -> MailDelivery:
         """Deliver one rendered message. Never raises.

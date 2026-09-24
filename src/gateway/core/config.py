@@ -1367,6 +1367,26 @@ class GatewayConfig(BudgetSettings, PricingSettings, FeedbackSettings, BaseSetti
         """
         return (self.ui_base_url or "").strip().rstrip("/") or (self.public_base_url or "").strip().rstrip("/")
 
+    def ui_link(self, path: str) -> str:
+        """An absolute link into the interface, or ``path`` itself when the address is unknown.
+
+        A query on ``ui_base_url`` travels with every link, placed before the hash
+        route: ``https://app.example.com/ui/?edge=a`` and ``/#/verify-email?token=t``
+        give ``https://app.example.com/ui/?edge=a#/verify-email?token=t``, which is
+        the one order a browser keeps the query in the page's own location rather
+        than in the route's.
+        """
+        base = self.effective_ui_base_url
+        if not base:
+            return path
+        location, _, query = base.partition("?")
+        location = location.rstrip("/")
+        if not query:
+            return f"{location}{path}"
+        before, hash_mark, route = path.partition("#")
+        joiner = "&" if "?" in before else "?"
+        return f"{location}{before}{joiner}{query}{hash_mark}{route}"
+
     @property
     def effective_mail_transport(self) -> str:
         """Which transport a send would actually use: ``smtp``, ``console`` or ``none``.
@@ -2079,7 +2099,9 @@ class GatewayConfig(BudgetSettings, PricingSettings, FeedbackSettings, BaseSetti
         Absolute, so that what this builds is absolute too: the same value has to
         survive a redirect and an inbox, and a relative reference means nothing
         in the second. A path-prefixed interface writes the whole URL, the way
-        ``public_base_url`` already does.
+        ``public_base_url`` already does. A query string is kept, since an edge
+        that serves one interface for several deployments may need each link to
+        say which one built it; ``ui_link`` places it ahead of the hash route.
         """
         stripped = (value or "").strip()
         if not stripped:
@@ -2090,8 +2112,8 @@ class GatewayConfig(BudgetSettings, PricingSettings, FeedbackSettings, BaseSetti
             # unset. Refused rather than silently answered by public_base_url.
             msg = f"ui_base_url must be an absolute http(s) URL, got '{value}'"
             raise ValueError(msg)
-        if "?" in normalized or "#" in normalized:
-            msg = "ui_base_url must carry no query string or fragment"
+        if "#" in normalized:
+            msg = "ui_base_url must carry no fragment"
             raise ValueError(msg)
         parsed = urlsplit(normalized)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
