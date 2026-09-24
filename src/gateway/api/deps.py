@@ -659,6 +659,11 @@ async def get_db_if_needed(
             yield db
 
 
+def build_file_service(uow: UnitOfWork, file_store: FileStoragePort, config: GatewayConfig) -> FileService:
+    """Build Files operations for a scoped output request or cleanup job."""
+    return FileService(uow, FileRepositories.on(uow), file_store, config)
+
+
 def build_sandbox_file_bridge(
     *,
     raw_request: Request,
@@ -682,8 +687,7 @@ def build_sandbox_file_bridge(
     return SandboxFileBridge(
         file_store=file_store,
         config=config,
-        uow=uow,
-        files=FileRepositories.on(uow).files,
+        files=build_file_service(uow, file_store, config),
         user_id=user_id,
         workspace_id=workspace_id,
         inputs=inputs,

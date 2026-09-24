@@ -1,0 +1,137 @@
+"""File consumers leave transactions and repository access to the service."""
+
+from __future__ import annotations
+
+import ast
+import asyncio
+import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import cast
+from unittest.mock import AsyncMock, Mock
+
+import pytest
+
+from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.models.files import FileObject, OutputFileRow
+from gateway.ports.file_storage_port import FileStoragePort
+from gateway.repositories.files import FileRepositories, FileRepository
+from gateway.services.files import FileService, SweepBatch, _sweeper
+
+
+class _Transactions:
+    def __init__(self, *, commit_error: BaseException | None = None) -> None:
+        self.depth = 0
+        self.blocks = 0
+        self.commit_error = commit_error
+
+    async def __aenter__(self) -> _Transactions:
+        self.depth += 1
+        self.blocks += 1
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self.depth -= 1
+        if exc[0] is None and self.commit_error is not None:
+            raise self.commit_error
+
+
+def _service(uow: _Transactions, repo: Mock, store: Mock) -> FileService:
+    return FileService(cast(UnitOfWork, uow), FileRepositories(files=repo), store, GatewayConfig())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delete_error", [None, FileNotFoundError(), PermissionError()])
+async def test_sweep_transfers_outside_transactions(delete_error: OSError | None) -> None:
+    uow = _Transactions()
+    repo = Mock(spec=FileRepository)
+    store = Mock(spec=FileStoragePort)
+    now = datetime.now(UTC)
+
+    async def candidates(**kwargs: object) -> list[FileObject]:
+        assert uow.depth == 1
+        return [FileObject(id="file-1", storage_ref="blob-1", created_at=now)]
+
+    async def delete(storage_ref: str) -> None:
+        assert uow.depth == 0
+        assert storage_ref == "blob-1"
+        if delete_error is not None:
+            raise delete_error
+
+    async def remove(file_ids: list[str]) -> None:
+        assert uow.depth == 1
+        assert file_ids == ["file-1"]
+
+    repo.reclaimable.side_effect = candidates
+    repo.remove_all.side_effect = remove
+    store.delete.side_effect = delete
+    result = await _service(uow, repo, store).sweep(batch_size=2)
+    blocked = isinstance(delete_error, PermissionError)
+    assert result == SweepBatch(reclaimed=0 if blocked else 1, seen=1, cursor=(now, "file-1"))
+    assert uow.depth == 0
+    assert uow.blocks == (1 if blocked else 2)
+    if blocked:
+        repo.remove_all.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("during_commit", [False, True])
+async def test_output_cancellation_cleans_only_before_commit(during_commit: bool) -> None:
+    uow = _Transactions(commit_error=asyncio.CancelledError() if during_commit else None)
+    repo = Mock(spec=FileRepository)
+    store = Mock(spec=FileStoragePort)
+
+    async def record(row: OutputFileRow) -> None:
+        assert uow.depth == 1
+        if not during_commit:
+            raise asyncio.CancelledError
+
+    async def delete(storage_ref: str) -> None:
+        assert uow.depth == 0
+        assert storage_ref == "blob-1"
+
+    repo.record_output.side_effect = record
+    store.delete.side_effect = delete
+    row = OutputFileRow("file-1", "user-1", uuid.uuid4(), "out.txt", "text/plain", 1, "user_data", "blob-1", None)
+    with pytest.raises(asyncio.CancelledError):
+        await _service(uow, repo, store).record_output(row)
+    assert uow.depth == 0
+    if during_commit:
+        store.delete.assert_not_awaited()
+    else:
+        store.delete.assert_awaited_once_with("blob-1")
+
+
+@pytest.mark.asyncio
+async def test_worker_builds_one_service_per_job_without_opening_transactions(monkeypatch: pytest.MonkeyPatch) -> None:
+    uow = _Transactions()
+    service = Mock(spec=FileService)
+    service.sweep = AsyncMock(return_value=SweepBatch(reclaimed=0, seen=0, cursor=None))
+
+    @asynccontextmanager
+    async def job() -> AsyncIterator[UnitOfWork]:
+        yield cast(UnitOfWork, uow)
+
+    def build(actual: UnitOfWork) -> FileService:
+        assert actual is cast(UnitOfWork, uow)
+        assert uow.depth == 0
+        return cast(FileService, service)
+
+    sleep = AsyncMock(side_effect=[None, asyncio.CancelledError()])
+    monkeypatch.setattr(_sweeper, "create_unit_of_work", job)
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await _sweeper.run_file_sweeper(1, build)
+    service.sweep.assert_awaited_once_with(batch_size=200, after=None)
+    assert uow.blocks == 0
+
+
+@pytest.mark.parametrize("module", ["_sandbox_bridge.py", "_sweeper.py"])
+def test_consumers_do_not_import_file_repositories(module: str) -> None:
+    root = Path(__file__).resolve().parents[2]
+    tree = ast.parse((root / "src/gateway/services/files" / module).read_text())
+    imports = [node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
+    assert not any(name.startswith("gateway.repositories") for name in imports)

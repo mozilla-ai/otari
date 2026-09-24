@@ -18,8 +18,9 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.repositories.files import FileRepository, OutputFileRow
-from gateway.services.files import CODE_EXECUTION_OUTPUT_PURPOSE, ProviderFile, SandboxFileBridge
+from gateway.models.files import OutputFileRow
+from gateway.repositories.files import FileRepositories, FileRepository
+from gateway.services.files import CODE_EXECUTION_OUTPUT_PURPOSE, FileService, ProviderFile, SandboxFileBridge
 from gateway.services.files._provider_files import FileOverBudgetError, ProviderFileUnavailableError
 
 
@@ -137,11 +138,18 @@ def _bridge(
     **config: Any,
 ) -> SandboxFileBridge:
     uow = uow if uow is not None else _CommittingUnitOfWork(_FakeDb())
+    settings = GatewayConfig(**config)
     return SandboxFileBridge(
         file_store=store,
-        config=GatewayConfig(**config),
-        uow=cast(UnitOfWork, uow),
-        files=_StubFiles(uow._session, known=known, error=lookup_error, record_error=record_error),
+        config=settings,
+        files=FileService(
+            cast(UnitOfWork, uow),
+            FileRepositories(
+                files=_StubFiles(uow._session, known=known, error=lookup_error, record_error=record_error)
+            ),
+            store,
+            settings,
+        ),
         user_id="u1",
         workspace_id=uuid.uuid4(),
         inputs=[],

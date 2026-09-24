@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -19,7 +21,7 @@ from gateway.exceptions.files_exceptions import (
     UploadTooLargeError,
 )
 from gateway.log_config import logger
-from gateway.models.files import FileObject
+from gateway.models.files import FileObject, OutputFileRow
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.repositories.files import FilePageQuery, FileRepositories
 from gateway.services.files._file_ids import file_id_in, page_token
@@ -108,6 +110,15 @@ class FileContent:
     mime_type: str
 
 
+@dataclass(frozen=True)
+class SweepBatch:
+    """One cleanup batch and the key that resumes scanning after it."""
+
+    reclaimed: int
+    seen: int
+    cursor: tuple[datetime, str] | None
+
+
 class FileService:
     """Everything the Files API does with a caller's uploads.
 
@@ -126,7 +137,7 @@ class FileService:
         repositories: FileRepositories,
         file_store: FileStoragePort,
         config: GatewayConfig,
-        default_workspace: DefaultWorkspace,
+        default_workspace: DefaultWorkspace | None = None,
     ) -> None:
         self._uow = uow
         self._files = repositories.files
@@ -158,7 +169,11 @@ class FileService:
                     # Resolved here rather than before the upload: it reads the
                     # database, and doing that first would hold the session's
                     # transaction open for as long as the bytes take to store.
-                    workspace_id = upload.workspace_id or await self._default_workspace()
+                    workspace_id = upload.workspace_id
+                    if workspace_id is None:
+                        if self._default_workspace is None:
+                            raise ValueError("A default workspace resolver is required for unscoped uploads")
+                        workspace_id = await self._default_workspace()
                     record = FileObject(
                         id=file_id,
                         user_id=upload.user_id,
@@ -322,6 +337,53 @@ class FileService:
                 await self._file_store.delete(storage_ref)
             except OSError as exc:
                 logger.warning("Discarded file %s but failed to remove its blob %s: %s", file_id, storage_ref, exc)
+
+    async def existing_output_ids(self, file_ids: Collection[str]) -> set[str]:
+        """Identify already-recorded output IDs without returning their contents or owners."""
+        async with self._uow:
+            return await self._files.existing_ids(file_ids)
+
+    async def record_output(self, row: OutputFileRow) -> None:
+        """Record stored output, cleaning up on failure but not on an uncertain commit."""
+        staged = False
+        try:
+            async with self._uow:
+                await self._files.record_output(row)
+                staged = True
+        except BaseException as exc:
+            # Cancellation during commit has an unknown outcome. Cancellation
+            # before staging completes cannot have committed this output.
+            if not isinstance(exc, asyncio.CancelledError) or not staged:
+                await self.discard_output_bytes(row.storage_ref)
+            raise
+
+    async def discard_output_bytes(self, storage_ref: str) -> None:
+        """Best-effort cleanup of output bytes that could not be registered."""
+        with contextlib.suppress(Exception):
+            await asyncio.shield(self._file_store.delete(storage_ref))
+
+    async def sweep(self, *, batch_size: int, after: tuple[datetime, str] | None = None) -> SweepBatch:
+        """Delete expired or revoked bytes between short database transactions."""
+        async with self._uow:
+            records = await self._files.reclaimable(batch_size=batch_size, after=after)
+            candidates = [(record.id, record.storage_ref, record.created_at) for record in records]
+        reclaimed: list[str] = []
+        for file_id, storage_ref, _ in candidates:
+            try:
+                if storage_ref is not None:
+                    await self._file_store.delete(storage_ref)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                logger.warning("File sweep could not remove bytes for %s: %s", file_id, exc)
+                continue
+            reclaimed.append(file_id)
+        if reclaimed:
+            async with self._uow:
+                await self._files.remove_all(reclaimed)
+            logger.info("File sweep reclaimed %d file(s)", len(reclaimed))
+        cursor = (candidates[-1][2], candidates[-1][0]) if candidates else None
+        return SweepBatch(reclaimed=len(reclaimed), seen=len(candidates), cursor=cursor)
 
     async def _drop_orphan(self, storage_ref: str, file_id: str) -> None:
         """Remove bytes that no row points at, best effort.

@@ -12,7 +12,7 @@ from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.sql.elements import ColumnElement
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.files import FileObject
+from gateway.models.files import FileObject, OutputFileRow
 from gateway.repositories.base_repository import BaseRepository
 
 
@@ -47,25 +47,6 @@ def _past(key: tuple[datetime, str], *, ascending: bool) -> ColumnElement[bool]:
         FileObject.created_at < created_at,
         and_(FileObject.created_at == created_at, FileObject.id < file_id),
     )
-
-
-@dataclass(frozen=True)
-class OutputFileRow:
-    """One file a code-execution run produced, already resolved to its columns."""
-
-    file_id: str
-    user_id: str
-    workspace_id: uuid.UUID
-    filename: str
-    mime_type: str
-    bytes: int
-    purpose: str
-    storage_ref: str
-    expires_at: datetime | None
-    # Set when a provider's own sandbox produced the file, naming where it came from.
-    provider: str | None = None
-    provider_instance: str | None = None
-    provider_container_id: str | None = None
 
 
 @dataclass(frozen=True)

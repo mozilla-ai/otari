@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from typing_extensions import override
 
 from gateway import features
-from gateway.api.deps import set_config
+from gateway.api.deps import build_file_service, set_config
 from gateway.api.main import register_routers
 from gateway.container import Container, build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
@@ -185,7 +185,10 @@ def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutin
     """
     if not config.files_enabled or config.files_sweep_interval_sec <= 0:
         return None
-    return run_file_sweeper(config.files_sweep_interval_sec, container.resolve(FileStoragePort, None))
+    file_store = container.resolve(FileStoragePort, None)
+    return run_file_sweeper(
+        config.files_sweep_interval_sec, lambda uow: build_file_service(uow, file_store, config)
+    )
 
 
 def _start_container_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:

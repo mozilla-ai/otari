@@ -765,8 +765,8 @@ def test_sweep_reclaims_expired_and_deleted_files(
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from gateway.core.unit_of_work import UnitOfWork
-    from gateway.repositories.files import FileRepository
-    from gateway.services.files import sweep_files
+    from gateway.repositories.files import FileRepositories
+    from gateway.services.files import FileService, sweep_files
 
     def _upload(name: str) -> str:
         resp = client.post(
@@ -794,8 +794,10 @@ def test_sweep_reclaims_expired_and_deleted_files(
     async def _sweep() -> int:
         engine = create_async_engine(make_url(test_config.database_url).set(drivername="postgresql+asyncpg"))
         try:
-            async with async_sessionmaker(engine)() as db, UnitOfWork(db) as uow:
-                batch = await sweep_files(FileRepository(uow), store, batch_size=10)
+            async with async_sessionmaker(engine)() as db:
+                uow = UnitOfWork(db)
+                files = FileService(uow, FileRepositories.on(uow), store, test_config)
+                batch = await sweep_files(files, batch_size=10)
                 return batch.reclaimed
         finally:
             await engine.dispose()
@@ -824,8 +826,8 @@ def test_sweep_pages_past_rows_whose_blob_will_not_delete(
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from gateway.core.unit_of_work import UnitOfWork
-    from gateway.repositories.files import FileRepository
-    from gateway.services.files import sweep_files
+    from gateway.repositories.files import FileRepositories
+    from gateway.services.files import FileService, sweep_files
 
     ids = []
     for name in ("stuck-1.txt", "stuck-2.txt", "fine.txt"):
@@ -852,9 +854,11 @@ def test_sweep_pages_past_rows_whose_blob_will_not_delete(
     async def _sweep_two_batches() -> list[tuple[int, int]]:
         engine = create_async_engine(make_url(test_config.database_url).set(drivername="postgresql+asyncpg"))
         try:
-            async with async_sessionmaker(engine)() as db, UnitOfWork(db) as uow:
-                first = await sweep_files(FileRepository(uow), store, batch_size=2)
-                second = await sweep_files(FileRepository(uow), store, batch_size=2, after=first.cursor)
+            async with async_sessionmaker(engine)() as db:
+                uow = UnitOfWork(db)
+                files = FileService(uow, FileRepositories.on(uow), store, test_config)
+                first = await sweep_files(files, batch_size=2)
+                second = await sweep_files(files, batch_size=2, after=first.cursor)
                 return [(first.seen, first.reclaimed), (second.seen, second.reclaimed)]
         finally:
             await engine.dispose()

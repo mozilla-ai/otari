@@ -9,10 +9,9 @@ from collections.abc import AsyncIterator
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
-from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
+from gateway.models.files import OutputFileRow
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.repositories.files import FileRepository, OutputFileRow
 from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._provider_files import (
     FileOverBudgetError,
@@ -21,6 +20,7 @@ from gateway.services.files._provider_files import (
     ProviderFileUnavailableError,
     serves_files,
 )
+from gateway.services.files._service import FileService
 from gateway.services.files._staging import CODE_EXECUTION_OUTPUT_PURPOSE, StagedFile
 
 # A missing credential or a database failure, which stop a copy before it starts.
@@ -41,10 +41,8 @@ class SandboxFileBridge:
     produced. ``base_url`` is where those downloads are served from, for a loop
     that announces a produced file to the caller as a URL.
 
-    Standalone only: it needs the local database that hybrid mode does not have.
-    Writes go through the request's Unit of Work, ``uow``: the request session
-    is released before the provider is dispatched, so it holds no transaction
-    while the tool loop runs, and each stored file is one block of its own.
+    Persistence goes through the Files service, which owns the request's
+    database transactions. Transfers run outside those transactions.
     """
 
     def __init__(
@@ -52,8 +50,7 @@ class SandboxFileBridge:
         *,
         file_store: FileStoragePort,
         config: GatewayConfig,
-        uow: UnitOfWork,
-        files: FileRepository,
+        files: FileService,
         user_id: str,
         workspace_id: uuid.UUID,
         inputs: list[StagedFile],
@@ -61,7 +58,6 @@ class SandboxFileBridge:
     ) -> None:
         self._file_store = file_store
         self._config = config
-        self._uow = uow
         self._files = files
         self._user_id = user_id
         self._workspace_id = workspace_id
@@ -96,7 +92,7 @@ class SandboxFileBridge:
         if size == 0:
             await self._file_store.delete(storage_ref)
             return None
-        await self._record(
+        await self._files.record_output(
             OutputFileRow(
                 file_id=file_id,
                 user_id=self._user_id,
@@ -134,8 +130,7 @@ class SandboxFileBridge:
                     workspace_id=self._workspace_id,
                 )
                 await stack.enter_async_context(contextlib.aclosing(client))
-                async with self._uow:
-                    known = await self._files.existing_ids([file.file_id for file in new])
+                known = await self._files.existing_output_ids([file.file_id for file in new])
             except _COPY_SETUP_ERRORS as exc:
                 logger.warning("Not copying %d %s file(s): %s", len(new), provider, exc)
                 return
@@ -203,37 +198,7 @@ class SandboxFileBridge:
                 provider_container_id=file.container_id,
             )
         except BaseException:
-            await self._discard(storage_ref)
+            await self._files.discard_output_bytes(storage_ref)
             raise
-        await self._record(row)
+        await self._files.record_output(row)
         return size
-
-    async def _record(self, row: OutputFileRow) -> None:
-        """Record ``row`` in a block of its own, and remove its blob when the row does not land.
-
-        A cancellation raised inside the block is cleaned up, because the
-        commit cannot have run yet. One arriving while the block commits is not:
-        its outcome is unknown, and removing the bytes could strand a row that
-        did land. An orphan the reclaim pass can find is the smaller failure.
-        """
-        try:
-            async with self._uow:
-                try:
-                    await self._files.record_output(row)
-                except BaseException:
-                    # Raised inside the block, so the commit has not been
-                    # reached and no row can have landed. Cancellation included.
-                    await self._discard(row.storage_ref)
-                    raise
-        except Exception:
-            # The commit itself failed and rolled back. Cancellation stays
-            # uncaught here, where its outcome is unknown.
-            await self._discard(row.storage_ref)
-            raise
-
-    async def _discard(self, storage_ref: str) -> None:
-        """Remove a blob that no row points at."""
-        # Shielded so the delete still runs while a cancellation unwinds. The
-        # shield detaches it, so its completion is not waited for.
-        with contextlib.suppress(Exception):
-            await asyncio.shield(self._file_store.delete(storage_ref))
