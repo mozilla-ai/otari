@@ -321,9 +321,10 @@ Deployment settings, health, modes, maintenance mode and mail.
 
 `control_plane/` is how a deployment asks the control plane a peer runs for it
 what a workspace may do. It is a Gateway in Fowler's sense and an
-anticorruption layer in Evans's: it holds everything about reaching a peer over
-HTTP, and raises this codebase's own errors so the peer's status codes stop at
-its edge. `ResolveEndpoint` is a closed set, so it answers questions and cannot
+anticorruption layer in Evans's: it holds how a deployment asks a peer for
+policy and credentials, and raises this codebase's own errors so the peer's
+status codes stop at its edge. Usage reporting still builds its own call from
+the API layer. `ResolveEndpoint` is a closed set, so it answers questions and cannot
 grow into a route for the data plane's own traffic.
 
 `deployment.py` holds `Plane`, which names the control plane and the data

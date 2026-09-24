@@ -7,8 +7,9 @@ instead of the one the caller has always seen.
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -77,10 +78,10 @@ async def test_a_refusal_keeps_the_status_and_the_wording_the_peer_chose(
 @pytest.mark.parametrize(
     ("endpoint", "detail"),
     [
-        (ResolveEndpoint.PROVIDER_KEYS, "Authorization request rejected"),
-        (ResolveEndpoint.MCP_SERVERS, "MCP server resolution failed"),
-        (ResolveEndpoint.WEB_SEARCH, "Web search resolution failed"),
         (ResolveEndpoint.CODE_EXECUTION, "Code execution resolution failed"),
+        (ResolveEndpoint.MCP_SERVERS, "MCP server resolution failed"),
+        (ResolveEndpoint.PROVIDER_KEYS, "Authorization request rejected"),
+        (ResolveEndpoint.WEB_SEARCH, "Web search resolution failed"),
     ],
 )
 async def test_a_refusal_with_nothing_usable_falls_back_to_the_endpoints_own_wording(
@@ -151,3 +152,28 @@ async def test_a_peer_that_cannot_be_reached_is_the_same_answer(
 
     with pytest.raises(ControlPlaneUnavailableError):
         await _ask()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "status_code", "detail", "retry_after"),
+    [
+        (ControlPlaneUnavailableError(UNAVAILABLE_DETAIL), 502, UNAVAILABLE_DETAIL, None),
+        (ControlPlaneNotConfiguredError(NOT_CONFIGURED_DETAIL), 500, NOT_CONFIGURED_DETAIL, None),
+        (ControlPlaneRefusedError("Slow down", status_code=429, retry_after="30"), 429, "Slow down", "30"),
+    ],
+)
+async def test_an_error_that_reaches_the_app_is_rendered_whole(
+    error: Exception,
+    status_code: int,
+    detail: str,
+    retry_after: str | None,
+) -> None:
+    """The tenancy family handler would give a 5xx a generic detail and drop the retry hint."""
+    from gateway.main import _control_plane_error_handler
+
+    response = await _control_plane_error_handler(cast(Any, None), error)
+
+    assert response.status_code == status_code
+    assert json.loads(bytes(response.body)) == {"detail": detail}
+    assert response.headers.get("Retry-After") == retry_after

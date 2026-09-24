@@ -23,12 +23,6 @@ class ControlPlaneNotConfiguredError(ControlPlaneError):
     status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
-class ControlPlaneUnavailableError(ControlPlaneError):
-    """The control plane could not be reached, or answered something unusable."""
-
-    status_code = status.HTTP_502_BAD_GATEWAY
-
-
 class ControlPlaneRefusedError(ControlPlaneError):
     """The control plane answered, and its answer was a refusal.
 
@@ -42,3 +36,9 @@ class ControlPlaneRefusedError(ControlPlaneError):
         super().__init__(message)
         self.status_code = status_code
         self.retry_after = retry_after
+
+
+class ControlPlaneUnavailableError(ControlPlaneError):
+    """The control plane could not be reached, or answered something unusable."""
+
+    status_code = status.HTTP_502_BAD_GATEWAY

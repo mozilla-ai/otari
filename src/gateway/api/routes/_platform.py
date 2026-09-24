@@ -963,13 +963,12 @@ async def _resolve_platform_code_execution(
     config: GatewayConfig,
     user_token: str,
 ) -> dict[str, Any]:
-    """Resolve the workspace's code-execution policy via the platform.
+    """Resolve the workspace's code-execution policy from the control plane.
 
-    POSTs an empty body to `/gateway/code-execution/resolve` (via
-    `_post_resolve`, which owns the shared guard/headers/status-code ladder)
-    and returns the parsed JSON dict on 200 (``{enabled, tools,
-    default_purpose_hint, max_iterations, exec_timeout_s}``, soft limits
-    already clamped to operator ceilings platform-side).
+    Returns the parsed answer on 200 (``{enabled, tools, default_purpose_hint,
+    max_iterations, exec_timeout_s}``, soft limits already clamped to the
+    operator's ceilings on the peer's side), and an empty policy for anything
+    else, which narrows nothing.
     """
     payload = await _post_resolve(
         config,

@@ -41,35 +41,31 @@ _FORWARDED_STATUSES = frozenset(
     }
 )
 
-UNAVAILABLE_DETAIL = "Authorization service unavailable"
 NOT_CONFIGURED_DETAIL = "Hybrid mode is misconfigured"
+UNAVAILABLE_DETAIL = "Authorization service unavailable"
 
 
 class ResolveEndpoint(StrEnum):
     """A question the control plane answers about a workspace.
 
-    Each member carries the detail a caller sees when the peer refuses without
-    one of its own, because that wording belongs to the question rather than to
-    whichever module happens to ask it.
+    A member is its path and the detail a caller sees when the peer refuses
+    without one of its own. The wording belongs to the question rather than to
+    whichever module asks it, and pairing them here means a member cannot exist
+    without one.
     """
 
-    PROVIDER_KEYS = "/gateway/provider-keys/resolve"
-    MCP_SERVERS = "/gateway/mcp-servers/resolve"
-    WEB_SEARCH = "/gateway/web-search/resolve"
-    CODE_EXECUTION = "/gateway/code-execution/resolve"
+    def __new__(cls, path: str, refusal_detail: str) -> "ResolveEndpoint":
+        member = str.__new__(cls, path)
+        member._value_ = path
+        member.refusal_detail = refusal_detail
+        return member
 
-    @property
-    def refusal_detail(self) -> str:
-        """What a caller is told when the peer refuses and says nothing usable."""
-        return _REFUSAL_DETAILS[self]
+    refusal_detail: str
 
-
-_REFUSAL_DETAILS = {
-    ResolveEndpoint.PROVIDER_KEYS: "Authorization request rejected",
-    ResolveEndpoint.MCP_SERVERS: "MCP server resolution failed",
-    ResolveEndpoint.WEB_SEARCH: "Web search resolution failed",
-    ResolveEndpoint.CODE_EXECUTION: "Code execution resolution failed",
-}
+    CODE_EXECUTION = ("/gateway/code-execution/resolve", "Code execution resolution failed")
+    MCP_SERVERS = ("/gateway/mcp-servers/resolve", "MCP server resolution failed")
+    PROVIDER_KEYS = ("/gateway/provider-keys/resolve", "Authorization request rejected")
+    WEB_SEARCH = ("/gateway/web-search/resolve", "Web search resolution failed")
 
 
 def _safe_detail(response: httpx.Response, fallback: str) -> str:

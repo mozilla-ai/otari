@@ -228,7 +228,7 @@ These are the rules that keep the boundary from eroding. They apply to anyone ad
 The rules above are this codebase's wording of four patterns. Naming them saves a contributor from deriving the shape again, and gives a review something to appeal to.
 
 - **Ports and adapters**, also called hexagonal architecture (Cockburn). A port names a capability in domain terms; adapters implement it; the composition root picks one. Rules 1 through 5 are this pattern.
-- **Gateway** (Fowler, *Patterns of Enterprise Application Architecture*). An object that encapsulates access to an external system. `services/control_plane/` is one: it holds everything about talking to a peer control plane, so no other module has to know that a peer is reached over HTTP.
+- **Gateway** (Fowler, *Patterns of Enterprise Application Architecture*). An object that encapsulates access to an external system. `services/control_plane/` is one: it holds how a deployment asks a peer for policy and credentials, so no module that asks has to know a peer is reached over HTTP. Usage reporting and the sandbox and web-search URL checks still build their own calls, and moving them is the remaining work.
 - **Anticorruption layer** (Evans, *Domain-Driven Design*). A translation at the edge, so a peer's vocabulary does not spread inward. A Gateway here raises this codebase's own errors rather than the peer's HTTP statuses, and the API layer renders them. Without it, the peer's protocol reaches every caller and rule 4 is lost.
 - **Replace conditional with polymorphism** (Fowler, *Refactoring*). Where a deployment's mode is read to choose behavior, the choice belongs in the binding rather than at the branch. A mode branch repeated across modules is the smell this removes.
 

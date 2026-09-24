@@ -1,7 +1,7 @@
 """The bounded POST a deployment makes to its peer control plane.
 
-NOTE: callers reach ``post`` through this module rather than binding the name,
-because a test double replaces it here. A bound name keeps the real one.
+NOTE: callers must reach ``post`` through this module rather than binding the
+name, so that replacing it here reaches them. A bound name keeps the original.
 """
 
 from typing import Any

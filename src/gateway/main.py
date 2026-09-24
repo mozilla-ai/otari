@@ -23,6 +23,7 @@ from gateway.core.database import create_session, dispose_db, init_db
 from gateway.core.feature import Worker
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
+from gateway.exceptions.control_plane_exceptions import ControlPlaneError
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
@@ -624,6 +625,23 @@ async def _tenancy_error_handler(_: Request, exc: Exception) -> Response:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
 
+async def _control_plane_error_handler(_: Request, exc: Exception) -> Response:
+    """Render a control plane failure as the answer the caller has always had.
+
+    Registered ahead of the tenancy family it belongs to, which would replace a
+    502 body with the generic internal-error detail and drop a rate limit's
+    ``Retry-After``. Both are part of this deployment's published contract with
+    a caller, so a peer's refusal reaches them whole.
+    """
+    if not isinstance(exc, ControlPlaneError):  # pragma: no cover - registered for ControlPlaneError only
+        raise exc
+    if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+        logger.error("Control plane request failed: %s", exc.message)
+    retry_after = getattr(exc, "retry_after", None)
+    headers = {"Retry-After": retry_after} if retry_after else None
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message}, headers=headers)
+
+
 async def _validation_error_handler(_: Request, exc: Exception) -> Response:
     """Render a request-validation failure without echoing what was sent.
 
@@ -905,6 +923,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     register_routers(app, config)
     app.add_exception_handler(TenancyError, _tenancy_error_handler)
+    app.add_exception_handler(ControlPlaneError, _control_plane_error_handler)
     app.add_exception_handler(RequestValidationError, _validation_error_handler)
 
     if config.enable_metrics:
