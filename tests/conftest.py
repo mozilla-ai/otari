@@ -188,7 +188,7 @@ def control_plane_transport(monkeypatch: pytest.MonkeyPatch) -> InstallControlPl
     """
 
     def install(handler: ControlPlaneHandler) -> None:
-        monkeypatch.setattr("gateway.api.routes._platform._post_platform", handler)
+        monkeypatch.setattr("gateway.services.control_plane._transport.post", handler)
 
     return install
 

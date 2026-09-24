@@ -33,10 +33,12 @@ from gateway.core.usage import (
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
 )
+from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
+from gateway.services.control_plane import ResolveEndpoint, _transport, control_plane_url, resolve
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.mcp_stateless import (
     CODE_RESOLUTION_FAILED,
@@ -481,101 +483,33 @@ def _split_model_selector(model_selector: str) -> tuple[str | None, str]:
     return split
 
 
-def _platform_url(base_url: str, path: str) -> str:
-    return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
-
-
-def _safe_detail_from_platform(response: httpx.Response, fallback: str) -> str:
-    try:
-        payload = response.json()
-    except ValueError:
-        return fallback
-
-    detail = payload.get("detail") if isinstance(payload, dict) else None
-    return detail if isinstance(detail, str) else fallback
-
-
-async def _post_platform(
-    url: str,
-    headers: dict[str, str],
-    body: dict[str, Any],
-    timeout_seconds: float,
-) -> httpx.Response:
-    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-        return await client.post(url, headers=headers, json=body)
-
-
 async def _post_resolve(
     config: GatewayConfig,
     *,
     user_token: str,
-    path: str,
+    endpoint: ResolveEndpoint,
     body: dict[str, Any],
     client_error_detail: str,
 ) -> Any:
-    """POST ``body`` to a platform resolve endpoint and return the parsed JSON.
+    """Ask the control plane, and render its refusal as this endpoint's own.
 
-    Owns the pieces every resolve helper shares: the base_url guard, the
-    gateway/user token headers, the bounded POST, and the status-code ladder.
-    A 200 returns the parsed payload; client errors (400/401/402/403/404/421/429)
-    are forwarded with the platform's detail when it is a safe string (falling
-    back to ``client_error_detail``), keeping Retry-After on a 429; timeouts,
-    network errors, the platform's server-side failures, and any unexpected
-    status collapse to a 502. 400 is included here (unlike 422, which stays
-    collapsed) because this backend's own 400s are deliberately hand-written,
-    caller-safe rejections (e.g. a Bedrock BYO key using an auth shape that
-    cannot be forwarded through a gateway), not raw framework validation
-    errors that might otherwise leak internal request-shape detail.
+    The service raises domain errors so that nothing below the API layer has to
+    know about HTTP. The callers here answer a request, so they need the status
+    back, and a 429 needs the peer's ``Retry-After`` with it.
     """
-    platform_base_url = config.platform.get("base_url")
-    if not platform_base_url:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Hybrid mode is misconfigured",
-        )
-
-    timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
-    resolve_url = _platform_url(platform_base_url, path)
-    headers = {
-        "X-Gateway-Token": config.platform_token or "",
-        "X-User-Token": user_token,
-    }
-
     try:
-        response = await _post_platform(
-            url=resolve_url,
-            headers=headers,
+        return await resolve(
+            config,
+            user_token=user_token,
+            endpoint=endpoint,
             body=body,
-            timeout_seconds=timeout_ms / 1000,
+            client_error_detail=client_error_detail,
         )
-    except (httpx.TimeoutException, httpx.NetworkError):
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Authorization service unavailable",
-        ) from None
-
-    if response.status_code == 200:
-        try:
-            return response.json()
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Authorization service unavailable",
-            ) from None
-
-    # 421 is the platform saying the user token belongs to another region; its
-    # detail names the host, and the caller needs both to go there (otari-ai#1665).
-    if response.status_code in {400, 401, 402, 403, 404, 421, 429}:
-        detail = _safe_detail_from_platform(response, client_error_detail)
-        response_headers: dict[str, str] | None = None
-        if response.status_code == 429 and response.headers.get("Retry-After"):
-            response_headers = {"Retry-After": response.headers["Retry-After"]}
-        raise HTTPException(status_code=response.status_code, detail=detail, headers=response_headers)
-
-    raise HTTPException(
-        status_code=status.HTTP_502_BAD_GATEWAY,
-        detail="Authorization service unavailable",
-    )
+    except ControlPlaneRefusedError as exc:
+        headers = {"Retry-After": exc.retry_after} if exc.retry_after else None
+        raise HTTPException(status_code=exc.status_code, detail=exc.message, headers=headers) from None
+    except ControlPlaneError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
 
 
 async def _resolve_platform_credentials(
@@ -594,7 +528,7 @@ async def _resolve_platform_credentials(
     payload = await _post_resolve(
         config,
         user_token=user_token,
-        path="/gateway/provider-keys/resolve",
+        endpoint=ResolveEndpoint.PROVIDER_KEYS,
         body=resolve_body,
         client_error_detail="Authorization request rejected",
     )
@@ -940,7 +874,7 @@ async def _resolve_platform_mcp_servers(
     payload = await _post_resolve(
         config,
         user_token=user_token,
-        path="/gateway/mcp-servers/resolve",
+        endpoint=ResolveEndpoint.MCP_SERVERS,
         body={"mcp_server_ids": [str(uid) for uid in dict.fromkeys(mcp_server_ids)]},
         client_error_detail="MCP server resolution failed",
     )
@@ -983,7 +917,7 @@ async def _resolve_platform_mcp_server(
     payload = await _post_resolve(
         config,
         user_token=user_token,
-        path="/gateway/mcp-servers/resolve",
+        endpoint=ResolveEndpoint.MCP_SERVERS,
         body={"mcp_server_ids": [str(mcp_server_id)]},
         client_error_detail="MCP server resolution failed",
     )
@@ -1024,7 +958,7 @@ async def _resolve_platform_web_search(
     payload = await _post_resolve(
         config,
         user_token=user_token,
-        path="/gateway/web-search/resolve",
+        endpoint=ResolveEndpoint.WEB_SEARCH,
         body={} if requested_tools is None else {"requested_tools": requested_tools},
         client_error_detail="Web search resolution failed",
     )
@@ -1046,7 +980,7 @@ async def _resolve_platform_code_execution(
     payload = await _post_resolve(
         config,
         user_token=user_token,
-        path="/gateway/code-execution/resolve",
+        endpoint=ResolveEndpoint.CODE_EXECUTION,
         body={},
         client_error_detail="Code execution resolution failed",
     )
@@ -1078,7 +1012,7 @@ async def _report_platform_usage(
 
     timeout_ms = int(config.platform.get("usage_timeout_ms", 5000))
     max_retries = int(config.platform.get("usage_max_retries", 3))
-    usage_url = _platform_url(platform_base_url, "/gateway/usage")
+    usage_url = control_plane_url(platform_base_url, "/gateway/usage")
     headers = {"X-Gateway-Token": config.platform_token or ""}
 
     payload: dict[str, Any] = {
@@ -1116,7 +1050,7 @@ async def _report_platform_usage(
     for attempt in range(1, max_retries + 1):
         should_retry = False
         try:
-            response = await _post_platform(
+            response = await _transport.post(
                 url=usage_url,
                 headers=headers,
                 body=payload,

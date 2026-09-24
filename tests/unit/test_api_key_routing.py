@@ -20,6 +20,7 @@ from gateway.api.deps import _verify_and_update_api_key, misdirected_key_detail
 from gateway.api.routes._platform import _post_resolve
 from gateway.metrics import REGISTRY
 from gateway.ports.api_key_format_port import KeyRoute, Local, Malformed, Misdirected
+from gateway.services.control_plane import ResolveEndpoint
 
 EU_HOST = "api.eu.otari.example"
 
@@ -123,7 +124,7 @@ async def test_hybrid_mode_forwards_the_platforms_421_and_its_host(
         await _post_resolve(
             _hybrid_config(),
             user_token="otr_tk_v1_eu_" + "e" * 49,
-            path="/gateway/provider-keys/resolve",
+            endpoint=ResolveEndpoint.PROVIDER_KEYS,
             body={"model": "gpt-4o-mini"},
             client_error_detail="Authorization request rejected",
         )
