@@ -479,6 +479,23 @@ def tokenize_phrase(phrase: str) -> list[str]:
     return shlex.split(_strip_shell_comment(phrase), posix=True)
 
 
+def tokenize_phrase_with_separators(phrase: str) -> list[str]:
+    """Tokenize one phrase the way a *command* is tokenized, with separators isolated.
+
+    Deliberately not what :func:`tokenize_phrase` does, and the difference is
+    the point. Matching leaves a separator glued to its word, because a phrase
+    is matched as a contiguous token run *within* one segment and a segment
+    never contains a separator to match against. Detecting one needs the
+    opposite: the same normalization `_command_segments` applies, so that
+    `"npm install;"` yields a `;` token rather than an `install;` token that
+    silently equals nothing a command can produce.
+
+    Quote-aware through `_normalize_separators`, so `echo "a && b"` keeps its
+    argument whole and is not mistaken for a phrase spanning a boundary.
+    """
+    return shlex.split(_normalize_separators(_strip_shell_comment(phrase)), posix=True)
+
+
 def tokenize_phrases(phrases: tuple[str, ...]) -> dict[str, list[str]]:
     """Tokenize every forbidden phrase once, for every gate and the cost estimate to share.
 

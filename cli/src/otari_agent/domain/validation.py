@@ -16,7 +16,12 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Literal
 
-from otari_agent.domain.evaluators import COMMAND_SEPARATORS, matched_changed_paths, tokenize_phrase
+from otari_agent.domain.evaluators import (
+    COMMAND_SEPARATORS,
+    matched_changed_paths,
+    tokenize_phrase,
+    tokenize_phrase_with_separators,
+)
 from otari_agent.domain.types import (
     CommandGate,
     CommandIfChangedGate,
@@ -142,7 +147,12 @@ def unmatchable_phrase(phrase: str, *, field: str) -> str | None:
     ``field`` picks the repair, which is not the same on both: see
     ``_SPLIT_ADVICE``.
     """
-    offenders = sorted({token for token in tokenize_phrase(phrase) if token in COMMAND_SEPARATORS})
+    # Command-style tokenization, not the matching one: a separator typed
+    # without spaces (`npm install;`) stays glued to its word otherwise, so
+    # nothing here equals a separator and the phrase that can never match
+    # reads as clean. See tokenize_phrase_with_separators.
+    tokens = tokenize_phrase_with_separators(phrase)
+    offenders = sorted({token for token in tokens if token in COMMAND_SEPARATORS})
     if not offenders:
         return None
     return (
@@ -238,7 +248,11 @@ def validate_policy(
                     f"(`grep -rn {phrase} .`). Prefer a phrase naming a real invocation.",
                 )
                 for phrase in gate.forbidden
-                if len(tokenize_phrase(phrase)) == 1
+                # A phrase that can never match cannot over-match either. The
+                # error above already says it matches nothing, and "it matches
+                # that word anywhere in a command" beside it would be two
+                # findings of which one is false.
+                if unmatchable_phrase(phrase, field="forbidden") is None and len(tokenize_phrase(phrase)) == 1
             )
 
         if isinstance(gate, PathGate) and tuple(gate.runs) == ("pre_tool_use.edit_target",):

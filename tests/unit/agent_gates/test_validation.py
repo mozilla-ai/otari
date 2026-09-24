@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import pytest
 
-from otari_agent.domain.evaluators import matched_changed_paths
+from otari_agent.domain.evaluators import (
+    _command_segments,
+    _contains_subsequence,
+    matched_changed_paths,
+    tokenize_phrase,
+)
 from otari_agent.domain.policy import parse_policy
 from otari_agent.domain.validation import shallower_twin, unmatchable_phrase, unreachable_glob, validate_policy
 
@@ -211,8 +216,6 @@ def test_the_unreachable_glob_claim_holds_in_the_real_matcher(glob: str) -> None
 
 def test_the_unmatchable_phrase_claim_holds_in_the_real_matcher() -> None:
     """A separator-carrying phrase does not match even the command it was copied from."""
-    from otari_agent.domain.evaluators import _command_segments, _contains_subsequence, tokenize_phrase
-
     phrase = "make postman && make openapi"
     assert unmatchable_phrase(phrase, field="forbidden") is not None
     tokens = tokenize_phrase(phrase)
@@ -248,9 +251,54 @@ def test_every_separator_is_caught_not_just_the_obvious_one(separator: str) -> N
     assert unmatchable_phrase(f"cat x {separator} grep y", field="forbidden") is not None
 
 
+@pytest.mark.parametrize("phrase", ["npm install;", "make a&&make b", "(npm install)", "make a\nmake b"])
+def test_a_separator_typed_without_spaces_is_caught_too(phrase: str) -> None:
+    """The spelling people actually type, and the one plain `shlex.split` hides.
+
+    Matching tokenization leaves a separator glued to its word (`install;`), so
+    looking for a separator token there finds nothing while the phrase still
+    matches no command. Detection uses the command-side tokenizer instead.
+    """
+    assert unmatchable_phrase(phrase, field="forbidden") is not None
+
+
 def test_an_ordinary_phrase_is_not_flagged() -> None:
     for phrase in ("npm install", "git push --force-with-lease", "uv run pytest tests/unit/x.py"):
         assert unmatchable_phrase(phrase, field="forbidden") is None
+
+
+def test_a_quoted_separator_is_left_alone() -> None:
+    """It is one argument, not a boundary, and the phrase matches a real command."""
+    assert unmatchable_phrase('echo "a && b"', field="forbidden") is None
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "npm install",
+        "git push --force",
+        'echo "a && b"',
+        "uv run pytest tests/unit/x.py",
+        "make a && make b",
+        "npm install;",
+        "make a&&make b",
+        "(npm install)",
+        "make a\nmake b",
+    ],
+)
+def test_a_phrase_is_flagged_exactly_when_it_cannot_match_itself(phrase: str) -> None:
+    """The invariant behind this check, asserted against the real matcher.
+
+    A phrase that matches nothing must be reported, and a phrase that matches
+    something must not be. Checked against the command it was copied from,
+    which is the weakest command that could possibly match it, so anything
+    failing here is a phrase no command can satisfy.
+    """
+    matches_itself = any(
+        _contains_subsequence(segment, tokenize_phrase(phrase)) for segment in _command_segments(phrase)
+    )
+    flagged = unmatchable_phrase(phrase, field="forbidden") is not None
+    assert flagged is not matches_itself
 
 
 @pytest.mark.parametrize("glob", ["./CHANGELOG.md", "/CHANGELOG.md", "../escape.md"])
@@ -317,3 +365,17 @@ def test_the_separator_repair_differs_by_field() -> None:
     assert "Split it into one phrase per command" in forbidden
     assert "Give each required command a gate of its own" in require
     assert "Do not split it across `require` entries" in require
+
+
+def test_an_unmatchable_phrase_does_not_also_draw_the_single_token_warning() -> None:
+    """Two findings of which one is false is worse than one that is true.
+
+    `npm;` is a single token *and* unmatchable, but "matches that word anywhere
+    in a command" is the opposite of what it does: it matches nothing.
+    """
+    findings = _findings(
+        "  - id: g\n    type: command\n    runs: [pre_tool_use.command]\n"
+        '    enforcement: required\n    forbidden: ["npm;"]\n    message: m\n'
+    )
+    assert [severity for severity, _gate, _message in findings] == ["error"]
+    assert "single token" not in findings[0][2]
