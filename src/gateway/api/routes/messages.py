@@ -79,6 +79,7 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
+from gateway.services.providers.messages_via_responses import amessages_with_responses_fallback
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.web_search_budget import WebSearchBudget
@@ -600,11 +601,11 @@ class _MessagesAdapter:
 
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
         provider_kwargs, _ = _split_client_betas(kwargs)
-        return await amessages(**provider_kwargs)  # type: ignore[return-value]
+        return await amessages_with_responses_fallback(amessages, provider_kwargs)  # type: ignore[no-any-return]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
         provider_kwargs, _ = _split_client_betas(kwargs)
-        return await amessages(**provider_kwargs)  # type: ignore[return-value]
+        return await amessages_with_responses_fallback(amessages, provider_kwargs)  # type: ignore[no-any-return]
 
     def prepare_stream_kwargs(
         self,
