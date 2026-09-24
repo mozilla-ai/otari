@@ -535,9 +535,7 @@ def _contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
     if not phrase or len(phrase) > len(segment):
         return False
     for start in range(len(segment) - len(phrase) + 1):
-        head_matches = (
-            _basename(segment[0]) == _basename(phrase[0]) if start == 0 else segment[start] == phrase[0]
-        )
+        head_matches = _basename(segment[0]) == _basename(phrase[0]) if start == 0 else segment[start] == phrase[0]
         if head_matches and segment[start + 1 : start + len(phrase)] == phrase[1:]:
             return True
     return False
@@ -602,9 +600,7 @@ def evaluate_command(
     # the parameter is optional and a caller that passes a partial one should
     # get a slower evaluation, not a 500.
     phrases_by_text = phrase_cache if phrase_cache is not None else {}
-    forbidden_phrases = [
-        phrases_by_text.get(phrase) or tokenize_phrase(phrase) for phrase in gate.forbidden
-    ]
+    forbidden_phrases = [phrases_by_text.get(phrase) or tokenize_phrase(phrase) for phrase in gate.forbidden]
     segments_by_command = segment_cache if segment_cache is not None else {}
 
     matched = sorted(

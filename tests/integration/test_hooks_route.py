@@ -1471,3 +1471,25 @@ def test_an_empty_path_list_needs_no_source(client: TestClient, master_key_heade
     )
     assert response.status_code == 200, response.text
     assert response.json()["blocked"] is False
+
+
+def test_paths_labeled_with_an_inapplicable_moment_are_refused(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """`RunsAt` admits five values on the wire, but a path can only be read at two.
+
+    A client that labels real paths `stop.session` would otherwise resolve every
+    path gate `not_applicable`: a 200 that silently enforces nothing. The wire is
+    the reachable case, since this endpoint is a plain HTTP API.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _VALID_POLICY,
+            "changed_paths": ["CHANGELOG.md"],
+            "changed_path_source": "stop.session",
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 422, response.text
+    assert "no path gate can be declared to run at" in response.json()["detail"]

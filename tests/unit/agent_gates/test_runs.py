@@ -124,7 +124,44 @@ def test_paths_submitted_without_a_moment_are_refused() -> None:
             changed_paths=["CHANGELOG.md"],
             commands=None,
         )
-    assert "without changed_path_source" in str(exc.value)
+    assert "changed_path_source=None" in str(exc.value)
+    # The hint must name only the moments a path gate can actually declare, or a
+    # caller follows it into silently losing every path gate.
+    assert "pre_tool_use.edit_target, stop.working_tree" in str(exc.value)
+    assert "stop.session" not in str(exc.value)
+
+
+@pytest.mark.parametrize("source", ["stop.session", "stop.verifier", "pre_tool_use.command"])
+def test_paths_labeled_with_a_moment_no_path_gate_can_declare_are_refused(source: str) -> None:
+    """Accepting one would resolve every path gate not_applicable: enforcement lost silently.
+
+    This is the same failure the whole field exists to remove, so it has to be
+    an error rather than a quiet pass. Reachable in practice because the Hook
+    Server is a plain HTTP API and `RunsAt` admits all five values on the wire.
+    """
+    with pytest.raises(PolicyCheckError) as exc:
+        run_policy_check(
+            _policy("[stop.working_tree]"),
+            source="t",
+            changed_paths=["CHANGELOG.md"],
+            commands=None,
+            changed_path_source=source,  # type: ignore[arg-type]
+        )
+    message = str(exc.value)
+    assert source in message
+    assert "no path gate can be declared to run at" in message
+    assert "pre_tool_use.edit_target, stop.working_tree" in message
+
+
+def test_an_empty_path_list_needs_no_moment() -> None:
+    """`[]` carries no paths to misattribute, and refusing it would abort the whole check."""
+    result = run_policy_check(
+        _policy("[stop.working_tree]"),
+        source="t",
+        changed_paths=[],
+        commands=[],
+    )
+    assert result.blocked is False
 
 
 def test_a_stop_only_gate_does_not_block_a_tool_call_but_still_blocks_the_turn() -> None:

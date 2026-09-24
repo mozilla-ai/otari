@@ -10997,7 +10997,7 @@ export interface components {
         PolicyCheckRequest: {
             /**
              * Changed Path Source
-             * @description Which moment `changed_paths` was read at, matching the `runs` values a gate declares: `pre_tool_use.edit_target` for a tool call's own target before it runs, `stop.working_tree` for `git status` once the turn is over. Required whenever `changed_paths` is present.
+             * @description Which moment `changed_paths` was read at, matching the `runs` values a path gate declares. Only two of the five `runs` values are legal here, because only those two are moments a path can be read at: `pre_tool_use.edit_target` for a tool call's own target before it runs, and `stop.working_tree` for `git status` once the turn is over. Required whenever `changed_paths` is non-empty, and rejected with a 422 if omitted or set to any other value: either would resolve every path gate `not_applicable`, which loses enforcement without reporting anything. An empty `changed_paths` needs no source.
              */
             changed_path_source?: ("pre_tool_use.edit_target" | "pre_tool_use.command" | "stop.working_tree" | "stop.session" | "stop.verifier") | null;
             /**

@@ -15,6 +15,7 @@ import yaml
 
 from otari_agent.domain.evaluators import tokenize_phrase
 from otari_agent.domain.types import (
+    PATH_EVIDENCE_SOURCES,
     CommandGate,
     CommandIfChangedGate,
     Enforcement,
@@ -54,7 +55,7 @@ _SUPPORTED_SCHEMA_VERSIONS = {"1.0"}
 # have a choice to know when a gate runs, and a wrong value is a parse error
 # that says so instead of a gate that quietly never fires.
 _LEGAL_RUNS_BY_GATE_TYPE = {
-    "path": ("pre_tool_use.edit_target", "stop.working_tree"),
+    "path": PATH_EVIDENCE_SOURCES,
     "command": ("pre_tool_use.command",),
     "command_if_changed": ("stop.session",),
     "judge": ("stop.session",),
@@ -341,9 +342,7 @@ def _parse_gate(raw: Any) -> GateSpec:
         if len(verifier) > _MAX_VERIFIER_LENGTH:
             raise PolicyError(f"Gate {gate_id!r}: verifier is longer than {_MAX_VERIFIER_LENGTH} characters.")
         if verifier.startswith("/"):
-            raise PolicyError(
-                f"Gate {gate_id!r}: verifier {verifier!r} must be a repo-relative path, not absolute."
-            )
+            raise PolicyError(f"Gate {gate_id!r}: verifier {verifier!r} must be a repo-relative path, not absolute.")
         if "\x00" in verifier:
             raise PolicyError(f"Gate {gate_id!r}: verifier {verifier!r} contains a NUL byte.")
         # Optional, like judge's own when_changed: absence means "always

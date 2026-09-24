@@ -46,6 +46,13 @@ RunsAt = Literal[
     "stop.verifier",
 ]
 
+# The subset of RunsAt a path can actually be read at, and therefore the only
+# values a caller may label `changed_paths` with. Shared by the policy parser's
+# legality table and by run_policy_check's evidence guard: a caller that labels
+# real paths with, say, `stop.session` would otherwise resolve every path gate
+# not_applicable, which is a silent loss of enforcement rather than an error.
+PATH_EVIDENCE_SOURCES: tuple[RunsAt, ...] = ("pre_tool_use.edit_target", "stop.working_tree")
+
 # Gate results that mean "no objection". Every other outcome blocks a required
 # gate: unknown and error are deliberately on the blocking side, not the
 # passing one, so a check that could not run is never mistaken for one that

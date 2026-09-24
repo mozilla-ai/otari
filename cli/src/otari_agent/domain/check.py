@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import get_args
 
 from otari_agent.domain.evaluators import (
     evaluate_command,
@@ -25,6 +24,7 @@ from otari_agent.domain.evaluators import (
 )
 from otari_agent.domain.policy import PolicyError, parse_policy
 from otari_agent.domain.types import (
+    PATH_EVIDENCE_SOURCES,
     ChangedPathEvidence,
     CheckEvidence,
     CheckVerdict,
@@ -173,11 +173,16 @@ def run_policy_check(
     # cannot tell a PreToolUse call apart from a Stop event on a clean tree and
     # the `runs` declaration means nothing. Refused rather than defaulted:
     # either default silently disables one half of every path gate.
-    if changed_paths and changed_path_source is None:
+    if changed_paths and changed_path_source not in PATH_EVIDENCE_SOURCES:
+        # Refuses a missing label and an inapplicable one alike. A path read at
+        # `stop.session` or `pre_tool_use.command` is not a moment any path gate
+        # can declare, so accepting it would resolve every one of them
+        # not_applicable: enforcement lost without a word, which is the failure
+        # this whole field exists to remove.
         raise PolicyCheckError(
-            "changed_paths was submitted without changed_path_source, so no gate can tell which "
-            "moment these paths were read at. Submit one of: "
-            f"{', '.join(get_args(RunsAt))}."
+            f"changed_paths was submitted with changed_path_source={changed_path_source!r}, which no "
+            "path gate can be declared to run at, so none of them could resolve against it. Submit one "
+            f"of: {', '.join(PATH_EVIDENCE_SOURCES)}."
         )
     changed_path_evidence = (
         ChangedPathEvidence(changed_paths=tuple(dict.fromkeys(changed_paths)), source=changed_path_source)
