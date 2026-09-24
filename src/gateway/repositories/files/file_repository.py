@@ -169,10 +169,16 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
         await self.db.flush()
 
     async def existing_ids(self, file_ids: Collection[str]) -> set[str]:
-        """Which of ``file_ids`` already have a row, recorded or uploaded."""
-        if not file_ids:
+        """Which of ``file_ids`` already have a row, recorded or uploaded.
+
+        An ID that could not name a file has no row and is left out of the
+        query, so one unusable ID in a batch costs only itself rather than
+        failing the lookup the whole batch depends on.
+        """
+        usable = [file_id for file_id in file_ids if could_name_a_file(file_id)]
+        if not usable:
             return set()
-        result = await self.db.execute(select(FileObject.id).where(FileObject.id.in_(list(file_ids))))
+        result = await self.db.execute(select(FileObject.id).where(FileObject.id.in_(usable)))
         return set(result.scalars())
 
     async def record_output(self, row: OutputFileRow) -> None:

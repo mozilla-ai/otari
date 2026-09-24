@@ -937,3 +937,32 @@ def test_a_file_id_that_could_name_nothing_is_a_404(client: TestClient, api_key_
     resp = client.get(f"{API_ROOT}/files/file-%00x", headers=api_key_header)
 
     assert resp.status_code == 404, resp.text
+
+
+def test_one_unusable_id_does_not_fail_a_batch_lookup(
+    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None, test_config: Any
+) -> None:
+    """A provider that announces an impossible ID must not cost the batch its valid files."""
+    import asyncio
+
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from gateway.core.unit_of_work import UnitOfWork
+    from gateway.repositories.files import FileRepository
+
+    resp = client.post(
+        f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"payload", "text/plain")}
+    )
+    assert resp.status_code == 200, resp.text
+    stored = str(resp.json()["id"])
+
+    async def _lookup() -> set[str]:
+        engine = create_async_engine(make_url(test_config.database_url).set(drivername="postgresql+asyncpg"))
+        try:
+            async with async_sessionmaker(engine)() as db, UnitOfWork(db) as uow:
+                return await FileRepository(uow).existing_ids([stored, "file-\x00x"])
+        finally:
+            await engine.dispose()
+
+    assert asyncio.run(_lookup()) == {stored}
