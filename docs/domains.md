@@ -259,7 +259,8 @@ configuration.
   `tenancy/organization_guardrail_service.py`,
   `tenancy/organization_guardrail_definition_service.py`,
   `tenancy/organization_guardrail_runner.py`,
-  `tenancy/organization_hosted_guardrail_service.py`
+  `tenancy/organization_hosted_guardrail_service.py`,
+  `tenancy/hosted_guardrail_check.py`, `tenancy/workspace_guardrail_evaluation.py`
 - Repositories: `tenancy/organization_guardrail_definition_repository.py`
 - Ports: `hosted_guardrail_port.py`
 - Adapters: `hosted_guardrail_adapter.py`
