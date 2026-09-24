@@ -7,20 +7,26 @@ import { useOrganizationContext } from "@/shared/api/organizations"
 import { useUnpricedUsage } from "@/shared/api/usage"
 import { formatNumber } from "@/shared/helpers/format"
 import { DAY_S } from "@/shared/helpers/timeRange"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // How many model names the sentence spells out before folding the rest.
 const NAMED_MODELS = 3
 
-// A gateway-wide notice, beside `PricingWarning` in the shell: successful
-// requests in the last day settled with no price, so they carry no cost on the
-// row or the response, and anything billing from that cost charged nothing
-// (#1625). It links to those rows on Activity, where each one offers "Price this
-// model". Deployment-operator-only, because the usage read is deployment-wide
-// and a price is a deployment-wide write. Dismissible per tab.
+// A notice beside `PricingWarning` in the shell: successful requests in the last
+// day whose model usage had no price, so the response carried no inline cost and
+// anything billing from it charged nothing for the model (#1625). Scoped to the
+// selected workspace, as the Activity rows it links to are; each row there offers
+// "Price this model". Deployment-operator-only, because a price is a
+// deployment-wide write. Dismissible per tab.
 export function UnpricedUsageWarning() {
   const organization = useOrganizationContext()
   const isOperator = isDeploymentOperator(organization.data)
-  const unpriced = useUnpricedUsage(DAY_S, isOperator)
+  const { selected: workspace } = useSelectedWorkspace()
+  const unpriced = useUnpricedUsage(
+    DAY_S,
+    workspace?.workspace_id ?? "",
+    isOperator,
+  )
   const [dismissed, setDismissed] = useState(false)
 
   // Read through `isOperator` for the reason `PricingWarning` does: a disabled
@@ -49,13 +55,12 @@ export function UnpricedUsageWarning() {
           <span>
             <strong className="font-semibold">
               {formatNumber(requests)} {requests === 1 ? "request" : "requests"}{" "}
-              in the last 24 hours had no price
+              in the last 24 hours had no model price
             </strong>
-            , so no cost was recorded or returned
+            {workspace ? ` in ${workspace.name}` : ""}
             {named.length > 0 ? (
               <>
-                {" "}
-                for{" "}
+                :{" "}
                 {named.map((model, index) => (
                   <span key={model}>
                     {index > 0 ? ", " : ""}
@@ -65,7 +70,7 @@ export function UnpricedUsageWarning() {
                 {more > 0 ? ` and ${formatNumber(more)} more` : ""}
               </>
             ) : null}
-            .{" "}
+            . Their model tokens carried no cost.{" "}
             <Link
               to="/activity"
               search={{

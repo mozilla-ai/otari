@@ -275,17 +275,31 @@ export function useFailureCount(windowSeconds: number, enabled = true) {
 // poll is enough for a banner that reports it.
 const UNPRICED_USAGE_POLL_MS = 5 * 60_000
 
-// Successful gateway requests within the last `windowSeconds` that settled with
-// no price (the Activity page's "Unpriced" filter), with the models that served
-// them. One bounded summary read: the totals, and the `model` breakdown only.
-// The window is resolved in the query function for the reasons `useFailureCount`
-// gives.
-export function useUnpricedUsage(windowSeconds: number, enabled = true) {
+// Successful gateway requests within the last `windowSeconds` whose model usage
+// had no price (the Activity page's "Unpriced" filter), with the models that
+// served them. One bounded summary read: the totals, and the `model` breakdown
+// only. `workspaceId` narrows it the way Activity narrows to the shell's
+// selected workspace, so a count and the Activity rows it links to agree; ""
+// is no workspace, which Activity reads as deployment-wide too. The window is
+// resolved in the query function for the reasons `useFailureCount` gives.
+export function useUnpricedUsage(
+  windowSeconds: number,
+  workspaceId: string,
+  enabled = true,
+) {
   const scope = useUsageScope()
   return useQuery({
-    queryKey: [USAGE, "summary", "unpriced", scope.base, windowSeconds],
+    queryKey: [
+      USAGE,
+      "summary",
+      "unpriced",
+      scope.base,
+      workspaceId,
+      windowSeconds,
+    ],
     queryFn: () => {
       const params = usageParams({
+        workspace_id: workspaceId || undefined,
         status: "success",
         source: "gateway",
         priced: false,

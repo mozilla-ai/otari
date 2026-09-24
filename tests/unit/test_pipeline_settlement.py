@@ -800,6 +800,43 @@ async def test_unpriced_settlement_warns_again_after_the_interval(
     assert len(_unpriced_warnings(gateway_caplog)) == 2
 
 
+def test_unpriced_warning_map_at_capacity_drops_expired_entries_first(
+    monkeypatch: pytest.MonkeyPatch, gateway_caplog: pytest.LogCaptureFixture
+) -> None:
+    """A full map keeps live suppressions, so a recently warned model stays quiet."""
+    now = time.monotonic()
+    cap = pipeline._UNPRICED_WARNING_MAX_MODELS
+    warned = {f"p:expired-{i}": now - pipeline.UNPRICED_WARNING_INTERVAL_S - 1 for i in range(cap - 1)}
+    warned["p:recent"] = now
+    monkeypatch.setattr(pipeline, "_unpriced_warned_at", warned)
+
+    pipeline._warn_unpriced_model("p:new")
+    pipeline._warn_unpriced_model("p:recent")
+
+    assert set(pipeline._unpriced_warned_at) == {"p:recent", "p:new"}
+    warnings = _unpriced_warnings(gateway_caplog)
+    assert len(warnings) == 1
+    assert "'p:new'" in warnings[0]
+
+
+def test_unpriced_warning_map_at_capacity_evicts_only_the_oldest(
+    monkeypatch: pytest.MonkeyPatch, gateway_caplog: pytest.LogCaptureFixture
+) -> None:
+    now = time.monotonic()
+    cap = pipeline._UNPRICED_WARNING_MAX_MODELS
+    warned = {f"p:live-{i}": now - i for i in range(cap)}
+    monkeypatch.setattr(pipeline, "_unpriced_warned_at", warned)
+    oldest = f"p:live-{cap - 1}"
+
+    pipeline._warn_unpriced_model("p:new")
+    pipeline._warn_unpriced_model("p:live-0")
+
+    assert len(pipeline._unpriced_warned_at) == cap
+    assert oldest not in pipeline._unpriced_warned_at
+    assert "p:new" in pipeline._unpriced_warned_at
+    assert len(_unpriced_warnings(gateway_caplog)) == 1
+
+
 @pytest.mark.asyncio
 async def test_priced_settlement_does_not_warn(
     monkeypatch: pytest.MonkeyPatch, gateway_caplog: pytest.LogCaptureFixture

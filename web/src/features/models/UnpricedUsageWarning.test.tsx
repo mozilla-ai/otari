@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { OrganizationContext, UsageGroupRow, UsageSummary } from "@/client"
 import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
 import * as apiClient from "@/shared/api/client"
+import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { organizationContext, usageTotals } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
@@ -58,7 +59,9 @@ function renderBanner() {
   })
   render(
     <QueryClientProvider client={client}>
-      <UnpricedUsageWarning />
+      <SelectedWorkspaceProvider>
+        <UnpricedUsageWarning />
+      </SelectedWorkspaceProvider>
     </QueryClientProvider>,
     { wrapper: withRouter() },
   )
@@ -80,7 +83,9 @@ describe("UnpricedUsageWarning", () => {
     renderBanner()
 
     expect(
-      await screen.findByText("19 requests in the last 24 hours had no price"),
+      await screen.findByText(
+        "19 requests in the last 24 hours had no model price",
+      ),
     ).toBeInTheDocument()
     // Busiest first, so the model costing the most unbilled traffic leads.
     const names = screen.getAllByText(/^gemini-/).map((el) => el.textContent)
@@ -100,6 +105,31 @@ describe("UnpricedUsageWarning", () => {
     expect(params.getAll("dimensions")).toEqual(["model"])
     const since = new Date(String(params.get("start_date"))).getTime()
     expect(Date.now() - since).toBeLessThanOrEqual(86_400_000 + 5_000)
+  })
+
+  it("scopes the count to the selected workspace, as Activity does", async () => {
+    // Activity narrows its rows to the shell's selected workspace, so a
+    // deployment-wide count would link to a view that cannot show them.
+    const spy = mockApi(
+      summary(3, [modelRow("gemini-3.7-flash", 3)]),
+      organizationContext({
+        workspace_memberships: [
+          { workspace_id: "ws-research", name: "Research", role: "owner" },
+        ],
+      }),
+    )
+    renderBanner()
+
+    expect(await screen.findByText(/in Research/)).toBeInTheDocument()
+    expect(summaryParams(spy).get("workspace_id")).toBe("ws-research")
+  })
+
+  it("asks deployment-wide when no workspace is selected", async () => {
+    const spy = mockApi(summary(3, [modelRow("gemini-3.7-flash", 3)]))
+    renderBanner()
+
+    await screen.findByText(/had no model price/)
+    expect(summaryParams(spy).has("workspace_id")).toBe(false)
   })
 
   it("folds models past the first three", async () => {
@@ -122,7 +152,9 @@ describe("UnpricedUsageWarning", () => {
     renderBanner()
 
     expect(
-      await screen.findByText("1 request in the last 24 hours had no price"),
+      await screen.findByText(
+        "1 request in the last 24 hours had no model price",
+      ),
     ).toBeInTheDocument()
   })
 
@@ -135,7 +167,7 @@ describe("UnpricedUsageWarning", () => {
       expect(summaryParams(spy).get("priced")).toBe("false")
       expect(client.isFetching()).toBe(0)
     })
-    expect(screen.queryByText(/had no price/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/had no model price/)).not.toBeInTheDocument()
   })
 
   it("asks nothing of the deployment-wide usage read for a tenant", async () => {
@@ -153,7 +185,7 @@ describe("UnpricedUsageWarning", () => {
     expect(
       spy.mock.calls.some(([path]) => String(path).includes("/summary")),
     ).toBe(false)
-    expect(screen.queryByText(/had no price/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/had no model price/)).not.toBeInTheDocument()
   })
 
   it("can be dismissed", async () => {
@@ -162,6 +194,6 @@ describe("UnpricedUsageWarning", () => {
     renderBanner()
 
     await user.click(await screen.findByRole("button", { name: "Dismiss" }))
-    expect(screen.queryByText(/had no price/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/had no model price/)).not.toBeInTheDocument()
   })
 })
