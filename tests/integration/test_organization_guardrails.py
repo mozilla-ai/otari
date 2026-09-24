@@ -37,6 +37,7 @@ from gateway.exceptions.guardrails_exceptions import (
     OrganizationGuardrailTestsItsDefinitionError,
     OrganizationGuardrailUnsafeUrlError,
 )
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.models.guardrails import (
     OrganizationGuardrail,
     OrganizationGuardrailDefinition,
@@ -51,7 +52,6 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.secret_box import decrypt_secret, generate_secret_key
-from gateway.services.tenancy.errors import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.services.tenancy.organization_guardrail_service import (
     MAX_GUARDRAILS_PER_ORGANIZATION,
     OrganizationGuardrailCreate,

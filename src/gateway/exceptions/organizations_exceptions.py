@@ -1,13 +1,4 @@
-"""Domain errors for the tenancy services, and the HTTP status each carries.
-
-The platform maps roughly 25 exception modules to statuses in one central table
-(`otari-ai` `backend/app/api/exception_handlers.py`). The gateway has no such
-table and its routes raise ``HTTPException`` directly, which would mean a
-try/except around every one of the tenancy handlers. Instead each error names
-its own status here and one handler, registered in `gateway.main`, renders it as
-FastAPI's own ``{"detail": ...}`` body, so a rehomed service keeps raising
-domain errors and the routes stay thin.
-"""
+"""Errors the organization and workspace surfaces raise, and the HTTP status each carries."""
 
 from fastapi import status
 
@@ -309,26 +300,21 @@ __all__ = [
     "MembershipUpdateError",
     "NotAnOrganizationMemberError",
     "NotAuthorizedError",
-    "OrganizationMemberAlreadyExistsError",
     "OrganizationDomainAlreadyClaimedError",
     "OrganizationDomainClaimedHereError",
     "OrganizationDomainNotFoundError",
     "OrganizationDomainNotVerifiedError",
+    "OrganizationMemberAlreadyExistsError",
     "OrganizationMemberNotFoundError",
     "OrganizationNameRequiredError",
     "OrganizationNotFoundError",
     "OrganizationSlugUnavailableError",
-    "TenancyConflictError",
-    "TenancyError",
-    "TenancyForbiddenError",
-    "TenancyNotFoundError",
-    "TenancyValidationError",
     "PublicEmailDomainError",
     "TooManyOrganizationDomainsError",
     "UnregistrableDomainError",
-    "WorkspaceAlreadyExistsError",
     "WorkspaceActivationUnavailableError",
     "WorkspaceAlreadyActivatedError",
+    "WorkspaceAlreadyExistsError",
     "WorkspaceInUseError",
     "WorkspaceMemberAlreadyExistsError",
     "WorkspaceMemberNotFoundError",

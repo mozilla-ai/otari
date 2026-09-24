@@ -72,6 +72,7 @@ from gateway.exceptions.guardrails_exceptions import (
     OrganizationGuardrailTestsItsDefinitionError,
     OrganizationGuardrailUnsafeUrlError,
 )
+from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
 from gateway.models.guardrails import (
@@ -89,7 +90,6 @@ from gateway.services.secret_box import (
     decrypt_secret,
     encrypt_secret,
 )
-from gateway.services.tenancy.errors import WorkspaceNotFoundError
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 

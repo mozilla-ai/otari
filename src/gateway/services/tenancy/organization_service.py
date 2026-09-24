@@ -19,6 +19,21 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.organizations_exceptions import (
+    InvitationAlreadyPendingError,
+    InvitationAlreadyUsedError,
+    InvitationExpiredError,
+    InvitationNotFoundError,
+    InvitationPasswordNotAcceptedError,
+    MembershipUpdateError,
+    NotAuthorizedError,
+    OrganizationMemberAlreadyExistsError,
+    OrganizationMemberNotFoundError,
+    OrganizationNameRequiredError,
+    OrganizationNotFoundError,
+    OrganizationSlugUnavailableError,
+    WorkspaceNotFoundError,
+)
 from gateway.models.money import as_float
 from gateway.models.tenancy import (
     MANAGEMENT_ROLES,
@@ -70,21 +85,6 @@ from gateway.services.password_service import hash_password_async
 from gateway.services.secret_box import secret_box_configured
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.email_address import validated_email as _validated_email
-from gateway.services.tenancy.errors import (
-    InvitationAlreadyPendingError,
-    InvitationAlreadyUsedError,
-    InvitationExpiredError,
-    InvitationNotFoundError,
-    InvitationPasswordNotAcceptedError,
-    MembershipUpdateError,
-    NotAuthorizedError,
-    OrganizationMemberAlreadyExistsError,
-    OrganizationMemberNotFoundError,
-    OrganizationNameRequiredError,
-    OrganizationNotFoundError,
-    OrganizationSlugUnavailableError,
-    WorkspaceNotFoundError,
-)
 from gateway.services.tenancy.invitation_email import render_invitation_email
 
 # The name first boot gives an organization's workspace, reused so a created

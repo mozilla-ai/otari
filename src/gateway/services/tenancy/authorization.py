@@ -10,9 +10,9 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.models.tenancy import MANAGEMENT_ROLES, Organization, User, Workspace
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
-from gateway.services.tenancy.errors import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.services.tenancy.organization_service import OrganizationService
 
 

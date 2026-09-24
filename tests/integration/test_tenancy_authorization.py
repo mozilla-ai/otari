@@ -14,6 +14,14 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.organizations_exceptions import (
+    InvitationAlreadyPendingError,
+    MembershipUpdateError,
+    NotAuthorizedError,
+    OrganizationNameRequiredError,
+    OrganizationNotFoundError,
+    WorkspaceNotFoundError,
+)
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberUpdateRequest,
@@ -37,14 +45,6 @@ from gateway.repositories.tenancy import (
 from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.authorization import resolve_visible_workspace_scope
-from gateway.services.tenancy.errors import (
-    InvitationAlreadyPendingError,
-    MembershipUpdateError,
-    NotAuthorizedError,
-    OrganizationNameRequiredError,
-    OrganizationNotFoundError,
-    WorkspaceNotFoundError,
-)
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
 
 _TEST_CONFIG = GatewayConfig()

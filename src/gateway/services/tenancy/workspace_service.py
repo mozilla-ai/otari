@@ -20,6 +20,16 @@ import uuid
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.organizations_exceptions import (
+    InvalidRoleError,
+    LastWorkspaceError,
+    NotAnOrganizationMemberError,
+    WorkspaceAlreadyExistsError,
+    WorkspaceInUseError,
+    WorkspaceMemberAlreadyExistsError,
+    WorkspaceMemberNotFoundError,
+    WorkspaceNameRequiredError,
+)
 from gateway.models.tenancy import (
     MANAGEMENT_ROLES,
     WORKSPACE_MEMBER_ROLES,
@@ -36,16 +46,6 @@ from gateway.models.tenancy import (
 )
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
 from gateway.services.tenancy import authorization
-from gateway.services.tenancy.errors import (
-    InvalidRoleError,
-    LastWorkspaceError,
-    NotAnOrganizationMemberError,
-    WorkspaceAlreadyExistsError,
-    WorkspaceInUseError,
-    WorkspaceMemberAlreadyExistsError,
-    WorkspaceMemberNotFoundError,
-    WorkspaceNameRequiredError,
-)
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
 

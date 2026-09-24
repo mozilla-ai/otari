@@ -34,6 +34,7 @@ from gateway.exceptions.guardrails_exceptions import (
     OrganizationGuardrailNotBuildableError,
     OrganizationGuardrailNotDefinableError,
 )
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError
 from gateway.models.guardrails import OrganizationGuardrail, OrganizationGuardrailDefinition
 from gateway.models.tenancy import Organization, User
 from gateway.repositories.tenancy import (
@@ -44,7 +45,6 @@ from gateway.repositories.tenancy import (
 )
 from gateway.services.secret_box import decrypt_secret, generate_secret_key
 from gateway.services.tenancy import organization_guardrail_runner as runner
-from gateway.services.tenancy.errors import NotAuthorizedError
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     MAX_DEFINITIONS_PER_ORGANIZATION,
     OrganizationGuardrailDefinitionCreate,

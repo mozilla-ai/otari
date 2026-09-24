@@ -24,6 +24,7 @@ from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError
 from gateway.exceptions.providers_exceptions import (
     OrgProviderKeyNotFoundError,
     OrgProviderLastModelError,
@@ -57,7 +58,6 @@ from gateway.services.organization_pricing_service import (
 from gateway.services.providers import OrgProviderModelService
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy import OrgProviderKeyService
-from gateway.services.tenancy.errors import NotAuthorizedError
 from gateway.services.tenancy.org_provider_key_service import (
     cached_org_model_restriction,
     refresh_org_provider_cache,

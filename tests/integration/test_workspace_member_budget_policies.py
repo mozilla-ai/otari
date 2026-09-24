@@ -23,6 +23,7 @@ from gateway.exceptions.budget_exceptions import (
     WorkspaceBudgetDefaultBudgetNotFoundError,
     WorkspaceBudgetDefaultNotFoundError,
 )
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.models.budgets import Budget, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.money import as_float
 from gateway.models.tenancy import (
@@ -38,7 +39,6 @@ from gateway.repositories.tenancy import (
 from gateway.schemas.budgets import WorkspaceMemberBudgetPolicyCreate, WorkspaceMemberBudgetPolicyUpdate
 from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
-from gateway.services.tenancy.errors import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.services.tenancy.provisioning_service import (
     DEFAULT_ORGANIZATION_SLUG,
     DEFAULT_WORKSPACE_NAME,

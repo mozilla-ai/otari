@@ -600,10 +600,10 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
 async def _tenancy_error_handler(_: Request, exc: Exception) -> Response:
     """Render a tenancy domain error as the status it carries.
 
-    One handler for the whole family, so a rehomed service keeps raising domain
-    errors and no tenancy route needs a try/except (see
-    `gateway.services.tenancy.errors`). The body matches FastAPI's own
-    ``HTTPException`` shape, so a client cannot tell which layer answered.
+    One handler for the whole family, so a service keeps raising domain errors
+    and no route needs a try/except (see `gateway.exceptions`). The body matches
+    FastAPI's own ``HTTPException`` shape, so a client cannot tell which layer
+    answered.
 
     A 4xx message is written for the caller and is rendered as it is. A 5xx one
     is not: it describes the deployment rather than the request, and
