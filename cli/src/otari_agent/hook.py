@@ -1521,11 +1521,11 @@ def hook(
 
     gates_file = root / ".otari-guardrails.yml"
     if not gates_file.is_file():
-        # This command fails open, so a repo still carrying the pre-rename
-        # `.otari-gates.yml` would stop enforcing every gate and report
-        # nothing. Naming that one case keeps it visible without reading the
-        # old file, which would be a compatibility path to maintain and later
-        # remove. A repo with no policy at all stays silent, as before.
+        # This command fails open, so a repo still on `.otari-gates.yml`
+        # would stop enforcing every gate and report nothing at all. Naming
+        # that one case keeps it visible without reading the old file, which
+        # would be a compatibility path to maintain and later remove. A repo
+        # with no policy stays silent.
         legacy_file = root / ".otari-gates.yml"
         if legacy_file.is_file():
             click.echo(
