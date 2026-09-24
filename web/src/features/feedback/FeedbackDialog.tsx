@@ -97,7 +97,7 @@ export function FeedbackDialog({
       <Modal.Backdrop isDismissable={!isPending}>
         <Modal.Container
           placement="top"
-          className="otari-form-dialog__container otari-feedback-dialog__container p-0 sm:px-4 sm:pt-[7.5rem] sm:pb-[7.5rem]"
+          className="otari-form-dialog__container p-0 sm:px-4 sm:pt-[7.5rem] sm:pb-[7.5rem]"
         >
           <Modal.Dialog
             aria-labelledby={headingId}
@@ -189,6 +189,7 @@ export function FeedbackDialog({
                       event.preventDefault()
                       send()
                     }}
+                    aria-invalid={isEmptySend || undefined}
                     readOnly={isPending}
                     maxLength={MAX_MESSAGE_LENGTH}
                     placeholder="What’s on your mind?"
@@ -224,11 +225,17 @@ export function FeedbackDialog({
                     </>
                   ) : (
                     <>
-                      {isEmptySend ? (
-                        <p role="status" className="text-caption text-danger">
-                          Write something first.
-                        </p>
-                      ) : null}
+                      {/* Mounted empty so the reason is announced when it
+                          arrives: a live region inserted already filled is
+                          often skipped. `contents` keeps it out of the flex
+                          row until it has something in it. */}
+                      <div role="status" className="contents">
+                        {isEmptySend ? (
+                          <p className="text-caption text-danger">
+                            Write something first.
+                          </p>
+                        ) : null}
+                      </div>
                       {/* Not `isPending`, for the reason `FormDialog` gives: a
                           send in flight is working, not refused, so it keeps
                           its fill and its width while the spinner stands in. */}

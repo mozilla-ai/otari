@@ -94,15 +94,19 @@ describe("FeedbackDialog", () => {
 
   it("answers an empty send beside the button, which stays live", async () => {
     const { fetch, user } = setup()
+    // Mounted before there is anything to say, so the reason is announced.
+    expect(screen.getByRole("status")).toBeEmptyDOMElement()
     await user.type(field(), "   ")
     await user.click(screen.getByRole("button", { name: SEND }))
     expect(screen.getByRole("status")).toHaveTextContent(
       "Write something first.",
     )
+    expect(field()).toHaveAttribute("aria-invalid", "true")
     expect(screen.getByRole("button", { name: SEND })).toBeEnabled()
     expect(fetch).not.toHaveBeenCalled()
     await user.type(field(), "x")
-    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toBeEmptyDOMElement()
+    expect(field()).not.toHaveAttribute("aria-invalid")
   })
 
   it.each([503, 429])(

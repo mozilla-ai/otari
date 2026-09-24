@@ -1784,8 +1784,8 @@ main {
     var(--feedback-swap-ease, ease-out) both;
 }
 
-/* A send that answers quickly never shows the spinner: the label holds until
-   the delay has passed, then the spinner takes its place. */
+/* The spinner replaces the label while a send is in flight.
+   `--feedback-spinner-delay` can hold the label for quick sends. */
 [data-feedback-send="pending"] [data-feedback-send-label] {
   animation: otari-feedback-hide 0s linear var(--feedback-spinner-delay, 0ms)
     both;
