@@ -13,7 +13,13 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
+from any_llm.types.completion import (
+    ChatCompletion,
+    ChatCompletionMessage,
+    Choice,
+    CompletionUsage,
+    PromptTokensDetails,
+)
 from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
 from fastapi.testclient import TestClient
 from openai.types.responses import Response, ResponseUsage
@@ -222,3 +228,43 @@ def test_gemini_is_served_on_responses(client: TestClient, api_key_header: dict[
 
     assert response.status_code == 200, response.text
     assert seen["provider"] == "gemini"
+
+
+def test_a_cache_write_on_chat_is_billed_at_the_write_price(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str]
+) -> None:
+    """Gemini's context caches (and Anthropic) report the write on ``prompt_tokens_details``."""
+    priced = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "gemini:gemini-cache-write",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 0.0,
+            "cache_read_price_per_million": 0.25,
+            "cache_write_price_per_million": 2.0,
+            "effective_at": "2020-01-01T00:00:00Z",
+        },
+        headers=master_key_header,
+    )
+    assert priced.status_code == 200, priced.text
+    completion = _chat_response()
+    completion.usage = CompletionUsage(
+        prompt_tokens=3_000_000,
+        completion_tokens=0,
+        total_tokens=3_000_000,
+        prompt_tokens_details=PromptTokensDetails(cached_tokens=0, cache_write_tokens=1_000_000),
+    )
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=completion)):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "gemini:gemini-cache-write", "messages": [{"role": "user", "content": "hi"}]},
+            headers=api_key_header,
+        )
+    assert response.status_code == 200, response.text
+
+    logs = client.get(
+        f"{API_ROOT}/usage", params={"endpoint": "/v1/chat/completions"}, headers=master_key_header
+    ).json()
+    # Two million fresh input tokens at 1.0 and one million written at 2.0.
+    assert logs[0]["cost"] == pytest.approx(4.0)

@@ -221,6 +221,7 @@ class _ChatAdapter:
             total_tokens=chunk.usage.total_tokens or 0,
             prompt_tokens_details=details,
             cache_read_tokens=(details.cached_tokens or 0) if details is not None else 0,
+            cache_write_tokens=(details.cache_write_tokens or 0) if details is not None else 0,
         )
 
     def extract_usage(self, result: ChatCompletion) -> CompletionUsage | None:

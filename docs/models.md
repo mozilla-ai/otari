@@ -144,6 +144,23 @@ model_capabilities:
 File handling uses these values to decide whether to pass an attachment through
 or normalize it for a text-only model. See [Files](files.md).
 
+## Prompt caching
+
+Mark the prompt prefix to cache the way Anthropic does, with `cache_control`
+(`{"type": "ephemeral"}`, optionally `"ttl": "1h"`): on a system block or content
+block on `/api/v1/messages`, or on a message or content part on
+`/api/v1/chat/completions`. Anthropic models read it natively. For Gemini, any-llm
+turns the last breakpoint into a Gemini context cache holding everything up to
+it, reuses that cache while it lives (5 minutes, or 1 hour with `"ttl": "1h"`),
+and falls back to an uncached request when Gemini refuses a prefix below its
+minimum size. Gemini 2.5 and later models also cache repeated prefixes on their
+own, with nothing marked.
+
+Either way, the usage reports the tokens written to and read from the cache, and
+Otari bills them at the model's `cache_write_price_per_million` and
+`cache_read_price_per_million` when the pricing sets them, and at the input price
+otherwise. The time a Gemini cache is stored is not billed separately.
+
 ## Model aliases
 
 An alias gives callers a stable name for one real selector:

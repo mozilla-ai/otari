@@ -93,9 +93,17 @@ def cache_read_tokens_of(usage: CompletionUsage) -> int:
 
 
 def cache_write_tokens_of(usage: CompletionUsage) -> int:
-    """Return the cache-write count carried by ``usage`` (0 for non-Anthropic)."""
+    """Return the cache-write count carried by ``usage``.
+
+    Handles both :class:`GatewayUsage` (explicit field) and a plain
+    ``CompletionUsage`` (falls back to ``prompt_tokens_details.cache_write_tokens``,
+    which any-llm fills for the providers that bill a cache write on Chat
+    Completions, such as Anthropic and Gemini's context caches).
+    """
     if isinstance(usage, GatewayUsage):
         return usage.cache_write_tokens
+    if usage.prompt_tokens_details is not None:
+        return usage.prompt_tokens_details.cache_write_tokens or 0
     return 0
 
 
