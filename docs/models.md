@@ -75,6 +75,10 @@ model-listing endpoint. It does not restrict direct dispatch.
 Named instances are local configuration and do not apply in hybrid mode, where
 the control plane resolves each attempt.
 
+A workspace or a single user can also bring its own server, reached the same
+way (`my-vllm:qwen3`) but visible only to its owner. See
+[Provider endpoints](provider-endpoints.md).
+
 ## Local providers
 
 Ollama, llama.cpp, and llamafile can run without an API key. Add a provider entry

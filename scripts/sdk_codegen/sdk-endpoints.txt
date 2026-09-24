@@ -110,6 +110,12 @@ PUT /api/v1/playground/favorite-models                          # session-author
 GET /api/v1/aliases                                 # not yet wrapped
 POST /api/v1/aliases                                # not yet wrapped
 DELETE /api/v1/aliases/{name}                       # not yet wrapped
+# Owned provider endpoints
+GET /api/v1/provider-endpoints                      # not yet wrapped
+POST /api/v1/provider-endpoints                     # not yet wrapped
+GET /api/v1/provider-endpoints/{endpoint_id}        # not yet wrapped
+PATCH /api/v1/provider-endpoints/{endpoint_id}      # not yet wrapped
+DELETE /api/v1/provider-endpoints/{endpoint_id}     # not yet wrapped
 # Provider credentials (runtime provider management)
 GET /api/v1/provider-credentials                    # not yet wrapped
 POST /api/v1/provider-credentials                   # not yet wrapped

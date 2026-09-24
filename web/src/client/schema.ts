@@ -3649,6 +3649,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/provider-endpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Provider Endpoints
+         * @description List owned provider endpoints, narrowed by owner when given. Keys are never returned.
+         */
+        get: operations["provider-endpoints-list_provider_endpoints"];
+        put?: never;
+        /**
+         * Create Provider Endpoint
+         * @description Register an endpoint for a workspace, or for one user in it.
+         *
+         *     It is reachable as ``<name>:<model>`` by its owner as soon as this returns on
+         *     this worker, and on the others within 30 seconds.
+         */
+        post: operations["provider-endpoints-create_provider_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/provider-endpoints/{endpoint_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Provider Endpoint
+         * @description Read one endpoint. The key is never returned, only its last four characters.
+         */
+        get: operations["provider-endpoints-get_provider_endpoint"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Provider Endpoint
+         * @description Delete an endpoint. Its name stops resolving at once on this worker, within 30 seconds elsewhere.
+         */
+        delete: operations["provider-endpoints-delete_provider_endpoint"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Provider Endpoint
+         * @description Change an endpoint's name, provider, base URL, key or default fields. The owner cannot change.
+         */
+        patch: operations["provider-endpoints-update_provider_endpoint"];
+        trace?: never;
+    };
     "/api/v1/providers": {
         parameters: {
             query?: never;
@@ -11045,6 +11100,123 @@ export interface components {
             streaming: boolean;
             /** Vision */
             vision: boolean;
+        };
+        /**
+         * ProviderEndpointCreateRequest
+         * @description What a caller sends to create an owned endpoint. The key is stored encrypted.
+         */
+        ProviderEndpointCreateRequest: {
+            /**
+             * Api Base
+             * @description Base URL of the endpoint. Refused when it resolves to a private, loopback, link-local or reserved address.
+             */
+            api_base: string;
+            /**
+             * Api Key
+             * @description Sent to the endpoint. Never returned, only its last four.
+             */
+            api_key?: string | null;
+            /**
+             * Default Params
+             * @description Fields added to every request body sent to this endpoint, beneath the caller's own: a field the caller sets wins. For fields the gateway does not model, such as vLLM's 'chat_template_kwargs'. Credential and transport fields are refused.
+             */
+            default_params?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Name
+             * @description What callers put before the colon to reach this endpoint, as '<name>:<model>'. Letters, digits, '.', '_' and '-', starting with a letter or digit. It may not be a provider's name or a configured instance's.
+             */
+            name: string;
+            /**
+             * Provider
+             * @description The implementation that speaks to the endpoint: 'openai' for an OpenAI-compatible server, 'anthropic' for an Anthropic-compatible one. Whichever it is, callers may use any of the chat, responses and messages routes.
+             */
+            provider: string;
+            /**
+             * User Id
+             * @description User that owns the endpoint. Omit for one every caller in the workspace reaches. A user's endpoint shadows a workspace-wide one of the same name for that user alone.
+             */
+            user_id?: string | null;
+            /**
+             * Workspace Id
+             * @description Workspace that owns the endpoint. Omit for the deployment's default workspace.
+             */
+            workspace_id?: string | null;
+        };
+        /**
+         * ProviderEndpointPublic
+         * @description The API-facing shape. Never carries the key, only whether one is set.
+         */
+        ProviderEndpointPublic: {
+            /** Api Base */
+            api_base: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Default Params */
+            default_params?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Last4 */
+            last4?: string | null;
+            /** Name */
+            name: string;
+            /** Provider */
+            provider: string;
+            /** Updated At */
+            updated_at?: string | null;
+            /** User Id */
+            user_id?: string | null;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * ProviderEndpointUpdateRequest
+         * @description A partial update. Only what is set is applied; an explicit null ``api_key`` clears it.
+         */
+        ProviderEndpointUpdateRequest: {
+            /**
+             * Api Base
+             * @description Base URL of the endpoint. Refused when it resolves to a private, loopback, link-local or reserved address.
+             */
+            api_base?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /**
+             * Default Params
+             * @description Fields added to every request body sent to this endpoint, beneath the caller's own: a field the caller sets wins. For fields the gateway does not model, such as vLLM's 'chat_template_kwargs'. Credential and transport fields are refused.
+             */
+            default_params?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Name
+             * @description What callers put before the colon to reach this endpoint, as '<name>:<model>'. Letters, digits, '.', '_' and '-', starting with a letter or digit. It may not be a provider's name or a configured instance's.
+             */
+            name?: string | null;
+            /**
+             * Provider
+             * @description The implementation that speaks to the endpoint: 'openai' for an OpenAI-compatible server, 'anthropic' for an Anthropic-compatible one. Whichever it is, callers may use any of the chat, responses and messages routes.
+             */
+            provider?: string | null;
+        };
+        /** ProviderEndpointsPublic */
+        ProviderEndpointsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["ProviderEndpointPublic"][];
         };
         /**
          * ProviderHealthResponse
@@ -19621,6 +19793,172 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TestProviderResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-endpoints-list_provider_endpoints": {
+        parameters: {
+            query?: {
+                /** @description Only endpoints this workspace owns. */
+                workspace_id?: string | null;
+                /** @description Only endpoints this user owns. */
+                user_id?: string | null;
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderEndpointsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-endpoints-create_provider_endpoint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderEndpointCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderEndpointPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-endpoints-get_provider_endpoint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                endpoint_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderEndpointPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-endpoints-delete_provider_endpoint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                endpoint_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-endpoints-update_provider_endpoint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                endpoint_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderEndpointUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderEndpointPublic"];
                 };
             };
             /** @description Validation Error */

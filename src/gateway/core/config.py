@@ -1248,6 +1248,15 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
             "general egress control. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
         ),
     )
+    provider_endpoints_enabled: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
+        default=False,
+        description=(
+            "Serve provider endpoints owned by a workspace or a user, reached as '<name>:<model>' and "
+            f"managed through {API_ROOT}/provider-endpoints. Off by default. Their api_base is always "
+            "refused when it resolves to a private, loopback, link-local or reserved address, whatever "
+            "provider_allow_private_hosts says. Also settable via OTARI_PROVIDER_ENDPOINTS_ENABLED."
+        ),
+    )
     platform: Annotated[dict[str, Any], OMITTED] = Field(
         default_factory=dict, description="otari.ai connection settings"
     )

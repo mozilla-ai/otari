@@ -33,9 +33,9 @@ from collections.abc import Callable
 from enum import StrEnum, auto
 from typing import TYPE_CHECKING, Any
 
-from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.core.config import parse_bool_env
 from gateway.core.env import otari_env
+from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.log_config import logger
 from gateway.models.tools import CodeExecutor
 from gateway.services.tool_usage import ToolUsageTally

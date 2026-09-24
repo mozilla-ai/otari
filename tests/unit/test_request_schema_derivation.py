@@ -33,7 +33,6 @@ from pydantic import BaseModel, Field, create_model
 
 from gateway.api.routes._schema_derive import (
     PARAM_FIELD_RENAMES,
-    SENSITIVE_PARAM_FIELDS,
     derive_request_base,
 )
 from gateway.api.routes._tools import _strip_gateway_fields
@@ -42,6 +41,7 @@ from gateway.api.routes.chat import ChatCompletionRequest
 from gateway.api.routes.images import ImageGenerationRequest
 from gateway.api.routes.messages import MessagesRequest
 from gateway.api.routes.responses import ResponsesRequest
+from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 
 # Inference endpoints whose request schema mirrors an any-llm typed ``*Params``
 # model: (gateway request model, any-llm Params model). The request model derives

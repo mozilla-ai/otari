@@ -92,6 +92,7 @@ _SETTING_NAMES = frozenset(
         "pricing_refresh_interval_seconds",
         "privacy_url",
         "provider_allow_private_hosts",
+        "provider_endpoints_enabled",
         "providers",
         "public_base_url",
         "public_catalog",
