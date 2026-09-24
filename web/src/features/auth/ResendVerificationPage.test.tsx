@@ -5,8 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ResendVerificationPage } from "@/features/auth/ResendVerificationPage"
 import { apiFetch } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { bootstrap } from "@/tests/fixtures"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
 // The network boundary, not the hooks: the real hooks, their query keys, and
@@ -30,9 +32,11 @@ function renderPage() {
   })
   return render(
     <QueryClientProvider client={client}>
-      <ThemeProvider>
-        <ResendVerificationPage />
-      </ThemeProvider>
+      <DeploymentProvider value={bootstrap()}>
+        <ThemeProvider>
+          <ResendVerificationPage />
+        </ThemeProvider>
+      </DeploymentProvider>
     </QueryClientProvider>,
   )
 }

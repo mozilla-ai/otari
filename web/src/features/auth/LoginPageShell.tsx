@@ -1,9 +1,55 @@
 import { type ReactNode, useRef } from "react"
 import { FiMonitor, FiMoon, FiSun } from "react-icons/fi"
 import { IconButton } from "@/design-system/actions/IconButton"
+import { publicCatalogHref } from "@/features/models/publicCatalog"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 import { THEME_PREFERENCES, useTheme } from "@/shared/hooks/useTheme"
 import { LoginBackground } from "./background/LoginBackground"
 import savedBackground from "./background/login-background.json"
+
+/**
+ * Where the header's logo leads a visitor who reached a sign-in page and wants
+ * out: the deployment's public website, else its public catalog. With neither
+ * there is nowhere to go but the page they are on, so the mark stays unlinked.
+ */
+function brandHref({
+  site_url,
+  public_catalog,
+}: {
+  site_url: string | null
+  public_catalog: boolean
+}): string | null {
+  if (site_url) return site_url
+  return public_catalog ? publicCatalogHref() : null
+}
+
+function BrandMark() {
+  const href = brandHref(useDeployment())
+  const mark = (
+    <>
+      <img
+        src={`${import.meta.env.BASE_URL}favicon.svg`}
+        alt=""
+        width={273}
+        height={250}
+        className="h-6 w-[1.638rem]"
+      />
+      <span className="text-title transition-colors group-hover:text-muted motion-reduce:transition-none">
+        Otari
+      </span>
+    </>
+  )
+  if (!href) return <div className="flex items-center gap-3">{mark}</div>
+  return (
+    <a
+      href={href}
+      aria-label="Otari home"
+      className="group -mx-1 flex min-h-11 items-center gap-3 px-1"
+    >
+      {mark}
+    </a>
+  )
+}
 
 export function LoginPageShell({ children }: { children: ReactNode }) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -18,16 +64,7 @@ export function LoginPageShell({ children }: { children: ReactNode }) {
   return (
     <div className="relative isolate flex min-h-svh flex-col bg-background">
       <header className="relative z-10 flex min-h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-background px-4 md:px-6">
-        <div className="flex items-center gap-3">
-          <img
-            src={`${import.meta.env.BASE_URL}favicon.svg`}
-            alt=""
-            width={273}
-            height={250}
-            className="h-6 w-[1.638rem]"
-          />
-          <span className="text-title">Otari</span>
-        </div>
+        <BrandMark />
         {/* No `md:` step down: the header is `min-h-14`, so a 44px target fits
             inside it at every width without moving the row. */}
         <IconButton
