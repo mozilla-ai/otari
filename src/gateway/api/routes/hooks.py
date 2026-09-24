@@ -87,7 +87,7 @@ router = APIRouter(
 # since they guard the evaluator's own cost, not this route's: `otari hook`'s
 # own local evaluation needs them just as much as an HTTP caller does, and
 # sharing one place keeps the two from drifting apart.
-_MAX_CHANGED_PATHS = 10_000
+_MAX_PATHS = 10_000
 _MAX_COMMANDS = 10_000
 
 # A judge verdict is a small, fixed-shape record (see JudgeVerdictRequest), not
@@ -154,16 +154,20 @@ class PolicyCheckRequest(BaseModel):
     # collected and there is none (`not_applicable`). This used to default to
     # `[]`, which collapsed the two and let an omitted field certify every
     # path gate as passing.
-    changed_paths: list[str] | None = Field(
+    paths: list[str] | None = Field(
         default=None,
-        max_length=_MAX_CHANGED_PATHS,
-        description="Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).",
+        max_length=_MAX_PATHS,
+        description=(
+            "Repo-relative paths this moment of the session puts in scope: what `git status "
+            "--porcelain` reports, or the single target a tool call is about to write or read. "
+            "`path_source` says which."
+        ),
     )
     # None (omitted, or an explicit `null`) is distinct from `[]`: None means
     # this caller never collects command evidence at all (evaluate_command
     # reports `unknown`, blocking a required gate rather than reading absent
     # evidence as a pass); `[]` means it was collected and there is none right
-    # now (`not_applicable`). Unlike changed_paths, an omitted commands field
+    # now (`not_applicable`). Unlike paths, an omitted commands field
     # is not defaulted to a list, because collapsing that distinction is
     # exactly the bug this field's default used to have.
     commands: list[str] | None = Field(
@@ -172,24 +176,25 @@ class PolicyCheckRequest(BaseModel):
         description="Shell commands the caller observed run or is about to run.",
     )
     # No default, unlike command_scope below, and required whenever
-    # changed_paths is present: a path list that does not say which moment it
+    # paths is present: a path list that does not say which moment it
     # was read at is one no gate can resolve against, because a gate's own
-    # `runs` names both the moment and the evidence. Either default would be
+    # `runs` names both the moment and the evidence. Any default would be
     # wrong rather than merely lossy: "pre_tool_use.edit_target" would make a
-    # Stop event's git evidence silently disable every working-tree gate, and
+    # Stop event's git evidence silently disable every working-tree gate,
     # "stop.working_tree" would fail a working-tree gate for a write that has
-    # not happened yet. run_policy_check rejects the combination.
-    changed_path_source: RunsAt | None = Field(
+    # not happened yet, and either would put a read in front of a gate that
+    # only ever asked about writes. run_policy_check rejects the combination.
+    path_source: RunsAt | None = Field(
         default=None,
         description=(
-            "Which moment `changed_paths` was read at, matching the `runs` values a path gate "
-            "declares. Only two of the five `runs` values are legal here, because only those "
-            "two are moments a path can be read at: `pre_tool_use.edit_target` for a tool "
-            "call's own target before it runs, and `stop.working_tree` for `git status` once "
-            "the turn is over. Required whenever `changed_paths` is non-empty, and rejected "
-            "with a 422 if omitted or set to any other value: either would resolve every path "
-            "gate `not_applicable`, which loses enforcement without reporting anything. An "
-            "empty `changed_paths` needs no source."
+            "Which moment `paths` was read at, matching the `runs` values a path gate declares. "
+            "Only three of the six `runs` values are legal here, because only those three are "
+            "moments a path can be read at: `pre_tool_use.edit_target` for a write tool's own "
+            "target before it runs, `pre_tool_use.read_target` for a read tool's, and "
+            "`stop.working_tree` for `git status` once the turn is over. Required whenever "
+            "`paths` is non-empty, and rejected with a 422 if omitted or set to any other "
+            "value: either would resolve every path gate `not_applicable`, which loses "
+            "enforcement without reporting anything. An empty `paths` needs no source."
         ),
     )
     # Defaults to "call" so a client written before this field existed keeps
@@ -205,7 +210,7 @@ class PolicyCheckRequest(BaseModel):
             "`session` for every command the session has run so far."
         ),
     )
-    # A tri-state, like changed_paths/commands above, but for a different
+    # A tri-state, like paths/commands above, but for a different
     # reason: a verdict already names the one gate it judged, so there is no
     # "collected, and there is none for this gate" case an empty list needs
     # to express that a missing gate id doesn't already cover. What None
@@ -274,9 +279,9 @@ async def check_policy(request: PolicyCheckRequest) -> PolicyCheckResponse:
         result = run_policy_check(
             request.policy_yaml,
             source="request body",
-            changed_paths=request.changed_paths,
+            paths=request.paths,
             commands=request.commands,
-            changed_path_source=request.changed_path_source,
+            path_source=request.path_source,
             command_scope=request.command_scope,
             judge_results=(
                 None

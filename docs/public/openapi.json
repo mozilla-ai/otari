@@ -11454,41 +11454,6 @@
         "additionalProperties": false,
         "description": "A policy body plus the evidence to check it against, both caller-supplied.",
         "properties": {
-          "changed_path_source": {
-            "anyOf": [
-              {
-                "enum": [
-                  "pre_tool_use.edit_target",
-                  "pre_tool_use.command",
-                  "stop.working_tree",
-                  "stop.session",
-                  "stop.verifier"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Which moment `changed_paths` was read at, matching the `runs` values a path gate declares. Only two of the five `runs` values are legal here, because only those two are moments a path can be read at: `pre_tool_use.edit_target` for a tool call's own target before it runs, and `stop.working_tree` for `git status` once the turn is over. Required whenever `changed_paths` is non-empty, and rejected with a 422 if omitted or set to any other value: either would resolve every path gate `not_applicable`, which loses enforcement without reporting anything. An empty `changed_paths` needs no source.",
-            "title": "Changed Path Source"
-          },
-          "changed_paths": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "maxItems": 10000,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).",
-            "title": "Changed Paths"
-          },
           "check_results": {
             "anyOf": [
               {
@@ -11546,6 +11511,42 @@
             ],
             "description": "Model verdicts the caller collected for this request's judge gates.",
             "title": "Judge Results"
+          },
+          "path_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pre_tool_use.edit_target",
+                  "pre_tool_use.read_target",
+                  "pre_tool_use.command",
+                  "stop.working_tree",
+                  "stop.session",
+                  "stop.verifier"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which moment `paths` was read at, matching the `runs` values a path gate declares. Only three of the six `runs` values are legal here, because only those three are moments a path can be read at: `pre_tool_use.edit_target` for a write tool's own target before it runs, `pre_tool_use.read_target` for a read tool's, and `stop.working_tree` for `git status` once the turn is over. Required whenever `paths` is non-empty, and rejected with a 422 if omitted or set to any other value: either would resolve every path gate `not_applicable`, which loses enforcement without reporting anything. An empty `paths` needs no source.",
+            "title": "Path Source"
+          },
+          "paths": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 10000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Repo-relative paths this moment of the session puts in scope: what `git status --porcelain` reports, or the single target a tool call is about to write or read. `path_source` says which.",
+            "title": "Paths"
           },
           "policy_yaml": {
             "maxLength": 262144,

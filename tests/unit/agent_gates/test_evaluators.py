@@ -1,7 +1,7 @@
 import time
 
 from otari_agent.domain.evaluators import _segment_matches, _segments_match, evaluate_path
-from otari_agent.domain.types import ChangedPathEvidence, Outcome, PathGate
+from otari_agent.domain.types import Outcome, PathEvidence, PathGate
 
 
 def _gate(**overrides: object) -> PathGate:
@@ -17,13 +17,13 @@ def _gate(**overrides: object) -> PathGate:
 
 
 def test_pass_when_no_forbidden_path_changed() -> None:
-    result = evaluate_path(_gate(), ChangedPathEvidence(changed_paths=("README.md", "src/gateway/cli.py")))
+    result = evaluate_path(_gate(), PathEvidence(paths=("README.md", "src/gateway/cli.py")))
     assert result.outcome is Outcome.PASS
     assert not result.outcome.is_blocking
 
 
 def test_fail_when_a_forbidden_path_changed() -> None:
-    evidence = ChangedPathEvidence(changed_paths=("CHANGELOG.md",))
+    evidence = PathEvidence(paths=("CHANGELOG.md",))
     result = evaluate_path(_gate(), evidence)
     assert result.outcome is Outcome.FAIL
     assert result.outcome.is_blocking
@@ -45,7 +45,7 @@ def test_not_applicable_when_evidence_is_an_explicit_empty_list() -> None:
     never had anything to check. Both are non-blocking, so this is about what
     gets reported, not what gets enforced.
     """
-    result = evaluate_path(_gate(), ChangedPathEvidence(changed_paths=()))
+    result = evaluate_path(_gate(), PathEvidence(paths=()))
     assert result.outcome is Outcome.NOT_APPLICABLE
     assert not result.outcome.is_blocking
 
@@ -53,19 +53,19 @@ def test_not_applicable_when_evidence_is_an_explicit_empty_list() -> None:
 def test_star_does_not_cross_a_path_segment() -> None:
     gate = _gate(forbidden=("src/*.py",))
     # A single '*' must not match the nested file: only a direct child of src/ counts.
-    result = evaluate_path(gate, ChangedPathEvidence(changed_paths=("src/gateway/cli.py",)))
+    result = evaluate_path(gate, PathEvidence(paths=("src/gateway/cli.py",)))
     assert result.outcome is Outcome.PASS
 
 
 def test_double_star_crosses_path_segments() -> None:
     gate = _gate(forbidden=("src/**",))
-    result = evaluate_path(gate, ChangedPathEvidence(changed_paths=("src/gateway/cli.py",)))
+    result = evaluate_path(gate, PathEvidence(paths=("src/gateway/cli.py",)))
     assert result.outcome is Outcome.FAIL
 
 
 def test_advisory_gate_does_not_block_required() -> None:
     gate = _gate(enforcement="advisory")
-    result = evaluate_path(gate, ChangedPathEvidence(changed_paths=("CHANGELOG.md",)))
+    result = evaluate_path(gate, PathEvidence(paths=("CHANGELOG.md",)))
     assert result.outcome is Outcome.FAIL
     assert result.enforcement == "advisory"
 

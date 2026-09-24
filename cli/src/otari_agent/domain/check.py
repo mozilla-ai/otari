@@ -25,7 +25,6 @@ from otari_agent.domain.evaluators import (
 from otari_agent.domain.policy import PolicyError, parse_policy
 from otari_agent.domain.types import (
     PATH_EVIDENCE_SOURCES,
-    ChangedPathEvidence,
     CheckEvidence,
     CheckVerdict,
     CommandEvidence,
@@ -37,6 +36,7 @@ from otari_agent.domain.types import (
     JudgeEvidence,
     JudgeGate,
     JudgeVerdict,
+    PathEvidence,
     PathGate,
     RunsAt,
     VerifierGate,
@@ -101,7 +101,7 @@ class PolicyCheckResult:
 
 def _evaluate_gate(
     gate: GateSpec,
-    changed_path_evidence: ChangedPathEvidence | None,
+    path_evidence: PathEvidence | None,
     command_evidence: CommandEvidence | None,
     judge_evidence: JudgeEvidence | None,
     check_evidence: CheckEvidence | None,
@@ -110,15 +110,15 @@ def _evaluate_gate(
 ) -> GateResult:
     """Dispatch one gate to its evaluator. Extend as a new gate type joins ``GateSpec``."""
     if isinstance(gate, PathGate):
-        return evaluate_path(gate, changed_path_evidence)
+        return evaluate_path(gate, path_evidence)
     if isinstance(gate, CommandGate):
         return evaluate_command(gate, command_evidence, segment_cache=segment_cache, phrase_cache=phrase_cache)
     if isinstance(gate, JudgeGate):
-        return evaluate_judge(gate, changed_path_evidence, judge_evidence)
+        return evaluate_judge(gate, path_evidence, judge_evidence)
     if isinstance(gate, VerifierGate):
-        return evaluate_verifier(gate, changed_path_evidence, check_evidence)
+        return evaluate_verifier(gate, path_evidence, check_evidence)
     return evaluate_command_if_changed(
-        gate, changed_path_evidence, command_evidence, segment_cache=segment_cache, phrase_cache=phrase_cache
+        gate, path_evidence, command_evidence, segment_cache=segment_cache, phrase_cache=phrase_cache
     )
 
 
@@ -126,9 +126,9 @@ def run_policy_check(
     policy_yaml: str,
     *,
     source: str,
-    changed_paths: Sequence[str] | None,
+    paths: Sequence[str] | None,
     commands: Sequence[str] | None,
-    changed_path_source: RunsAt | None = None,
+    path_source: RunsAt | None = None,
     command_scope: EvidenceScope = "call",
     judge_results: Sequence[JudgeVerdict] | None = None,
     check_results: Sequence[CheckVerdict] | None = None,
@@ -149,9 +149,9 @@ def run_policy_check(
     except PolicyError as exc:
         raise PolicyCheckError(str(exc)) from exc
 
-    for path in changed_paths or ():
+    for path in paths or ():
         if len(path) > _MAX_PATH_LENGTH:
-            raise PolicyCheckError(f"changed_paths entry exceeds {_MAX_PATH_LENGTH} characters.")
+            raise PolicyCheckError(f"paths entry exceeds {_MAX_PATH_LENGTH} characters.")
     for command in commands or ():
         if len(command) > _MAX_COMMAND_LENGTH:
             raise PolicyCheckError(f"commands entry exceeds {_MAX_COMMAND_LENGTH} characters.")
@@ -172,24 +172,20 @@ def run_policy_check(
     # A submitted path list must say which moment it was read at, or a gate
     # cannot tell a PreToolUse call apart from a Stop event on a clean tree and
     # the `runs` declaration means nothing. Refused rather than defaulted:
-    # either default silently disables one half of every path gate.
-    if changed_paths and changed_path_source not in PATH_EVIDENCE_SOURCES:
+    # any default silently disables every path gate that named a different one.
+    if paths and path_source not in PATH_EVIDENCE_SOURCES:
         # Refuses a missing label and an inapplicable one alike. A path read at
         # `stop.session` or `pre_tool_use.command` is not a moment any path gate
         # can declare, so accepting it would resolve every one of them
         # not_applicable: enforcement lost without a word, which is the failure
         # this whole field exists to remove.
         raise PolicyCheckError(
-            f"changed_paths was submitted with changed_path_source={changed_path_source!r}, which no "
+            f"paths was submitted with path_source={path_source!r}, which no "
             "path gate can be declared to run at, so none of them could resolve against it. Submit one "
             f"of: {', '.join(PATH_EVIDENCE_SOURCES)}."
         )
-    changed_path_evidence = (
-        ChangedPathEvidence(changed_paths=tuple(dict.fromkeys(changed_paths)), source=changed_path_source)
-        if changed_paths is not None
-        else None
-    )
-    path_list = changed_path_evidence.changed_paths if changed_path_evidence is not None else ()
+    path_evidence = PathEvidence(paths=tuple(dict.fromkeys(paths)), source=path_source) if paths is not None else None
+    path_list = path_evidence.paths if path_evidence is not None else ()
     path_globs = (
         [glob for gate in path_gates for glob in gate.forbidden]
         + [glob for gate in command_if_changed_gates for glob in gate.when_changed]
@@ -207,7 +203,7 @@ def run_policy_check(
             f"This policy and evidence would take an estimated {estimated_work:,} match operations "
             f"across {comparisons:,} pattern/path comparisons, over this build's limits "
             f"({_MAX_MATCH_WORK:,} and {_MAX_COMPARISONS:,} respectively). Narrow the policy's "
-            "forbidden globs or the submitted changed_paths."
+            "forbidden globs or the submitted paths."
         )
 
     command_evidence = (
@@ -275,7 +271,7 @@ def run_policy_check(
     # submitted.
     results = tuple(
         _evaluate_gate(
-            gate, changed_path_evidence, command_evidence, judge_evidence, check_evidence, segment_cache, phrase_cache
+            gate, path_evidence, command_evidence, judge_evidence, check_evidence, segment_cache, phrase_cache
         )
         for gate in spec.gates
     )

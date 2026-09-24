@@ -1,5 +1,5 @@
 from otari_agent.domain.evaluators import evaluate_command_if_changed, tokenize_commands
-from otari_agent.domain.types import ChangedPathEvidence, CommandEvidence, CommandIfChangedGate, Outcome
+from otari_agent.domain.types import CommandEvidence, CommandIfChangedGate, Outcome, PathEvidence
 
 
 def _gate(**overrides: object) -> CommandIfChangedGate:
@@ -18,7 +18,7 @@ def _gate(**overrides: object) -> CommandIfChangedGate:
 def test_pass_when_path_matches_and_required_command_ran() -> None:
     result = evaluate_command_if_changed(
         _gate(),
-        ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
+        PathEvidence(paths=("docs/public/openapi.json",)),
         CommandEvidence(commands=("make postman",), scope="session"),
     )
     assert result.outcome is Outcome.PASS
@@ -28,7 +28,7 @@ def test_pass_when_path_matches_and_required_command_ran() -> None:
 def test_fail_when_path_matches_and_required_command_did_not_run() -> None:
     result = evaluate_command_if_changed(
         _gate(),
-        ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
+        PathEvidence(paths=("docs/public/openapi.json",)),
         CommandEvidence(commands=("git status", "make lint"), scope="session"),
     )
     assert result.outcome is Outcome.FAIL
@@ -46,7 +46,7 @@ def test_not_applicable_under_call_scope_even_when_a_path_matches() -> None:
     """
     result = evaluate_command_if_changed(
         _gate(),
-        ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
+        PathEvidence(paths=("docs/public/openapi.json",)),
         CommandEvidence(commands=("git status",), scope="call"),
     )
     assert result.outcome is Outcome.NOT_APPLICABLE
@@ -64,7 +64,7 @@ def test_fail_when_session_scope_collected_no_commands_at_all() -> None:
     """
     result = evaluate_command_if_changed(
         _gate(),
-        ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
+        PathEvidence(paths=("docs/public/openapi.json",)),
         CommandEvidence(commands=(), scope="session"),
     )
     assert result.outcome is Outcome.FAIL
@@ -75,7 +75,7 @@ def test_fail_when_session_scope_collected_no_commands_at_all() -> None:
 def test_not_applicable_when_no_path_matches() -> None:
     result = evaluate_command_if_changed(
         _gate(),
-        ChangedPathEvidence(changed_paths=("README.md",)),
+        PathEvidence(paths=("README.md",)),
         CommandEvidence(commands=(), scope="session"),
     )
     assert result.outcome is Outcome.NOT_APPLICABLE
@@ -89,7 +89,7 @@ def test_not_applicable_wins_over_missing_commands_when_nothing_relevant_changed
     """
     result = evaluate_command_if_changed(
         _gate(),
-        ChangedPathEvidence(changed_paths=()),
+        PathEvidence(paths=()),
         CommandEvidence(commands=(), scope="session"),
     )
     assert result.outcome is Outcome.NOT_APPLICABLE
@@ -102,9 +102,7 @@ def test_unknown_when_changed_path_evidence_was_not_collected() -> None:
 
 
 def test_unknown_when_command_evidence_was_not_collected() -> None:
-    result = evaluate_command_if_changed(
-        _gate(), ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)), None
-    )
+    result = evaluate_command_if_changed(_gate(), PathEvidence(paths=("docs/public/openapi.json",)), None)
     assert result.outcome is Outcome.UNKNOWN
 
 
@@ -117,7 +115,7 @@ def test_any_one_require_phrase_satisfies_the_gate() -> None:
     gate = _gate(require=("make postman", "python scripts/generate_postman.py"))
     result = evaluate_command_if_changed(
         gate,
-        ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
+        PathEvidence(paths=("docs/public/openapi.json",)),
         CommandEvidence(commands=("python scripts/generate_postman.py --check",), scope="session"),
     )
     assert result.outcome is Outcome.PASS
@@ -127,7 +125,7 @@ def test_advisory_gate_does_not_block_required() -> None:
     gate = _gate(enforcement="advisory")
     result = evaluate_command_if_changed(
         gate,
-        ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
+        PathEvidence(paths=("docs/public/openapi.json",)),
         CommandEvidence(commands=("git status",), scope="session"),
     )
     assert result.outcome is Outcome.FAIL
@@ -145,7 +143,7 @@ def test_shares_a_precomputed_segment_cache() -> None:
     cache = tokenize_commands(evidence.commands)
     result = evaluate_command_if_changed(
         _gate(),
-        ChangedPathEvidence(changed_paths=("docs/public/openapi.json",)),
+        PathEvidence(paths=("docs/public/openapi.json",)),
         evidence,
         segment_cache=cache,
     )

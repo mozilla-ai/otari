@@ -49,7 +49,8 @@ MAX_GATE_ID_LENGTH = 200
 _SUPPORTED_SCHEMA_VERSIONS = {"1.0"}
 
 # Which `runs` values each gate type may declare. Four of the five admit
-# exactly one, because only a path can be known at two different moments (see
+# exactly one, because only a path is knowable at more than one moment: about
+# to be written, about to be read, or changed by the time the turn ends (see
 # PathGate). Requiring the field anyway, rather than defaulting the
 # single-choice types, is deliberate: a reader never has to know which types
 # have a choice to know when a gate runs, and a wrong value is a parse error

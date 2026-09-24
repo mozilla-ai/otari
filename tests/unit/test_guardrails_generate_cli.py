@@ -660,6 +660,6 @@ def test_a_proposal_missing_runs_is_refused_before_anything_is_written(
     assert result.exit_code == 0, result.output
     assert "does not pass validation" in result.output
     assert "needs a non-empty 'runs'" in result.output
-    assert "pre_tool_use.edit_target, stop.working_tree" in result.output
+    assert "pre_tool_use.edit_target, pre_tool_use.read_target, stop.working_tree" in result.output
     assert "Added 0 gate(s)" in result.output
     assert not (repo / ".otari-guardrails.yml").exists()

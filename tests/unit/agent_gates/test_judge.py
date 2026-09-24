@@ -1,5 +1,5 @@
 from otari_agent.domain.evaluators import evaluate_judge
-from otari_agent.domain.types import ChangedPathEvidence, JudgeEvidence, JudgeGate, JudgeVerdict, Outcome
+from otari_agent.domain.types import JudgeEvidence, JudgeGate, JudgeVerdict, Outcome, PathEvidence
 
 
 def _gate(**overrides: object) -> JudgeGate:
@@ -42,7 +42,7 @@ def test_unknown_when_evidence_is_submitted_but_empty() -> None:
 def test_unknown_when_evidence_has_no_verdict_for_this_gate() -> None:
     """A submitted list missing this gate's id is treated the same as no evidence at all.
 
-    Unlike ChangedPathEvidence/CommandEvidence, a verdict already names the
+    Unlike PathEvidence/CommandEvidence, a verdict already names the
     one gate it judged, so there is no separate "collected, and there is
     none" case to distinguish here.
     """
@@ -61,7 +61,7 @@ def test_unconditional_gate_ignores_changed_path_evidence_entirely() -> None:
     evidence = JudgeEvidence(
         verdicts=(JudgeVerdict(gate_id="follows-error-handling-pattern", outcome="pass", reasoning="fine"),)
     )
-    result = evaluate_judge(_gate(), ChangedPathEvidence(changed_paths=()), evidence)
+    result = evaluate_judge(_gate(), PathEvidence(paths=()), evidence)
     assert result.outcome is Outcome.PASS
 
 
@@ -77,7 +77,7 @@ def test_unknown_when_when_changed_is_set_but_no_changed_path_evidence_was_submi
 
 def test_not_applicable_when_when_changed_globs_match_nothing_that_changed() -> None:
     gate = _gate(when_changed=("src/**",))
-    changed_path_evidence = ChangedPathEvidence(changed_paths=("docs/README.md",))
+    changed_path_evidence = PathEvidence(paths=("docs/README.md",))
     evidence = JudgeEvidence(
         verdicts=(JudgeVerdict(gate_id="follows-error-handling-pattern", outcome="fail", reasoning="should not run"),)
     )
@@ -88,7 +88,7 @@ def test_not_applicable_when_when_changed_globs_match_nothing_that_changed() -> 
 
 def test_when_changed_gate_still_resolves_the_verdict_once_a_matching_path_changed() -> None:
     gate = _gate(when_changed=("src/**",))
-    changed_path_evidence = ChangedPathEvidence(changed_paths=("src/module.py",))
+    changed_path_evidence = PathEvidence(paths=("src/module.py",))
     evidence = JudgeEvidence(
         verdicts=(JudgeVerdict(gate_id="follows-error-handling-pattern", outcome="fail", reasoning="swallows"),)
     )

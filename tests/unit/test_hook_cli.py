@@ -110,12 +110,103 @@ def test_pretooluse_ignores_unhandled_tools(monkeypatch: pytest.MonkeyPatch, rep
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
-        "tool_name": "Read",
-        "tool_input": {"file_path": str(repo / "README.md")},
+        # Grep, not Read: Read is collected as `pre_tool_use.read_target`
+        # evidence now, and Grep is deliberately still not, since it returns
+        # matching lines rather than whole contents.
+        "tool_name": "Grep",
+        "tool_input": {"pattern": "SECRET", "path": str(repo / "README.md")},
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
     assert not called, "a tool call this integration does not name must never reach the Hook Server"
+
+
+@pytest.mark.parametrize("tool_name", ["Grep", "Glob"])
+def test_pretooluse_does_not_gate_the_narrow_search_tools(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tool_name: str
+) -> None:
+    """Grep and Glob stay ungated even though both name a path.
+
+    They return matching lines and file names rather than whole contents, and
+    reading one line through a narrow pattern is the mitigation a secret gate's
+    own message should recommend. Gating them would refuse the workaround.
+    """
+    called = False
+
+    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
+        nonlocal called
+        called = True
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": tool_name,
+        "tool_input": {"path": str(repo / ".env"), "pattern": "*"},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert not called
+
+
+def test_pretooluse_submits_a_read_target_as_its_own_moment(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """A Read call submits its target labeled `pre_tool_use.read_target`.
+
+    The label is the whole point: it is what lets a gate that asked about
+    reads see this, and what keeps it away from every path gate written before
+    reads were collectable at all.
+    """
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse(
+            {
+                "blocked": True,
+                "results": [
+                    {"gate_id": "no-secret-reads", "enforcement": "required", "outcome": "fail", "message": "no"}
+                ],
+            }
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(repo / ".env")},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 2, result.output
+    assert captured["json"]["paths"] == [".env"]
+    assert captured["json"]["path_source"] == "pre_tool_use.read_target"
+    assert captured["json"]["commands"] == []
+
+
+def test_a_read_outside_the_repo_submits_nothing(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """Mirrors the edit branch: a path no repo-relative glob can name is not evidence."""
+    called = False
+
+    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
+        nonlocal called
+        called = True
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    # The `repo` fixture is tmp_path itself, so "outside" has to climb above
+    # it rather than sit beside anything in it.
+    outside = repo.parent / "elsewhere.env"
+    outside.write_text("SECRET=1\n", encoding="utf-8")
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(outside)},
+    }
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert not called
 
 
 def test_pretooluse_submits_a_bash_command_for_command(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -142,7 +233,7 @@ def test_pretooluse_submits_a_bash_command_for_command(monkeypatch: pytest.Monke
     result = _invoke(payload)
     assert result.exit_code == 2, result.output
     assert captured["json"]["commands"] == ["git push --force"]
-    assert captured["json"]["changed_paths"] == []
+    assert captured["json"]["paths"] == []
 
 
 def test_an_oversize_bash_command_is_truncated_rather_than_rejected(
@@ -244,7 +335,7 @@ def test_stop_event_blocks_on_git_status(monkeypatch: pytest.MonkeyPatch, repo: 
     payload = {"hook_event_name": "Stop", "cwd": str(repo)}
     result = _invoke(payload)
     assert result.exit_code == 2, result.output
-    assert captured["json"]["changed_paths"] == ["CHANGELOG.md"]
+    assert captured["json"]["paths"] == ["CHANGELOG.md"]
 
 
 def test_stop_event_evaluates_locally_and_blocks_on_git_status(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -660,7 +751,7 @@ def test_pretooluse_submits_a_posix_relative_path(monkeypatch: pytest.MonkeyPatc
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    submitted = captured["json"]["changed_paths"]
+    submitted = captured["json"]["paths"]
     assert submitted == ["docs/guide/page.md"]
     assert "\\" not in submitted[0]
 
@@ -680,7 +771,7 @@ def test_stop_event_parses_a_rename_as_its_new_path(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(httpx, "post", fake_post)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)})
     assert result.exit_code == 0, result.output
-    assert captured["json"]["changed_paths"] == ["renamed.txt"]
+    assert captured["json"]["paths"] == ["renamed.txt"]
 
 
 def test_stop_event_does_not_misparse_a_filename_containing_an_arrow(
@@ -705,7 +796,7 @@ def test_stop_event_does_not_misparse_a_filename_containing_an_arrow(
     monkeypatch.setattr(httpx, "post", fake_post)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)})
     assert result.exit_code == 0, result.output
-    assert captured["json"]["changed_paths"] == ["weird -> name.txt"]
+    assert captured["json"]["paths"] == ["weird -> name.txt"]
 
 
 def test_stop_event_reports_a_non_ascii_filename_unescaped(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -723,7 +814,7 @@ def test_stop_event_reports_a_non_ascii_filename_unescaped(monkeypatch: pytest.M
     monkeypatch.setattr(httpx, "post", fake_post)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)})
     assert result.exit_code == 0, result.output
-    assert captured["json"]["changed_paths"] == ["café.txt"]
+    assert captured["json"]["paths"] == ["café.txt"]
 
 
 def test_stop_event_does_not_block_when_git_status_fails(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -1797,7 +1888,7 @@ def test_stop_event_bounds_total_judge_time_so_a_required_gate_still_reaches_the
     assert sorted(entry["outcome"] for entry in verdicts) == ["error", "error", "pass"]
     starved = [entry["reasoning"] for entry in verdicts if entry["outcome"] == "error"]
     assert all("budget" in reasoning for reasoning in starved), starved
-    assert captured["json"]["changed_paths"] == ["CHANGELOG.md"]
+    assert captured["json"]["paths"] == ["CHANGELOG.md"]
 
 
 def test_stop_event_with_a_non_utf8_diff_still_blocks_a_required_gate(
@@ -1865,7 +1956,7 @@ def test_stop_event_with_a_non_utf8_diff_still_blocks_a_required_gate(
     # .otari-guardrails.yml itself is untracked here (written after the initial commit,
     # for a self-contained test repo) and so is real, expected changed-path evidence
     # too, alongside the two files this test cares about.
-    assert sorted(captured["json"]["changed_paths"]) == [
+    assert sorted(captured["json"]["paths"]) == [
         ".otari-guardrails.yml",
         "CHANGELOG.md",
         "src/gateway/latin.py",
@@ -2255,7 +2346,7 @@ def test_pretooluse_labels_each_branch_with_the_moment_it_really_is(
             "tool_input": tool_input,
         }
         assert _invoke(payload).exit_code == 0
-        assert captured["json"]["changed_path_source"] == expected, tool_name
+        assert captured["json"]["path_source"] == expected, tool_name
 
 
 def test_stop_event_labels_its_paths_as_the_working_tree(
@@ -2278,7 +2369,7 @@ def test_stop_event_labels_its_paths_as_the_working_tree(
     monkeypatch.setattr(httpx, "post", fake_post)
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     assert _invoke(payload).exit_code == 0
-    assert captured["json"]["changed_path_source"] == "stop.working_tree"
+    assert captured["json"]["path_source"] == "stop.working_tree"
 
 
 def test_a_repeat_stop_block_says_the_block_is_finite(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:

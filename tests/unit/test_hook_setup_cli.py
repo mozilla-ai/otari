@@ -25,6 +25,13 @@ _PATH_ONLY_GATES = (
     '    forbidden: ["CHANGELOG.md"]\n    message: m\n'
 )
 
+_READ_GATES = (
+    'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+    "  - id: g\n    type: path\n"
+    "    runs: [pre_tool_use.read_target]\n    enforcement: required\n"
+    '    forbidden: ["**/.env"]\n    message: m\n'
+)
+
 _COMMAND_GATES = (
     'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
     "  - id: g\n    type: command\n    runs: [pre_tool_use.command]\n    enforcement: required\n"
@@ -95,6 +102,50 @@ def test_an_existing_command_policy_adds_bash_to_the_matcher(repo: Path) -> None
     assert result.exit_code == 0, result.output
     settings = _read_settings(repo)
     assert settings["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Bash"
+
+
+def test_an_existing_read_policy_adds_read_to_the_matcher(repo: Path) -> None:
+    """A read gate is the one `runs` value that earns its own matcher group.
+
+    Nothing else distinguishes it: a read gate and an edit gate are the same
+    `path` type, so the matcher has to be picked from `runs` rather than from
+    the gate type the way Bash's is.
+    """
+    (repo / ".otari-guardrails.yml").write_text(_READ_GATES, encoding="utf-8")
+    result = _invoke("--api-key", "k")
+    assert result.exit_code == 0, result.output
+    settings = _read_settings(repo)
+    assert settings["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Read"
+
+
+def test_a_policy_with_no_read_gate_keeps_read_out_of_the_matcher(repo: Path) -> None:
+    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--api-key", "k")
+    assert result.exit_code == 0, result.output
+    assert "Read" not in _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"]
+    assert "pre_tool_use.read_target to also cover Read" in result.output
+
+
+def test_a_read_and_command_policy_earns_both_extra_groups(repo: Path) -> None:
+    combined = _READ_GATES + (
+        "  - id: c\n    type: command\n    runs: [pre_tool_use.command]\n"
+        '    enforcement: required\n    forbidden: ["npm install"]\n    message: m\n'
+    )
+    (repo / ".otari-guardrails.yml").write_text(combined, encoding="utf-8")
+    result = _invoke("--api-key", "k")
+    assert result.exit_code == 0, result.output
+    settings = _read_settings(repo)
+    assert settings["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Read|Bash"
+
+
+def test_codex_has_no_read_group_to_add(repo: Path) -> None:
+    """Codex has no read tool: its reads go through the shell, where they are command evidence."""
+    (repo / ".otari-guardrails.yml").write_text(_READ_GATES, encoding="utf-8")
+    result = _invoke("--harness", "codex", "--api-key", "k")
+    assert result.exit_code == 0, result.output
+    settings = json.loads((repo / ".codex" / "hooks.json").read_text(encoding="utf-8"))
+    assert settings["hooks"]["PreToolUse"][0]["matcher"] == "apply_patch"
+    assert "Read" not in result.output
 
 
 def test_an_unparseable_policy_defaults_to_the_narrower_matcher(repo: Path) -> None:

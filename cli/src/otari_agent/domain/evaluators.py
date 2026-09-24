@@ -13,7 +13,6 @@ import re
 import shlex
 
 from otari_agent.domain.types import (
-    ChangedPathEvidence,
     CheckEvidence,
     CommandEvidence,
     CommandGate,
@@ -22,6 +21,7 @@ from otari_agent.domain.types import (
     JudgeEvidence,
     JudgeGate,
     Outcome,
+    PathEvidence,
     PathGate,
     VerifierGate,
 )
@@ -650,7 +650,7 @@ def evaluate_command(
 
 def evaluate_command_if_changed(
     gate: CommandIfChangedGate,
-    changed_path_evidence: ChangedPathEvidence | None,
+    path_evidence: PathEvidence | None,
     command_evidence: CommandEvidence | None,
     *,
     segment_cache: dict[str, list[list[str]]] | None = None,
@@ -666,7 +666,7 @@ def evaluate_command_if_changed(
     that passed. An empty list is not absent evidence; see ``scope`` below.
 
     Resolves only against ``session``-scoped command evidence. A
-    ``PreToolUse`` call submits its own target as ``changed_paths`` and its
+    ``PreToolUse`` call submits its own target as ``paths`` and its
     one command (or none, for an edit tool) as ``call``-scoped evidence,
     before the edit itself has even run: the required command cannot have
     run in response to a change that has not happened yet, so failing there
@@ -691,7 +691,7 @@ def evaluate_command_if_changed(
     dicts to every call, so tokenizing costs once per request rather than
     once per gate.
     """
-    if changed_path_evidence is None or command_evidence is None:
+    if path_evidence is None or command_evidence is None:
         return GateResult(
             gate_id=gate.id,
             enforcement=gate.enforcement,
@@ -699,9 +699,7 @@ def evaluate_command_if_changed(
             message="Change or command evidence was not submitted.",
         )
 
-    matched_paths = sorted(
-        path for path in changed_path_evidence.changed_paths if _matches_any(path, gate.when_changed) is not None
-    )
+    matched_paths = sorted(path for path in path_evidence.paths if _matches_any(path, gate.when_changed) is not None)
     if not matched_paths:
         # Nothing this gate cares about changed: there is nothing to require
         # a command for, independent of whether any command ran at all.
@@ -765,14 +763,20 @@ def evaluate_command_if_changed(
     )
 
 
-def evaluate_path(gate: PathGate, evidence: ChangedPathEvidence | None) -> GateResult:
-    """Fail when a changed path matches one of the gate's forbidden globs."""
+def evaluate_path(gate: PathGate, evidence: PathEvidence | None) -> GateResult:
+    """Fail when a submitted path matches one of the gate's forbidden globs.
+
+    "Submitted" rather than "changed" because the evidence's own ``source``
+    decides which: a path about to be written, a path about to be read, or one
+    `git status` reports afterwards. The match is identical in all three; only
+    whether this gate asked to see that source differs.
+    """
     if evidence is None:
         return GateResult(
             gate_id=gate.id,
             enforcement=gate.enforcement,
             outcome=Outcome.UNKNOWN,
-            message="Change evidence was not submitted.",
+            message="Path evidence was not submitted.",
         )
 
     if evidence.source is not None and evidence.source not in gate.runs:
@@ -781,7 +785,8 @@ def evaluate_path(gate: PathGate, evidence: ChangedPathEvidence | None) -> GateR
         # gate does not look at this moment's evidence" is the more specific
         # and more debuggable reason than "nothing was submitted". This is the
         # line that keeps a `stop.working_tree`-only gate from reading a
-        # PreToolUse call as a clean result.
+        # PreToolUse call as a clean result, and the line that keeps read
+        # evidence off a gate that only ever asked about writes.
         return GateResult(
             gate_id=gate.id,
             enforcement=gate.enforcement,
@@ -789,21 +794,21 @@ def evaluate_path(gate: PathGate, evidence: ChangedPathEvidence | None) -> GateR
             message=f"This gate does not run at {evidence.source}.",
         )
 
-    if not evidence.changed_paths:
+    if not evidence.paths:
         # Mirrors evaluate_command: a caller submits an empty list for
         # exactly the events that carry no path evidence at all (a PreToolUse
-        # call for Bash rather than an edit tool), and PASS there reads as a
-        # check that ran and found nothing when this gate never had anything
-        # to check. Both outcomes are non-blocking, so this changes what is
-        # reported rather than what is enforced.
+        # call for Bash rather than an edit or read tool), and PASS there
+        # reads as a check that ran and found nothing when this gate never had
+        # anything to check. Both outcomes are non-blocking, so this changes
+        # what is reported rather than what is enforced.
         return GateResult(
             gate_id=gate.id,
             enforcement=gate.enforcement,
             outcome=Outcome.NOT_APPLICABLE,
-            message="No changed paths were submitted to check.",
+            message="No paths were submitted to check.",
         )
 
-    matched = sorted(path for path in evidence.changed_paths if _matches_any(path, gate.forbidden) is not None)
+    matched = sorted(path for path in evidence.paths if _matches_any(path, gate.forbidden) is not None)
     if matched:
         return GateResult(
             gate_id=gate.id,
@@ -816,13 +821,11 @@ def evaluate_path(gate: PathGate, evidence: ChangedPathEvidence | None) -> GateR
         gate_id=gate.id,
         enforcement=gate.enforcement,
         outcome=Outcome.PASS,
-        message="No forbidden paths changed.",
+        message="No forbidden paths were submitted.",
     )
 
 
-def evaluate_judge(
-    gate: JudgeGate, changed_path_evidence: ChangedPathEvidence | None, evidence: JudgeEvidence | None
-) -> GateResult:
+def evaluate_judge(gate: JudgeGate, path_evidence: PathEvidence | None, evidence: JudgeEvidence | None) -> GateResult:
     """Relay the caller's own model verdict for this gate; Otari never calls a model itself.
 
     ``evidence`` being ``None`` outright, before even checking
@@ -842,7 +845,7 @@ def evaluate_judge(
     ``gate.when_changed`` narrows applicability the same way
     ``CommandIfChangedGate.when_changed`` narrows its own gate, checked
     next, before looking for a verdict. Empty (the default) means this
-    gate always applies. Non-empty needs ``changed_path_evidence`` to resolve
+    gate always applies. Non-empty needs ``path_evidence`` to resolve
     at all (``unknown`` if it was never submitted, mirroring
     ``evaluate_command_if_changed``'s own applicability check) and resolves
     ``not_applicable`` when nothing the gate cares about changed, the same
@@ -872,14 +875,14 @@ def evaluate_judge(
         )
 
     if gate.when_changed:
-        if changed_path_evidence is None:
+        if path_evidence is None:
             return GateResult(
                 gate_id=gate.id,
                 enforcement=gate.enforcement,
                 outcome=Outcome.UNKNOWN,
-                message="Change evidence was not submitted.",
+                message="Path evidence was not submitted.",
             )
-        if not matched_changed_paths(gate.when_changed, changed_path_evidence.changed_paths):
+        if not matched_changed_paths(gate.when_changed, path_evidence.paths):
             return GateResult(
                 gate_id=gate.id,
                 enforcement=gate.enforcement,
@@ -924,7 +927,7 @@ def evaluate_judge(
 
 
 def evaluate_verifier(
-    gate: VerifierGate, changed_path_evidence: ChangedPathEvidence | None, evidence: CheckEvidence | None
+    gate: VerifierGate, path_evidence: PathEvidence | None, evidence: CheckEvidence | None
 ) -> GateResult:
     """Relay the caller's own verifier verdict for this gate; Otari never runs a verifier itself.
 
@@ -948,14 +951,14 @@ def evaluate_verifier(
         )
 
     if gate.when_changed:
-        if changed_path_evidence is None:
+        if path_evidence is None:
             return GateResult(
                 gate_id=gate.id,
                 enforcement=gate.enforcement,
                 outcome=Outcome.UNKNOWN,
-                message="Change evidence was not submitted.",
+                message="Path evidence was not submitted.",
             )
-        if not matched_changed_paths(gate.when_changed, changed_path_evidence.changed_paths):
+        if not matched_changed_paths(gate.when_changed, path_evidence.paths):
             return GateResult(
                 gate_id=gate.id,
                 enforcement=gate.enforcement,

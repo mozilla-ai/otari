@@ -121,17 +121,18 @@ when the gate gets a chance to run at all.
 | entry | runs at | sees | can it refuse the action? | is it complete? |
 |---|---|---|---|---|
 | `pre_tool_use.edit_target` | before a tool call | the path an `Edit`/`Write`/`NotebookEdit` (or Codex `apply_patch`) call names in its own `tool_input` | yes, the write never happens | no: a `Bash` call declares no path, so every shell write is invisible |
+| `pre_tool_use.read_target` | before a tool call | the path a `Read` call names in its own `tool_input` | yes, the contents never enter the transcript | no: a shell read (`cat`, `less`) is invisible, and nothing catches it later |
 | `pre_tool_use.command` | before a tool call | the literal text of a `Bash` command | yes, the command never runs | no: it cannot see inside a script the command invokes |
 | `stop.working_tree` | after the turn | every path `git status --porcelain` reports | no, the file already changed | yes, over the tree, whatever wrote it |
 | `stop.session` | after the turn | the working tree plus the session's own transcript | no | yes |
 | `stop.verifier` | after the turn | a repo-local verifier script's exit code | no | whatever the script checks |
 
 Each gate type accepts only certain entries, because only a path is knowable
-at two different moments:
+at more than one moment:
 
 | gate type | legal `runs` |
 |---|---|
-| `path` | `pre_tool_use.edit_target`, `stop.working_tree`, or both |
+| `path` | `pre_tool_use.edit_target`, `pre_tool_use.read_target`, `stop.working_tree`, or any combination |
 | `command` | `pre_tool_use.command` |
 | `command_if_changed` | `stop.session` |
 | `judge` | `stop.session` |
@@ -143,12 +144,20 @@ which gate types have a choice in order to know when a gate runs, and a wrong
 value is a parse error that names the legal set rather than a gate that
 quietly never fires.
 
-**There is no entry covering a path a shell command is about to write.** No
+**There is no entry covering a path a shell command is about to touch.** No
 such evidence exists to collect: before the command runs there is only its
-text, and enumerating what an arbitrary shell line will touch is not
-decidable. So a `path` gate cannot prevent `echo x >> CHANGELOG.md`;
-it catches it at `stop.working_tree`, after the file changed. If you need that
+text, and enumerating what an arbitrary shell line will read or write is not
+decidable. So a `path` gate cannot prevent `echo x >> CHANGELOG.md`; it
+catches it at `stop.working_tree`, after the file changed. If you need that
 command refused before it runs, that is what `command` is for.
+
+**For a read, that gap has no afterwards.** A write the shell slips past
+`pre_tool_use.edit_target` still lands in the tree, so `stop.working_tree`
+reports it and the turn is blocked over a file that already changed. A read
+the shell slips past `pre_tool_use.read_target` lands nowhere: a read changes
+nothing, `git status` has nothing to report, and no `stop` entry exists or
+could exist for one. `cat .env` is therefore refused only by a `command`
+gate, or not at all. Plan a secret rule as two gates, not one.
 
 ## Gate types
 
@@ -169,7 +178,9 @@ within one path segment; `**` crosses segment boundaries.
 This is the only gate type with a real choice of `runs`, and the choice is
 what the field exists for. `pre_tool_use.edit_target` refuses a write before
 it happens but sees only tools that declare a path; `stop.working_tree` sees
-everything but only once it has happened. Most rules want both, as above.
+everything but only once it has happened. Most write rules want both, as
+above. `pre_tool_use.read_target` is a third moment for the same glob list,
+covered in its own section below.
 
 Both is usually right even for a path a build generates. It is tempting to
 reason that no tool call will ever name a generated bundle, so
@@ -185,14 +196,93 @@ deliberately do not want the turn blocked over a change that is already in
 the tree. Name only `stop.working_tree` when you want the finished state
 judged and are content for the write itself to go through.
 
-Evidence is whatever `changed_paths` list the caller submits, together with
-the `changed_path_source` saying which moment it was read at: Otari does no
-Git I/O of its own, so it only sees what the caller reports
-(`client_reported` provenance, never confused with something Otari observed
-directly). A path list submitted without a source is refused rather than
-guessed at, because either guess silently disables one half of every path
-gate. Renames should be submitted as their destination path. This is the v0
-glob grammar; broader symlink/monorepo/rename semantics are not built yet.
+Evidence is whatever `paths` list the caller submits, together with the
+`path_source` saying which moment it was read at: Otari does no Git I/O of
+its own, so it only sees what the caller reports (`client_reported`
+provenance, never confused with something Otari observed directly). A path
+list submitted without a source is refused rather than guessed at, because
+any guess silently disables every path gate that named a different moment.
+Renames should be submitted as their destination path. This is the v0 glob
+grammar; broader symlink/monorepo/rename semantics are not built yet.
+
+#### Refusing a read
+
+`pre_tool_use.read_target` puts the same `forbidden` globs in front of the
+`Read` tool. A match refuses the call, so the file's contents never enter the
+transcript, where they would stay for the rest of the session. That
+permanence is why this is prevention or nothing: there is no later moment at
+which a read can be caught.
+
+```yaml
+  - id: no-secret-reads
+    type: path
+    runs: [pre_tool_use.read_target]
+    enforcement: required
+    forbidden: [".env", "**/.env", "**/*.pem"]
+    message: >-
+      Secrets stay out of the transcript. If you need one key, grep for that
+      one line rather than reading the file.
+```
+
+`required` is allowed here, unlike on a `judge` gate: a glob match is
+reproducible, so there is nothing to hedge about.
+
+Three things this does not cover, all of them deliberate:
+
+- **`Grep` and `Glob` are not gated.** They return matching lines and file
+  names rather than whole contents, and grepping for the one line you need is
+  exactly the mitigation the message above recommends. Gating them would
+  refuse the workaround.
+- **A shell read is invisible**, the same way a shell write is invisible to
+  `pre_tool_use.edit_target`: `cat .env`, `less .env`, `head -5 .env` and
+  anything a script does internally all go through `Bash`, which declares no
+  path. Unlike a write, nothing catches this afterwards. Pair the gate with a
+  `command` gate if shell reads matter, and read that gate type's own section
+  on what a phrase can and cannot express, because a path-qualified argument
+  (`cat config/.env`) does not match a bare `.env` phrase.
+- **Codex has no read tool at all**, so this source is never collected there.
+  Its reads go through the shell, where they are `pre_tool_use.command`
+  evidence like everything else.
+
+`otari guardrails validate` warns about the second of those until some
+`command` gate's own forbidden phrase names a path these globs match, which
+is the one mechanically checkable form of "the shell was considered here". It
+is not a coverage proof, and cannot be: the measured table below shows a
+phrase catching the bare spelling and missing a path-qualified one. The
+warning clears anyway, because a warning that cannot be cleared fails
+`--strict` forever and would make this source unusable in CI.
+
+`otari hook setup` adds `Read` to the registered PreToolUse matcher exactly
+when the guardrail has a gate that names this source.
+
+What a `command` gate does and does not catch, measured against this build:
+
+| command | caught by `forbidden: ["cat .env", "head .env"]` |
+|---|---|
+| `cat .env` | yes |
+| `head .env` | yes |
+| `head -5 .env` | **no**: a phrase matches a contiguous token run, and the flag breaks it |
+| `cat ./.env` | no |
+| `cat /abs/path/.env` | no |
+| `cat config/.env` | no |
+| `python3 -c "print(open('.env').read())"` | no |
+| `while read l; do echo $l; done < .env` | no |
+
+The first miss is the one to plan around, because `head -5` is the ordinary
+spelling and `head` alone is not. Do not reach for a bare `.env` phrase to
+close it: a one-token phrase matches that token anywhere in a command, so it
+would also refuse `grep -n SECRET .env`, which is the mitigation a read
+gate's own message should be recommending. `otari guardrails validate` warns
+about a one-token `forbidden` phrase for this reason.
+
+The `path` gate has no equivalent hole, because it globs a **resolved** path:
+`.env`, `./.env`, `/abs/path/.env` and `web/../.env` all normalize to the
+same repo-relative string before matching. A pattern rule over the shell side
+is #1532 (`command_regex`), not this.
+
+Put plainly: this refuses the agent's own file-reading tool, which is how an
+agent actually reads a file. It is not a containment boundary against one
+working around it.
 
 ### `command` (available now)
 
@@ -756,7 +846,7 @@ contacting a gateway.
 ```
 otari guardrails validate
 otari guardrails validate --command "npm install lodash"
-otari guardrails validate --changed-path CHANGELOG.md
+otari guardrails validate --path CHANGELOG.md
 ```
 
 An **error** is a gate that provably cannot do its job, whatever the session
@@ -818,7 +908,7 @@ intended:
 None of these blocks on its own, because each has a legitimate exception.
 `--strict` makes a warning non-zero too, which is what a CI invocation wants.
 
-`--command` and `--changed-path` (both repeatable) answer the other question,
+`--command` and `--path` (both repeatable) answer the other question,
 "does it say what I think it says". Each is evaluated at every moment a real
 session would offer it, with the same evidence shape `otari hook` itself
 submits for that event: one `PreToolUse` block per command or path, then one
@@ -840,7 +930,7 @@ drop reads `skipped` rather than promising a call that never happens. A gate fir
 asked, not a failure, so it does not change the exit status.
 
 ```
-$ otari guardrails validate --changed-path docs/public/openapi.json --command "make postman"
+$ otari guardrails validate --path docs/public/openapi.json --command "make postman"
 .otari-guardrails.yml: otari/repo-quality, 22 gate(s), schema 1.0.
 0 error(s), 0 warning(s).
 
@@ -883,8 +973,8 @@ $ python3 -c '
 import json, urllib.request
 body = json.dumps({
     "policy_yaml": open(".otari-guardrails.yml").read(),
-    "changed_path_source": "stop.working_tree",
-    "changed_paths": ["CHANGELOG.md"],
+    "path_source": "stop.working_tree",
+    "paths": ["CHANGELOG.md"],
     "commands": ["git push --force"],
 }).encode()
 request = urllib.request.Request(
@@ -921,7 +1011,7 @@ print(urllib.request.urlopen(request).read().decode())
 ```
 
 The example policy has one `path` gate and one `command` gate,
-so the response carries one result per gate. A non-empty `changed_paths`/
+so the response carries one result per gate. A non-empty `paths`/
 `commands` list that names nothing forbidden resolves every gate `pass`;
 an empty list instead resolves that field's gates `not_applicable`
 (evidence was collected and there was none to check, not "checked, found
@@ -934,11 +1024,11 @@ required gate rather than passing it. Request/response fields:
 | Field | Meaning |
 | --- | --- |
 | `policy_yaml` | The full text of the caller's `.otari-guardrails.yml`, read and submitted by the caller. |
-| `changed_path_source` | Which moment `changed_paths` was read at, matching the `runs` values a gate declares: `pre_tool_use.edit_target` for a tool call's own target before it runs, `stop.working_tree` for `git status` once the turn is over. Required whenever `changed_paths` is **non-empty**; an empty list needs none, because it carries no paths to misattribute. Refused rather than defaulted when absent, and refused too when it names a moment no path gate can declare (`stop.session`, `stop.verifier`, `pre_tool_use.command`), since either would resolve every path gate `not_applicable` and lose enforcement without a word. Defaulting would be just as wrong: `pre_tool_use.edit_target` would make a Stop event's Git evidence silently disable every working-tree gate, and `stop.working_tree` would fail a working-tree gate over a write that has not happened. |
-| `changed_paths` | Repo-relative paths the caller observed changed. Send `[]` if evidence was collected and there is none (a `path` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects path evidence at all (a required `path` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
+| `path_source` | Which moment `paths` was read at, matching the `runs` values a gate declares: `pre_tool_use.edit_target` for a write tool's own target before it runs, `pre_tool_use.read_target` for a read tool's, `stop.working_tree` for `git status` once the turn is over. Required whenever `paths` is **non-empty**; an empty list needs none, because it carries no paths to misattribute. Refused rather than defaulted when absent, and refused too when it names a moment no path gate can declare (`stop.session`, `stop.verifier`, `pre_tool_use.command`), since either would resolve every path gate `not_applicable` and lose enforcement without a word. Defaulting would be just as wrong: `pre_tool_use.edit_target` would make a Stop event's Git evidence silently disable every working-tree gate, `stop.working_tree` would fail a working-tree gate over a write that has not happened, and any of them would put a read in front of a gate that only ever asked about writes. |
+| `paths` | Repo-relative paths this moment puts in scope: what the caller observed changed, or the single target a tool call is about to write or read, with `path_source` saying which. Send `[]` if evidence was collected and there is none (a `path` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects path evidence at all (a required `path` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
 | `commands` | Shell commands the caller observed run or is about to run. Send `[]` if evidence was collected and there is none right now (a `command` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects command evidence at all (a required `command` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
 | `command_scope` | What `commands` covers: `call` (the default) for the single tool call about to run, `session` for every command the session has run so far. This decides which gates can resolve at all: `command` judges only `call` scope, `command_if_changed` only `session` scope. A caller that omits it keeps the `call` semantics it was written against. |
-| `judge_results` | Model verdicts the caller collected for this request's `judge` gates: a list of `{gate_id, outcome, reasoning}`, one entry per gate it judged. Tri-state, but for a different reason than `changed_paths`/`commands`: a verdict already names the one gate it judged, so there is no "collected, and there is none for this gate" case an empty list needs beyond a missing gate id, but omitting the field entirely (or an explicit `null`) means this caller's event type never runs judge gates at all (`otari hook` on `PreToolUse`) and resolves every judge gate `not_applicable` rather than the `unknown` a caller that does run judge gates but is genuinely missing one gets. `outcome` is one of `pass`, `fail`, or `error` (the caller's own model call failed or returned something it could not parse as a verdict). |
+| `judge_results` | Model verdicts the caller collected for this request's `judge` gates: a list of `{gate_id, outcome, reasoning}`, one entry per gate it judged. Tri-state, but for a different reason than `paths`/`commands`: a verdict already names the one gate it judged, so there is no "collected, and there is none for this gate" case an empty list needs beyond a missing gate id, but omitting the field entirely (or an explicit `null`) means this caller's event type never runs judge gates at all (`otari hook` on `PreToolUse`) and resolves every judge gate `not_applicable` rather than the `unknown` a caller that does run judge gates but is genuinely missing one gets. `outcome` is one of `pass`, `fail`, or `error` (the caller's own model call failed or returned something it could not parse as a verdict). |
 | `check_results` | Verifier verdicts the caller collected for this request's `verifier` gates: a list of `{gate_id, outcome, detail}`, one entry per gate it checked. Tri-state exactly like `judge_results`, for the same reason: omitting the field (or sending `null`) means this caller's event type never runs verifier gates at all and resolves every such gate `not_applicable` rather than the `unknown` a caller that does run them but is missing one gets. `outcome` is one of `pass`, `fail`, or `error` (the verifier script exited 0, 1, or anything else, including a crash). |
 | `blocked` | `true` when a `required` gate's outcome is not `pass`/`not_applicable`. An unresolved gate never counts as a pass. A `judge` gate can never set this: its `enforcement` is always `advisory`. A `verifier` gate can, unlike `judge`: its `enforcement` may be `required`. |
 | `results[].outcome` | `pass`, `fail`, `unknown`, `error`, `not_applicable`, or `not_run`. |
@@ -1088,12 +1178,15 @@ blocking proves nothing about whether an interactive session's own
    passes.
 
    The `PreToolUse` `matcher` it writes only includes `Bash` when the policy
-   actually has a `command` gate to check a command against: the round
-   trip is otherwise harmless (nothing in `tool_input` matches a
-   `path` gate, so it always passes), but there is no reason to pay
-   it. `Stop` carries no `matcher` at all; it is registered unconditionally,
-   since `path` always benefits from its Git-status fallback there
-   and a `command_if_changed` gate has no other event it can resolve on.
+   actually has a `command` gate to check a command against, and only
+   includes `Read` when some `path` gate declares
+   `pre_tool_use.read_target`: either round trip is otherwise harmless
+   (nothing in `tool_input` matches a gate that did not ask for that moment,
+   so it always passes), but there is no reason to pay it. The edit tools are
+   always in the matcher. `Stop` carries no `matcher` at all; it is
+   registered unconditionally, since `path` always benefits from its
+   Git-status fallback there and a `command_if_changed` gate has no other
+   event it can resolve on.
 
    With no `--api-key`, the generated command carries no credential at all:
    `otari hook` evaluates the policy locally, and needs neither one nor a
@@ -1146,7 +1239,7 @@ explicitly, one for `PreToolUse` and one for `Stop`:
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|NotebookEdit|Bash",
+        "matcher": "Edit|Write|NotebookEdit|Read|Bash",
         "hooks": [
           {
             "type": "command",
@@ -1259,6 +1352,13 @@ Hook Server route calls; every actual decision comes from
 `otari_agent.domain`, whichever caller runs it. What neither command does
 yet: uninstall itself, or probe whether it is correctly registered
 (`otari status`, not built).
+
+Nothing reports a secret that was already read. `pre_tool_use.read_target`
+refuses the `Read` tool and that is all it does; a session that reached a
+secret through the shell leaves no signal a guardrail can raise afterwards,
+so there is no "this turn read a secret, rotate it" report. The transcript
+`otari hook` already scans at `Stop` could carry one, but that is incident
+response rather than enforcement and is not built.
 
 ## What's next
 

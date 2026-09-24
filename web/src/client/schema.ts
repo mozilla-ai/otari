@@ -10996,16 +10996,6 @@ export interface components {
          */
         PolicyCheckRequest: {
             /**
-             * Changed Path Source
-             * @description Which moment `changed_paths` was read at, matching the `runs` values a path gate declares. Only two of the five `runs` values are legal here, because only those two are moments a path can be read at: `pre_tool_use.edit_target` for a tool call's own target before it runs, and `stop.working_tree` for `git status` once the turn is over. Required whenever `changed_paths` is non-empty, and rejected with a 422 if omitted or set to any other value: either would resolve every path gate `not_applicable`, which loses enforcement without reporting anything. An empty `changed_paths` needs no source.
-             */
-            changed_path_source?: ("pre_tool_use.edit_target" | "pre_tool_use.command" | "stop.working_tree" | "stop.session" | "stop.verifier") | null;
-            /**
-             * Changed Paths
-             * @description Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).
-             */
-            changed_paths?: string[] | null;
-            /**
              * Check Results
              * @description Verifier verdicts the caller collected for this request's verifier gates.
              */
@@ -11027,6 +11017,16 @@ export interface components {
              * @description Model verdicts the caller collected for this request's judge gates.
              */
             judge_results?: components["schemas"]["JudgeVerdictRequest"][] | null;
+            /**
+             * Path Source
+             * @description Which moment `paths` was read at, matching the `runs` values a path gate declares. Only three of the six `runs` values are legal here, because only those three are moments a path can be read at: `pre_tool_use.edit_target` for a write tool's own target before it runs, `pre_tool_use.read_target` for a read tool's, and `stop.working_tree` for `git status` once the turn is over. Required whenever `paths` is non-empty, and rejected with a 422 if omitted or set to any other value: either would resolve every path gate `not_applicable`, which loses enforcement without reporting anything. An empty `paths` needs no source.
+             */
+            path_source?: ("pre_tool_use.edit_target" | "pre_tool_use.read_target" | "pre_tool_use.command" | "stop.working_tree" | "stop.session" | "stop.verifier") | null;
+            /**
+             * Paths
+             * @description Repo-relative paths this moment of the session puts in scope: what `git status --porcelain` reports, or the single target a tool call is about to write or read. `path_source` says which.
+             */
+            paths?: string[] | null;
             /** Policy Yaml */
             policy_yaml: string;
         };

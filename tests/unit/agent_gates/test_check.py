@@ -25,8 +25,8 @@ def test_a_forbidden_path_blocks() -> None:
     result = run_policy_check(
         _PATH_POLICY,
         source="test",
-        changed_paths=["CHANGELOG.md"],
-        changed_path_source="stop.working_tree",
+        paths=["CHANGELOG.md"],
+        path_source="stop.working_tree",
         commands=None,
     )
     assert result.policy_id == "test"
@@ -38,8 +38,8 @@ def test_an_unmatched_path_passes_and_does_not_block() -> None:
     result = run_policy_check(
         _PATH_POLICY,
         source="test",
-        changed_paths=["README.md"],
-        changed_path_source="stop.working_tree",
+        paths=["README.md"],
+        path_source="stop.working_tree",
         commands=None,
     )
     assert result.blocked is False
@@ -48,15 +48,13 @@ def test_an_unmatched_path_passes_and_does_not_block() -> None:
 
 def test_omitted_changed_paths_resolves_unknown_and_blocks() -> None:
     """None (never collected) is distinct from [] (collected, and there is none)."""
-    result = run_policy_check(_PATH_POLICY, source="test", changed_paths=None, commands=None)
+    result = run_policy_check(_PATH_POLICY, source="test", paths=None, commands=None)
     assert result.results[0].outcome is Outcome.UNKNOWN
     assert result.blocked is True
 
 
 def test_empty_changed_paths_resolves_not_applicable_and_does_not_block() -> None:
-    result = run_policy_check(
-        _PATH_POLICY, source="test", changed_paths=[], changed_path_source="stop.working_tree", commands=None
-    )
+    result = run_policy_check(_PATH_POLICY, source="test", paths=[], path_source="stop.working_tree", commands=None)
     assert result.results[0].outcome is Outcome.NOT_APPLICABLE
     assert result.blocked is False
 
@@ -65,8 +63,8 @@ def test_duplicate_changed_paths_do_not_change_the_outcome() -> None:
     result = run_policy_check(
         _PATH_POLICY,
         source="test",
-        changed_paths=["CHANGELOG.md", "CHANGELOG.md"],
-        changed_path_source="stop.working_tree",
+        paths=["CHANGELOG.md", "CHANGELOG.md"],
+        path_source="stop.working_tree",
         commands=None,
     )
     assert result.results[0].outcome is Outcome.FAIL
@@ -77,8 +75,8 @@ def test_malformed_policy_raises_policy_check_error() -> None:
         run_policy_check(
             "not: valid: yaml: at: all:\n  - [",
             source="test",
-            changed_paths=[],
-            changed_path_source="stop.working_tree",
+            paths=[],
+            path_source="stop.working_tree",
             commands=None,
         )
     except PolicyCheckError as exc:
@@ -92,8 +90,8 @@ def test_oversize_path_entry_raises_policy_check_error() -> None:
         run_policy_check(
             _PATH_POLICY,
             source="test",
-            changed_paths=["a" * 5000],
-            changed_path_source="stop.working_tree",
+            paths=["a" * 5000],
+            path_source="stop.working_tree",
             commands=None,
         )
     except PolicyCheckError as exc:
@@ -106,7 +104,7 @@ def test_judge_verdict_is_relayed_into_the_result() -> None:
     result = run_policy_check(
         _JUDGE_POLICY,
         source="test",
-        changed_paths=None,
+        paths=None,
         commands=None,
         judge_results=[JudgeVerdict(gate_id="j", outcome="fail", reasoning="does not follow it")],
     )
@@ -117,7 +115,7 @@ def test_judge_verdict_is_relayed_into_the_result() -> None:
 
 
 def test_omitted_judge_results_resolves_not_applicable() -> None:
-    result = run_policy_check(_JUDGE_POLICY, source="test", changed_paths=None, commands=None, judge_results=None)
+    result = run_policy_check(_JUDGE_POLICY, source="test", paths=None, commands=None, judge_results=None)
     assert result.results[0].outcome is Outcome.NOT_APPLICABLE
 
 
@@ -125,7 +123,7 @@ def test_verifier_verdict_is_relayed_into_the_result() -> None:
     result = run_policy_check(
         _CHECK_POLICY,
         source="test",
-        changed_paths=None,
+        paths=None,
         commands=None,
         check_results=[CheckVerdict(gate_id="c", outcome="fail", detail="conflict markers found")],
     )
@@ -134,6 +132,6 @@ def test_verifier_verdict_is_relayed_into_the_result() -> None:
 
 
 def test_omitted_check_results_resolves_not_applicable_and_does_not_block() -> None:
-    result = run_policy_check(_CHECK_POLICY, source="test", changed_paths=None, commands=None, check_results=None)
+    result = run_policy_check(_CHECK_POLICY, source="test", paths=None, commands=None, check_results=None)
     assert result.results[0].outcome is Outcome.NOT_APPLICABLE
     assert result.blocked is False

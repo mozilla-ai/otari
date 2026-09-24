@@ -82,7 +82,7 @@ def test_pretooluse_extracts_a_single_path_from_an_apply_patch_envelope(
     }
     result = _invoke(payload)
     assert result.exit_code == 2, result.output
-    assert captured["json"]["changed_paths"] == ["CHANGELOG.md"]
+    assert captured["json"]["paths"] == ["CHANGELOG.md"]
     assert captured["json"]["commands"] == []
 
 
@@ -111,7 +111,7 @@ def test_pretooluse_apply_patch_covers_every_file_it_touches(monkeypatch: pytest
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["changed_paths"] == ["src/new_module.py", "README.md", "old_file.py"]
+    assert captured["json"]["paths"] == ["src/new_module.py", "README.md", "old_file.py"]
 
 
 def test_pretooluse_apply_patch_rename_reports_both_old_and_new_path(
@@ -138,7 +138,7 @@ def test_pretooluse_apply_patch_rename_reports_both_old_and_new_path(
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["changed_paths"] == ["old_name.py", "new_name.py"]
+    assert captured["json"]["paths"] == ["old_name.py", "new_name.py"]
 
 
 def test_pretooluse_ignores_an_apply_patch_with_no_command(repo: Path) -> None:
@@ -180,7 +180,7 @@ def test_pretooluse_apply_patch_path_outside_the_repo_is_skipped(monkeypatch: py
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["changed_paths"] == ["CHANGELOG.md"]
+    assert captured["json"]["paths"] == ["CHANGELOG.md"]
 
 
 # --- PreToolUse: shell / Code Mode exec -------------------------------------

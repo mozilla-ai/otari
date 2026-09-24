@@ -162,6 +162,77 @@ def unmatchable_phrase(phrase: str, *, field: str) -> str | None:
     )
 
 
+def _mentioned_by_a_command_gate(globs: tuple[str, ...], spec: PolicySpec) -> bool:
+    """Whether any `command` gate's forbidden phrase names a path these globs match.
+
+    The one mechanically checkable form of "something here also covers the
+    shell". A phrase is tokenized the way the matcher tokenizes it, and each
+    token is matched against the globs with the matcher's own function, so
+    `forbidden: ["cat .env"]` answers for a read gate globbing `.env` and a
+    phrase about something else does not.
+
+    Deliberately not a coverage proof: it cannot tell whether that command
+    gate catches every spelling of the read, and it demonstrably does not
+    (a path-qualified argument matches no bare phrase). It answers the
+    narrower question the warning actually asks, which is whether the author
+    addressed the shell at all or left it unconsidered.
+    """
+    for other in spec.gates:
+        if not isinstance(other, CommandGate):
+            continue
+        for phrase in other.forbidden:
+            try:
+                tokens = tokenize_phrase(phrase)
+            except ValueError:  # pragma: no cover - parse already proved it tokenizes
+                continue
+            if matched_changed_paths(globs, tuple(tokens)):
+                return True
+    return False
+
+
+def _path_gate_blind_spots(gate: PathGate, spec: PolicySpec) -> Iterator[Finding]:
+    """What this gate's own `runs` cannot see, where saying so is worth a warning.
+
+    Both prevention sources are blind to the shell, and neither warning is
+    about that blindness on its own: it is inherent, and a gate that has
+    answered it has answered it. What differs is what answering looks like,
+    and that is not symmetric between the two.
+
+    A write escaping `pre_tool_use.edit_target` still lands in the tree, so
+    `stop.working_tree` catches it afterwards and naming it is the repair,
+    on this same gate. A read escaping `pre_tool_use.read_target` lands
+    nowhere: it changes nothing, `git status` reports nothing, and no `runs`
+    value this gate could add would see it. So the read warning cannot point
+    at a backstop, because there is none to point at; it points at a
+    `command` gate, which is a different gate the author has to write.
+    Saying "add stop.working_tree" there would be advice that reads as a fix
+    and is not one.
+
+    Both warnings clear, which matters more than it looks: a warning that
+    cannot be cleared fails `--strict` forever, so leaving the read one
+    unconditional would have made a correct read gate unusable in CI and
+    taught everyone to pass `--strict` nothing.
+    """
+    sources = frozenset(gate.runs)
+    if "pre_tool_use.edit_target" in sources and "stop.working_tree" not in sources:
+        yield Finding(
+            "warning",
+            gate.id,
+            "runs at pre_tool_use.edit_target with no stop.working_tree beside it, so it sees the "
+            "path an edit tool declares and nothing a shell command writes (a redirect, `sed -i`, a "
+            "heredoc, `cp`, a script). Add stop.working_tree for a backstop over the finished tree.",
+        )
+    if "pre_tool_use.read_target" in sources and not _mentioned_by_a_command_gate(gate.forbidden, spec):
+        yield Finding(
+            "warning",
+            gate.id,
+            "runs at pre_tool_use.read_target, which sees the Read tool and nothing a shell command "
+            "reads (`cat`, `less`, `head`). Unlike a write, nothing catches that afterwards: a read "
+            "changes nothing, so no stop source can see one, and no command gate here names any of "
+            "these paths. Add one if a shell read of them matters too.",
+        )
+
+
 def validate_policy(
     spec: PolicySpec,
     *,
@@ -255,16 +326,8 @@ def validate_policy(
                 if unmatchable_phrase(phrase, field="forbidden") is None and len(tokenize_phrase(phrase)) == 1
             )
 
-        if isinstance(gate, PathGate) and tuple(gate.runs) == ("pre_tool_use.edit_target",):
-            findings.append(
-                Finding(
-                    "warning",
-                    gate.id,
-                    "runs only at pre_tool_use.edit_target, which sees the path an edit tool declares "
-                    "and nothing a shell command writes (a redirect, `sed -i`, a heredoc, `cp`, a "
-                    "script). Add stop.working_tree for a backstop over the finished tree.",
-                )
-            )
+        if isinstance(gate, PathGate):
+            findings.extend(_path_gate_blind_spots(gate, spec))
 
         if isinstance(gate, VerifierGate) and probe_verifier is not None:
             problem = probe_verifier(gate.verifier)

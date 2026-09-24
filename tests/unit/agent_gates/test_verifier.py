@@ -1,9 +1,9 @@
 from otari_agent.domain.evaluators import evaluate_verifier
 from otari_agent.domain.types import (
-    ChangedPathEvidence,
     CheckEvidence,
     CheckVerdict,
     Outcome,
+    PathEvidence,
     VerifierGate,
 )
 
@@ -56,7 +56,7 @@ def test_unconditional_gate_ignores_changed_path_evidence_entirely() -> None:
     evidence = CheckEvidence(
         verdicts=(CheckVerdict(gate_id="no-leftover-conflict-markers", outcome="pass", detail=""),)
     )
-    result = evaluate_verifier(_gate(), ChangedPathEvidence(changed_paths=()), evidence)
+    result = evaluate_verifier(_gate(), PathEvidence(paths=()), evidence)
     assert result.outcome is Outcome.PASS
 
 
@@ -72,7 +72,7 @@ def test_unknown_when_when_changed_is_set_but_no_changed_path_evidence_was_submi
 
 def test_not_applicable_when_when_changed_globs_match_nothing_that_changed() -> None:
     gate = _gate(when_changed=("src/**",))
-    changed_path_evidence = ChangedPathEvidence(changed_paths=("docs/README.md",))
+    changed_path_evidence = PathEvidence(paths=("docs/README.md",))
     evidence = CheckEvidence(
         verdicts=(CheckVerdict(gate_id="no-leftover-conflict-markers", outcome="fail", detail="should not run"),)
     )
@@ -83,7 +83,7 @@ def test_not_applicable_when_when_changed_globs_match_nothing_that_changed() -> 
 
 def test_when_changed_gate_still_resolves_the_verdict_once_a_matching_path_changed() -> None:
     gate = _gate(when_changed=("src/**",))
-    changed_path_evidence = ChangedPathEvidence(changed_paths=("src/module.py",))
+    changed_path_evidence = PathEvidence(paths=("src/module.py",))
     evidence = CheckEvidence(
         verdicts=(CheckVerdict(gate_id="no-leftover-conflict-markers", outcome="fail", detail="conflicted.txt:2"),)
     )

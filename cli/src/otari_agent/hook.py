@@ -34,6 +34,7 @@ from otari_agent.domain.types import (
     JudgeGate,
     JudgeVerdict,
     Outcome,
+    PathGate,
     PolicySpec,
     RunsAt,
     VerifierGate,
@@ -43,6 +44,15 @@ from otari_agent.settings import API_KEY_HEADER, API_ROOT, load_settings
 
 # Claude Code's own edit tools and the tool_input field naming their target.
 _HOOK_EDIT_TOOL_PATH_FIELDS = {"Edit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
+
+# Claude Code's whole-file read tool and the tool_input field naming its
+# target. Deliberately only Read: Grep and Glob return matching lines and file
+# names rather than whole contents, and reading one line through a narrow
+# pattern is the mitigation a secret gate's own message should recommend, so
+# gating them would refuse the workaround. Codex has no entry here because it
+# has no read tool: its reads go through the shell, where they are already
+# `pre_tool_use.command` evidence.
+_HOOK_READ_TOOL_PATH_FIELDS = {"Read": "file_path"}
 
 # Claude Code's shell tool and the tool_input field naming the command it is
 # about to run. A PreToolUse call for this tool is the only evidence a
@@ -1536,7 +1546,7 @@ def hook(
         click.echo(f"otari hook: could not read {gates_file} ({exc}), not blocking.", err=True)
         return
 
-    changed_paths: list[str] = []
+    paths: list[str] = []
     # `[]`, not None, by default: PreToolUse's edit-tool branch below leaves
     # this as `[]` on purpose, meaning "no command evidence for this call",
     # the same not_applicable-not-unknown contract every other command-less
@@ -1551,8 +1561,9 @@ def hook(
     # Which moment the submitted paths were read at, the counterpart to a
     # gate's own `runs`. Set in every branch below that submits a path list;
     # run_policy_check refuses a path list without one, because a gate cannot
-    # otherwise tell a PreToolUse call from a Stop event on a clean tree.
-    changed_path_source: RunsAt | None = None
+    # otherwise tell a PreToolUse call from a Stop event on a clean tree, nor
+    # a path about to be read from one about to be written.
+    path_source: RunsAt | None = None
     # None, not [], by default: a PreToolUse call has neither a full diff nor
     # a finished transcript to judge against yet, and never runs
     # _hook_collect_judge_verdicts at all, so submitting None (rather than an
@@ -1575,9 +1586,11 @@ def hook(
         tool_input = payload.get("tool_input") or {}
         command_fields = _HOOK_COMMAND_TOOL_FIELDS_BY_HARNESS.get(harness, _HOOK_COMMAND_TOOL_FIELDS)
         is_apply_patch = harness == "codex" and tool_name == _CODEX_PATCH_TOOL_NAME
-        # A tool call is either an edit or a shell command, never both, so at
-        # most one of these evidence lists is ever populated per call.
+        # A tool call is an edit, a read or a shell command, never more than
+        # one, so at most one of these evidence lists is ever populated per
+        # call.
         path_field = None if is_apply_patch else _HOOK_EDIT_TOOL_PATH_FIELDS.get(tool_name)
+        read_field = _HOOK_READ_TOOL_PATH_FIELDS.get(tool_name)
         command_field = command_fields.get(tool_name)
         if is_apply_patch:
             # apply_patch carries no bare file_path the way Edit/Write do:
@@ -1602,8 +1615,8 @@ def hook(
                     continue  # Outside the repo: nothing this policy can name.
             if not resolved_paths:
                 return
-            changed_paths = resolved_paths
-            changed_path_source = "pre_tool_use.edit_target"
+            paths = resolved_paths
+            path_source = "pre_tool_use.edit_target"
         elif path_field:
             target = tool_input.get(path_field)
             if not target:
@@ -1615,8 +1628,22 @@ def hook(
                 # nothing. That fails open and silently, a passing gate being
                 # indistinguishable from no forbidden change, so every
                 # PreToolUse gate would pass on Windows.
-                changed_paths = [Path(target).resolve().relative_to(root).as_posix()]
-                changed_path_source = "pre_tool_use.edit_target"
+                paths = [Path(target).resolve().relative_to(root).as_posix()]
+                path_source = "pre_tool_use.edit_target"
+            except ValueError:
+                return  # Outside the repo: nothing this policy can name.
+        elif read_field:
+            target = tool_input.get(read_field)
+            if not target:
+                return
+            try:
+                # Resolved and made repo-relative exactly the way the edit
+                # branch above does, as_posix() included and for the identical
+                # reason: a WindowsPath's native "docs\\foo.md" spelling
+                # matches no repo-relative POSIX glob, and that failure is
+                # silent and open.
+                paths = [Path(target).resolve().relative_to(root).as_posix()]
+                path_source = "pre_tool_use.read_target"
             except ValueError:
                 return  # Outside the repo: nothing this policy can name.
         elif command_field:
@@ -1638,7 +1665,7 @@ def hook(
                 )
                 command = command[:_HOOK_MAX_COMMAND_LENGTH]
             commands = [command]
-            changed_path_source = "pre_tool_use.command"
+            path_source = "pre_tool_use.command"
         else:
             return  # A tool this harness integration does not check yet.
     elif event == "Stop":
@@ -1646,8 +1673,8 @@ def hook(
         if collected is None:
             click.echo("otari hook: could not read Git state, not blocking.", err=True)
             return
-        changed_paths = collected
-        changed_path_source = "stop.working_tree"
+        paths = collected
+        path_source = "stop.working_tree"
 
         # transcript_path is the session's JSONL transcript on disk (each
         # harness's own name/format for it). Absent, or unreadable, submits
@@ -1684,13 +1711,13 @@ def hook(
             gates_file,
             root,
             transcript_path,
-            changed_paths,
+            paths,
             judge_model=judge_model,
             judge_dry_run=judge_dry_run,
             harness=harness,
             judge_cli_override=judge_cli,
         )
-        check_results = _hook_collect_check_verdicts(policy_yaml, gates_file, root, changed_paths)
+        check_results = _hook_collect_check_verdicts(policy_yaml, gates_file, root, paths)
     else:
         return  # An event this harness integration does not check yet.
 
@@ -1703,9 +1730,9 @@ def hook(
             check_result = run_policy_check(
                 policy_yaml,
                 source=str(gates_file),
-                changed_paths=changed_paths,
+                paths=paths,
                 commands=commands,
-                changed_path_source=changed_path_source,
+                path_source=path_source,
                 command_scope=command_scope,
                 judge_results=(
                     None
@@ -1776,9 +1803,9 @@ def hook(
                 f"{resolved_url.rstrip('/')}{API_ROOT}/hooks/check",
                 json={
                     "policy_yaml": policy_yaml,
-                    "changed_paths": changed_paths,
+                    "paths": paths,
                     "commands": commands,
-                    "changed_path_source": changed_path_source,
+                    "path_source": path_source,
                     "command_scope": command_scope,
                     "judge_results": judge_results,
                     "check_results": check_results,
@@ -1896,30 +1923,58 @@ def _otari_binary_path() -> str:
     return str(Path(sys.executable).with_name("otari"))
 
 
-def _gates_file_allows_bash(gates_file: Path) -> bool:
-    """Whether the matcher should include Bash: only if a command gate exists.
+def _policy_checks_reads(spec: PolicySpec) -> bool:
+    """Whether any path gate here declares `pre_tool_use.read_target`.
 
-    Parses gates_file the same way the Hook Server does. A missing or
-    unparseable policy defaults to False, the narrower matcher: setup cannot
-    know what a broken policy would have wanted, and the round trip is
-    otherwise harmless but pointless to pay for nothing.
+    The one `runs` value that decides whether a tool matcher needs a group,
+    because it is the only one naming a tool no other gate type reaches: an
+    edit gate and a read gate are the same type and differ only here.
+    """
+    return any(isinstance(gate, PathGate) and "pre_tool_use.read_target" in gate.runs for gate in spec.gates)
 
-    Deliberately does not consult any gate's `runs`, which looks like it
-    should matter and does not: no `runs` value a path gate can name
-    is collectable from a Bash call. `pre_tool_use.edit_target` needs a tool
-    that declares a path, and a Bash call declares none; `stop.working_tree`
-    is not readable at PreToolUse at all. Only a command gate gives the
-    Bash matcher anything to do. That changes the day a source for shell write
-    targets exists, and not before.
+
+class _MatcherNeeds(NamedTuple):
+    """Which PreToolUse matcher groups this guardrail gives work to, beyond the edit tools.
+
+    The edit group is unconditional (a path gate at either `pre_tool_use`
+    source is the common case, and `stop.working_tree` needs no matcher at
+    all), so only these two are decided per guardrail.
+    """
+
+    bash: bool
+    read: bool
+
+
+def _gates_file_matcher_needs(gates_file: Path) -> _MatcherNeeds:
+    """Which matcher groups this guardrail file earns, parsed the way the Hook Server parses it.
+
+    A missing or unparseable policy earns neither, the narrowest matcher:
+    setup cannot know what a broken policy would have wanted, and a round trip
+    is otherwise harmless but pointless to pay for nothing.
+
+    `bash` deliberately does not consult any gate's `runs`, which looks like it
+    should matter and does not: no `runs` value a path gate can name is
+    collectable from a Bash call. `pre_tool_use.edit_target` and
+    `pre_tool_use.read_target` both need a tool that declares a path, and a
+    Bash call declares none; `stop.working_tree` is not readable at PreToolUse
+    at all. Only a command gate gives the Bash matcher anything to do. That
+    changes the day a source for shell write or read targets exists, and not
+    before.
+
+    `read` is the opposite: it turns on `runs` alone, since a read gate and an
+    edit gate are the same `path` type and nothing else tells them apart.
     """
     if not gates_file.is_file():
-        return False
+        return _MatcherNeeds(bash=False, read=False)
 
     try:
         spec = parse_policy(gates_file.read_text(encoding="utf-8"), source=str(gates_file))
     except PolicyError:
-        return False
-    return any(isinstance(gate, CommandGate) for gate in spec.gates)
+        return _MatcherNeeds(bash=False, read=False)
+    return _MatcherNeeds(
+        bash=any(isinstance(gate, CommandGate) for gate in spec.gates),
+        read=_policy_checks_reads(spec),
+    )
 
 
 def _policy_header(repo_name: str) -> str:
@@ -2049,11 +2104,15 @@ class _HookSetup(NamedTuple):
     settings_name: str
     edit_matcher: str
     command_matcher: str
+    read_matcher: str | None
 
 
 _HOOK_SETUP_BY_HARNESS = {
-    "claude-code": _HookSetup(".claude", "settings.local.json", "Edit|Write|NotebookEdit", "Bash"),
-    "codex": _HookSetup(".codex", "hooks.json", "apply_patch", "Bash|exec|code_mode_exec"),
+    "claude-code": _HookSetup(".claude", "settings.local.json", "Edit|Write|NotebookEdit", "Bash", "Read"),
+    # Codex has no read tool to match: its reads go through the shell, so a
+    # read gate is not collectable there at all and the command matcher is
+    # already the only thing that could see one.
+    "codex": _HookSetup(".codex", "hooks.json", "apply_patch", "Bash|exec|code_mode_exec", None),
 }
 
 
@@ -2083,10 +2142,10 @@ def hook_setup(harness: str, api_key: str | None) -> None:
     point at the same otari hook invocation; the harness passes its own
     hook_event_name in the payload, so one callback serves either event.
     Offers to scaffold a starter .otari-guardrails.yml when this repo has none
-    yet, and picks the PreToolUse matcher (whether it needs to cover a shell
-    tool) from whatever gates the policy turns out to have; Stop needs no
-    matcher; see docs/agent-guardrails.md for why both are registered
-    unconditionally.
+    yet, and picks the PreToolUse matcher (whether it needs to cover the shell
+    tool, the read tool, or both) from whatever gates the policy turns out to
+    have; Stop needs no matcher; see docs/agent-guardrails.md for why both are
+    registered unconditionally.
     """
     root = _hook_find_repo_root(Path.cwd())
     if root is None:
@@ -2104,8 +2163,13 @@ def hook_setup(harness: str, api_key: str | None) -> None:
             )
 
     setup = _HOOK_SETUP_BY_HARNESS[harness]
-    include_bash = _gates_file_allows_bash(gates_file)
-    matcher = f"{setup.edit_matcher}|{setup.command_matcher}" if include_bash else setup.edit_matcher
+    needs = _gates_file_matcher_needs(gates_file)
+    matcher_parts = [setup.edit_matcher]
+    if needs.read and setup.read_matcher is not None:
+        matcher_parts.append(setup.read_matcher)
+    if needs.bash:
+        matcher_parts.append(setup.command_matcher)
+    matcher = "|".join(matcher_parts)
 
     # No credential resolution, and no prompt: `otari hook` evaluates the
     # local policy in process by default and needs neither. `--api-key` here
@@ -2125,9 +2189,16 @@ def hook_setup(harness: str, api_key: str | None) -> None:
     settings_path = root / setup.settings_dir / setup.settings_name
     pretooluse_created = _merge_hook_entry(settings_path, "PreToolUse", command, matcher=matcher)
     click.echo(f"{'Added' if pretooluse_created else 'Updated'} the PreToolUse hook in {settings_path}.")
-    click.echo(
-        f"Matcher: {matcher}" + ("" if include_bash else f" (add a command gate to also cover {setup.command_matcher})")
-    )
+    uncovered = [
+        f"a command gate to also cover {setup.command_matcher}" if not needs.bash else "",
+        (
+            f"a path gate running at pre_tool_use.read_target to also cover {setup.read_matcher}"
+            if not needs.read and setup.read_matcher is not None
+            else ""
+        ),
+    ]
+    missing = [item for item in uncovered if item]
+    click.echo(f"Matcher: {matcher}" + (f" (add {', or '.join(missing)})" if missing else ""))
 
     # Registered unconditionally, not only when the policy has a gate that
     # benefits: path already falls back to `git status` on Stop
@@ -2159,7 +2230,7 @@ fails; should point back at the rule/section it came from), and `runs`, a
 non-empty list naming when the gate runs and what it can see there. Each gate
 type accepts only certain `runs` values, and there is no default:
 
-- path: `pre_tool_use.edit_target`, `stop.working_tree`, or both
+- path: `pre_tool_use.edit_target`, `pre_tool_use.read_target`, `stop.working_tree`, or any combination
 - command: `pre_tool_use.command`
 - command_if_changed: `stop.session`
 - judge: `stop.session`
@@ -2172,6 +2243,15 @@ git status reports once the turn is over: complete whatever wrote the file, but
 always after the fact. Propose both for a path gate unless the path is
 only ever written by a build or a generator, in which case propose
 `[stop.working_tree]` alone, because no tool call will ever name it.
+
+`pre_tool_use.read_target` is the path a Read call names before it runs, so a
+match refuses the read and the file's contents never enter the transcript.
+Propose it only for a rule about *reading* a file (a secret, a credential, a
+key), never as an extra entry on a "do not hand-edit this" gate, where it would
+refuse merely looking at the file. It cannot see a shell read (cat, less), and
+unlike a write there is no `stop` value that catches one afterwards, because a
+read changes nothing: if the doc also wants shell reads refused, propose a
+separate command gate for that.
 
 - path: fails when a changed path matches one of `forbidden`, a list
   of repo-relative POSIX globs (`*` within one path segment, at most one `**`
@@ -2721,7 +2801,7 @@ def _guardrails_repo_relative(repo_root: Path, path: str) -> tuple[str | None, s
 
     The edit target is ``None`` when no PreToolUse check arises for it at all.
 
-    A gate's globs are repo-relative POSIX, and matching `--changed-path`
+    A gate's globs are repo-relative POSIX, and matching `--path`
     literally would report `quiet` for the absolute or `./`-prefixed spelling a
     person naturally types while a real session matches it: a silent false
     clean, which is the failure this whole command exists to remove.
@@ -2757,7 +2837,7 @@ def _guardrails_repo_relative(repo_root: Path, path: str) -> tuple[str | None, s
     )
     if working_tree is None:
         raise click.ClickException(
-            f"--changed-path {path!r} is outside {repo_root}; a guardrail can only name paths inside the repo."
+            f"--path {path!r} is outside {repo_root}; a guardrail can only name paths inside the repo."
         )
     # No fallback to the working-tree spelling: `hook`'s own PreToolUse branch
     # returns without evaluating anything when a target resolves out of the
@@ -2772,8 +2852,8 @@ def _guardrails_dry_run(
     source: str,
     *,
     heading: str,
-    changed_paths: list[str],
-    changed_path_source: RunsAt | None,
+    paths: list[str],
+    path_source: RunsAt | None,
     commands: list[str],
     command_scope: EvidenceScope,
 ) -> None:
@@ -2798,9 +2878,9 @@ def _guardrails_dry_run(
         check = run_policy_check(
             policy_yaml,
             source=source,
-            changed_paths=changed_paths,
+            paths=paths,
             commands=commands,
-            changed_path_source=changed_path_source,
+            path_source=path_source,
             command_scope=command_scope,
         )
     except PolicyCheckError as exc:
@@ -2808,7 +2888,7 @@ def _guardrails_dry_run(
 
     click.echo()
     click.echo(heading)
-    changed = tuple(changed_paths)
+    changed = tuple(paths)
     # Which gates survive each cap, resolved up front so the loop below can
     # report a gate `when_changed` selected but the cap then dropped. Mirrors
     # _hook_collect_judge_verdicts/_hook_collect_check_verdicts: filter by
@@ -2864,7 +2944,7 @@ def _guardrails_dry_run(
     help="Dry run this shell command against the guardrail. Repeatable.",
 )
 @click.option(
-    "--changed-path",
+    "--path",
     "dry_run_paths",
     multiple=True,
     help="Dry run this repo-relative path against the guardrail. Repeatable.",
@@ -2889,7 +2969,7 @@ def guardrails_validate(
     own, since each has a legitimate exception; `--strict` is what makes one
     non-zero, for CI.
 
-    `--command` and `--changed-path` answer the other question, "does it say
+    `--command` and `--path` answer the other question, "does it say
     what I think it says", by evaluating the guardrail against evidence you
     supply at each moment a real session would offer it: one PreToolUse call
     per command or path, then the Stop event with all of them together. A
@@ -2937,19 +3017,20 @@ def guardrails_validate(
             spec,
             str(target),
             heading=f"PreToolUse, Bash: {command}",
-            changed_paths=[],
-            changed_path_source="pre_tool_use.command",
+            paths=[],
+            path_source="pre_tool_use.command",
             commands=[command],
             command_scope="call",
         )
-    paths = [_guardrails_repo_relative(root, path) for path in dry_run_paths]
-    for edit_target, working_tree in paths:
+    checks_reads = _policy_checks_reads(spec)
+    dry_run_targets = [_guardrails_repo_relative(root, path) for path in dry_run_paths]
+    for edit_target, working_tree in dry_run_targets:
         if edit_target is None:
             click.echo()
-            click.echo(f"PreToolUse, Edit/Write: {working_tree}")
+            click.echo(f"PreToolUse: {working_tree}")
             click.echo(
                 "  not checked  this path resolves outside the repo, so the hook evaluates no gate "
-                "for the edit at all. Only the Stop block below covers it."
+                "for the edit or the read at all. Only the Stop block below covers it."
             )
             continue
         _guardrails_dry_run(
@@ -2957,19 +3038,37 @@ def guardrails_validate(
             spec,
             str(target),
             heading=f"PreToolUse, Edit/Write: {edit_target}",
-            changed_paths=[edit_target],
-            changed_path_source="pre_tool_use.edit_target",
+            paths=[edit_target],
+            path_source="pre_tool_use.edit_target",
             commands=[],
             command_scope="call",
         )
+        # Conditional, unlike the Edit/Write moment above, so a guardrail with
+        # no read gate prints exactly what it printed before this moment
+        # existed. A path is dry-run at every moment its own guardrail can
+        # actually see it, and for a guardrail with no read gate that is not
+        # one of them.
+        if checks_reads:
+            _guardrails_dry_run(
+                policy_yaml,
+                spec,
+                str(target),
+                heading=f"PreToolUse, Read: {edit_target}",
+                paths=[edit_target],
+                path_source="pre_tool_use.read_target",
+                commands=[],
+                command_scope="call",
+            )
     if dry_run_commands or dry_run_paths:
         _guardrails_dry_run(
             policy_yaml,
             spec,
             str(target),
-            heading=(f"Stop, the finished turn: {len(paths)} changed path(s), {len(dry_run_commands)} command(s)"),
-            changed_paths=[working_tree for _edit_target, working_tree in paths],
-            changed_path_source="stop.working_tree",
+            heading=(
+                f"Stop, the finished turn: {len(dry_run_targets)} changed path(s), {len(dry_run_commands)} command(s)"
+            ),
+            paths=[working_tree for _edit_target, working_tree in dry_run_targets],
+            path_source="stop.working_tree",
             commands=list(dry_run_commands),
             command_scope="session",
         )

@@ -26,14 +26,22 @@ EvidenceScope = Literal["call", "session"]
 # when the gate gets a chance to run. Spelled together, a reader of one line
 # knows both the moment and the limit.
 #
-# No value covers a path written by a shell command before it runs: there is
-# no such evidence to collect, only the command text (``pre_tool_use.command``)
-# or the tree afterwards (``stop.working_tree``).
+# No value covers a path a shell command touches before it runs: there is no
+# such evidence to collect, only the command text (``pre_tool_use.command``).
+# For a write, ``stop.working_tree`` catches afterwards what that misses. For
+# a read, nothing does: a read changes nothing, so there is no after-the-fact
+# source for one at all.
 RunsAt = Literal[
     # The path an Edit/Write/NotebookEdit call (or a Codex apply_patch) names
     # in its own tool_input, read before the tool runs. Matching here refuses
     # the call, so the write never happens. Blind to a shell write.
     "pre_tool_use.edit_target",
+    # The path a Read call names in its own tool_input, read before the tool
+    # runs. Matching here refuses the call, so the contents never enter the
+    # transcript. Blind to a shell read (`cat`, `less`), and unlike a write
+    # there is no after-the-fact source that catches what it misses: a read
+    # leaves nothing in the working tree for `git status` to report.
+    "pre_tool_use.read_target",
     # The literal text of a Bash call about to run. Matching refuses the call.
     # Cannot see inside a script the command invokes.
     "pre_tool_use.command",
@@ -47,13 +55,13 @@ RunsAt = Literal[
 ]
 
 # The subset of RunsAt a path can actually be read at, and therefore the only
-# values a caller may label `changed_paths` with. Its own alias rather than a
-# plain tuple so the wire contract can be typed with it: a request naming
+# values a caller may label a submitted path list with. Its own alias rather
+# than a plain tuple so the wire contract can be typed with it: a request naming
 # `stop.session` for a path list is then refused by request validation, and the
 # generated client cannot express it at all. Without that narrowing such a
 # request resolves every path gate not_applicable, which is a silent loss of
 # enforcement rather than an error.
-PathEvidenceSource = Literal["pre_tool_use.edit_target", "stop.working_tree"]
+PathEvidenceSource = Literal["pre_tool_use.edit_target", "pre_tool_use.read_target", "stop.working_tree"]
 PATH_EVIDENCE_SOURCES: tuple[PathEvidenceSource, ...] = get_args(PathEvidenceSource)
 
 # Gate results that mean "no objection". Every other outcome blocks a required
@@ -93,25 +101,43 @@ class PathGate:
     grammar; the full symlink/monorepo/rename grammar is AG-005.
 
     This is the one gate type with a real choice of ``runs``, because a path
-    can be known at two different moments that are not interchangeable:
+    is knowable at three moments that are not interchangeable:
 
-    ``pre_tool_use.edit_target`` is the path a tool call names before it runs,
-    so a match refuses the call and the write never happens. It covers only
-    tools whose input declares a path (``Edit``/``Write``/``NotebookEdit``,
-    Codex's ``apply_patch``). A ``Bash`` call declares none, so **every path a
-    shell command writes is invisible to this source**: a redirect, ``sed -i``,
-    a heredoc, ``cp``, a script. Prevention for those lives on
-    :class:`CommandGate`, which refuses the command itself.
+    ``pre_tool_use.edit_target`` is the path a write tool names before it
+    runs, so a match refuses the call and the write never happens. It covers
+    only tools whose input declares a path (``Edit``/``Write``/
+    ``NotebookEdit``, Codex's ``apply_patch``). A ``Bash`` call declares none,
+    so **every path a shell command writes is invisible to this source**: a
+    redirect, ``sed -i``, a heredoc, ``cp``, a script. Prevention for those
+    lives on :class:`CommandGate`, which refuses the command itself.
+
+    ``pre_tool_use.read_target`` is the same thing for ``Read``: the path it
+    names before it runs, so a match refuses the call and the file's contents
+    never enter the transcript, where they would stay for the rest of the
+    session. This is the source a secret rule wants, since "do not read this"
+    is the thing such a rule most needs to say. ``Grep`` and ``Glob`` are
+    deliberately outside it: they return matching lines and file names rather
+    than whole contents, and reading one line through a narrow pattern is the
+    mitigation such a gate's own message should recommend.
 
     ``stop.working_tree`` is what ``git status`` reports once the turn is over.
     It is complete over the tree, whatever wrote the file, and it is always
     after the fact: the gate blocks the turn rather than the write.
 
-    Most rules want both, and that is usually the right answer even for a path
-    a build generates: "nothing legitimately writes this by hand" is exactly
-    when an agent writing it by hand is worth refusing, and naming
-    ``pre_tool_use.edit_target`` costs nothing when no tool call ever names
-    the path. Drop it only when you positively want such a write allowed
+    The two prevention sources are **not** symmetric in what backs them up. A
+    write that escapes ``pre_tool_use.edit_target`` through the shell is still
+    caught by ``stop.working_tree`` afterwards. A read that escapes
+    ``pre_tool_use.read_target`` through the shell (``cat``, ``less``,
+    ``head``) is caught by nothing, ever, because a read leaves no trace in
+    the tree for ``git status`` to find. A rule that cares about shell reads
+    needs a :class:`CommandGate` beside this one; naming ``stop.working_tree``
+    does not stand in for one.
+
+    Most write rules want both write-side sources, and that is usually right
+    even for a path a build generates: "nothing legitimately writes this by
+    hand" is exactly when an agent writing it by hand is worth refusing, and
+    naming ``pre_tool_use.edit_target`` costs nothing when no tool call ever
+    names the path. Drop it only when you positively want such a write allowed
     through to be judged against the finished tree instead.
     """
 
@@ -302,18 +328,29 @@ class PolicySpec:
 
 
 @dataclass(frozen=True, slots=True)
-class ChangedPathEvidence:
-    """Repo-relative paths the caller reports as changed or about to change.
+class PathEvidence:
+    """Repo-relative paths this moment of the session puts in scope.
+
+    Named for the paths rather than for what is being done to them, because
+    the three sources do not agree on that: ``stop.working_tree`` reports what
+    changed, ``pre_tool_use.edit_target`` what is about to change, and
+    ``pre_tool_use.read_target`` what is about to be read and never changes at
+    all. ``source`` is what says which, so it carries that distinction instead
+    of the field name pretending to.
 
     Otari does not collect or verify this itself; see the module docstring.
 
-    ``source`` says which of the two moments these paths come from, and is the
-    counterpart to the gate's own ``runs``: a gate that does not list this
+    ``source`` says which of the three moments these paths come from, and is
+    the counterpart to the gate's own ``runs``: a gate that does not list this
     source resolves ``not_applicable`` rather than reading the list as a clean
     result. Without it, a ``PreToolUse`` call for ``Bash`` (which declares no
     path, so submits ``[]``) is indistinguishable from a ``Stop`` event on a
     clean tree, and a gate meant to check the finished tree quietly passes on
-    every tool call instead.
+    every tool call instead. It is also what keeps a read from reaching a gate
+    that never asked to see one: a path gate written before
+    ``pre_tool_use.read_target`` existed declares only write-side sources, so
+    read evidence resolves ``not_applicable`` on it and its meaning is
+    unchanged.
 
     Distinct from :attr:`CommandEvidence.scope`, which answers a different
     question: scope says how much of the session a *command* list covers,
@@ -321,7 +358,7 @@ class ChangedPathEvidence:
     two questions, not an oversight.
     """
 
-    changed_paths: tuple[str, ...]
+    paths: tuple[str, ...]
     source: RunsAt | None = None
 
 
@@ -365,13 +402,13 @@ class JudgeVerdict:
 class JudgeEvidence:
     """Verdicts the caller collected for this request's judge gates.
 
-    Unlike :class:`ChangedPathEvidence`/:class:`CommandEvidence`, a verdict is
+    Unlike :class:`PathEvidence`/:class:`CommandEvidence`, a verdict is
     already keyed to the one gate it judged (each judge gate carries its own
     rubric, so the caller's model call is necessarily one call per gate, not
     one shared fact every gate matches independently), so there is no
     "collected, and there is none for this gate" case distinct from "this
-    gate's id is simply missing" the way an empty ``changed_paths``/
-    ``commands`` list differs from one that names something. Both resolve
+    gate's id is simply missing" the way an empty ``paths``/``commands`` list
+    differs from one that names something. Both resolve
     ``unknown`` identically.
 
     What *is* a tri-state, the same as the other two evidence kinds, is

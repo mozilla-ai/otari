@@ -118,7 +118,7 @@ def test_a_path_gate_that_only_runs_before_an_edit_tool_warns() -> None:
         '    enforcement: required\n    forbidden: ["CHANGELOG.md"]\n    message: m\n'
     )
     assert len(findings) == 1
-    assert "runs only at pre_tool_use.edit_target" in findings[0][2]
+    assert "runs at pre_tool_use.edit_target with no stop.working_tree" in findings[0][2]
 
 
 def test_a_path_gate_with_the_stop_backstop_does_not_warn() -> None:
@@ -134,6 +134,82 @@ def test_a_stop_only_path_gate_does_not_warn() -> None:
         )
         == ()
     )
+
+
+def test_an_edit_gate_that_also_runs_at_read_still_warns_about_its_missing_backstop() -> None:
+    """The edit warning is about the sources present, not about the list being exactly one.
+
+    A gate naming both prevention moments and no `stop.working_tree` has the
+    same shell-write hole as an edit-only one, so an exact-tuple test would
+    have stopped warning the moment a second source was added beside it.
+    """
+    findings = _findings(
+        "  - id: g\n    type: path\n    runs: [pre_tool_use.edit_target, pre_tool_use.read_target]\n"
+        '    enforcement: required\n    forbidden: ["**/.env", ".env"]\n    message: m\n'
+    )
+    messages = [message for _severity, _gate, message in findings]
+    assert any("no stop.working_tree beside it" in message for message in messages)
+
+
+def test_a_read_gate_is_warned_about_the_shell_and_never_told_to_add_a_backstop() -> None:
+    """A read leaves nothing in the tree, so `stop.working_tree` is not the repair.
+
+    Pointing at it would read as a fix and would not be one. The repair is a
+    separate `command` gate, which is what this warning has to name.
+    """
+    findings = _findings(
+        "  - id: g\n    type: path\n    runs: [pre_tool_use.read_target, stop.working_tree]\n"
+        '    enforcement: required\n    forbidden: [".env"]\n    message: m\n'
+    )
+    assert len(findings) == 1
+    severity, gate_id, message = findings[0]
+    assert (severity, gate_id) == ("warning", "g")
+    assert "pre_tool_use.read_target" in message
+    assert "`cat`" in message
+    assert "no command gate here names any of these paths" in message
+    assert "Add stop.working_tree" not in message
+
+
+def test_a_command_gate_naming_one_of_the_paths_clears_the_read_warning() -> None:
+    """A warning that cannot be cleared fails `--strict` forever.
+
+    Left unconditional, a correct read gate could never pass `--strict`, which
+    would make the source unusable in CI and teach everyone to stop passing it.
+    The clearing condition is mechanical: a command gate whose own phrase
+    tokenizes to something these globs match.
+    """
+    assert (
+        _findings(
+            "  - id: g\n    type: path\n    runs: [pre_tool_use.read_target]\n"
+            '    enforcement: required\n    forbidden: [".env"]\n    message: m\n'
+            "  - id: shell\n    type: command\n    runs: [pre_tool_use.command]\n"
+            '    enforcement: required\n    forbidden: ["cat .env"]\n    message: m\n'
+        )
+        == ()
+    )
+
+
+def test_an_unrelated_command_gate_does_not_clear_the_read_warning() -> None:
+    """Presence of any command gate is too weak a proxy; it has to name a matching path."""
+    findings = _findings(
+        "  - id: g\n    type: path\n    runs: [pre_tool_use.read_target]\n"
+        '    enforcement: required\n    forbidden: [".env"]\n    message: m\n'
+        "  - id: pnpm\n    type: command\n    runs: [pre_tool_use.command]\n"
+        '    enforcement: required\n    forbidden: ["npm install"]\n    message: m\n'
+    )
+    assert len(findings) == 1
+    assert "pre_tool_use.read_target" in findings[0][2]
+
+
+def test_a_gate_naming_all_three_moments_warns_only_about_the_read() -> None:
+    """The edit half is answered by the backstop; the read half never can be."""
+    findings = _findings(
+        "  - id: g\n    type: path\n"
+        "    runs: [pre_tool_use.edit_target, pre_tool_use.read_target, stop.working_tree]\n"
+        '    enforcement: required\n    forbidden: [".env"]\n    message: m\n'
+    )
+    assert len(findings) == 1
+    assert "pre_tool_use.read_target" in findings[0][2]
 
 
 def _judge_gates(count: int) -> str:

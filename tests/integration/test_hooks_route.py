@@ -56,7 +56,7 @@ def test_requires_authentication(client: TestClient) -> None:
 def test_passes_with_no_forbidden_changes(client: TestClient, api_key_header: dict[str, str]) -> None:
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _VALID_POLICY, "changed_path_source": "stop.working_tree", "changed_paths": ["README.md"]},
+        json={"policy_yaml": _VALID_POLICY, "path_source": "stop.working_tree", "paths": ["README.md"]},
         headers=api_key_header,
     )
     assert response.status_code == 200, response.text
@@ -72,8 +72,8 @@ def test_blocks_on_a_forbidden_change(client: TestClient, master_key_header: dic
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _VALID_POLICY,
-            "changed_path_source": "stop.working_tree",
-            "changed_paths": ["scratch/notes.txt"],
+            "path_source": "stop.working_tree",
+            "paths": ["scratch/notes.txt"],
         },
         headers=master_key_header,
     )
@@ -92,7 +92,7 @@ def test_an_empty_changed_paths_list_is_not_applicable_not_a_pass(
     """
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _VALID_POLICY, "changed_path_source": "stop.working_tree", "changed_paths": []},
+        json={"policy_yaml": _VALID_POLICY, "path_source": "stop.working_tree", "paths": []},
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -167,7 +167,7 @@ def test_oversized_aggregate_workload_is_rejected(client: TestClient, master_key
     changed_paths = [f"src/{'y' * 40}-{i:05d}.txt" for i in range(10_000)]
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "changed_path_source": "stop.working_tree", "changed_paths": changed_paths},
+        json={"policy_yaml": policy, "path_source": "stop.working_tree", "paths": changed_paths},
         headers=master_key_header,
     )
     assert response.status_code == 422
@@ -208,7 +208,7 @@ def test_duplicated_globs_and_paths_resolve_quickly_instead_of_blocking(
     start = time.time()
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "changed_path_source": "stop.working_tree", "changed_paths": changed_paths},
+        json={"policy_yaml": policy, "path_source": "stop.working_tree", "paths": changed_paths},
         headers=master_key_header,
     )
     assert time.time() - start < 3.0
@@ -237,7 +237,7 @@ def test_many_distinct_short_globs_and_paths_trip_the_comparisons_bound(
     changed_paths = [f"q{i:04d}" for i in range(2000)]
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "changed_path_source": "stop.working_tree", "changed_paths": changed_paths},
+        json={"policy_yaml": policy, "path_source": "stop.working_tree", "paths": changed_paths},
         headers=master_key_header,
     )
     assert response.status_code == 422
@@ -285,8 +285,8 @@ class TestHybridMode:
             f"{API_ROOT}/hooks/check",
             json={
                 "policy_yaml": _VALID_POLICY,
-                "changed_path_source": "stop.working_tree",
-                "changed_paths": ["scratch/notes.txt"],
+                "path_source": "stop.working_tree",
+                "paths": ["scratch/notes.txt"],
             },
             headers={"Authorization": "Bearer any-platform-user-token"},
         )
@@ -307,8 +307,8 @@ class TestHybridMode:
             f"{API_ROOT}/hooks/check",
             json={
                 "policy_yaml": _VALID_POLICY,
-                "changed_path_source": "stop.working_tree",
-                "changed_paths": ["README.md"],
+                "path_source": "stop.working_tree",
+                "paths": ["README.md"],
             },
         )
         assert response.status_code == 401
@@ -380,8 +380,8 @@ def test_path_and_command_gates_preserve_declaration_order(
         json={
             "policy_yaml": policy,
             "commands": ["git push --force"],
-            "changed_path_source": "stop.working_tree",
-            "changed_paths": ["scratch/x.txt"],
+            "path_source": "stop.working_tree",
+            "paths": ["scratch/x.txt"],
         },
         headers=master_key_header,
     )
@@ -491,8 +491,8 @@ def test_a_policy_with_no_command_gate_never_tokenizes_commands(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _VALID_POLICY,
-            "changed_path_source": "stop.working_tree",
-            "changed_paths": [],
+            "path_source": "stop.working_tree",
+            "paths": [],
             "commands": commands,
         },
         headers=master_key_header,
@@ -721,8 +721,8 @@ def test_command_if_changed_passes_when_required_command_ran(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
-            "changed_path_source": "stop.working_tree",
-            "changed_paths": ["docs/public/openapi.json"],
+            "path_source": "stop.working_tree",
+            "paths": ["docs/public/openapi.json"],
             "commands": ["make postman"],
             "command_scope": "session",
         },
@@ -741,8 +741,8 @@ def test_command_if_changed_blocks_when_required_command_did_not_run(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
-            "changed_path_source": "stop.working_tree",
-            "changed_paths": ["docs/public/openapi.json"],
+            "path_source": "stop.working_tree",
+            "paths": ["docs/public/openapi.json"],
             "commands": ["git status"],
             "command_scope": "session",
         },
@@ -762,8 +762,8 @@ def test_command_if_changed_is_not_applicable_when_no_matching_path_changed(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
-            "changed_path_source": "stop.working_tree",
-            "changed_paths": ["README.md"],
+            "path_source": "stop.working_tree",
+            "paths": ["README.md"],
             "commands": [],
         },
         headers=master_key_header,
@@ -791,8 +791,8 @@ def test_command_if_changed_does_not_block_the_edit_that_triggers_it(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
-            "changed_path_source": "stop.working_tree",
-            "changed_paths": ["docs/public/openapi.json"],
+            "path_source": "stop.working_tree",
+            "paths": ["docs/public/openapi.json"],
             "commands": [],
         },
         headers=master_key_header,
@@ -815,8 +815,8 @@ def test_command_if_changed_blocks_when_commands_is_omitted(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
-            "changed_path_source": "stop.working_tree",
-            "changed_paths": ["docs/public/openapi.json"],
+            "path_source": "stop.working_tree",
+            "paths": ["docs/public/openapi.json"],
         },
         headers=master_key_header,
     )
@@ -846,7 +846,7 @@ def test_command_if_changed_oversized_workload_is_rejected(
     changed_paths = [f"src/{'y' * 40}-{i:05d}.txt" for i in range(10_000)]
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "changed_path_source": "stop.working_tree", "changed_paths": changed_paths},
+        json={"policy_yaml": policy, "path_source": "stop.working_tree", "paths": changed_paths},
         headers=master_key_header,
     )
     assert response.status_code == 422, response.text
@@ -864,8 +864,8 @@ def test_command_if_changed_defers_call_scoped_evidence(client: TestClient, mast
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
-            "changed_path_source": "stop.working_tree",
-            "changed_paths": ["docs/public/openapi.json"],
+            "path_source": "stop.working_tree",
+            "paths": ["docs/public/openapi.json"],
             "commands": ["git status"],
         },
         headers=master_key_header,
@@ -890,8 +890,8 @@ def test_command_if_changed_blocks_when_the_session_ran_no_commands(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
-            "changed_path_source": "stop.working_tree",
-            "changed_paths": ["docs/public/openapi.json"],
+            "path_source": "stop.working_tree",
+            "paths": ["docs/public/openapi.json"],
             "commands": [],
             "command_scope": "session",
         },
@@ -1072,8 +1072,8 @@ def test_judge_gate_with_when_changed_is_not_applicable_when_nothing_matches(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _WHEN_CHANGED_JUDGE_POLICY,
-            "changed_path_source": "stop.working_tree",
-            "changed_paths": ["docs/README.md"],
+            "path_source": "stop.working_tree",
+            "paths": ["docs/README.md"],
             "judge_results": [
                 {"gate_id": "follows-error-handling-pattern", "outcome": "fail", "reasoning": "should not matter"}
             ],
@@ -1110,8 +1110,8 @@ def test_judge_gate_with_when_changed_still_resolves_the_verdict_once_a_matching
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _WHEN_CHANGED_JUDGE_POLICY,
-            "changed_path_source": "stop.working_tree",
-            "changed_paths": ["src/module.py"],
+            "path_source": "stop.working_tree",
+            "paths": ["src/module.py"],
             "judge_results": [
                 {"gate_id": "follows-error-handling-pattern", "outcome": "fail", "reasoning": "swallows exceptions"}
             ],
@@ -1139,8 +1139,8 @@ def test_judge_gate_with_when_changed_is_not_applicable_on_a_pretooluse_shaped_r
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _WHEN_CHANGED_JUDGE_POLICY,
-            "changed_path_source": "pre_tool_use.edit_target",
-            "changed_paths": ["src/module.py"],
+            "path_source": "pre_tool_use.edit_target",
+            "paths": ["src/module.py"],
         },
         headers=master_key_header,
     )
@@ -1170,7 +1170,7 @@ def test_judge_when_changed_oversized_workload_is_rejected(
     changed_paths = [f"src/{'y' * 40}-{i:05d}.txt" for i in range(10_000)]
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "changed_path_source": "stop.working_tree", "changed_paths": changed_paths},
+        json={"policy_yaml": policy, "path_source": "stop.working_tree", "paths": changed_paths},
         headers=master_key_header,
     )
     assert response.status_code == 422, response.text
@@ -1332,8 +1332,8 @@ def test_verifier_gate_with_when_changed_is_not_applicable_when_nothing_matches(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _WHEN_CHANGED_VERIFIER_POLICY,
-            "changed_path_source": "stop.working_tree",
-            "changed_paths": ["docs/README.md"],
+            "path_source": "stop.working_tree",
+            "paths": ["docs/README.md"],
             "check_results": [
                 {"gate_id": "no-leftover-conflict-markers", "outcome": "fail", "detail": "should not matter"}
             ],
@@ -1370,8 +1370,8 @@ def test_verifier_gate_with_when_changed_still_resolves_the_verdict_once_a_match
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _WHEN_CHANGED_VERIFIER_POLICY,
-            "changed_path_source": "stop.working_tree",
-            "changed_paths": ["src/module.py"],
+            "path_source": "stop.working_tree",
+            "paths": ["src/module.py"],
             "check_results": [
                 {"gate_id": "no-leftover-conflict-markers", "outcome": "fail", "detail": "conflicted.txt:2"}
             ],
@@ -1400,8 +1400,8 @@ def test_verifier_gate_with_when_changed_is_not_applicable_on_a_pretooluse_shape
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _WHEN_CHANGED_VERIFIER_POLICY,
-            "changed_path_source": "pre_tool_use.edit_target",
-            "changed_paths": ["src/module.py"],
+            "path_source": "pre_tool_use.edit_target",
+            "paths": ["src/module.py"],
         },
         headers=master_key_header,
     )
@@ -1432,7 +1432,7 @@ def test_verifier_when_changed_oversized_workload_is_rejected(
     changed_paths = [f"src/{'y' * 40}-{i:05d}.txt" for i in range(10_000)]
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "changed_path_source": "stop.working_tree", "changed_paths": changed_paths},
+        json={"policy_yaml": policy, "path_source": "stop.working_tree", "paths": changed_paths},
         headers=master_key_header,
     )
     assert response.status_code == 422, response.text
@@ -1451,11 +1451,11 @@ def test_paths_without_a_source_are_refused_rather_than_guessed(
     """
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _VALID_POLICY, "changed_paths": ["CHANGELOG.md"]},
+        json={"policy_yaml": _VALID_POLICY, "paths": ["CHANGELOG.md"]},
         headers=master_key_header,
     )
     assert response.status_code == 422, response.text
-    assert "changed_path_source" in response.json()["detail"]
+    assert "path_source" in response.json()["detail"]
 
 
 def test_an_empty_path_list_needs_no_source(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -1466,7 +1466,7 @@ def test_an_empty_path_list_needs_no_source(client: TestClient, master_key_heade
     """
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _VALID_POLICY, "changed_paths": [], "commands": []},
+        json={"policy_yaml": _VALID_POLICY, "paths": [], "commands": []},
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -1476,7 +1476,7 @@ def test_an_empty_path_list_needs_no_source(client: TestClient, master_key_heade
 def test_paths_labeled_with_an_inapplicable_moment_are_refused(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """`RunsAt` admits five values on the wire, but a path can only be read at two.
+    """`RunsAt` admits six values on the wire, but a path can only be read at three.
 
     A client that labels real paths `stop.session` would otherwise resolve every
     path gate `not_applicable`: a 200 that silently enforces nothing. The wire is
@@ -1486,10 +1486,69 @@ def test_paths_labeled_with_an_inapplicable_moment_are_refused(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _VALID_POLICY,
-            "changed_paths": ["CHANGELOG.md"],
-            "changed_path_source": "stop.session",
+            "paths": ["CHANGELOG.md"],
+            "path_source": "stop.session",
         },
         headers=master_key_header,
     )
     assert response.status_code == 422, response.text
     assert "no path gate can be declared to run at" in response.json()["detail"]
+
+
+_READ_POLICY = (
+    'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+    "  - id: no-secret-reads\n    type: path\n    runs: [pre_tool_use.read_target]\n"
+    '    enforcement: required\n    forbidden: [".env", "**/.env"]\n    message: Secrets stay out of the transcript.\n'
+)
+
+
+def test_a_read_target_blocks_a_gate_that_asked_for_that_moment(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The wire shape `otari hook` submits for a `PreToolUse` call on `Read`."""
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _READ_POLICY,
+            "paths": ["config/.env"],
+            "path_source": "pre_tool_use.read_target",
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is True
+    assert body["results"][0]["outcome"] == "fail"
+
+
+@pytest.mark.parametrize("source", ["pre_tool_use.edit_target", "stop.working_tree"])
+def test_a_read_gate_ignores_every_other_moment(
+    client: TestClient, master_key_header: dict[str, str], source: str
+) -> None:
+    """A read is neither a write nor a change, so the same path must not fire it elsewhere."""
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _READ_POLICY, "paths": ["config/.env"], "path_source": source},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "not_applicable"
+
+
+def test_read_evidence_leaves_a_write_only_policy_alone(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """The compatibility claim on the wire: a policy written before reads existed is unchanged."""
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _VALID_POLICY,
+            "paths": ["CHANGELOG.md"],
+            "path_source": "pre_tool_use.read_target",
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert all(result["outcome"] == "not_applicable" for result in body["results"])
