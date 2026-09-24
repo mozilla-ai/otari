@@ -6053,6 +6053,72 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HostedGuardrailPublic": {
+        "description": "A hosted guardrail as the picker shows it. Never a secret or an argument.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "guardrail_name": {
+            "title": "Guardrail Name",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "price_per_check": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Per Check"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "guardrail_name",
+          "description",
+          "price_per_check"
+        ],
+        "title": "HostedGuardrailPublic",
+        "type": "object"
+      },
+      "HostedGuardrailsPublic": {
+        "description": "Every hosted guardrail the caller's organization may pick.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/HostedGuardrailPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "HostedGuardrailsPublic",
+        "type": "object"
+      },
       "Icon": {
         "additionalProperties": true,
         "description": "An icon for display in user interfaces.",
@@ -24645,6 +24711,36 @@
           }
         ],
         "summary": "Test Organization Guardrail",
+        "tags": [
+          "organization-guardrails"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/hosted-guardrails": {
+      "get": {
+        "description": "List the deployment's hosted guardrails the caller's organization may pick.\n\nOrganization owners and admins only, like the mandates they are picked for.\nEach entry names the guardrail and its price per check, never its secret\nor arguments.",
+        "operationId": "organization-guardrails-list_organization_hosted_guardrails",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedGuardrailsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Organization Hosted Guardrails",
         "tags": [
           "organization-guardrails"
         ]

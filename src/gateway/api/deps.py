@@ -52,6 +52,7 @@ from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyServ
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
 )
+from gateway.services.tenancy.organization_hosted_guardrail_service import OrganizationHostedGuardrailService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_service import WorkspaceService
 from gateway.services.workspace_scope import default_workspace_id
@@ -877,6 +878,22 @@ def get_hosted_guardrail_port(db: PortSessionDep, container: ContainerDep) -> Ho
 
 
 HostedGuardrailPortDep = Annotated[HostedGuardrailPort, Depends(get_hosted_guardrail_port)]
+
+
+def get_organization_hosted_guardrail_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    hosted_guardrails: HostedGuardrailPortDep,
+) -> OrganizationHostedGuardrailService:
+    """Build the hosted-guardrail picker on the request's session, for the role gate."""
+    return OrganizationHostedGuardrailService(
+        organizations=OrganizationService(db, membership_listener=None),
+        hosted_guardrails=hosted_guardrails,
+    )
+
+
+OrganizationHostedGuardrailServiceDep = Annotated[
+    OrganizationHostedGuardrailService, Depends(get_organization_hosted_guardrail_service)
+]
 
 
 # Deliberately ``get_db`` and not ``PortSessionDep``: every surface that

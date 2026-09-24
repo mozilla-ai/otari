@@ -2152,6 +2152,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/hosted-guardrails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Organization Hosted Guardrails
+         * @description List the deployment's hosted guardrails the caller's organization may pick.
+         *
+         *     Organization owners and admins only, like the mandates they are picked for.
+         *     Each entry names the guardrail and its price per check, never its secret
+         *     or arguments.
+         */
+        get: operations["organization-guardrails-list_organization_hosted_guardrails"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/keys": {
         parameters: {
             query?: never;
@@ -8236,6 +8260,33 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HostedGuardrailPublic
+         * @description A hosted guardrail as the picker shows it. Never a secret or an argument.
+         */
+        HostedGuardrailPublic: {
+            /** Description */
+            description: string | null;
+            /** Guardrail Name */
+            guardrail_name: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Price Per Check */
+            price_per_check: number | null;
+        };
+        /**
+         * HostedGuardrailsPublic
+         * @description Every hosted guardrail the caller's organization may pick.
+         */
+        HostedGuardrailsPublic: {
+            /** Data */
+            data: components["schemas"]["HostedGuardrailPublic"][];
         };
         /**
          * Icon
@@ -17272,6 +17323,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-guardrails-list_organization_hosted_guardrails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedGuardrailsPublic"];
                 };
             };
         };
