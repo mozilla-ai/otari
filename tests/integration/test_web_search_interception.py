@@ -98,13 +98,13 @@ def test_intercepted_declaration_runs_the_gateway_search(
     assert search.await_count == 1, "the gateway's search backend never ran"
 
 
-@pytest.mark.parametrize("tool_type", ["web_search_20250305", "web_fetch_20250910", "web_fetch_20260209"])
+@pytest.mark.parametrize("tool_type", ["web_fetch_20250910", "web_fetch_20260209"])
 def test_declaration_is_forwarded_when_interception_is_off(
     client: TestClient,
     api_key_header: dict[str, str],
     tool_type: str,
 ) -> None:
-    """Default behavior: the keyword reaches the provider and no gateway search runs."""
+    """Default behavior: a provider fetch keyword reaches the provider and no gateway search runs."""
     search = AsyncMock(return_value="never called")
     captured: dict[str, Any] = {}
 
@@ -285,3 +285,32 @@ def test_invalid_max_uses_is_rejected_instead_of_becoming_uncapped(
     assert response.status_code == 400, response.text
     assert response.json() == {"detail": "web_search max_uses must be a non-negative integer"}
     assert search.await_count == 0
+
+
+def test_search_keyword_no_provider_runs_is_claimed_without_interception(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Chat Completions has no native search, so with a backend configured the
+    keyword runs on it rather than reaching a provider that cannot serve it."""
+    search = AsyncMock(return_value="search results for otari")
+    with (
+        patch(
+            "gateway.services.mcp_loop.acompletion",
+            new=AsyncMock(side_effect=[_completion(tool_call=True), _completion(tool_call=False)]),
+        ),
+        patch("gateway.services.web_search_backend.WebSearchBackend._search_tool", new=search),
+        patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
+    ):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "what is otari"}],
+                "tools": [{"type": "web_search_20250305"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 200, response.text
+    assert search.await_count == 1, "the keyword was forwarded instead of claimed"

@@ -8,9 +8,11 @@ handling regardless of wire shape.
 
 The explicit ``otari_*`` tool types always trigger gateway-side execution.
 A provider-native web-search keyword (``web_search`` / ``web_search_<date>``)
-is left untouched in ``tools[]`` and forwarded to the upstream provider unless
-``web_search_intercept`` is on. It is off by default because turning it on
-silently takes a search away from a provider that would have run it (see
+is forwarded to the upstream provider when that provider runs it natively
+(Anthropic's dated keyword on Messages, OpenAI's on Responses), and claimed by
+the gateway's backend otherwise, when one is configured. ``web_search_intercept``
+claims it in every case. It is off by default because turning it on silently
+takes a search away from a provider that would have run it (see
 ``docs/tools.md``). An OpenAI ``function`` named ``web_search`` is deliberately
 *not* claimed even then: that is a caller's own tool, and hijacking it means the
 caller's handler never fires and it never gets back a ``tool_call`` it can
@@ -111,6 +113,55 @@ def _is_provider_web_search_tool_type(type_value: Any) -> bool:
 def _is_any_web_search_tool_type(type_value: Any) -> bool:
     """The gateway-managed type or a provider-named keyword."""
     return _is_web_search_tool_type(type_value) or _is_provider_web_search_tool_type(type_value)
+
+
+# Where a provider-named web-search keyword is the provider's own: Anthropic runs
+# its dated keyword on Messages, OpenAI its keywords on Responses. Every other
+# pairing names a search the dispatched provider cannot run.
+_NATIVE_WEB_SEARCH: frozenset[tuple[str, Dialect]] = frozenset(
+    {("anthropic", Dialect.MESSAGES), ("openai", Dialect.RESPONSES)}
+)
+
+
+def first_provider_web_search_tool(tools: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """The first provider-named web-search declaration in ``tools``, if any."""
+    for entry in tools or []:
+        if isinstance(entry, dict) and _is_provider_web_search_tool_type(entry.get("type")):
+            return entry
+    return None
+
+
+def provider_runs_web_search_natively(
+    tool_entry: dict[str, Any] | None, *, provider: str | None, dialect: Dialect
+) -> bool:
+    """Whether the dispatched provider would run this web-search declaration itself.
+
+    The web-search counterpart of :func:`provider_runs_code_natively`. ``None``
+    for the provider reads as not native, as it does there.
+    """
+    if provider is None or tool_entry is None or not _is_provider_web_search_tool_type(tool_entry.get("type")):
+        return False
+    return (provider.lower(), dialect) in _NATIVE_WEB_SEARCH
+
+
+def claims_provider_web_search(
+    tool_entry: dict[str, Any] | None,
+    *,
+    intercept: bool,
+    backend_configured: bool,
+    provider: str | None,
+    dialect: Dialect,
+) -> bool:
+    """Whether the gateway runs a provider-named web-search declaration itself.
+
+    Only with a backend to run it on. Interception claims every such keyword;
+    without it, a keyword is claimed only when the dispatched provider cannot run
+    it, which is what keeps a request working when its model is swapped for one
+    with no search of its own. A provider that can search keeps its search.
+    """
+    if tool_entry is None or not backend_configured:
+        return False
+    return intercept or not provider_runs_web_search_natively(tool_entry, provider=provider, dialect=dialect)
 
 
 def _is_code_execution_tool_type(type_value: Any) -> bool:

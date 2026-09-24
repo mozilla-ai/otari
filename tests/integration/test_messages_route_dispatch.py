@@ -40,6 +40,8 @@ from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, MCP_CLIENT_BETA
 from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
 
+from .conftest import MODEL_NAME
+
 _CONTEXT_MANAGEMENT = {"edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]}
 _BETAS = ["compact-2026-01-12"]
 _AUTOMATIC_CACHE_CONTROL = {"type": "ephemeral", "ttl": "1h"}
@@ -1839,6 +1841,83 @@ def test_intercept_off_still_forwards_provider_keywords(
             f"{API_ROOT}/messages",
             json={
                 "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [{"type": "web_search_20250305"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert [tool["type"] for tool in captured.get("tools") or []] == ["web_search_20250305"]
+
+
+def test_a_search_keyword_the_provider_cannot_run_is_claimed_with_native_blocks(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without interception, a dated keyword sent for a model whose provider has no
+    search runs on the gateway backend and still answers in Anthropic's blocks."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
+    seen: list[tuple[Any, frozenset[str]]] = []
+
+    async def fake_loop(
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
+    ) -> MessageResponse:
+        seen.append((pool, native_tools))
+        return _text_response("ok")
+
+    fake_backend = AsyncMock()
+    fake_backend.purpose_hints = lambda: []
+    fake_builder_result = AsyncMock(
+        __aenter__=AsyncMock(return_value=fake_backend),
+        __aexit__=AsyncMock(return_value=None),
+    )
+    with (
+        patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
+        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 2}],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert seen == [(fake_backend, frozenset({WEB_SEARCH_TOOL_NAME}))]
+
+
+def test_a_search_keyword_the_provider_cannot_run_is_forwarded_without_a_backend(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With nothing to run it on, the keyword passes through as it always has."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _text_response("ok")
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": MODEL_NAME,
                 "messages": [{"role": "user", "content": "search"}],
                 "max_tokens": 100,
                 "tools": [{"type": "web_search_20250305"}],

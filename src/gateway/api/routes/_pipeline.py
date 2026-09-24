@@ -104,9 +104,11 @@ from gateway.api.routes._tools import (
     _is_provider_web_search_tool_type,
     _resolve_sandbox_purpose_hint,
     _web_search_intercept_enabled,
+    claims_provider_web_search,
     decide_code_executor,
     declares_code_execution,
     first_provider_code_execution_tool,
+    first_provider_web_search_tool,
     native_code_execution_dialect,
     parse_code_execution_header,
     provider_runs_code_natively,
@@ -2888,11 +2890,17 @@ async def prepare_gateway_tools(
     reservation taken by :func:`resolve_request_context` before propagating.
     """
     try:
-        intercept_web_search = _web_search_intercept_enabled(ctx.config) and ctx.config.web_search_configured()
+        claim_web_search = claims_provider_web_search(
+            first_provider_web_search_tool(tools),
+            intercept=_web_search_intercept_enabled(ctx.config),
+            backend_configured=ctx.config.web_search_configured(),
+            provider=_dispatch_provider_name(ctx),
+            dialect=adapter.name,
+        )
         _validate_managed_web_declarations(
             adapter,
             tools,
-            intercept_web_search=intercept_web_search,
+            intercept_web_search=claim_web_search,
         )
 
         # The organization's and the policy's guardrails are merged in here
@@ -3189,14 +3197,13 @@ async def prepare_gateway_tools(
                 raise adapter.error(400, CONTAINER_NOT_GATEWAY_RUN_DETAIL, ErrorKind.INVALID_REQUEST)
 
         web_search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
-        # Interception (claiming the provider-named web_search keywords) is opt-in and
-        # additionally requires a backend: without one there is nothing to intercept
-        # *to*, and claiming the keyword would turn a request the provider would have
-        # served into a 400. So with no backend configured, or the toggle off, a
-        # provider-named keyword passes through exactly as it always has.
+        # A provider-named keyword is claimed only with a backend to run it on, and
+        # then either because interception is on or because the dispatched provider
+        # cannot run it (see `claims_provider_web_search`). Otherwise it passes
+        # through as it always has.
         web_search_tool_entry, tools_after_search = _extract_web_search_tool(
             tools_after_sandbox,
-            intercept=intercept_web_search,
+            intercept=claim_web_search,
         )
         try:
             _read_web_search_max_uses(web_search_tool_entry)
