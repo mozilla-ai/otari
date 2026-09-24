@@ -2405,7 +2405,18 @@ main {
 
    The selection box is held with them rather than left to scroll: it acts on the
    row, and a checkbox that has slid away from the row it selects is worse than
-   no pin at all. */
+   no pin at all.
+
+   The box is only there when some row on the page is bulk-editable, so the
+   offsets start from a variable that drops to zero when Time is the first
+   column. Fixed offsets pushed every held lane a box-width right of where it
+   sits, and Model then covered the start of Routing. */
+.otari-activity-table {
+  --activity-pin-start: 3rem;
+}
+.otari-activity-table:has(.table__column[data-key="time"]:first-child) {
+  --activity-pin-start: 0rem;
+}
 .otari-activity-table .table__column:first-child,
 .otari-activity-table .table__row .table__cell:first-child {
   position: sticky;
@@ -2416,21 +2427,21 @@ main {
 .otari-activity-table .table__column[data-key="time"],
 .otari-activity-table .table__cell[data-key="time"] {
   position: sticky;
-  left: 3rem;
+  left: var(--activity-pin-start);
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="user"],
 .otari-activity-table .table__cell[data-key="user"] {
   position: sticky;
-  left: 10.5rem;
+  left: calc(var(--activity-pin-start) + 7.5rem);
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="model"],
 .otari-activity-table .table__cell[data-key="model"] {
   position: sticky;
-  left: 19.875rem;
+  left: calc(var(--activity-pin-start) + 16.875rem);
   z-index: 1;
   background-color: var(--color-background);
 }
