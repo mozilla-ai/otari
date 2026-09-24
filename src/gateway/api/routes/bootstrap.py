@@ -210,9 +210,10 @@ class DeploymentBootstrap(BaseModel):
     site_url: str | None = Field(
         description=(
             "Where this deployment's public website lives. Set, the logo on the pages a visitor "
-            "reaches without an account links to it; null, it links to the public catalog. A "
-            "link target an operator configured, validated at startup as an absolute http(s) "
-            "URL carrying no credential, since this response is unauthenticated."
+            "reaches without an account links to it; null, it links to the public catalog where "
+            "public_catalog is true, and is not a link otherwise. A link target an operator "
+            "configured, validated at startup as an absolute http(s) URL carrying no credential, "
+            "since this response is unauthenticated."
         ),
     )
     sign_in_methods: list[SignInMethod] = Field(

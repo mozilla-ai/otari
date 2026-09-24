@@ -378,8 +378,9 @@ way `data_plane_url` refuses one. The same check covers `docs_url` and
 
 A deployment with a website of its own (a landing page beside the dashboard)
 sets `site_url` or `OTARI_SITE_URL` to its absolute HTTP or HTTPS address. The
-logo on the pages a visitor reaches without an account, the public model
-catalog among them, then links there. Unset, it links to the catalog itself.
+logo on the pages a visitor reaches without an account, the sign-in pages and
+the public model catalog, then links there. Unset, it links to the catalog where
+the deployment publishes one, and is plain text otherwise.
 
 ## The interface address
 

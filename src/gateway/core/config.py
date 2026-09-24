@@ -546,9 +546,9 @@ class GatewayConfig(BudgetSettings, PricingSettings, FeedbackSettings, BaseSetti
         description=(
             "Where this deployment's public website lives, as an absolute http(s) URL "
             "(e.g. 'https://otari.ai/'). Set, the logo on the pages a visitor reaches "
-            "without an account (the public model catalog) links to it; unset, it links to "
-            "the catalog itself. A link target an operator configured, held to the same bar "
-            "as docs_url."
+            "without an account (the sign-in pages and the public model catalog) links to it; "
+            "unset, it links to the catalog where one is published, and is not a link "
+            "otherwise. A link target an operator configured, held to the same bar as docs_url."
         ),
     )
     data_plane_url: Annotated[str | None, Shown(SettingsGroup.GENERAL)] = Field(
