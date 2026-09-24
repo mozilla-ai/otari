@@ -631,6 +631,10 @@ export type OrganizationGuardrailTestResult =
 export type OrganizationGuardrailDefinition =
   Schemas["OrganizationGuardrailDefinitionPublic"]
 export type GuardrailBuildState = OrganizationGuardrailDefinition["build_state"]
+// A guardrail the deployment hosts, with a secret of its own, that the
+// organization may mandate through `hosted_guardrail_id`. Empty on a build that
+// hosts none.
+export type HostedGuardrail = Schemas["HostedGuardrailPublic"]
 export type CreateOrganizationGuardrailDefinitionRequest = Defaulted<
   Schemas["OrganizationGuardrailDefinitionCreate"],
   "enabled"

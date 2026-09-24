@@ -86,6 +86,9 @@ export const ORGANIZATION_GUARDRAILS = "organization-guardrails"
 // when a definition does, so a definition write leaves the mandates alone.
 export const ORGANIZATION_GUARDRAIL_DEFINITIONS =
   "organization-guardrail-definitions"
+// What the deployment hosts for the organization to mandate. The deployment's
+// to change, so nothing on the organization's pages invalidates it.
+export const HOSTED_GUARDRAILS = "hosted-guardrails"
 // The organization's own upstream provider credentials. Its own key for the
 // reason the two above have one: this is read by one page, and a credential
 // edit has no business refetching the organization context every page reads.

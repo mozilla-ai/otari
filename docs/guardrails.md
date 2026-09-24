@@ -426,6 +426,9 @@ offer them to every organization. An owner or admin lists the ones on offer at
 `/api/v1/organizations/me/hosted-guardrails`, each with its price per check, and
 mandates one with `hosted_guardrail_id`. The plain build hosts none, so that list
 is empty and the rest of this section never applies.
+In the dashboard, the mandate dialog then offers **A guardrail the deployment
+hosts**, with each one's price per check, and the table marks a mandate whose
+hosted guardrail is no longer offered.
 
 A hosted check behaves like one the organization defined: the same verdicts, the
 same `mode` and `on_unavailable`. The deployment runs it and never shares its

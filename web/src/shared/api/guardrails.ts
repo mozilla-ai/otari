@@ -4,6 +4,7 @@ import type {
   BuiltInGuardrailCatalog,
   CreateOrganizationGuardrailDefinitionRequest,
   GuardrailTestResult,
+  HostedGuardrail,
   OrganizationGuardrailDefinition,
   TestOrganizationGuardrailDefinitionRequest,
   UpdateOrganizationGuardrailDefinitionRequest,
@@ -11,6 +12,7 @@ import type {
 import { apiFetch } from "@/shared/api/client"
 import {
   BUILTIN_GUARDRAIL_CATALOG,
+  HOSTED_GUARDRAILS,
   ORGANIZATION_GUARDRAIL_DEFINITIONS,
 } from "@/shared/api/queryKeys"
 
@@ -41,6 +43,23 @@ export function useOrganizationGuardrailDefinitions(enabled = true) {
       (await apiFetch<{ data: OrganizationGuardrailDefinition[] }>(DEFINITIONS))
         .data,
     staleTime: 60_000,
+    enabled,
+  })
+}
+
+// The guardrails the deployment hosts that this organization may mandate. The
+// list is the whole answer: a build that hosts none returns it empty, which is
+// how the mandate dialog knows to offer no hosted choice.
+export function useHostedGuardrails(enabled = true) {
+  return useQuery({
+    queryKey: [HOSTED_GUARDRAILS],
+    queryFn: async () =>
+      (
+        await apiFetch<{ data: HostedGuardrail[] }>(
+          "/organizations/me/hosted-guardrails",
+        )
+      ).data,
+    staleTime: 5 * 60_000,
     enabled,
   })
 }

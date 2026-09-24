@@ -73,6 +73,32 @@ describe("credentialsLabel", () => {
 })
 
 describe("runsOnLabel", () => {
+  it("names the hosted guardrail a mandate runs, or says it is gone", () => {
+    const hosted = [
+      {
+        id: "h1",
+        name: "Prompt injection",
+        guardrail_name: "lakera_guard",
+        description: null,
+        price_per_check: null,
+      },
+    ]
+    expect(
+      runsOnLabel(
+        organizationGuardrail({ hosted_guardrail_id: "h1" }),
+        [],
+        hosted,
+      ),
+    ).toBe("Prompt injection (hosted)")
+    expect(
+      runsOnLabel(
+        organizationGuardrail({ hosted_guardrail_id: "h2" }),
+        [],
+        hosted,
+      ),
+    ).toBe("a hosted guardrail no longer offered")
+  })
+
   it("names the definition a mandate runs", () => {
     expect(
       runsOnLabel(organizationGuardrail({ definition_id: "d1" }), [lakera]),
