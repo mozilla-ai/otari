@@ -463,6 +463,8 @@ class ResolvedOrganizationGuardrail:
     credential: str | None
     definition_id: uuid.UUID | None
     hosted_guardrail_id: uuid.UUID | None = None
+    # The mandate's own id, which a metered check pairs with the request to be charged once.
+    id: uuid.UUID | None = None
 
 
 async def resolve_organization_guardrails(
@@ -524,6 +526,7 @@ async def resolve_organization_guardrails(
             credential=decrypt_secret(row.encrypted_credential) if row.encrypted_credential else None,
             definition_id=row.definition_id,
             hosted_guardrail_id=row.hosted_guardrail_id,
+            id=row.id,
         )
         for row in rows
     ]

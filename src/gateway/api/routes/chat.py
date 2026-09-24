@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CodeExecutionPortDep,
+    HostedGuardrailPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
     build_sandbox_container_registry,
@@ -58,6 +59,7 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.models.tools import CodeExecutor
 from gateway.ports.code_execution_port import CodeExecutionPort
+from gateway.ports.hosted_guardrail_port import HostedGuardrailPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.files import FileService, StagedFile
 from gateway.services.log_writer import LogWriter
@@ -400,6 +402,7 @@ async def chat_completions(
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
     code_execution_port: CodeExecutionPortDep,
+    hosted_guardrails: HostedGuardrailPortDep,
 ) -> ChatCompletion | StreamingResponse:
     """OpenAI-compatible chat completions endpoint.
 
@@ -423,6 +426,7 @@ async def chat_completions(
         log_writer=log_writer,
         model_provider=model_provider,
         code_execution_port=code_execution_port,
+        hosted_guardrails=hosted_guardrails,
     )
 
 
@@ -439,6 +443,7 @@ async def run_chat_completion(
     log_writer: LogWriter,
     model_provider: ModelProviderPort,
     code_execution_port: CodeExecutionPort | None,
+    hosted_guardrails: HostedGuardrailPort | None = None,
     session_principal: SessionPrincipal | None = None,
 ) -> ChatCompletion | StreamingResponse:
     """Serve one chat completion, from the resolved preamble to the response.
@@ -540,6 +545,7 @@ async def run_chat_completion(
         tools_header=request.tools_header,
         code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
         code_execution_port=code_execution_port,
+        hosted_guardrails=hosted_guardrails,
         sandbox_containers=build_sandbox_container_registry(
             config=config,
             uow=ctx.uow,

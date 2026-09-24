@@ -65,6 +65,7 @@ from gateway.api.deps import (
     CodeExecutionPortDep,
     CurrentIdentity,
     FileServiceDep,
+    HostedGuardrailPortDep,
     ModelProviderPortDep,
     get_config,
     get_db,
@@ -182,6 +183,7 @@ async def playground_chat_completions(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
+    hosted_guardrails: HostedGuardrailPortDep,
     code_execution_port: CodeExecutionPortDep,
     key_format: ApiKeyFormatPortDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
@@ -235,6 +237,7 @@ async def playground_chat_completions(
         config=config,
         log_writer=log_writer,
         model_provider=model_provider,
+        hosted_guardrails=hosted_guardrails,
         session_principal=principal,
     )
 

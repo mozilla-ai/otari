@@ -419,6 +419,21 @@ policy](routing.md) that mandates the same profile with a `url`. The operator's
 layer is the outermost one, so it owns where that check is sent, and the
 organization's definition steps aside.
 
+### Hosted guardrails
+
+A deployment may host guardrails of its own, with its own vendor secret, and
+offer them to every organization. An owner or admin lists the ones on offer at
+`/api/v1/organizations/me/hosted-guardrails`, each with its price per check, and
+mandates one with `hosted_guardrail_id`. The plain build hosts none, so that list
+is empty and the rest of this section never applies.
+
+A hosted check behaves like one the organization defined: the same verdicts, the
+same `mode` and `on_unavailable`. The deployment runs it and never shares its
+secret, and it may charge the organization for each check that returns a
+verdict. An organization that cannot pay makes the check unevaluable, so a
+`block` mandate with `on_unavailable: block` refuses the request with a `402`,
+and anything else serves it and records the check as inconclusive.
+
 ### Turning one off
 
 Two switches, stopping different amounts of work. `enabled: false` on a
