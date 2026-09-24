@@ -142,7 +142,6 @@ class FileService:
             EmptyUploadError: the upload carried no bytes.
             FileStorageError: the bytes were written but the row would not land.
         """
-        workspace_id = upload.workspace_id or await self._default_workspace()
         file_id = f"file-{uuid.uuid4().hex}"
         max_bytes = self._config.files_max_bytes
         storage_ref, size = await self._file_store.put_stream(file_id, _capped(upload.chunks, max_bytes))
@@ -153,20 +152,24 @@ class FileService:
             raise EmptyUploadError
 
         now = datetime.now(UTC)
-        record = FileObject(
-            id=file_id,
-            user_id=upload.user_id,
-            workspace_id=workspace_id,
-            filename=upload.filename or file_id,
-            mime_type=guess_mime_type(upload.filename, upload.content_type),
-            bytes=size,
-            purpose=upload.purpose,
-            storage_ref=storage_ref,
-            created_at=now,
-            expires_at=expiry_for(self._config, now),
-        )
         try:
             async with self._uow:
+                # Resolved here rather than before the upload: it reads the
+                # database, and doing that first would hold the session's
+                # transaction open for as long as the bytes take to store.
+                workspace_id = upload.workspace_id or await self._default_workspace()
+                record = FileObject(
+                    id=file_id,
+                    user_id=upload.user_id,
+                    workspace_id=workspace_id,
+                    filename=upload.filename or file_id,
+                    mime_type=guess_mime_type(upload.filename, upload.content_type),
+                    bytes=size,
+                    purpose=upload.purpose,
+                    storage_ref=storage_ref,
+                    created_at=now,
+                    expires_at=expiry_for(self._config, now),
+                )
                 await self._files.add(record)
         except DATABASE_ERRORS as exc:
             # Logged before the cleanup, so the failure that ended the upload is
@@ -176,6 +179,15 @@ class FileService:
             # failed insert does not leak a blob nothing references.
             await self._drop_orphan(storage_ref, file_id)
             raise FileStorageError(f"Could not record the file {file_id}") from exc
+        except Exception:
+            # Anything else that stopped the row from landing, the workspace
+            # lookup above included. The block has rolled back, so the bytes have
+            # nothing pointing at them and the sweep, which walks rows, will
+            # never see them. A cancellation is deliberately not caught here:
+            # its commit outcome is unknown, and dropping the bytes of a row
+            # that did land is the worse failure.
+            await self._drop_orphan(storage_ref, file_id)
+            raise
 
         logger.info(
             "Stored file %s (%d bytes) for user %s in workspace %s", file_id, size, upload.user_id, workspace_id

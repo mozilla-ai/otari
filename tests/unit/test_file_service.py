@@ -125,8 +125,12 @@ def _row(file_id: str = "file-1", *, storage_ref: str | None = "blob-1") -> File
     )
 
 
-def _service(store: _MemoryStore, files: _StubFiles, **config: Any) -> FileService:
+def _service(
+    store: _MemoryStore, files: _StubFiles, *, workspace_error: Exception | None = None, **config: Any
+) -> FileService:
     async def _default_workspace() -> uuid.UUID:
+        if workspace_error is not None:
+            raise workspace_error
         return _DEFAULT_WORKSPACE
 
     return FileService(
@@ -255,3 +259,15 @@ async def test_bytes_that_will_not_read_back_are_a_storage_failure() -> None:
 
     with pytest.raises(FileStorageError):
         await _service(store, files).content("file-1", FileScope(user_id="u1", workspace_id=_WORKSPACE))
+
+
+@pytest.mark.asyncio
+async def test_an_upload_whose_workspace_will_not_resolve_takes_its_blob_with_it() -> None:
+    """The workspace is resolved after the bytes are written, so its failure owns them too."""
+    store = _MemoryStore()
+    service = _service(store, _StubFiles(), workspace_error=RuntimeError("no default workspace"))
+
+    with pytest.raises(RuntimeError, match="no default workspace"):
+        await service.store(_upload(b"a,b\n", workspace_id=None))
+
+    assert store.blobs == {}
