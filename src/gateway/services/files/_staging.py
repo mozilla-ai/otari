@@ -2,6 +2,7 @@
 
 from collections.abc import Collection
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import PurePosixPath
 
 # The purpose stamped on a file the code-execution sandbox produced, so a
@@ -23,6 +24,10 @@ class StagedFile:
     filename: str
     mime_type: str
     storage_ref: str
+    # When Otari stops serving the file, and None where it is kept
+    # indefinitely. Carried so a copy made of it elsewhere can be given a life
+    # no longer than the one Otari gives the file itself.
+    expires_at: datetime | None = None
 
 
 def sandbox_path_for(filename: str, taken: Collection[str]) -> str:

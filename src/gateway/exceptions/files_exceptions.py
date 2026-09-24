@@ -63,3 +63,48 @@ class FileStorageError(TenancyError):
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
+
+
+class ProviderAttachmentError(TenancyError):
+    """A file a request attached cannot be given to the provider's own code execution.
+
+    Each of these refuses the request rather than answering without the file,
+    because the request asked for code to be run over that file and the code
+    would not find it.
+    """
+
+    status_code = status.HTTP_400_BAD_REQUEST
+
+
+class AttachedFileUnavailableError(ProviderAttachmentError):
+    """The deployment holds no usable file under the ID the request attached."""
+
+    def __init__(self) -> None:
+        super().__init__("An attached file does not exist, or holds no bytes here")
+
+
+class AttachedFileExpiresTooSoonError(ProviderAttachmentError):
+    """The file has too little left for a provider to hold a copy no longer than Otari does."""
+
+    def __init__(self) -> None:
+        super().__init__("An attached file expires too soon to be copied to the provider")
+
+
+class ProviderUploadDisabledError(ProviderAttachmentError):
+    """The deployment does not upload a copy of an attached file to a provider."""
+
+    def __init__(self) -> None:
+        super().__init__("This deployment does not upload attached files to a provider")
+
+
+class ProviderUploadFailedError(ProviderAttachmentError):
+    """A copy of the attached file could not be put at the provider.
+
+    A 502 because nothing the caller sent is wrong: the provider refused the
+    copy, would not be reached, or the bytes could not be read back.
+    """
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+
+    def __init__(self) -> None:
+        super().__init__("An attached file could not be made available to the provider's code execution")

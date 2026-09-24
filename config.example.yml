@@ -95,6 +95,9 @@ providers:
 # files_output_max_bytes: 67108864
 # files_retention_hours: 168
 # files_sweep_interval_sec: 3600
+# A copy at the provider that runs a request's code, and how long it lives there:
+# files_provider_upload_enabled: true
+# files_provider_upload_ttl_hours: 1
 # vision_strategy: describe
 # vision_describe_model: "ollama:qwen2-vl"
 # model_capabilities:
