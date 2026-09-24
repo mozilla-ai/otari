@@ -144,7 +144,7 @@ dev = [
     # uses it: the gateway parses that contract with its own Pydantic models.
     "jsonschema>=4.26.0",
     "types-jsonschema",
-    "moto[s3]>=5.0.0",
+    "moto[s3]>=5.2.3",
     "mypy",
     # Parses the mcp dependency spec straight out of this file's own
     # [project.dependencies], in the regression test for #689, instead of
