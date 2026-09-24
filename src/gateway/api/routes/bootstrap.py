@@ -9,8 +9,9 @@ which mode the gateway is in.
 Registered in both modes, and unauthenticated by necessity: this is what tells a
 browser whether a sign-in screen is even the right thing to show. It therefore
 carries no secret. In particular it never carries the platform token, and
-``management_url``, ``data_plane_url``, ``docs_url``, ``terms_url`` and
-``privacy_url`` are addresses an operator configured, not credentials.
+``management_url``, ``data_plane_url``, ``docs_url``, ``terms_url``,
+``privacy_url`` and ``site_url`` are addresses an operator configured, not
+credentials.
 
 The contract is shared with otari.ai, which serves the same shape for its hosted
 deployment (mozilla-ai/otari-ai#1591). ``deployment_type`` and ``session_type``
@@ -206,6 +207,14 @@ class DeploymentBootstrap(BaseModel):
             "http(s) URL carrying no credential, since this response is unauthenticated."
         )
     )
+    site_url: str | None = Field(
+        description=(
+            "Where this deployment's public website lives. Set, the logo on the pages a visitor "
+            "reaches without an account links to it; null, it links to the public catalog. A "
+            "link target an operator configured, validated at startup as an absolute http(s) "
+            "URL carrying no credential, since this response is unauthenticated."
+        ),
+    )
     sign_in_methods: list[SignInMethod] = Field(
         description=(
             "How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is "
@@ -312,6 +321,7 @@ async def get_bootstrap(
             docs_url=config.docs_url,
             terms_url=config.terms_url,
             privacy_url=config.privacy_url,
+            site_url=config.site_url,
             maintenance_mode=False,
             passkeys_ready=False,
             oauth_providers=[],
@@ -338,6 +348,7 @@ async def get_bootstrap(
         docs_url=config.docs_url,
         terms_url=config.terms_url,
         privacy_url=config.privacy_url,
+        site_url=config.site_url,
         maintenance_mode=await _maintenance_mode(db),
         public_catalog=bool(config.public_catalog) and not config.is_hybrid_mode,
         passkeys_ready=config.webauthn_enabled,

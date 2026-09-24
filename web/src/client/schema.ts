@@ -7618,6 +7618,11 @@ export interface components {
              */
             sign_in_methods: ("master_key" | "password" | "passkey")[];
             /**
+             * Site Url
+             * @description Where this deployment's public website lives. Set, the logo on the pages a visitor reaches without an account links to it; null, it links to the public catalog. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
+             */
+            site_url: string | null;
+            /**
              * Surfaces
              * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis, and this is the deployment (topology) axis. Empty for a hybrid gateway.
              */

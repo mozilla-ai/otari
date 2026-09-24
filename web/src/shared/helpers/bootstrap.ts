@@ -74,6 +74,7 @@ export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {
     docs_url: wire.docs_url ?? null,
     terms_url: wire.terms_url ?? null,
     privacy_url: wire.privacy_url ?? null,
+    site_url: wire.site_url ?? null,
     maintenance_mode: wire.maintenance_mode ?? false,
     passkeys_ready: wire.passkeys_ready ?? false,
     mail_ready: wire.mail_ready ?? false,

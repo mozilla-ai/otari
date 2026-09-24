@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
@@ -122,13 +123,21 @@ function mockApi() {
 // No router on purpose: the page renders ahead of the session, where the app
 // has not mounted one, so a component that reached for a router hook here
 // would be the bug the test exists to catch.
-function renderPage(modelId?: string, openSignup = false) {
+function renderPage(
+  modelId?: string,
+  openSignup = false,
+  overrides: Parameters<typeof bootstrap>[0] = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <DeploymentProvider
-      value={bootstrap({ public_catalog: true, open_signup: openSignup })}
+      value={bootstrap({
+        public_catalog: true,
+        open_signup: openSignup,
+        ...overrides,
+      })}
     >
       <QueryClientProvider client={client}>
         <PublicCatalogPage modelId={modelId} />
@@ -152,8 +161,6 @@ describe("PublicCatalogPage", () => {
     expect(
       within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }),
     ).toHaveAttribute("href", "#/models/z-ai/glm-5.3")
-    // No account action in the bar: "Use this model" is the way in.
-    expect(screen.queryByRole("link", { name: /sign in/i })).toBeNull()
     expect(screen.getByText(/deployment's list rates/)).toBeInTheDocument()
     // A visitor has no organization to ask about, and asking would be a 401.
     expect(
@@ -198,5 +205,73 @@ describe("PublicCatalogPage", () => {
     expect(
       await screen.findByRole("link", { name: "Use this model" }),
     ).toHaveAttribute("href", "#/signup")
+  })
+
+  it("carries the site's navbar, and the logo goes back to the catalog without a site", async () => {
+    mockApi()
+    renderPage()
+
+    const nav = screen.getByRole("navigation", { name: "Site" })
+    expect(within(nav).getByRole("link", { name: "Models" })).toHaveAttribute(
+      "href",
+      "#/models",
+    )
+    expect(within(nav).getByRole("link", { name: "Log in" })).toHaveAttribute(
+      "href",
+      "#/",
+    )
+    // The bundled guide sits behind sign-in, so a visitor gets the docs on GitHub.
+    expect(
+      within(nav).getByRole("link", { name: "Documentation" }),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/mozilla-ai/otari/blob/main/docs/index.md",
+    )
+    expect(within(nav).getByRole("link", { name: "GitHub" })).toHaveAttribute(
+      "href",
+      "https://github.com/mozilla-ai/otari",
+    )
+    // Signup is closed on this deployment, so there is nothing to offer.
+    expect(within(nav).queryByRole("link", { name: "Sign up" })).toBeNull()
+    expect(screen.getByRole("link", { name: "Otari home" })).toHaveAttribute(
+      "href",
+      "#/models",
+    )
+    await screen.findByRole("list", { name: "Models" })
+  })
+
+  it("links the logo to the deployment's site and offers signup where it is open", async () => {
+    mockApi()
+    renderPage(undefined, true, {
+      site_url: "https://otari.ai/",
+      docs_url: "https://docs.otari.ai/en/",
+    })
+
+    expect(screen.getByRole("link", { name: "Otari home" })).toHaveAttribute(
+      "href",
+      "https://otari.ai/",
+    )
+    const nav = screen.getByRole("navigation", { name: "Site" })
+    expect(within(nav).getByRole("link", { name: "Sign up" })).toHaveAttribute(
+      "href",
+      "#/signup",
+    )
+    expect(
+      within(nav).getByRole("link", { name: "Documentation" }),
+    ).toHaveAttribute("href", "https://docs.otari.ai/en/")
+    await screen.findByRole("list", { name: "Models" })
+  })
+
+  it("opens the same destinations from the menu at phone width", async () => {
+    mockApi()
+    renderPage()
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole("button", { name: "Open menu" }))
+
+    const menu = await screen.findByRole("dialog", { name: "Menu" })
+    for (const name of ["Models", "Documentation", "GitHub", "Log in"]) {
+      expect(within(menu).getByRole("link", { name })).toBeInTheDocument()
+    }
   })
 })

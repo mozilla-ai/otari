@@ -53,6 +53,9 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // No legal pages configured here; see docs/configuration.md#legal-pages.
     terms_url: null,
     privacy_url: null,
+    // No site of its own here, so the public catalog's logo links to the
+    // catalog; see docs/configuration.md#the-public-site.
+    site_url: null,
     // Sign-ins are open, which is the resting state: maintenance mode is a
     // stored row an operator sets to freeze them during a redeploy, and
     // nothing in this environment sets it.

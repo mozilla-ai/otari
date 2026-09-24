@@ -57,6 +57,8 @@ test.describe("hybrid deployment", () => {
       // Deployment-wide like docs_url, and unset here too.
       terms_url: null,
       privacy_url: null,
+      // Deployment-wide like docs_url, and unset here too.
+      site_url: null,
       // Never frozen, because the freeze is on a sign-in this deployment does
       // not serve: a hybrid gateway mints no session for maintenance mode to
       // refuse. Its control plane owns that, as it owns the sign-in itself.

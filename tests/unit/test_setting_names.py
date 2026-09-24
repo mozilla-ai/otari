@@ -115,6 +115,7 @@ _SETTING_NAMES = frozenset(
         "sandbox_session_image",
         "sandbox_url",
         "search_tools",
+        "site_url",
         "smtp_host",
         "smtp_password",
         "smtp_port",
