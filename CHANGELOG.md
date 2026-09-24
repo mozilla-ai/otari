@@ -4,6 +4,18 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.11.0](https://github.com/mozilla-ai/otari/releases/tag/v0.11.0) - 2026-09-24
+
+
+
+### Features
+
+- **catalog:** Let a guest browse the hosted models and start an account from one in [#1652](https://github.com/mozilla-ai/otari/pull/1652) by [@jigjigjig](https://github.com/jigjigjig) ([`538f247`](https://github.com/mozilla-ai/otari/commit/538f24790d0fc787185ccbe24042e33749dbcae2))
+- **dashboard:** Send feedback to the Otari team from the top bar in [#1655](https://github.com/mozilla-ai/otari/pull/1655) by [@jigjigjig](https://github.com/jigjigjig) ([`558209f`](https://github.com/mozilla-ai/otari/commit/558209ffe604b98f642ddd9f7e193f80b7dee55b))
+- **dashboard:** Seams for a dashboard that reaches several deployments in [#1669](https://github.com/mozilla-ai/otari/pull/1669) by [@tbille](https://github.com/tbille) ([`cf5e1fa`](https://github.com/mozilla-ai/otari/commit/cf5e1fab56446f966f73c3c7fc4dea206773954a))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.10.0...v0.11.0
 ## [0.10.0](https://github.com/mozilla-ai/otari/releases/tag/v0.10.0) - 2026-09-24
 
 
