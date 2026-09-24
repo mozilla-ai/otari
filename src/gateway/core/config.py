@@ -977,6 +977,27 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
             "deleted files. 0 disables the sweep, leaving cleanup to the operator."
         ),
     )
+    files_provider_upload_enabled: Annotated[bool, Shown(SettingsGroup.FILES)] = Field(
+        default=True,
+        description=(
+            "Upload a copy of an attached file to the provider when the provider's own code "
+            "execution needs one to name it. This does not decide whether a file's contents "
+            "reach the provider, which they do either way; it decides whether a copy is stored "
+            "in the provider's account until it expires. When False, a request that asks the "
+            "provider to run code over an attached file is refused."
+        ),
+    )
+    files_provider_upload_ttl_hours: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
+        default=1,
+        ge=1,
+        le=2160,
+        description=(
+            "Ceiling on how long a copy uploaded to a provider may live before the provider "
+            "expires it. The ceiling is the 90 days Anthropic's Files API accepts, and a copy "
+            "never outlives the file it was made from. Otari reuses a copy that still has time "
+            "left rather than uploading the same file again."
+        ),
+    )
     file_understanding_enabled: Annotated[bool, Shown(SettingsGroup.VISION)] = Field(
         default=True,
         description=(

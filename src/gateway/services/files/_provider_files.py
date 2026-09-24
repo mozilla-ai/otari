@@ -1,4 +1,4 @@
-"""Files a provider's own sandbox produced, and the client that reads them back.
+"""The files a provider holds, and the client that reads and writes them.
 
 A provider-native code execution keeps what it wrote in the provider's container
 and answers with the provider's file ID.
@@ -12,6 +12,7 @@ import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import timedelta
 from functools import cached_property
 from typing import Any
 from urllib.parse import quote
@@ -20,10 +21,11 @@ import httpx
 from anthropic import AnthropicError
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
-from any_llm.types.files import AsyncFileDownload
+from any_llm.types.files import AsyncFileDownload, FileMetadata
 from pydantic import ValidationError
 
 from gateway.core.config import GatewayConfig, provider_credential_env_names
+from gateway.exceptions.files_exceptions import ProviderUploadFailedError
 from gateway.log_config import logger
 from gateway.services.provider_kwargs import get_provider_kwargs
 
@@ -34,6 +36,11 @@ _TIMEOUT = httpx.Timeout(30.0)
 
 # The providers a produced file can be read back from.
 _FILE_PROVIDERS = frozenset({LLMProvider.ANTHROPIC, LLMProvider.OPENAI})
+
+# The shortest life a provider will give a file it stores. Anthropic's Files
+# API takes an expiry between one hour and 90 days, so a copy cannot be asked
+# for less than an hour. A provider absent here sets no floor of its own.
+_MINIMUM_COPY_LIFETIMES = {LLMProvider.ANTHROPIC: timedelta(hours=1)}
 
 # How a file call fails. any-llm raises its own error, or re-raises the provider
 # SDK's while unified exceptions are off, and the OpenAI container read is httpx.
@@ -135,6 +142,14 @@ def produced_files_for(dialect: str, obj: Any) -> list[ProviderFile]:
     return []
 
 
+def minimum_copy_lifetime(provider: str) -> timedelta:
+    """The shortest life ``provider`` will give a file it stores, or zero where it sets no floor."""
+    try:
+        return _MINIMUM_COPY_LIFETIMES.get(LLMProvider(provider), timedelta(0))
+    except ValueError:
+        return timedelta(0)
+
+
 def serves_files(provider: str) -> bool:
     """Whether Otari knows how to fetch a produced file back from ``provider``."""
     try:
@@ -213,9 +228,9 @@ def _container_file_request(file: ProviderFile, credential: ProviderCredential) 
 
 
 class ProviderFileClient:
-    """Reads back the files a provider instance's code produced, with that instance's credential.
+    """Reads and writes one provider instance's files, with that instance's credential.
 
-    Owns the connection its reads run on, so a caller closes it with
+    Owns the connection its calls run on, so a caller closes it with
     :meth:`aclose` once it has read everything it wants.
     """
 
@@ -280,6 +295,35 @@ class ProviderFileClient:
             await self._connection.aclose()
         except (httpx.HTTPError, RuntimeError):
             logger.exception("Could not release the %s connection", self.provider)
+
+    async def upload(self, data: bytes, *, filename: str, mime_type: str, expires_in: int) -> FileMetadata:
+        """Store ``data`` at the provider for ``expires_in`` seconds, and return what it recorded.
+
+        The provider expires the copy itself, which is what keeps Otari's store
+        the one place a file is kept indefinitely.
+
+        Raises:
+            ProviderUploadFailedError: the provider refused the copy, has no
+                files API, or could not be reached.
+        """
+        try:
+            return await self._llm.aupload_file(data, filename=filename, mime_type=mime_type, expires_in=expires_in)
+        except (*_FILE_CALL_ERRORS, NotImplementedError) as exc:
+            raise ProviderUploadFailedError from exc
+
+    async def discard(self, file_id: str) -> bool:
+        """Remove a file this client put at the provider, and say whether it is gone.
+
+        False rather than raising, because every caller is already refusing the
+        request that made the file and has nothing better to do with a failure
+        than say so.
+        """
+        try:
+            await self._llm.adelete_file(file_id)
+        except (*_FILE_CALL_ERRORS, NotImplementedError) as exc:
+            logger.warning("Could not remove %s file %s: %s", self.provider, file_id, exc)
+            return False
+        return True
 
     async def get_filename(self, file_id: str) -> str | None:
         """The file's name, from Anthropic's file metadata.

@@ -5,6 +5,7 @@ from contextlib import aclosing
 from datetime import UTC, datetime
 from typing import Annotated
 
+from any_llm import LLMProvider
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,7 +39,7 @@ from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
-from gateway.services.files import FileService, SandboxFileBridge, StagedFile
+from gateway.services.files import FileService, ProviderFileUploader, SandboxFileBridge, StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.organization_pricing_service import OrganizationPricingService
@@ -637,6 +638,39 @@ async def get_db_if_needed(
     async with aclosing(get_db()) as sessions:
         async for db in sessions:
             yield db
+
+
+def build_provider_file_uploader(
+    *,
+    raw_request: Request,
+    config: GatewayConfig,
+    uow: UnitOfWork | None,
+    provider: LLMProvider | None,
+    provider_instance: str | None,
+    workspace_id: uuid.UUID | None,
+) -> ProviderFileUploader | None:
+    """The uploader a request gets for the provider running its code, or None.
+
+    None where there is nothing to upload from or record on: hybrid mode, which
+    has no local database or file store, and a selector that resolved to no
+    provider. ``workspace_id`` may be None, which is a master-key request
+    resolving credentials deployment-wide, so it does not withhold the uploader.
+    Whether the deployment makes provider copies at all is the uploader's own
+    answer, because a request that needs one and cannot have one is refused
+    rather than served a different way.
+    """
+    file_store = getattr(raw_request.app.state, "file_store", None)
+    if uow is None or file_store is None or provider is None:
+        return None
+    return ProviderFileUploader(
+        uow,
+        FileRepositories.on(uow),
+        file_store,
+        config,
+        provider=provider.value,
+        provider_instance=provider_instance or provider.value,
+        workspace_id=workspace_id,
+    )
 
 
 def build_sandbox_file_bridge(

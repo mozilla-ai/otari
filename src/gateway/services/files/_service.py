@@ -287,7 +287,7 @@ class FileService:
             record = await self._files.live(file_id, scope.user_id, workspace_id=scope.workspace_id)
         if record is None or record.storage_ref is None:
             return None
-        return StagedFile(record.id, record.filename, record.mime_type, record.storage_ref)
+        return StagedFile(record.id, record.filename, record.mime_type, record.storage_ref, record.expires_at)
 
     async def read_bytes(self, staged: StagedFile) -> bytes:
         """The whole of a staged upload's bytes."""
