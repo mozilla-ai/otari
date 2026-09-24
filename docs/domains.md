@@ -225,8 +225,9 @@ The model never calls files, so it is not a tool. Inference normalizes an
 uploaded file into a request. Tools hands one to a sandbox and returns one
 from a tool call. The sandbox bridge and retention worker use `FileService`
 for output registration and cleanup; neither receives a Files repository.
-The service owns short database transactions, with output compensation and
-cleanup storage calls outside them.
+The service accepts produced-file metadata as `NewOutput` and maps it to the
+repository's row type internally. It owns short database transactions, with
+output compensation and cleanup storage calls outside them.
 
 ### tools
 

@@ -77,6 +77,24 @@ class NewFile:
 
 
 @dataclass(frozen=True)
+class NewOutput:
+    """A produced file to register after its bytes have been stored."""
+
+    file_id: str
+    user_id: str
+    workspace_id: uuid.UUID
+    filename: str
+    mime_type: str
+    bytes: int
+    purpose: str
+    storage_ref: str
+    expires_at: datetime | None
+    provider: str | None = None
+    provider_instance: str | None = None
+    provider_container_id: str | None = None
+
+
+@dataclass(frozen=True)
 class FileListing:
     """One page of a caller's files, as the request asked for it."""
 
@@ -346,10 +364,24 @@ class FileService:
         async with self._uow:
             return await self._files.existing_ids(file_ids)
 
-    async def record_output(self, row: OutputFileRow) -> None:
+    async def record_output(self, output: NewOutput) -> None:
         """Record stored output, cleaning up on failure but not on an uncertain commit."""
         staged = False
         try:
+            row = OutputFileRow(
+                file_id=output.file_id,
+                user_id=output.user_id,
+                workspace_id=output.workspace_id,
+                filename=output.filename,
+                mime_type=output.mime_type,
+                bytes=output.bytes,
+                purpose=output.purpose,
+                storage_ref=output.storage_ref,
+                expires_at=output.expires_at,
+                provider=output.provider,
+                provider_instance=output.provider_instance,
+                provider_container_id=output.provider_container_id,
+            )
             async with self._uow:
                 await self._files.record_output(row)
                 staged = True
@@ -357,7 +389,7 @@ class FileService:
             # Interruptions during commit leave its outcome unknown;
             # before staging completes, no output can have committed.
             if not staged or isinstance(exc, Exception):
-                await self.discard_output_bytes(row.storage_ref)
+                await self.discard_output_bytes(output.storage_ref)
             raise
 
     async def discard_output_bytes(self, storage_ref: str) -> None:
@@ -409,9 +441,7 @@ class FileService:
         between two pages still says where the next page starts. Another user's
         ID names no position.
         """
-        cursor = await self._files.any_owned(
-            cursor_id, listing.scope.user_id, workspace_id=listing.scope.workspace_id
-        )
+        cursor = await self._files.any_owned(cursor_id, listing.scope.user_id, workspace_id=listing.scope.workspace_id)
         if cursor is None:
             if listing.dialect is FileDialect.ANTHROPIC:
                 raise UnknownPageCursorError

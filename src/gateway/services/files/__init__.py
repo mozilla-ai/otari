@@ -1,6 +1,5 @@
 """The files domain: uploaded files, their lifecycle, and the sweep that gives their storage back."""
 
-from gateway.repositories.files import OutputFileRow
 from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._provider_files import ProviderFile, produced_files_for
 from gateway.services.files._sandbox_bridge import SandboxFileBridge
@@ -14,6 +13,7 @@ from gateway.services.files._service import (
     FileScope,
     FileService,
     NewFile,
+    NewOutput,
     SweepBatch,
 )
 from gateway.services.files._staging import CODE_EXECUTION_OUTPUT_PURPOSE, StagedFile, sandbox_path_for
@@ -30,7 +30,7 @@ __all__ = [
     "FileScope",
     "FileService",
     "NewFile",
-    "OutputFileRow",
+    "NewOutput",
     "ProviderFile",
     "SandboxFileBridge",
     "StagedFile",

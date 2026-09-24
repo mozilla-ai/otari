@@ -11,7 +11,6 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.log_config import logger
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.repositories.files import OutputFileRow
 from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._provider_files import (
     FileOverBudgetError,
@@ -20,7 +19,7 @@ from gateway.services.files._provider_files import (
     ProviderFileUnavailableError,
     serves_files,
 )
-from gateway.services.files._service import FileService
+from gateway.services.files._service import FileService, NewOutput
 from gateway.services.files._staging import CODE_EXECUTION_OUTPUT_PURPOSE, StagedFile
 
 # A missing credential or a database failure, which stop a copy before it starts.
@@ -94,7 +93,7 @@ class SandboxFileBridge:
             await self._file_store.delete(storage_ref)
             return None
         await self._files.record_output(
-            OutputFileRow(
+            NewOutput(
                 file_id=file_id,
                 user_id=self._user_id,
                 workspace_id=self._workspace_id,
@@ -184,7 +183,7 @@ class SandboxFileBridge:
             storage_ref, size = await self._file_store.put_stream(blob_key, chunks)
         try:
             filename = file.filename or await client.get_filename(file.file_id) or file.file_id
-            row = OutputFileRow(
+            output = NewOutput(
                 file_id=file.file_id,
                 user_id=self._user_id,
                 workspace_id=self._workspace_id,
@@ -201,5 +200,5 @@ class SandboxFileBridge:
         except BaseException:
             await self._files.discard_output_bytes(storage_ref)
             raise
-        await self._files.record_output(row)
+        await self._files.record_output(output)
         return size

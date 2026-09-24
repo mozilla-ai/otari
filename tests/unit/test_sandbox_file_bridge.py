@@ -18,11 +18,10 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.repositories.files import FileRepositories, FileRepository
+from gateway.repositories.files import FileRepositories, FileRepository, OutputFileRow
 from gateway.services.files import (
     CODE_EXECUTION_OUTPUT_PURPOSE,
     FileService,
-    OutputFileRow,
     ProviderFile,
     SandboxFileBridge,
 )

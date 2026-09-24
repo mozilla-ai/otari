@@ -16,8 +16,8 @@ from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.repositories.files import FileRepositories, FileRepository
-from gateway.services.files import FileService, OutputFileRow, SweepBatch, _sweeper
+from gateway.repositories.files import FileRepositories, FileRepository, OutputFileRow
+from gateway.services.files import FileService, NewOutput, SweepBatch, _sweeper
 
 
 class _Transactions:
@@ -106,15 +106,67 @@ async def test_output_failure_cleanup(
 
     repo.record_output.side_effect = record
     store.delete.side_effect = delete
-    row = OutputFileRow("file-1", "user-1", uuid.uuid4(), "out.txt", "text/plain", 1, "user_data", "blob-1", None)
+    output = NewOutput("file-1", "user-1", uuid.uuid4(), "out.txt", "text/plain", 1, "user_data", "blob-1", None)
     with pytest.raises(error_type) as raised:
-        await _service(uow, repo, store).record_output(row)
+        await _service(uow, repo, store).record_output(output)
     assert raised.value is error
     assert uow.depth == 0
     if during_commit and not clean_after_commit:
         store.delete.assert_not_awaited()
     else:
         store.delete.assert_awaited_once_with("blob-1")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", [None, "anthropic"])
+async def test_output_maps_service_input_to_repository_row(provider: str | None) -> None:
+    uow = _Transactions()
+    repo = Mock(spec=FileRepository)
+    store = Mock(spec=FileStoragePort)
+    workspace_id = uuid.uuid4()
+    expires_at = datetime.now(UTC)
+    instance = "primary" if provider else None
+    container = "container-1" if provider else None
+    output = NewOutput(
+        file_id="file-1",
+        user_id="user-1",
+        workspace_id=workspace_id,
+        filename="out.txt",
+        mime_type="text/plain",
+        bytes=42,
+        purpose="user_data",
+        storage_ref="blob-1",
+        expires_at=expires_at,
+        provider=provider,
+        provider_instance=instance,
+        provider_container_id=container,
+    )
+
+    async def record(row: OutputFileRow) -> None:
+        assert uow.depth == 1
+        assert type(row) is OutputFileRow
+        assert row == OutputFileRow(
+            file_id="file-1",
+            user_id="user-1",
+            workspace_id=workspace_id,
+            filename="out.txt",
+            mime_type="text/plain",
+            bytes=42,
+            purpose="user_data",
+            storage_ref="blob-1",
+            expires_at=expires_at,
+            provider=provider,
+            provider_instance=instance,
+            provider_container_id=container,
+        )
+
+    repo.record_output.side_effect = record
+    await _service(uow, repo, store).record_output(output)
+
+    repo.record_output.assert_awaited_once()
+    assert uow.blocks == 1
+    assert uow.depth == 0
+    store.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
