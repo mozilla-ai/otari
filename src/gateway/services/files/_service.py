@@ -351,9 +351,9 @@ class FileService:
                 await self._files.record_output(row)
                 staged = True
         except BaseException as exc:
-            # Cancellation during commit has an unknown outcome. Cancellation
-            # before staging completes cannot have committed this output.
-            if not isinstance(exc, asyncio.CancelledError) or not staged:
+            # Interruptions during commit leave its outcome unknown;
+            # before staging completes, no output can have committed.
+            if not staged or isinstance(exc, Exception):
                 await self.discard_output_bytes(row.storage_ref)
             raise
 

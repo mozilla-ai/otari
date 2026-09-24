@@ -79,15 +79,28 @@ async def test_sweep_transfers_outside_transactions(delete_error: OSError | None
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("during_commit", [False, True])
-async def test_output_cancellation_cleans_only_before_commit(during_commit: bool) -> None:
-    uow = _Transactions(commit_error=asyncio.CancelledError() if during_commit else None)
+@pytest.mark.parametrize(
+    ("error_type", "clean_after_commit"),
+    [
+        (asyncio.CancelledError, False),
+        (KeyboardInterrupt, False),
+        (SystemExit, False),
+        (GeneratorExit, False),
+        (RuntimeError, True),
+    ],
+)
+async def test_output_failure_cleanup(
+    during_commit: bool, error_type: type[BaseException], clean_after_commit: bool
+) -> None:
+    error = error_type()
+    uow = _Transactions(commit_error=error if during_commit else None)
     repo = Mock(spec=FileRepository)
     store = Mock(spec=FileStoragePort)
 
     async def record(row: OutputFileRow) -> None:
         assert uow.depth == 1
         if not during_commit:
-            raise asyncio.CancelledError
+            raise error
 
     async def delete(storage_ref: str) -> None:
         assert uow.depth == 0
@@ -96,10 +109,11 @@ async def test_output_cancellation_cleans_only_before_commit(during_commit: bool
     repo.record_output.side_effect = record
     store.delete.side_effect = delete
     row = OutputFileRow("file-1", "user-1", uuid.uuid4(), "out.txt", "text/plain", 1, "user_data", "blob-1", None)
-    with pytest.raises(asyncio.CancelledError):
+    with pytest.raises(error_type) as raised:
         await _service(uow, repo, store).record_output(row)
+    assert raised.value is error
     assert uow.depth == 0
-    if during_commit:
+    if during_commit and not clean_after_commit:
         store.delete.assert_not_awaited()
     else:
         store.delete.assert_awaited_once_with("blob-1")
