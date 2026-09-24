@@ -80,11 +80,17 @@ class _FakeUnitOfWork:
         self._depth -= 1
 
 
-class _FailingUnitOfWork(_FakeUnitOfWork):
-    """A Unit of Work whose commit fails the way a connect timeout does: a bare ``TimeoutError``."""
+class _AcknowledgmentLostUnitOfWork(_FakeUnitOfWork):
+    """The database commits, but the client never receives the acknowledgment."""
+
+    def __init__(self, db: Any) -> None:
+        super().__init__(db)
+        self.committed: list[Any] = []
 
     async def __aexit__(self, *exc: object) -> None:
-        raise TimeoutError("connect timed out")
+        await super().__aexit__(*exc)
+        self.committed.extend(self._session.added)
+        raise ConnectionError("commit acknowledgment lost")
 
 
 class _CancellingUnitOfWork(_FakeUnitOfWork):
@@ -195,10 +201,20 @@ async def test_a_row_that_fails_to_land_takes_its_blob_with_it() -> None:
     store = _MemoryStore()
 
     with pytest.raises(TimeoutError):
-        await _bridge(store, _FailingUnitOfWork(_FakeDb())).store_output("out.csv", _chunks(b"a,b\n"))
-    # Nothing references the bytes any more, and the sweep only sees rows, so
-    # leaving them would be a leak nothing reclaims.
+        await _bridge(store, record_error=TimeoutError()).store_output("out.csv", _chunks(b"a,b\n"))
     assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_a_lost_commit_acknowledgment_keeps_committed_file_bytes() -> None:
+    store = _MemoryStore()
+    uow = _AcknowledgmentLostUnitOfWork(_FakeDb())
+
+    with pytest.raises(ConnectionError, match="commit acknowledgment lost"):
+        await _bridge(store, uow).store_output("out.csv", _chunks(b"a,b\n"))
+
+    (record,) = uow.committed
+    assert store.blobs == {record.storage_ref: b"a,b\n"}
 
 
 def test_the_output_budget_never_exceeds_the_upload_cap() -> None:
@@ -209,7 +225,7 @@ def test_the_output_budget_never_exceeds_the_upload_cap() -> None:
 
 
 class _FailingSecondBlock(_FakeUnitOfWork):
-    """A Unit of Work whose first block commits and whose later ones fail, as a row insert can."""
+    """The lookup succeeds, but the output commit has an unknown outcome."""
 
     def __init__(self, db: Any) -> None:
         super().__init__(db)
@@ -377,9 +393,19 @@ async def test_a_copied_file_whose_row_fails_takes_its_blob_with_it(monkeypatch:
     _stub_provider(monkeypatch, {"file_01a": b"a"})
     store = _MemoryStore()
 
-    await _copy(_bridge(store, _FailingSecondBlock(_FakeDb())), "file_01a")
+    await _copy(_bridge(store, record_error=TimeoutError()), "file_01a")
 
     assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_a_copied_file_with_an_uncertain_commit_keeps_its_blob(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_provider(monkeypatch, {"file_01a": b"a"})
+    store = _MemoryStore()
+
+    await _copy(_bridge(store, _FailingSecondBlock(_FakeDb())), "file_01a")
+
+    assert list(store.blobs.values()) == [b"a"]
 
 
 @pytest.mark.asyncio

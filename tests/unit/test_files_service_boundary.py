@@ -84,18 +84,10 @@ async def test_sweep_transfers_outside_transactions(delete_error: OSError | None
 @pytest.mark.asyncio
 @pytest.mark.parametrize("during_commit", [False, True])
 @pytest.mark.parametrize(
-    ("error_type", "clean_after_commit"),
-    [
-        (asyncio.CancelledError, False),
-        (KeyboardInterrupt, False),
-        (SystemExit, False),
-        (GeneratorExit, False),
-        (RuntimeError, True),
-    ],
+    "error_type",
+    [asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit, RuntimeError, ConnectionError, TimeoutError],
 )
-async def test_output_failure_cleanup(
-    during_commit: bool, error_type: type[BaseException], clean_after_commit: bool
-) -> None:
+async def test_output_failure_cleanup(during_commit: bool, error_type: type[BaseException]) -> None:
     error = error_type()
     uow = _Transactions(commit_error=error if during_commit else None)
     repo = Mock(spec=FileRepository)
@@ -117,7 +109,7 @@ async def test_output_failure_cleanup(
         await _service(uow, repo, store).record_output(output)
     assert raised.value is error
     assert uow.depth == 0
-    if during_commit and not clean_after_commit:
+    if during_commit:
         store.delete.assert_not_awaited()
     else:
         store.delete.assert_awaited_once_with("blob-1")

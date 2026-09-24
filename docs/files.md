@@ -247,6 +247,11 @@ deleted file, or one past `files_retention_hours`, loses its row and bytes
 within an hour where cleanup was the operator's task. Set
 `files_sweep_interval_sec: 0` to keep it that way.
 
+If recording sandbox or provider output fails during commit, Otari retains the
+bytes because the metadata may already have committed. If the commit actually
+failed, this can leave an orphan blob. The sweep only follows database rows and
+cannot reclaim blobs without metadata; those require manual reconciliation.
+
 ### Storage backends
 
 `files_backend` chooses where the file bytes live. Their metadata stays in the

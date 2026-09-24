@@ -382,10 +382,10 @@ class FileService:
             async with self._uow:
                 await self._files.record_output(row)
                 staged = True
-        except BaseException as exc:
-            # Interruptions during commit leave its outcome unknown;
-            # before staging completes, no output can have committed.
-            if not staged or isinstance(exc, Exception):
+        except BaseException:
+            # A commit error can follow a successful database commit.
+            # Before staging completes, no output can have committed.
+            if not staged:
                 await discard_output_bytes(self._file_store, output.storage_ref)
             raise
 
