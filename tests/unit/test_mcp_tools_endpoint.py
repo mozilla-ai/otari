@@ -141,7 +141,7 @@ def test_the_live_catalog_is_returned_with_the_stored_server_revision(
         ],
         "warnings": [],
     }
-    assert response.headers["X-Otari-Request-ID"]
+    assert response.headers["Otari-Request-ID"]
 
 
 def test_the_response_discloses_no_url_credential_or_allowlist(

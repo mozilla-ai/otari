@@ -101,7 +101,7 @@ for model in "${MODELS[@]}"; do
   hr; echo "${BOLD}b. injection prompt, mode=block${RST} (expect: 403, provider NOT called)"
   ./ask.sh --profile "$PROFILE" --model "$model" --mode block "$INJECTION" || true
 
-  hr; echo "${BOLD}c. injection prompt, mode=monitor${RST} (expect: 200, verdict on X-Otari-Guardrails header)"
+  hr; echo "${BOLD}c. injection prompt, mode=monitor${RST} (expect: 200, verdict on Otari-Guardrails header)"
   ./ask.sh --profile "$PROFILE" --model "$model" --mode monitor "$INJECTION" || true
 done
 

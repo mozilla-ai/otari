@@ -49,7 +49,7 @@ from gateway.api.routes._platform import (
 # resolves a route signature at import time to decide what each parameter is.
 # Left as strings it cannot resolve, it reads both dependencies as query
 # parameters and every request fails validation before the handler runs.
-from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.config import API_ROOT, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import release_session
 from gateway.inflight import track_request
 from gateway.log_config import logger
@@ -196,7 +196,7 @@ class _McpRoute(APIRoute):
                     request_id,
                     headers={"Retry-After": retry_after} if retry_after else None,
                 )
-            response.headers["X-Otari-Request-ID"] = request_id
+            response.headers[REQUEST_ID_HEADER] = request_id
             return response
 
         return handler
@@ -216,7 +216,7 @@ def _error_response(
         execution_state=execution_state,
         request_id=request_id,
     )
-    response_headers = {"X-Otari-Request-ID": request_id}
+    response_headers = {REQUEST_ID_HEADER: request_id}
     if headers:
         response_headers.update(headers)
     return JSONResponse(status_code=status_code, content=body.model_dump(mode="json"), headers=response_headers)

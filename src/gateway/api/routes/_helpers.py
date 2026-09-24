@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from gateway.db import APIKey
 
 
-GUARDRAILS_RESULT_HEADER = "X-Otari-Guardrails"
+GUARDRAILS_RESULT_HEADER = "Otari-Guardrails"
 """Response header carrying a compact JSON summary of guardrail verdicts when a
 ``monitor``-mode (or otherwise non-blocking) check ran."""
 

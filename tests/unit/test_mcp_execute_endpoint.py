@@ -204,7 +204,7 @@ def test_the_request_id_is_returned_on_success_without_touching_the_result(
     """The successful body stays the native MCP result, so the id rides a header."""
     response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
-    assert response.headers["X-Otari-Request-ID"]
+    assert response.headers["Otari-Request-ID"]
     assert "request_id" not in response.json()
 
 

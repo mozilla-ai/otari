@@ -157,7 +157,7 @@ boto3 client and AWS has two distinct credential shapes:
 
 `request_id` groups every `attempt_id` from the same resolve call so the
 platform can attribute spend, render trace timelines, and emit fallback events.
-Otari also surfaces it as the `X-Otari-Request-ID` response header.
+Otari also surfaces it as the `Otari-Request-ID` response header.
 
 `fallback_enabled` is informational, set by the platform when its routing
 policy actually allows fallback (i.e. the policy has multiple enabled entries

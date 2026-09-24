@@ -922,7 +922,7 @@ class RequestContext:
         request_id: str | None = None,
     ) -> None:
         self.config = config
-        # Sent to the client as ``X-Otari-Request-ID``: the platform's id in hybrid
+        # Sent to the client as ``Otari-Request-ID``: the platform's id in hybrid
         # mode, one minted by this gateway in standalone.
         self.request_id = request_id
         self.db = db
@@ -4220,8 +4220,8 @@ def _container_headers(lease: ContainerLease | None) -> dict[str, str]:
     if lease is None:
         return {}
     return {
-        "X-Otari-Container-Id": lease.container_id,
-        "X-Otari-Container-Expires-At": lease.expires_at.isoformat(),
+        "Otari-Container-Id": lease.container_id,
+        "Otari-Container-Expires-At": lease.expires_at.isoformat(),
     }
 
 

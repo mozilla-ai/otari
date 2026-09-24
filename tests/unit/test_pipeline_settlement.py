@@ -183,7 +183,7 @@ def test_all_settlement_callbacks_wired_for_every_format_and_path(
     assert captured["fmt"] is adapter.stream_format
     if hybrid_path:
         assert response.headers["X-Correlation-ID"] == "corr-1"
-        assert response.headers["X-Otari-Request-ID"] == "req-1"
+        assert response.headers["Otari-Request-ID"] == "req-1"
     else:
         assert "X-Correlation-ID" not in response.headers
 
