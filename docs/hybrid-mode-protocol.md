@@ -116,7 +116,7 @@ Content-Type: application/json
 Otari iterates `attempts` in order. On a provider failure before a response is
 committed, it moves to the next entry; on success it stops. The `attempt_id` of
 the entry that ultimately succeeded (or the last one tried, on total failure) is what Otari echoes
-back via `X-Correlation-ID` and reports through `/gateway/usage`.
+back via `Otari-Attempt-ID` and reports through `/gateway/usage`.
 
 `extra_params` (optional, omitted for most providers) carries provider-specific
 credential/client fields beyond `api_key`/`api_base`: for example AWS

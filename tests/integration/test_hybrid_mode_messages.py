@@ -224,7 +224,7 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     )
 
     assert response.status_code == 200, response.text
-    assert response.headers["X-Correlation-ID"] == attempt_id
+    assert response.headers["Otari-Attempt-ID"] == attempt_id
     assert response.headers["Otari-Request-ID"] == "req-1"
     assert response.json()["usage"]["cost_usd"] == "0.012345"
     assert response.json()["usage"]["pricing_source"] == "managed"
@@ -346,7 +346,7 @@ def test_hybrid_mode_falls_through_on_first_attempt_failure(
 
     assert response.status_code == 200, response.text
     assert response.json()["content"][0]["text"] == "from-fallback"
-    assert response.headers["X-Correlation-ID"] == "att-fallback"
+    assert response.headers["Otari-Attempt-ID"] == "att-fallback"
     # Both attempts hit upstream — the first one failed, the second succeeded.
     assert len(calls) == 2
     # Both attempts reported usage: error for the primary, success for the fallback.
@@ -412,7 +412,7 @@ def test_hybrid_mode_falls_through_on_404_model_unavailable(
 
     assert response.status_code == 200, response.text
     assert response.json()["content"][0]["text"] == "from-fallback"
-    assert response.headers["X-Correlation-ID"] == "att-fallback"
+    assert response.headers["Otari-Attempt-ID"] == "att-fallback"
     assert len(calls) == 2, "404 on the primary must fall through to the next attempt"
 
 
@@ -731,7 +731,7 @@ def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     )
 
     assert response.status_code == 200, response.text
-    assert response.headers["X-Correlation-ID"] == "tool-att-fallback"
+    assert response.headers["Otari-Attempt-ID"] == "tool-att-fallback"
     body = response.json()
     assert body["content"][0]["text"] == "from-fallback"
     # Both attempts were tried in order — confirms the [:1] collapse is gone.
@@ -894,7 +894,7 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
             headers={"Authorization": "Bearer user_test_token"},
         ) as response:
             assert response.status_code == 200, response.read().decode()
-            assert response.headers["X-Correlation-ID"] == attempt_id
+            assert response.headers["Otari-Attempt-ID"] == attempt_id
             assert response.headers["Otari-Request-ID"] == "req-1"
             wire = response.read().decode()
 
@@ -1218,7 +1218,7 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     )
 
     assert response.status_code == 200, response.text
-    assert response.headers["X-Correlation-ID"] == "tool-att-fallback"
+    assert response.headers["Otari-Attempt-ID"] == "tool-att-fallback"
     assert response.headers["Otari-Request-ID"] == "tool-stream-req-1"
     assert "message_delta" in response.text
     # Both attempts were tried in order: the tool-loop gate is gone.

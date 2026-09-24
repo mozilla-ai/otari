@@ -74,6 +74,11 @@ ROUTER_TASK_HEADER = "Otari-Router-Task"
 # minted by the gateway in standalone. Clients use it to correlate a response with
 # its usage record.
 REQUEST_ID_HEADER = "Otari-Request-ID"
+# Response header naming the single provider attempt that served the request, or
+# the last one tried when every attempt failed. One request id spans several
+# attempt ids, so this is the finer grained of the two. Hybrid mode only: a
+# standalone gateway resolves no attempts to name.
+ATTEMPT_ID_HEADER = "Otari-Attempt-ID"
 # The version this deployment's API is served under. The root is built from it
 # rather than parsed back out of it, so nothing has to guess where the version
 # segment sits in a path.

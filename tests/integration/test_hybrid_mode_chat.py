@@ -198,7 +198,7 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     )
 
     assert response.status_code == 200
-    assert response.headers["X-Correlation-ID"] == "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68"
+    assert response.headers["Otari-Attempt-ID"] == "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68"
     assert response.json()["usage"]["cost_usd"] == "0.012345"
     assert response.json()["usage"]["pricing_source"] == "managed"
     assert usage_reports == [
@@ -501,9 +501,9 @@ def test_hybrid_mode_accepts_legacy_resolve_shape(
     )
 
     assert response.status_code == 200
-    # Gateway maps the legacy correlation_id onto attempt_id, so X-Correlation-ID
+    # Gateway maps the legacy correlation_id onto attempt_id, so Otari-Attempt-ID
     # still carries the same value as before.
-    assert response.headers["X-Correlation-ID"] == "9b2cce4a-5e91-4c19-9ad5-17a83f72b001"
+    assert response.headers["Otari-Attempt-ID"] == "9b2cce4a-5e91-4c19-9ad5-17a83f72b001"
     assert usage_reports[0]["correlation_id"] == "9b2cce4a-5e91-4c19-9ad5-17a83f72b001"
     assert usage_reports[0]["status"] == "success"
 
@@ -641,7 +641,7 @@ def test_hybrid_mode_falls_through_on_sdk_wrapped_connection_error(
     )
 
     assert response.status_code == 200
-    assert response.headers["X-Correlation-ID"] == "conn-err-att-good"
+    assert response.headers["Otari-Attempt-ID"] == "conn-err-att-good"
     assert calls == ["https://unreachable.example.com/v1", "https://api.openai.com/v1"]
 
     error_reports = [r for r in usage_reports if r.get("status") == "error"]
@@ -750,7 +750,7 @@ def test_hybrid_mode_falls_through_when_a_provider_account_is_out_of_credit(
     )
 
     assert response.status_code == 200
-    assert response.headers["X-Correlation-ID"] == "billing-att-funded"
+    assert response.headers["Otari-Attempt-ID"] == "billing-att-funded"
     assert calls == ["anthropic:claude-haiku-4-5", "openai:gpt-4o-mini"]
 
     error_reports = [r for r in usage_reports if r.get("status") == "error"]
@@ -1101,7 +1101,7 @@ def test_hybrid_mode_streaming_falls_through_on_first_attempt_failure(
     )
 
     assert response.status_code == 200
-    assert response.headers["X-Correlation-ID"] == "stream-att-openai"
+    assert response.headers["Otari-Attempt-ID"] == "stream-att-openai"
     # StreamingResponse builds its own response object, so Otari-Request-ID
     # has to be set in the StreamingResponse headers directly — assigning to
     # the dependency-injected Response object doesn't propagate.
@@ -1564,7 +1564,7 @@ def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     )
 
     assert response.status_code == 200
-    assert response.headers["X-Correlation-ID"] == "tool-att-openai"
+    assert response.headers["Otari-Attempt-ID"] == "tool-att-openai"
     body = response.json()
     assert body["choices"][0]["message"]["content"] == "hello from openai"
     # Both attempts were tried in order — confirms the [:1] collapse is gone.
@@ -1857,7 +1857,7 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     )
 
     assert response.status_code == 200
-    assert response.headers["X-Correlation-ID"] == "tool-att-openai"
+    assert response.headers["Otari-Attempt-ID"] == "tool-att-openai"
     assert calls == ["anthropic:claude-haiku-4-5", "openai:gpt-4o-mini"]
     assert "hello" in response.text
 

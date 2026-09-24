@@ -182,10 +182,10 @@ def test_all_settlement_callbacks_wired_for_every_format_and_path(
         assert callable(captured.get(callback_name)), f"{callback_name} not wired"
     assert captured["fmt"] is adapter.stream_format
     if hybrid_path:
-        assert response.headers["X-Correlation-ID"] == "corr-1"
+        assert response.headers["Otari-Attempt-ID"] == "corr-1"
         assert response.headers["Otari-Request-ID"] == "req-1"
     else:
-        assert "X-Correlation-ID" not in response.headers
+        assert "Otari-Attempt-ID" not in response.headers
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS)

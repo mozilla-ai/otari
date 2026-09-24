@@ -113,7 +113,7 @@ from gateway.api.routes._tools import (
     resolve_code_executor_preference,
     web_search_max_results_baseline,
 )
-from gateway.core.config import REQUEST_ID_HEADER, GatewayConfig
+from gateway.core.config import ATTEMPT_ID_HEADER, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.env import otari_env
 from gateway.core.metered_pricing import calculate_metered_cost, quantize_cost
@@ -4690,7 +4690,7 @@ def build_streaming_response(
     # ``Response`` object does not propagate to streaming responses.
     headers: dict[str, str] = dict(rate_limit_headers(rate_limit_info)) if rate_limit_info else {}
     if platform_correlation_id:
-        headers["X-Correlation-ID"] = platform_correlation_id
+        headers[ATTEMPT_ID_HEADER] = platform_correlation_id
     if request_id:
         headers[REQUEST_ID_HEADER] = request_id
     if extra_headers:
@@ -5268,7 +5268,7 @@ async def run_platform_non_stream(
         )
 
     def _on_attempt_success(attempt: ResolvedAttempt) -> None:
-        response.headers["X-Correlation-ID"] = attempt.attempt_id
+        response.headers[ATTEMPT_ID_HEADER] = attempt.attempt_id
         if rate_limit_info:
             for key, value in rate_limit_headers(rate_limit_info).items():
                 response.headers[key] = value
