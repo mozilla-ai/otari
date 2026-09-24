@@ -76,6 +76,7 @@ the corresponding startup value after the database is available.
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the bundled genai-prices catalog when no stored price exists. |
 | `pricing_refresh` | What a scheduled genai-prices check does with an update: `manual`, `review`, or `auto`. |
+| `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `false`; startup setting, unavailable in hybrid mode. See [Product feedback](#product-feedback). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -436,3 +437,29 @@ This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
 contributed route. See [Architecture](../ARCHITECTURE.md) for the extension
 boundary.
+
+## Product feedback
+
+With `feedback_enabled` on, signed-in dashboard users can choose **Share
+feedback** in the account menu to send a message to the Otari team. The team
+receives it privately in Slack. Only the message is sent: no email, screenshot,
+page URL, account identifier, deployment identifier, or usage history is
+attached. Opening the form, typing, and canceling make no outbound request.
+
+The gateway forwards the message to
+`https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the
+browser's cookies, authorization, referrer, or IP headers. Network peers still
+see connection metadata, so this is private feedback, not anonymous feedback.
+Keep request-body capture disabled for the feedback endpoint in any additional
+logging or tracing you configure.
+
+Feedback is off by default. To turn it on, set `feedback_enabled: true` in YAML
+or `OTARI_FEEDBACK_ENABLED=true`, then restart. Off, the endpoint is not mounted
+and the menu row is hidden. Hybrid gateways never offer the form. This setting
+is visible in Settings but cannot be changed there at runtime.
+
+Feedback text accepts up to 4,000 Unicode code points. The gateway waits up to
+10 seconds for the receiver and does not retry automatically. An unconfirmed
+submission stays in the form until the person retries or explicitly discards
+it. Drafts are held only in memory and disappear on page reload. A manual retry
+after an unconfirmed delivery can produce a duplicate.

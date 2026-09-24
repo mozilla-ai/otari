@@ -45,6 +45,8 @@ def generate_openapi_spec() -> dict[str, object]:
             web_search_provider="tavily",
             web_search_provider_api_key="openapi-generation-placeholder",
             web_search_backend_token="openapi-generation-placeholder",
+            # Off by default and mounted only when on, so it is set for the same reason.
+            feedback_enabled=True,
         )
         app = create_app(config)
         return cast(dict[str, object], app.openapi())

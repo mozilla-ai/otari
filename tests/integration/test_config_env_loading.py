@@ -739,3 +739,21 @@ def test_load_config_structured_env_non_mapping_fails_fast(tmp_path: Path, monke
 
     with pytest.raises(ValueError, match="must contain a YAML mapping"):
         load_config()
+
+
+@pytest.mark.parametrize(("value", "expected"), [("true", True), ("false", False)])
+def test_feedback_env_overrides_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str, expected: bool
+) -> None:
+    config_file = tmp_path / "config.yml"
+    config_file.write_text(f"feedback_enabled: {str(not expected).lower()}\n")
+    monkeypatch.setenv("OTARI_FEEDBACK_ENABLED", value)
+    assert load_config(str(config_file)).feedback_enabled is expected
+
+
+def test_feedback_rejects_invalid_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_file = tmp_path / "config.yml"
+    config_file.write_text("{}\n")
+    monkeypatch.setenv("OTARI_FEEDBACK_ENABLED", "maybe")
+    with pytest.raises(ValueError):
+        load_config(str(config_file))

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.auth.models import hash_key
 from gateway.container import Container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, X_API_KEY_HEADER, GatewayConfig
-from gateway.core.database import DATABASE_ERRORS, create_session, get_db
+from gateway.core.database import DATABASE_ERRORS, create_session, get_db, release_session
 from gateway.core.feature import CoreFeature
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
@@ -38,6 +38,7 @@ from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
+from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileService, SandboxFileBridge, StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
@@ -1101,6 +1102,15 @@ async def _caller_organization_id(
 CallerOrganization = Annotated[uuid.UUID, Depends(_caller_organization_id)]
 
 
+async def get_feedback_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _authenticated: Annotated[str | None, Depends(verify_master_key)],
+) -> FeedbackService:
+    """Finish authentication's database work before waiting for the receiver."""
+    await release_session(db)
+    return FeedbackService()
+
+
 __all__ = [
     "BillingPortDep",
     "ContainerDep",
@@ -1124,6 +1134,7 @@ __all__ = [
     "reset_config",
     "set_config",
     "get_db_if_needed",
+    "get_feedback_service",
     "get_file_store",
     "get_log_writer",
     "is_valid_master_key",

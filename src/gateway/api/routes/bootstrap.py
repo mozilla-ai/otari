@@ -276,6 +276,7 @@ class DeploymentBootstrap(BaseModel):
             "the wording that matches. False for a hybrid gateway, which holds no identities."
         )
     )
+    feedback_enabled: bool = Field(description="Whether this deployment accepts deliberate feedback submissions.")
     mail_ready: bool = Field(
         description=(
             "Whether this deployment can deliver a message carrying a link back to itself "
@@ -325,6 +326,7 @@ async def get_bootstrap(
             maintenance_mode=False,
             passkeys_ready=False,
             oauth_providers=[],
+            feedback_enabled=False,
             mail_ready=False,
             open_signup=False,
         )
@@ -353,6 +355,7 @@ async def get_bootstrap(
         public_catalog=bool(config.public_catalog) and not config.is_hybrid_mode,
         passkeys_ready=config.webauthn_enabled,
         oauth_providers=list(config.oauth_providers),
+        feedback_enabled=any(feature.name == "feedback" for feature in enabled_features),
         mail_ready=config.mail_ready,
         # Gated on mail as well as on the setting, and not only because the
         # route refuses without it: an operator who turned open signup on and
