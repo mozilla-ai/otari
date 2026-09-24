@@ -312,11 +312,19 @@ Deployment settings, health, modes, maintenance mode and mail.
 
 - Routes: `settings.py`, `bootstrap.py`, `health.py`, `maintenance_mode.py`,
   `hosted_mode.py`, `hybrid_mode.py`, `mail.py`
-- Services: `runtime_settings_service.py`, `maintenance_mode_service.py`,
-  `master_key_service.py`, `mail/mailer.py`, `mail/message.py`,
-  `mail/templates.py`, `mail/transports.py`
+- Services: `control_plane/`, `runtime_settings_service.py`,
+  `maintenance_mode_service.py`, `master_key_service.py`, `mail/mailer.py`,
+  `mail/message.py`, `mail/templates.py`, `mail/transports.py`
 - Models: `platform.py`
+- Exceptions: `control_plane_exceptions.py`
 - Core: `deployment.py`, `surface.py`, `feature.py`
+
+`control_plane/` is how a deployment asks the control plane a peer runs for it
+what a workspace may do. It is a Gateway in Fowler's sense and an
+anticorruption layer in Evans's: it holds everything about reaching a peer over
+HTTP, and raises this codebase's own errors so the peer's status codes stop at
+its edge. `ResolveEndpoint` is a closed set, so it answers questions and cannot
+grow into a route for the data plane's own traffic.
 
 `deployment.py` holds `Plane`, which names the control plane and the data
 plane, and the value that says which of them a process serves. `surface.py`

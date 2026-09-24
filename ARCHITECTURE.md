@@ -223,6 +223,15 @@ These are the rules that keep the boundary from eroding. They apply to anyone ad
 6. **An overlay never edits an Otari source file.** It registers into the extension points Otari exposes (the container, the router list, the nav registry) and supplies configuration. If extending an overlay *requires* editing an Otari file, that is a missing seam, and the seam belongs in Otari. Supplying configuration or a bootstrap module is not editing the core.
 7. **Introduce a port only when it earns one.** A port that will only ever have one implementation is ceremony with no benefit. A capability earns a port only when a genuine second implementation is real, or a hard boundary (intellectual property, or a hosted service) runs through it. Plain CRUD and infrastructure (user, team, and trace management, and the bulk of orgs/workspaces management) stay concrete in the core. "Most of the management plane is core" and "most services are not ports" are the same statement.
 
+### The patterns these rules are built from
+
+The rules above are this codebase's wording of four patterns. Naming them saves a contributor from deriving the shape again, and gives a review something to appeal to.
+
+- **Ports and adapters**, also called hexagonal architecture (Cockburn). A port names a capability in domain terms; adapters implement it; the composition root picks one. Rules 1 through 5 are this pattern.
+- **Gateway** (Fowler, *Patterns of Enterprise Application Architecture*). An object that encapsulates access to an external system. `services/control_plane/` is one: it holds everything about talking to a peer control plane, so no other module has to know that a peer is reached over HTTP.
+- **Anticorruption layer** (Evans, *Domain-Driven Design*). A translation at the edge, so a peer's vocabulary does not spread inward. A Gateway here raises this codebase's own errors rather than the peer's HTTP statuses, and the API layer renders them. Without it, the peer's protocol reaches every caller and rule 4 is lost.
+- **Replace conditional with polymorphism** (Fowler, *Refactoring*). Where a deployment's mode is read to choose behavior, the choice belongs in the binding rather than at the branch. A mode branch repeated across modules is the smell this removes.
+
 These rules are enforced mechanically, not only in review. The boundary check (`scripts/check_architecture.py`, run by `make lint` in CI) asserts the layering: ports may import models, exceptions, and core, but not services, the API, or any adapter; services may import ports but not a concrete adapter; only the composition root may import an adapter. This document is the human-readable companion to that check; the two are kept in step so the boundary the doc describes is the boundary CI enforces.
 
 ## The modular monolith
