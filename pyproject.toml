@@ -14,7 +14,7 @@ version = "0.0.0"
 description = "otari, an OpenAI-compatible LLM gateway"
 requires-python = ">=3.13"
 dependencies = [
-    "any-llm-sdk[all]>=1.28.0",
+    "any-llm-sdk[all]>=1.29.0",
     # The built-in guardrail catalog (`services/guardrail_catalog.py`) and the
     # runner that builds an organization's definitions from it
     # (`services/tenancy/organization_guardrail_runner.py`). The extras are the

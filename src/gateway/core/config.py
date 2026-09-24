@@ -247,11 +247,20 @@ def _get_platform_token_from_env() -> str | None:
     return token or None
 
 
+# Self-hosted backends any-llm calls without a key although each declares a
+# credential variable: each tolerates a missing key in ``_verify_and_set_api_key``
+# and defaults to a localhost or LAN base URL, so a bare ``vllm:my-model`` reaches
+# a local server with nothing configured. The declaration alone cannot tell them
+# from a keyed provider, so they are listed by hand and drift-guarded in
+# ``tests/unit/test_provider_instances.py``.
+KEYLESS_SELF_HOSTED_PROVIDERS = frozenset({"cascadia", "llamacpp", "lmstudio", "otari", "vllm"})
+
+
 def provider_credential_env_names(provider_type: str) -> tuple[str, ...] | None:
     """Environment variables any-llm reads for a provider's credential.
 
     Returns an empty tuple when the provider needs no API key: the keyless local
-    backends (ollama, llamacpp, llamafile) declare the literal string ``"None"``,
+    backends ollama and llamafile declare the literal string ``"None"``,
     and a provider authenticating through a cloud SDK (Vertex AI) declares an
     empty name. Returns ``None`` when the provider cannot be inspected at all
     (not a known implementation, or an optional SDK dependency that is not
@@ -1773,7 +1782,7 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         env_names = provider_credential_env_names(instance)
         # Empty: a keyless backend, nothing to warn about. None: a provider we
         # cannot inspect, so we do not know that a credential is needed.
-        if not env_names:
+        if not env_names or instance in KEYLESS_SELF_HOSTED_PROVIDERS:
             return
         if any(os.getenv(name) for name in env_names):
             return

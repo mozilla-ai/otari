@@ -10,13 +10,17 @@ from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
 
 from gateway.api.routes.pricing import _candidate_model_keys
-from gateway.core.config import GatewayConfig, ModelCapabilityConfig, provider_credential_env_names
+from gateway.core.config import (
+    KEYLESS_SELF_HOSTED_PROVIDERS,
+    GatewayConfig,
+    ModelCapabilityConfig,
+    provider_credential_env_names,
+)
 from gateway.log_config import logger as gateway_logger
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import (
     _AMBIENT_CREDENTIAL_PROVIDERS,
     _KEYLESS_PLACEHOLDER_API_KEY,
-    _KEYLESS_SELF_HOSTED_PROVIDERS,
     get_provider_kwargs,
     keyless_placeholder_api_key,
     normalize_pricing_key,
@@ -221,7 +225,7 @@ def test_credential_env_names_splits_alternatives() -> None:
 
 def test_credential_env_names_empty_for_keyless_backends() -> None:
     # any-llm spells "no credential" as the literal string "None".
-    for keyless in ("ollama", "llamacpp", "llamafile"):
+    for keyless in ("ollama", "llamafile"):
         assert provider_credential_env_names(keyless) == ()
 
 
@@ -248,7 +252,7 @@ def test_the_uncredentialed_provider_roster_has_not_drifted() -> None:
     routes a working self-hosted or IAM-authenticated request to somebody else's
     fleet. `provider_credential_env_names` cannot answer it, because it sees the
     *declaration* and these providers declare a variable they do not insist on,
-    so the two sets are written out by hand in `provider_kwargs.py`.
+    so the two sets are written out by hand in `config.py` and `provider_kwargs.py`.
 
     This is the drift guard for both directions, which is why it asserts on the
     whole roster rather than only on the names already listed. A provider that
@@ -270,17 +274,17 @@ def test_the_uncredentialed_provider_roster_has_not_drifted() -> None:
     # itself and need no hand-written entry, so they are expected here but not in
     # either set.
     declares_nothing = {name for name in overriding if provider_credential_env_names(name) == ()}
-    classified = _KEYLESS_SELF_HOSTED_PROVIDERS | _AMBIENT_CREDENTIAL_PROVIDERS | _KEYED_DESPITE_OVERRIDING
+    classified = KEYLESS_SELF_HOSTED_PROVIDERS | _AMBIENT_CREDENTIAL_PROVIDERS | _KEYED_DESPITE_OVERRIDING
 
     assert overriding - declares_nothing == classified, (
         "any-llm's uncredentialed-provider roster changed. Every provider overriding "
-        "_verify_and_set_api_key must be classified in provider_kwargs.py "
-        "(_KEYLESS_SELF_HOSTED_PROVIDERS / _AMBIENT_CREDENTIAL_PROVIDERS) or here "
+        "_verify_and_set_api_key must be classified in config.py "
+        "(KEYLESS_SELF_HOSTED_PROVIDERS), provider_kwargs.py (_AMBIENT_CREDENTIAL_PROVIDERS) or here "
         "(_KEYED_DESPITE_OVERRIDING). Unclassified names are treated as keyed, which is "
         "the direction that hands a working request to a hosted fleet."
     )
     # And nothing in either set has quietly started demanding a key.
-    for name in _KEYLESS_SELF_HOSTED_PROVIDERS | _AMBIENT_CREDENTIAL_PROVIDERS:
+    for name in KEYLESS_SELF_HOSTED_PROVIDERS | _AMBIENT_CREDENTIAL_PROVIDERS:
         assert provider_credential_env_names(name), f"{name} no longer declares a credential variable"
         assert name in overriding, f"any-llm now unconditionally requires a credential for {name}"
 

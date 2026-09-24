@@ -38,7 +38,7 @@ from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
 
 from gateway.auth.vertex_auth import setup_vertex_environment
-from gateway.core.config import GatewayConfig, provider_credential_env_names
+from gateway.core.config import KEYLESS_SELF_HOSTED_PROVIDERS, GatewayConfig, provider_credential_env_names
 from gateway.services.alias_service import resolve_effective_alias
 from gateway.services.catalog_selectors import resolve_catalog_selector
 from gateway.services.policy_store import resolve_effective_policy
@@ -59,19 +59,13 @@ _INSTANCE_META_KEYS = ("provider_type", "models")
 # tolerance (mozilla-ai/any-llm#1198).
 _KEYLESS_PLACEHOLDER_API_KEY = "otari-no-key-required"
 
-# Two sets of providers any-llm calls without an otari-visible credential, even
-# though each *declares* a credential environment variable.
-# ``provider_credential_env_names`` sees only the declaration, so it cannot tell
-# them from a keyed provider the way it can ollama/llamacpp/llamafile (which
+# Providers any-llm calls without an otari-visible credential, even though each
+# *declares* a credential environment variable, so ``provider_credential_env_names``
+# cannot tell them from a keyed provider the way it can ollama/llamafile (which
 # declare the literal ``"None"``) or Vertex AI (which declares an empty name).
-# Both are written out by hand and both are drift-guarded in
-# ``tests/unit/test_provider_instances.py``.
+# The self-hosted ones are ``KEYLESS_SELF_HOSTED_PROVIDERS``; this set is drift-guarded
+# alongside it in ``tests/unit/test_provider_instances.py``.
 #
-# Local and LAN backends that never require a key: each overrides
-# ``_verify_and_set_api_key`` to return without raising and defaults to a
-# localhost or LAN base URL, so a bare ``vllm:my-model`` reaches a self-hosted
-# server today with nothing configured in otari at all.
-_KEYLESS_SELF_HOSTED_PROVIDERS = frozenset({"vllm", "lmstudio", "cascadia", "otari"})
 # Providers authenticating from cloud SDK credentials this gateway cannot see:
 # an EC2 instance profile, an SSO session, or an ambient boto3 chain. They are
 # the same category as Vertex AI's application default credentials, which
@@ -154,9 +148,9 @@ def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any]) -
     caller that might serve it from somewhere else. A deployment pointing at its
     own backends is served upstream of anything reading this. They come in two
     shapes: those declaring no credential variable at all (the keyless local
-    backends ollama, llamacpp and llamafile, and Vertex AI, which authenticates
+    backends ollama and llamafile, and Vertex AI, which authenticates
     through the cloud SDK), and those declaring one any-llm does not insist on
-    (``_KEYLESS_SELF_HOSTED_PROVIDERS`` and ``_AMBIENT_CREDENTIAL_PROVIDERS``).
+    (``KEYLESS_SELF_HOSTED_PROVIDERS`` and ``_AMBIENT_CREDENTIAL_PROVIDERS``).
 
     ``provider_credential_env_names`` returns ``None`` rather than ``()`` for a
     provider it cannot inspect at all, and that stays exhausted: nothing is known
@@ -165,7 +159,7 @@ def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any]) -
     """
     if _kwargs_carry_a_credential(kwargs):
         return False
-    if provider.value in _KEYLESS_SELF_HOSTED_PROVIDERS or provider.value in _AMBIENT_CREDENTIAL_PROVIDERS:
+    if provider.value in KEYLESS_SELF_HOSTED_PROVIDERS or provider.value in _AMBIENT_CREDENTIAL_PROVIDERS:
         return False
     if provider_credential_env_names(provider.value) == ():
         return False
