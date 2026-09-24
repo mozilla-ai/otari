@@ -209,11 +209,17 @@ class SandboxFileBridge:
         return size
 
     async def _record(self, row: OutputFileRow) -> None:
-        """Record ``row`` in a block of its own, and remove its blob when the row does not land."""
+        """Record ``row`` in a block of its own, and remove its blob when the row does not land.
+
+        A cancellation is deliberately not caught: it derives from
+        ``BaseException``, and one arriving while the block commits leaves the
+        outcome unknown, so removing the bytes could strand a row that did land.
+        An orphan the reclaim pass can find is the smaller failure.
+        """
         try:
             async with self._uow:
                 await self._files.record_output(row)
-        except BaseException:
+        except Exception:
             await self._discard(row.storage_ref)
             raise
 

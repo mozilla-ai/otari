@@ -81,6 +81,13 @@ class _FailingUnitOfWork(_FakeUnitOfWork):
         raise TimeoutError("connect timed out")
 
 
+class _CancellingUnitOfWork(_FakeUnitOfWork):
+    """A Unit of Work cancelled as its block ends, so the commit's outcome is unknown."""
+
+    async def __aexit__(self, *exc: object) -> None:
+        raise asyncio.CancelledError
+
+
 class _CommittingUnitOfWork(_FakeUnitOfWork):
     pass
 
@@ -411,3 +418,17 @@ async def test_a_blob_goes_when_its_row_cannot_be_built(monkeypatch: pytest.Monk
 
     assert db.added == []
     assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_commit_keeps_the_bytes() -> None:
+    """The row may have landed, so the bytes stay rather than stranding it.
+
+    An orphan is reclaimable; a live row pointing at bytes that were deleted is not.
+    """
+    store = _MemoryStore()
+
+    with pytest.raises(asyncio.CancelledError):
+        await _bridge(store, _CancellingUnitOfWork(_FakeDb())).store_output("out.csv", _chunks(b"a,b\n"))
+
+    assert list(store.blobs.values()) == [b"a,b\n"]
