@@ -24,7 +24,7 @@ const DRAWER_LINK =
  * Documentation opens `docs_url` where it is set; otherwise the docs on GitHub,
  * because the bundled guide at `/#/docs` sits behind the sign-in screen.
  */
-export function PublicCatalogBar() {
+export function PublicCatalogBar({ onList }: { onList: boolean }) {
   const { site_url, docs_url, open_signup } = useDeployment()
   const [menuOpen, setMenuOpen] = useState(false)
   const docsHref = docs_url ?? docsSourceHref("index.md")
@@ -43,7 +43,11 @@ export function PublicCatalogBar() {
         />
       </a>
       <nav aria-label="Site" className="flex items-center gap-1 md:gap-2">
-        <a href={publicCatalogHref()} className={LINK}>
+        <a
+          href={publicCatalogHref()}
+          aria-current={onList ? "page" : undefined}
+          className={LINK}
+        >
           Models
         </a>
         <a
@@ -102,6 +106,7 @@ export function PublicCatalogBar() {
                 <Drawer.Body className="flex flex-col gap-1 px-2 py-3">
                   <a
                     href={publicCatalogHref()}
+                    aria-current={onList ? "page" : undefined}
                     onClick={() => setMenuOpen(false)}
                     className={DRAWER_LINK}
                   >

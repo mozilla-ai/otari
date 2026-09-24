@@ -212,10 +212,9 @@ describe("PublicCatalogPage", () => {
     renderPage()
 
     const nav = screen.getByRole("navigation", { name: "Site" })
-    expect(within(nav).getByRole("link", { name: "Models" })).toHaveAttribute(
-      "href",
-      "#/models",
-    )
+    const models = within(nav).getByRole("link", { name: "Models" })
+    expect(models).toHaveAttribute("href", "#/models")
+    expect(models).toHaveAttribute("aria-current", "page")
     expect(within(nav).getByRole("link", { name: "Log in" })).toHaveAttribute(
       "href",
       "#/",
@@ -273,5 +272,9 @@ describe("PublicCatalogPage", () => {
     for (const name of ["Models", "Documentation", "GitHub", "Log in"]) {
       expect(within(menu).getByRole("link", { name })).toBeInTheDocument()
     }
+    expect(within(menu).getByRole("link", { name: "Models" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    )
   })
 })

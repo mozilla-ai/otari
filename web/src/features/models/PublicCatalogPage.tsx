@@ -16,7 +16,7 @@ import { publicCatalogHref } from "@/features/models/publicCatalog"
 export function PublicCatalogPage({ modelId }: { modelId?: string }) {
   return (
     <div className="flex min-h-full flex-col">
-      <PublicCatalogBar />
+      <PublicCatalogBar onList={!modelId} />
       <main className="mx-auto flex w-full max-w-[112.5rem] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
         <InfoBanner>
           This is the deployment's public catalog. Sign in to see the rates your
