@@ -161,6 +161,7 @@ describe("WorkspaceMcpServersCard", () => {
       }),
     ]
     mockApi({ servers })
+    const user = userEvent.setup()
     await renderLoaded(servers)
 
     // The id is what a request names in `mcp_server_ids`, so the full value
@@ -168,9 +169,10 @@ describe("WorkspaceMcpServersCard", () => {
     const id = screen.getByText("66666666…")
     expect(id).toBeVisible()
     expect(id).toHaveAttribute("title", "66666666-6666-6666-6666-666666666666")
-    expect(
-      screen.getByRole("button", { name: /Copy id for wiki/ }),
-    ).toBeVisible()
+    await user.click(screen.getByRole("button", { name: /Copy id for wiki/ }))
+    expect(await navigator.clipboard.readText()).toBe(
+      "66666666-6666-6666-6666-666666666666",
+    )
   })
 
   it("reads an empty allow-list as every tool, the way the gateway does", async () => {
