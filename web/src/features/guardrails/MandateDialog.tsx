@@ -2,6 +2,7 @@ import { useState } from "react"
 import type {
   BuiltInGuardrailCatalog,
   GuardrailCatalog,
+  HostedGuardrail,
   OrganizationGuardrail,
   OrganizationGuardrailDefinition,
   Workspace,
@@ -25,10 +26,14 @@ import {
   useCreateOrganizationGuardrail,
   useUpdateOrganizationGuardrail,
 } from "@/shared/api/tools"
+import { formatUnitRate } from "@/shared/helpers/format"
 
 type Mode = "block" | "monitor"
-/** Who runs the check: Otari, from a definition, or a guardrails service. */
-export type MandateShape = "definition" | "remote"
+/**
+ * Who runs the check: Otari, from a definition; a guardrail the deployment
+ * hosts; or a guardrails service.
+ */
+export type MandateShape = "definition" | "hosted" | "remote"
 
 const MODE_OPTIONS = [
   { value: "monitor", label: "Monitor" },
@@ -50,6 +55,11 @@ const UNAVAILABLE_WORDS: Record<
     description:
       "When the guardrail could not be built, is switched off, or the vendor refuses the call. Only a blocking guardrail can refuse; a monitoring one always serves.",
   },
+  hosted: {
+    label: "If it can't run",
+    description:
+      "When the hosted guardrail gives no verdict, or the organization cannot pay for the check. Only a blocking guardrail can refuse; a monitoring one always serves.",
+  },
   remote: {
     label: "If unreachable",
     description:
@@ -58,7 +68,16 @@ const UNAVAILABLE_WORDS: Record<
 }
 
 export function mandateShape(mandate: OrganizationGuardrail): MandateShape {
+  if (mandate.hosted_guardrail_id) return "hosted"
   return mandate.definition_id ? "definition" : "remote"
+}
+
+/** A hosted guardrail as the picker lists it, with what one check costs. */
+export function hostedGuardrailLabel(guardrail: HostedGuardrail): string {
+  const price = guardrail.price_per_check
+  return price == null
+    ? guardrail.name
+    : `${guardrail.name} · ${formatUnitRate(price)} per check`
 }
 
 /**
@@ -81,6 +100,7 @@ export function MandateDialog({
   builtInCatalog,
   remoteCatalog,
   isRemoteCatalogPending,
+  hostedGuardrails = [],
   workspaces,
   onSetUpDefinition,
   onSaved,
@@ -95,6 +115,8 @@ export function MandateDialog({
   builtInCatalog: BuiltInGuardrailCatalog | undefined
   remoteCatalog: GuardrailCatalog | undefined
   isRemoteCatalogPending: boolean
+  /** What the deployment hosts for the organization; empty offers no hosted choice. */
+  hostedGuardrails?: readonly HostedGuardrail[]
   workspaces: readonly Workspace[]
   /** Opens the definition dialog, for an organization that has none yet. */
   onSetUpDefinition: () => void
@@ -115,6 +137,7 @@ export function MandateDialog({
     shapeChoice || (hasDefinitions ? "definition" : "remote")
 
   const [definitionId, setDefinitionId] = useState(mandate?.definition_id ?? "")
+  const [hostedId, setHostedId] = useState(mandate?.hosted_guardrail_id ?? "")
   const [profile, setProfile] = useState(mandate?.profile ?? "")
   const [isProfileTouched, setProfileTouched] = useState(isEdit)
   const [mode, setMode] = useState<Mode>((mandate?.mode as Mode) ?? "monitor")
@@ -132,28 +155,35 @@ export function MandateDialog({
   ])
 
   const definition = definitions.find((row) => row.id === definitionId)
+  const hosted = hostedGuardrails.find((row) => row.id === hostedId)
+  // A definition and a hosted guardrail both name an any-guardrail class, so
+  // the built-in catalog describes the arguments of either.
+  const builtInName =
+    shape === "hosted" ? hosted?.guardrail_name : definition?.guardrail_name
   const builtIn = builtInCatalog?.guardrails?.find(
-    (spec) => spec.guardrail_name === definition?.guardrail_name,
+    (spec) => spec.guardrail_name === builtInName,
   )
+  const chosenId = shape === "hosted" ? hostedId : definitionId
   // The per-call arguments, typed from whichever source describes them.
   const specs =
-    shape === "definition"
-      ? (builtIn?.validate_parameters ?? [])
-      : parameterSpecs(remoteCatalog, profile)
+    shape === "remote"
+      ? parameterSpecs(remoteCatalog, profile)
+      : (builtIn?.validate_parameters ?? [])
   const isDescribed =
-    shape === "definition"
-      ? builtIn !== undefined || definitionId === ""
-      : profile === "" || findProfile(remoteCatalog, profile) !== undefined
+    shape === "remote"
+      ? profile === "" || findProfile(remoteCatalog, profile) !== undefined
+      : builtIn !== undefined || chosenId === ""
   const parameters = useGuardrailParameterForm(
     specs,
     mandate?.validate_kwargs,
-    shape === "definition"
-      ? `definition:${definitionId}`
-      : profileIdentity(remoteCatalog, profile),
+    shape === "remote"
+      ? profileIdentity(remoteCatalog, profile)
+      : `${shape}:${chosenId}`,
   )
   const { isDirty } = useDirtySnapshot({
     shape,
     definitionId,
+    hostedId,
     profile,
     mode,
     onUnavailable,
@@ -172,10 +202,16 @@ export function MandateDialog({
     }
   }
 
+  const chooseHosted = (next: string) => {
+    setHostedId(next)
+    if (!isProfileTouched) {
+      setProfile(hostedGuardrails.find((row) => row.id === next)?.name ?? "")
+    }
+  }
+
   const named = profile.trim()
   const isPending = create.isPending || update.isPending
-  const isIncomplete =
-    named === "" || (shape === "definition" && definitionId === "")
+  const isIncomplete = named === "" || (shape !== "remote" && chosenId === "")
 
   const submit = () => {
     if (!parameters.check()) return
@@ -199,10 +235,12 @@ export function MandateDialog({
           ...scopeBody,
           ...(shape === "definition"
             ? { definition_id: definitionId }
-            : {
-                url: url.trim() === "" ? null : url.trim(),
-                credential: credential === "" ? null : credential,
-              }),
+            : shape === "hosted"
+              ? { hosted_guardrail_id: hostedId }
+              : {
+                  url: url.trim() === "" ? null : url.trim(),
+                  credential: credential === "" ? null : credential,
+                }),
         },
         done,
       )
@@ -225,15 +263,19 @@ export function MandateDialog({
             ? definitionId === mandate.definition_id
               ? {}
               : { definition_id: definitionId }
-            : {
-                // Omitted leaves the endpoint, "" clears it, a value replaces
-                // it; only sent when it differs from what is stored.
-                ...(url.trim() === (mandate.url ?? "")
-                  ? {}
-                  : { url: url.trim() }),
-                // Omitted when blank, so an edit never clears a credential.
-                ...(credential === "" ? {} : { credential }),
-              }),
+            : shape === "hosted"
+              ? hostedId === mandate.hosted_guardrail_id
+                ? {}
+                : { hosted_guardrail_id: hostedId }
+              : {
+                  // Omitted leaves the endpoint, "" clears it, a value replaces
+                  // it; only sent when it differs from what is stored.
+                  ...(url.trim() === (mandate.url ?? "")
+                    ? {}
+                    : { url: url.trim() }),
+                  // Omitted when blank, so an edit never clears a credential.
+                  ...(credential === "" ? {} : { credential }),
+                }),
         },
       },
       done,
@@ -264,7 +306,9 @@ export function MandateDialog({
           <span className="text-muted">Runs on </span>
           {shape === "definition"
             ? "a guardrail you set up"
-            : "your own service"}
+            : shape === "hosted"
+              ? "a guardrail the deployment hosts"
+              : "your own service"}
         </p>
       ) : (
         <div className="flex flex-col gap-2">
@@ -283,6 +327,16 @@ export function MandateDialog({
                 // stays findable.
                 isDisabled: !hasDefinitions,
               },
+              // Offered only where the deployment hosts one, so a build that
+              // hosts none draws exactly the two choices it always had.
+              ...(hostedGuardrails.length > 0
+                ? [
+                    {
+                      value: "hosted",
+                      label: "A guardrail the deployment hosts",
+                    },
+                  ]
+                : []),
               { value: "remote", label: "Your own guardrails service" },
             ]}
             description={
@@ -292,7 +346,9 @@ export function MandateDialog({
                   ? "You have not set up a guardrail yet, so only your own service is available."
                   : shape === "definition"
                     ? "Otari builds and runs the check itself."
-                    : "Otari posts each check to a service you run."
+                    : shape === "hosted"
+                      ? "The deployment runs the check with its own account, and may charge the organization for each one."
+                      : "Otari posts each check to a service you run."
             }
           />
           {isDefinitionsSettled && !hasDefinitions ? (
@@ -319,7 +375,26 @@ export function MandateDialog({
         />
       ) : null}
 
-      {shape === "definition" ? (
+      {shape === "hosted" ? (
+        <Select
+          label="Hosted guardrail"
+          value={hostedId}
+          onChange={chooseHosted}
+          options={hostedGuardrails.map((row) => ({
+            value: row.id,
+            label: hostedGuardrailLabel(row),
+          }))}
+          placeholder={
+            isEdit && hosted === undefined
+              ? "No longer offered; choose another"
+              : "Choose a hosted guardrail"
+          }
+          description={hosted?.description ?? undefined}
+          shouldReserveMessage={false}
+        />
+      ) : null}
+
+      {shape !== "remote" ? (
         <Field
           label="Profile a caller sends"
           value={profile}
@@ -401,9 +476,9 @@ export function MandateDialog({
         extraJsonError={parameters.rawError}
         isDescribed={isDescribed}
         extraJsonDescription={
-          shape === "definition"
-            ? "Handed to the guardrail with each check, under whatever the fields above set."
-            : undefined
+          shape === "remote"
+            ? undefined
+            : "Handed to the guardrail with each check, under whatever the fields above set."
         }
         onChange={parameters.setValue}
         onExtraJsonChange={parameters.setExtraJson}

@@ -39,6 +39,7 @@ import { canManage } from "@/features/organization/roles"
 import {
   useBuiltInGuardrailCatalog,
   useDeleteOrganizationGuardrailDefinition,
+  useHostedGuardrails,
   useOrganizationGuardrailDefinitions,
 } from "@/shared/api/guardrails"
 import { useOrganizationContext } from "@/shared/api/organizations"
@@ -73,6 +74,7 @@ export function OrganizationGuardrailsPage() {
   const definitions = useOrganizationGuardrailDefinitions(canEdit)
   const mandates = useOrganizationGuardrails(canEdit)
   const builtInCatalog = useBuiltInGuardrailCatalog(canEdit)
+  const hostedGuardrails = useHostedGuardrails(canEdit)
   const remoteCatalog = useGuardrailProfiles(canEdit)
   const workspaces = useWorkspaces()
   const removeDefinition = useDeleteOrganizationGuardrailDefinition()
@@ -97,6 +99,7 @@ export function OrganizationGuardrailsPage() {
   const defined = definitions.data ?? []
   const entries = mandates.data ?? []
   const known = workspaces.data ?? []
+  const hosted = hostedGuardrails.data ?? []
   const editingDefinition =
     open.kind === "definition"
       ? defined.find((row) => row.id === open.editingId)
@@ -206,7 +209,7 @@ export function OrganizationGuardrailsPage() {
       id: "runs_on",
       header: "Runs on",
       cell: (row) => (
-        <span className="text-muted">{runsOnLabel(row, defined)}</span>
+        <span className="text-muted">{runsOnLabel(row, defined, hosted)}</span>
       ),
     },
     {
@@ -407,6 +410,7 @@ export function OrganizationGuardrailsPage() {
             builtInCatalog={builtInCatalog.data}
             remoteCatalog={remoteCatalog.data}
             isRemoteCatalogPending={!remoteCatalog.isFetched}
+            hostedGuardrails={hosted}
             workspaces={known}
             onSetUpDefinition={() => openDialog("definition")}
             onSaved={() => {}}

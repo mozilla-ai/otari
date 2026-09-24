@@ -2,6 +2,7 @@
 
 import type {
   BuiltInGuardrailCatalog,
+  HostedGuardrail,
   OrganizationGuardrail,
   OrganizationGuardrailDefinition,
 } from "@/client"
@@ -55,13 +56,21 @@ export function credentialsLabel(
 }
 
 /**
- * Who runs a mandate's check: a definition by its name, the host of the
- * mandate's own endpoint, or the deployment's service when it names neither.
+ * Who runs a mandate's check: a definition or a hosted guardrail by its name,
+ * the host of the mandate's own endpoint, or the deployment's service when it
+ * names none of them.
  */
 export function runsOnLabel(
   mandate: OrganizationGuardrail,
   definitions: readonly OrganizationGuardrailDefinition[],
+  hosted: readonly HostedGuardrail[] = [],
 ): string {
+  if (mandate.hosted_guardrail_id) {
+    const offered = hosted.find((row) => row.id === mandate.hosted_guardrail_id)
+    return offered
+      ? `${offered.name} (hosted)`
+      : "a hosted guardrail no longer offered"
+  }
   if (mandate.definition_id) {
     return (
       definitions.find((row) => row.id === mandate.definition_id)?.name ??
