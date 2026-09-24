@@ -76,6 +76,8 @@ describe("the header's logo", () => {
     const link = screen.getByRole("link", { name: "Otari home" })
     expect(link).toHaveAttribute("href", "https://otari.ai/")
     expect(link).not.toHaveAttribute("target")
+    // The 44px touch floor; jsdom computes no height, so the class is the
+    // only evidence a unit test has.
     expect(link).toHaveClass("min-h-11")
   })
 
@@ -90,9 +92,7 @@ describe("the header's logo", () => {
   // The only other page would be the sign-in screen itself.
   it("stays unlinked with neither a website nor a catalog", () => {
     renderShell(undefined, { site_url: null, public_catalog: false })
-    expect(
-      screen.queryByRole("link", { name: "Otari home" }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByRole("link")).not.toBeInTheDocument()
     expect(screen.getByText("Otari")).toBeInTheDocument()
   })
 })

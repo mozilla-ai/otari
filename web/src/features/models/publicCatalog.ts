@@ -1,3 +1,5 @@
+import type { DeploymentBootstrap } from "@/client"
+
 /**
  * Which catalog page a hash names, for the render ahead of a session.
  *
@@ -29,6 +31,20 @@ export function publicCatalogPath(
 /** The hash a public catalog link points at. */
 export function publicCatalogHref(modelId?: string): string {
   return modelId ? `#/models/${modelId}` : "#/models"
+}
+
+/**
+ * Where the logo on a page reached without an account leads: the deployment's
+ * public website, else its public catalog. `""` when it publishes neither, so
+ * the only page left would be the one the visitor is on and the logo stays
+ * unlinked.
+ */
+export function siteHomeHref({
+  site_url,
+  public_catalog,
+}: Pick<DeploymentBootstrap, "site_url" | "public_catalog">): string {
+  if (site_url) return site_url
+  return public_catalog ? publicCatalogHref() : ""
 }
 
 // A visitor who asks to use a model is sent to create an account first, and

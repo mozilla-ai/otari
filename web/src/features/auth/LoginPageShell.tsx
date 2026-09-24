@@ -1,30 +1,14 @@
 import { type ReactNode, useRef } from "react"
 import { FiMonitor, FiMoon, FiSun } from "react-icons/fi"
 import { IconButton } from "@/design-system/actions/IconButton"
-import { publicCatalogHref } from "@/features/models/publicCatalog"
+import { siteHomeHref } from "@/features/models/publicCatalog"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { THEME_PREFERENCES, useTheme } from "@/shared/hooks/useTheme"
 import { LoginBackground } from "./background/LoginBackground"
 import savedBackground from "./background/login-background.json"
 
-/**
- * Where the header's logo leads a visitor who reached a sign-in page and wants
- * out: the deployment's public website, else its public catalog. With neither
- * there is nowhere to go but the page they are on, so the mark stays unlinked.
- */
-function brandHref({
-  site_url,
-  public_catalog,
-}: {
-  site_url: string | null
-  public_catalog: boolean
-}): string | null {
-  if (site_url) return site_url
-  return public_catalog ? publicCatalogHref() : null
-}
-
 function BrandMark() {
-  const href = brandHref(useDeployment())
+  const href = siteHomeHref(useDeployment())
   const mark = (
     <>
       <img

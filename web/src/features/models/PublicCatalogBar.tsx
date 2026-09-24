@@ -2,7 +2,10 @@ import { Button, buttonVariants, Drawer } from "@heroui/react"
 import { useState } from "react"
 import { FaGithub } from "react-icons/fa"
 import { FiMenu } from "react-icons/fi"
-import { publicCatalogHref } from "@/features/models/publicCatalog"
+import {
+  publicCatalogHref,
+  siteHomeHref,
+} from "@/features/models/publicCatalog"
 import { docsSourceHref } from "@/shared/helpers/docs"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -25,14 +28,15 @@ const DRAWER_LINK =
  * because the bundled guide at `/#/docs` sits behind the sign-in screen.
  */
 export function PublicCatalogBar({ onList }: { onList: boolean }) {
-  const { site_url, docs_url, open_signup } = useDeployment()
+  const deployment = useDeployment()
+  const { docs_url, open_signup } = deployment
   const [menuOpen, setMenuOpen] = useState(false)
   const docsHref = docs_url ?? docsSourceHref("index.md")
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4 md:px-6">
       <a
-        href={site_url ?? publicCatalogHref()}
+        href={siteHomeHref(deployment) || publicCatalogHref()}
         aria-label="Otari home"
         className="inline-flex min-h-11 items-center"
       >
