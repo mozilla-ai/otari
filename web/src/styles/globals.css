@@ -2444,6 +2444,10 @@ main {
   height: 3.25rem;
   padding-block: 0;
 }
+.otari-mcp-table .table__column[data-key="server_id"] {
+  width: 9.5rem;
+  min-width: 9.5rem;
+}
 .otari-mcp-table .table__column[data-key="token"] {
   width: 8.75rem;
   min-width: 8.75rem;
