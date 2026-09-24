@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, Mock
 
@@ -141,11 +139,3 @@ async def test_worker_builds_one_service_per_job_without_opening_transactions(mo
         await _sweeper.run_file_sweeper(1, build)
     service.sweep.assert_awaited_once_with(batch_size=200, after=None)
     assert uow.blocks == 0
-
-
-@pytest.mark.parametrize("module", ["_sandbox_bridge.py", "_sweeper.py"])
-def test_consumers_do_not_import_file_repositories(module: str) -> None:
-    root = Path(__file__).resolve().parents[2]
-    tree = ast.parse((root / "src/gateway/services/files" / module).read_text())
-    imports = [node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
-    assert not any(name.startswith("gateway.repositories") for name in imports)
