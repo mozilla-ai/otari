@@ -115,11 +115,69 @@ marker the model is given carries the name the file actually has. An Anthropic
 `container_upload` block (`{"type": "container_upload", "file_id": "..."}`) is
 for the sandbox only: the model is told the file is there and never sees its
 contents. A `document`, `file`, or `input_file` block with a `file_id` is both
-shown to the model (extracted or passed through as usual) and seeded. Without a
-sandbox in the request, a `container_upload` block is read as a document. That
-is also what happens when the executor leaves a provider's declaration with the
-provider: whether a file is staged follows who runs the code, decided once from
-the workspace pin, the header and the deployment default.
+shown to the model (extracted or passed through as usual) and seeded. A request
+that runs no code execution at all reads a `container_upload` block as a
+document. Where a file goes follows who runs the code, decided once from the
+workspace pin, the header and the deployment default.
+
+### A file the provider's own code execution reads
+
+A declaration the [executor](tools.md#code-execution-executor) leaves with the
+provider runs in the provider's container, which reads only files that provider
+holds. So Otari uploads a copy of the attached file to the provider, and the
+`container_upload` block carries the provider's ID for that copy rather than
+Otari's. The model still never sees the contents.
+
+Otari's store stays the source of truth and the copy is a cache. The copy
+carries an expiry, `files_provider_upload_ttl_hours` (1 hour by default, up to
+the 90 days Anthropic accepts), and the provider deletes it when that passes. A
+copy with time left is reused, so attaching the same file on every turn of a
+conversation uploads it once. The copy is recorded against the file, with the
+provider, the configured instance and the workspace that made it, because a
+provider file ID exists only inside the account of the credential that uploaded
+it, and both the instance and the workspace's organization can supply that
+credential. A request resolving a different credential makes a copy of its own
+rather than naming one its account does not hold.
+
+**A copy never outlives the file's expiry.** Where `files_retention_hours` is
+set, the copy's expiry is cut back to whatever the file itself has left, so the
+provider never holds a file past the point Otari would have stopped serving it.
+A provider that reports a longer expiry than that has the copy deleted again and
+the request refused, because the promise is about the copy that exists rather
+than the one Otari asked for.
+Anthropic will not hold a file for less than an hour, so a file with less than an
+hour left cannot have a copy at all, and such a request is refused. That makes
+`files_retention_hours` and the provider's floor interact: set retention to an
+hour against Anthropic and no file is ever copyable, because a file is under an
+hour from its expiry almost at once. Leave retention comfortably above the floor
+where provider-side code execution is wanted. Deleting a
+file early is the one case this does not cover: see the note at the end of this
+section.
+
+Four things refuse the request rather than answering without the file, because
+the request asked for code over that file:
+
+- a `file_id` this deployment does not hold, which also keeps a provider file ID
+  of the caller's choosing from reaching the provider, whose files are scoped to
+  the account rather than to the caller;
+- a file with too little left for a copy to expire no later than it does;
+- `files_provider_upload_enabled` set to `false`;
+- a provider that would not take the copy.
+
+`files_provider_upload_enabled` does not decide whether a file's contents reach
+the provider, which they do either way, inline in the request. It decides
+whether a copy is stored in the provider's account until it expires.
+
+Today this applies to Anthropic's code execution, whose `container_upload` block
+is the only provider-native block that names a file. Anthropic's Files API is
+generally available on the Claude API and is not available on Amazon Bedrock or
+Google Cloud, so a deployment reaching Anthropic through one of those refuses
+rather than copying.
+
+One limit is worth knowing. Deleting the Otari file before its expiry does not
+yet reach the copy, so the copy stands at the provider until its own expiry
+passes, which is never later than the file's would have been. Keep
+`files_provider_upload_ttl_hours` short where that matters.
 
 A file the code writes into the working directory comes back as a new stored
 file owned by the same user and workspace, with purpose `code_execution_output`.
@@ -234,6 +292,10 @@ code-execution call may store from its sandbox, and what one reply may copy
 from a provider's (see above). An expired file answers 404 at once, and the
 background sweep (`files_sweep_interval_sec`, hourly by default, `0` to
 disable) then reclaims its bytes and row along with those of deleted files.
+- `files_provider_upload_enabled` and `files_provider_upload_ttl_hours`: whether
+a copy of an attached file may be stored at the provider that runs a request's
+code, and how long that copy lives (see
+[A file the provider's own code execution reads](#a-file-the-providers-own-code-execution-reads)).
 - `file_understanding_enabled`: master switch for content normalization.
 - `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:
 how images are handled for text-only models. The describe model may be a local

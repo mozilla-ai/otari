@@ -21,6 +21,7 @@ from gateway.api.deps import (
     CodeExecutionPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
+    build_provider_file_uploader,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     extract_credential_token,
@@ -31,7 +32,11 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
-from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
+from gateway.api.routes._normalize import (
+    normalize_request_messages,
+    provider_container_requested,
+    sandbox_requested,
+)
 from gateway.api.routes._pipeline import (
     CONTAINER_AUTO,
     DB_UNAVAILABLE_DETAIL,
@@ -67,7 +72,7 @@ from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.code_execution import ContainerLease
-from gateway.services.files import StagedFile
+from gateway.services.files import ProviderFileUploader, StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_messages import (
@@ -790,6 +795,24 @@ async def create_message(
         # Resolve uploaded file/image blocks into the Anthropic wire payload
         # before the cost estimate. Standalone only; no-op when the files
         # feature is off or the request has no attachments.
+        code_execution_header = raw_request.headers.get(CODE_EXECUTION_HEADER)
+        uploader: ProviderFileUploader | None = None
+        if provider_container_requested(
+            request.tools,
+            config=config,
+            provider=target.provider,
+            dialect=_ADAPTER.name,
+            code_execution_header=code_execution_header,
+            workspace_executor=target.workspace_executor,
+        ):
+            uploader = build_provider_file_uploader(
+                raw_request=raw_request,
+                config=config,
+                uow=uow,
+                provider=target.provider,
+                provider_instance=target.instance,
+                workspace_id=target.credential_workspace_id,
+            )
         request.messages, stats = await normalize_request_messages(
             request.messages,
             fmt="anthropic",
@@ -805,9 +828,10 @@ async def create_message(
                 config=config,
                 provider=target.provider,
                 dialect=_ADAPTER.name,
-                code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+                code_execution_header=code_execution_header,
                 workspace_executor=target.workspace_executor,
             ),
+            container_uploads=uploader,
         )
         sandbox_inputs.extend(stats.sandbox_inputs)
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()

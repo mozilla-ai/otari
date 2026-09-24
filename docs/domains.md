@@ -206,6 +206,11 @@ lifecycle, including its expiry and the sweep that gives its storage back.
 The bytes sit in a pluggable blob backend. The row holds the metadata and
 the reference to them.
 
+`file_provider_copies` is the second table. A provider-native feature reads an
+attached file only under an ID that provider issued, so a copy is put there with
+an expiry and the row says which account holds it. Otari's store stays the
+source of truth and the copy is a cache.
+
 - Routes: `files.py`
 - Services: `files/`
 - Repositories: `files/`
@@ -295,6 +300,7 @@ and the Playground.
 - Services: `batch_service.py`, `content_normalizer.py`, `vision.py`,
   `upstream_redaction.py`, `playground_service.py`, `playground_dispatch.py`
 - Models: `inference.py`, `playground.py`
+- Types: `normalization_target.py`
 
 ### platform
 
