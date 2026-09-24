@@ -28,7 +28,10 @@ proves the caller is an Otari instance configured against this platform
 deployment. The three resolve endpoints additionally require `X-User-Token:
 <tk_...>`, which is the workspace API token forwarded opaquely from the end
 user's credential header (`Authorization: Bearer`, `Otari-Key`, or
-`x-api-key`). The usage endpoint sends only the gateway token.
+`x-api-key`). The usage endpoint sends only the gateway token. Every endpoint
+also carries `X-Otari-Protocol-Version: <int>` (see [Versions](#versions)); a
+peer that does not care about it can ignore it like any other unrecognized
+header.
 
 ## Extension policy
 
@@ -615,6 +618,16 @@ restart event (which would break OpenAI SDK compatibility).
 Mid-stream failover is not currently planned. If a future client SDK starts
 honoring a custom restart event, it could be added behind that capability
 flag.
+
+## Versions
+
+`X-Otari-Protocol-Version` (see [Authentication](#authentication)) is a single
+integer, bumped when a change below needs the peer to branch on it. One line
+per version, oldest first:
+
+| Version | Introduced |
+|---|---|
+| 1 | Initial version signal. No wire-shape change: covers every request/response shape already documented above, including the legacy single-attempt resolve shape. |
 
 ## Configuration
 
