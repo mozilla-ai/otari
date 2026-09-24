@@ -233,7 +233,7 @@ class SandboxFileBridge:
 
     async def _discard(self, storage_ref: str) -> None:
         """Remove a blob that no row points at."""
-        # Shielded so a cancellation already in flight cannot cut the
-        # cleanup short and leave the orphan it exists to prevent.
+        # Shielded so the delete still runs while a cancellation unwinds. The
+        # shield detaches it, so its completion is not waited for.
         with contextlib.suppress(Exception):
             await asyncio.shield(self._file_store.delete(storage_ref))
