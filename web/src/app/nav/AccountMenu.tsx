@@ -153,6 +153,7 @@ function MenuItem({
   trailing,
   trailingIcon,
   ariaLabel,
+  className = "",
 }: {
   label: string
   /** A Feather mark, named at the call site and dressed here. */
@@ -164,6 +165,7 @@ function MenuItem({
   /** Fills the same lane as `trailing`, for a mark rather than a value. */
   trailingIcon?: ReactNode
   ariaLabel?: string
+  className?: string
 }) {
   return (
     <button
@@ -177,7 +179,7 @@ function MenuItem({
         isDisabled && title ? `${label} (${title})` : (ariaLabel ?? undefined)
       }
       onClick={onPress}
-      className={`${MENU_ROW} ${isDisabled ? MENU_ROW_DISABLED : MENU_ROW_RESTING}`}
+      className={`${MENU_ROW} ${isDisabled ? MENU_ROW_DISABLED : MENU_ROW_RESTING} ${className}`}
     >
       <Icon aria-hidden="true" className={MENU_ICON_CLASS} />
       <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -305,7 +307,7 @@ export function AccountMenu({
   deploymentLanding,
   triggerRef,
   onOpenDeploymentLevel,
-  onShareFeedback,
+  onOpenFeedback,
 }: {
   isCollapsed: boolean
   /**
@@ -321,8 +323,11 @@ export function AccountMenu({
    * opens it as a level inside the drawer, and this popover has closed by then.
    */
   onOpenDeploymentLevel?: () => void
-  /** Opens the feedback dialog, which the shell mounts outside this popover. */
-  onShareFeedback?: () => void
+  /**
+   * Below `md`, opens the feedback dialog, which the shell mounts outside this
+   * popover. From `md` up the top bar carries it beside Documentation.
+   */
+  onOpenFeedback?: () => void
 }) {
   const { logout } = useAuth()
   const { docs_url, terms_url, privacy_url, feedback_enabled } = useDeployment()
@@ -480,13 +485,14 @@ export function AccountMenu({
               className="md:hidden"
             />
           )}
-          {feedback_enabled && onShareFeedback ? (
+          {feedback_enabled && onOpenFeedback ? (
             <MenuItem
-              label="Share feedback"
+              label="Feedback"
               icon={FiMessageSquare}
+              className="md:hidden"
               onPress={() => {
                 setOpen(false)
-                onShareFeedback()
+                onOpenFeedback()
               }}
             />
           ) : null}

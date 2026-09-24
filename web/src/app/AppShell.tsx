@@ -480,6 +480,7 @@ export function AppShell() {
 function AppShellChrome() {
   const { feedback_enabled } = useDeployment()
   const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const feedbackTriggerRef = useRef<HTMLButtonElement>(null)
 
   // Navigation is data: the shell renders whatever the registry declares and
   // decides visibility from the deployment and the entitlements,
@@ -1111,7 +1112,7 @@ function AppShellChrome() {
               <div className="-mx-3 flex h-14 shrink-0 items-center border-t border-border">
                 <AccountMenu
                   isCollapsed={effectiveCollapsed}
-                  onShareFeedback={() => {
+                  onOpenFeedback={() => {
                     closeMobileNav()
                     setFeedbackOpen(true)
                   }}
@@ -1183,7 +1184,10 @@ function AppShellChrome() {
               </button>
               <Breadcrumbs pathname={pathname} />
             </div>
-            <TopBarActions />
+            <TopBarActions
+              onOpenFeedback={() => setFeedbackOpen(true)}
+              feedbackTriggerRef={feedbackTriggerRef}
+            />
           </header>
           <main
             ref={mainRef}
@@ -1218,9 +1222,9 @@ function AppShellChrome() {
         <FeedbackDialog
           isOpen={feedbackOpen}
           onOpenChange={setFeedbackOpen}
-          // The drawer has closed by then, and the account control inside it
-          // with it, so below `md` the control that reopens the drawer takes focus.
-          returnFocusRef={isMobile ? toggleRef : accountTriggerRef}
+          // Below `md` the drawer has closed by then, and the menu row inside it
+          // with it, so the control that reopens the drawer takes focus.
+          returnFocusRef={isMobile ? toggleRef : feedbackTriggerRef}
         />
       ) : null}
     </div>

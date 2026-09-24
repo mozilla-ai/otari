@@ -57,14 +57,14 @@ function CallerProbe() {
 // mounts it at "/" and resolves the first location before the assertions run.
 type MenuOptions = Partial<DeploymentBootstrap> & {
   deploymentLanding?: string
-  onShareFeedback?: () => void
+  onOpenFeedback?: () => void
   onOpenDeploymentLevel?: () => void
 }
 
 async function renderMenu({
   deploymentLanding,
   onOpenDeploymentLevel,
-  onShareFeedback,
+  onOpenFeedback,
   ...overrides
 }: MenuOptions = {}) {
   await renderWithRouter(
@@ -74,7 +74,7 @@ async function renderMenu({
           isCollapsed={false}
           deploymentLanding={deploymentLanding as never}
           onOpenDeploymentLevel={onOpenDeploymentLevel}
-          onShareFeedback={onShareFeedback}
+          onOpenFeedback={onOpenFeedback}
         />
         <CallerProbe />
       </DeploymentProvider>
@@ -357,23 +357,24 @@ describe("AccountMenu", () => {
   })
 })
 
-it("opens feedback from a row shown at every width, after Documentation", async () => {
+it("opens feedback from a phone-only row right after Documentation", async () => {
   mockCaller(OPERATOR)
-  const onShareFeedback = vi.fn()
-  await openMenu({ feedback_enabled: true, onShareFeedback })
-  const trigger = screen.getByRole("button", { name: "Share feedback" })
-  expect(trigger).not.toHaveClass("md:hidden")
+  const onOpenFeedback = vi.fn()
+  await openMenu({ feedback_enabled: true, onOpenFeedback })
+  const trigger = screen.getByRole("button", { name: "Feedback" })
+  // From md up the top bar carries it, as it carries Documentation.
+  expect(trigger).toHaveClass("md:hidden")
   expect(trigger.previousElementSibling).toBe(
     screen.getByRole("link", { name: "Documentation" }),
   )
   await userEvent.setup().click(trigger)
-  expect(onShareFeedback).toHaveBeenCalledOnce()
+  expect(onOpenFeedback).toHaveBeenCalledOnce()
 })
 
 it("hides the feedback row when the deployment has feedback off", async () => {
   mockCaller(OPERATOR)
-  await openMenu({ feedback_enabled: false, onShareFeedback: vi.fn() })
+  await openMenu({ feedback_enabled: false, onOpenFeedback: vi.fn() })
   expect(
-    screen.queryByRole("button", { name: "Share feedback" }),
+    screen.queryByRole("button", { name: "Feedback" }),
   ).not.toBeInTheDocument()
 })

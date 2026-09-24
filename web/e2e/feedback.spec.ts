@@ -23,7 +23,7 @@ test.beforeEach(async ({ page }) => {
   )
 })
 
-test("desktop: the account menu opens it, a failure keeps the draft, a retry thanks", async ({
+test("desktop: the top bar opens it beside Documentation, a failure keeps the draft, a retry thanks", async ({
   page,
 }) => {
   const payloads: unknown[] = []
@@ -37,11 +37,22 @@ test("desktop: the account menu opens it, a failure keeps the draft, a retry tha
   })
   await enableFeedback(page)
   await login(page)
-  const account = page.getByRole("button", { name: /^Account:/ })
-  await account.click()
-  await page
-    .getByRole("button", { name: "Share feedback", exact: true })
-    .click()
+  // The account menu's row is the phone's entry, so on a desktop it is hidden.
+  await page.getByRole("button", { name: /^Account:/ }).click()
+  await expect(
+    page
+      .getByRole("dialog", { name: "Account" })
+      .getByRole("button", { name: "Feedback", exact: true }),
+  ).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  const topBar = page.locator("header")
+  const trigger = topBar.getByRole("button", { name: "Feedback", exact: true })
+  expect(
+    await topBar
+      .getByRole("link", { name: "Documentation", exact: true })
+      .evaluate((link) => link.nextElementSibling?.textContent),
+  ).toBe("Feedback")
+  await trigger.click()
   const dialog = page.getByRole("dialog", { name: "Feedback", exact: true })
   const field = dialog.getByRole("textbox", { name: "Feedback" })
   await expect(field).toBeFocused()
@@ -56,7 +67,7 @@ test("desktop: the account menu opens it, a failure keeps the draft, a retry tha
   await expect(thanks).toBeFocused()
   await page.keyboard.press("Escape")
   await expect(thanks).toBeHidden()
-  await expect(account).toBeFocused()
+  await expect(trigger).toBeFocused()
   expect(payloads).toEqual([{ message: MESSAGE }, { message: MESSAGE }])
 })
 
@@ -67,7 +78,7 @@ test.describe("phone", () => {
     hasTouch: true,
   })
 
-  test("the drawer's account row opens a full-screen sheet that closes by its own control", async ({
+  test("the drawer's account menu row opens a full-screen sheet that closes by its own control", async ({
     page,
   }) => {
     let submissions = 0
@@ -85,9 +96,7 @@ test.describe("phone", () => {
     })
     await openNavigation.click()
     await page.getByRole("button", { name: /^Account:/ }).click()
-    await page
-      .getByRole("button", { name: "Share feedback", exact: true })
-      .click()
+    await page.getByRole("button", { name: "Feedback", exact: true }).click()
     const dialog = page.getByRole("dialog", { name: "Feedback", exact: true })
     await expect(openNavigation).toHaveAttribute("aria-expanded", "false")
     await expect.poll(async () => (await dialog.boundingBox())?.width).toBe(390)
@@ -114,11 +123,10 @@ test.describe("phone", () => {
 
 test("a gateway with feedback off never offers it", async ({ page }) => {
   await login(page)
-  await page.getByRole("button", { name: /^Account:/ }).click()
   await expect(
-    page.getByRole("button", { name: "Log out", exact: true }),
+    page.getByRole("link", { name: "Documentation", exact: true }),
   ).toBeVisible()
   await expect(
-    page.getByRole("button", { name: "Share feedback", exact: true }),
+    page.getByRole("button", { name: "Feedback", exact: true }),
   ).toHaveCount(0)
 })

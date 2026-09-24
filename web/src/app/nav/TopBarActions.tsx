@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router"
+import type { RefObject } from "react"
 
 // By its `@/…` specifier, never as `./overlayWalletSlot`: that specifier is the
 // seam's alias key, and the module says what a relative import would cost.
@@ -13,8 +14,16 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 const ACTION =
   "flex min-h-[2.125rem] items-center rounded-md px-1 text-shell-label font-medium text-muted transition-colors hover:text-foreground"
 
-export function TopBarActions() {
-  const { docs_url } = useDeployment()
+export function TopBarActions({
+  onOpenFeedback,
+  feedbackTriggerRef,
+}: {
+  /** Opens the feedback dialog, which the shell mounts. */
+  onOpenFeedback?: () => void
+  /** So the shell can return focus here when the dialog closes. */
+  feedbackTriggerRef?: RefObject<HTMLButtonElement | null>
+}) {
+  const { docs_url, feedback_enabled } = useDeployment()
   const hostsSurface = useSurfaceVisibility()
 
   return (
@@ -42,6 +51,18 @@ export function TopBarActions() {
           Documentation
         </Link>
       )}
+      {/* A button beside two links, so it takes their class and the pointer a
+          link gets for free. */}
+      {feedback_enabled && onOpenFeedback ? (
+        <button
+          type="button"
+          ref={feedbackTriggerRef}
+          onClick={onOpenFeedback}
+          className={`${ACTION} cursor-pointer`}
+        >
+          Feedback
+        </button>
+      ) : null}
       <WalletNavSlot />
     </div>
   )

@@ -18,7 +18,8 @@ const MAX_MESSAGE_LENGTH = 4000
 const IS_APPLE = /Mac|iPhone|iPad/.test(navigator.platform)
 
 /**
- * A message to the Otari team, opened from the account menu.
+ * A message to the Otari team, opened from Feedback beside Documentation: in the
+ * top bar from `md` up, and in the account menu below it.
  *
  * Not a `FormDialog`: that frame always renders a titled header, a footer rule
  * and Cancel, and this one is a single field and a single action. It wears the
@@ -91,7 +92,7 @@ export function FeedbackDialog({
       {/* Driven from state, so the trigger slot is filled and hidden, as in
           `FormDialog`. */}
       <Modal.Trigger aria-hidden className="hidden">
-        Share feedback
+        Feedback
       </Modal.Trigger>
       <Modal.Backdrop isDismissable={!isPending}>
         <Modal.Container

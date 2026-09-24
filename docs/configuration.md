@@ -440,8 +440,9 @@ boundary.
 
 ## Product feedback
 
-With `feedback_enabled` on, signed-in dashboard users can choose **Share
-feedback** in the account menu to send a message to the Otari team. The team
+With `feedback_enabled` on, signed-in dashboard users can choose **Feedback**,
+beside Documentation in the top bar (in the account menu on a phone), to send a
+message to the Otari team. The team
 receives it privately in Slack. Only the message is sent: no email, screenshot,
 page URL, account identifier, deployment identifier, or usage history is
 attached. Opening the form, typing, and canceling make no outbound request.
@@ -455,7 +456,7 @@ logging or tracing you configure.
 
 Feedback is off by default. To turn it on, set `feedback_enabled: true` in YAML
 or `OTARI_FEEDBACK_ENABLED=true`, then restart. Off, the endpoint is not mounted
-and the menu row is hidden. Hybrid gateways never offer the form. This setting
+and the Feedback entry is hidden. Hybrid gateways never offer the form. This setting
 is visible in Settings but cannot be changed there at runtime.
 
 Feedback text accepts up to 4,000 Unicode code points. The gateway waits up to
