@@ -20,6 +20,7 @@ from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
+from gateway.adapters.hosted_guardrail_adapter import NullHostedGuardrailAdapter
 from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
@@ -38,6 +39,7 @@ from gateway.ports.billing_port import BillingPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
+from gateway.ports.hosted_guardrail_port import HostedGuardrailPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
@@ -94,6 +96,7 @@ def test_core_defaults_are_bound_for_every_port() -> None:
     assert isinstance(container.resolve(BillingPort, NO_SESSION), NullBillingAdapter)
     assert isinstance(container.resolve(EntitlementPort, NO_SESSION), BaseEntitlementAdapter)
     assert isinstance(container.resolve(ModelProviderPort, NO_SESSION), SelfHostedModelProviderAdapter)
+    assert isinstance(container.resolve(HostedGuardrailPort, NO_SESSION), NullHostedGuardrailAdapter)
     assert isinstance(container.resolve(GrowthSignalPort, NO_SESSION), NullGrowthSignalAdapter)
     assert isinstance(container.resolve(TelemetryStoragePort, NO_SESSION), DatabaseTelemetryStorageAdapter)
     assert isinstance(container.resolve(IdentityProviderPort, NO_SESSION), RosterIdentityProviderAdapter)
@@ -109,6 +112,7 @@ def test_no_selector_contributes_no_routers_and_says_so() -> None:
         BillingPort,
         EntitlementPort,
         GrowthSignalPort,
+        HostedGuardrailPort,
         IdentityProviderPort,
         ModelProviderPort,
         TelemetryStoragePort,

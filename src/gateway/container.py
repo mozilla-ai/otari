@@ -35,6 +35,7 @@ from gateway.adapters.code_execution_adapter import build_code_execution_port, v
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.file_storage_adapter import build_file_storage_port
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
+from gateway.adapters.hosted_guardrail_adapter import NullHostedGuardrailAdapter
 from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
@@ -46,6 +47,7 @@ from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
+from gateway.ports.hosted_guardrail_port import HostedGuardrailPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
@@ -207,6 +209,11 @@ def _entitlement_adapter(session: AsyncSession | None) -> EntitlementPort:
     return BaseEntitlementAdapter(session)
 
 
+def _hosted_guardrail_adapter(session: AsyncSession | None) -> HostedGuardrailPort:
+    """Build the core ``HostedGuardrailPort`` adapter for one request."""
+    return NullHostedGuardrailAdapter(session)
+
+
 def _model_provider_adapter(session: AsyncSession | None) -> ModelProviderPort:
     """Build the core ``ModelProviderPort`` adapter for one request."""
     return SelfHostedModelProviderAdapter(session)
@@ -352,6 +359,9 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # candidate with no BYO credential is unavailable. Self-hosting is served
     # upstream of this port, not behind it.
     container.bind(ModelProviderPort, _model_provider_adapter)
+    # Hosted guardrails: the base hosts none, so an organization runs only the
+    # guardrails it defines itself.
+    container.bind(HostedGuardrailPort, _hosted_guardrail_adapter)
     # Growth and support-messenger notifications: the base has no vendor of its
     # own, so every lifecycle event is a no-op.
     container.bind(GrowthSignalPort, _growth_signal_adapter)
@@ -419,6 +429,7 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
         raise BootstrapError(msg)
     rebound = sorted(_port_name(port) for port, factory in container.bindings() if defaults.get(port) is not factory)
     _verify_port_shape(container, ModelProviderPort)
+    _verify_port_shape(container, HostedGuardrailPort)
     container.summary = f"{bootstrap_selector} rebound {', '.join(rebound) or 'no ports'}"
     contributed = ", ".join(contribution.capability for contribution in container.router_contributions())
     if contributed:
