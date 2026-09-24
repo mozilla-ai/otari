@@ -750,37 +750,6 @@ def test_no_policy_file_is_a_no_op(tmp_path: Path) -> None:
     assert result.output == ""
 
 
-def test_the_pre_rename_policy_filename_is_reported_rather_than_read(tmp_path: Path) -> None:
-    """A repo still on `.otari-gates.yml` enforces nothing, and says so.
-
-    The file is not read: this is a one-line diagnostic for the rename, not a
-    compatibility path. Without it the rename is silent, because this command
-    fails open and a policy it cannot find is indistinguishable from a repo
-    that never had one.
-    """
-    (tmp_path / ".git").mkdir()
-    (tmp_path / ".otari-gates.yml").write_text('schema_version: "1.0"\npolicy:\n  id: x\ngates: []\n')
-    result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
-    assert result.exit_code == 0, result.output
-    # The agent has to actually see it. This branch exits 0, and Claude Code
-    # shows a non-blocking hook's stderr only in its own debug log, so the
-    # warning travels as a stdout `systemMessage` like every other
-    # non-blocking message this command emits.
-    payload = json.loads(result.output)
-    assert ".otari-gates.yml is no longer read" in payload["systemMessage"]
-    assert ".otari-guardrails.yml" in payload["systemMessage"]
-
-
-def test_the_new_policy_filename_wins_and_says_nothing_about_the_old_one(tmp_path: Path) -> None:
-    """Both present: the new file is authoritative and the warning stays quiet."""
-    (tmp_path / ".git").mkdir()
-    (tmp_path / ".otari-gates.yml").write_text("not even yaml: [\n")
-    (tmp_path / ".otari-guardrails.yml").write_text('schema_version: "1.0"\npolicy:\n  id: x\ngates: []\n')
-    result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
-    assert result.exit_code == 0, result.output
-    assert "no longer read" not in result.output
-
-
 def test_a_non_utf8_policy_file_does_not_block(tmp_path: Path) -> None:
     """`gates_file.is_file()` does not guarantee the read right after it succeeds
 

@@ -1521,28 +1521,6 @@ def hook(
 
     gates_file = root / ".otari-guardrails.yml"
     if not gates_file.is_file():
-        # This command fails open, so a repo still on `.otari-gates.yml`
-        # would stop enforcing every gate and report nothing at all. Naming
-        # that one case keeps it visible without reading the old file, which
-        # would be a compatibility path to maintain and later remove. A repo
-        # with no policy stays silent.
-        legacy_file = root / ".otari-gates.yml"
-        if legacy_file.is_file():
-            # stdout `systemMessage`, not stderr, for the reason the advisory
-            # branch below spells out: this exits 0, and Claude Code shows a
-            # non-blocking hook's stderr only in its own debug log. On stderr
-            # the one signal that this repo stopped enforcing would itself be
-            # invisible.
-            click.echo(
-                json.dumps(
-                    {
-                        "systemMessage": (
-                            f"otari hook: {legacy_file.name} is no longer read. Rename it to "
-                            f"{gates_file.name}; until then this repo enforces no gates."
-                        )
-                    }
-                )
-            )
         return
     try:
         policy_yaml = gates_file.read_text(encoding="utf-8")
@@ -2112,23 +2090,6 @@ def hook_setup(harness: str, api_key: str | None) -> None:
         raise click.ClickException("Not inside a Git repository.")
 
     gates_file = root / ".otari-guardrails.yml"
-    legacy_file = root / ".otari-gates.yml"
-    if not gates_file.is_file() and legacy_file.is_file():
-        # Scaffolding here would write a starter policy, and the starter's
-        # existence is what stops `otari hook` reporting the legacy file. The
-        # repo's real gates would be orphaned with no signal left that they
-        # had stopped running.
-        if click.confirm(
-            f"{legacy_file.name} holds this repo's gates and is no longer read. Rename it to {gates_file.name}?",
-            default=True,
-        ):
-            legacy_file.rename(gates_file)
-            click.echo(f"Renamed {legacy_file.name} to {gates_file.name}.")
-        else:
-            click.echo(
-                f"Skipping. otari hook will still be registered below, but every gate in "
-                f"{legacy_file.name} stays unenforced until it is renamed to {gates_file.name}."
-            )
     if not gates_file.is_file():
         if click.confirm(f"No {gates_file.name} found in {root}. Create a starter guardrail?", default=True):
             gates_file.write_text(_starter_gates_yaml(root.name), encoding="utf-8")
@@ -2630,16 +2591,6 @@ def guardrails_generate(
         )
 
     target = guardrail_file_option if guardrail_file_option is not None else root / ".otari-guardrails.yml"
-    legacy_file = root / ".otari-gates.yml"
-    if guardrail_file_option is None and not target.is_file() and legacy_file.is_file():
-        # Appending to a fresh target would read this repo's existing gate ids
-        # as empty and propose duplicates of gates that are sitting, unread, in
-        # the legacy file. Renaming is the caller's call, not this command's.
-        raise click.ClickException(
-            f"{legacy_file.name} is no longer read, and {target.name} does not exist yet. "
-            f"Rename {legacy_file.name} to {target.name} first, so proposals append to this "
-            "repo's real gates rather than to an empty file."
-        )
     existing_ids: set[str] = set()
     if target.is_file():
         try:
