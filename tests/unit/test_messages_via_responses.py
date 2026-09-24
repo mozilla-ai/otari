@@ -31,6 +31,7 @@ from gateway.services.mcp_loop_messages import _MessagesToolLoopStrategy
 from gateway.services.providers import messages_via_responses
 from gateway.services.providers.messages_via_responses import (
     ResponsesStreamFailedError,
+    _input_items,
     amessages_with_responses_fallback,
 )
 
@@ -377,3 +378,31 @@ async def test_the_gateway_tool_loop_falls_back_too() -> None:
         result = await _MessagesToolLoopStrategy().call(_kwargs())
 
     assert result.stop_reason == "tool_use"
+
+
+_IMAGE_PART = {"type": "image_url", "image_url": {"url": "https://example.com/a.png"}}
+_TEXT_PARTS = [{"type": "text", "text": "sun"}, {"type": "text", "text": "ny"}]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        pytest.param({"role": "tool", "tool_call_id": "call_1", "content": None}, id="tool-no-content"),
+        pytest.param({"role": "tool", "tool_call_id": "call_1", "content": [_IMAGE_PART]}, id="tool-image"),
+        pytest.param(
+            {"role": "tool", "tool_call_id": "call_1", "content": [*_TEXT_PARTS, _IMAGE_PART]}, id="tool-mixed"
+        ),
+        pytest.param({"role": "assistant", "content": [_IMAGE_PART]}, id="assistant-image"),
+        pytest.param({"role": "assistant", "content": {"text": "x"}}, id="assistant-object"),
+        pytest.param({"role": "user", "content": {"text": "x"}}, id="user-object"),
+    ],
+)
+def test_content_that_cannot_be_carried_whole_is_refused(message: dict[str, Any]) -> None:
+    assert _input_items(message) is None
+
+
+def test_text_only_tool_and_assistant_lists_are_joined() -> None:
+    assert _input_items({"role": "tool", "tool_call_id": "call_1", "content": _TEXT_PARTS}) == [
+        {"type": "function_call_output", "call_id": "call_1", "output": "sunny"}
+    ]
+    assert _input_items({"role": "assistant", "content": _TEXT_PARTS}) == [{"role": "assistant", "content": "sunny"}]

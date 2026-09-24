@@ -17,12 +17,13 @@ The request side reuses any-llm's own Messages-to-Chat conversion and then
 maps Chat messages onto Responses input items, so a request reaches Responses
 with the same messages, tools and effort Chat Completions would have seen. A
 request carrying anything that mapping does not cover (``stop_sequences``,
-structured output, a content part other than text or an image) keeps its
-original error rather than being sent with a field quietly missing. Replayed
-``thinking`` text is not sent: Responses takes prior reasoning only as the
-opaque items it issued, which a Messages transcript does not hold. No reasoning
-summary is requested, so the answer carries no ``thinking`` block, which is
-what the Chat Completions path returns for these models too.
+structured output, a content part other than text or an image, a tool
+result or assistant turn holding anything but text) keeps its original error
+rather than being sent with a field quietly missing. Replayed ``thinking`` text
+is not sent: Responses takes prior reasoning only as the opaque items it
+issued, which a Messages transcript does not hold. No reasoning summary is
+requested, so the answer carries no ``thinking`` block, which is what the Chat
+Completions path returns for these models too.
 
 Stopgap: which provider API serves a bridged Messages request is any-llm's to
 decide. Remove this once any-llm serves these OpenAI requests through
@@ -210,17 +211,17 @@ def _input_items(message: dict[str, Any]) -> list[dict[str, Any]] | None:
     role = message.get("role")
     content = message.get("content")
     if role == "tool":
-        return [
-            {
-                "type": "function_call_output",
-                "call_id": message.get("tool_call_id", ""),
-                "output": content if isinstance(content, str) else "",
-            }
-        ]
+        output = _joined_text(content)
+        if output is None:
+            return None
+        return [{"type": "function_call_output", "call_id": message.get("tool_call_id", ""), "output": output}]
     if role == "assistant":
+        text = "" if content is None else _joined_text(content)
+        if text is None:
+            return None
         items: list[dict[str, Any]] = []
-        if isinstance(content, str) and content:
-            items.append({"role": "assistant", "content": content})
+        if text:
+            items.append({"role": "assistant", "content": text})
         for tool_call in message.get("tool_calls") or []:
             function = tool_call.get("function") or {}
             items.append(
@@ -232,15 +233,35 @@ def _input_items(message: dict[str, Any]) -> list[dict[str, Any]] | None:
                 }
             )
         return items
-    if isinstance(content, list):
-        parts: list[dict[str, Any]] = []
-        for part in content:
-            converted = _input_part(part)
-            if converted is None:
-                return None
-            parts.append(converted)
-        return [{"role": role, "content": parts}]
-    return [{"role": role, "content": content}]
+    if isinstance(content, str):
+        return [{"role": role, "content": content}]
+    if not isinstance(content, list):
+        return None
+    parts: list[dict[str, Any]] = []
+    for part in content:
+        converted = _input_part(part)
+        if converted is None:
+            return None
+        parts.append(converted)
+    return [{"role": role, "content": parts}]
+
+
+def _joined_text(content: Any) -> str | None:
+    """``content`` as one string when it is text alone, else ``None``.
+
+    A list of text parts joins without loss, which is how any-llm flattens them
+    itself; any other part has no place in a string.
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return None
+    texts: list[str] = []
+    for part in content:
+        if not isinstance(part, dict) or part.get("type") != "text" or not isinstance(part.get("text"), str):
+            return None
+        texts.append(part["text"])
+    return "".join(texts)
 
 
 def _input_part(part: Any) -> dict[str, Any] | None:
