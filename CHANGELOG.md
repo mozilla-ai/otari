@@ -4,6 +4,29 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.10.0](https://github.com/mozilla-ai/otari/releases/tag/v0.10.0) - 2026-09-24
+
+
+
+### Bug Fixes
+
+- **messages:** Let container auto through the managed-credential gate in [#1618](https://github.com/mozilla-ai/otari/pull/1618) by [@hasangzl](https://github.com/hasangzl) ([`f9748a8`](https://github.com/mozilla-ai/otari/commit/f9748a8819e3fa9e2ea00b378beed5e17db1d9ad))
+- **dashboard:** Seat the account band on the bottom edge of the rail in [#1641](https://github.com/mozilla-ai/otari/pull/1641) by [@jigjigjig](https://github.com/jigjigjig) ([`1cddb70`](https://github.com/mozilla-ai/otari/commit/1cddb707f3415ff727dfd2a8769d2d043a29f57c))
+
+
+### Features
+
+- **policy-checks:** Support Codex as a hook harness alongside Claude Code in [#1447](https://github.com/mozilla-ai/otari/pull/1447) by [@agpituk](https://github.com/agpituk) ([`178810f`](https://github.com/mozilla-ai/otari/commit/178810fd2d3b605f8cafcce9ad32e653f43eaeb5))
+- **policy-checks:** Evaluate otari hook policies locally by default in [#1448](https://github.com/mozilla-ai/otari/pull/1448) by [@agpituk](https://github.com/agpituk) ([`377fc9e`](https://github.com/mozilla-ai/otari/commit/377fc9eb482d40bb1f49d5e61d43271611309774))
+- **policy-checks:** Add otari gates generate and run hook gates concurrently in [#1542](https://github.com/mozilla-ai/otari/pull/1542) by [@agpituk](https://github.com/agpituk) ([`4e404b7`](https://github.com/mozilla-ai/otari/commit/4e404b7209af730cdc9b19c4f95e44a99ee56082))
+- **guardrails:** Add an endpoint to test a mandate on its own guardrails service by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`5137351`](https://github.com/mozilla-ai/otari/commit/5137351857a1463778d3eb5712bbdd0e0ba0eb80))
+- **dashboard:** Add a test action to mandates on your own guardrails service by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`bde5bf1`](https://github.com/mozilla-ai/otari/commit/bde5bf143a3750759ae8acf62fb2a4c312822369))
+- **cli:** Ship the agent-side otari CLI as the otari-agent package in [#1581](https://github.com/mozilla-ai/otari/pull/1581) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`509314e`](https://github.com/mozilla-ai/otari/commit/509314e4e4f571da4d0f0388f178e6da1bceb20d))
+- **cli:** Render the homebrew formula from the lock by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`2445c09`](https://github.com/mozilla-ai/otari/commit/2445c09dad198e4846bb855eb7b92602c9b49580))
+- **dashboard:** Show each MCP server's id with a copy button in [#1624](https://github.com/mozilla-ai/otari/pull/1624) by [@HareeshBahuleyan](https://github.com/HareeshBahuleyan) ([`f5f0d9c`](https://github.com/mozilla-ai/otari/commit/f5f0d9cb492dbb1f234c06ac45f84d98ef9167d1))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.9.0...v0.10.0
 ## [0.9.0](https://github.com/mozilla-ai/otari/releases/tag/v0.9.0) - 2026-09-23
 
 
