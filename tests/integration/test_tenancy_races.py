@@ -27,6 +27,11 @@ from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import OrganizationScopeNotFoundError
+from gateway.exceptions.identity_exceptions import (
+    EmailAlreadyInUseError,
+    ResetTokenInvalidError,
+    VerificationTokenInvalidError,
+)
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import SCOPE_WORKSPACE, SCOPE_WORKSPACE_MEMBER, ScopedBudget, ScopeType
 from gateway.models.tenancy import (
@@ -63,7 +68,6 @@ from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultServic
 from gateway.services.password_service import verify_password_async
 from gateway.services.tenancy import OrganizationService, WorkspaceService, user_service
 from gateway.services.tenancy.errors import (
-    EmailAlreadyInUseError,
     ForeignTenancyError,
     InvitationAlreadyPendingError,
     InvitationAlreadyUsedError,
@@ -72,8 +76,6 @@ from gateway.services.tenancy.errors import (
     MembershipUpdateError,
     NotAuthorizedError,
     OrganizationMemberAlreadyExistsError,
-    ResetTokenInvalidError,
-    VerificationTokenInvalidError,
     WorkspaceAlreadyExistsError,
     WorkspaceMemberAlreadyExistsError,
 )

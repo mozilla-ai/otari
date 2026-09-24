@@ -18,14 +18,14 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.tenancy import User
-from gateway.repositories.tenancy import UserRepository
-from gateway.services.tenancy.email_address import validated_email
-from gateway.services.tenancy.errors import (
+from gateway.exceptions.identity_exceptions import (
     InvalidEmailError,
     OAuthEmailNotVerifiedError,
     OAuthIdentityUnknownError,
 )
+from gateway.models.tenancy import User
+from gateway.repositories.tenancy import UserRepository
+from gateway.services.tenancy.email_address import validated_email
 
 
 class RosterIdentityProviderAdapter:

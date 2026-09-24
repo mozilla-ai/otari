@@ -59,13 +59,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT, OAUTH_PROVIDERS, GatewayConfig
+from gateway.exceptions.identity_exceptions import OAuthExchangeError, OAuthNotConfiguredError, OAuthStateError
 from gateway.log_config import logger
 from gateway.models.tenancy import OAUTH_STATE_TTL_SECONDS, OAuthPendingState
-from gateway.services.tenancy.errors import (
-    OAuthExchangeError,
-    OAuthNotConfiguredError,
-    OAuthStateError,
-)
 
 # Which scopes each provider is asked for, and what it calls itself.
 #
