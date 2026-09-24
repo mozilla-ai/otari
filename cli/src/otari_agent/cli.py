@@ -12,6 +12,10 @@ from otari_agent import __version__
 from otari_agent.hook import gates, hook
 from otari_agent.usage_import import import_group
 
+# What gateway.cli.register attaches, named here so a light install can say why
+# the command is missing rather than that it does not exist.
+SERVER_COMMANDS = frozenset({"serve", "init-db", "migrate", "gen-secret-key", "routing"})
+
 
 class OtariGroup(click.Group):
     """A group that attaches the gateway's server commands only when something asks for them.
@@ -47,6 +51,11 @@ class OtariGroup(click.Group):
         if command is None:
             self._attach_gateway_commands()
             command = super().get_command(ctx, cmd_name)
+        if command is None and cmd_name in SERVER_COMMANDS:
+            ctx.fail(
+                f"'{cmd_name}' is a server command, and this install does not include the otari gateway. "
+                "Run it from the gateway's Docker image or a source checkout."
+            )
         return command
 
 
