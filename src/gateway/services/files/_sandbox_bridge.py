@@ -11,6 +11,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.log_config import logger
 from gateway.ports.file_storage_port import FileStoragePort
+from gateway.services.files._cleanup import discard_output_bytes
 from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._provider_files import (
     FileOverBudgetError,
@@ -198,7 +199,7 @@ class SandboxFileBridge:
                 provider_container_id=file.container_id,
             )
         except BaseException:
-            await self._files.discard_output_bytes(storage_ref)
+            await discard_output_bytes(self._file_store, storage_ref)
             raise
         await self._files.record_output(output)
         return size

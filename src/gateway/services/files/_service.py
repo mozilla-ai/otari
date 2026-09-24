@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass, replace
@@ -24,6 +22,7 @@ from gateway.log_config import logger
 from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.repositories.files import FilePageQuery, FileRepositories, OutputFileRow
+from gateway.services.files._cleanup import discard_output_bytes
 from gateway.services.files._file_ids import file_id_in, page_token
 from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._staging import StagedFile
@@ -389,15 +388,8 @@ class FileService:
             # Interruptions during commit leave its outcome unknown;
             # before staging completes, no output can have committed.
             if not staged or isinstance(exc, Exception):
-                await self.discard_output_bytes(output.storage_ref)
+                await discard_output_bytes(self._file_store, output.storage_ref)
             raise
-
-    async def discard_output_bytes(self, storage_ref: str) -> None:
-        """Best-effort cleanup of output bytes that could not be registered."""
-        # Wait for deletion unless the caller is cancelled during the await;
-        # shielding lets deletion continue without the caller waiting for it.
-        with contextlib.suppress(Exception):
-            await asyncio.shield(self._file_store.delete(storage_ref))
 
     async def sweep(self, *, batch_size: int, after: tuple[datetime, str] | None = None) -> SweepBatch:
         """Delete expired or revoked bytes between short database transactions."""
