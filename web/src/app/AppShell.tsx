@@ -52,10 +52,12 @@ import { PendingPage } from "@/app/PendingPage"
 import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
+import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { canManage } from "@/features/organization/roles"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useDocumentTitle } from "@/shared/hooks/useDocumentTitle"
 import { useEntitlements } from "@/shared/hooks/useEntitlements"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
@@ -476,6 +478,9 @@ export function AppShell() {
 }
 
 function AppShellChrome() {
+  const { feedback_enabled } = useDeployment()
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+
   // Navigation is data: the shell renders whatever the registry declares and
   // decides visibility from the deployment and the entitlements,
   // rather than each page asking what it is running against.
@@ -1106,6 +1111,10 @@ function AppShellChrome() {
               <div className="-mx-3 flex h-14 shrink-0 items-center border-t border-border">
                 <AccountMenu
                   isCollapsed={effectiveCollapsed}
+                  onShareFeedback={() => {
+                    closeMobileNav()
+                    setFeedbackOpen(true)
+                  }}
                   triggerRef={accountTriggerRef}
                   // Below `md` the Deployment row opens a level inside the
                   // drawer instead of navigating: the popover it lives in is
@@ -1205,6 +1214,15 @@ function AppShellChrome() {
           </main>
         </div>
       </div>
+      {feedback_enabled ? (
+        <FeedbackDialog
+          isOpen={feedbackOpen}
+          onOpenChange={setFeedbackOpen}
+          // The drawer has closed by then, and the account control inside it
+          // with it, so below `md` the control that reopens the drawer takes focus.
+          returnFocusRef={isMobile ? toggleRef : accountTriggerRef}
+        />
+      ) : null}
     </div>
   )
 }

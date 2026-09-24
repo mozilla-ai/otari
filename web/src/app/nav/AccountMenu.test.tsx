@@ -57,12 +57,14 @@ function CallerProbe() {
 // mounts it at "/" and resolves the first location before the assertions run.
 type MenuOptions = Partial<DeploymentBootstrap> & {
   deploymentLanding?: string
+  onShareFeedback?: () => void
   onOpenDeploymentLevel?: () => void
 }
 
 async function renderMenu({
   deploymentLanding,
   onOpenDeploymentLevel,
+  onShareFeedback,
   ...overrides
 }: MenuOptions = {}) {
   await renderWithRouter(
@@ -72,6 +74,7 @@ async function renderMenu({
           isCollapsed={false}
           deploymentLanding={deploymentLanding as never}
           onOpenDeploymentLevel={onOpenDeploymentLevel}
+          onShareFeedback={onShareFeedback}
         />
         <CallerProbe />
       </DeploymentProvider>
@@ -352,4 +355,25 @@ describe("AccountMenu", () => {
       expect(onOpen).toHaveBeenCalledTimes(1)
     })
   })
+})
+
+it("opens feedback from a row shown at every width, after Documentation", async () => {
+  mockCaller(OPERATOR)
+  const onShareFeedback = vi.fn()
+  await openMenu({ feedback_enabled: true, onShareFeedback })
+  const trigger = screen.getByRole("button", { name: "Share feedback" })
+  expect(trigger).not.toHaveClass("md:hidden")
+  expect(trigger.previousElementSibling).toBe(
+    screen.getByRole("link", { name: "Documentation" }),
+  )
+  await userEvent.setup().click(trigger)
+  expect(onShareFeedback).toHaveBeenCalledOnce()
+})
+
+it("hides the feedback row when the deployment has feedback off", async () => {
+  mockCaller(OPERATOR)
+  await openMenu({ feedback_enabled: false, onShareFeedback: vi.fn() })
+  expect(
+    screen.queryByRole("button", { name: "Share feedback" }),
+  ).not.toBeInTheDocument()
 })

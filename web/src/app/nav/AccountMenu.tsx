@@ -10,6 +10,7 @@ import {
   FiFileText,
   FiHardDrive,
   FiLogOut,
+  FiMessageSquare,
   FiMoon,
   FiSettings,
   FiShield,
@@ -304,6 +305,7 @@ export function AccountMenu({
   deploymentLanding,
   triggerRef,
   onOpenDeploymentLevel,
+  onShareFeedback,
 }: {
   isCollapsed: boolean
   /**
@@ -319,9 +321,11 @@ export function AccountMenu({
    * opens it as a level inside the drawer, and this popover has closed by then.
    */
   onOpenDeploymentLevel?: () => void
+  /** Opens the feedback dialog, which the shell mounts outside this popover. */
+  onShareFeedback?: () => void
 }) {
   const { logout } = useAuth()
-  const { docs_url, terms_url, privacy_url } = useDeployment()
+  const { docs_url, terms_url, privacy_url, feedback_enabled } = useDeployment()
   const hostsSurface = useSurfaceVisibility()
   const organization = useOrganizationContext()
   const [open, setOpen] = useState(false)
@@ -476,6 +480,16 @@ export function AccountMenu({
               className="md:hidden"
             />
           )}
+          {feedback_enabled && onShareFeedback ? (
+            <MenuItem
+              label="Share feedback"
+              icon={FiMessageSquare}
+              onPress={() => {
+                setOpen(false)
+                onShareFeedback()
+              }}
+            />
+          ) : null}
           {terms_url ? (
             <MenuExternalLink
               label="Terms of service"
