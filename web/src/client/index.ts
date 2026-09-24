@@ -618,6 +618,13 @@ export type CreateOrganizationGuardrailRequest = Defaulted<
 >
 export type UpdateOrganizationGuardrailRequest =
   Schemas["OrganizationGuardrailUpdate"]
+// Posting some text to the service a mandate names, which stores nothing.
+export type TestOrganizationGuardrailRequest = Defaulted<
+  Schemas["OrganizationGuardrailTest"],
+  "validate_kwargs"
+>
+export type OrganizationGuardrailTestResult =
+  Schemas["OrganizationGuardrailTestResult"]
 // A guardrail the organization defined for Otari to build and run itself. A
 // mandate points at one through `definition_id`; see
 // `src/gateway/services/tenancy/organization_guardrail_definition_service.py`.
