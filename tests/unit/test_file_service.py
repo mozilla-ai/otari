@@ -30,7 +30,12 @@ from gateway.exceptions.files_exceptions import (
 )
 from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.repositories.files import FilePageQuery, FileRepositories, FileRepository
+from gateway.repositories.files import (
+    FilePageQuery,
+    FileProviderCopyRepository,
+    FileRepositories,
+    FileRepository,
+)
 from gateway.services.files import FileDialect, FileListing, FileScope, FileService, NewFile
 
 _WORKSPACE = uuid.uuid4()
@@ -155,7 +160,7 @@ def _service(
 
     return FileService(
         cast(UnitOfWork, _FakeUnitOfWork()),
-        FileRepositories(files=cast(FileRepository, files)),
+        FileRepositories(files=cast(FileRepository, files), provider_copies=cast(FileProviderCopyRepository, None)),
         cast(FileStoragePort, store),
         GatewayConfig(**config),
         _default_workspace,
@@ -257,7 +262,10 @@ async def test_output_builder_requires_explicit_workspace_for_uploads(
 ) -> None:
     store = _MemoryStore()
     files = _StubFiles()
-    monkeypatch.setattr(FileRepositories, "on", Mock(return_value=FileRepositories(files=cast(FileRepository, files))))
+    repositories = FileRepositories(
+        files=cast(FileRepository, files), provider_copies=cast(FileProviderCopyRepository, None)
+    )
+    monkeypatch.setattr(FileRepositories, "on", Mock(return_value=repositories))
     service = build_file_service(cast(UnitOfWork, _FakeUnitOfWork()), cast(FileStoragePort, store), GatewayConfig())
 
     if workspace_id is None:

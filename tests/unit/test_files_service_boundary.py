@@ -18,7 +18,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import FileStorageError
 from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.repositories.files import FileRepositories, FileRepository
+from gateway.repositories.files import FileProviderCopyRepository, FileRepositories, FileRepository
 from gateway.services.files import FileService, NewOutput, SweepBatch, _sweeper
 
 
@@ -42,7 +42,7 @@ class _Transactions:
 def _service(uow: _Transactions, repo: Mock, store: Mock) -> FileService:
     return FileService(
         cast(UnitOfWork, uow),
-        FileRepositories(files=repo),
+        FileRepositories(files=repo, provider_copies=cast(FileProviderCopyRepository, None)),
         store,
         GatewayConfig(),
         AsyncMock(side_effect=AssertionError("Workspace resolution is not expected")),

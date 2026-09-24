@@ -22,7 +22,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import FileStorageError
 from gateway.models.files import FileObject
-from gateway.repositories.files import FileRepositories, FileRepository
+from gateway.repositories.files import FileProviderCopyRepository, FileRepositories, FileRepository
 from gateway.services.files import (
     CODE_EXECUTION_OUTPUT_PURPOSE,
     FileService,
@@ -171,7 +171,8 @@ def _bridge(
         files=FileService(
             cast(UnitOfWork, uow),
             FileRepositories(
-                files=_StubFiles(uow._session, known=known, error=lookup_error, record_error=record_error)
+                files=_StubFiles(uow._session, known=known, error=lookup_error, record_error=record_error),
+                provider_copies=cast(FileProviderCopyRepository, None),
             ),
             store,
             settings,
