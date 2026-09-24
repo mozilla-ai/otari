@@ -66,6 +66,9 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // needs a registered passkey; see docs/access-control.md.
     passkeys_ready: false,
     oauth_providers: [],
+    // Off by default until the otari.ai intake is deployed; see
+    // docs/configuration.md#product-feedback.
+    feedback_enabled: false,
     // No SMTP configured in this e2e environment, so invitations are
     // creatable but not emailed; see docs/configuration.md#mail.
     mail_ready: false,
