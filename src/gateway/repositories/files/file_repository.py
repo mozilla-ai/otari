@@ -213,14 +213,8 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
             or_(FileObject.deleted_at.is_not(None), FileObject.expires_at < (now or datetime.now(UTC)))
         )
         if after is not None:
-            created_at, file_id = after
-            stmt = stmt.where(
-                or_(
-                    FileObject.created_at > created_at,
-                    and_(FileObject.created_at == created_at, FileObject.id > file_id),
-                )
-            )
-        stmt = stmt.order_by(FileObject.created_at, FileObject.id).limit(batch_size)
+            stmt = stmt.where(_past(after, ascending=True))
+        stmt = stmt.order_by(*_ordering(ascending=True)).limit(batch_size)
         return (await self.db.execute(stmt)).scalars().all()
 
     async def remove_all(self, file_ids: Collection[str]) -> None:
