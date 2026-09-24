@@ -1087,7 +1087,7 @@ class Fakes:
     mcp: FakeMcpServer
     # Real providers: the mock provider records nothing, and prompts force tools.
     live: LiveProviders | None = None
-    # X-Correlation-ID of every 200 the caller received: the attempts that were
+    # Otari-Attempt-ID of every 200 the caller received: the attempts that were
     # dispatched, and therefore the ones a usage report is owed for.
     dispatched: list[str] = field(default_factory=list)
 
@@ -1100,8 +1100,8 @@ class Fakes:
         return self.live.anthropic_model if self.live else ANTHROPIC_MODEL
 
     def note_dispatched(self, headers: dict[str, str], what: str) -> None:
-        attempt = headers.get("x-correlation-id")
-        _check(bool(attempt), f"{what}: no X-Correlation-ID on a served response: {headers!r}")
+        attempt = headers.get("otari-attempt-id")
+        _check(bool(attempt), f"{what}: no Otari-Attempt-ID on a served response: {headers!r}")
         self.dispatched.append(str(attempt))
 
 
@@ -1176,8 +1176,8 @@ def run_completion(base_url: str, fakes: Fakes) -> None:
         _check(len(chats) == 1, f"expected one provider call, got {len(chats)}")
         _check(chats[0].body.get("model") == OPENAI_MODEL, f"provider saw model {chats[0].body.get('model')!r}")
 
-    _check(headers.get("x-otari-request-id") == "req_0001", f"X-Otari-Request-ID missing or wrong: {headers!r}")
-    _check(headers.get("x-correlation-id") == "att_0001", f"X-Correlation-ID missing or wrong: {headers!r}")
+    _check(headers.get("otari-request-id") == "req_0001", f"Otari-Request-ID missing or wrong: {headers!r}")
+    _check(headers.get("otari-attempt-id") == "att_0001", f"Otari-Attempt-ID missing or wrong: {headers!r}")
     fakes.note_dispatched(headers, "the completion")
 
     reports = fakes.control_plane.recorder.wait_for("usage", before + 1)
@@ -1505,7 +1505,7 @@ def run_streaming_completion(base_url: str, fakes: Fakes) -> None:
 def check_every_attempt_was_reported(fakes: Fakes) -> None:
     """Exactly one usage report per dispatched attempt, and none for anything else.
 
-    Keyed on the ``X-Correlation-ID`` each served response carried, which is
+    Keyed on the ``Otari-Attempt-ID`` each served response carried, which is
     the attempt the report must name. A request the platform refused, or one
     refused at tool admission after its credentials resolved, dispatched
     nothing and owes no report.
