@@ -15,7 +15,12 @@ from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.tenancy import Workspace
-from gateway.services.guardrails import GuardrailsNotReachableError, InProcessGuardrail, run_input_guardrails
+from gateway.services.guardrails import (
+    GuardrailsNotReachableError,
+    GuardrailUnfundedError,
+    InProcessGuardrail,
+    run_input_guardrails,
+)
 from gateway.services.routing.decide import RoutingSignal
 from gateway.services.url_safety import UnsafeURLError
 from gateway.services.workspace_scope import default_workspace_id
@@ -312,8 +317,10 @@ async def apply_input_guardrails(
         HTTPException: ``400`` when a *caller-supplied* guardrail's ``url``
             fails the SSRF/scheme safety check (a mandated entry's failure is a
             502 or a recorded inconclusive instead, per its own settings);
-            ``403`` when a ``block`` guardrail flags the input; ``502`` when a
-            ``block`` guardrail that fails closed can't be evaluated. The 502
+            ``403`` when a ``block`` guardrail flags the input; ``402`` when a
+            metered one that fails closed was refused for the organization's
+            funds; ``502`` when a ``block`` guardrail that fails closed can't be
+            evaluated otherwise. The 502
             body names the profile and not the endpoint, which goes to the log
             instead.
     """
@@ -335,6 +342,9 @@ async def apply_input_guardrails(
         )
     except UnsafeURLError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except GuardrailUnfundedError as exc:
+        logger.info("guardrail check refused for funds: %s", exc)
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=exc.public_detail) from exc
     except GuardrailsNotReachableError as exc:
         # The full reason, endpoint included, goes to the log; the caller gets
         # the error's `public_detail`, which names the profile and nothing else.

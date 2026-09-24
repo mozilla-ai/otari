@@ -75,6 +75,19 @@ class GuardrailsNotReachableError(RuntimeError):
         self.public_detail = public_detail if public_detail is not None else message
 
 
+class GuardrailUnfundedError(GuardrailsNotReachableError):
+    """Raised when a metered guardrail was refused because the organization cannot pay for it.
+
+    Unevaluable like any other failure, so ``mode`` and ``on_unavailable``
+    decide the request. A caller that refuses the request answers 402 rather
+    than 502, because the fix is the organization's funds, not a service.
+    """
+
+
+def _unfunded_detail(profile: str) -> str:
+    return f"{_unevaluated_detail(profile)}: organization funds exhausted"
+
+
 @dataclass
 class GuardrailResult:
     """Outcome of one guardrail check."""
@@ -236,6 +249,8 @@ async def _check_in_process(
         )
     try:
         verdict = await guardrail.check(input_text, **cfg.validate_kwargs)
+    except GuardrailUnfundedError as exc:
+        raise GuardrailUnfundedError(str(exc), public_detail=_unfunded_detail(cfg.profile)) from exc
     except GuardrailsNotReachableError as exc:
         # Its message names the definition and the type of what went wrong, and
         # its public detail names neither, because the runner does not know the

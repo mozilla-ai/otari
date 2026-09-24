@@ -137,6 +137,7 @@ from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import CodeExecutor
 from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import CodeExecutionPort
+from gateway.ports.hosted_guardrail_port import HostedGuardrailPort
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budgets import (
@@ -202,6 +203,7 @@ from gateway.services.tenancy.errors import (
     WorkspaceMcpServerNotFoundError,
     WorkspaceWebSearchDomainsExcludedError,
 )
+from gateway.services.tenancy.hosted_guardrail_check import HostedGuardrailCheck, HostedMandate
 from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.services.tenancy.organization_guardrail_runner import handle as guardrail_handle
 from gateway.services.tenancy.organization_guardrail_service import (
@@ -2553,23 +2555,25 @@ def _overlay_mandate(merged: dict[str, GuardrailConfig], mandated: Iterable[Guar
 class EffectiveGuardrails:
     """The guardrails a request runs, and what the runner needs to know about them.
 
-    Four fields rather than a list, because three of the four answer questions
-    the list cannot: which entries carry a credential, which came from a layer
-    the caller does not control, and which are run by this process rather than
-    sent anywhere. The second decides how a URL that fails its safety check is
+    Fields rather than a list, because all but the first answer questions the
+    list cannot: which entries carry a credential, which came from a layer the
+    caller does not control, and which are run by this process or a hosted
+    guardrail rather than sent anywhere. The second decides how a URL that fails its safety check is
     reported, so it has to survive the merge rather than be re-derived from a
     config the merge has already flattened.
 
     ``in_process`` maps a profile to the definition that serves it, and is its
     own field for the reason ``mandated`` is: after the merge such an entry's
     ``url`` is ``None``, which is exactly what a remote entry falling back to the
-    deployment's guardrails service looks like.
+    deployment's guardrails service looks like. ``hosted`` is the same for a
+    profile a hosted guardrail serves.
     """
 
     configs: list[GuardrailConfig] | None
     credentials: dict[str, str]
     mandated: frozenset[str]
     in_process: dict[str, uuid.UUID]
+    hosted: dict[str, HostedMandate]
 
 
 def merge_guardrail_layers(
@@ -2602,13 +2606,14 @@ def merge_guardrail_layers(
     """
     policy = ctx.plan.guardrails if ctx.plan is not None else []
     if not organization and not policy:
-        return EffectiveGuardrails(requested, {}, frozenset(), {})
+        return EffectiveGuardrails(requested, {}, frozenset(), {}, {})
 
     # Caller entries first, so a mandating layer of the same profile overwrites them.
     merged: dict[str, GuardrailConfig] = {guardrail.profile: guardrail for guardrail in requested or []}
     credentials: dict[str, str] = {}
     mandated: set[str] = set()
     in_process: dict[str, uuid.UUID] = {}
+    hosted: dict[str, HostedMandate] = {}
     for entry in organization:
         _overlay_mandate(merged, (entry.config,))
         mandated.add(entry.config.profile)
@@ -2616,16 +2621,26 @@ def merge_guardrail_layers(
             credentials[entry.config.profile] = entry.credential
         if entry.definition_id is not None:
             in_process[entry.config.profile] = entry.definition_id
+        if entry.hosted_guardrail_id is not None and entry.id is not None:
+            hosted[entry.config.profile] = HostedMandate(
+                mandate_id=entry.id, hosted_guardrail_id=entry.hosted_guardrail_id
+            )
     if policy:
         _overlay_mandate(merged, policy)
         for guardrail in policy:
             mandated.add(guardrail.profile)
             credentials.pop(guardrail.profile, None)
             in_process.pop(guardrail.profile, None)
-    return EffectiveGuardrails(list(merged.values()), credentials, frozenset(mandated), in_process)
+            hosted.pop(guardrail.profile, None)
+    return EffectiveGuardrails(list(merged.values()), credentials, frozenset(mandated), in_process, hosted)
 
 
-def _in_process_guardrails(ctx: RequestContext, effective: EffectiveGuardrails) -> dict[str, InProcessGuardrail | None]:
+def _in_process_guardrails(
+    ctx: RequestContext,
+    effective: EffectiveGuardrails,
+    *,
+    hosted_guardrails: HostedGuardrailPort | None = None,
+) -> dict[str, InProcessGuardrail | None]:
     """The guardrails this worker already holds for the profiles the merge marked.
 
     One dictionary lookup per profile, with nothing awaited and nothing built:
@@ -2642,10 +2657,26 @@ def _in_process_guardrails(ctx: RequestContext, effective: EffectiveGuardrails) 
     organization_id = ctx.organization_id
     if organization_id is None:
         return {}
-    return {
+    checks: dict[str, InProcessGuardrail | None] = {
         profile: guardrail_handle(organization_id, definition_id)
         for profile, definition_id in effective.in_process.items()
     }
+    # A hosted profile with no port to run it is unevaluable, for the reason a
+    # definition this worker does not hold is.
+    request_id = ctx.request_id or str(uuid.uuid4())
+    for profile, mandate in effective.hosted.items():
+        checks[profile] = (
+            HostedGuardrailCheck(
+                hosted_guardrails,
+                organization_id=organization_id,
+                workspace_id=ctx.workspace_id,
+                mandate=mandate,
+                request_id=request_id,
+            )
+            if hosted_guardrails is not None
+            else None
+        )
+    return checks
 
 
 async def _resolve_organization_guardrails(
@@ -2872,6 +2903,7 @@ async def prepare_gateway_tools(
     code_execution_port: CodeExecutionPort | None = None,
     container_id: str | None = None,
     sandbox_containers: SandboxContainerRegistry | None = None,
+    hosted_guardrails: HostedGuardrailPort | None = None,
 ) -> ToolContext:
     """Guardrails, MCP server-id resolution, and gateway-tool extraction.
 
@@ -2910,7 +2942,7 @@ async def prepare_gateway_tools(
             config=ctx.config,
             credentials=effective.credentials,
             mandated=effective.mandated,
-            in_process=_in_process_guardrails(ctx, effective),
+            in_process=_in_process_guardrails(ctx, effective, hosted_guardrails=hosted_guardrails),
         )
 
         # Checked per source, not over the merged list: see

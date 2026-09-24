@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CodeExecutionPortDep,
+    HostedGuardrailPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
     build_sandbox_container_registry,
@@ -760,6 +761,7 @@ async def create_message(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
+    hosted_guardrails: HostedGuardrailPortDep,
     code_execution_port: CodeExecutionPortDep,
 ) -> dict[str, Any] | StreamingResponse:
     """Anthropic Messages API-compatible endpoint.
@@ -875,6 +877,7 @@ async def create_message(
         tools_header=request.tools_header,
         code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
         code_execution_port=code_execution_port,
+        hosted_guardrails=hosted_guardrails,
         # Anthropic's own field, which is where an Anthropic SDK puts the id it
         # read off the last response. Resolved at admission against this caller's
         # leases; the provider never sees it when the sandbox runs the code.
