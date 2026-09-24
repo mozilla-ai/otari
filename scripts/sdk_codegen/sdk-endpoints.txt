@@ -335,6 +335,9 @@ POST /api/v1/organizations/me/guardrail-definitions                    # dashboa
 PATCH /api/v1/organizations/me/guardrail-definitions/{definition_id}   # dashboard-only
 DELETE /api/v1/organizations/me/guardrail-definitions/{definition_id}  # dashboard-only
 POST /api/v1/organizations/me/guardrail-definitions/{definition_id}/test  # dashboard-only
+# What a mandate may pick from the deployment's hosted guardrails, for the same
+# dashboard form the definitions above feed.
+GET /api/v1/organizations/me/hosted-guardrails                        # dashboard-only
 POST /api/v1/organizations/me/member-invitations                # dashboard-only
 DELETE /api/v1/organizations/me/member-invitations/{invitation_id} # dashboard-only
 # The invitee's side of the same flow, and dashboard-only for the same reason

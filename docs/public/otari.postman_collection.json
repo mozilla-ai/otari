@@ -3959,6 +3959,27 @@
               ]
             }
           }
+        },
+        {
+          "name": "List Organization Hosted Guardrails",
+          "request": {
+            "description": "List the deployment's hosted guardrails the caller's organization may pick.\n\nOrganization owners and admins only, like the mandates they are picked for.\nEach entry names the guardrail and its price per check, never its secret\nor arguments.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "hosted-guardrails"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/hosted-guardrails"
+            }
+          }
         }
       ],
       "name": "organization-guardrails"
