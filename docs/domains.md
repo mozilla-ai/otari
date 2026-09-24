@@ -72,7 +72,7 @@ since. A module "runs queries" when it imports a query builder (`select`,
 | Service packages per domain | 6: `services/tools/`, which holds the built-in tool registry and no service yet, `services/overview/`, `services/budgets/`, `services/api_keys/`, `services/files/` and `services/providers/`, which holds the organization-scoped half of providers. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
 | Repository packages per domain | 6: `repositories/overview/`, `repositories/api_keys/`, `repositories/files/`, `repositories/budgets/`, `repositories/pricing/` and `repositories/providers/`. `repositories/tenancy/` is an older subpackage |
 | Modules in `schemas/` | Four domain modules so far, `budgets.py`, `files.py`, `overview.py` and `providers.py` |
-| Modules in `exceptions/` | The shared error bases in `_base.py`, which the package root re-exports, and three domain modules so far, `budget_exceptions.py`, `files_exceptions.py` and `providers_exceptions.py`. `services/tenancy/errors.py` holds the rest of the tenancy errors in 1,145 lines |
+| Modules in `exceptions/` | The shared error bases in `_base.py`, which the package root re-exports, `shared_exceptions.py` for the errors no one domain owns, and nine domain modules: `budget_exceptions.py`, `feedback_exceptions.py`, `files_exceptions.py`, `guardrails_exceptions.py`, `identity_exceptions.py`, `organizations_exceptions.py`, `pricing_exceptions.py`, `providers_exceptions.py` and `tools_exceptions.py` |
 
 ## The domains
 
@@ -102,6 +102,7 @@ account administration.
   `tenancy/password_reset_email.py`, `oauth_service.py`, `password_service.py`,
   `dashboard_session_service.py`
 - Repositories: `tenancy/user_repository.py`
+- Exceptions: `identity_exceptions.py`
 
 Its tables sit in `models/tenancy.py` today, which organizations holds.
 
@@ -116,12 +117,13 @@ provisioning, the setup guide, and the gateway's billing users.
   `tenancy/authorization.py`, `tenancy/invitation_email.py`,
   `tenancy/organization_domain_service.py`, `tenancy/domain_verification.py`,
   `tenancy/provisioning_service.py`, `tenancy/workspace_activation_service.py`,
-  `tenancy/errors.py`, `workspace_scope.py`
+  `workspace_scope.py`
 - Repositories: `tenancy/organization_repository.py`,
   `tenancy/organization_member_repository.py`,
   `tenancy/organization_domain_repository.py`,
   `tenancy/invitation_repository.py`, `tenancy/workspace_repository.py`,
   `users_repository.py`
+- Exceptions: `organizations_exceptions.py`
 - Models: `tenancy.py`, `users.py`
 
 ### api-keys
@@ -158,6 +160,7 @@ snapshots.
 - Services: `pricing_service.py`, `pricing_init_service.py`,
   `pricing_refresh_service.py`, `organization_pricing_service.py`
 - Repositories: `pricing/`
+- Exceptions: `pricing_exceptions.py`
 - Models: `pricing.py`, `pricing_schemas.py`
 
 ### providers
@@ -239,6 +242,7 @@ retrieval and code execution.
   `tenancy/workspace_web_search_service.py`,
   `tenancy/workspace_code_execution_policy_service.py`, `code_execution/`
 - Repositories: `code_execution/`
+- Exceptions: `tools_exceptions.py`
 - Ports: `code_execution_port.py`
 - Adapters: `code_execution_adapter.py`, `e2b_code_execution_adapter.py`
 - Models: `tools.py`, `mcp.py`
@@ -259,6 +263,7 @@ configuration.
   `tenancy/organization_guardrail_definition_service.py`,
   `tenancy/organization_guardrail_runner.py`
 - Repositories: `tenancy/organization_guardrail_definition_repository.py`
+- Exceptions: `guardrails_exceptions.py`
 - Models: `guardrails.py`
 
 ### agent-gates
@@ -339,6 +344,7 @@ Cross-cutting modules that several domains import. They stay where they are.
 
 - Services: `url_safety.py`, `secret_box.py`, `file_extractors.py`
 - Repositories: `base_repository.py`
+- Exceptions: `shared_exceptions.py`
 - Models: `base.py`, `money.py`, `secret_fields.py`
 
 `file_extractors.py` turns bytes into text and holds no state. Inference
