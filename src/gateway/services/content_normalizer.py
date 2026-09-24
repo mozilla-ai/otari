@@ -1,22 +1,22 @@
-"""Normalize file/image content blocks for the target model.
+"""Rewriting a request's non-text content blocks for whoever will read them.
 
-For each non-text content block in the request messages, decide — based on the
-resolved :class:`~gateway.services.model_capabilities.Capabilities` — whether to:
+A block reaches one of three readers, and the reader decides what the block
+becomes.
+The model reads it as it stands where the provider serves that kind natively, or
+as text where the model is text-only.
+The gateway's code-execution sandbox reads it from the store, and the model is
+told only that the file is there.
+The provider's own code-execution container reads it under an ID that provider
+issued, so the block carries the ID of a copy rather than Otari's own.
 
-* **pass through** to a natively-capable provider (resolving any ``file_id`` to
-  inline bytes first, since the upstream provider doesn't know our file ids), or
-* **extract to text** for a text-only model: documents via markitdown, images
-  via a vision side-call / OCR, scanned PDFs via rasterize-then-describe, or
-* **stage into the code-execution sandbox** when the request runs one: an
-  Anthropic ``container_upload`` block names a file for the sandbox rather than
-  the model, so it is recorded on the stats for the sandbox backend to seed and
-  replaced by a short text marker telling the model the file is there.
+A block the model reads never fails the request.
+The original block is left in place instead, because one unreadable attachment
+is not worth refusing a request over.
 
-The normalizer is format-aware (OpenAI chat, Anthropic messages, OpenAI
-Responses) because each wire shape names its blocks and its text block
-differently. It is defensive by construction: any per-block failure leaves the
-original block untouched and is logged — it must never turn a chat request into
-a 500.
+A block the provider's container reads does fail the request when it cannot be
+resolved, because the code would then run without the file it was given, and
+because a block Otari cannot resolve must not reach the provider carrying a file
+ID of the caller's choosing.
 """
 
 from __future__ import annotations
@@ -25,16 +25,20 @@ import base64
 import binascii
 import uuid
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.files_exceptions import AttachedFileUnavailableError, ProviderUploadFailedError
 from gateway.log_config import logger
 from gateway.services.file_extractors import extract_text_from_file, ocr_image, rasterize_pdf
 from gateway.services.files import FileScope, FileService, StagedFile, sandbox_path_for
 from gateway.services.model_capabilities import Capabilities
 from gateway.services.vision import describe_image
+
+if TYPE_CHECKING:
+    from gateway.services.files import ProviderFileUploader
 
 WireFormat = Literal["openai", "anthropic", "responses"]
 
@@ -200,6 +204,7 @@ async def _classify(
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     sandbox_requested: bool = False,
+    provider_container: bool = False,
 ) -> _Source | None:
     """Identify an image/document/container block and resolve its bytes, or return None."""
     btype = block.get("type")
@@ -213,7 +218,7 @@ async def _classify(
             files=files,
             user_id=user_id,
             workspace_id=workspace_id,
-            read_bytes=not sandbox_requested,
+            read_bytes=not sandbox_requested and not provider_container,
         )
         return resolved.source(_CONTAINER) if resolved else None
 
@@ -358,6 +363,16 @@ async def _describe_pdf_pages(src: _Source, config: GatewayConfig, stats: Normal
     return f"[Attached scanned file: {label}]\n" + "\n".join(descriptions) + f"\n[End of {label}]"
 
 
+def _is_container_block(block: dict[str, Any], fmt: WireFormat) -> bool:
+    """Whether ``block`` is Anthropic's block naming a file for a code-execution container.
+
+    Where the provider runs that code, such a block may not be forwarded as
+    written: its ``file_id`` would be one the caller chose, naming a file in the
+    deployment's provider account rather than one of theirs.
+    """
+    return fmt == "anthropic" and block.get("type") == _CONTAINER
+
+
 async def _normalize_block(
     block: Any,
     fmt: WireFormat,
@@ -369,6 +384,7 @@ async def _normalize_block(
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     sandbox_requested: bool = False,
+    container_uploads: ProviderFileUploader | None = None,
 ) -> Any:
     if not isinstance(block, dict):
         return block
@@ -380,11 +396,18 @@ async def _normalize_block(
             user_id=user_id,
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
+            provider_container=container_uploads is not None,
         )
     except Exception as exc:  # noqa: BLE001 — never fail the request over a block
         logger.warning("content normalizer: failed to classify block: %s", exc)
+        if container_uploads is not None and _is_container_block(block, fmt):
+            # The file may well exist. Saying it does not would blame the caller
+            # for a store or database failure, so this reads as an upstream fault.
+            raise ProviderUploadFailedError from exc
         return block
     if src is None:
+        if container_uploads is not None and _is_container_block(block, fmt):
+            raise AttachedFileUnavailableError
         return block
 
     staged = stats.stage(src.staged) if sandbox_requested and src.staged is not None else None
@@ -392,6 +415,14 @@ async def _normalize_block(
         if staged is not None:
             # The sandbox gets the bytes; the model gets told where they are.
             return _text_block(fmt, f"[File available in the code execution sandbox: {staged.filename}]")
+        if container_uploads is not None and _is_container_block(block, fmt):
+            if src.staged is None:
+                # Resolved, but to no stored file, so there is nothing to copy.
+                # Falling back would show the model contents its code cannot open.
+                raise AttachedFileUnavailableError
+            # The provider's own container reads only its provider's file ids,
+            # so the block names the copy rather than the upload.
+            return {**block, "file_id": await container_uploads.file_id_for(src.staged)}
         src.kind = _DOCUMENT
 
     native = caps.image if src.kind == _IMAGE else caps.pdf
@@ -446,6 +477,7 @@ async def normalize_messages(
     user_id: str | None,
     workspace_id: uuid.UUID | None = None,
     sandbox_requested: bool = False,
+    container_uploads: ProviderFileUploader | None = None,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Return (possibly-rewritten messages, stats).
 
@@ -457,6 +489,11 @@ async def normalize_messages(
     sandbox. Every stored upload the messages reference is then also recorded on
     ``stats.sandbox_inputs`` for the sandbox to seed, and ``container_upload``
     blocks are staged instead of read.
+
+    ``container_uploads`` says the provider runs the code in a container of its
+    own, and is what gives a ``container_upload`` block the provider's ID for the
+    upload it names. A block this cannot resolve refuses the request rather than
+    reaching the provider.
 
     Messages whose ``content`` is a plain string are returned untouched (the
     common, zero-overhead path). Only list-content messages are walked, plus, on
@@ -481,6 +518,7 @@ async def normalize_messages(
             user_id=user_id,
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
+            container_uploads=container_uploads,
         )
 
     out: list[dict[str, Any]] = []

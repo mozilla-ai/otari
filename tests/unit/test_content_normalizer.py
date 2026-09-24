@@ -14,6 +14,7 @@ import pytest
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.files_exceptions import AttachedFileUnavailableError, ProviderUploadFailedError
 from gateway.services import content_normalizer as cn
 from gateway.services.content_normalizer import normalize_messages
 from gateway.services.file_extractors import ExtractionResult
@@ -396,3 +397,82 @@ async def test_two_uploads_named_alike_are_both_staged_and_the_model_learns_both
     assert "data.csv" in markers[0]
     assert "data-2.csv" in markers[1]
     assert "data.csv" in markers[2] and "data-2" not in markers[2]
+
+
+class _Uploader:
+    """The provider copy an attached file gets, with the upload stubbed."""
+
+    def __init__(self, provider_file_id: str = "file_011Cq") -> None:
+        self._provider_file_id = provider_file_id
+        self.asked: list[str] = []
+
+    async def file_id_for(self, staged: StagedFile) -> str:
+        self.asked.append(staged.file_id)
+        return self._provider_file_id
+
+
+@pytest.mark.asyncio
+async def test_container_upload_names_the_provider_copy_when_the_provider_runs_the_code() -> None:
+    files = _files(_stored(), data=b"a,b\n1,2\n")
+    uploader = _Uploader()
+    msgs = [{"role": "user", "content": [{"type": "container_upload", "file_id": "file-csv"}]}]
+
+    out, stats = await normalize_messages(
+        msgs,
+        config=GatewayConfig(),
+        caps=_TEXT_ONLY,
+        fmt="anthropic",
+        files=files,
+        user_id="u",
+        container_uploads=cast(Any, uploader),
+    )
+
+    # The provider's own id reaches the provider, and the model is shown nothing:
+    # the block is for its container. The blob is never loaded here either.
+    assert out[0]["content"][0] == {"type": "container_upload", "file_id": "file_011Cq"}
+    assert uploader.asked == ["file-csv"]
+    assert stats.files_extracted == 0
+    assert files.reads == []
+
+
+@pytest.mark.asyncio
+async def test_container_upload_naming_an_unknown_file_refuses() -> None:
+    """A provider file ID of the caller's choosing must never reach the provider."""
+    msgs = [{"role": "user", "content": [{"type": "container_upload", "file_id": "file_someone_elses"}]}]
+
+    with pytest.raises(AttachedFileUnavailableError):
+        await normalize_messages(
+            msgs,
+            config=GatewayConfig(),
+            caps=_TEXT_ONLY,
+            fmt="anthropic",
+            files=_files(_stored()),
+            user_id="u",
+            container_uploads=cast(Any, _Uploader()),
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_container_upload_whose_lookup_fails_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A lookup that errors must not forward the caller's own file id to the provider.
+
+    It refuses as an upstream fault rather than a missing file, because the file
+    may well exist and the caller has nothing to correct.
+    """
+
+    class _Broken:
+        async def staged_upload(self, file_id: str, scope: Any) -> None:
+            raise RuntimeError("database unavailable")
+
+    msgs = [{"role": "user", "content": [{"type": "container_upload", "file_id": "file-csv"}]}]
+
+    with pytest.raises(ProviderUploadFailedError):
+        await normalize_messages(
+            msgs,
+            config=GatewayConfig(),
+            caps=_TEXT_ONLY,
+            fmt="anthropic",
+            files=cast(Any, _Broken()),
+            user_id="u",
+            container_uploads=cast(Any, _Uploader()),
+        )
