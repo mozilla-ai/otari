@@ -256,6 +256,7 @@ from gateway.streaming import (
     streaming_generator,
 )
 from gateway.types.attempt import Attempt
+from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.session_principal import SessionPrincipal
 
 ResultT = TypeVar("ResultT")
@@ -1711,11 +1712,7 @@ async def resolve_request_context(
     estimate_cache_write_ttl: Literal["5m", "1h"] | None = None,
     session_principal: SessionPrincipal | None = None,
     routing_signal: Callable[[], RoutingSignal] | None = None,
-    normalize_messages: Callable[
-        [str, LLMProvider | None, str, str | None, uuid.UUID | None, CodeExecutor | None],
-        Awaitable[tuple[int, CompletionUsage | None]],
-    ]
-    | None = None,
+    normalize_messages: Callable[[NormalizationTarget], Awaitable[tuple[int, CompletionUsage | None]]] | None = None,
     tools: list[dict[str, Any]] | None = None,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
@@ -2105,12 +2102,17 @@ async def resolve_request_context(
                 # file references. The files service reads None as "every
                 # workspace", matching the /api/v1/files routes.
                 post_chars, vision_usage = await normalize_messages(
-                    user_id,
-                    gate_impl,
-                    gate_model,
-                    gate_instance,
-                    _caller_workspace_id(api_key, session_principal),
-                    code_execution_policy.executor if code_execution_policy is not None else None,
+                    NormalizationTarget(
+                        user_id=user_id,
+                        provider=gate_impl,
+                        model=gate_model,
+                        instance=gate_instance,
+                        file_workspace_id=_caller_workspace_id(api_key, session_principal),
+                        credential_workspace_id=workspace_id,
+                        workspace_executor=(
+                            code_execution_policy.executor if code_execution_policy is not None else None
+                        ),
+                    )
                 )
                 # Bill the vision describe side-call before the reservation
                 # top-up: its cost is already incurred by normalize_messages,

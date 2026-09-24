@@ -3,7 +3,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any, Literal
 
-from any_llm import AnyLLM, LLMProvider, amessages
+from any_llm import AnyLLM, amessages
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.messages import (
     MessageDeltaEvent,
@@ -66,7 +66,6 @@ from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.models.tools import CodeExecutor
 from gateway.services.code_execution import ContainerLease
 from gateway.services.files import StagedFile
 from gateway.services.log_writer import LogWriter
@@ -83,6 +82,7 @@ from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_
 from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, Dialect, ToolUseBudget
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
+from gateway.types.normalization_target import NormalizationTarget
 
 router = APIRouter(tags=["messages"])
 
@@ -786,14 +786,7 @@ async def create_message(
     # sandbox session once the billed user and workspace are resolved.
     sandbox_inputs: list[StagedFile] = []
 
-    async def _normalize(
-        user_id: str,
-        provider: LLMProvider | None,
-        model: str,
-        instance: str | None,
-        workspace_id: uuid.UUID | None,
-        workspace_executor: CodeExecutor | None,
-    ) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Anthropic wire payload
         # before the cost estimate. Standalone only; no-op when the files
         # feature is off or the request has no attachments.
@@ -801,19 +794,19 @@ async def create_message(
             request.messages,
             fmt="anthropic",
             config=config,
-            provider=provider,
-            model=model,
+            provider=target.provider,
+            model=target.model,
             files=files,
-            user_id=user_id,
-            instance=instance,
-            workspace_id=workspace_id,
+            user_id=target.user_id,
+            instance=target.instance,
+            workspace_id=target.file_workspace_id,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
-                provider=provider,
+                provider=target.provider,
                 dialect=_ADAPTER.name,
                 code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-                workspace_executor=workspace_executor,
+                workspace_executor=target.workspace_executor,
             ),
         )
         sandbox_inputs.extend(stats.sandbox_inputs)
