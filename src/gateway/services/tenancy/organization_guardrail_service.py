@@ -59,6 +59,7 @@ from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
 from gateway.models.guardrails import (
     GuardrailConfig,
@@ -87,7 +88,6 @@ from gateway.services.tenancy.errors import (
     OrganizationGuardrailSingleBackendError,
     OrganizationGuardrailTestsItsDefinitionError,
     OrganizationGuardrailUnsafeUrlError,
-    SecretBoxUnavailableTenancyError,
     WorkspaceNotFoundError,
 )
 from gateway.services.tenancy.organization_service import OrganizationService

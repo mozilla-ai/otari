@@ -724,26 +724,6 @@ class WorkspaceProviderKeyOverrideConflictError(TenancyValidationError):
         super().__init__("A provider key override cannot be both pinned as default and disabled")
 
 
-class SecretBoxUnavailableTenancyError(TenancyError):
-    """`OTARI_SECRET_KEY` is not configured, so a secret cannot be stored.
-
-    Wraps `services.secret_box.SecretBoxUnavailableError` as a tenancy error so
-    the route stays thin (see the module docstring): the underlying error
-    carries no key material, and neither does this one. A 500, not the 400 a
-    `TenancyValidationError` would carry: the caller sent a well-formed
-    request, and a missing secret key is a deployment configuration gap the
-    caller cannot fix. Blaming the client here would also keep the condition
-    out of 5xx error-rate alerting, which is exactly the audience that can.
-
-    ``stored`` names what could not be stored, so the message points at the
-    surface the caller was using. It defaults to the provider credentials this
-    error was written for; workspace MCP servers pass their own.
-    """
-
-    def __init__(self, stored: str = "provider credentials") -> None:
-        super().__init__(f"OTARI_SECRET_KEY is not set; it is required to store {stored}")
-
-
 # The two below are pricing errors in a tenancy module, because the status
 # mapping is what decides where an error class lives here: one handler is
 # registered for ``TenancyError`` (see `gateway.main`), so an organization-scoped
@@ -1324,7 +1304,6 @@ __all__ = [
     "ResetTokenInvalidError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",
-    "SecretBoxUnavailableTenancyError",
     "SignInAddressRequiredError",
     "TenancyConflictError",
     "TenancyError",

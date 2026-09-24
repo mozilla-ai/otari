@@ -49,6 +49,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.tenancy import User
 from gateway.models.tools import WorkspaceMcpServer
@@ -60,7 +61,6 @@ from gateway.services.secret_box import (
 )
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.errors import (
-    SecretBoxUnavailableTenancyError,
     WorkspaceMcpServerAlreadyExistsError,
     WorkspaceMcpServerLimitReachedError,
     WorkspaceMcpServerNotFoundError,
