@@ -1800,13 +1800,17 @@ main {
   }
 }
 
-/* Reduced motion keeps the fades and drops every movement. */
+/* Reduced motion: no motion at all. The house reset above loses to the
+   shorthands here on specificity, so this block zeroes them itself; the `both`
+   fill still lands every element in its end state. */
 @media (prefers-reduced-motion: reduce) {
   [data-feedback-view],
   [data-feedback-part],
   [data-feedback-footer] > * {
     --feedback-from-offset: 0;
     --feedback-from-scale: 1;
+    animation-duration: 0.01ms;
+    animation-delay: 0s;
   }
 }
 
