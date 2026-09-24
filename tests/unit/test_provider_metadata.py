@@ -23,8 +23,8 @@ from gateway.services.provider_metadata_service import (
     known_provider_detail,
     list_known_provider_summaries,
     list_provider_info,
-    run_env_only_provider_notice,
     provider_info,
+    run_env_only_provider_notice,
 )
 
 
