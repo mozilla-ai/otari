@@ -10,8 +10,8 @@ from collections.abc import AsyncIterator
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.log_config import logger
-from gateway.models.files import OutputFileRow
 from gateway.ports.file_storage_port import FileStoragePort
+from gateway.services.files import OutputFileRow
 from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._provider_files import (
     FileOverBudgetError,

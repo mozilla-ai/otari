@@ -18,9 +18,14 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.files import OutputFileRow
 from gateway.repositories.files import FileRepositories, FileRepository
-from gateway.services.files import CODE_EXECUTION_OUTPUT_PURPOSE, FileService, ProviderFile, SandboxFileBridge
+from gateway.services.files import (
+    CODE_EXECUTION_OUTPUT_PURPOSE,
+    FileService,
+    OutputFileRow,
+    ProviderFile,
+    SandboxFileBridge,
+)
 from gateway.services.files._provider_files import FileOverBudgetError, ProviderFileUnavailableError
 
 

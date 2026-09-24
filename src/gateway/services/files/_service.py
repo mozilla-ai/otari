@@ -21,9 +21,9 @@ from gateway.exceptions.files_exceptions import (
     UploadTooLargeError,
 )
 from gateway.log_config import logger
-from gateway.models.files import FileObject, OutputFileRow
+from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.repositories.files import FilePageQuery, FileRepositories
+from gateway.repositories.files import FilePageQuery, FileRepositories, OutputFileRow
 from gateway.services.files._file_ids import file_id_in, page_token
 from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._staging import StagedFile

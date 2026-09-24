@@ -1,7 +1,6 @@
 """ORM table for the files the Files API stores, and the metadata that outlives their bytes."""
 
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -9,24 +8,6 @@ from sqlalchemy import JSON, DateTime, ForeignKey, Index, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base
-
-
-@dataclass(frozen=True)
-class OutputFileRow:
-    """Metadata for a produced file whose bytes have already been stored."""
-
-    file_id: str
-    user_id: str
-    workspace_id: uuid.UUID
-    filename: str
-    mime_type: str
-    bytes: int
-    purpose: str
-    storage_ref: str
-    expires_at: datetime | None
-    provider: str | None = None
-    provider_instance: str | None = None
-    provider_container_id: str | None = None
 
 
 class FileObject(Base):

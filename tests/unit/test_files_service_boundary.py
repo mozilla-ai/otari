@@ -16,10 +16,10 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.files import FileObject, OutputFileRow
+from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.repositories.files import FileRepositories, FileRepository
-from gateway.services.files import FileService, SweepBatch, _sweeper
+from gateway.services.files import FileService, OutputFileRow, SweepBatch, _sweeper
 
 
 class _Transactions:

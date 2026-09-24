@@ -1,6 +1,6 @@
 """The files domain: uploaded files, their lifecycle, and the sweep that gives their storage back."""
 
-from gateway.models.files import OutputFileRow
+from gateway.repositories.files import OutputFileRow
 from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._provider_files import ProviderFile, produced_files_for
 from gateway.services.files._sandbox_bridge import SandboxFileBridge
