@@ -1920,6 +1920,12 @@ main {
 .list-box-item[data-focus-visible="true"] {
   background-color: var(--color-surface-alt);
 }
+/* The fill above is the focus mark. HeroUI also rings a focused row, outside
+   its box; the rows run edge to edge inside a list that scrolls, so the ring
+   is clipped to its bottom edge and reads as a stray rule between two rows. */
+.list-box-item[data-focus-visible="true"] {
+  box-shadow: none;
+}
 .list-box-item[data-selected="true"] {
   background-color: var(--color-surface-subtle);
   color: var(--color-text);
