@@ -73,6 +73,8 @@ _SURVIVALS_REVISION = "d2f5b8c0e4a7"
 _SURVIVAL_TABLES = ("routing_memory", "router_preferences", "file_objects")
 
 _GUARDRAIL_DEFINITIONS_REVISION = "a9c4e7b2d5f8"
+_HOSTED_MANDATE_REVISION = "c2e5a8d1f4b7"
+_MANDATES_HOSTED_CHECK = "ck_organization_guardrails_hosted_alone"
 _DEFINITIONS_TABLE = "organization_guardrail_definitions"
 _MANDATES_TABLE = "organization_guardrails"
 _MANDATES_BACKEND_CHECK = "ck_organization_guardrails_single_backend"
@@ -1055,14 +1057,16 @@ def _insert_mandate(
     profile: str,
     url: str | None = None,
     definition_id: str | None = None,
+    hosted_guardrail_id: str | None = None,
+    encrypted_credential: str | None = None,
 ) -> None:
     connection.execute(
         text(
             "INSERT INTO organization_guardrails "
-            "(id, organization_id, profile, url, definition_id, mode, on_unavailable, enabled, "
-            " applies_to_all_workspaces, created_at, updated_at) "
-            "VALUES (:id, :organization_id, :profile, :url, :definition_id, 'monitor', 'block', 1, 1, "
-            " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            "(id, organization_id, profile, url, definition_id, hosted_guardrail_id, encrypted_credential, "
+            " mode, on_unavailable, enabled, applies_to_all_workspaces, created_at, updated_at) "
+            "VALUES (:id, :organization_id, :profile, :url, :definition_id, :hosted_guardrail_id, "
+            " :encrypted_credential, 'monitor', 'block', 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
         ),
         {
             "id": uuid.uuid4().hex,
@@ -1070,8 +1074,65 @@ def _insert_mandate(
             "profile": profile,
             "url": url,
             "definition_id": definition_id,
+            "hosted_guardrail_id": hosted_guardrail_id,
+            "encrypted_credential": encrypted_credential,
         },
     )
+
+
+def test_a_hosted_mandate_names_nothing_else(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """A hosted guardrail brings its own backend and secret, so a mandate naming one names nothing else."""
+    _, engine = sqlite_at_head
+
+    with engine.begin() as connection:
+        organization = _default_organization(connection)
+        _insert_mandate(connection, organization, profile="hosted", hosted_guardrail_id=uuid.uuid4().hex)
+        for profile, extra in (
+            ("with-url", {"url": "https://example.invalid/guardrails"}),
+            ("with-definition", {"definition_id": uuid.uuid4().hex}),
+            ("with-credential", {"encrypted_credential": "ciphertext"}),
+        ):
+            with connection.begin_nested(), pytest.raises(IntegrityError):
+                _insert_mandate(
+                    connection, organization, profile=profile, hosted_guardrail_id=uuid.uuid4().hex, **extra
+                )
+
+
+def test_the_hosted_mandate_revision_keeps_what_the_table_had(sqlite_at_head: tuple[Config, Engine]) -> None:
+    _, engine = sqlite_at_head
+    inspector = inspect(engine)
+
+    checks = {check["name"] for check in inspector.get_check_constraints(_MANDATES_TABLE)}
+    assert {_MANDATES_BACKEND_CHECK, _MANDATES_HOSTED_CHECK} <= checks
+    assert {"ix_organization_guardrails_organization_id", "ix_organization_guardrails_hosted_guardrail_id"} <= {
+        index["name"] for index in inspector.get_indexes(_MANDATES_TABLE)
+    }
+    assert _MANDATES_DEFINITION_FK in {fk["name"] for fk in inspector.get_foreign_keys(_MANDATES_TABLE)}
+    declared = SQLModel.metadata.tables[_MANDATES_TABLE]
+    assert {column["name"] for column in inspector.get_columns(_MANDATES_TABLE)} == set(declared.columns.keys())
+
+
+def test_the_hosted_mandate_revision_round_trips_and_drops_hosted_rows(
+    sqlite_at_head: tuple[Config, Engine],
+) -> None:
+    """A hosted mandate cannot survive without its column, so the downgrade removes it."""
+    config, engine = sqlite_at_head
+    with engine.begin() as connection:
+        organization = _default_organization(connection)
+        _insert_mandate(connection, organization, profile="hosted", hosted_guardrail_id=uuid.uuid4().hex)
+        _insert_mandate(connection, organization, profile="plain")
+
+    command.downgrade(config, _parent_of(_HOSTED_MANDATE_REVISION))
+
+    inspector = inspect(engine)
+    assert "hosted_guardrail_id" not in {column["name"] for column in inspector.get_columns(_MANDATES_TABLE)}
+    assert _MANDATES_BACKEND_CHECK in {check["name"] for check in inspector.get_check_constraints(_MANDATES_TABLE)}
+    with engine.connect() as connection:
+        profiles = connection.execute(text("SELECT profile FROM organization_guardrails")).scalars().all()
+    assert profiles == ["plain"]
+
+    command.upgrade(config, "head")
+    assert "hosted_guardrail_id" in {column["name"] for column in inspect(engine).get_columns(_MANDATES_TABLE)}
 
 
 def test_the_guardrail_definitions_revision_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None:

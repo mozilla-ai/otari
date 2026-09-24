@@ -105,7 +105,8 @@ class OrganizationGuardrailDefinition(Base):
     is what settles it.
 
     Organization-keyed, not deployment-global. A row that served every tenant
-    could not be reached from ``HOSTED_SURFACES`` at all (#818).
+    could not be reached from ``HOSTED_SURFACES`` at all (#818); a guardrail
+    every organization may pick is reached through ``HostedGuardrailPort``.
 
     The runner builds these rows and holds the vendor clients ready
     (``services/tenancy/organization_guardrail_runner``), and a mandate pointing
@@ -217,6 +218,12 @@ class OrganizationGuardrail(Base):
             "NOT (url IS NOT NULL AND definition_id IS NOT NULL)",
             name="ck_organization_guardrails_single_backend",
         ),
+        # A hosted guardrail brings its own backend and secret, so a mandate
+        # naming one names no other backend and carries no credential.
+        CheckConstraint(
+            "hosted_guardrail_id IS NULL OR (url IS NULL AND definition_id IS NULL AND encrypted_credential IS NULL)",
+            name="ck_organization_guardrails_hosted_alone",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -233,6 +240,10 @@ class OrganizationGuardrail(Base):
     # builds and runs the check itself from the definition. Nullable with no
     # backfill, because every row that predates this column is the former.
     definition_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, default=None)
+    # Set means a guardrail the deployment hosts runs the check
+    # (``HostedGuardrailPort``). No foreign key: the hosted table belongs to the
+    # build that binds the port, which is also what says whether an id is offered.
+    hosted_guardrail_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, default=None, index=True)
     mode: Mapped[str] = mapped_column(default="monitor", nullable=False)
     on_unavailable: Mapped[str] = mapped_column(default="block", nullable=False)
     validate_kwargs: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)

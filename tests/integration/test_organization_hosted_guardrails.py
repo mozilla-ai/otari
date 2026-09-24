@@ -1,62 +1,17 @@
 """The hosted guardrails an organization may pick: who sees them, and what they see."""
 
-import uuid
-from collections.abc import Mapping, Sequence
-from decimal import Decimal
-from typing import Any
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
 from gateway.models.tenancy import Organization, User
-from gateway.ports.hosted_guardrail_port import (
-    HostedGuardrail,
-    HostedGuardrailUnavailableError,
-    HostedGuardrailVerdict,
-)
 from gateway.repositories.tenancy import OrganizationMemberRepository, OrganizationRepository, UserRepository
 from gateway.services.tenancy.errors import NotAuthorizedError
 from gateway.services.tenancy.organization_hosted_guardrail_service import OrganizationHostedGuardrailService
 from gateway.services.tenancy.organization_service import OrganizationService
 
-LAKERA = HostedGuardrail(
-    id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
-    name="Prompt injection",
-    guardrail_name="lakera_guard",
-    description="Lakera Guard, run by the deployment",
-    price_per_check=Decimal("0.0005"),
-)
-
-
-class OfferingPort:
-    """An overlay-bound adapter offering one guardrail to one organization."""
-
-    def __init__(self, offered_to: uuid.UUID | None) -> None:
-        self.offered_to = offered_to
-        self.asked: list[uuid.UUID | None] = []
-
-    async def list_hosted_guardrails(self, *, organization_id: uuid.UUID | None) -> Sequence[HostedGuardrail]:
-        self.asked.append(organization_id)
-        return [LAKERA] if organization_id == self.offered_to else []
-
-    async def get_hosted_guardrail(
-        self, *, organization_id: uuid.UUID, hosted_guardrail_id: uuid.UUID
-    ) -> HostedGuardrail | None:
-        return LAKERA if organization_id == self.offered_to and hosted_guardrail_id == LAKERA.id else None
-
-    async def evaluate(
-        self,
-        *,
-        organization_id: uuid.UUID,
-        workspace_id: uuid.UUID | None,
-        hosted_guardrail_id: uuid.UUID,
-        text: str,
-        validate_kwargs: Mapping[str, Any],
-        idempotency_key: str,
-    ) -> HostedGuardrailVerdict:
-        raise HostedGuardrailUnavailableError("not under test")
+from .hosted_guardrail_helpers import LAKERA, HostedGuardrails
 
 
 async def _member(db: AsyncSession, organization: Organization, *, role: str) -> User:
@@ -67,7 +22,7 @@ async def _member(db: AsyncSession, organization: Organization, *, role: str) ->
     return user
 
 
-def _service(db: AsyncSession, port: OfferingPort) -> OrganizationHostedGuardrailService:
+def _service(db: AsyncSession, port: HostedGuardrails) -> OrganizationHostedGuardrailService:
     return OrganizationHostedGuardrailService(
         organizations=OrganizationService(db, membership_listener=None), hosted_guardrails=port
     )
@@ -79,7 +34,7 @@ async def test_an_admin_sees_what_is_offered_to_their_own_organization(async_db:
         name="Acme", slug="acme", created_by_user_id=None
     )
     admin = await _member(async_db, organization, role="admin")
-    port = OfferingPort(offered_to=organization.id)
+    port = HostedGuardrails(offered_to=organization.id)
 
     listed = await _service(async_db, port).list_for(user=admin)
 
@@ -102,7 +57,7 @@ async def test_another_organization_sees_nothing_offered_elsewhere(async_db: Asy
     other = await repository.create_organization(name="Other", slug="other", created_by_user_id=None)
     owner = await _member(async_db, other, role="owner")
 
-    listed = await _service(async_db, OfferingPort(offered_to=offered.id)).list_for(user=owner)
+    listed = await _service(async_db, HostedGuardrails(offered_to=offered.id)).list_for(user=owner)
 
     assert listed.data == []
 
@@ -113,7 +68,7 @@ async def test_a_plain_member_may_not_see_the_list(async_db: AsyncSession) -> No
         name="Acme", slug="acme", created_by_user_id=None
     )
     member = await _member(async_db, organization, role="member")
-    port = OfferingPort(offered_to=organization.id)
+    port = HostedGuardrails(offered_to=organization.id)
 
     with pytest.raises(NotAuthorizedError):
         await _service(async_db, port).list_for(user=member)

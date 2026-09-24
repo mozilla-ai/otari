@@ -23,7 +23,7 @@ from typing import Annotated, cast
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, HostedGuardrailPortDep, get_config, get_db, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
@@ -59,9 +59,11 @@ router = APIRouter(
 SURFACE = Surface("organization_guardrails")
 
 
-def get_organization_guardrail_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationGuardrailService:
+def get_organization_guardrail_service(
+    db: Annotated[AsyncSession, Depends(get_db)], hosted_guardrails: HostedGuardrailPortDep
+) -> OrganizationGuardrailService:
     """Build the service on the request's session."""
-    return OrganizationGuardrailService(db)
+    return OrganizationGuardrailService(db, hosted_guardrails=hosted_guardrails)
 
 
 OrganizationGuardrailServiceDep = Annotated[OrganizationGuardrailService, Depends(get_organization_guardrail_service)]

@@ -9861,6 +9861,11 @@ export interface components {
              */
             enabled: boolean;
             /**
+             * Hosted Guardrail Id
+             * @description A guardrail the deployment hosts, from the organization's hosted guardrails list, to run this check. It brings its own backend, so url, credential and definition_id stay unset
+             */
+            hosted_guardrail_id?: string | null;
+            /**
              * Mode
              * @description block rejects a flagged request with 403; monitor annotates the response and forwards it
              * @default monitor
@@ -10100,6 +10105,8 @@ export interface components {
             enabled: boolean;
             /** Has Credential */
             has_credential: boolean;
+            /** Hosted Guardrail Id */
+            hosted_guardrail_id: string | null;
             /**
              * Id
              * Format: uuid
@@ -10183,7 +10190,7 @@ export interface components {
          *
          *     ``workspace_ids`` replaces the scope whole when sent; ``[]`` clears it.
          *
-         *     ``definition_id`` diverges: an explicit ``null`` **clears** it. The rule
+         *     ``definition_id`` and ``hosted_guardrail_id`` diverge: an explicit ``null`` **clears** them. The rule
          *     above protects a field the client was never shown, and this one is returned
          *     on every read, so a form sending ``null`` is sending back a field it was
          *     given rather than an empty box it never filled in. Omitting it still leaves
@@ -10206,6 +10213,11 @@ export interface components {
             definition_id?: string | null;
             /** Enabled */
             enabled?: boolean;
+            /**
+             * Hosted Guardrail Id
+             * @description The hosted guardrail this mandate runs. Like definition_id, an explicit null clears it; omit the field to leave it as it is
+             */
+            hosted_guardrail_id?: string | null;
             /**
              * Mode
              * @enum {string}

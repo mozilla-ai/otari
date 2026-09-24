@@ -1055,6 +1055,35 @@ class OrganizationGuardrailSingleBackendError(TenancyValidationError):
         )
 
 
+class OrganizationGuardrailHostedAloneError(TenancyValidationError):
+    """A mandate named a hosted guardrail and also an endpoint, a credential or a definition.
+
+    A hosted guardrail brings its own backend and secret, so anything else
+    beside it is a second way to run the check.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A mandate that names a hosted guardrail names no endpoint, credential or definition of its own; clear them"
+        )
+
+
+class OrganizationGuardrailHostedNotFoundError(TenancyNotFoundError):
+    """A mandate named a hosted guardrail this organization is not offered."""
+
+    def __init__(self, hosted_guardrail_id: object):
+        super().__init__(f"Hosted guardrail {hosted_guardrail_id} not found")
+
+
+class OrganizationGuardrailUnfundedError(TenancyError):
+    """A hosted check was refused before it ran, because the organization cannot pay for it."""
+
+    status_code = status.HTTP_402_PAYMENT_REQUIRED
+
+    def __init__(self) -> None:
+        super().__init__("The guardrail could not be evaluated: the organization's funds are exhausted")
+
+
 class OrganizationGuardrailTestsItsDefinitionError(TenancyConflictError):
     """A test asked for a mandate that runs one of the organization's definitions.
 

@@ -122,6 +122,7 @@ organization owner or admin), and each one carries:
 | `mode`, `on_unavailable` | The same two settings a request-body entry has, with the same meanings. |
 | `url` | An endpoint of the organization's own. Omit it to use the deployment's `guardrails_url`. |
 | `definition_id` | One of the organization's own guardrail definitions, for Otari to build and run the check itself. Exclusive with `url` and `credential`, which name a service instead. An explicit `null` clears it. |
+| `hosted_guardrail_id` | A guardrail the deployment hosts, picked from `/api/v1/organizations/me/hosted-guardrails`. It brings its own backend and secret, so `url`, `credential` and `definition_id` stay unset. A build that hosts none answers that list empty and refuses the field with `404`. An explicit `null` clears it. |
 | `credential` | Sent to that endpoint as `Authorization: Bearer`. Requires `url`, which must then be `https`, so the credential is never sent to the deployment URL, which may be a plain-http sidecar. Encrypted at rest, never returned. |
 | `validate_kwargs` | Forwarded to the guardrails service `/validate` call. A parameter whose name looks credential-shaped (it contains `key`, `secret`, `token`, `password`, `authorization` or `credential`) is read back as `***` rather than its stored value. Sending `***` back keeps what is stored, so editing the rest of an entry does not overwrite the parameter you were never shown. |
 | `enabled` | `false` stops this mandate everywhere without discarding the entry. |
@@ -158,7 +159,8 @@ reports a failure rather than serving the text unchecked, whatever the
 mandate's `mode`, and works on a mandate with `enabled: false`. A service that
 cannot be reached answers `502`, with the reason in the gateway's log. A mandate
 with no endpoint on a deployment with no `guardrails_url` answers `409`, and so
-does one that runs a definition: test that one from the definition's own row.
+does one that runs a definition: test that one from the definition's own row. A test of a mandate that names a hosted guardrail runs one real check, which the
+deployment may charge for, and answers `402` when the organization cannot pay.
 
 ### Which profiles exist, and what they take
 
