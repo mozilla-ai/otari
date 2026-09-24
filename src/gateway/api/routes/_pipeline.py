@@ -74,6 +74,7 @@ from gateway.api.routes._platform import (
     _STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS_KEY,
     _STREAM_FIRST_CHUNK_TIMEOUT_MS_KEY,
     _STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP_KEY,
+    PlatformGuardrailBatch,
     ResolvedAttempt,
     ResolvedRoute,
     SettledCost,
@@ -2574,6 +2575,8 @@ class EffectiveGuardrails:
     mandated: frozenset[str]
     in_process: dict[str, uuid.UUID]
     hosted: dict[str, HostedMandate]
+    # Hybrid only: a profile the peer mandates, by the mandate id the peer runs it under.
+    platform: dict[str, uuid.UUID]
 
 
 def merge_guardrail_layers(
@@ -2606,7 +2609,7 @@ def merge_guardrail_layers(
     """
     policy = ctx.plan.guardrails if ctx.plan is not None else []
     if not organization and not policy:
-        return EffectiveGuardrails(requested, {}, frozenset(), {}, {})
+        return EffectiveGuardrails(requested, {}, frozenset(), {}, {}, {})
 
     # Caller entries first, so a mandating layer of the same profile overwrites them.
     merged: dict[str, GuardrailConfig] = {guardrail.profile: guardrail for guardrail in requested or []}
@@ -2614,6 +2617,7 @@ def merge_guardrail_layers(
     mandated: set[str] = set()
     in_process: dict[str, uuid.UUID] = {}
     hosted: dict[str, HostedMandate] = {}
+    platform: dict[str, uuid.UUID] = {}
     for entry in organization:
         _overlay_mandate(merged, (entry.config,))
         mandated.add(entry.config.profile)
@@ -2625,6 +2629,8 @@ def merge_guardrail_layers(
             hosted[entry.config.profile] = HostedMandate(
                 mandate_id=entry.id, hosted_guardrail_id=entry.hosted_guardrail_id
             )
+        if ctx.hybrid_mode and entry.id is not None:
+            platform[entry.config.profile] = entry.id
     if policy:
         _overlay_mandate(merged, policy)
         for guardrail in policy:
@@ -2632,7 +2638,10 @@ def merge_guardrail_layers(
             credentials.pop(guardrail.profile, None)
             in_process.pop(guardrail.profile, None)
             hosted.pop(guardrail.profile, None)
-    return EffectiveGuardrails(list(merged.values()), credentials, frozenset(mandated), in_process, hosted)
+            platform.pop(guardrail.profile, None)
+    return EffectiveGuardrails(
+        list(merged.values()), credentials, frozenset(mandated), in_process, hosted, platform
+    )
 
 
 def _in_process_guardrails(
@@ -2654,13 +2663,24 @@ def _in_process_guardrails(
     :func:`_resolve_organization_guardrails`, which refuses the request before
     resolving anything when the organization is missing.
     """
+    checks: dict[str, InProcessGuardrail | None] = {}
+    if effective.platform and ctx.route is not None and ctx.user_token is not None:
+        batch = PlatformGuardrailBatch(
+            ctx.config,
+            user_token=ctx.user_token,
+            request_id=ctx.route.request_id,
+            guardrail_ids=list(effective.platform.values()),
+        )
+        checks.update({profile: batch.check_for(mandate_id) for profile, mandate_id in effective.platform.items()})
     organization_id = ctx.organization_id
     if organization_id is None:
-        return {}
-    checks: dict[str, InProcessGuardrail | None] = {
-        profile: guardrail_handle(organization_id, definition_id)
-        for profile, definition_id in effective.in_process.items()
-    }
+        return checks
+    checks.update(
+        {
+            profile: guardrail_handle(organization_id, definition_id)
+            for profile, definition_id in effective.in_process.items()
+        }
+    )
     # A hosted profile with no port to run it is unevaluable, for the reason a
     # definition this worker does not hold is.
     request_id = ctx.request_id or str(uuid.uuid4())
@@ -2684,10 +2704,8 @@ async def _resolve_organization_guardrails(
 ) -> list[ResolvedOrganizationGuardrail]:
     """The guardrails the request's organization mandates for its workspace.
 
-    Standalone only. Hybrid mode's tenancy lives on the platform, which has no
-    guardrail resolve endpoint of its own (its guardrail enforcement was
-    reachable only through its own completion route), so a hybrid request is
-    checked exactly as it was before this plane existed.
+    In hybrid mode the peer names them on resolve, as descriptors it runs
+    itself (``docs/hybrid-mode-protocol.md``), so nothing is read here.
 
     One read per request rather than a cached overlay, per the seam #655 settled
     and #678 wrote down. Unlike the MCP and code-execution resolves beside it,
@@ -2710,7 +2728,17 @@ async def _resolve_organization_guardrails(
     unchecked.
     """
     if ctx.hybrid_mode:
-        return []
+        return [
+            ResolvedOrganizationGuardrail(
+                config=GuardrailConfig(
+                    profile=descriptor.profile, mode=descriptor.mode, on_unavailable=descriptor.on_unavailable
+                ),
+                credential=None,
+                definition_id=None,
+                id=descriptor.id,
+            )
+            for descriptor in (ctx.route.guardrails if ctx.route is not None else [])
+        ]
     if ctx.db is None or ctx.workspace_id is None or ctx.organization_id is None:
         raise adapter.error(500, ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL, ErrorKind.API)
     try:

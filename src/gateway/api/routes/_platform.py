@@ -37,6 +37,7 @@ from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
+from gateway.services.guardrails import GuardrailsNotReachableError, GuardrailUnfundedError
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.mcp_stateless import (
     CODE_RESOLUTION_FAILED,
@@ -46,6 +47,11 @@ from gateway.services.mcp_stateless import (
 )
 from gateway.services.provider_kwargs import split_selector
 from gateway.services.sandbox_backend import SandboxNotReachableError
+from gateway.services.tenancy.workspace_guardrail_evaluation import (
+    GuardrailDescriptor,
+    GuardrailEvaluation,
+    GuardrailEvaluationResponse,
+)
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 
 T = TypeVar("T")
@@ -194,6 +200,10 @@ class ResolvedRoute(BaseModel):
     # into some other tenant's.
     workspace_id: str | None = None
     organization_id: str | None = None
+    # The guardrails the peer mandates for this workspace, which the gateway
+    # runs through the peer before any attempt. Empty for a peer that predates
+    # the field.
+    guardrails: list[GuardrailDescriptor] = Field(default_factory=list)
 
 
 class _AttemptFailure(NamedTuple):
@@ -617,6 +627,28 @@ def _tenant_ids(payload: dict[str, Any]) -> tuple[str | None, str | None]:
     )
 
 
+def _guardrail_descriptors(payload: dict[str, Any]) -> list[GuardrailDescriptor]:
+    """Read the optional ``guardrails`` list, failing closed on anything malformed.
+
+    Absent is a peer that mandates nothing, or one that predates the field.
+    Present but unreadable is refused rather than dropped, because dropping it
+    would serve a request the peer meant to check.
+    """
+    if "guardrails" not in payload:
+        return []
+    raw = payload["guardrails"]
+    try:
+        if not isinstance(raw, list):
+            raise TypeError(type(raw).__name__)
+        return [GuardrailDescriptor.model_validate(entry) for entry in raw]
+    except (TypeError, ValidationError) as exc:
+        logger.warning("Platform resolve carried malformed guardrails: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization service unavailable",
+        ) from None
+
+
 def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
     """Build a ResolvedRoute from either the new attempts-list shape or the
     legacy single-attempt shape.
@@ -651,6 +683,7 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
             user_id=str(raw_user_id) if raw_user_id is not None else None,
             workspace_id=workspace_id,
             organization_id=organization_id,
+            guardrails=_guardrail_descriptors(payload),
         )
 
     # Legacy single-attempt shape predates user_id entirely, same treatment as
@@ -664,6 +697,7 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
         fallback_enabled=False,
         workspace_id=workspace_id,
         organization_id=organization_id,
+        guardrails=_guardrail_descriptors(payload),
         attempts=[
             ResolvedAttempt(
                 attempt_id=correlation_id,
@@ -1029,6 +1063,101 @@ async def _resolve_platform_web_search(
         client_error_detail="Web search resolution failed",
     )
     return payload if isinstance(payload, dict) else {}
+
+
+async def _evaluate_platform_guardrails(
+    config: GatewayConfig,
+    *,
+    user_token: str,
+    request_id: str,
+    guardrail_ids: list[uuid.UUID],
+    input_text: str,
+) -> dict[uuid.UUID, GuardrailEvaluation]:
+    """Ask the peer to run the mandated guardrails, one outcome per id.
+
+    Every failure of the call itself answers an empty map, so each id reads as
+    unavailable and its mandate's ``on_unavailable`` decides. That is the
+    difference from the resolve helpers above, which forward the peer's status:
+    here an outage must refuse only the requests asked to fail closed.
+    """
+    platform_base_url = config.platform.get("base_url")
+    if not platform_base_url:
+        return {}
+    timeout_ms = int(config.platform.get("guardrail_timeout_ms", 15000))
+    try:
+        response = await _post_platform(
+            url=_platform_url(platform_base_url, "/gateway/guardrails/evaluate"),
+            headers={"X-Gateway-Token": config.platform_token or "", "X-User-Token": user_token},
+            body={
+                "request_id": request_id,
+                "guardrail_ids": [str(guardrail_id) for guardrail_id in guardrail_ids],
+                "input_text": input_text,
+            },
+            timeout_seconds=timeout_ms / 1000,
+        )
+    except (httpx.TimeoutException, httpx.NetworkError) as exc:
+        logger.warning("Platform guardrail evaluation failed request_id=%s: %s", request_id, type(exc).__name__)
+        return {}
+    if response.status_code != 200:
+        logger.warning("Platform guardrail evaluation answered %s request_id=%s", response.status_code, request_id)
+        return {}
+    try:
+        parsed = GuardrailEvaluationResponse.model_validate(response.json())
+    except (ValueError, ValidationError):
+        logger.warning("Platform guardrail evaluation answered an unreadable body request_id=%s", request_id)
+        return {}
+    return {result.id: result for result in parsed.results}
+
+
+class PlatformGuardrailBatch:
+    """One request's peer-mandated guardrails, evaluated in one call.
+
+    The request path runs guardrails one after another and asks each for its
+    verdict; the first to ask makes the call for every id, and the rest read
+    the same answer.
+    """
+
+    def __init__(
+        self, config: GatewayConfig, *, user_token: str, request_id: str, guardrail_ids: list[uuid.UUID]
+    ) -> None:
+        self._config = config
+        self._user_token = user_token
+        self._request_id = request_id
+        self._guardrail_ids = guardrail_ids
+        self._results: asyncio.Task[dict[uuid.UUID, GuardrailEvaluation]] | None = None
+
+    def check_for(self, guardrail_id: uuid.UUID) -> _PlatformGuardrailCheck:
+        return _PlatformGuardrailCheck(self, guardrail_id)
+
+    async def results(self, input_text: str) -> dict[uuid.UUID, GuardrailEvaluation]:
+        if self._results is None:
+            self._results = asyncio.ensure_future(
+                _evaluate_platform_guardrails(
+                    self._config,
+                    user_token=self._user_token,
+                    request_id=self._request_id,
+                    guardrail_ids=self._guardrail_ids,
+                    input_text=input_text,
+                )
+            )
+        return await self._results
+
+
+class _PlatformGuardrailCheck:
+    """One peer-mandated guardrail, answered from its batch."""
+
+    def __init__(self, batch: PlatformGuardrailBatch, guardrail_id: uuid.UUID) -> None:
+        self._batch = batch
+        self._guardrail_id = guardrail_id
+
+    async def check(self, prompt: str, **_validate_kwargs: Any) -> GuardrailEvaluation:
+        # The peer holds the mandate's own arguments, so none are sent from here.
+        result = (await self._batch.results(prompt)).get(self._guardrail_id)
+        if result is None or result.status == "unavailable":
+            raise GuardrailsNotReachableError(f"platform guardrail {self._guardrail_id} gave no verdict")
+        if result.status == "unfunded":
+            raise GuardrailUnfundedError(f"platform guardrail {self._guardrail_id} refused for funds")
+        return result
 
 
 async def _resolve_platform_code_execution(

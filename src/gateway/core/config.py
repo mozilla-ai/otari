@@ -2600,6 +2600,7 @@ def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
         "PLATFORM_HEALTH_URL": ("health_url", str),
         "PLATFORM_RESOLVE_TIMEOUT_MS": ("resolve_timeout_ms", int),
         "PLATFORM_USAGE_TIMEOUT_MS": ("usage_timeout_ms", int),
+        "PLATFORM_GUARDRAIL_TIMEOUT_MS": ("guardrail_timeout_ms", int),
         # Budget for the one usage report the response path waits on. Expiry
         # detaches the wait without cancelling the accounting report.
         "PLATFORM_USAGE_INLINE_TIMEOUT_MS": ("usage_inline_timeout_ms", int),
