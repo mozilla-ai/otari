@@ -25,6 +25,7 @@ from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
+from gateway.ports.hosted_guardrail_port import HostedGuardrailPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
@@ -868,6 +869,14 @@ def get_identity_provider_port(
 def get_model_provider_port(db: PortSessionDep, container: ContainerDep) -> ModelProviderPort:
     """Resolve the model-provider adapter this build bound at startup."""
     return container.resolve(ModelProviderPort, db)
+
+
+def get_hosted_guardrail_port(db: PortSessionDep, container: ContainerDep) -> HostedGuardrailPort:
+    """Resolve the hosted-guardrail adapter this build bound at startup."""
+    return container.resolve(HostedGuardrailPort, db)
+
+
+HostedGuardrailPortDep = Annotated[HostedGuardrailPort, Depends(get_hosted_guardrail_port)]
 
 
 # Deliberately ``get_db`` and not ``PortSessionDep``: every surface that
