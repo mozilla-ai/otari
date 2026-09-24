@@ -123,12 +123,14 @@ function mockApi() {
 // No router on purpose: the page renders ahead of the session, where the app
 // has not mounted one, so a component that reached for a router hook here
 // would be the bug the test exists to catch.
-function renderPage(modelId?: string) {
+function renderPage(modelId?: string, openSignup = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <DeploymentProvider value={bootstrap({ public_catalog: true })}>
+    <DeploymentProvider
+      value={bootstrap({ public_catalog: true, open_signup: openSignup })}
+    >
       <QueryClientProvider client={client}>
         <PublicCatalogPage modelId={modelId} />
       </QueryClientProvider>
@@ -151,10 +153,10 @@ describe("PublicCatalogPage", () => {
     expect(
       within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }),
     ).toHaveAttribute("href", "#/models/z-ai/glm-5.3")
-    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
-      "href",
-      "#/",
-    )
+    // Signup is closed on this deployment, so the way in is sign-in.
+    expect(
+      screen.getByRole("link", { name: "Start building with Otari" }),
+    ).toHaveAttribute("href", "#/")
     expect(screen.getByText(/deployment's list rates/)).toBeInTheDocument()
     // A visitor has no organization to ask about, and asking would be a 401.
     expect(
@@ -162,6 +164,15 @@ describe("PublicCatalogPage", () => {
         String(url).includes(`${API_ROOT}/organizations/me`),
       ),
     ).toBe(false)
+  })
+
+  it("sends a visitor to signup where the deployment offers it", async () => {
+    mockApi()
+    renderPage(undefined, true)
+
+    expect(
+      await screen.findByRole("link", { name: "Start building with Otari" }),
+    ).toHaveAttribute("href", "#/signup")
   })
 
   it("shows a model's offerings without the links that need a session", async () => {
