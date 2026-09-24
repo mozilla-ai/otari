@@ -44,7 +44,9 @@ providers:
 
 A native variable such as `OPENAI_API_KEY` can be enough to dispatch a direct
 request. Add the provider to `providers` when you also want model discovery or
-explicit client settings.
+explicit client settings. A provider reachable only through its variable is
+named in a startup log line and on the dashboard's Models page, so an empty
+catalog says why.
 
 Provider support is endpoint-specific. A provider that supports chat may not
 support Responses, images, audio, rerank, or batches. Unsupported combinations

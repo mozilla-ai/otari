@@ -65,6 +65,7 @@ from gateway.services.pricing_refresh_service import (
     run_price_update_poller,
 )
 from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
+from gateway.services.provider_metadata_service import run_env_only_provider_notice
 from gateway.services.provider_store_service import (
     load_providers_at_startup,
     reset_provider_cache,
@@ -153,7 +154,7 @@ _UNAUTHENTICATED_PATHS = frozenset(
 
 @dataclass(frozen=True)
 class _LifespanWorker:
-    """One periodic background task a standalone deployment runs.
+    """One background task, usually periodic, a standalone deployment runs.
 
     ``start`` returns the task's coroutine, or None for a worker this config does
     not run. ``reset`` clears the cache the worker keeps warm.
@@ -252,6 +253,8 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     # The provider reclaims a held sandbox on its own timer; this drops the
     # rows that named it once nobody can resume them.
     _LifespanWorker("sandbox container sweep", _start_container_sweeper),
+    # One-shot, off the startup path: finding these imports every provider SDK.
+    _LifespanWorker("env-only provider notice", lambda config, _container: run_env_only_provider_notice(config)),
 )
 
 

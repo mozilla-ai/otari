@@ -11223,6 +11223,11 @@ export interface components {
          * @description Metadata for every configured provider.
          */
         ProvidersResponse: {
+            /**
+             * Env Only Providers
+             * @description Providers that serve requests through their native credential environment variable but are not configured, so their models are not listed. Add one under providers: or on the Providers page to list its models.
+             */
+            env_only_providers?: string[];
             /** Providers */
             providers: components["schemas"]["ProviderInfoSchema"][];
         };

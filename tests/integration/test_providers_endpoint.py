@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.services import provider_metadata_service
 
 from .conftest import build_test_client
 
@@ -81,6 +82,43 @@ def test_providers_carries_metadata_and_capabilities(
         "moderation",
         "list_models",
     }
+
+
+@pytest.fixture
+def no_provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear every provider credential env var the host may carry."""
+    for _pid, names in provider_metadata_service._listing_providers_with_env_credential():
+        for name in names:
+            monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.usefixtures("no_provider_env")
+def test_providers_names_an_env_only_provider(
+    providers_client: TestClient,
+    master_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider reachable by its env var alone is named, apart from the configured ones (#1626)."""
+    monkeypatch.setenv("GEMINI_API_KEY", "gm-test")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    resp = providers_client.get(f"{API_ROOT}/providers", headers=master_header)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["env_only_providers"] == ["gemini"]
+    assert "gm-test" not in resp.text
+
+
+@pytest.mark.usefixtures("no_provider_env")
+def test_providers_names_no_env_only_provider_without_env_var(
+    providers_client: TestClient,
+    master_header: dict[str, str],
+) -> None:
+    resp = providers_client.get(f"{API_ROOT}/providers", headers=master_header)
+
+    assert resp.status_code == 200
+    assert resp.json()["env_only_providers"] == []
 
 
 def test_providers_requires_master_key(

@@ -10,16 +10,20 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from any_llm import AnyLLM
 
 from gateway.core.config import GatewayConfig
+from gateway.services import provider_metadata_service
 from gateway.services.pricing_service import model_context_window
 from gateway.services.provider_metadata_service import (
+    env_only_providers,
     known_provider_detail,
     list_known_provider_summaries,
     list_provider_info,
+    run_env_only_provider_notice,
     provider_info,
 )
 
@@ -211,3 +215,104 @@ def test_provider_detail_keyless_backend_never_present() -> None:
 def test_provider_detail_unknown_id_is_none() -> None:
     """An unknown provider id yields None (the route maps this to a 404)."""
     assert known_provider_detail("definitely-not-a-provider") is None
+
+
+# A fixed registry, so the host's own provider env vars cannot leak in and the
+# tests do not pay for importing every provider SDK.
+_REGISTRY = (
+    ("anthropic", ("ANTHROPIC_API_KEY",)),
+    ("gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY")),
+    ("openai", ("OPENAI_API_KEY",)),
+)
+
+
+@pytest.fixture
+def registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(provider_metadata_service, "_listing_providers_with_env_credential", lambda: _REGISTRY)
+    for _pid, names in _REGISTRY:
+        for name in names:
+            monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry")
+async def test_env_only_providers_names_an_unconfigured_env_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A provider with its credential env var set and no instance is named; a configured one is not."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("GOOGLE_API_KEY", "g-test")
+
+    names = await env_only_providers(_config({"openai": {"api_key": "sk-test"}}))
+
+    assert names == ["anthropic", "gemini"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry")
+async def test_env_only_providers_empty_without_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No credential env var, or a blank one, names nothing."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "  ")
+
+    assert await env_only_providers(_config({})) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry")
+async def test_env_only_providers_skips_an_implementation_a_named_instance_backs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``my-anthropic`` (provider_type: anthropic) already lists anthropic's models."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    config = _config({"my-anthropic": {"provider_type": "anthropic", "api_key": "sk-ant-test"}})
+
+    assert await env_only_providers(config) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry")
+async def test_env_only_providers_empty_on_hosted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hosted deployment serves no inference, so no env credential makes a provider callable there."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    config = GatewayConfig(master_key="test", mode="hosted", providers={})
+
+    assert await env_only_providers(config) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry")
+async def test_run_env_only_provider_notice_names_providers_never_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The startup notice names the provider and where to configure it, never the credential."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
+    log = MagicMock()
+    monkeypatch.setattr(provider_metadata_service, "logger", log)
+
+    await run_env_only_provider_notice(_config({}))
+
+    log.info.assert_called_once()
+    template, *args = log.info.call_args.args
+    message = template % tuple(args)
+    assert "anthropic" in message
+    assert "providers:" in message and "Providers page" in message
+    assert "sk-ant-secret-value" not in message
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry")
+async def test_run_env_only_provider_notice_silent_when_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    log = MagicMock()
+    monkeypatch.setattr(provider_metadata_service, "logger", log)
+
+    await run_env_only_provider_notice(_config({}))
+
+    log.info.assert_not_called()
+
+
+def test_listing_registry_holds_only_keyed_listing_providers() -> None:
+    """The real registry keeps keyed, model-listing providers and drops keyless ones."""
+    registry = dict(provider_metadata_service._listing_providers_with_env_credential())
+
+    assert registry["anthropic"] == ("ANTHROPIC_API_KEY",)
+    assert registry["gemini"] == ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+    assert "ollama" not in registry

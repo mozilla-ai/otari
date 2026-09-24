@@ -39,6 +39,7 @@ import {
   SOURCE_OPTIONS,
   vendorOptions,
 } from "@/features/models/catalog"
+import { EnvOnlyProvidersNotice } from "@/features/models/EnvOnlyProvidersNotice"
 import { publicCatalogHref } from "@/features/models/publicCatalog"
 import { useCatalog } from "@/shared/api/models"
 import {
@@ -660,6 +661,8 @@ export function ModelCatalogView({
       </header>
 
       <ErrorBanner error={catalog.error} />
+
+      {publicView ? null : <EnvOnlyProvidersNotice />}
 
       {withheld > 0 ? (
         <InfoBanner tone="warning">

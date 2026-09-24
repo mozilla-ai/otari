@@ -12076,6 +12076,14 @@
       "ProvidersResponse": {
         "description": "Metadata for every configured provider.",
         "properties": {
+          "env_only_providers": {
+            "description": "Providers that serve requests through their native credential environment variable but are not configured, so their models are not listed. Add one under providers: or on the Providers page to list its models.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Env Only Providers",
+            "type": "array"
+          },
           "providers": {
             "items": {
               "$ref": "#/components/schemas/ProviderInfoSchema"

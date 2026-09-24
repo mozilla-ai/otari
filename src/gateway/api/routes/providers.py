@@ -38,6 +38,7 @@ from gateway.services.provider_metadata_service import (
     KnownProvider,
     KnownProviderSummary,
     ProviderInfo,
+    env_only_providers,
     known_provider_detail,
     list_known_provider_summaries,
     list_provider_info,
@@ -111,6 +112,14 @@ class ProvidersResponse(BaseModel):
     """Metadata for every configured provider."""
 
     providers: list[ProviderInfoSchema]
+    env_only_providers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Providers that serve requests through their native credential environment variable but are not "
+            "configured, so their models are not listed. Add one under providers: or on the Providers page to "
+            "list its models."
+        ),
+    )
 
 
 def _to_schema(info: ProviderInfo) -> ProviderInfoSchema:
@@ -149,7 +158,10 @@ async def list_providers(
     pricing links, and display name from the bundled any-llm and genai-prices
     datasets. No provider is contacted, so this is cheap and always available.
     """
-    return ProvidersResponse(providers=[_to_schema(info) for info in list_provider_info(config)])
+    return ProvidersResponse(
+        providers=[_to_schema(info) for info in list_provider_info(config)],
+        env_only_providers=await env_only_providers(config),
+    )
 
 
 class KnownProviderSummarySchema(BaseModel):

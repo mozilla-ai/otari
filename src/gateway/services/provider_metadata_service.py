@@ -15,12 +15,14 @@ call, which the dashboard already has from GET /v1/models/discoverable and can
 join client-side.
 """
 
+import asyncio
+import functools
 import os
 from dataclasses import dataclass, field
 
 from any_llm import AnyLLM, LLMProvider
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import GatewayConfig, provider_credential_env_names
 from gateway.log_config import logger
 
 
@@ -217,3 +219,56 @@ def known_provider_detail(provider_id: str) -> KnownProvider | None:
         requires_api_key=env_key is not None,
         env_key_present=env_key is not None and bool((os.getenv(env_key) or "").strip()),
     )
+
+
+@functools.cache
+def _listing_providers_with_env_credential() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Each any-llm provider that lists models and reads a key from the environment.
+
+    Paired with the variable names it reads. Imports every provider SDK (seconds,
+    cold), so the result is kept for the process: the registry does not change
+    at runtime, only the environment it is checked against.
+    """
+    found: list[tuple[str, tuple[str, ...]]] = []
+    for pid in AnyLLM.get_supported_providers():
+        try:
+            lists_models = bool(AnyLLM.get_provider_class(pid).get_provider_metadata().list_models)
+        except Exception as exc:
+            logger.debug("no any-llm metadata for provider %r: %s", pid, exc)
+            continue
+        env_names = provider_credential_env_names(pid)
+        if lists_models and env_names:
+            found.append((pid, env_names))
+    return tuple(found)
+
+
+async def env_only_providers(config: GatewayConfig) -> list[str]:
+    """Providers a request reaches through a native credential env var alone.
+
+    Such a provider (``ANTHROPIC_API_KEY`` set, no ``anthropic`` instance) serves
+    a direct ``anthropic:<model>`` request, but model discovery only lists
+    configured instances, so its models are missing from the catalog. Names only;
+    a provider whose implementation already backs a configured instance is not
+    one. Empty on a hosted deployment, which serves no inference.
+    """
+    if config.is_hosted_mode:
+        return []
+    registry = await asyncio.to_thread(_listing_providers_with_env_credential)
+    configured = {config.provider_instance_type(instance) for instance in config.providers}
+    return sorted(
+        pid
+        for pid, env_names in registry
+        if pid not in configured and any((os.getenv(name) or "").strip() for name in env_names)
+    )
+
+
+async def run_env_only_provider_notice(config: GatewayConfig) -> None:
+    """Say once at startup which providers are usable but not listed."""
+    names = await env_only_providers(config)
+    if names:
+        logger.info(
+            "Provider(s) %s are callable through their credential environment variable but not configured, "
+            "so their models are not listed in the catalog. Add them under providers: in config.yml or on the "
+            "dashboard's Providers page to list them.",
+            ", ".join(names),
+        )

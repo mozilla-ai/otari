@@ -10,6 +10,7 @@ import type {
   CatalogOffering,
   CatalogResponse,
   OrganizationContext,
+  ProvidersResponse,
 } from "@/client"
 import { ModelCatalogPage } from "@/features/models/ModelCatalogPage"
 import { API_ROOT } from "@/shared/api/client"
@@ -149,10 +150,15 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function mockApi(
-  options: { catalog?: CatalogResponse; context?: OrganizationContext } = {},
+  options: {
+    catalog?: CatalogResponse
+    context?: OrganizationContext
+    providers?: ProvidersResponse
+  } = {},
 ) {
   const catalog = options.catalog ?? CATALOG
   const context = options.context ?? organizationContext()
+  const providers = options.providers ?? { providers: [] }
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
     if (url.includes(`${API_ROOT}/catalog/models/z-ai/glm-5.3`)) {
@@ -164,6 +170,7 @@ function mockApi(
     if (url.includes(`${API_ROOT}/catalog/models`)) return jsonResponse(catalog)
     if (url.includes(`${API_ROOT}/organizations/me`))
       return jsonResponse(context)
+    if (url.endsWith(`${API_ROOT}/providers`)) return jsonResponse(providers)
     return jsonResponse([])
   })
 }
@@ -440,5 +447,57 @@ describe("ModelCatalogPage", () => {
 
     await screen.findByRole("list", { name: "Models" })
     expect(screen.queryByText(/holds the first/)).not.toBeInTheDocument()
+  })
+
+  describe("providers usable only by env var (#1626)", () => {
+    const EMPTY_CATALOG: CatalogResponse = { ...CATALOG, count: 0, models: [] }
+
+    it("names them to an operator and points at where to configure them", async () => {
+      mockApi({
+        catalog: EMPTY_CATALOG,
+        providers: {
+          providers: [],
+          env_only_providers: ["anthropic", "gemini"],
+        },
+      })
+      renderPage(<ModelCatalogPage />)
+
+      expect(await screen.findByText("anthropic, gemini")).toBeInTheDocument()
+      expect(
+        screen.getByText(
+          /serve requests through their credential environment variable/,
+        ),
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole("link", { name: "Providers page" }),
+      ).toHaveAttribute("href", "/providers")
+    })
+
+    it("says nothing when every usable provider is configured", async () => {
+      mockApi({ providers: { providers: [], env_only_providers: [] } })
+      renderPage(<ModelCatalogPage />)
+
+      await screen.findByRole("list", { name: "Models" })
+      expect(
+        screen.queryByText(/credential environment variable/),
+      ).not.toBeInTheDocument()
+    })
+
+    it("neither asks nor tells a caller who does not operate the deployment", async () => {
+      const fetchMock = mockApi({
+        context: organizationContext({ deployment_operator: false }),
+        providers: { providers: [], env_only_providers: ["anthropic"] },
+      })
+      renderPage(<ModelCatalogPage />)
+
+      await screen.findByRole("list", { name: "Models" })
+      expect(
+        screen.queryByText(/credential environment variable/),
+      ).not.toBeInTheDocument()
+      const urls = fetchMock.mock.calls.map(([input]) => String(input))
+      expect(urls.some((url) => url.endsWith(`${API_ROOT}/providers`))).toBe(
+        false,
+      )
+    })
   })
 })
