@@ -937,7 +937,9 @@ function AppShellChrome() {
               <WorkspaceSwitcher isCollapsed={effectiveCollapsed} />
             )}
           </div>
-          <div className="flex min-h-0 flex-1 flex-col gap-4 p-3">
+          {/* No bottom padding: the account band closes the rail, so it sits on
+              the viewport's edge the way the scope band sits on the top. */}
+          <div className="flex min-h-0 flex-1 flex-col gap-4 px-3 pt-3">
             <nav
               // Named because the header's breadcrumb is a navigation landmark
               // too, and two unnamed ones give a screen-reader user no way to tell
