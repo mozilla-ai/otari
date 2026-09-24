@@ -14,6 +14,7 @@ and a ceiling that names one is still listed, with ``manageable`` false, because
 from datetime import UTC, datetime
 from typing import Any
 
+from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.budget_exceptions import (
     BudgetStillReferencedError,
     OrganizationBudgetHeldElsewhereError,
@@ -41,7 +42,6 @@ from gateway.schemas.budgets import (
 from gateway.services.budgets._periods import period_window
 from gateway.services.budgets._retiming import cadence_of
 from gateway.services.budgets._scopes import ScopeOwnership, lock_workspace_for_scope
-from gateway.services.tenancy.errors import TenancyValidationError
 from gateway.services.tenancy.organization_service import OrganizationService
 
 _MAX_LIST_LIMIT = 1000

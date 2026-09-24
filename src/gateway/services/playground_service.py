@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions import TenancyConflictError, TenancyForbiddenError
 from gateway.models.playground import (
     MAX_FAVORITE_MODELS,
     MAX_SAVED_COMPARISONS,
@@ -48,11 +49,7 @@ from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
-from gateway.services.tenancy.errors import (
-    TenancyConflictError,
-    TenancyForbiddenError,
-    WorkspaceNotFoundError,
-)
+from gateway.services.tenancy.errors import WorkspaceNotFoundError
 from gateway.services.workspace_scope import organization_default_workspace_id
 from gateway.types.session_principal import SessionPrincipal
 

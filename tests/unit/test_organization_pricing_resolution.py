@@ -24,6 +24,7 @@ from sqlmodel import SQLModel
 
 import gateway.models  # noqa: F401  (registers every table on the shared metadata)
 from gateway.core.config import GatewayConfig
+from gateway.exceptions import TenancyValidationError
 from gateway.models.pricing import ModelPricing, OrganizationModelPricing
 from gateway.models.tenancy import Organization
 from gateway.services.external_usage_service import _load_pricing_index, _resolve_pricing
@@ -32,10 +33,7 @@ from gateway.services.organization_pricing_service import (
     validate_period,
 )
 from gateway.services.pricing_service import find_model_pricing, price_tool_calls
-from gateway.services.tenancy.errors import (
-    OrganizationPricingOverlapError,
-    TenancyValidationError,
-)
+from gateway.services.tenancy.errors import OrganizationPricingOverlapError
 
 T = TypeVar("T")
 

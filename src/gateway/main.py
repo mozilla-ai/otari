@@ -22,6 +22,7 @@ from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, 
 from gateway.core.database import create_session, dispose_db, init_db
 from gateway.core.feature import Worker
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
+from gateway.exceptions import TenancyError
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
@@ -80,7 +81,6 @@ from gateway.services.search_tool_store_service import (
 )
 from gateway.services.secret_box import validate_secret_key
 from gateway.services.selector_index_service import run_selector_index_refresher
-from gateway.services.tenancy.errors import TenancyError
 from gateway.services.tenancy.org_provider_key_service import (
     load_org_provider_keys_at_startup,
     reset_org_provider_cache,

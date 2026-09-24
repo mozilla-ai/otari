@@ -30,6 +30,7 @@ from sqlmodel import col
 
 from gateway.core.config import API_ROOT
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.budget_exceptions import (
     OrganizationBudgetHeldElsewhereError,
     OrganizationBudgetInUseError,
@@ -59,7 +60,7 @@ from gateway.schemas.budgets import (
 )
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService
-from gateway.services.tenancy.errors import NotAuthorizedError, TenancyValidationError
+from gateway.services.tenancy.errors import NotAuthorizedError
 from gateway.services.tenancy.organization_service import OrganizationService
 
 _BUDGETS = f"{API_ROOT}/organizations/me/budgets"
