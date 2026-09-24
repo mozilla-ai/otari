@@ -209,7 +209,9 @@ async def test_output_builder_requires_explicit_workspace_for_uploads(
     service = build_file_service(cast(UnitOfWork, _FakeUnitOfWork()), cast(FileStoragePort, store), GatewayConfig())
 
     if workspace_id is None:
-        with pytest.raises(RuntimeError, match="does not support unscoped uploads"):
+        with pytest.raises(
+            RuntimeError, match="Unscoped uploads are not supported in this context; specify a workspace"
+        ):
             await service.store(_upload(b"payload", workspace_id=None))
         assert files.added == []
         assert store.blobs == {}

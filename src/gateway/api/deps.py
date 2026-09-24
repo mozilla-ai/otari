@@ -663,7 +663,7 @@ def build_file_service(uow: UnitOfWork, file_store: FileStoragePort, config: Gat
     """Build Files operations for a scoped output request or cleanup job."""
 
     async def reject_unscoped_upload() -> uuid.UUID:
-        raise RuntimeError("This FileService configuration does not support unscoped uploads")
+        raise RuntimeError("Unscoped uploads are not supported in this context; specify a workspace.")
 
     return FileService(uow, FileRepositories.on(uow), file_store, config, reject_unscoped_upload)
 
