@@ -14,7 +14,7 @@ import pytest
 from otari_agent.domain.check import PolicyCheckError, run_policy_check
 from otari_agent.domain.evaluators import evaluate_path
 from otari_agent.domain.policy import PolicyError, parse_policy
-from otari_agent.domain.types import ChangedPathEvidence, Outcome, PathGate
+from otari_agent.domain.types import ChangedPathEvidence, Outcome, PathGate, RunsAt
 
 
 def _policy(runs: str, gate_type: str = "path", extra: str = '    forbidden: ["CHANGELOG.md"]\n') -> str:
@@ -132,7 +132,7 @@ def test_paths_submitted_without_a_moment_are_refused() -> None:
 
 
 @pytest.mark.parametrize("source", ["stop.session", "stop.verifier", "pre_tool_use.command"])
-def test_paths_labeled_with_a_moment_no_path_gate_can_declare_are_refused(source: str) -> None:
+def test_paths_labeled_with_a_moment_no_path_gate_can_declare_are_refused(source: RunsAt) -> None:
     """Accepting one would resolve every path gate not_applicable: enforcement lost silently.
 
     This is the same failure the whole field exists to remove, so it has to be
@@ -145,7 +145,7 @@ def test_paths_labeled_with_a_moment_no_path_gate_can_declare_are_refused(source
             source="t",
             changed_paths=["CHANGELOG.md"],
             commands=None,
-            changed_path_source=source,  # type: ignore[arg-type]
+            changed_path_source=source,
         )
     message = str(exc.value)
     assert source in message
