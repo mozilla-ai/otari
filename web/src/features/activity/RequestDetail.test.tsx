@@ -190,4 +190,23 @@ describe("RequestDetail", () => {
     expect(screen.getByText(/200 at \$10.00 \/ 1M/)).toBeInTheDocument()
     expect(screen.getByText(/2 at .* each/)).toBeInTheDocument()
   })
+
+  it("shows the provider-reported compute time alongside Total time", async () => {
+    // provider_latency_ms is a diagnostic alongside Total time (otari#337); this
+    // asserts the row's value actually reaches the "Provider time" field rather
+    // than only being present in the fixture shape.
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({ provider: "groq", provider_latency_ms: 156 })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    const label = screen.getByText("Provider time", {
+      selector: "span.text-overline",
+    })
+    expect(label.parentElement?.textContent).toContain("156 ms")
+  })
 })
