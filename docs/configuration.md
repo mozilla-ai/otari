@@ -76,7 +76,7 @@ the corresponding startup value after the database is available.
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the bundled genai-prices catalog when no stored price exists. |
 | `pricing_refresh` | What a scheduled genai-prices check does with an update: `manual`, `review`, or `auto`. |
-| `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `false`; startup setting, unavailable in hybrid mode. See [Product feedback](#product-feedback). |
+| `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting, unavailable in hybrid mode. See [Product feedback](#product-feedback). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -449,12 +449,12 @@ boundary.
 
 ## Product feedback
 
-With `feedback_enabled` on, signed-in dashboard users can choose **Feedback**,
-beside Documentation in the top bar (in the account menu on a phone), to send a
-message to the Otari team. The team receives it privately in Slack. Only the
-message is sent: no email, screenshot, page URL, account identifier, deployment
-identifier, or usage history is attached. Opening the form, typing, and
-canceling make no outbound request.
+Signed-in dashboard users can choose **Feedback**, beside Documentation in the
+top bar (in the account menu on a phone), to send a message to the Otari team.
+The team receives it privately in Slack. Only the message is sent: no email,
+screenshot, page URL, account identifier, deployment identifier, or usage
+history is attached. Opening the form, typing, and canceling make no outbound
+request.
 
 The gateway forwards the message to
 `https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the
@@ -463,13 +463,10 @@ see connection metadata, so this is private feedback, not anonymous feedback.
 Keep request-body capture disabled for the feedback endpoint in any additional
 logging or tracing you configure.
 
-Feedback is off by default. To turn it on, set `feedback_enabled: true` in YAML
-or `OTARI_FEEDBACK_ENABLED=true`, then restart. Off, the endpoint is not mounted
-and the Feedback entry is hidden. Hybrid gateways never offer the form. This
-setting is visible in Settings but cannot be changed there at runtime.
-
-The otari.ai intake is not live yet, so until it is, every send fails with the
-"didn't reach us" message and the gateway logs the receiver's status.
+Feedback is on by default. To turn it off, set `feedback_enabled: false` in
+YAML or `OTARI_FEEDBACK_ENABLED=false`, then restart. Off, the endpoint is not
+mounted and the Feedback entry is hidden. Hybrid gateways never offer the form.
+This setting is visible in Settings but cannot be changed there at runtime.
 
 Each signed-in person (and the master key) can send five messages every ten
 minutes; past that the gateway answers `429` with `Retry-After`.

@@ -113,7 +113,7 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         "maintenance_mode": False,
         "passkeys_ready": False,
         "oauth_providers": [],
-        "feedback_enabled": False,
+        "feedback_enabled": True,
         "mail_ready": False,
         "public_catalog": False,
         "open_signup": False,
