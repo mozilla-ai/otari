@@ -118,6 +118,43 @@ def test_invalid_feedback_does_not_leave_gateway(
     assert not deliveries
 
 
+def test_each_caller_is_limited_to_five_sends_per_window(
+    client: TestClient,
+    db_session: Session,
+    master_key_header: dict[str, str],
+    deliveries: list[httpx.Request],
+) -> None:
+    for _ in range(5):
+        sent = client.post(f"{API_ROOT}/feedback", json={"message": "Idea"}, headers=master_key_header)
+        assert sent.status_code == 204
+    refused = client.post(f"{API_ROOT}/feedback", json={"message": "One more"}, headers=master_key_header)
+    assert refused.status_code == 429
+    assert 1 <= int(refused.headers["Retry-After"]) <= 600
+    assert len(deliveries) == 5
+
+    # A body that never leaves the gateway spends nothing, and the limit is the
+    # caller's own: a member signed in on the same gateway still gets through.
+    assert client.post(f"{API_ROOT}/feedback", json={"message": " "}, headers=master_key_header).status_code == 422
+    added = client.post(
+        f"{API_ROOT}/organizations/me/members", json={"email": "member@example.com"}, headers=master_key_header
+    )
+    assert added.status_code == 201, added.text
+    user = db_session.scalars(select(User).where(col(User.email) == "member@example.com")).one()
+    token = "feedback-limit-member"
+    db_session.add(
+        DashboardSession(
+            token_hash=hash_session_token(token),
+            user_id=user.id,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+    )
+    db_session.commit()
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    assert client.post(f"{API_ROOT}/feedback", json={"message": "Mine"}).status_code == 204
+    assert len(deliveries) == 6
+
+
 def test_chunked_body_limit(
     client: TestClient, master_key_header: dict[str, str], deliveries: list[httpx.Request]
 ) -> None:

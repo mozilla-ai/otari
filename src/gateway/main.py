@@ -35,6 +35,7 @@ from gateway.services.budgets import run_reservation_sweeper
 from gateway.services.catalog_selectors import reset_selector_index
 from gateway.services.code_execution.container_sweeper import run_sandbox_container_sweeper
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
+from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import run_file_sweeper
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
@@ -881,6 +882,8 @@ def create_app(config: GatewayConfig) -> FastAPI:
         app.state.login_rate_limiter = RateLimiter(config.dashboard_login_rate_limit_per_minute)
     else:
         app.state.login_rate_limiter = None
+
+    app.state.feedback_rate_limiter = new_feedback_rate_limiter() if config.feedback_enabled else None
 
     if config.public_catalog_rate_limit_per_minute is not None:
         app.state.public_catalog_rate_limiter = RateLimiter(config.public_catalog_rate_limit_per_minute)

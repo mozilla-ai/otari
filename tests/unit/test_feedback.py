@@ -1,20 +1,33 @@
 """Bounded, private forwarding and safe receiver failures."""
 
 import logging
+from collections.abc import Iterator
 
 import httpx
 import pytest
 
 from gateway.exceptions.feedback_exceptions import FeedbackDeliveryError
+from gateway.log_config import logger as gateway_logger
 from gateway.schemas.feedback import FeedbackSubmission
 from gateway.services.feedback import FeedbackService
+
+
+@pytest.fixture
+def gateway_logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """The gateway logger does not propagate, so caplog sees it only with its handler attached."""
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.DEBUG, logger="gateway")
+    try:
+        yield caplog
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("upstream", "expected"), [(204, None), (200, 503), (302, 503), (413, 413), (422, 422), (429, 429), (500, 503)]
 )
-async def test_receiver_statuses(upstream: int, expected: int | None, caplog: pytest.LogCaptureFixture) -> None:
+async def test_receiver_statuses(upstream: int, expected: int | None, gateway_logs: pytest.LogCaptureFixture) -> None:
     calls = []
 
     def receive(request: httpx.Request) -> httpx.Response:
@@ -26,16 +39,16 @@ async def test_receiver_statuses(upstream: int, expected: int | None, caplog: py
         )
 
     service = FeedbackService(transport=httpx.MockTransport(receive))
-    with caplog.at_level(logging.DEBUG):
-        if expected is None:
+    if expected is None:
+        await service.submit(FeedbackSubmission(message="PRIVATE feedback"))
+    else:
+        with pytest.raises(FeedbackDeliveryError) as error:
             await service.submit(FeedbackSubmission(message="PRIVATE feedback"))
-        else:
-            with pytest.raises(FeedbackDeliveryError) as error:
-                await service.submit(FeedbackSubmission(message="PRIVATE feedback"))
-            assert error.value.status_code == expected
-            assert error.value.retry_after == (3600 if expected == 429 else None)
+        assert error.value.status_code == expected
+        assert error.value.retry_after == (3600 if expected == 429 else None)
+        assert f"Feedback receiver answered {upstream}" in gateway_logs.text
     assert len(calls) == 1
-    assert "PRIVATE" not in caplog.text
+    assert "PRIVATE" not in gateway_logs.text
 
 
 @pytest.mark.asyncio

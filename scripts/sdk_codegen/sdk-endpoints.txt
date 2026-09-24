@@ -151,7 +151,8 @@ PUT /api/v1/auth/password                           # dashboard-only
 # the credential ones. An SDK authenticates as a key rather than as a person and
 # has no account page to render, so there is nothing here for one to wrap.
 PATCH /api/v1/auth/profile                          # dashboard-only
-# A signed-in person's message to the Otari team, sent from the account menu.
+# A signed-in person's message to the Otari team, sent from the top bar (the
+# account menu on a phone).
 # It is something a person writes, not something an integration calls.
 POST /api/v1/feedback                               # dashboard-only
 # Signup, email verification, and password reset (otari#650): claiming a

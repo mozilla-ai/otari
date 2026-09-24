@@ -7,9 +7,19 @@ import httpx
 from gateway.core.config import API_ROOT
 from gateway.exceptions.feedback_exceptions import FeedbackDeliveryError
 from gateway.log_config import logger
+from gateway.rate_limit import RateLimiter
 from gateway.schemas.feedback import FeedbackSubmission
 
 FEEDBACK_RECEIVER = f"https://api.otari.ai{API_ROOT}/feedback/submissions"
+# Each send is a real POST upstream, and the receiver's own limit is shared by
+# everyone behind this gateway's address, so one caller must not spend it.
+SENDS_PER_WINDOW = 5
+WINDOW_SEC = 10 * 60
+
+
+def new_feedback_rate_limiter() -> RateLimiter:
+    """A fresh per-caller send limit, kept on ``app.state.feedback_rate_limiter``."""
+    return RateLimiter(SENDS_PER_WINDOW, window_sec=WINDOW_SEC)
 
 
 class FeedbackService:
@@ -27,6 +37,8 @@ class FeedbackService:
             ):
                 if response.status_code == 204:
                     return
+                # The status only: the body is the receiver's and may echo the message.
+                logger.warning("Feedback receiver answered %s", response.status_code)
                 if response.status_code in (413, 422, 429):
                     retry = response.headers.get("Retry-After", "")
                     retry_after = (

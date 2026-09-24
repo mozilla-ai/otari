@@ -442,10 +442,10 @@ boundary.
 
 With `feedback_enabled` on, signed-in dashboard users can choose **Feedback**,
 beside Documentation in the top bar (in the account menu on a phone), to send a
-message to the Otari team. The team
-receives it privately in Slack. Only the message is sent: no email, screenshot,
-page URL, account identifier, deployment identifier, or usage history is
-attached. Opening the form, typing, and canceling make no outbound request.
+message to the Otari team. The team receives it privately in Slack. Only the
+message is sent: no email, screenshot, page URL, account identifier, deployment
+identifier, or usage history is attached. Opening the form, typing, and
+canceling make no outbound request.
 
 The gateway forwards the message to
 `https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the
@@ -456,8 +456,14 @@ logging or tracing you configure.
 
 Feedback is off by default. To turn it on, set `feedback_enabled: true` in YAML
 or `OTARI_FEEDBACK_ENABLED=true`, then restart. Off, the endpoint is not mounted
-and the Feedback entry is hidden. Hybrid gateways never offer the form. This setting
-is visible in Settings but cannot be changed there at runtime.
+and the Feedback entry is hidden. Hybrid gateways never offer the form. This
+setting is visible in Settings but cannot be changed there at runtime.
+
+The otari.ai intake is not live yet, so until it is, every send fails with the
+"didn't reach us" message and the gateway logs the receiver's status.
+
+Each signed-in person (and the master key) can send five messages every ten
+minutes; past that the gateway answers `429` with `Retry-After`.
 
 Feedback text accepts up to 4,000 Unicode code points. The gateway waits up to
 10 seconds for the receiver and does not retry automatically. An unconfirmed
