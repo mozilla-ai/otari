@@ -8907,7 +8907,9 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             /** Container */
-            container?: string | null;
+            container?: string | {
+                [key: string]: unknown;
+            } | null;
             /** Context Management */
             context_management?: {
                 [key: string]: unknown;

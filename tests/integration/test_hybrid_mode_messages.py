@@ -1254,12 +1254,22 @@ def _container_route(monkeypatch: pytest.MonkeyPatch, *, managed: bool, calls: l
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
 
+@pytest.mark.parametrize(
+    "container",
+    [
+        "container_01ABC",
+        {"id": "container_01ABC"},
+        {"skills": [{"type": "anthropic", "skill_id": "pptx"}]},
+    ],
+    ids=["id", "object-with-id", "object-with-skills-only"],
+)
 def test_container_is_refused_on_a_managed_credential(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    container: str | dict[str, Any],
 ) -> None:
     """A managed attempt runs on an account many workspaces share, so a
-    caller-chosen container id would address another tenant's state."""
+    caller-chosen container would address or create state on that account."""
     calls: list[str] = []
     _container_route(monkeypatch, managed=True, calls=calls)
 
@@ -1269,7 +1279,7 @@ def test_container_is_refused_on_a_managed_credential(
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 100,
-            "container": "container_01ABC",
+            "container": container,
         },
         headers={"Authorization": "Bearer user_test_token"},
     )

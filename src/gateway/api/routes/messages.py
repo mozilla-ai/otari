@@ -706,7 +706,7 @@ CONTAINER_ON_MANAGED_CREDENTIAL_DETAIL = (
 )
 
 
-def _reject_container_on_managed_credential(ctx: RequestContext, container: str) -> None:
+def _reject_container_on_managed_credential(ctx: RequestContext, container: str | dict[str, Any]) -> None:
     """Refuse a caller-chosen container id when the upstream account is not the caller's.
 
     A container id names an execution environment and the files uploaded into it,
