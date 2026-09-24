@@ -40,7 +40,7 @@ plane to [otari.ai](https://otari.ai).
 - Revocable API keys with user, workspace, and model scope
 - Budget checks before spend and usage records after settlement
 - Local routing policies for failover, weighting, and learned selection
-- Optional code execution, web search, MCP, guardrails, and file understanding
+- Optional code execution, web search, MCP, inference guardrails, and file understanding
 
 ## Quickstart
 
@@ -87,7 +87,7 @@ The command a developer runs next to a coding agent (`otari hook`,
 brew install mozilla-ai/tap/otari
 ```
 
-See [Agent Gates](docs/agent-gates.md) and
+See [Agent Guardrails](docs/agent-guardrails.md) and
 [Use with Claude Code](docs/use-with-claude-code.md).
 
 ## Run the full stack
@@ -177,7 +177,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 - [Routing](docs/routing.md)
 - [Access control](docs/access-control.md)
 - [Built-in tools](docs/tools.md)
-- [Agent Gates](docs/agent-gates.md)
+- [Agent Guardrails](docs/agent-guardrails.md)
 - [SDK and agent integrations](docs/index.md#for-integrators)
 - [Architecture](ARCHITECTURE.md)
 

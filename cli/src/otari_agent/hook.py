@@ -1,9 +1,9 @@
-"""`otari hook`, `otari hook setup` and `otari gates generate`: the agent-side half of Agent Gates.
+"""`otari hook`, `otari hook setup` and `otari guardrails generate`: the agent-side half of Agent Guardrails.
 
 Reads one hook payload from a supported coding agent, collects the evidence it
-names, evaluates the repository's `.otari-gates.yml` in process (or, when opted
+names, evaluates the repository's `.otari-guardrails.yml` in process (or, when opted
 in, asks a gateway's Hook Server to) and answers in the harness's own exit-code
-protocol. See docs/agent-gates.md.
+protocol. See docs/agent-guardrails.md.
 """
 
 import json
@@ -43,7 +43,7 @@ _HOOK_EDIT_TOOL_PATH_FIELDS = {"Edit": "file_path", "Write": "file_path", "Noteb
 
 # Claude Code's shell tool and the tool_input field naming the command it is
 # about to run. A PreToolUse call for this tool is the only evidence a
-# command gate gets before the command runs; see docs/agent-gates.md.
+# command gate gets before the command runs; see docs/agent-guardrails.md.
 _HOOK_COMMAND_TOOL_FIELDS = {"Bash": "command"}
 
 # Codex hook-dispatches its own shell tool under the same canonical name
@@ -682,7 +682,7 @@ def _hook_judge_workdir() -> Path:
     gate calling out to a model at all. A dedicated directory under
     `~/.otari/` (not the shared system temp root, and not the repo being
     judged) is a stable, otari-owned place a future judge-specific hook or
-    its own `.otari-gates.yml` could live, the same reasoning
+    its own `.otari-guardrails.yml` could live, the same reasoning
     `_hook_judge_log_path` already applies to the audit log. Today it holds
     nothing, so nothing resolves from it: no hooks, since Claude Code walks
     up from `cwd` looking for a `.claude/settings.local.json` and finds none
@@ -1126,7 +1126,7 @@ def _hook_collect_judge_verdicts(
     if len(judge_gates) > _HOOK_JUDGE_MAX_GATES_PER_RUN:
         skipped = [gate.id for gate in judge_gates[_HOOK_JUDGE_MAX_GATES_PER_RUN:]]
         click.echo(
-            f"otari hook: {len(judge_gates):,} judge gates in this policy, over the "
+            f"otari hook: {len(judge_gates):,} judge gates in this guardrail, over the "
             f"{_HOOK_JUDGE_MAX_GATES_PER_RUN:,} limit; skipping: {', '.join(skipped)}.",
             err=True,
         )
@@ -1239,7 +1239,7 @@ def _hook_run_check_verifier(repo_root: Path, verifier: str, *, deadline: float)
 
     No sandboxing beyond that check, and no guard requiring the script to
     predate the diff under check, deliberately: see VerifierGate's own
-    docstring and docs/agent-gates.md for why. `cwd` is the repo root, so a
+    docstring and docs/agent-guardrails.md for why. `cwd` is the repo root, so a
     verifier that wants to inspect the working tree (`git diff`, `git
     status`, a plain file scan) can do so exactly the way a Makefile target
     or a pre-commit hook already checked into the repo would.
@@ -1371,7 +1371,7 @@ def _hook_collect_check_verdicts(
     verifier that is not safe under that (one that writes to a fixed
     temporary path another verifier might also use, or that mutates the
     working tree itself rather than only reading it, e.g. `git stash`) can
-    now race in a way it could not before this build. `.otari-gates/verifiers/`
+    now race in a way it could not before this build. `.otari-guardrails/verifiers/`
     in this repo only ever reads the tree (`git status`/`git diff`, a file
     scan), which is safe under concurrency for free; a verifier that needs to
     write should not assume it is the only one running.
@@ -1393,7 +1393,7 @@ def _hook_collect_check_verdicts(
     if len(check_gates) > _HOOK_CHECK_MAX_GATES_PER_RUN:
         skipped = [gate.id for gate in check_gates[_HOOK_CHECK_MAX_GATES_PER_RUN:]]
         click.echo(
-            f"otari hook: {len(check_gates):,} verifier gates in this policy, over the "
+            f"otari hook: {len(check_gates):,} verifier gates in this guardrail, over the "
             f"{_HOOK_CHECK_MAX_GATES_PER_RUN:,} limit; skipping: {', '.join(skipped)}.",
             err=True,
         )
@@ -1476,14 +1476,14 @@ def hook(
 
     Reads one JSON hook payload on stdin, collects the evidence that payload
     carries (a PreToolUse call's own target path, or a Stop event's Git
-    status), and evaluates it against the local `.otari-gates.yml` itself, in
+    status), and evaluates it against the local `.otari-guardrails.yml` itself, in
     process, through `otari_agent.domain.check.run_policy_check`: no server,
     no credential, needed for this by default. `--url`/`--api-key` (or
     `OTARI_URL`/`OTARI_API_KEY`) are the opt-in exception: give either and
     this instead calls a gateway's `POST /api/v1/hooks/check` over HTTP the
     way every version of this command before local evaluation existed did,
     for whoever wants a shared/hosted gateway to be the one deciding rather
-    than the machine the agent is running on. See docs/agent-gates.md.
+    than the machine the agent is running on. See docs/agent-guardrails.md.
 
     Exit code is this harness's own protocol, not otari policy check's:
     Claude Code's and Codex's PreToolUse and Stop hooks both take 0 (proceed)
@@ -1519,8 +1519,20 @@ def hook(
     if root is None:
         return
 
-    gates_file = root / ".otari-gates.yml"
+    gates_file = root / ".otari-guardrails.yml"
     if not gates_file.is_file():
+        # This command fails open, so a repo still carrying the pre-rename
+        # `.otari-gates.yml` would stop enforcing every gate and report
+        # nothing. Naming that one case keeps it visible without reading the
+        # old file, which would be a compatibility path to maintain and later
+        # remove. A repo with no policy at all stays silent, as before.
+        legacy_file = root / ".otari-gates.yml"
+        if legacy_file.is_file():
+            click.echo(
+                f"otari hook: {legacy_file.name} is no longer read. Rename it to "
+                f"{gates_file.name}; until then this repo enforces no gates.",
+                err=True,
+            )
         return
     try:
         policy_yaml = gates_file.read_text(encoding="utf-8")
@@ -1651,7 +1663,7 @@ def hook(
         # None rather than `[]`: `[]` means "collected, and there is none",
         # which would let a required command/command_if_changed gate
         # read a failed collection as a clean pass instead of the unresolved
-        # `unknown` it actually is (see docs/agent-gates.md).
+        # `unknown` it actually is (see docs/agent-guardrails.md).
         transcript_path = payload.get("transcript_path")
         collect_transcript_commands = (
             _hook_collect_codex_transcript_commands if harness == "codex" else _hook_collect_transcript_commands
@@ -1930,7 +1942,7 @@ def _policy_header(repo_name: str) -> str:
     return (
         'schema_version: "1.0"\n'
         "policy:\n"
-        f"  id: {json.dumps(f'{repo_name}/gates')}\n"
+        f"  id: {json.dumps(f'{repo_name}/guardrails')}\n"
         "  description: Rules this repo checks on its own working tree.\n"
         "\n"
         "gates:\n"
@@ -1965,7 +1977,7 @@ def _starter_gates_yaml(repo_name: str) -> str:
         # A path nothing legitimately generates, on purpose. A gate over a
         # generated file warns on the very command that regenerates it, which
         # is the trap this repo's own policy documents twice (see the
-        # postman-collection and pyproject gates in .otari-gates.yml).
+        # postman-collection and pyproject gates in .otari-guardrails.yml).
         "    runs: [pre_tool_use.edit_target, stop.working_tree]\n"
         "    enforcement: advisory\n"
         '    forbidden: [".env", "**/.env"]\n'
@@ -2067,7 +2079,7 @@ _HOOK_SETUP_BY_HARNESS = {
     default=None,
     help=(
         "Embed this credential in the generated command, opting the registered hook into checking "
-        "against a gateway over HTTP instead of evaluating the policy locally. Omit for the default: "
+        "against a gateway over HTTP instead of evaluating the guardrail locally. Omit for the default: "
         "no credential, no server, evaluated in process."
     ),
 )
@@ -2079,25 +2091,25 @@ def hook_setup(harness: str, api_key: str | None) -> None:
     _HOOK_SETUP_BY_HARNESS) so registering it is not a manual JSON edit. Both
     point at the same otari hook invocation; the harness passes its own
     hook_event_name in the payload, so one callback serves either event.
-    Offers to scaffold a starter .otari-gates.yml when this repo has none
+    Offers to scaffold a starter .otari-guardrails.yml when this repo has none
     yet, and picks the PreToolUse matcher (whether it needs to cover a shell
     tool) from whatever gates the policy turns out to have; Stop needs no
-    matcher; see docs/agent-gates.md for why both are registered
+    matcher; see docs/agent-guardrails.md for why both are registered
     unconditionally.
     """
     root = _hook_find_repo_root(Path.cwd())
     if root is None:
         raise click.ClickException("Not inside a Git repository.")
 
-    gates_file = root / ".otari-gates.yml"
+    gates_file = root / ".otari-guardrails.yml"
     if not gates_file.is_file():
-        if click.confirm(f"No {gates_file.name} found in {root}. Create a starter policy?", default=True):
+        if click.confirm(f"No {gates_file.name} found in {root}. Create a starter guardrail?", default=True):
             gates_file.write_text(_starter_gates_yaml(root.name), encoding="utf-8")
             click.echo(f"Wrote {gates_file}.")
         else:
             click.echo(
                 f"Skipping. otari hook will still be registered below, but every gate check "
-                f"passes until {gates_file.name} exists; see docs/agent-gates.md."
+                f"passes until {gates_file.name} exists; see docs/agent-guardrails.md."
             )
 
     setup = _HOOK_SETUP_BY_HARNESS[harness]
@@ -2131,7 +2143,7 @@ def hook_setup(harness: str, api_key: str | None) -> None:
     # benefits: path already falls back to `git status` on Stop
     # (catching a Bash-written change PreToolUse never saw coming), and
     # command_if_changed/command now read real command evidence there
-    # too (from the session's own transcript; see docs/agent-gates.md). A
+    # too (from the session's own transcript; see docs/agent-guardrails.md). A
     # PreToolUse-only install left both silently unreachable.
     stop_created = _merge_hook_entry(settings_path, "Stop", command)
     click.echo(f"{'Added' if stop_created else 'Updated'} the Stop hook in {settings_path}.")
@@ -2201,7 +2213,7 @@ for command_if_changed, optional (defaults to "always") for the other two.
 def _gates_generate_build_prompt(*, doc_name: str, doc_text: str, existing_ids: frozenset[str]) -> str:
     existing_ids_text = ", ".join(sorted(existing_ids)) if existing_ids else "(none yet)"
     return (
-        "You are proposing gates for an otari `.otari-gates.yml` policy: mechanical "
+        "You are proposing gates for an otari `.otari-guardrails.yml` guardrail: mechanical "
         "rules a coding agent's own hook checks against its working tree and "
         "commands before proceeding.\n\n"
         f"{_GATES_GENERATE_SCHEMA_REFERENCE}\n"
@@ -2231,7 +2243,7 @@ def _gates_generate_run_cli(argv: list[str], prompt: str, *, label: str) -> str:
     command's own prompt asks for. Runs from `_hook_judge_workdir()`, the
     same isolated directory a judge gate's own model call uses and for the
     same reason (see that function's own docstring): this repo's own
-    `.otari-gates.yml` can register `otari hook` on `Stop`, and running this
+    `.otari-guardrails.yml` can register `otari hook` on `Stop`, and running this
     call from the repo it is reading would let that fire for this call too.
     """
     try:
@@ -2312,13 +2324,13 @@ def _gates_generate_validate_gate(gate_dict: dict[str, Any]) -> None:
     """Raise PolicyError unless `gate_dict` is a well-formed gate on its own.
 
     Wraps it in a minimal policy skeleton and runs it through the exact
-    parser a submitted `.otari-gates.yml`/Hook Server request goes through
+    parser a submitted `.otari-guardrails.yml`/Hook Server request goes through
     (`otari_agent.domain.policy.parse_policy`), so a hallucinated field,
     type, or a `judge` gate proposed as `required` is caught here, before
     this ever gets appended to the real file, not the first time the hook
     actually runs against it.
     """
-    skeleton = {"schema_version": "1.0", "policy": {"id": "gates-generate/preview"}, "gates": [gate_dict]}
+    skeleton = {"schema_version": "1.0", "policy": {"id": "guardrails-generate/preview"}, "gates": [gate_dict]}
     parse_policy(yaml.safe_dump(skeleton, sort_keys=False, allow_unicode=True), source="proposed gate")
 
 
@@ -2394,7 +2406,7 @@ def _gates_generate_read_choice(message: str, choices: str, default: str) -> str
 
 
 def _gates_generate_render_list_item(gate_dict: dict[str, Any], indent: str = "  ") -> str:
-    """Render one accepted gate as a block-sequence item for `.otari-gates.yml`, its
+    """Render one accepted gate as a block-sequence item for `.otari-guardrails.yml`, its
     `- ` marker at `indent`.
 
     Deliberately plain block style throughout (PyYAML's own default), not
@@ -2446,7 +2458,7 @@ def _gates_generate_append(gates_file: Path, repo_name: str, gate_dict: dict[str
 
     Splices raw text rather than round-tripping the file through a YAML
     dump, so every hand-written comment already in it (as in this repo's
-    own `.otari-gates.yml`) survives untouched. `schema_version`, `policy`,
+    own `.otari-guardrails.yml`) survives untouched. `schema_version`, `policy`,
     and `gates` are a policy's only top-level keys
     (domain/policy.py's `_TOP_LEVEL_FIELDS`), so the end of the `gates:`
     sequence is wherever a following line returns to column 0 without being
@@ -2496,7 +2508,7 @@ def _gates_generate_write_checked(gates_file: Path, new_text: str) -> None:
         parse_policy(new_text, source=str(gates_file))
     except PolicyError as exc:
         raise click.ClickException(
-            f"Appending to {gates_file} would produce a policy that no longer parses ({exc}); "
+            f"Appending to {gates_file} would produce a guardrail that no longer parses ({exc}); "
             "left it unchanged."
         ) from exc
     gates_file.write_text(new_text, encoding="utf-8")
@@ -2517,12 +2529,12 @@ def _gates_generate_parse_edit(edited: str | None, *, fallback: dict[str, Any]) 
     return parsed
 
 
-@click.group(name="gates")
-def gates() -> None:
-    """Work with a repo's `.otari-gates.yml` policy."""
+@click.group(name="guardrails")
+def guardrails() -> None:
+    """Work with a repo's `.otari-guardrails.yml` guardrail."""
 
 
-@gates.command(name="generate")
+@guardrails.command(name="generate")
 @click.option(
     "--source",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -2530,18 +2542,18 @@ def gates() -> None:
     help="Doc to read candidate rules from. Defaults to AGENTS.md, then CLAUDE.md, in the repo root.",
 )
 @click.option(
-    "--gates-file",
-    "gates_file_option",
+    "--guardrail-file",
+    "guardrail_file_option",
     type=click.Path(dir_okay=False, path_type=Path),
     default=None,
-    help="Policy file to append accepted gates to. Defaults to .otari-gates.yml in the repo root.",
+    help="Guardrail file to append accepted gates to. Defaults to .otari-guardrails.yml in the repo root.",
 )
 @click.option(
     "--cli",
     "cli_override",
     callback=_parse_judge_cli,
     default=None,
-    envvar="OTARI_GATES_GENERATE_CLI",
+    envvar="OTARI_GUARDRAILS_GENERATE_CLI",
     help=(
         "Comma-separated, ordered CLI backend(s) to try (claude, codex). Defaults to claude, "
         "then codex, whichever is found on PATH first."
@@ -2550,16 +2562,16 @@ def gates() -> None:
 @click.option(
     "--model",
     default=None,
-    envvar="OTARI_GATES_GENERATE_MODEL",
+    envvar="OTARI_GUARDRAILS_GENERATE_MODEL",
     help="Model the resolved CLI uses for its one generation call. Left unset uses that CLI's own default model.",
 )
-def gates_generate(
+def guardrails_generate(
     source: Path | None,
-    gates_file_option: Path | None,
+    guardrail_file_option: Path | None,
     cli_override: tuple[str, ...] | None,
     model: str | None,
 ) -> None:
-    """Propose `.otari-gates.yml` gates from a repo's own AGENTS.md/CLAUDE.md, one at a time.
+    """Propose `.otari-guardrails.yml` gates from a repo's own AGENTS.md/CLAUDE.md, one at a time.
 
     Resolves a locally installed model CLI (`claude -p` or `codex exec`,
     whichever is found on PATH first; no otari server, no otari credential)
@@ -2572,7 +2584,7 @@ def gates_generate(
     gate (edited or not) is validated the same way a submitted policy is
     (`otari_agent.domain.policy.parse_policy`) before it is appended, so a
     hallucinated field or type is caught here, not the first time the hook
-    actually runs. See docs/agent-gates.md for the gate schema this asks the
+    actually runs. See docs/agent-guardrails.md for the gate schema this asks the
     model to stay inside.
     """
     root = _hook_find_repo_root(Path.cwd())
@@ -2590,7 +2602,7 @@ def gates_generate(
             "pass --source to point at a smaller/narrower doc."
         )
 
-    target = gates_file_option if gates_file_option is not None else root / ".otari-gates.yml"
+    target = guardrail_file_option if guardrail_file_option is not None else root / ".otari-guardrails.yml"
     existing_ids: set[str] = set()
     if target.is_file():
         try:

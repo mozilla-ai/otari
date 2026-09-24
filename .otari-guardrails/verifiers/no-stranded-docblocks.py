@@ -3,7 +3,7 @@
 a declaration it does not document (AGENTS.md, "Repository Conventions").
 
 Run with cwd at the repo root. Exit 0 is pass, 1 is fail, anything else is
-error, per docs/agent-gates.md's check_passed exit-code contract. Python's
+error, per docs/agent-guardrails.md's check_passed exit-code contract. Python's
 own `re`, not a shelled-out `grep`, is what makes the match itself correct:
 the pattern spans a newline, which a real `grep -P` invocation only handles
 portably with `--null-data`, and BSD grep has no `-P` at all either way.

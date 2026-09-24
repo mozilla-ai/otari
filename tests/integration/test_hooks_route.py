@@ -1201,7 +1201,7 @@ gates:
     type: verifier
     runs: [stop.verifier]
     enforcement: required
-    verifier: .otari-gates/verifiers/no-conflict-markers.sh
+    verifier: .otari-guardrails/verifiers/no-conflict-markers.sh
     message: A tracked file still carries a Git merge-conflict marker.
 """
 
@@ -1319,7 +1319,7 @@ gates:
     type: verifier
     runs: [stop.verifier]
     enforcement: required
-    verifier: .otari-gates/verifiers/no-conflict-markers.sh
+    verifier: .otari-guardrails/verifiers/no-conflict-markers.sh
     when_changed: ["src/**"]
     message: A tracked file still carries a Git merge-conflict marker.
 """

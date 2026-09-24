@@ -1,4 +1,4 @@
-"""Parse a submitted ``.otari-gates.yml`` body.
+"""Parse a submitted ``.otari-guardrails.yml`` body.
 
 Pure: the caller (an agent hook, eventually the native dispatcher) reads its
 own repo's policy file and Git evidence and submits both in one request, per

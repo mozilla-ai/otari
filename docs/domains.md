@@ -257,8 +257,10 @@ splits inside tools, behind the registry interface, not into a new domain.
 
 ### guardrails
 
-Guardrails that run on a request, and an organization's guardrail
-configuration.
+Inference Guardrails: checks that run on a request before the provider is
+called, and an organization's guardrail configuration. Distinct from
+`agent-guardrails` below, which checks what a coding agent did to a
+repository; the two share no route, table or identifier.
 
 - Routes: `organization_guardrails.py`, `organization_guardrail_definitions.py`
 - Services: `guardrails.py`, `guardrail_catalog.py`,
@@ -269,9 +271,9 @@ configuration.
 - Exceptions: `guardrails_exceptions.py`
 - Models: `guardrails.py`
 
-### agent-gates
+### agent-guardrails
 
-The Hook Server that evaluates an Agent Gates policy against caller-submitted
+The Hook Server that evaluates an Agent Guardrails policy against caller-submitted
 evidence. The evaluator is pure policy code with no database, so the domain has
 a service package and no repository.
 
@@ -373,7 +375,7 @@ One domain at a time, in this order:
 7. routing.
 8. identity and organizations: splitting `organization_service.py` and
    `errors.py`.
-9. api-keys, guardrails, agent-gates and platform, which are small.
+9. api-keys, guardrails, agent-guardrails and platform, which are small.
 10. inference last, after the tool loop is split by dialect.
 
 ## What one domain change does

@@ -45,7 +45,7 @@ def _judge_log_in_tmp_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
-    (tmp_path / ".otari-gates.yml").write_text(_GATES_YAML, encoding="utf-8")
+    (tmp_path / ".otari-guardrails.yml").write_text(_GATES_YAML, encoding="utf-8")
     return tmp_path
 
 
@@ -257,7 +257,7 @@ def test_stop_event_evaluates_locally_and_blocks_on_git_status(monkeypatch: pyte
     path's evidence collection and evaluation are wired together correctly
     end to end.
     """
-    (repo / ".otari-gates.yml").write_text(
+    (repo / ".otari-guardrails.yml").write_text(
         'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
         "  - id: g\n    type: path\n"
         "    runs: [pre_tool_use.edit_target, stop.working_tree]\n    enforcement: required\n"
@@ -745,6 +745,35 @@ def test_no_policy_file_is_a_no_op(tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
     assert result.exit_code == 0, result.output
+    # Silent, not merely passing: this command runs on every tool call, so a
+    # repo that simply has no policy must not say anything at all.
+    assert result.output == ""
+
+
+def test_the_pre_rename_policy_filename_is_reported_rather_than_read(tmp_path: Path) -> None:
+    """A repo still on `.otari-gates.yml` enforces nothing, and says so.
+
+    The file is not read: this is a one-line diagnostic for the rename, not a
+    compatibility path. Without it the rename is silent, because this command
+    fails open and a policy it cannot find is indistinguishable from a repo
+    that never had one.
+    """
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".otari-gates.yml").write_text('schema_version: "1.0"\npolicy:\n  id: x\ngates: []\n')
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
+    assert result.exit_code == 0, result.output
+    assert ".otari-gates.yml is no longer read" in result.output
+    assert ".otari-guardrails.yml" in result.output
+
+
+def test_the_new_policy_filename_wins_and_says_nothing_about_the_old_one(tmp_path: Path) -> None:
+    """Both present: the new file is authoritative and the warning stays quiet."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".otari-gates.yml").write_text("not even yaml: [\n")
+    (tmp_path / ".otari-guardrails.yml").write_text('schema_version: "1.0"\npolicy:\n  id: x\ngates: []\n')
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
+    assert result.exit_code == 0, result.output
+    assert "no longer read" not in result.output
 
 
 def test_a_non_utf8_policy_file_does_not_block(tmp_path: Path) -> None:
@@ -756,7 +785,7 @@ def test_a_non_utf8_policy_file_does_not_block(tmp_path: Path) -> None:
     evidence-collection failure in this command already has.
     """
     (tmp_path / ".git").mkdir()
-    (tmp_path / ".otari-gates.yml").write_bytes(b'schema_version: "1.0"\npolicy:\n  id: x\n# caf\xe9\ngates: []\n')
+    (tmp_path / ".otari-guardrails.yml").write_bytes(b'schema_version: "1.0"\npolicy:\n  id: x\n# caf\xe9\ngates: []\n')
     result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
     assert result.exit_code == 0, result.output
     assert "could not read" in result.output
@@ -775,7 +804,7 @@ def test_malformed_stdin_is_a_no_op() -> None:
 def test_no_flags_evaluates_locally_with_no_credential_needed(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     """No `--api-key`/`--url` is the default now, not a missing-setup case:
 
-    `otari hook` evaluates `.otari-gates.yml` in process
+    `otari hook` evaluates `.otari-guardrails.yml` in process
     (`otari_agent.domain.check.run_policy_check`) and calls `httpx.post`
     only when either flag opts into the other, HTTP-backed mode. A required
     gate still blocks with no credential, no config, and no server at all.
@@ -785,7 +814,7 @@ def test_no_flags_evaluates_locally_with_no_credential_needed(monkeypatch: pytes
         raise AssertionError("httpx.post should not be called for the default, local evaluation path")
 
     monkeypatch.setattr(httpx, "post", fail_if_called)
-    (repo / ".otari-gates.yml").write_text(
+    (repo / ".otari-guardrails.yml").write_text(
         'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
         "  - id: g\n    type: path\n"
         "    runs: [pre_tool_use.edit_target, stop.working_tree]\n    enforcement: required\n"
@@ -810,7 +839,7 @@ def test_malformed_local_policy_does_not_block(monkeypatch: pytest.MonkeyPatch, 
     every other evidence-collection failure this command handles, not raise.
     """
     monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
-    (repo / ".otari-gates.yml").write_text("not: valid: yaml: at: all:\n  - [", encoding="utf-8")
+    (repo / ".otari-guardrails.yml").write_text("not: valid: yaml: at: all:\n  - [", encoding="utf-8")
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
@@ -1043,7 +1072,7 @@ _JUDGE_GATES_YAML = (
 @pytest.fixture
 def judge_repo(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
-    (tmp_path / ".otari-gates.yml").write_text(_JUDGE_GATES_YAML, encoding="utf-8")
+    (tmp_path / ".otari-guardrails.yml").write_text(_JUDGE_GATES_YAML, encoding="utf-8")
     return tmp_path
 
 
@@ -1733,7 +1762,7 @@ def test_stop_event_bounds_total_judge_time_so_a_required_gate_still_reaches_the
         "  - id: judge-2\n    type: judge\n"
         "    runs: [stop.session]\n    enforcement: advisory\n    rubric: r2\n    message: m2\n"
     )
-    (tmp_path / ".otari-gates.yml").write_text(gates_yaml, encoding="utf-8")
+    (tmp_path / ".otari-guardrails.yml").write_text(gates_yaml, encoding="utf-8")
 
     claude_call_count = 0
 
@@ -1832,7 +1861,7 @@ def test_stop_event_with_a_non_utf8_diff_still_blocks_a_required_gate(
         "  - id: follows-pattern\n    type: judge\n    runs: [stop.session]\n    enforcement: advisory\n"
         '    rubric: r\n    when_changed: ["src/**"]\n    message: m\n'
     )
-    (tmp_path / ".otari-gates.yml").write_text(gates_yaml, encoding="utf-8")
+    (tmp_path / ".otari-guardrails.yml").write_text(gates_yaml, encoding="utf-8")
 
     captured: dict[str, Any] = {}
 
@@ -1859,10 +1888,14 @@ def test_stop_event_with_a_non_utf8_diff_still_blocks_a_required_gate(
         input=json.dumps({"hook_event_name": "Stop", "cwd": str(tmp_path)}),
     )
     assert result.exit_code == 2, result.output
-    # .otari-gates.yml itself is untracked here (written after the initial commit,
+    # .otari-guardrails.yml itself is untracked here (written after the initial commit,
     # for a self-contained test repo) and so is real, expected changed-path evidence
     # too, alongside the two files this test cares about.
-    assert sorted(captured["json"]["changed_paths"]) == [".otari-gates.yml", "CHANGELOG.md", "src/gateway/latin.py"]
+    assert sorted(captured["json"]["changed_paths"]) == [
+        ".otari-guardrails.yml",
+        "CHANGELOG.md",
+        "src/gateway/latin.py",
+    ]
 
 
 def test_a_policy_with_no_judge_gates_submits_no_judge_results(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -1909,7 +1942,7 @@ def test_stop_event_caps_the_number_of_judge_gates_evaluated(monkeypatch: pytest
         f"    runs: [stop.session]\n    enforcement: advisory\n    rubric: r{i}\n    message: m{i}\n"
         for i in range(gate_count)
     )
-    (tmp_path / ".otari-gates.yml").write_text(gates_yaml, encoding="utf-8")
+    (tmp_path / ".otari-guardrails.yml").write_text(gates_yaml, encoding="utf-8")
 
     claude_call_count = 0
 
@@ -1963,7 +1996,7 @@ def test_stop_event_skips_a_when_changed_judge_gate_that_does_not_apply(
         "  - id: judge-src-only\n    type: judge\n    runs: [stop.session]\n    enforcement: advisory\n"
         "    rubric: r\n    when_changed: [src/**]\n    message: m\n"
     )
-    (tmp_path / ".otari-gates.yml").write_text(gates_yaml, encoding="utf-8")
+    (tmp_path / ".otari-guardrails.yml").write_text(gates_yaml, encoding="utf-8")
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
@@ -1998,7 +2031,7 @@ def test_stop_event_runs_a_when_changed_judge_gate_that_applies(
         "  - id: judge-src-only\n    type: judge\n    runs: [stop.session]\n    enforcement: advisory\n"
         "    rubric: r\n    when_changed: [src/**]\n    message: m\n"
     )
-    (tmp_path / ".otari-gates.yml").write_text(gates_yaml, encoding="utf-8")
+    (tmp_path / ".otari-guardrails.yml").write_text(gates_yaml, encoding="utf-8")
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
@@ -2470,7 +2503,7 @@ def test_verifier_gates_run_concurrently_not_sequentially(tmp_path: Path) -> Non
     )
 
     start = time.monotonic()
-    results = hook_cli._hook_collect_check_verdicts(gates_yaml, tmp_path / ".otari-gates.yml", tmp_path, [])
+    results = hook_cli._hook_collect_check_verdicts(gates_yaml, tmp_path / ".otari-guardrails.yml", tmp_path, [])
     elapsed = time.monotonic() - start
 
     assert [result["gate_id"] for result in results] == [f"g{i}" for i in range(gate_count)]
@@ -2501,7 +2534,7 @@ _CHECK_GATES_YAML_TEMPLATE = (
 def check_repo(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
     _write_verifier(tmp_path, "verify.sh", "exit 0")
-    (tmp_path / ".otari-gates.yml").write_text(
+    (tmp_path / ".otari-guardrails.yml").write_text(
         _CHECK_GATES_YAML_TEMPLATE.format(verifier="verify.sh"), encoding="utf-8"
     )
     return tmp_path
@@ -2553,7 +2586,7 @@ def test_stop_event_submits_a_check_verdict_from_the_verifier_script(
 def test_stop_event_submits_a_failing_check_verdict_and_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     _write_verifier(tmp_path, "verify.sh", 'echo "conflicted.txt:2"\nexit 1')
-    (tmp_path / ".otari-gates.yml").write_text(
+    (tmp_path / ".otari-guardrails.yml").write_text(
         _CHECK_GATES_YAML_TEMPLATE.format(verifier="verify.sh"), encoding="utf-8"
     )
 
@@ -2590,7 +2623,7 @@ def test_pretooluse_submits_no_check_results(monkeypatch: pytest.MonkeyPatch, ch
 
     must be omitted (None), not an empty list, so a required verifier
     gate resolves not_applicable rather than the unknown a genuinely missing
-    verdict would (see docs/agent-gates.md).
+    verdict would (see docs/agent-guardrails.md).
     """
     captured: dict[str, Any] = {}
 
@@ -2633,7 +2666,7 @@ def test_stop_event_skips_verifier_gates_that_when_changed_excludes(
         "    when_changed: ['src/**']\n"
         "    message: m\n"
     )
-    (tmp_path / ".otari-gates.yml").write_text(policy, encoding="utf-8")
+    (tmp_path / ".otari-guardrails.yml").write_text(policy, encoding="utf-8")
 
     monkeypatch.setattr(subprocess, "run", _git_status_only_run(git_status_stdout=" M docs/README.md\0"))
     captured: dict[str, Any] = {}
@@ -2656,7 +2689,7 @@ def test_collect_check_verdicts_skips_gates_over_the_per_run_limit(tmp_path: Pat
         "    runs: [stop.verifier]\n    enforcement: required\n    verifier: verify.sh\n    message: m"
         for i in range(hook_cli._HOOK_CHECK_MAX_GATES_PER_RUN + 1)
     )
-    gates_file = tmp_path / ".otari-gates.yml"
+    gates_file = tmp_path / ".otari-guardrails.yml"
     policy_yaml = "\n".join(gates_yaml) + "\n"
     gates_file.write_text(policy_yaml, encoding="utf-8")
 
@@ -2666,5 +2699,5 @@ def test_collect_check_verdicts_skips_gates_over_the_per_run_limit(tmp_path: Pat
 
 
 def test_collect_check_verdicts_returns_empty_for_an_unparseable_policy(tmp_path: Path) -> None:
-    gates_file = tmp_path / ".otari-gates.yml"
+    gates_file = tmp_path / ".otari-guardrails.yml"
     assert hook_cli._hook_collect_check_verdicts("not: valid: yaml: at: all:", gates_file, tmp_path, []) == []

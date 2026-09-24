@@ -5,9 +5,9 @@ coding agent. It talks HTTP to a running gateway and needs none of the server.
 
 | Command | What it does |
 |---|---|
-| `otari hook` | The callback a coding agent's hook calls. Evaluates the repository's `.otari-gates.yml` in process; see `docs/agent-gates.md`. |
+| `otari hook` | The callback a coding agent's hook calls. Evaluates the repository's `.otari-guardrails.yml` in process; see `docs/agent-guardrails.md`. |
 | `otari hook setup` | Registers that callback in the agent's own settings file. |
-| `otari gates generate` | Proposes `.otari-gates.yml` gates from the repository's own `AGENTS.md` or `CLAUDE.md`, one at a time. |
+| `otari guardrails generate` | Proposes `.otari-guardrails.yml` gates from the repository's own `AGENTS.md` or `CLAUDE.md`, one at a time. |
 | `otari import claude-code` | Backfills Claude Code usage from local transcripts into a gateway. |
 | `otari --version` | The version this distribution was built as, or `OTARI_VERSION` where a deployment sets it (the Docker image does). |
 
@@ -32,7 +32,7 @@ root lists it). Distribution `otari-agent`, import package `otari_agent`:
 the names `otari` and `otari-cli` on PyPI belong to other Mozilla AI projects.
 
 It owns the `otari` console script. The gateway (`../src/gateway`) depends on
-this package for the Agent Gates evaluator (`otari_agent.domain`) and, when
+this package for the Agent Guardrails evaluator (`otari_agent.domain`) and, when
 both are installed (Docker, a development checkout), attaches its server
 commands (`serve`, `migrate`, ...) to the same `otari` group through
 `gateway.cli.register`. On its own, `otari --help` lists only the commands

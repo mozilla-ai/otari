@@ -1,7 +1,7 @@
-"""Otari's Hook Server: evaluate an Agent Gates policy against caller-submitted evidence.
+"""Otari's Hook Server: evaluate an Agent Guardrails policy against caller-submitted evidence.
 
 Otari never reads a caller's repository. The caller (an agent hook, e.g.
-``otari hook``) already read its own ``.otari-gates.yml`` and collected its
+``otari hook``) already read its own ``.otari-guardrails.yml`` and collected its
 own Git evidence, and submits both here in one request; this route parses
 and evaluates them and returns the per-gate results, exactly the way ``otari
 hook`` itself evaluates the same policy in process by default (see
@@ -9,7 +9,7 @@ hook`` itself evaluates the same policy in process by default (see
 route is the opt-in path for a caller that wants a gateway to be the one
 deciding instead. This is the integration mechanism that
 docs/otari-product-foundation.md calls the Hook Server; see
-docs/agent-gates.md for the request/response contract.
+docs/agent-guardrails.md for the request/response contract.
 
 Every result is ``client_reported`` provenance: an authenticated request
 identifies its sender, not the truth of what it claims about a repository

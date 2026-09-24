@@ -136,10 +136,10 @@ def run_policy_check(
     """Parse ``policy_yaml`` and evaluate it against the given evidence.
 
     ``source`` names ``policy_yaml`` in a raised ``PolicyCheckError`` (e.g.
-    "request body", or a gates-file path). Every other argument mirrors
+    "request body", or a guardrail-file path). Every other argument mirrors
     ``routes/hooks.py``'s own ``PolicyCheckRequest`` fields one for one,
     including their tri-state contracts (see that model's own field docs,
-    and docs/agent-gates.md): ``None`` means a caller that never collects
+    and docs/agent-guardrails.md): ``None`` means a caller that never collects
     that evidence kind at all (resolves ``unknown``/``not_applicable``
     depending on the gate type); ``()``/``[]`` means it collected some and
     there is none (resolves ``not_applicable``).

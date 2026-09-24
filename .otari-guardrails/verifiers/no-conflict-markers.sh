@@ -3,7 +3,7 @@
 # Git merge-conflict marker (a line starting with <<<<<<<, |||||||,
 # =======, or >>>>>>>; the second is diff3's base section, which survives a
 # resolution that deleted only the other three). Run with cwd at the repo
-# root, per docs/agent-gates.md's check_passed exit-code contract: 0 is
+# root, per docs/agent-guardrails.md's check_passed exit-code contract: 0 is
 # pass, 1 is fail, anything else is error. Uses `git grep`, not the system
 # `grep` binary, so this behaves the same on every platform `git` itself
 # does, rather than depending on which grep flavor happens to be on PATH.

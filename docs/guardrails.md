@@ -1,4 +1,8 @@
-# Guardrails
+# Inference Guardrails
+
+Not to be confused with [Agent Guardrails](agent-guardrails.md), which checks
+what a coding agent does to a repository. This page is about inference time:
+what a model is asked, and what it answers.
 
 A guardrail is a request-level check Otari runs on the input before the provider is ever called. The caller opts in per request via a top-level `guardrails` field (a sibling of `tools`, not an entry inside it), and the model can't see or decline it.
 

@@ -50,7 +50,7 @@ node_modules
 .pnpm-store/
 
 # otari hook setup's own generated settings: both embed a live Otari API key
-# or master key directly in the hook command (see docs/agent-gates.md), so
+# or master key directly in the hook command (see docs/agent-guardrails.md), so
 # neither is safe to commit. Only these two files, not the whole .claude/ or
 # .codex/ directory: .claude/settings.json (team-shared, committed on
 # purpose) and any .claude/skills/ live under the same directory and must

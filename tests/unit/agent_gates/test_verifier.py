@@ -13,7 +13,7 @@ def _gate(**overrides: object) -> VerifierGate:
         "runs": ("stop.verifier",),
         "id": "no-leftover-conflict-markers",
         "enforcement": "required",
-        "verifier": ".otari-gates/verifiers/no-conflict-markers.sh",
+        "verifier": ".otari-guardrails/verifiers/no-conflict-markers.sh",
         "message": "A tracked file still carries a Git merge-conflict marker.",
     }
     defaults.update(overrides)
@@ -138,7 +138,7 @@ def test_error_when_the_verifier_could_not_be_run() -> None:
             CheckVerdict(
                 gate_id="no-leftover-conflict-markers",
                 outcome="error",
-                detail="verifier '.otari-gates/verifiers/no-conflict-markers.sh' does not exist",
+                detail="verifier '.otari-guardrails/verifiers/no-conflict-markers.sh' does not exist",
             ),
         )
     )
@@ -147,4 +147,4 @@ def test_error_when_the_verifier_could_not_be_run() -> None:
     assert result.outcome is Outcome.ERROR
     assert result.outcome.is_blocking
     assert result.enforcement == "required"
-    assert result.detail == "verifier '.otari-gates/verifiers/no-conflict-markers.sh' does not exist"
+    assert result.detail == "verifier '.otari-guardrails/verifiers/no-conflict-markers.sh' does not exist"

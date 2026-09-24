@@ -1,15 +1,22 @@
-# Agent Gates
+# Agent Guardrails
 
-A gate is a repo-owned rule that checks evidence a caller reports about what a
-coding agent (or you) did to the working tree, not what a transcript claims.
-Otari evaluates that caller-reported evidence; it does not read the caller's
-repository itself. Rules live in `.otari-gates.yml`, committed alongside the
-code they check, so they survive an agent swap and a clone the same way the
-rest of the repo does.
+A **guardrail** is a repo-owned intent about what a coding agent may do to your
+working tree ("do not hand-edit the changelog"), and a **gate** is one check
+that enforces it. A guardrail is one or more gates: `.otari-guardrails.yml`
+names the intent under `policy.id` and lists the gates under `gates`, so one
+policy file is one guardrail. Most of this page is about gates, because the
+gate is where the rule is actually written.
+
+A gate checks evidence a caller reports about what a coding agent (or you) did
+to the working tree, not what a transcript claims. Otari evaluates that
+caller-reported evidence; it does not read the caller's repository itself.
+Guardrails live in `.otari-guardrails.yml`, committed alongside the code they
+check, so they survive an agent swap and a clone the same way the rest of the
+repo does.
 
 This is core Otari, not a separate package or plugin. It is not
-[Guardrails](guardrails.md), which checks request input/output at inference
-time; a gate checks agent actions and repo diffs. It also needs no running
+[Inference Guardrails](guardrails.md), which checks request input/output at
+inference time; a gate checks agent actions and repo diffs. It also needs no running
 `otari serve`: the evaluator (`otari_agent.domain.check`) is pure
 Python with no filesystem, network, subprocess, database, or clock access, so
 `otari hook` evaluates it in process by default, and `otari serve`'s own Hook
@@ -25,7 +32,7 @@ This is the first slice. It ships:
   `judge`, and `verifier`.
 - `otari hook --harness claude-code` and `otari hook --harness codex`, real
   installed commands that read a Claude Code or Codex hook payload, collect
-  the evidence it implies, and evaluate the repo's own `.otari-gates.yml`
+  the evidence it implies, and evaluate the repo's own `.otari-guardrails.yml`
   against it in process, no server or credential required. Given `--url`
   and/or `--api-key` (or their `OTARI_URL`/`OTARI_API_KEY` envvars), they
   instead call `POST /api/v1/hooks/check` on a gateway over HTTP.
@@ -34,24 +41,24 @@ This is the first slice. It ships:
 - `otari hook setup`, which registers it: writes a `PreToolUse` and a `Stop`
   hook entry into the harness's own settings (`.claude/settings.local.json`
   for Claude Code, `.codex/hooks.json` for Codex) and, if this repo has no
-  `.otari-gates.yml` yet, offers to scaffold a starter one. No reusable packs
+  `.otari-guardrails.yml` yet, offers to scaffold a starter one. No reusable packs
   yet. The Codex integration is newer and less exercised against a real
   session than the Claude Code one; in particular, a session that runs
   through Codex's own Code Mode does not yet get a `PreToolUse` dispatch at
   all for a shell/apply_patch call it wraps in JS (openai/codex#23411, open
   upstream), so only `Stop`'s own Git-status fallback and transcript scan
   reach it today.
-- `otari gates generate`, which proposes a starting `.otari-gates.yml` from a
+- `otari guardrails generate`, which proposes a starting `.otari-guardrails.yml` from a
   repo's own AGENTS.md/CLAUDE.md: one model call to draft candidate gates,
   then an interactive accept/reject/edit pass over each one before it is
   appended. See "Generating gates from AGENTS.md/CLAUDE.md" below.
 
 This is a hook protocol, not a local filesystem reader: Otari never opens a
 caller's repository itself. The caller (an agent hook today; a native
-dispatcher eventually) reads its own `.otari-gates.yml` and collects its own
+dispatcher eventually) reads its own `.otari-guardrails.yml` and collects its own
 Git evidence, then submits both in one request.
 
-## The gates file: `.otari-gates.yml`
+## The gates file: `.otari-guardrails.yml`
 
 ```yaml
 schema_version: "1.0"
@@ -517,7 +524,7 @@ already passed reports `error` without attempting the call at all.
 A gate whose verdict comes from a verifier script's own exit status, not a
 glob, a phrase, or a model. `verifier` is a repo-relative path to an
 executable script *in the calling repo* (e.g.
-`.otari-gates/verifiers/no-conflict-markers.sh`), not a closed set of
+`.otari-guardrails/verifiers/no-conflict-markers.sh`), not a closed set of
 otari-shipped implementations: anyone can write one and add the gate that
 runs it, without an otari code change or release. Unlike `judge`,
 `enforcement` is not restricted to `advisory`: a verifier's exit code is
@@ -529,7 +536,7 @@ reproducible the way a glob or phrase match is, not a model's opinion, so a
     type: verifier
     runs: [stop.verifier]
     enforcement: required
-    verifier: .otari-gates/verifiers/no-conflict-markers.sh
+    verifier: .otari-guardrails/verifiers/no-conflict-markers.sh
     message: >-
       A tracked file still carries a Git merge-conflict marker
       (<<<<<<</=======/>>>>>>>). Resolve the conflict and remove the
@@ -564,7 +571,7 @@ the policy names. `command` and `command_if_changed` inspect the
 command text the agent submitted, `path` matches globs, and `judge`
 sends a prompt to `claude -p`; none of them runs a script the repo supplies.
 The boundary this sits behind is the repo itself. A script checked into the
-repo, named by that repo's own `.otari-gates.yml`, is the same trust level
+repo, named by that repo's own `.otari-guardrails.yml`, is the same trust level
 as a Makefile target, a pre-commit hook, or the test suite, every one of
 which a contributor already runs on a branch they have checked out.
 Resolving the verifier against the repo root, and refusing a path that
@@ -652,7 +659,7 @@ that writes to a fixed temporary path, or that mutates the tree itself
 in a way it could not before gates ran concurrently.
 
 This repo dogfoods two. `no-leftover-conflict-markers` runs
-`.otari-gates/verifiers/no-conflict-markers.sh`, which fails when a tracked
+`.otari-guardrails/verifiers/no-conflict-markers.sh`, which fails when a tracked
 file still has a line starting with `<<<<<<<`, `=======`, or `>>>>>>>`. It
 uses `git grep`, not the system `grep` binary: `git grep` is compiled into
 `git` itself and behaves the same on every platform `git` runs on, so this
@@ -666,7 +673,7 @@ same script reported `pass`, `fail` (with the offending lines on stdout), and
 `error` (not a git repository) identically on both.
 
 `no-stranded-docblocks` runs
-`.otari-gates/verifiers/no-stranded-docblocks.py`, AGENTS.md's own stranded-
+`.otari-guardrails/verifiers/no-stranded-docblocks.py`, AGENTS.md's own stranded-
 docblock detector (`\*/\n[ \t]*/\*\*`), reimplemented as a Python script
 rather than a policy-level allowlist entry: this is the exact check the
 abandoned prototype hardcoded into `cli.py` behind a closed set of
@@ -692,9 +699,9 @@ problems" trade a diff-scoped linter already makes.
 
 ## Generating gates from AGENTS.md/CLAUDE.md
 
-Writing a `.otari-gates.yml` by hand means finding the rules worth checking
+Writing a `.otari-guardrails.yml` by hand means finding the rules worth checking
 in a repo's own AGENTS.md (or CLAUDE.md, when that is the only doc a repo
-has) and turning prose into the gate schema above. `otari gates generate`
+has) and turning prose into the gate schema above. `otari guardrails generate`
 does the first pass: it resolves a locally installed model CLI (`claude -p`
 or `codex exec`, whichever is found on `PATH` first; no otari server, no
 otari credential, the same "evaluated locally by default" posture `otari
@@ -719,7 +726,7 @@ hook actually runs.
 It only ever appends: existing gates and their comments are left untouched
 (the new gate is spliced into the `gates:` sequence as raw text, not a
 round-tripped YAML dump that would drop them, at whatever column that
-sequence's own items already use), and a repo with no `.otari-gates.yml`
+sequence's own items already use), and a repo with no `.otari-guardrails.yml`
 yet gets a starter `schema_version`/`policy` header scaffolded around the
 first accepted gate. Splicing text is a heuristic where the policy loader
 is a parser, so nothing is written until `parse_policy` accepts the result:
@@ -728,8 +735,8 @@ never a corrupted policy. That is the difference that matters, because
 `otari hook` fails *open* on a policy it cannot parse, so quietly writing a
 broken one would stop every gate in it from being enforced, required ones
 included. `--source` names a different doc,
-`--gates-file` a different policy file, `--cli`/`--model`
-(`OTARI_GATES_GENERATE_CLI`/`OTARI_GATES_GENERATE_MODEL`) override which CLI
+`--guardrail-file` a different guardrail file, `--cli`/`--model`
+(`OTARI_GUARDRAILS_GENERATE_CLI`/`OTARI_GUARDRAILS_GENERATE_MODEL`) override which CLI
 backend and model make the one generation call. This is a one-shot proposal
 tool, not a sync: rerunning it after AGENTS.md changes proposes again from
 scratch and still asks about every candidate, including ones a prior run
@@ -738,7 +745,7 @@ already declined.
 ## Calling the Hook Server
 
 `otari hook` does not need this by default: it evaluates the local
-`.otari-gates.yml` in process (see "Status" above), and reaches this endpoint
+`.otari-guardrails.yml` in process (see "Status" above), and reaches this endpoint
 only when it is given `--url` and/or `--api-key` (or their `OTARI_URL`/
 `OTARI_API_KEY` envvars). Opting into it is for whoever wants a shared or
 hosted gateway, rather than the machine the agent is running on, to be the
@@ -753,7 +760,7 @@ its evidence is true.
 $ python3 -c '
 import json, urllib.request
 body = json.dumps({
-    "policy_yaml": open(".otari-gates.yml").read(),
+    "policy_yaml": open(".otari-guardrails.yml").read(),
     "changed_path_source": "stop.working_tree",
     "changed_paths": ["CHANGELOG.md"],
     "commands": ["git push --force"],
@@ -804,7 +811,7 @@ required gate rather than passing it. Request/response fields:
 
 | Field | Meaning |
 | --- | --- |
-| `policy_yaml` | The full text of the caller's `.otari-gates.yml`, read and submitted by the caller. |
+| `policy_yaml` | The full text of the caller's `.otari-guardrails.yml`, read and submitted by the caller. |
 | `changed_path_source` | Which moment `changed_paths` was read at, matching the `runs` values a gate declares: `pre_tool_use.edit_target` for a tool call's own target before it runs, `stop.working_tree` for `git status` once the turn is over. Required whenever `changed_paths` is **non-empty**; an empty list needs none, because it carries no paths to misattribute. Refused rather than defaulted when absent, and refused too when it names a moment no path gate can declare (`stop.session`, `stop.verifier`, `pre_tool_use.command`), since either would resolve every path gate `not_applicable` and lose enforcement without a word. Defaulting would be just as wrong: `pre_tool_use.edit_target` would make a Stop event's Git evidence silently disable every working-tree gate, and `stop.working_tree` would fail a working-tree gate over a write that has not happened. |
 | `changed_paths` | Repo-relative paths the caller observed changed. Send `[]` if evidence was collected and there is none (a `path` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects path evidence at all (a required `path` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
 | `commands` | Shell commands the caller observed run or is about to run. Send `[]` if evidence was collected and there is none right now (a `command` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects command evidence at all (a required `command` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
@@ -932,7 +939,7 @@ would also foreclose ever attaching a hook to this specific call on purpose,
 which is very nearly the point of a `judge` gate calling out to a model at
 all. A dedicated directory under `~/.otari/`, not the repo being judged and
 not the shared system temp root, is a stable, otari-owned place a future
-judge-specific hook or its own `.otari-gates.yml` could live, the same
+judge-specific hook or its own `.otari-guardrails.yml` could live, the same
 reasoning `_hook_judge_log_path` already applies to the audit log. This
 guarantee is narrower than `--safe-mode`'s (project-scoped only, not a
 hypothetical user- or enterprise-level hook), which does not matter here
@@ -954,7 +961,7 @@ blocking proves nothing about whether an interactive session's own
    install's own
    `otari hook --harness claude-code`; Claude Code passes its own
    `hook_event_name` in the payload, so one callback serves both. If this
-   repo has no `.otari-gates.yml` yet, it offers to write a small starter
+   repo has no `.otari-guardrails.yml` yet, it offers to write a small starter
    one first, so there is something to check rather than a hook that always
    passes.
 
@@ -999,7 +1006,7 @@ blocking proves nothing about whether an interactive session's own
    secret in argv. Fixed then, not now.
 
 2. Try something a gate forbids: `Edit` `CHANGELOG.md`, or ask for
-   `npm install` (this repo's own `.otari-gates.yml` enforces pnpm; see
+   `npm install` (this repo's own `.otari-guardrails.yml` enforces pnpm; see
    `web/AGENTS.md`). Either tool call itself is refused before it runs; for
    the edit, `git status` afterward shows nothing changed, because the edit
    never happened.

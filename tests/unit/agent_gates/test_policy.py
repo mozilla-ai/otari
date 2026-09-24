@@ -24,7 +24,7 @@ gates:
 
 
 def test_parses_a_valid_policy() -> None:
-    spec = parse_policy(VALID_POLICY, source=".otari-gates.yml")
+    spec = parse_policy(VALID_POLICY, source=".otari-guardrails.yml")
     assert spec.schema_version == "1.0"
     assert spec.policy_id == "otari/repo-quality"
     assert len(spec.gates) == 1
@@ -432,14 +432,14 @@ def test_parses_a_valid_verifier_policy() -> None:
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
         "  - id: no-leftover-conflict-markers\n    type: verifier\n"
         "    runs: [stop.verifier]\n    enforcement: required\n"
-        "    verifier: .otari-gates/verifiers/no-conflict-markers.sh\n    message: m\n"
+        "    verifier: .otari-guardrails/verifiers/no-conflict-markers.sh\n    message: m\n"
     )
     spec = parse_policy(policy, source="test.yml")
     assert len(spec.gates) == 1
     gate = spec.gates[0]
     assert isinstance(gate, VerifierGate)
     assert gate.enforcement == "required"
-    assert gate.verifier == ".otari-gates/verifiers/no-conflict-markers.sh"
+    assert gate.verifier == ".otari-guardrails/verifiers/no-conflict-markers.sh"
 
 
 def test_verifier_gate_accepts_required_enforcement() -> None:

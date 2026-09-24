@@ -44,7 +44,7 @@ def _judge_log_in_tmp_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
-    (tmp_path / ".otari-gates.yml").write_text(_GATES_YAML, encoding="utf-8")
+    (tmp_path / ".otari-guardrails.yml").write_text(_GATES_YAML, encoding="utf-8")
     return tmp_path
 
 
@@ -480,7 +480,7 @@ def test_setup_matcher_covers_bash_and_exec_when_a_command_gate_exists(
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.chdir(tmp_path)
-    (tmp_path / ".otari-gates.yml").write_text(
+    (tmp_path / ".otari-guardrails.yml").write_text(
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
         "  - id: g\n    type: command\n    runs: [pre_tool_use.command]\n    enforcement: required\n"
         '    forbidden: ["npm"]\n    message: m\n',

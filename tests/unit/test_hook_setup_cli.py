@@ -64,7 +64,7 @@ def test_fails_outside_a_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 def test_declining_the_starter_policy_still_registers_the_hook(repo: Path) -> None:
     result = _invoke("--api-key", "k", input="n\n")
     assert result.exit_code == 0, result.output
-    assert not (repo / ".otari-gates.yml").exists()
+    assert not (repo / ".otari-guardrails.yml").exists()
     settings = _read_settings(repo)
     entry = settings["hooks"]["PreToolUse"][0]
     assert entry["matcher"] == "Edit|Write|NotebookEdit"
@@ -74,7 +74,7 @@ def test_declining_the_starter_policy_still_registers_the_hook(repo: Path) -> No
 def test_accepting_the_starter_policy_writes_one_and_its_command_gate_adds_bash(repo: Path) -> None:
     result = _invoke("--api-key", "k", input="y\n")
     assert result.exit_code == 0, result.output
-    gates_file = repo / ".otari-gates.yml"
+    gates_file = repo / ".otari-guardrails.yml"
     assert gates_file.is_file()
     assert "command" in gates_file.read_text(encoding="utf-8")
     settings = _read_settings(repo)
@@ -82,7 +82,7 @@ def test_accepting_the_starter_policy_writes_one_and_its_command_gate_adds_bash(
 
 
 def test_an_existing_path_only_policy_keeps_bash_out_of_the_matcher(repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
     result = _invoke("--api-key", "k")
     assert result.exit_code == 0, result.output
     settings = _read_settings(repo)
@@ -90,7 +90,7 @@ def test_an_existing_path_only_policy_keeps_bash_out_of_the_matcher(repo: Path) 
 
 
 def test_an_existing_command_policy_adds_bash_to_the_matcher(repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_COMMAND_GATES, encoding="utf-8")
+    (repo / ".otari-guardrails.yml").write_text(_COMMAND_GATES, encoding="utf-8")
     result = _invoke("--api-key", "k")
     assert result.exit_code == 0, result.output
     settings = _read_settings(repo)
@@ -98,7 +98,7 @@ def test_an_existing_command_policy_adds_bash_to_the_matcher(repo: Path) -> None
 
 
 def test_an_unparseable_policy_defaults_to_the_narrower_matcher(repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text("not: valid: yaml: at: all:\n  - [", encoding="utf-8")
+    (repo / ".otari-guardrails.yml").write_text("not: valid: yaml: at: all:\n  - [", encoding="utf-8")
     result = _invoke("--api-key", "k")
     assert result.exit_code == 0, result.output
     settings = _read_settings(repo)
@@ -106,7 +106,7 @@ def test_an_unparseable_policy_defaults_to_the_narrower_matcher(repo: Path) -> N
 
 
 def test_explicit_api_key_flag_skips_resolution_and_prompting(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (repo / ".otari-gates.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
 
     def fail_if_called(config_path: str | None = None) -> HookSettings:
         raise AssertionError("load_settings should not be called when --api-key is given")
@@ -126,7 +126,7 @@ def test_no_api_key_means_no_credential_resolution_or_prompt(repo: Path, monkeyp
     neither one, so `setup` must not resolve a `master_key` from config (even
     when one is configured) or prompt for anything to get the same result.
     """
-    (repo / ".otari-gates.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
 
     def fail_if_called(config_path: str | None = None) -> HookSettings:
         raise AssertionError("load_settings should not be called when --api-key is not given either")
@@ -140,7 +140,7 @@ def test_no_api_key_means_no_credential_resolution_or_prompt(repo: Path, monkeyp
 
 
 def test_rerunning_updates_the_existing_entry_instead_of_duplicating_it(repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
     first = _invoke("--api-key", "first-key")
     assert first.exit_code == 0, first.output
     assert "Added" in first.output
@@ -156,7 +156,7 @@ def test_rerunning_updates_the_existing_entry_instead_of_duplicating_it(repo: Pa
 
 
 def test_rerunning_preserves_unrelated_hooks_and_permissions(repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
     settings_path = repo / ".claude" / "settings.local.json"
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text(
@@ -199,7 +199,7 @@ def test_registers_both_pretooluse_and_stop_hooks(repo: Path) -> None:
 
 
 def test_rerunning_updates_the_stop_entry_instead_of_duplicating_it(repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
     first = _invoke("--api-key", "first-key")
     assert first.exit_code == 0, first.output
     assert "Added the Stop hook" in first.output
@@ -215,7 +215,7 @@ def test_rerunning_updates_the_stop_entry_instead_of_duplicating_it(repo: Path) 
 
 
 def test_stop_hook_registration_preserves_an_unrelated_stop_entry(repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
     settings_path = repo / ".claude" / "settings.local.json"
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text(
@@ -233,7 +233,7 @@ def test_stop_hook_registration_preserves_an_unrelated_stop_entry(repo: Path) ->
 
 
 def test_rejects_an_existing_settings_file_that_is_not_valid_json(repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
     settings_path = repo / ".claude" / "settings.local.json"
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text("{not valid json", encoding="utf-8")
@@ -246,7 +246,7 @@ def test_rejects_an_existing_settings_file_that_is_not_valid_json(repo: Path) ->
 
 
 def test_rejects_a_non_object_hooks_section(repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
     settings_path = repo / ".claude" / "settings.local.json"
     settings_path.parent.mkdir(parents=True)
     original = json.dumps({"hooks": ["not", "an", "object"]})
@@ -259,7 +259,7 @@ def test_rejects_a_non_object_hooks_section(repo: Path) -> None:
 
 
 def test_rejects_a_non_array_pretooluse_list(repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
     settings_path = repo / ".claude" / "settings.local.json"
     settings_path.parent.mkdir(parents=True)
     original = json.dumps({"hooks": {"PreToolUse": "not-a-list"}})
@@ -284,7 +284,7 @@ def test_rejects_a_non_array_stop_list(repo: Path) -> None:
     narrower: the malformed hooks.Stop value itself is never touched, and
     PreToolUse is registered correctly despite the later failure.
     """
-    (repo / ".otari-gates.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
     settings_path = repo / ".claude" / "settings.local.json"
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text(json.dumps({"hooks": {"Stop": "not-a-list"}}), encoding="utf-8")

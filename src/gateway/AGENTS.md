@@ -289,10 +289,10 @@ rather than a page. A count that sizes a mutation applies the mutation's fixed
 scope and not only its filter set. Nothing else narrows it, and
 `UsageEntry.bulk_editable` is how a client learns which rows that scope admits.
 
-## Agent Gates
+## Agent Guardrails
 
 `otari_agent.domain` (in the `otari-agent` workspace member, `cli/`) evaluates
-a caller-submitted `.otari-gates.yml` policy against caller-submitted evidence.
+a caller-submitted `.otari-guardrails.yml` policy against caller-submitted evidence.
 Everything under it is pure: no filesystem, network, subprocess, or clock
 access. Otari never reads a caller's repository itself. It lives beside the CLI
 rather than in the gateway so `otari hook` installs without the server;
@@ -302,7 +302,7 @@ dispatch to each gate's evaluator): `otari hook` (`cli.py`) calls it in
 process by default, needing no running gateway, and the Hook Server
 (`POST /api/v1/hooks/check`, `routes/hooks.py`) calls the same function for
 whoever opts a hook into checking against a gateway over HTTP instead. See
-[docs/agent-gates.md](../../docs/agent-gates.md).
+[docs/agent-guardrails.md](../../docs/agent-guardrails.md).
 
 ## Logging
 

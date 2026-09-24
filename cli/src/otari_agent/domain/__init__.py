@@ -1,4 +1,4 @@
-"""Agent Gates: policy evaluation for coding-agent sessions.
+"""Agent Guardrails: policy evaluation for coding-agent sessions.
 
 Otari never reads a caller's repository directly. The caller (`otari hook`)
 collects its own policy body and Git evidence locally; this package parses and
@@ -11,5 +11,5 @@ evidence passed in.
 It lives in the otari-agent distribution rather than in the gateway so that
 `otari hook` can be installed without the server. Evaluation results are
 ``client_reported``: Otari did not observe the repository itself, only what the
-caller claims about it. See docs/agent-gates.md for the contract.
+caller claims about it. See docs/agent-guardrails.md for the contract.
 """

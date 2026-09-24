@@ -46,8 +46,8 @@ Calling the gateway from your own code.
 - [MCP](mcp.md): connect MCP servers to chat, messages, and responses requests,
   or drive them from your own application through the caller-orchestrated endpoints.
 - [Files](files.md): file uploads and document understanding for local models.
-- [Guardrails](guardrails.md): request-level checks like prompt-injection detection.
-- [Agent Gates](agent-gates.md): repo-owned policy checks against evidence a coding
+- [Inference Guardrails](guardrails.md): request-level checks like prompt-injection detection.
+- [Agent Guardrails](agent-guardrails.md): repo-owned policy checks against evidence a coding
   agent's session reports. `otari hook` evaluates them locally by default, with
   Otari's Hook Server (`POST /api/v1/hooks/check`) as an opt-in.
 - [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.
