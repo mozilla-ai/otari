@@ -880,8 +880,8 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         default=False,
         description=(
             "Serve GET /api/v1/catalog/models and the dashboard's Models pages to a visitor with no session or "
-            "key. An anonymous read sees the configured provider instances priced from the deployment "
-            "list and the defaults, and nothing tenant-specific. Off by default."
+            "key. An anonymous read sees the configured provider instances and the hosted models, priced "
+            "from the deployment list and the defaults, and nothing tenant-specific. Off by default."
         ),
     )
     files_enabled: Annotated[bool, Shown(SettingsGroup.FILES)] = Field(

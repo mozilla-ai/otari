@@ -23,6 +23,7 @@ from gateway.services import model_catalog_service as mcs
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 
 from .conftest import build_test_client
+from .hosted_port_helpers import HostedModelProvider, bind_model_provider
 
 # Two providers serving one model under two spellings, one of them Fireworks'
 # ``p``-for-point and path prefix, plus a second model on one of them.
@@ -522,6 +523,34 @@ def test_a_visitor_in_hosted_mode_reads_the_deployments_own_instances(
     assert offering["credential"] == "deployment"
     assert offering["price_source"] == "deployment"
     assert offering["usage_30d"] is None
+
+
+def test_a_visitor_in_hosted_mode_reads_the_hosted_models_too(
+    hosted_public_client: TestClient, master_header: dict[str, str]
+) -> None:
+    """The models the deployment pays for are its own offerings, so a visitor sees them.
+
+    What the port advertises with no organization, and no more: a priced model
+    the port does not advertise stays off the list, as it does for a tenant.
+    """
+    model_provider = HostedModelProvider("groq", models={"groq": ["glm-5.3"]})
+    bind_model_provider(hosted_public_client, model_provider)
+    _price(hosted_public_client, master_header, "groq:glm-5.3", 0.4, 1.6)
+    _price(hosted_public_client, master_header, "groq:glm-4.7", 0.3, 1.2)
+
+    body = _get(hosted_public_client, f"{API_ROOT}/catalog/models")
+    selectors = {selector for model in body["models"] for selector in model["selectors"]}
+    assert "groq:glm-5.3" in selectors
+    assert "groq:glm-4.7" not in selectors
+
+    model_id = next(model["id"] for model in body["models"] if "groq:glm-5.3" in model["selectors"])
+    detail = _get(hosted_public_client, f"{API_ROOT}/catalog/models/{model_id}")
+    offering = next(offering for offering in detail["offerings"] if offering["selector"] == "groq:glm-5.3")
+    assert offering["credential"] == "hosted"
+    assert offering["price_source"] == "deployment"
+    assert offering["usage_30d"] is None
+    # Asked for the deployment-wide answer, never for somebody's organization.
+    assert set(model_provider.asked_for) == {None}
 
 
 @pytest.fixture

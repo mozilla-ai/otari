@@ -972,8 +972,8 @@ export interface paths {
          *     Prices are the caller's: an organization's override where one applies, else
          *     the deployment's row, else the genai-prices default. Aliases and routing
          *     policies are not models and are not listed; see Routing. A visitor, where
-         *     the catalog is public, sees the configured instances at the deployment's
-         *     rates and nothing that belongs to a tenant.
+         *     the catalog is public, sees the configured instances and the hosted
+         *     models at the deployment's rates, and nothing that belongs to a tenant.
          */
         get: operations["catalog-list_catalog"];
         put?: never;

@@ -595,8 +595,8 @@ async def verify_catalog_reader_or_public(
     ``None`` is the anonymous caller, admitted only while ``public_catalog`` is on
     and only when the request carries no credential at all: a credential that is
     present and wrong is refused as it always was, never downgraded to a visitor.
-    The route is what narrows an anonymous read (the configured instances, the
-    deployment price list, no tenant rows); this only decides who is asking.
+    The route is what narrows an anonymous read (the deployment's own
+    offerings, the deployment price list, no tenant rows); this only decides who is asking.
 
     Throttled per client address on its own budget,
     ``public_catalog_rate_limit_per_minute``, the way the public auth routes

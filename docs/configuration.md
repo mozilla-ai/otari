@@ -216,7 +216,8 @@ every restart is distinguishable from one set in the dashboard.
 `public_catalog: true` serves `GET /api/v1/catalog/models` and the dashboard's
 Models page to a visitor with no credential, so a deployment can show what it
 serves before anyone signs up. A visitor sees the configured `providers:`
-instances only, priced at the deployment's rates, and never an organization's
+instances and any hosted models the deployment serves, priced at the
+deployment's rates, and never an organization's
 override, key-scoped allow-list, or usage. A caller who sends a credential is
 served as that caller, valid or not. The setting is off by default, off in
 hybrid mode, and can be changed at runtime.
@@ -236,7 +237,9 @@ running N workers serves up to N times the configured number.
 
 In hosted mode a visitor sees the same thing a visitor sees anywhere else: the
 process-wide `providers:` instances, which in that mode are the deployment's
-own rather than any tenant's, priced at the deployment's rates. No
+own rather than any tenant's, and the deployment-wide roster of the hosted
+models it pays for (what `ModelProviderPort.get_hosted_models` answers with no
+organization), priced at the deployment's rates. No
 organization's providers, overrides, or usage are public, whatever the flag is
 set to.
 
