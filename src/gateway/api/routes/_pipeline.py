@@ -124,6 +124,7 @@ from gateway.core.usage import (
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
 )
+from gateway.exceptions.tools_exceptions import WorkspaceMcpServerNotFoundError, WorkspaceWebSearchDomainsExcludedError
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Histogram
@@ -198,10 +199,6 @@ from gateway.services.sandbox_backend import (
     SandboxUnavailableError,
 )
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
-from gateway.services.tenancy.errors import (
-    WorkspaceMcpServerNotFoundError,
-    WorkspaceWebSearchDomainsExcludedError,
-)
 from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.services.tenancy.organization_guardrail_runner import handle as guardrail_handle
 from gateway.services.tenancy.organization_guardrail_service import (

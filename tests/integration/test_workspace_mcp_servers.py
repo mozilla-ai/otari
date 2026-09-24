@@ -29,6 +29,12 @@ from gateway.api.routes._pipeline import RequestContext, prepare_gateway_tools
 from gateway.api.routes.chat import ChatCompletionRequest
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.tools_exceptions import (
+    WorkspaceMcpServerAlreadyExistsError,
+    WorkspaceMcpServerLimitReachedError,
+    WorkspaceMcpServerNotFoundError,
+    WorkspaceMcpServerUnsafeUrlError,
+)
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.models.tenancy import Organization, User, Workspace
 from gateway.models.tools import WorkspaceMcpServer
@@ -40,14 +46,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.secret_box import decrypt_secret, generate_secret_key
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    WorkspaceMcpServerAlreadyExistsError,
-    WorkspaceMcpServerLimitReachedError,
-    WorkspaceMcpServerNotFoundError,
-    WorkspaceMcpServerUnsafeUrlError,
-    WorkspaceNotFoundError,
-)
+from gateway.services.tenancy.errors import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.services.tenancy.workspace_mcp_server_service import (
     MAX_ALLOWED_TOOLS,
     MAX_MCP_SERVERS_PER_WORKSPACE,

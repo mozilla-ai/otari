@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.tools_exceptions import SandboxImageNotAllowedError, SandboxToolsUnrunnableError
 from gateway.models.tenancy import User, Workspace
 from gateway.models.tools import CodeExecutor, WorkspaceCodeExecutionPolicy
 from gateway.services.mcp_loop import MAX_TOOL_ITERATIONS_CAP
@@ -33,7 +34,6 @@ from gateway.services.sandbox_backend import (
     DEFAULT_EXEC_TIMEOUT_S,
 )
 from gateway.services.tenancy import authorization
-from gateway.services.tenancy.errors import SandboxImageNotAllowedError, SandboxToolsUnrunnableError
 from gateway.services.tenancy.organization_service import OrganizationService
 
 # A policy may only narrow, so a value above either ceiling would read as a

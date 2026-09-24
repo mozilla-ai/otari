@@ -50,6 +50,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
+from gateway.exceptions.tools_exceptions import (
+    WorkspaceMcpServerAlreadyExistsError,
+    WorkspaceMcpServerLimitReachedError,
+    WorkspaceMcpServerNotFoundError,
+    WorkspaceMcpServerUnsafeUrlError,
+)
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.tenancy import User
 from gateway.models.tools import WorkspaceMcpServer
@@ -60,12 +66,6 @@ from gateway.services.secret_box import (
     encrypt_secret,
 )
 from gateway.services.tenancy import authorization
-from gateway.services.tenancy.errors import (
-    WorkspaceMcpServerAlreadyExistsError,
-    WorkspaceMcpServerLimitReachedError,
-    WorkspaceMcpServerNotFoundError,
-    WorkspaceMcpServerUnsafeUrlError,
-)
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.url_safety import UnsafeURLError, redact_url_secrets, validate_mcp_url
 

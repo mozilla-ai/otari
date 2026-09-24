@@ -56,11 +56,11 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.tools_exceptions import WorkspaceMcpServerNotFoundError
 from gateway.models.mcp import McpServerConfig
 from gateway.models.pricing import PriceSource
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budgets import ReservationHandle
-from gateway.services.tenancy.errors import WorkspaceMcpServerNotFoundError
 from gateway.services.tenancy.workspace_web_search_service import ResolvedWebSearchConfig
 from gateway.services.tool_usage import ToolUsageTally
 
