@@ -38,7 +38,13 @@ class _Transactions:
 
 
 def _service(uow: _Transactions, repo: Mock, store: Mock) -> FileService:
-    return FileService(cast(UnitOfWork, uow), FileRepositories(files=repo), store, GatewayConfig())
+    return FileService(
+        cast(UnitOfWork, uow),
+        FileRepositories(files=repo),
+        store,
+        GatewayConfig(),
+        AsyncMock(side_effect=AssertionError("Workspace resolution is not expected")),
+    )
 
 
 @pytest.mark.asyncio

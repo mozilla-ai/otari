@@ -157,7 +157,7 @@ class FileService:
         repositories: FileRepositories,
         file_store: FileStoragePort,
         config: GatewayConfig,
-        default_workspace: DefaultWorkspace | None = None,
+        default_workspace: DefaultWorkspace,
     ) -> None:
         self._uow = uow
         self._files = repositories.files
@@ -191,8 +191,6 @@ class FileService:
                     # transaction open for as long as the bytes take to store.
                     workspace_id = upload.workspace_id
                     if workspace_id is None:
-                        if self._default_workspace is None:
-                            raise ValueError("A default workspace resolver is required for unscoped uploads")
                         workspace_id = await self._default_workspace()
                     record = FileObject(
                         id=file_id,

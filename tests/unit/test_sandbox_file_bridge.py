@@ -12,6 +12,7 @@ import asyncio
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Collection
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
@@ -153,6 +154,7 @@ def _bridge(
             ),
             store,
             settings,
+            AsyncMock(side_effect=AssertionError("Workspace resolution is not expected")),
         ),
         user_id="u1",
         workspace_id=uuid.uuid4(),

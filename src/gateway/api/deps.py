@@ -661,7 +661,11 @@ async def get_db_if_needed(
 
 def build_file_service(uow: UnitOfWork, file_store: FileStoragePort, config: GatewayConfig) -> FileService:
     """Build Files operations for a scoped output request or cleanup job."""
-    return FileService(uow, FileRepositories.on(uow), file_store, config)
+
+    async def reject_unscoped_upload() -> uuid.UUID:
+        raise RuntimeError("This FileService configuration does not support unscoped uploads")
+
+    return FileService(uow, FileRepositories.on(uow), file_store, config, reject_unscoped_upload)
 
 
 def build_sandbox_file_bridge(

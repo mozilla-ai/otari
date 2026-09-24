@@ -13,10 +13,12 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
+from gateway.api.deps import build_file_service
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import (
@@ -194,6 +196,28 @@ async def test_a_master_key_upload_lands_in_the_default_workspace() -> None:
 
     assert record.workspace_id == _DEFAULT_WORKSPACE
     assert files.added == [record]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("workspace_id", [None, _WORKSPACE])
+async def test_output_builder_requires_explicit_workspace_for_uploads(
+    monkeypatch: pytest.MonkeyPatch, workspace_id: uuid.UUID | None
+) -> None:
+    store = _MemoryStore()
+    files = _StubFiles()
+    monkeypatch.setattr(FileRepositories, "on", Mock(return_value=FileRepositories(files=cast(FileRepository, files))))
+    service = build_file_service(cast(UnitOfWork, _FakeUnitOfWork()), cast(FileStoragePort, store), GatewayConfig())
+
+    if workspace_id is None:
+        with pytest.raises(RuntimeError, match="does not support unscoped uploads"):
+            await service.store(_upload(b"payload", workspace_id=None))
+        assert files.added == []
+        assert store.blobs == {}
+    else:
+        record = await service.store(_upload(b"payload", workspace_id=workspace_id))
+        assert record.workspace_id == workspace_id
+        assert files.added == [record]
+        assert store.blobs == {record.id: b"payload"}
 
 
 @pytest.mark.asyncio
