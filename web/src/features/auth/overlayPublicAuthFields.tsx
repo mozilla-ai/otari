@@ -12,23 +12,15 @@
  * token from a link do not render it, because the link already names where
  * it came from. `page` says which one is asking and `isBusy` whether a request
  * of that page's own is in flight, so a contributed control can hold still
- * while an answer is pending.
+ * while an answer is pending. The props are `PublicAuthFieldsProps` in
+ * `./publicAuthFields`, kept off this module so the replacing one can import them.
  *
  * **Reached by its `@/features/auth/overlayPublicAuthFields` specifier and
  * never relatively**, which is the seam rule and not a style call;
  * `overlaySeams.test.ts` enforces it and web/AGENTS.md says why.
  */
 
-export type PublicAuthFieldsPage =
-  | "login"
-  | "signup"
-  | "recover-password"
-  | "resend-verification"
-
-export interface PublicAuthFieldsProps {
-  page: PublicAuthFieldsPage
-  isBusy: boolean
-}
+import type { PublicAuthFieldsProps } from "./publicAuthFields"
 
 export function PublicAuthFields(_props: PublicAuthFieldsProps) {
   return null

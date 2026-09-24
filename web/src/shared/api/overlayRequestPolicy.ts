@@ -6,7 +6,8 @@
  * dashboard reaches several deployments replaces this module at build time and
  * answers with the origin the person chose; that version owns how the choice
  * is made and kept, so the base client holds no state for a topology it does
- * not have.
+ * not have. The shape it answers with is `RequestPolicy` in `./requestPolicy`,
+ * kept off this module so the replacing one can import it.
  *
  * `prepareRequests` runs once, before the bootstrap is read, so a replacing
  * module can settle its answer (a stored choice, a directory it has to fetch)
@@ -20,24 +21,7 @@
  * enforces it and web/AGENTS.md says why.
  */
 
-export interface RequestPolicy {
-  /**
-   * The origin every API path is prepended with, or `""` for the page's own.
-   * A scheme and host with no path or trailing slash, `https://api.example.com`.
-   */
-  origin: string
-  /**
-   * `fetch`'s credentials mode: `same-origin` on the page's own origin, and
-   * `include` when `origin` names another host, so the session cookie that host
-   * set is sent back to it.
-   */
-  credentials: RequestCredentials
-}
-
-export const SAME_ORIGIN_POLICY: RequestPolicy = {
-  origin: "",
-  credentials: "same-origin",
-}
+import { type RequestPolicy, SAME_ORIGIN_POLICY } from "./requestPolicy"
 
 export async function prepareRequests(): Promise<void> {}
 

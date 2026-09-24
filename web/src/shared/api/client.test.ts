@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { API_ROOT, DASHBOARD_BUILD_PATH } from "@/shared/api/client"
-import type { RequestPolicy } from "@/shared/api/overlayRequestPolicy"
+import type { RequestPolicy } from "@/shared/api/requestPolicy"
 import {
   ApiError,
   apiFetch,
