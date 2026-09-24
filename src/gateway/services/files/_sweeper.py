@@ -8,21 +8,11 @@ from datetime import datetime
 
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
-from gateway.services.files._service import FileService, SweepBatch
+from gateway.services.files._service import FileService
 
 # Bound work per tick so a large backlog drains across ticks rather than
 # keeping one job's session open until every candidate has been scanned.
 _MAX_SWEEP_PASSES = 10
-
-
-async def sweep_files(
-    files: FileService,
-    *,
-    batch_size: int,
-    after: tuple[datetime, str] | None = None,
-) -> SweepBatch:
-    """Reclaim one batch through the Files service."""
-    return await files.sweep(batch_size=batch_size, after=after)
 
 
 async def run_file_sweeper(
@@ -36,7 +26,7 @@ async def run_file_sweeper(
                 files = build_service(uow)
                 cursor: tuple[datetime, str] | None = None
                 for _ in range(_MAX_SWEEP_PASSES):
-                    batch = await sweep_files(files, batch_size=batch_size, after=cursor)
+                    batch = await files.sweep(batch_size=batch_size, after=cursor)
                     if batch.seen < batch_size:
                         break
                     cursor = batch.cursor

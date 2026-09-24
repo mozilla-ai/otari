@@ -17,7 +17,7 @@ from gateway.services.files._service import (
     SweepBatch,
 )
 from gateway.services.files._staging import CODE_EXECUTION_OUTPUT_PURPOSE, StagedFile, sandbox_path_for
-from gateway.services.files._sweeper import run_file_sweeper, sweep_files
+from gateway.services.files._sweeper import run_file_sweeper
 
 __all__ = [
     "CODE_EXECUTION_OUTPUT_PURPOSE",
@@ -40,5 +40,4 @@ __all__ = [
     "produced_files_for",
     "run_file_sweeper",
     "sandbox_path_for",
-    "sweep_files",
 ]

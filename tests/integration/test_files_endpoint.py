@@ -766,7 +766,7 @@ def test_sweep_reclaims_expired_and_deleted_files(
 
     from gateway.core.unit_of_work import UnitOfWork
     from gateway.repositories.files import FileRepositories
-    from gateway.services.files import FileService, sweep_files
+    from gateway.services.files import FileService
 
     def _upload(name: str) -> str:
         resp = client.post(
@@ -797,7 +797,7 @@ def test_sweep_reclaims_expired_and_deleted_files(
             async with async_sessionmaker(engine)() as db:
                 uow = UnitOfWork(db)
                 files = FileService(uow, FileRepositories.on(uow), store, test_config)
-                batch = await sweep_files(files, batch_size=10)
+                batch = await files.sweep(batch_size=10)
                 return batch.reclaimed
         finally:
             await engine.dispose()
@@ -827,7 +827,7 @@ def test_sweep_pages_past_rows_whose_blob_will_not_delete(
 
     from gateway.core.unit_of_work import UnitOfWork
     from gateway.repositories.files import FileRepositories
-    from gateway.services.files import FileService, sweep_files
+    from gateway.services.files import FileService
 
     ids = []
     for name in ("stuck-1.txt", "stuck-2.txt", "fine.txt"):
@@ -857,8 +857,8 @@ def test_sweep_pages_past_rows_whose_blob_will_not_delete(
             async with async_sessionmaker(engine)() as db:
                 uow = UnitOfWork(db)
                 files = FileService(uow, FileRepositories.on(uow), store, test_config)
-                first = await sweep_files(files, batch_size=2)
-                second = await sweep_files(files, batch_size=2, after=first.cursor)
+                first = await files.sweep(batch_size=2)
+                second = await files.sweep(batch_size=2, after=first.cursor)
                 return [(first.seen, first.reclaimed), (second.seen, second.reclaimed)]
         finally:
             await engine.dispose()
