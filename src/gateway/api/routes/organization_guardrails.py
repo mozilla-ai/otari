@@ -18,21 +18,25 @@ changes nothing about how a request is checked.
 """
 
 import uuid
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
 from gateway.api.routes.organizations import Message
+from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.services.tenancy.organization_guardrail_service import (
     OrganizationGuardrailCreate,
     OrganizationGuardrailPublic,
     OrganizationGuardrailService,
     OrganizationGuardrailsPublic,
+    OrganizationGuardrailTest,
+    OrganizationGuardrailTestResult,
     OrganizationGuardrailUpdate,
 )
+from gateway.services.tool_settings_service import GUARDRAILS_URL, effective_value
 
 # Master key on the router, as every standalone management router declares it.
 # The role gate is a separate question answered in the service: the credential
@@ -112,6 +116,37 @@ async def update_organization_guardrail(
     ``credential`` are cleared by sending an empty string rather than null.
     """
     return await service.update_guardrail(user=current_identity, guardrail_id=guardrail_id, request=body)
+
+
+@router.post("/{guardrail_id}/test")
+async def test_organization_guardrail(
+    service: OrganizationGuardrailServiceDep,
+    current_identity: CurrentIdentity,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    guardrail_id: uuid.UUID,
+    body: OrganizationGuardrailTest,
+) -> OrganizationGuardrailTestResult:
+    """Post some text to the guardrails service a mandate names and return its verdict.
+
+    Organization owners and admins only. Uses the mandate's own endpoint and
+    credential, or the deployment's guardrails URL when it names none, and
+    faces the same safety check a request does. Nothing is stored.
+    ``validate_kwargs`` replaces the stored arguments for this call, a
+    ``***`` in it keeps the value stored under that name, and omitting it
+    sends the stored arguments.
+
+    A mandate that runs a configured guardrail answers 409: test that
+    guardrail through ``/api/v1/organizations/me/guardrail-definitions``. So
+    does one with nowhere to send the check. A service that cannot be reached,
+    or answers something malformed, answers 502, and the reason is in the
+    gateway's log only.
+    """
+    return await service.test_guardrail(
+        user=current_identity,
+        guardrail_id=guardrail_id,
+        request=body,
+        default_url=cast("str | None", effective_value(config, GUARDRAILS_URL)),
+    )
 
 
 @router.delete("/{guardrail_id}")

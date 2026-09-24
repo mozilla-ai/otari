@@ -59,6 +59,7 @@ from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.log_config import logger
 from gateway.models.guardrails import (
     GuardrailConfig,
     OrganizationGuardrail,
@@ -68,6 +69,7 @@ from gateway.models.guardrails import (
 from gateway.models.secret_fields import redact_secret_like_values, restore_redacted_values
 from gateway.models.tenancy import User
 from gateway.repositories.tenancy import WorkspaceRepository
+from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     decrypt_secret,
@@ -75,12 +77,15 @@ from gateway.services.secret_box import (
 )
 from gateway.services.tenancy.errors import (
     OrganizationGuardrailAlreadyExistsError,
+    OrganizationGuardrailCheckFailedError,
     OrganizationGuardrailCredentialNeedsUrlError,
     OrganizationGuardrailDefinitionNotFoundError,
     OrganizationGuardrailLimitReachedError,
+    OrganizationGuardrailNoEndpointError,
     OrganizationGuardrailNotFoundError,
     OrganizationGuardrailScopeConflictError,
     OrganizationGuardrailSingleBackendError,
+    OrganizationGuardrailTestsItsDefinitionError,
     OrganizationGuardrailUnsafeUrlError,
     SecretBoxUnavailableTenancyError,
     WorkspaceNotFoundError,
@@ -118,6 +123,9 @@ MAX_GUARDRAILS_PER_ORGANIZATION = 10
 MAX_SCOPED_WORKSPACES = 500
 
 _MAX_LIST_LIMIT = 1000
+
+# A test is one request's worth of text, as a definition's test is.
+_MAX_TEST_TEXT = 10_000
 
 # Sentinel for "this PATCH did not mention the field", which is not the same as
 # "this PATCH cleared it": see `OrganizationGuardrailUpdate`.
@@ -377,6 +385,31 @@ class OrganizationGuardrailPublic(BaseModel):
 class OrganizationGuardrailsPublic(BaseModel):
     data: list[OrganizationGuardrailPublic]
     count: int
+
+
+class OrganizationGuardrailTest(BaseModel):
+    """Text to run one mandate's check over, as a request would."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: Annotated[str, StringConstraints(min_length=1, max_length=_MAX_TEST_TEXT)] = Field(
+        description="The input to check, as a request's user text would reach it"
+    )
+    validate_kwargs: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Per-check arguments to send in place of the stored ones; omitted sends the stored ones. "
+            "A *** keeps the value stored under that name"
+        ),
+    )
+
+
+class OrganizationGuardrailTestResult(BaseModel):
+    """The guardrails service's verdict on the text, in the fields a request's check reports."""
+
+    valid: bool | None = Field(description="False when the guardrail flagged the text, null when it gave no verdict")
+    explanation: str | None = Field(description="The service's reason, when it gives one")
+    score: float | None = Field(description="The service's score, when it gives one")
 
 
 @dataclass(frozen=True)
@@ -854,6 +887,66 @@ class OrganizationGuardrailService:
             raise OrganizationGuardrailAlreadyExistsError(attempted_profile) from exc
         await self.db.refresh(guardrail)
         return await self._public(guardrail)
+
+    async def test_guardrail(
+        self,
+        *,
+        user: User,
+        guardrail_id: uuid.UUID,
+        request: OrganizationGuardrailTest,
+        default_url: str | None,
+    ) -> OrganizationGuardrailTestResult:
+        """Post some text to the service a mandate names and return its verdict.
+
+        The endpoint, credential and safety check a request would use, but run
+        as ``block`` with ``on_unavailable="block"`` whatever is stored, so a
+        failure is reported rather than recorded as inconclusive. Works on a
+        paused mandate too: pausing stops it running, not being checked.
+        """
+        organization_id = await self._manageable_organization_id(user)
+        guardrail = await self._get_or_404(organization_id, guardrail_id)
+        if guardrail.definition_id is not None:
+            raise OrganizationGuardrailTestsItsDefinitionError()
+        url = guardrail.url
+        if url is None and not default_url:
+            raise OrganizationGuardrailNoEndpointError()
+        profile = guardrail.profile
+        credential = decrypt_secret(guardrail.encrypted_credential) if guardrail.encrypted_credential else None
+        stored_kwargs = guardrail.validate_kwargs
+        validate_kwargs = (
+            restore_redacted_values(request.validate_kwargs, stored_kwargs)
+            if "validate_kwargs" in request.model_fields_set
+            else stored_kwargs
+        ) or {}
+        # Ends the read, so no transaction idles over a call of up to 30 seconds.
+        await self.db.rollback()
+
+        config = GuardrailConfig(
+            profile=profile, url=url, mode="block", on_unavailable="block", validate_kwargs=validate_kwargs
+        )
+        try:
+            verdict = await run_input_guardrails(
+                [config],
+                request.text,
+                default_url=default_url,
+                credentials={profile: credential} if credential else None,
+            )
+        except UnsafeURLError as exc:
+            raise OrganizationGuardrailUnsafeUrlError(str(exc)) from exc
+        except GuardrailsNotReachableError as exc:
+            # Not the message: it can quote the service's result, which may echo
+            # the text or the arguments sent, credentials included.
+            reason = type(exc.__cause__ or exc).__name__
+            logger.warning("Testing organization guardrail %s failed: %s", profile, reason)
+            raise OrganizationGuardrailCheckFailedError() from exc
+        result = verdict.results[0]
+        return OrganizationGuardrailTestResult(
+            valid=result.valid,
+            explanation=None if result.explanation is None else str(result.explanation),
+            score=float(result.score)
+            if isinstance(result.score, int | float) and not isinstance(result.score, bool)
+            else None,
+        )
 
     async def delete_guardrail(self, *, user: User, guardrail_id: uuid.UUID) -> None:
         """Drop the guardrail and its scope rows, which cascade with it."""

@@ -323,6 +323,7 @@ GET /api/v1/organizations/me/guardrails                         # operator surfa
 POST /api/v1/organizations/me/guardrails                        # operator surface
 PATCH /api/v1/organizations/me/guardrails/{guardrail_id}        # operator surface
 DELETE /api/v1/organizations/me/guardrails/{guardrail_id}       # operator surface
+POST /api/v1/organizations/me/guardrails/{guardrail_id}/test    # operator surface
 # The definitions those mandates will point at: what a guardrail *is*, where the
 # mandate says where it runs. Excluded on the `/organizations/me` ground rather
 # than the operator one above, which is the same ground the provider-key form

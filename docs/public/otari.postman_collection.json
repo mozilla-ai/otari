@@ -3915,6 +3915,50 @@
               ]
             }
           }
+        },
+        {
+          "name": "Test Organization Guardrail",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"text\": \"string\"\n}"
+            },
+            "description": "Post some text to the guardrails service a mandate names and return its verdict.\n\nOrganization owners and admins only. Uses the mandate's own endpoint and\ncredential, or the deployment's guardrails URL when it names none, and\nfaces the same safety check a request does. Nothing is stored.\n``validate_kwargs`` replaces the stored arguments for this call, a\n``***`` in it keeps the value stored under that name, and omitting it\nsends the stored arguments.\n\nA mandate that runs a configured guardrail answers 409: test that\nguardrail through ``/api/v1/organizations/me/guardrail-definitions``. So\ndoes one with nowhere to send the check. A service that cannot be reached,\nor answers something malformed, answers 502, and the reason is in the\ngateway's log only.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "guardrails",
+                ":guardrail_id",
+                "test"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/guardrails/:guardrail_id/test",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "guardrail_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
         }
       ],
       "name": "organization-guardrails"

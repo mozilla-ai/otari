@@ -9548,6 +9548,78 @@
         "title": "OrganizationGuardrailPublic",
         "type": "object"
       },
+      "OrganizationGuardrailTest": {
+        "additionalProperties": false,
+        "description": "Text to run one mandate's check over, as a request would.",
+        "properties": {
+          "text": {
+            "description": "The input to check, as a request's user text would reach it",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "validate_kwargs": {
+            "additionalProperties": true,
+            "description": "Per-check arguments to send in place of the stored ones; omitted sends the stored ones. A *** keeps the value stored under that name",
+            "title": "Validate Kwargs",
+            "type": "object"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "OrganizationGuardrailTest",
+        "type": "object"
+      },
+      "OrganizationGuardrailTestResult": {
+        "description": "The guardrails service's verdict on the text, in the fields a request's check reports.",
+        "properties": {
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The service's reason, when it gives one",
+            "title": "Explanation"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The service's score, when it gives one",
+            "title": "Score"
+          },
+          "valid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "False when the guardrail flagged the text, null when it gave no verdict",
+            "title": "Valid"
+          }
+        },
+        "required": [
+          "valid",
+          "explanation",
+          "score"
+        ],
+        "title": "OrganizationGuardrailTestResult",
+        "type": "object"
+      },
       "OrganizationGuardrailUpdate": {
         "description": "Partial update. Only the fields the caller sets are applied.\n\n``credential`` and ``url`` have three states rather than two, which is what\na write-only field and its nullable partner need: omit to leave the stored\nvalue alone, send ``\"\"`` to clear it, send a value to replace it. An\nexplicit ``null`` also leaves them alone, matching\n`WorkspaceMcpServerUpdate`: a client that serializes its whole form back,\nwith an empty credential box it never filled in, must not destroy a\ncredential it was never shown.\n\n``workspace_ids`` replaces the scope whole when sent; ``[]`` clears it.\n\n``definition_id`` diverges: an explicit ``null`` **clears** it. The rule\nabove protects a field the client was never shown, and this one is returned\non every read, so a form sending ``null`` is sending back a field it was\ngiven rather than an empty box it never filled in. Omitting it still leaves\nthe link alone.",
         "example": {
@@ -24250,6 +24322,68 @@
           }
         ],
         "summary": "Update Organization Guardrail",
+        "tags": [
+          "organization-guardrails"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/guardrails/{guardrail_id}/test": {
+      "post": {
+        "description": "Post some text to the guardrails service a mandate names and return its verdict.\n\nOrganization owners and admins only. Uses the mandate's own endpoint and\ncredential, or the deployment's guardrails URL when it names none, and\nfaces the same safety check a request does. Nothing is stored.\n``validate_kwargs`` replaces the stored arguments for this call, a\n``***`` in it keeps the value stored under that name, and omitting it\nsends the stored arguments.\n\nA mandate that runs a configured guardrail answers 409: test that\nguardrail through ``/api/v1/organizations/me/guardrail-definitions``. So\ndoes one with nowhere to send the check. A service that cannot be reached,\nor answers something malformed, answers 502, and the reason is in the\ngateway's log only.",
+        "operationId": "organization-guardrails-test_organization_guardrail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "guardrail_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Guardrail Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationGuardrailTest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationGuardrailTestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Organization Guardrail",
         "tags": [
           "organization-guardrails"
         ]

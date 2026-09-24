@@ -1055,6 +1055,40 @@ class OrganizationGuardrailSingleBackendError(TenancyValidationError):
         )
 
 
+class OrganizationGuardrailTestsItsDefinitionError(TenancyConflictError):
+    """A test asked for a mandate that runs one of the organization's definitions.
+
+    That check is the definition's, and its own test runs it; testing it here
+    as well would be a second way to reach one runner.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("This mandate runs a guardrail you configured; test that guardrail instead")
+
+
+class OrganizationGuardrailNoEndpointError(TenancyConflictError):
+    """A test asked for a mandate with no endpoint, on a deployment that sets none either."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This guardrail names no endpoint and the deployment has no guardrails URL, so there is "
+            "nothing to test against"
+        )
+
+
+class OrganizationGuardrailCheckFailedError(TenancyError):
+    """The guardrails service was called and the check did not come back.
+
+    A 502 naming nothing the service said, for the reason
+    `OrganizationGuardrailDefinitionCheckFailedError` gives: the reason is logged.
+    """
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+
+    def __init__(self) -> None:
+        super().__init__("The guardrail could not be evaluated. The reason is in the gateway's log.")
+
+
 class OrganizationGuardrailDefinitionNotFoundError(TenancyNotFoundError):
     def __init__(self, definition_id: object):
         super().__init__(f"Organization guardrail definition {definition_id} not found")

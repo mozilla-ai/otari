@@ -2119,6 +2119,39 @@ export interface paths {
         patch: operations["organization-guardrails-update_organization_guardrail"];
         trace?: never;
     };
+    "/api/v1/organizations/me/guardrails/{guardrail_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Organization Guardrail
+         * @description Post some text to the guardrails service a mandate names and return its verdict.
+         *
+         *     Organization owners and admins only. Uses the mandate's own endpoint and
+         *     credential, or the deployment's guardrails URL when it names none, and
+         *     faces the same safety check a request does. Nothing is stored.
+         *     ``validate_kwargs`` replaces the stored arguments for this call, a
+         *     ``***`` in it keeps the value stored under that name, and omitting it
+         *     sends the stored arguments.
+         *
+         *     A mandate that runs a configured guardrail answers 409: test that
+         *     guardrail through ``/api/v1/organizations/me/guardrail-definitions``. So
+         *     does one with nowhere to send the check. A service that cannot be reached,
+         *     or answers something malformed, answers 502, and the reason is in the
+         *     gateway's log only.
+         */
+        post: operations["organization-guardrails-test_organization_guardrail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/keys": {
         parameters: {
             query?: never;
@@ -9926,6 +9959,45 @@ export interface components {
             workspace_ids: string[];
         };
         /**
+         * OrganizationGuardrailTest
+         * @description Text to run one mandate's check over, as a request would.
+         */
+        OrganizationGuardrailTest: {
+            /**
+             * Text
+             * @description The input to check, as a request's user text would reach it
+             */
+            text: string;
+            /**
+             * Validate Kwargs
+             * @description Per-check arguments to send in place of the stored ones; omitted sends the stored ones. A *** keeps the value stored under that name
+             */
+            validate_kwargs?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * OrganizationGuardrailTestResult
+         * @description The guardrails service's verdict on the text, in the fields a request's check reports.
+         */
+        OrganizationGuardrailTestResult: {
+            /**
+             * Explanation
+             * @description The service's reason, when it gives one
+             */
+            explanation: string | null;
+            /**
+             * Score
+             * @description The service's score, when it gives one
+             */
+            score: number | null;
+            /**
+             * Valid
+             * @description False when the guardrail flagged the text, null when it gave no verdict
+             */
+            valid: boolean | null;
+        };
+        /**
          * OrganizationGuardrailUpdate
          * @description Partial update. Only the fields the caller sets are applied.
          *
@@ -17043,6 +17115,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrganizationGuardrailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-guardrails-test_organization_guardrail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                guardrail_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationGuardrailTest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationGuardrailTestResult"];
                 };
             };
             /** @description Validation Error */
