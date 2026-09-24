@@ -1,6 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, within } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
@@ -144,7 +143,7 @@ describe("PublicCatalogPage", () => {
     window.location.hash = ""
   })
 
-  it("lists the catalog for a visitor with a way to sign in and nothing to edit", async () => {
+  it("lists the catalog for a visitor and nothing to edit", async () => {
     const fetchMock = mockApi()
     renderPage()
 
@@ -153,10 +152,8 @@ describe("PublicCatalogPage", () => {
     expect(
       within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }),
     ).toHaveAttribute("href", "#/models/z-ai/glm-5.3")
-    // Signup is closed on this deployment, so the way in is sign-in.
-    expect(
-      screen.getByRole("link", { name: "Start building with Otari" }),
-    ).toHaveAttribute("href", "#/")
+    // No account action in the bar: "Use this model" is the way in.
+    expect(screen.queryByRole("link", { name: /sign in/i })).toBeNull()
     expect(screen.getByText(/deployment's list rates/)).toBeInTheDocument()
     // A visitor has no organization to ask about, and asking would be a 401.
     expect(
@@ -164,15 +161,6 @@ describe("PublicCatalogPage", () => {
         String(url).includes(`${API_ROOT}/organizations/me`),
       ),
     ).toBe(false)
-  })
-
-  it("sends a visitor to signup where the deployment offers it", async () => {
-    mockApi()
-    renderPage(undefined, true)
-
-    expect(
-      await screen.findByRole("link", { name: "Start building with Otari" }),
-    ).toHaveAttribute("href", "#/signup")
   })
 
   it("shows a model's offerings without the links that need a session", async () => {
@@ -193,18 +181,22 @@ describe("PublicCatalogPage", () => {
     )
   })
 
-  it("tells a visitor to sign in before the request to copy", async () => {
+  it("starts an account from Use this model, sign-in while signup is closed", async () => {
     mockApi()
     renderPage("z-ai/glm-5.3")
-    const user = userEvent.setup()
 
-    await user.click(
-      await screen.findByRole("button", { name: "Use this model" }),
-    )
+    const use = await screen.findByRole("link", { name: "Use this model" })
+    expect(use).toHaveAttribute("href", "#/")
+    // No drawer for a visitor: there is no key to send its request with.
+    expect(screen.queryByRole("button", { name: "Use this model" })).toBeNull()
+  })
 
-    const drawer = await screen.findByRole("dialog", { name: "Use this model" })
+  it("starts an account from Use this model at signup where it is open", async () => {
+    mockApi()
+    renderPage("z-ai/glm-5.3", true)
+
     expect(
-      within(drawer).getByRole("link", { name: "Sign in" }),
-    ).toHaveAttribute("href", "#/")
+      await screen.findByRole("link", { name: "Use this model" }),
+    ).toHaveAttribute("href", "#/signup")
   })
 })

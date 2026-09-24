@@ -1,4 +1,4 @@
-import { Button } from "@heroui/react"
+import { Button, buttonVariants } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useState } from "react"
@@ -32,11 +32,13 @@ import {
   formatReleaseDate,
 } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // One model, on a page of its own: the header with its facts, then every
 // offering of the model this viewer may call, cheapest first, with the price
 // they would be charged and where it came from. "Use this model" opens a
-// drawer beside the table with the request to send.
+// drawer beside the table with the request to send; ahead of a session, where
+// there is no key to send it with, it starts an account instead.
 //
 // Read-only for everyone (otari-ai#2095, #2096): a rate is edited on Model
 // pricing, which the operator's link here points at, so the page that compares
@@ -343,6 +345,7 @@ export function ModelDetailView({
   publicView?: boolean
 }) {
   const organization = useOrganizationContext(!publicView)
+  const { open_signup } = useDeployment()
   // Not a pricing authority here: rates are set per model on Providers, which
   // answers to the organization role. It decides the two hints below that point
   // at deployment-wide pages.
@@ -472,11 +475,19 @@ export function ModelDetailView({
                 Providers
               </Link>
             ) : null}
-            {model.offerings.length > 0 ? (
+            {model.offerings.length === 0 ? null : publicView ? (
+              // Signup where the deployment offers it, sign-in otherwise.
+              <a
+                href={open_signup ? "#/signup" : "#/"}
+                className={buttonVariants({ variant: "primary" })}
+              >
+                Use this model
+              </a>
+            ) : (
               <Button variant="primary" onPress={() => setUseModel(true)}>
                 Use this model
               </Button>
-            ) : null}
+            )}
           </div>
         </div>
         {model.description ? (
@@ -546,8 +557,10 @@ export function ModelDetailView({
             <p className="max-w-prose text-sm text-muted">
               Several providers serve the same model. Each row is one offering:
               what {publicView ? "this deployment lists it at" : "you pay"} and
-              where that price comes from. "Use this model" has the request to
-              send, to the gateway's pick or a provider you pin.{" "}
+              where that price comes from.{" "}
+              {publicView
+                ? null
+                : `"Use this model" has the request to send, to the gateway's pick or a provider you pin. `}
               {model.offering_count} on {model.provider_count}{" "}
               {model.provider_count === 1 ? "provider" : "providers"}, cheapest
               first.
@@ -626,12 +639,13 @@ export function ModelDetailView({
           ) : null}
         </section>
       </div>
-      <UseModelDrawer
-        model={model}
-        isOpen={useModel}
-        onOpenChange={setUseModel}
-        publicView={publicView}
-      />
+      {publicView ? null : (
+        <UseModelDrawer
+          model={model}
+          isOpen={useModel}
+          onOpenChange={setUseModel}
+        />
+      )}
     </div>
   )
 }
