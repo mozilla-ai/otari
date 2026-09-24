@@ -4,6 +4,8 @@ The gateway's backend is a modular monolith: one process and one deploy, with
 the code cut by domain. This page gives the target shape of a domain, and
 assigns every module under `services/`, `api/routes/`, `models/` and
 `repositories/` in `src/gateway/` to one domain or to the shared set.
+`core/` is listed only where a domain owns a module there. The rest of it is
+wiring every domain uses and belongs to none.
 
 ## The target shape
 
@@ -20,6 +22,7 @@ with underscores (`api_keys`).
 | Schemas | `schemas/<domain>.py` | Pydantic request and response models, and their mapping from ORM rows | Anything else |
 | Exceptions | `exceptions/<domain>_exceptions.py` | The domain's error classes, each with its HTTP status | Handle errors |
 | Models | `models/<domain>.py` | ORM tables, and the closed vocabulary of each string column that has one | Hold logic |
+| Core | `core/<subject>.py` | What a deployment is, and the vocabulary its own wiring is written in | Hold a domain's business rules, run a query |
 
 How a domain fits together:
 
@@ -311,6 +314,12 @@ Deployment settings, health, modes, maintenance mode and mail.
   `master_key_service.py`, `mail/mailer.py`, `mail/message.py`,
   `mail/templates.py`, `mail/transports.py`
 - Models: `platform.py`
+- Core: `deployment.py`, `surface.py`, `feature.py`
+
+`deployment.py` holds `Plane`, which names the control plane and the data
+plane, and the value that says which of them a process serves. `surface.py`
+says which deployments publish a dashboard page and `feature.py` shapes an
+optional feature, so the three together are how a build describes itself.
 
 ### alerts
 
