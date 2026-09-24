@@ -38,7 +38,7 @@ from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
-from gateway.services.control_plane import ResolveEndpoint, _transport, control_plane_url, resolve
+from gateway.services.control_plane import ResolveEndpoint, resolve, transport
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.mcp_stateless import (
     CODE_RESOLUTION_FAILED,
@@ -489,7 +489,6 @@ async def _post_resolve(
     user_token: str,
     endpoint: ResolveEndpoint,
     body: dict[str, Any],
-    client_error_detail: str,
 ) -> Any:
     """Ask the control plane, and render its refusal as this endpoint's own.
 
@@ -503,7 +502,6 @@ async def _post_resolve(
             user_token=user_token,
             endpoint=endpoint,
             body=body,
-            client_error_detail=client_error_detail,
         )
     except ControlPlaneRefusedError as exc:
         headers = {"Retry-After": exc.retry_after} if exc.retry_after else None
@@ -530,7 +528,6 @@ async def _resolve_platform_credentials(
         user_token=user_token,
         endpoint=ResolveEndpoint.PROVIDER_KEYS,
         body=resolve_body,
-        client_error_detail="Authorization request rejected",
     )
     return _parse_resolve_payload(payload)
 
@@ -876,7 +873,6 @@ async def _resolve_platform_mcp_servers(
         user_token=user_token,
         endpoint=ResolveEndpoint.MCP_SERVERS,
         body={"mcp_server_ids": [str(uid) for uid in dict.fromkeys(mcp_server_ids)]},
-        client_error_detail="MCP server resolution failed",
     )
     return [
         McpServerConfig(
@@ -919,7 +915,6 @@ async def _resolve_platform_mcp_server(
         user_token=user_token,
         endpoint=ResolveEndpoint.MCP_SERVERS,
         body={"mcp_server_ids": [str(mcp_server_id)]},
-        client_error_detail="MCP server resolution failed",
     )
     servers = payload.get("servers") if isinstance(payload, dict) else None
     if not isinstance(servers, list):
@@ -960,7 +955,6 @@ async def _resolve_platform_web_search(
         user_token=user_token,
         endpoint=ResolveEndpoint.WEB_SEARCH,
         body={} if requested_tools is None else {"requested_tools": requested_tools},
-        client_error_detail="Web search resolution failed",
     )
     return payload if isinstance(payload, dict) else {}
 
@@ -982,7 +976,6 @@ async def _resolve_platform_code_execution(
         user_token=user_token,
         endpoint=ResolveEndpoint.CODE_EXECUTION,
         body={},
-        client_error_detail="Code execution resolution failed",
     )
     return payload if isinstance(payload, dict) else {}
 
@@ -1012,7 +1005,7 @@ async def _report_platform_usage(
 
     timeout_ms = int(config.platform.get("usage_timeout_ms", 5000))
     max_retries = int(config.platform.get("usage_max_retries", 3))
-    usage_url = control_plane_url(platform_base_url, "/gateway/usage")
+    usage_url = transport.control_plane_url(platform_base_url, "/gateway/usage")
     headers = {"X-Gateway-Token": config.platform_token or ""}
 
     payload: dict[str, Any] = {
@@ -1050,7 +1043,7 @@ async def _report_platform_usage(
     for attempt in range(1, max_retries + 1):
         should_retry = False
         try:
-            response = await _transport.post(
+            response = await transport.post(
                 url=usage_url,
                 headers=headers,
                 body=payload,

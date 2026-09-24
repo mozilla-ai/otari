@@ -126,7 +126,6 @@ async def test_hybrid_mode_forwards_the_platforms_421_and_its_host(
             user_token="otr_tk_v1_eu_" + "e" * 49,
             endpoint=ResolveEndpoint.PROVIDER_KEYS,
             body={"model": "gpt-4o-mini"},
-            client_error_detail="Authorization request rejected",
         )
 
     assert exc_info.value.status_code == status.HTTP_421_MISDIRECTED_REQUEST
