@@ -16,10 +16,11 @@ platform-fallback streaming paths. These tests pin that contract:
 
 import asyncio
 import json
+import logging
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -57,9 +58,10 @@ from gateway.api.routes._pipeline import (
 from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
 from gateway.core.config import GatewayConfig
 from gateway.models.mcp import McpServerConfig
-from gateway.models.pricing import PriceSource
+from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budgets import ReservationHandle
+from gateway.services.pricing_service import ResolvedPricing
 from gateway.services.tenancy.errors import WorkspaceMcpServerNotFoundError
 from gateway.services.tenancy.workspace_web_search_service import ResolvedWebSearchConfig
 from gateway.services.tool_usage import ToolUsageTally
@@ -714,6 +716,103 @@ async def test_log_usage_still_resolves_the_workspace_when_not_given_one(monkeyp
 
     assert lookups == 1
     assert log_writer.put_rows[0].workspace_id == resolved
+
+
+def _stub_pricing(monkeypatch: pytest.MonkeyPatch, resolved: ResolvedPricing | None) -> None:
+    async def workspace_for_key_id(db: Any, api_key_id: str | None) -> uuid.UUID:
+        return uuid.uuid4()
+
+    async def organization_for_workspace_id(db: Any, workspace_id: uuid.UUID | None) -> None:
+        return None
+
+    async def resolve_model_pricing(*args: Any, **kwargs: Any) -> ResolvedPricing | None:
+        return resolved
+
+    monkeypatch.setattr(pipeline, "workspace_for_key_id", workspace_for_key_id)
+    monkeypatch.setattr(pipeline, "organization_for_workspace_id", organization_for_workspace_id)
+    monkeypatch.setattr(pipeline, "resolve_model_pricing", resolve_model_pricing)
+    monkeypatch.setattr(pipeline, "_unpriced_warned_at", {})
+
+
+async def _settle(model: str) -> Any:
+    writer = _FakeLogWriter()
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, writer),
+        api_key_id=None,
+        model=model,
+        provider="gemini",
+        endpoint="/v1/chat/completions",
+        usage_override=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+    )
+    return writer.put_rows[0]
+
+
+@pytest.fixture
+def gateway_caplog(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """``caplog`` attached to the gateway logger, which does not propagate to root."""
+    gateway_logger = logging.getLogger("gateway")
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        yield caplog
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
+def _unpriced_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [r.getMessage() for r in caplog.records if "No pricing configured" in r.getMessage()]
+
+
+@pytest.mark.asyncio
+async def test_unpriced_settlement_warns_once_per_model(
+    monkeypatch: pytest.MonkeyPatch, gateway_caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unpriced model is logged once per interval, not once per request (#1625)."""
+    _stub_pricing(monkeypatch, None)
+
+    row = await _settle("gemini-3.7-flash")
+    await _settle("gemini-3.7-flash")
+    await _settle("gemini-3.8-flash")
+
+    assert row.cost is None
+    warnings = _unpriced_warnings(gateway_caplog)
+    assert len(warnings) == 2
+    assert "'gemini:gemini-3.7-flash'" in warnings[0]
+    assert "'gemini:gemini-3.8-flash'" in warnings[1]
+
+
+@pytest.mark.asyncio
+async def test_unpriced_settlement_warns_again_after_the_interval(
+    monkeypatch: pytest.MonkeyPatch, gateway_caplog: pytest.LogCaptureFixture
+) -> None:
+    _stub_pricing(monkeypatch, None)
+
+    await _settle("gemini-3.7-flash")
+    await _settle("gemini-3.7-flash")
+    assert len(_unpriced_warnings(gateway_caplog)) == 1
+
+    # Backdate the last warning past the interval rather than patching the clock,
+    # which the event loop reads too.
+    pipeline._unpriced_warned_at["gemini:gemini-3.7-flash"] -= pipeline.UNPRICED_WARNING_INTERVAL_S
+    await _settle("gemini-3.7-flash")
+
+    assert len(_unpriced_warnings(gateway_caplog)) == 2
+
+
+@pytest.mark.asyncio
+async def test_priced_settlement_does_not_warn(
+    monkeypatch: pytest.MonkeyPatch, gateway_caplog: pytest.LogCaptureFixture
+) -> None:
+    pricing = ModelPricing(
+        model_key="gemini:gemini-2.5-flash", input_price_per_million=1.0, output_price_per_million=2.0
+    )
+    _stub_pricing(monkeypatch, ResolvedPricing(pricing, "deployment"))
+
+    row = await _settle("gemini-2.5-flash")
+
+    assert row.cost is not None
+    assert _unpriced_warnings(gateway_caplog) == []
 
 
 @pytest.mark.asyncio

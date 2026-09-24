@@ -179,6 +179,12 @@ Default pricing is off because provider catalogs and reseller rates change.
 With `require_pricing: true`, a budgeted request with no effective price is
 rejected instead of bypassing the budget.
 
+With `require_pricing: false`, such a request is served and recorded with no
+cost, and its response carries no inline `cost_usd`. The gateway logs a warning
+for each unpriced model at most once an hour per process, and the dashboard
+shows operators a banner naming the models that served unpriced traffic in the
+last 24 hours, linked to those requests in Activity, where each can be priced.
+
 ### Keeping the defaults current
 
 `pricing_refresh` decides what the gateway does with a newer genai-prices

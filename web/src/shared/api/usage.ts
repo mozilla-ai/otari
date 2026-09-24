@@ -271,6 +271,38 @@ export function useFailureCount(windowSeconds: number, enabled = true) {
   })
 }
 
+// Unpriced usage moves at the pace of traffic to a model nobody priced, so a slow
+// poll is enough for a banner that reports it.
+const UNPRICED_USAGE_POLL_MS = 5 * 60_000
+
+// Successful gateway requests within the last `windowSeconds` that settled with
+// no price (the Activity page's "Unpriced" filter), with the models that served
+// them. One bounded summary read: the totals, and the `model` breakdown only.
+// The window is resolved in the query function for the reasons `useFailureCount`
+// gives.
+export function useUnpricedUsage(windowSeconds: number, enabled = true) {
+  const scope = useUsageScope()
+  return useQuery({
+    queryKey: [USAGE, "summary", "unpriced", scope.base, windowSeconds],
+    queryFn: () => {
+      const params = usageParams({
+        status: "success",
+        source: "gateway",
+        priced: false,
+        start_date: isoAgo(windowSeconds),
+      })
+      params.set("bucket", "hour")
+      params.append("dimensions", "model")
+      return apiFetch<UsageSummary>(
+        `${scope.base}/summary?${params.toString()}`,
+      )
+    },
+    enabled: enabled && scope.isReady,
+    refetchInterval: UNPRICED_USAGE_POLL_MS,
+    retry: false,
+  })
+}
+
 // The rows of one or more request groups: every attempt a routed request made,
 // which is what turns "attempt 1 of 2, failed" into "and here is what served it".
 // A plan is capped at a handful of candidates and the activity table pages at a

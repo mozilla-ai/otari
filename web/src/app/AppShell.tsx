@@ -53,6 +53,7 @@ import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { PricingWarning } from "@/features/models/PricingWarning"
+import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
 import { canManage } from "@/features/organization/roles"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
@@ -796,6 +797,7 @@ function AppShellChrome() {
       <UpdatePrompt />
       <ConnectionStatus />
       <PricingWarning />
+      <UnpricedUsageWarning />
       {/* `relative` so the mobile drawer can be offset from *this row* rather
           than from the viewport. The row's top edge is the header's top edge,
           and the pricing alarm above it is a band in flow, so a

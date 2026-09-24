@@ -3627,6 +3627,31 @@ def _stored_error_message(error: str | None) -> str | None:
     return _redacted_upstream_detail(error, PROVIDER_ERROR_DETAIL)
 
 
+# Per-process memory of when each unpriced model was last warned about, so a busy
+# unpriced model logs once per interval rather than once per request. Bounded:
+# once full it is cleared, which costs at most one early repeat per model.
+UNPRICED_WARNING_INTERVAL_S = 3600.0
+_UNPRICED_WARNING_MAX_MODELS = 1024
+_unpriced_warned_at: dict[str, float] = {}
+
+
+def _warn_unpriced_model(model_ref: str) -> None:
+    """Warn that ``model_ref`` settled with no price, at most once per interval per model."""
+    now = time.monotonic()
+    last = _unpriced_warned_at.get(model_ref)
+    if last is not None and now - last < UNPRICED_WARNING_INTERVAL_S:
+        return
+    if len(_unpriced_warned_at) >= _UNPRICED_WARNING_MAX_MODELS:
+        _unpriced_warned_at.clear()
+    _unpriced_warned_at[model_ref] = now
+    logger.warning(
+        "No pricing configured for '%s'. Usage is recorded without cost and responses carry no inline cost; "
+        "set a price for this model. Repeats for it are suppressed for %d minutes.",
+        model_ref,
+        int(UNPRICED_WARNING_INTERVAL_S // 60),
+    )
+
+
 class LoggedUsage(NamedTuple):
     """What :func:`record_usage` wrote: the row's total cost and its rate's source.
 
@@ -3779,8 +3804,7 @@ async def record_usage(
             usage_log.billing_meters = meters
             usage_log.pricing_breakdown = breakdown
         else:
-            model_ref = f"{provider}:{model}" if provider else model
-            logger.warning("No pricing configured for '%s'. Usage will be tracked without cost.", model_ref)
+            _warn_unpriced_model(f"{provider}:{model}" if provider else model)
 
     # When the caller bills a fixed amount without provider usage (e.g. the
     # stream-missing-usage estimate policy), record that amount on the log row
