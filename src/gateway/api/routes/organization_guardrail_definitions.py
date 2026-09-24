@@ -4,8 +4,8 @@ Thin composition over
 `gateway.services.tenancy.organization_guardrail_definition_service`: resolve the
 caller's identity, call the service, return its typed result. The role gate, the
 catalog rules and the secret handling live there, and the domain errors it raises
-carry their own statuses (see `gateway.services.tenancy.errors`), so nothing here
-catches them.
+carry their own statuses (see `gateway.exceptions.guardrails_exceptions`), so
+nothing here catches them.
 
 A separate surface from ``/api/v1/organizations/me/guardrails`` because the two
 say different things. A definition is *what* a check is, and one of them can be

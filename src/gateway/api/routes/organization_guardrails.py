@@ -3,8 +3,8 @@
 Thin composition over `gateway.services.tenancy.organization_guardrail_service`:
 resolve the caller's identity, call the service, return its typed result. The
 role gate and the scope rules live there, and the domain errors it raises carry
-their own statuses (see `gateway.services.tenancy.errors`), so nothing here
-catches them.
+their own statuses (see `gateway.exceptions.guardrails_exceptions`), so nothing
+here catches them.
 
 Scoped to ``/me`` for the reason `routes/organization_pricing.py` and
 `routes/organizations.py` are: a standalone deployment has exactly one

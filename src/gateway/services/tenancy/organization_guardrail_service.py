@@ -59,6 +59,19 @@ from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.guardrails_exceptions import (
+    OrganizationGuardrailAlreadyExistsError,
+    OrganizationGuardrailCheckFailedError,
+    OrganizationGuardrailCredentialNeedsUrlError,
+    OrganizationGuardrailDefinitionNotFoundError,
+    OrganizationGuardrailLimitReachedError,
+    OrganizationGuardrailNoEndpointError,
+    OrganizationGuardrailNotFoundError,
+    OrganizationGuardrailScopeConflictError,
+    OrganizationGuardrailSingleBackendError,
+    OrganizationGuardrailTestsItsDefinitionError,
+    OrganizationGuardrailUnsafeUrlError,
+)
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
 from gateway.models.guardrails import (
@@ -76,20 +89,7 @@ from gateway.services.secret_box import (
     decrypt_secret,
     encrypt_secret,
 )
-from gateway.services.tenancy.errors import (
-    OrganizationGuardrailAlreadyExistsError,
-    OrganizationGuardrailCheckFailedError,
-    OrganizationGuardrailCredentialNeedsUrlError,
-    OrganizationGuardrailDefinitionNotFoundError,
-    OrganizationGuardrailLimitReachedError,
-    OrganizationGuardrailNoEndpointError,
-    OrganizationGuardrailNotFoundError,
-    OrganizationGuardrailScopeConflictError,
-    OrganizationGuardrailSingleBackendError,
-    OrganizationGuardrailTestsItsDefinitionError,
-    OrganizationGuardrailUnsafeUrlError,
-    WorkspaceNotFoundError,
-)
+from gateway.services.tenancy.errors import WorkspaceNotFoundError
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 

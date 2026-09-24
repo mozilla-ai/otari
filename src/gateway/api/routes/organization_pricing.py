@@ -4,8 +4,8 @@ Thin composition over `gateway.services.organization_pricing_service`: resolve
 the caller's identity, call the service, return its typed result. The overlap
 rule, the role gate, and the refusal to re-price a model the deployment supplies
 the credential for all live there, and the domain errors it raises carry their
-own statuses (see `gateway.services.tenancy.errors`), so nothing here catches
-them.
+own statuses (see `gateway.exceptions.pricing_exceptions`), so nothing here
+catches them.
 
 Scoped to ``/me`` for the same reason `routes/organizations.py` is: a request
 cannot name an organization at all, because a standalone deployment has exactly

@@ -24,6 +24,19 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.guardrails_exceptions import (
+    OrganizationGuardrailAlreadyExistsError,
+    OrganizationGuardrailCheckFailedError,
+    OrganizationGuardrailCredentialNeedsUrlError,
+    OrganizationGuardrailDefinitionNotFoundError,
+    OrganizationGuardrailLimitReachedError,
+    OrganizationGuardrailNoEndpointError,
+    OrganizationGuardrailNotFoundError,
+    OrganizationGuardrailScopeConflictError,
+    OrganizationGuardrailSingleBackendError,
+    OrganizationGuardrailTestsItsDefinitionError,
+    OrganizationGuardrailUnsafeUrlError,
+)
 from gateway.models.guardrails import (
     OrganizationGuardrail,
     OrganizationGuardrailDefinition,
@@ -38,21 +51,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.secret_box import decrypt_secret, generate_secret_key
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    OrganizationGuardrailAlreadyExistsError,
-    OrganizationGuardrailCheckFailedError,
-    OrganizationGuardrailCredentialNeedsUrlError,
-    OrganizationGuardrailDefinitionNotFoundError,
-    OrganizationGuardrailLimitReachedError,
-    OrganizationGuardrailNoEndpointError,
-    OrganizationGuardrailNotFoundError,
-    OrganizationGuardrailScopeConflictError,
-    OrganizationGuardrailSingleBackendError,
-    OrganizationGuardrailTestsItsDefinitionError,
-    OrganizationGuardrailUnsafeUrlError,
-    WorkspaceNotFoundError,
-)
+from gateway.services.tenancy.errors import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.services.tenancy.organization_guardrail_service import (
     MAX_GUARDRAILS_PER_ORGANIZATION,
     OrganizationGuardrailCreate,
