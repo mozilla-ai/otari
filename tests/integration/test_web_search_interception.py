@@ -24,6 +24,7 @@ from any_llm.types.completion import (
 )
 from fastapi.testclient import TestClient
 
+from gateway.api.routes._tools import WEB_SEARCH_HEADER
 from gateway.core.config import API_ROOT
 
 from .conftest import MODEL_NAME
@@ -287,12 +288,12 @@ def test_invalid_max_uses_is_rejected_instead_of_becoming_uncapped(
     assert search.await_count == 0
 
 
-def test_search_keyword_no_provider_runs_is_claimed_without_interception(
+def test_auto_claims_a_search_keyword_no_provider_runs_without_interception(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """Chat Completions has no native search, so with a backend configured the
-    keyword runs on it rather than reaching a provider that cannot serve it."""
+    """Chat Completions has no native search, so `Otari-Web-Search: auto` runs the
+    keyword on the backend rather than sending it to a provider that cannot serve it."""
     search = AsyncMock(return_value="search results for otari")
     with (
         patch(
@@ -309,7 +310,7 @@ def test_search_keyword_no_provider_runs_is_claimed_without_interception(
                 "messages": [{"role": "user", "content": "what is otari"}],
                 "tools": [{"type": "web_search_20250305"}],
             },
-            headers=api_key_header,
+            headers={**api_key_header, WEB_SEARCH_HEADER: "auto"},
         )
 
     assert response.status_code == 200, response.text

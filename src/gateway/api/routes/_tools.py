@@ -8,12 +8,13 @@ handling regardless of wire shape.
 
 The explicit ``otari_*`` tool types always trigger gateway-side execution.
 A provider-native web-search keyword (``web_search`` / ``web_search_<date>``)
-is forwarded to the upstream provider when that provider runs it natively
-(Anthropic's dated keyword on Messages, OpenAI's on Responses), and claimed by
-the gateway's backend otherwise, when one is configured. ``web_search_intercept``
-claims it in every case. It is off by default because turning it on silently
-takes a search away from a provider that would have run it (see
-``docs/tools.md``). An OpenAI ``function`` named ``web_search`` is deliberately
+is forwarded to the upstream provider unless ``web_search_intercept`` is on or
+:data:`WEB_SEARCH_HEADER` asks otherwise. The header takes ``CodeExecutor``'s
+vocabulary: ``auto`` claims the keyword only when the dispatched provider cannot
+run it (Anthropic's dated keyword on Messages, OpenAI's on Responses are the
+native pairings), ``otari`` always, ``provider`` never. Interception is off by
+default because turning it on silently takes a search away from a provider that
+would have run it (see ``docs/tools.md``). An OpenAI ``function`` named ``web_search`` is deliberately
 *not* claimed even then: that is a caller's own tool, and hijacking it means the
 caller's handler never fires and it never gets back a ``tool_call`` it can
 dispatch.
@@ -59,6 +60,11 @@ if TYPE_CHECKING:
 # provider's own SDK sends; every SDK can add a default header without a code
 # change. One of ``CodeExecutor``'s values, case-insensitive.
 CODE_EXECUTION_HEADER = "Otari-Code-Execution"
+
+# Per-request choice of who runs a provider-named web-search declaration, in the
+# same vocabulary and for the same reason as ``CODE_EXECUTION_HEADER``. Absent,
+# the deployment's ``web_search_intercept`` decides, as it always has.
+WEB_SEARCH_HEADER = "Otari-Web-Search"
 
 
 class Tool(StrEnum):
@@ -144,9 +150,25 @@ def provider_runs_web_search_natively(
     return (provider.lower(), dialect) in _NATIVE_WEB_SEARCH
 
 
+def parse_web_search_header(value: str | None) -> CodeExecutor | None:
+    """Who a request asked to run its web search, ``None`` when it asked for no one.
+
+    Raises ``ValueError`` for a value outside the vocabulary, as
+    :func:`parse_code_execution_header` does.
+    """
+    if value is None or not value.strip():
+        return None
+    executor = CodeExecutor.parse(value)
+    if executor is None:
+        msg = f"{WEB_SEARCH_HEADER} must be one of {', '.join(e.value for e in CodeExecutor)}"
+        raise ValueError(msg)
+    return executor
+
+
 def claims_provider_web_search(
     tool_entry: dict[str, Any] | None,
     *,
+    requested: CodeExecutor | None,
     intercept: bool,
     backend_configured: bool,
     provider: str | None,
@@ -154,14 +176,18 @@ def claims_provider_web_search(
 ) -> bool:
     """Whether the gateway runs a provider-named web-search declaration itself.
 
-    Only with a backend to run it on. Interception claims every such keyword;
-    without it, a keyword is claimed only when the dispatched provider cannot run
-    it, which is what keeps a request working when its model is swapped for one
-    with no search of its own. A provider that can search keeps its search.
+    Only with a backend to run it on. The request's :data:`WEB_SEARCH_HEADER`
+    wins; without one, interception claims every keyword and its absence none.
+    ``auto`` claims a keyword only when the dispatched provider cannot run it,
+    which keeps a request working when its model is swapped for one with no
+    search of its own while a provider that can search keeps its search.
     """
     if tool_entry is None or not backend_configured:
         return False
-    return intercept or not provider_runs_web_search_natively(tool_entry, provider=provider, dialect=dialect)
+    executor = requested or (CodeExecutor.OTARI if intercept else CodeExecutor.PROVIDER)
+    if executor is CodeExecutor.AUTO:
+        return not provider_runs_web_search_natively(tool_entry, provider=provider, dialect=dialect)
+    return executor is CodeExecutor.OTARI
 
 
 def _is_code_execution_tool_type(type_value: Any) -> bool:

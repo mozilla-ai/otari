@@ -97,6 +97,7 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.api.routes._tools import (
     CODE_EXECUTION_HEADER,
+    WEB_SEARCH_HEADER,
     _build_web_retrieval_backend,
     _extract_code_execution_tool,
     _extract_web_fetch_tool,
@@ -111,6 +112,7 @@ from gateway.api.routes._tools import (
     first_provider_web_search_tool,
     native_code_execution_dialect,
     parse_code_execution_header,
+    parse_web_search_header,
     provider_runs_code_natively,
     resolve_code_executor_preference,
     web_search_max_results_baseline,
@@ -344,6 +346,7 @@ CODE_EXECUTOR_NOT_CONFIGURED_DETAIL = (
     "Set OTARI_SANDBOX_URL on the gateway, or let the provider run it."
 )
 CODE_EXECUTION_HEADER_INVALID_DETAIL = f"{CODE_EXECUTION_HEADER} must be one of auto, otari, provider"
+WEB_SEARCH_HEADER_INVALID_DETAIL = f"{WEB_SEARCH_HEADER} must be one of auto, otari, provider"
 CODE_EXECUTOR_PINNED_DETAIL = (
     f"this workspace's code-execution policy decides who runs code; the {CODE_EXECUTION_HEADER} "
     "header cannot choose otherwise"
@@ -2867,6 +2870,7 @@ async def prepare_gateway_tools(
     max_tool_iterations: int | None,
     tools_header: str | None,
     code_execution_header: str | None = None,
+    web_search_header: str | None = None,
     sandbox_files: SandboxFileBridge | None = None,
     code_execution_port: CodeExecutionPort | None = None,
     container_id: str | None = None,
@@ -2890,8 +2894,13 @@ async def prepare_gateway_tools(
     reservation taken by :func:`resolve_request_context` before propagating.
     """
     try:
+        try:
+            requested_web_search = parse_web_search_header(web_search_header)
+        except ValueError:
+            raise adapter.error(400, WEB_SEARCH_HEADER_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from None
         claim_web_search = claims_provider_web_search(
             first_provider_web_search_tool(tools),
+            requested=requested_web_search,
             intercept=_web_search_intercept_enabled(ctx.config),
             backend_configured=ctx.config.web_search_configured(),
             provider=_dispatch_provider_name(ctx),
@@ -3198,9 +3207,8 @@ async def prepare_gateway_tools(
 
         web_search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
         # A provider-named keyword is claimed only with a backend to run it on, and
-        # then either because interception is on or because the dispatched provider
-        # cannot run it (see `claims_provider_web_search`). Otherwise it passes
-        # through as it always has.
+        # then as the request's header or the deployment's interception toggle says
+        # (see `claims_provider_web_search`). Otherwise it passes through.
         web_search_tool_entry, tools_after_search = _extract_web_search_tool(
             tools_after_sandbox,
             intercept=claim_web_search,
