@@ -762,8 +762,13 @@ def test_the_pre_rename_policy_filename_is_reported_rather_than_read(tmp_path: P
     (tmp_path / ".otari-gates.yml").write_text('schema_version: "1.0"\npolicy:\n  id: x\ngates: []\n')
     result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
     assert result.exit_code == 0, result.output
-    assert ".otari-gates.yml is no longer read" in result.output
-    assert ".otari-guardrails.yml" in result.output
+    # The agent has to actually see it. This branch exits 0, and Claude Code
+    # shows a non-blocking hook's stderr only in its own debug log, so the
+    # warning travels as a stdout `systemMessage` like every other
+    # non-blocking message this command emits.
+    payload = json.loads(result.output)
+    assert ".otari-gates.yml is no longer read" in payload["systemMessage"]
+    assert ".otari-guardrails.yml" in payload["systemMessage"]
 
 
 def test_the_new_policy_filename_wins_and_says_nothing_about_the_old_one(tmp_path: Path) -> None:

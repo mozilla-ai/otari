@@ -119,6 +119,34 @@ def test_fails_outside_a_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert "Not inside a Git repository" in result.output
 
 
+def test_refuses_to_append_beside_an_unread_legacy_policy(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An orphaned `.otari-gates.yml` makes this repo's gate ids read as empty.
+
+    Appending to a fresh target would propose duplicates of gates that are
+    already sitting, unread, in the legacy file. Renaming is the caller's
+    call, so this refuses rather than guessing.
+    """
+    (repo / ".otari-gates.yml").write_text(
+        'schema_version: "1.0"\npolicy:\n  id: real/gates\ngates: []\n', encoding="utf-8"
+    )
+    result = _invoke(monkeypatch)
+    assert result.exit_code != 0
+    assert ".otari-gates.yml is no longer read" in result.output
+    assert not (repo / ".otari-guardrails.yml").exists()
+
+
+def test_an_explicit_guardrail_file_is_not_second_guessed(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard is on the default target only: --guardrail-file said where to write."""
+    (repo / ".otari-gates.yml").write_text(
+        'schema_version: "1.0"\npolicy:\n  id: real/gates\ngates: []\n', encoding="utf-8"
+    )
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, "[]")
+    result = _invoke(monkeypatch, "--guardrail-file", str(repo / "explicit.yml"))
+    assert result.exit_code == 0, result.output
+    assert "no longer read" not in result.output
+
+
 def test_fails_when_no_agents_or_claude_md_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.chdir(tmp_path)

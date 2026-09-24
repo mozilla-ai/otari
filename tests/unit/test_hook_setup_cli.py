@@ -71,6 +71,40 @@ def test_declining_the_starter_policy_still_registers_the_hook(repo: Path) -> No
     assert entry["hooks"][0]["command"] == f"{_FAKE_OTARI_PATH} hook --harness claude-code --api-key k"
 
 
+_LEGACY_POLICY = (
+    'schema_version: "1.0"\npolicy:\n  id: real/gates\ngates:\n'
+    "  - id: no-force-push\n    type: command\n    runs: [pre_tool_use.command]\n"
+    '    enforcement: required\n    forbidden: ["git push --force"]\n    message: no\n'
+)
+
+
+def test_a_legacy_policy_is_offered_a_rename_rather_than_scaffolded_over(repo: Path) -> None:
+    """Scaffolding here would orphan the repo's real gates, silently.
+
+    The starter policy's own existence is what stops `otari hook` reporting
+    the legacy file, so writing one would take away the last signal that
+    these gates had stopped running.
+    """
+    (repo / ".otari-gates.yml").write_text(_LEGACY_POLICY, encoding="utf-8")
+    result = _invoke("--api-key", "k", input="y\n")
+    assert result.exit_code == 0, result.output
+    gates_file = repo / ".otari-guardrails.yml"
+    assert not (repo / ".otari-gates.yml").exists()
+    assert "no-force-push" in gates_file.read_text(encoding="utf-8")
+    # The rename satisfied the policy check, so no starter was offered on top.
+    assert "Create a starter guardrail?" not in result.output
+
+
+def test_declining_the_legacy_rename_leaves_both_files_alone(repo: Path) -> None:
+    (repo / ".otari-gates.yml").write_text(_LEGACY_POLICY, encoding="utf-8")
+    result = _invoke("--api-key", "k", input="n\nn\n")
+    assert result.exit_code == 0, result.output
+    assert (repo / ".otari-gates.yml").is_file()
+    assert "stays unenforced" in result.output
+    # Still registers the hook, the same way declining the starter does.
+    assert _read_settings(repo)["hooks"]["PreToolUse"]
+
+
 def test_accepting_the_starter_policy_writes_one_and_its_command_gate_adds_bash(repo: Path) -> None:
     result = _invoke("--api-key", "k", input="y\n")
     assert result.exit_code == 0, result.output
