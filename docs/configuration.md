@@ -184,8 +184,9 @@ no cost, and its response carries no inline `cost_usd`. The usage row records no
 cost unless the request also ran priced gateway tools, whose charges are still
 recorded. The gateway logs a warning for each unpriced model at most once an
 hour per process, and the dashboard shows operators a banner naming the models
-that served unpriced traffic in the selected workspace in the last 24 hours,
-linked to those requests in Activity, where each can be priced.
+that served unpriced traffic in the selected workspace in the last 24 hours
+and still have no stored price, linked to those requests in Activity, where
+each can be priced.
 
 ### Keeping the defaults current
 

@@ -3,11 +3,20 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { OrganizationContext, UsageGroupRow, UsageSummary } from "@/client"
+import type {
+  OrganizationContext,
+  PricingResponse,
+  UsageGroupRow,
+  UsageSummary,
+} from "@/client"
 import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
 import * as apiClient from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
-import { organizationContext, usageTotals } from "@/tests/fixtures"
+import {
+  organizationContext,
+  pricingResponse,
+  usageTotals,
+} from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
 function modelRow(key: string, requests: number): UsageGroupRow {
@@ -36,12 +45,14 @@ function summary(requests: number, byModel: UsageGroupRow[]): UsageSummary {
 function mockApi(
   answer: UsageSummary,
   context: OrganizationContext = organizationContext(),
+  prices: PricingResponse[] = [],
 ) {
   return vi
     .spyOn(apiClient, "apiFetch")
     .mockImplementation(async (path: string) => {
       if (path === "/organizations/me") return context as never
       if (path.startsWith("/usage/summary?")) return answer as never
+      if (path.startsWith("/pricing?")) return prices as never
       throw new Error(`unexpected request: ${path}`)
     })
 }
@@ -185,6 +196,44 @@ describe("UnpricedUsageWarning", () => {
     expect(
       spy.mock.calls.some(([path]) => String(path).includes("/summary")),
     ).toBe(false)
+    expect(screen.queryByText(/had no model price/)).not.toBeInTheDocument()
+  })
+
+  it("drops a model priced since its requests were logged", async () => {
+    // Pricing a model leaves its logged rows uncosted, so the summary still
+    // counts them; the banner must not keep asking for that price.
+    mockApi(
+      summary(19, [
+        modelRow("gemini-3.8-flash", 4),
+        modelRow("gemini-3.7-flash", 15),
+      ]),
+      organizationContext(),
+      [pricingResponse({ model_key: "gemini:gemini-3.7-flash" })],
+    )
+    renderBanner()
+
+    expect(
+      await screen.findByText(
+        "4 requests in the last 24 hours had no model price",
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("gemini-3.7-flash")).not.toBeInTheDocument()
+  })
+
+  it("goes away once every model it named is priced", async () => {
+    const spy = mockApi(
+      summary(15, [modelRow("gemini-3.7-flash", 15)]),
+      organizationContext(),
+      [pricingResponse({ model_key: "gemini:gemini-3.7-flash" })],
+    )
+    const client = renderBanner()
+
+    await waitFor(() => {
+      expect(
+        spy.mock.calls.some(([path]) => String(path).startsWith("/pricing?")),
+      ).toBe(true)
+      expect(client.isFetching()).toBe(0)
+    })
     expect(screen.queryByText(/had no model price/)).not.toBeInTheDocument()
   })
 
