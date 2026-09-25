@@ -89,7 +89,8 @@ class SandboxFileBridge:
         store that no row and no sweep can reach.
         """
         file_id = f"file-{uuid.uuid4().hex}"
-        storage_ref, size = await self._file_store.put_stream(file_id, chunks)
+        storage_ref = await self._file_store.allocate(file_id)
+        size = await self._file_store.put_stream(storage_ref, chunks)
         if size == 0:
             await self._file_store.delete(storage_ref)
             return None
@@ -180,8 +181,9 @@ class SandboxFileBridge:
         """Copy one file into the store and record its row, returning its size."""
         # A blob key of Otari's own, so two copies of one provider ID never share a blob.
         blob_key = f"file-{uuid.uuid4().hex}"
+        storage_ref = await self._file_store.allocate(blob_key)
         async with contextlib.aclosing(client.read(file, budget_bytes=budget)) as chunks:
-            storage_ref, size = await self._file_store.put_stream(blob_key, chunks)
+            size = await self._file_store.put_stream(storage_ref, chunks)
         try:
             filename = file.filename or await client.get_filename(file.file_id) or file.file_id
             output = NewOutput(

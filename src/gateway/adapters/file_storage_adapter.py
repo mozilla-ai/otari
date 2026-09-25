@@ -91,24 +91,24 @@ class LocalDirFileStore:
             raise ValueError(msg)
         return path
 
-    async def put(self, file_id: str, data: bytes) -> str:
-        ref = _shard_key(file_id)
-        path = self._resolve(ref)
+    async def allocate(self, file_id: str) -> str:
+        return _shard_key(file_id)
+
+    async def put(self, storage_ref: str, data: bytes) -> None:
+        path = self._resolve(storage_ref)
 
         def _write() -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
 
         await asyncio.to_thread(_write)
-        return ref
 
     async def get(self, storage_ref: str) -> bytes:
         path = self._resolve(storage_ref)
         return await asyncio.to_thread(path.read_bytes)
 
-    async def put_stream(self, file_id: str, chunks: AsyncIterator[bytes]) -> tuple[str, int]:
-        ref = _shard_key(file_id)
-        path = self._resolve(ref)
+    async def put_stream(self, storage_ref: str, chunks: AsyncIterator[bytes]) -> int:
+        path = self._resolve(storage_ref)
 
         def _mkparent() -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -124,20 +124,19 @@ class LocalDirFileStore:
                     total += len(chunk)
                     await asyncio.to_thread(handle.write, chunk)
         except BaseException:
-            # The chunk source (e.g. the files service's size cap, or a client
-            # disconnect) failed partway through; don't leave a truncated blob
-            # with no storage_ref pointing at it, since the caller never gets a
-            # ref back to clean it up. BaseException includes CancelledError,
-            # so this cleanup itself runs inside an already-cancelling task;
-            # shield it so a repeated cancel() can't cut it off before the
-            # unlink completes, and don't let a cleanup failure mask the
-            # original error.
+            # The chunk source (the files service's size cap, or a client
+            # disconnect) failed partway through, so drop the truncated blob
+            # rather than leave the caller to reclaim it. BaseException
+            # includes CancelledError, so this cleanup runs inside an
+            # already-cancelling task; shield it so a repeated cancel() cannot
+            # cut it off before the unlink completes, and do not let a cleanup
+            # failure mask the original error.
             try:
                 await asyncio.shield(asyncio.to_thread(_unlink_partial))
             except Exception as cleanup_exc:
-                logger.warning("put_stream: failed to remove partial blob %s: %s", ref, cleanup_exc)
+                logger.warning("put_stream: failed to remove partial blob %s: %s", storage_ref, cleanup_exc)
             raise
-        return ref, total
+        return total
 
     async def get_stream(self, storage_ref: str) -> AsyncGenerator[bytes, None]:
         path = self._resolve(storage_ref)
@@ -223,15 +222,16 @@ class S3FileStore:
         self._bucket = bucket
         self._client: S3Client = boto3.client("s3", endpoint_url=endpoint_url, region_name=region or "us-east-1")
 
-    async def put(self, file_id: str, data: bytes) -> str:
+    async def allocate(self, file_id: str) -> str:
+        return _shard_key(file_id)
+
+    async def put(self, storage_ref: str, data: bytes) -> None:
         # Intentionally mirrors LocalDirFileStore.put: the caller already has
         # the full blob in memory here, same as the local backend's put, so
         # this isn't a new memory regression (put_stream is the streaming
         # path for both). Not a priority to stream, since files_max_bytes
         # already bounds the worst case the same way it does for local.
-        key = _shard_key(file_id)
-        await asyncio.to_thread(self._client.put_object, Bucket=self._bucket, Key=key, Body=data)
-        return key
+        await asyncio.to_thread(self._client.put_object, Bucket=self._bucket, Key=storage_ref, Body=data)
 
     async def get(self, storage_ref: str) -> bytes:
         # Same intentional symmetry with LocalDirFileStore.get: full-buffer by
@@ -247,8 +247,7 @@ class S3FileStore:
         with _translate_s3_errors(storage_ref):
             return await asyncio.to_thread(_get)
 
-    async def put_stream(self, file_id: str, chunks: AsyncIterator[bytes]) -> tuple[str, int]:
-        key = _shard_key(file_id)
+    async def put_stream(self, storage_ref: str, chunks: AsyncIterator[bytes]) -> int:
         total = 0
         spool: IO[bytes] = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_MEMORY_BYTES)
         upload_task: asyncio.Task[None] | None = None
@@ -266,7 +265,7 @@ class S3FileStore:
                 # being cancelled, instead of assuming "cancelled" means
                 # "nothing was uploaded".
                 upload_task = asyncio.create_task(
-                    asyncio.to_thread(self._client.upload_fileobj, spool, self._bucket, key)
+                    asyncio.to_thread(self._client.upload_fileobj, spool, self._bucket, storage_ref)
                 )
                 # upload_fileobj manages multipart upload internally,
                 # including aborting an incomplete multipart upload if it
@@ -291,10 +290,12 @@ class S3FileStore:
                         # ourselves.
                         try:
                             await asyncio.shield(
-                                asyncio.to_thread(self._client.delete_object, Bucket=self._bucket, Key=key)
+                                asyncio.to_thread(self._client.delete_object, Bucket=self._bucket, Key=storage_ref)
                             )
                         except Exception as cleanup_exc:
-                            logger.warning("put_stream: failed to remove orphaned upload %s: %s", key, cleanup_exc)
+                            logger.warning(
+                                "put_stream: failed to remove orphaned upload %s: %s", storage_ref, cleanup_exc
+                            )
                 raise
         finally:
             # Shielded like _open_handle: this runs during unwind on a
@@ -303,8 +304,8 @@ class S3FileStore:
             try:
                 await asyncio.shield(asyncio.to_thread(spool.close))
             except Exception as cleanup_exc:
-                logger.warning("put_stream: failed to close spool file for %s: %s", key, cleanup_exc)
-        return key, total
+                logger.warning("put_stream: failed to close spool file for %s: %s", storage_ref, cleanup_exc)
+        return total
 
     async def get_stream(self, storage_ref: str) -> AsyncGenerator[bytes, None]:
         with _translate_s3_errors(storage_ref):
@@ -391,17 +392,18 @@ class FsspecFileStore:
         # filesystem-like backend needs it before the first write into a shard.
         self._fs.makedirs(path.rsplit("/", 1)[0], exist_ok=True)
 
-    async def put(self, file_id: str, data: bytes) -> str:
-        ref = _shard_key(file_id)
-        path = self._resolve(ref)
+    async def allocate(self, file_id: str) -> str:
+        return _shard_key(file_id)
+
+    async def put(self, storage_ref: str, data: bytes) -> None:
+        path = self._resolve(storage_ref)
 
         def _write() -> None:
             self._mkparent(path)
             self._fs.pipe_file(path, data)
 
-        with _translate_fsspec_errors(ref):
+        with _translate_fsspec_errors(storage_ref):
             await asyncio.to_thread(_write)
-        return ref
 
     async def get(self, storage_ref: str) -> bytes:
         path = self._resolve(storage_ref)
@@ -409,9 +411,8 @@ class FsspecFileStore:
             data: bytes = await asyncio.to_thread(self._fs.cat_file, path)
         return data
 
-    async def put_stream(self, file_id: str, chunks: AsyncIterator[bytes]) -> tuple[str, int]:
-        ref = _shard_key(file_id)
-        path = self._resolve(ref)
+    async def put_stream(self, storage_ref: str, chunks: AsyncIterator[bytes]) -> int:
+        path = self._resolve(storage_ref)
         total = 0
 
         def _open() -> IO[bytes]:
@@ -425,27 +426,27 @@ class FsspecFileStore:
             except FileNotFoundError:
                 pass
 
-        with _translate_fsspec_errors(ref):
+        with _translate_fsspec_errors(storage_ref):
             handle = await asyncio.to_thread(_open)
         try:
             try:
                 async for chunk in chunks:
                     total += len(chunk)
-                    with _translate_fsspec_errors(ref):
+                    with _translate_fsspec_errors(storage_ref):
                         await asyncio.to_thread(handle.write, chunk)
             finally:
                 # Object-store handles upload on close, so the close is part of
                 # the write and its failure is a write failure. Shielded like the
                 # local backend's: this also runs while a cancellation unwinds.
-                with _translate_fsspec_errors(ref):
+                with _translate_fsspec_errors(storage_ref):
                     await asyncio.shield(asyncio.to_thread(handle.close))
         except BaseException:
             try:
                 await asyncio.shield(asyncio.to_thread(_discard_partial))
             except Exception as cleanup_exc:  # noqa: BLE001
-                logger.warning("put_stream: failed to remove partial blob %s: %s", ref, cleanup_exc)
+                logger.warning("put_stream: failed to remove partial blob %s: %s", storage_ref, cleanup_exc)
             raise
-        return ref, total
+        return total
 
     async def get_stream(self, storage_ref: str) -> AsyncGenerator[bytes, None]:
         path = self._resolve(storage_ref)

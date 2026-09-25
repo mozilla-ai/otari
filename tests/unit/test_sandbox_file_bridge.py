@@ -33,19 +33,21 @@ class _MemoryStore:
     def __init__(self) -> None:
         self.blobs: dict[str, bytes] = {}
 
-    async def put(self, file_id: str, data: bytes) -> str:
-        self.blobs[file_id] = data
+    async def allocate(self, file_id: str) -> str:
         return file_id
+
+    async def put(self, storage_ref: str, data: bytes) -> None:
+        self.blobs[storage_ref] = data
 
     async def get(self, storage_ref: str) -> bytes:
         return self.blobs[storage_ref]
 
-    async def put_stream(self, file_id: str, chunks: AsyncIterator[bytes]) -> tuple[str, int]:
+    async def put_stream(self, storage_ref: str, chunks: AsyncIterator[bytes]) -> int:
         data = bytearray()
         async for chunk in chunks:
             data.extend(chunk)
-        self.blobs[file_id] = bytes(data)
-        return file_id, len(data)
+        self.blobs[storage_ref] = bytes(data)
+        return len(data)
 
     async def get_stream(self, storage_ref: str) -> Any:
         yield self.blobs[storage_ref]

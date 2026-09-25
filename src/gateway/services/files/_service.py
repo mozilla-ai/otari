@@ -175,7 +175,8 @@ class FileService:
         """
         file_id = f"file-{uuid.uuid4().hex}"
         max_bytes = self._config.files_max_bytes
-        storage_ref, size = await self._file_store.put_stream(file_id, _capped(upload.chunks, max_bytes))
+        storage_ref = await self._file_store.allocate(file_id)
+        size = await self._file_store.put_stream(storage_ref, _capped(upload.chunks, max_bytes))
         if size == 0:
             # The size is only known once the stream drains, so a zero-byte blob
             # is already in the store by the time the upload is refused.
