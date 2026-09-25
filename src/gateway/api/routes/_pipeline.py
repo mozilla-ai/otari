@@ -450,12 +450,34 @@ class ErrorKind(Enum):
     The chat and responses formats raise plain ``HTTPException`` and ignore
     the kind; the Anthropic messages format maps it to the ``error.type``
     field of its error body.
+
+    The set covers every category a dialect distinguishes, so an error can
+    always say what it is rather than leaving a reader of its status to guess.
     """
 
-    INVALID_REQUEST = auto()
     API = auto()
+    AUTHENTICATION = auto()
+    INVALID_REQUEST = auto()
+    NOT_FOUND = auto()
     PERMISSION = auto()
     RATE_LIMIT = auto()
+
+
+# The kind a status implies, for an error that reached a dialect already
+# flattened into an ``HTTPException`` and so no longer carrying its own. Code
+# that still has the error says the kind instead of being classified here.
+_STATUS_ERROR_KINDS = {
+    status.HTTP_400_BAD_REQUEST: ErrorKind.INVALID_REQUEST,
+    status.HTTP_401_UNAUTHORIZED: ErrorKind.AUTHENTICATION,
+    status.HTTP_403_FORBIDDEN: ErrorKind.PERMISSION,
+    status.HTTP_404_NOT_FOUND: ErrorKind.NOT_FOUND,
+    status.HTTP_429_TOO_MANY_REQUESTS: ErrorKind.RATE_LIMIT,
+}
+
+
+def error_kind_for_status(status_code: int) -> ErrorKind:
+    """The kind a bare status implies, falling back to ``API``."""
+    return _STATUS_ERROR_KINDS.get(status_code, ErrorKind.API)
 
 
 class ProviderErrorMapping(NamedTuple):
