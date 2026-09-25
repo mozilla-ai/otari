@@ -135,8 +135,10 @@ jobs:
           # PR_TITLE outright. Every SDK releases with release-please, so a subject
           # it does not recognize drops the whole squash from the changelog, taking
           # any hand-written commit on the branch down with it. "feat" because a
-          # regenerated core is changed public API surface; retitle to "feat!" when
-          # the diff carries a break.
+          # regenerated core is changed public API surface. A regeneration that
+          # breaks callers needs "feat!" in the squash subject, and under
+          # COMMIT_OR_PR_TITLE a retitled PR does not reach it. Cancel auto-merge
+          # and set the squash subject by hand instead.
           commit-message: "feat: regenerate SDK client core from Otari OpenAPI spec"
           title: "feat: regenerate SDK client core from Otari OpenAPI spec"
           body: |
