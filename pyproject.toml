@@ -95,7 +95,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.0",
     "sqlmodel>=0.0.24",
     "trafilatura>=2.0.0",
-    "uvicorn[standard]>=0.30.0",
+    "uvicorn[standard]>=0.53.0",
     "opentelemetry-proto>=1.39.1",
     "webauthn>=2.5.0",
 ]
