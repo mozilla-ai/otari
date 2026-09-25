@@ -26,6 +26,7 @@ from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
+from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.repositories.api_keys import ApiKeyRepository
@@ -893,6 +894,15 @@ def get_identity_provider_port(
     return container.resolve(IdentityProviderPort, db)
 
 
+def get_mcp_server_port(db: PortSessionDep, container: ContainerDep) -> McpServerPort:
+    """Resolve the MCP server adapter this build bound at startup.
+
+    Invariant: a deployment that holds the rows always has a session here, so
+    the refusal inside the adapter's builder is unreachable through this.
+    """
+    return container.resolve(McpServerPort, db)
+
+
 def get_model_provider_port(db: PortSessionDep, container: ContainerDep) -> ModelProviderPort:
     """Resolve the model-provider adapter this build bound at startup."""
     return container.resolve(ModelProviderPort, db)
@@ -997,6 +1007,7 @@ BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
 EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
 GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]
 IdentityProviderPortDep = Annotated[IdentityProviderPort, Depends(get_identity_provider_port)]
+McpServerPortDep = Annotated[McpServerPort, Depends(get_mcp_server_port)]
 ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_port)]
 
 
@@ -1149,6 +1160,7 @@ __all__ = [
     "OverviewServiceDep",
     "GrowthSignalPortDep",
     "IdentityProviderPortDep",
+    "McpServerPortDep",
     "ModelProviderPortDep",
     "OrgProviderModelServiceDep",
     "TelemetryStoragePortDep",

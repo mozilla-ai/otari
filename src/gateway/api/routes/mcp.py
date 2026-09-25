@@ -40,9 +40,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from gateway.api.deps import (
+    McpServerPortDep,
     extract_credential_token,
     get_config,
-    get_container,
     get_db_if_needed,
     verify_api_key_or_master_key,
 )
@@ -378,7 +378,7 @@ async def _refuse_blocked_user(db: AsyncSession, api_key: APIKey) -> None:
 
 async def _resolve_server(
     principal: _Principal,
-    servers: McpServerPort,
+    mcp_server_port: McpServerPort,
     mcp_server_id: uuid.UUID,
 ) -> ResolvedMcpServer:
     """Resolve the stored server, applying the outcome ladder both modes share (R-RES-1).
@@ -388,7 +388,7 @@ async def _resolve_server(
     """
     scope = McpServerScope(workspace_id=principal.workspace_id, user_token=principal.user_token)
     try:
-        resolved = await servers.resolve_one(scope, mcp_server_id)
+        resolved = await mcp_server_port.resolve_one(scope, mcp_server_id)
     except McpServerResolutionFailedError:
         raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
     except (SecretDecryptionError, SecretBoxUnavailableError):
@@ -495,6 +495,7 @@ async def list_mcp_tools(
     mcp_server_id: uuid.UUID,
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    mcp_server_port: McpServerPortDep,
 ) -> McpToolsResponse:
     """List the tools a stored MCP server exposes to the authenticated workspace.
 
@@ -515,8 +516,7 @@ async def list_mcp_tools(
     try:
         async with asyncio.timeout(mcp_stateless.DISCOVERY_TOTAL_TIMEOUT_S):
             principal = await _authenticate(raw_request, db, config)
-            servers = get_container(raw_request).resolve(McpServerPort, db)
-            server = await _resolve_server(principal, servers, mcp_server_id)
+            server = await _resolve_server(principal, mcp_server_port, mcp_server_id)
 
             if server.allowed_tools == []:
                 # An operator's explicit deny-all is a complete answer already,
@@ -609,6 +609,7 @@ async def execute_mcp_tool(
     request: McpExecuteRequest,
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    mcp_server_port: McpServerPortDep,
 ) -> CallToolResult:
     """Execute one caller-authorized tool call against a stored MCP server.
 
@@ -635,8 +636,7 @@ async def execute_mcp_tool(
     try:
         async with asyncio.timeout(mcp_stateless.EXECUTION_TOTAL_TIMEOUT_S):
             principal = await _authenticate(raw_request, db, config)
-            servers = get_container(raw_request).resolve(McpServerPort, db)
-            server = await _resolve_server(principal, servers, request.mcp_server_id)
+            server = await _resolve_server(principal, mcp_server_port, request.mcp_server_id)
             _require_allowed(server, request.tool_name)
             if request.server_revision != server.revision:
                 # In memory, over the resolution both modes already needed, so this
