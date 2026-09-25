@@ -18,6 +18,7 @@ Otari calls these endpoints, all rooted at the configured platform base URL:
 | `POST {base}/gateway/usage`                 | Report the outcome of an attempt back to the platform |
 | `POST {base}/gateway/mcp-servers/resolve`   | Authorize MCP access and swap workspace-scoped MCP server ids for inline server configs |
 | `POST {base}/gateway/web-search/resolve`    | Resolve the workspace's Web Access policy when a request uses `otari_web_search` or `otari_web_fetch` |
+| `POST {base}/gateway/code-execution/resolve` | Resolve the workspace's code-execution policy when a request declares `otari_code_execution` |
 
 `{base}` means Otari platform `base_url` setting. Otari concatenates literally. The peer service is responsible for including any API-version prefix it exposes its own routes under. For the reference otari deployment that prefix is `/api/v1`, so the base URL is `http://backend:8000/api/v1` and Otari ends up POSTing to `http://backend:8000/api/v1/gateway/provider-keys/resolve`.
 
@@ -386,6 +387,79 @@ informational: the active Search backend is configured on the gateway itself.
 > become the contract of record once the consumer-side fixtures land
 > ([#146](https://github.com/mozilla-ai/otari/issues/146)); until then this
 > document is authoritative.
+
+## Code execution resolution
+
+Called when a request declares `otari_code_execution` and the deployment has
+decided the sandbox will run it. It is asked after that decision rather than
+before it, because the answer authorizes a workspace to run code here and
+refuses one that may not, so asking earlier would refuse every workspace the
+platform has not enabled.
+
+### Request
+
+```
+POST /gateway/code-execution/resolve
+X-Gateway-Token: gw_...
+X-User-Token: tk_...
+Content-Type: application/json
+
+{}
+```
+
+The workspace is identified by `X-User-Token`. The body carries nothing: the
+question is what this workspace may do, not what this request asked for.
+
+### Response
+
+```json
+{
+  "enabled": true,
+  "default_purpose_hint": "Data analysis",
+  "max_iterations": 4,
+  "executor": "otari",
+  "tools": ["python"],
+  "exec_timeout_s": 30
+}
+```
+
+`enabled` is the platform's veto and must be a JSON boolean. A missing or
+malformed value is a contract break rather than a denial, so it fails closed
+with `502` and no code runs.
+
+The remaining fields are read leniently, because an unusable default must not
+fail a request: `default_purpose_hint` is used when it is a non-empty string,
+`max_iterations` when it is a positive integer, and `executor` when it names a
+known executor. Anything else narrows nothing.
+
+`tools` and `exec_timeout_s` are accepted and **not** applied by Otari today.
+The control plane enforces both on every sandbox call, and this side was left
+relying on that. Whether a data plane should enforce them as well is
+[#1726](https://github.com/mozilla-ai/otari/issues/1726).
+
+A policy narrows what the deployment already allows and never widens it. A
+response that resolves to nothing leaves the deployment's own settings in force.
+
+### Failure
+
+| Status | Behavior |
+|---|---|
+| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Code execution resolution failed"`. |
+| `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
+| Network/timeout                    | Mapped to `502 Bad Gateway`. |
+
+### Where the code runs
+
+This endpoint answers policy only. It returns no sandbox address and no
+credential, because the sandbox is deployment-wide configuration
+(`OTARI_SANDBOX_URL`) rather than a per-workspace fact.
+
+Today that setting may name the control plane itself, and Otari then forwards
+the caller's token to it, which is what makes the control plane a proxy for
+sandbox traffic. That arrangement is under review in
+[#1688](https://github.com/mozilla-ai/otari/issues/1688) and
+[#1603](https://github.com/mozilla-ai/otari/issues/1603). This section records
+the contract as it stands rather than as it should be.
 
 ## Usage report
 
