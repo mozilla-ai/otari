@@ -846,6 +846,12 @@ next turn without blocking this one. The gate's `message` and the judge's own
 `reasoning` both travel, since which line the model objected to is what makes
 the finding actionable.
 
+Only a `fail` crosses over. A judge gate reporting `error`, `not_run` or
+`unknown` evaluated no rubric, so forwarding it would describe a finding that
+was never made, and a judge that could not run is the operator's problem
+rather than the turn's. Those still reach the person on `systemMessage`, like
+any other gate that could not resolve.
+
 A deterministic gate whose author wrote `advisory` keeps `systemMessage`
 alone. That author could have written `required` and chose not to, so the
 quieter channel is the one they asked for; a `judge` author was never offered

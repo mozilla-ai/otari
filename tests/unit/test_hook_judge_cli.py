@@ -533,3 +533,35 @@ def test_additional_context_carries_the_judge_finding_alone(monkeypatch: pytest.
     # The person still gets both, which is what systemMessage was always for.
     assert "judge says no" in payload["systemMessage"]
     assert "never ran the tests" in payload["systemMessage"]
+
+
+def test_a_judge_gate_that_could_not_run_is_not_reported_to_the_model(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """`error` means the model call produced no verdict, so no rubric was evaluated.
+
+    Passing it on as a judge finding would invent one, and the agent can do
+    nothing about a judge that failed to run in any case. The person still
+    hears it on `systemMessage`, which is where a guardrail that could not run
+    has always been reported.
+    """
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
+    _advisory_failures(
+        monkeypatch,
+        [
+            {
+                "gate_id": "g",
+                "enforcement": "advisory",
+                "outcome": "error",
+                "message": "m",
+                "detail": "claude exited 1: prompt is too long",
+            }
+        ],
+    )
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert "hookSpecificOutput" not in payload
+    assert "prompt is too long" in payload["systemMessage"]

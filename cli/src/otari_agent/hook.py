@@ -2160,8 +2160,17 @@ def hook(
     # Only a judge finding: a deterministic gate whose author chose
     # `advisory` over `required` had the blocking channel available and
     # declined it, and keeps the quieter one they asked for.
+    # `fail` alone, not everything `failing` holds: a judge gate also lands
+    # there on `error` (its model call could not produce a verdict), on
+    # `not_run` (it fell past the per-Stop cap) and on `unknown`, and in none
+    # of those did a model actually review anything. Telling the agent a
+    # rubric was not met when no rubric was evaluated invents a finding, and
+    # the agent can do nothing about a judge that failed to run anyway: that
+    # is the operator's problem, the same way a guardrail that stopped
+    # loading is (see `_hook_not_enforcing`). The person still hears about
+    # all four through `systemMessage`.
     judge_ids = {gate.id for gate in spec.gates if isinstance(gate, JudgeGate)}
-    judge_failures = [gate for gate in failing if gate.get("gate_id") in judge_ids]
+    judge_failures = [gate for gate in failing if gate.get("gate_id") in judge_ids and gate.get("outcome") == "fail"]
     if judge_failures and event == "Stop":
         output["hookSpecificOutput"] = {
             "hookEventName": "Stop",
