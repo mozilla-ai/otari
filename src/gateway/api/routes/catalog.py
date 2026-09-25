@@ -61,6 +61,7 @@ from gateway.services.merged_catalog_service import (
     MergedCatalog,
     ModelPricingInfo,
     build_merged_catalog,
+    served_on_deployment_key,
     viewer_price,
 )
 from gateway.services.model_catalog_service import (
@@ -451,7 +452,9 @@ async def _group(
                 provider=instance,
                 provider_type=provider_type,
                 credential=_get_credential(
-                    config, instance, hosted=obj.deployment_managed or instance in merged.hosted_providers
+                    config,
+                    instance,
+                    hosted=obj.deployment_managed or served_on_deployment_key(merged.deployment_key_models, obj.id),
                 ),
                 discovered=obj.id in merged.discovered_keys,
                 context_window=(metadata.context_window if metadata else None) or obj.context_window,
