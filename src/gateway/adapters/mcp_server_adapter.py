@@ -52,11 +52,11 @@ class RemoteMcpServers(McpServerPort):
     def __init__(self, config: GatewayConfig) -> None:
         self._config = config
 
-    async def _ask(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[Any] | None:
-        """The peer's ``servers`` list, or ``None`` where its answer omits the key.
+    async def _ask(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[Any]:
+        """The peer's ``servers`` list.
 
         IDs are de-duplicated with their order kept, because the protocol does not define a repeated ID.
-        An unreadable answer is refused, so a malformed ``servers`` value never reads as an absent one.
+        An empty list resolves to no servers, and an answer omitting the key is refused.
         """
         if not scope.user_token:
             raise McpServerResolutionFailedError
@@ -68,17 +68,13 @@ class RemoteMcpServers(McpServerPort):
         )
         if not isinstance(payload, dict):
             raise McpServerResolutionFailedError
-        if "servers" not in payload:
-            return None
-        servers = payload["servers"]
+        servers = payload.get("servers")
         if not isinstance(servers, list):
             raise McpServerResolutionFailedError
         return servers
 
     async def resolve_many(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
-        # An answer omitting the key resolves to no servers rather than refusing,
-        # which is the contract this side has always had.
-        entries = await self._ask(scope, server_ids) or []
+        entries = await self._ask(scope, server_ids)
         try:
             return [
                 McpServerConfig(
@@ -97,8 +93,6 @@ class RemoteMcpServers(McpServerPort):
 
     async def resolve_one(self, scope: McpServerScope, server_id: uuid.UUID) -> ResolvedMcpServer | None:
         servers = await self._ask(scope, [server_id])
-        if servers is None:
-            raise McpServerResolutionFailedError
         if not servers:
             # An older peer omits a disabled server rather than reporting one.
             # Both mean the caller cannot reach it.

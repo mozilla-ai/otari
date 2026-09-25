@@ -234,14 +234,14 @@ def test_the_request_bound_admits_every_server_a_workspace_can_hold() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_answer_omitting_servers_resolves_to_none(
+async def test_an_explicit_empty_list_resolves_to_no_servers(
     monkeypatch: pytest.MonkeyPatch,
     control_plane_transport: InstallControlPlane,
 ) -> None:
-    """A peer that names no servers at all is served, not refused."""
+    """An empty list is how a peer says it resolved none, and it is served."""
 
     async def fake_post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> Any:
-        return httpx.Response(200, json={})
+        return httpx.Response(200, json={"servers": []})
 
     control_plane_transport(fake_post)
 
@@ -256,6 +256,7 @@ async def test_an_answer_omitting_servers_resolves_to_none(
     "payload",
     [
         pytest.param([], id="the answer is not an object"),
+        pytest.param({}, id="the servers key is absent"),
         pytest.param({"servers": None}, id="servers is null"),
         pytest.param({"servers": {"a": 1}}, id="servers is an object"),
         pytest.param({"servers": "none"}, id="servers is a string"),

@@ -265,10 +265,11 @@ The caller-orchestrated endpoints send exactly one id:
 ```
 
 Otari reads `name`, `url`, `authorization_token`, `purpose_hint`, and
-`allowed_tools` off each entry in `servers`; for the tool loop, a missing
-`servers` key is treated as an empty list. The same URL-safety rules as inline
-MCP configs apply once the configs are resolved (SSRF guard, no bearer token
-over cleartext `http://`).
+`allowed_tools` off each entry in `servers`. Every answer must carry the
+`servers` key. An empty list says the peer resolved none. An answer omitting the
+key is one Otari cannot read. The same URL-safety rules as inline MCP configs
+apply once the configs are resolved (SSRF guard, no bearer token over cleartext
+`http://`).
 
 For a caller-orchestrated request, exactly one returned entry is bound to the
 one id Otari requested. A legacy entry may omit `id` and `enabled`; Otari uses
@@ -278,6 +279,11 @@ list is the legacy representation of a disabled server and becomes
 A missing or malformed `servers` list, multiple entries, malformed recognized
 fields, or an explicit id that does not match remain
 `502 mcp_resolution_failed`.
+
+For a tool-loop request, a missing or malformed `servers` list is also
+`502 mcp_resolution_failed`. A request naming stored servers is refused rather
+than dispatched without them. A caller cannot tell an emptied tool list from a
+model that chose not to call one, and the attempt is billed either way.
 
 New peers should return `id` and `enabled`. When present, `id` must match the
 request and `enabled` must be a JSON boolean; `enabled: false` becomes the same
