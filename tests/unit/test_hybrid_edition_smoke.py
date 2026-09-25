@@ -84,18 +84,22 @@ def test_the_platform_token_is_the_one_setting_put_back() -> None:
 
 
 def test_config_is_a_hybrid_deployment_and_nothing_else() -> None:
-    config = smoke.hybrid_config(port=8123, platform_base_url="http://127.0.0.1:9000/api/v1")
+    config = smoke.hybrid_config(
+        port=8123, platform_base_url="http://127.0.0.1:9000/api/v1", search_base_url="http://search.test"
+    )
     assert config["platform"]["base_url"] == "http://127.0.0.1:9000/api/v1"
     assert "providers" not in config, "local providers are refused in hybrid mode"
     assert "database_url" not in config, "a hybrid gateway runs no database"
     assert "sandbox_url" not in config, "no sandbox is what makes native code execution pass through"
-    # The gateway appends /search itself, and sends its token only under base_url.
-    assert config["web_search_url"] == "http://127.0.0.1:9000/api/v1/gateway/web-search"
+    # The gateway appends /search itself.
+    assert config["web_search_url"] == "http://search.test"
 
 
 def test_config_file_is_loadable_as_yaml(tmp_path: Path) -> None:
     path = tmp_path / "hybrid.yml"
-    config = smoke.hybrid_config(port=8123, platform_base_url="http://127.0.0.1:9000/api/v1")
+    config = smoke.hybrid_config(
+        port=8123, platform_base_url="http://127.0.0.1:9000/api/v1", search_base_url="http://search.test"
+    )
     smoke.write_config(path, config)
     assert yaml.safe_load(path.read_text(encoding="utf-8")) == config
 
@@ -188,12 +192,10 @@ def test_web_access_resolve_authorizes_search_only(control_plane: Any) -> None:
     assert body["authorized_tools"] == ["web_search"]
 
 
-def test_search_backend_requires_the_gateway_token(control_plane: Any) -> None:
+def test_the_control_plane_carries_no_search_traffic(control_plane: Any) -> None:
+    """A search backend is deployment infrastructure, so the control plane does not serve it."""
     url = f"{control_plane.base_url}{smoke.PLATFORM_PREFIX}/gateway/web-search/search?q=x&format=json"
-    assert _call("GET", url)[0] == 401
-    status, body = _call("GET", url, headers={"X-Gateway-Token": smoke.GATEWAY_TOKEN})
-    assert status == 200
-    assert body["results"][0]["extracted_content"] == smoke.SEARCH_CONTENT, "supplied so nothing is retrieved"
+    assert _call("GET", url)[0] == 404
 
 
 def test_usage_is_accepted_and_recorded(control_plane: Any) -> None:
@@ -339,6 +341,22 @@ def test_mcp_offers_no_server_stream(mcp: Any) -> None:
     assert _call("GET", mcp.mcp_url)[0] == 405
 
 
+@pytest.fixture
+def search_service() -> Iterator[Any]:
+    with smoke.serve(smoke.FakeSearchService(), "test-search") as server:
+        yield server
+
+
+def test_the_search_service_answers_the_searxng_path(search_service: Any) -> None:
+    status, body = _call("GET", f"{search_service.base_url}/search?q=x&format=json")
+    assert status == 200
+    assert body["results"][0]["extracted_content"] == smoke.SEARCH_CONTENT, "supplied so nothing is retrieved"
+
+
+def test_the_search_service_answers_no_other_path(search_service: Any) -> None:
+    assert _call("GET", f"{search_service.base_url}/gateway/web-search/search")[0] == 404
+
+
 # --------------------------------------------------------------------------- #
 # The live mode
 # --------------------------------------------------------------------------- #
@@ -380,11 +398,17 @@ def test_live_keys_are_scrubbed_from_the_gateway_environment() -> None:
 
 
 def test_live_config_puts_tavily_ahead_of_the_search_url() -> None:
-    config = smoke.hybrid_config(port=8123, platform_base_url="http://cp/api/v1", tavily_key="tvly-live")
+    config = smoke.hybrid_config(
+        port=8123,
+        platform_base_url="http://cp/api/v1",
+        search_base_url="http://search.test",
+        tavily_key="tvly-live",
+    )
     assert config["web_search_provider"] == "tavily"
     assert config["web_search_provider_api_key"] == "tvly-live"
     assert "web_search_url" in config, "the URL stays; the backend prefers the provider"
-    assert "web_search_provider" not in smoke.hybrid_config(port=8123, platform_base_url="http://cp/api/v1")
+    bare = smoke.hybrid_config(port=8123, platform_base_url="http://cp/api/v1", search_base_url="http://search.test")
+    assert "web_search_provider" not in bare
 
 
 def test_live_resolve_carries_the_real_key_and_no_api_base() -> None:
@@ -416,10 +440,12 @@ def test_container_config_leaves_the_listen_address_to_the_image() -> None:
     how the first container run failed: the gateway listened on the image's 8000
     while the smoke polled a port of its own.
     """
-    config = smoke.hybrid_config(port=8123, platform_base_url="http://cp/api/v1", in_container=True)
+    config = smoke.hybrid_config(
+        port=8123, platform_base_url="http://cp/api/v1", search_base_url="http://search.test", in_container=True
+    )
     assert "host" not in config
     assert "port" not in config
-    source = smoke.hybrid_config(port=8123, platform_base_url="http://cp/api/v1")
+    source = smoke.hybrid_config(port=8123, platform_base_url="http://cp/api/v1", search_base_url="http://search.test")
     assert (source["host"], source["port"]) == (smoke.LOOPBACK, 8123)
 
 

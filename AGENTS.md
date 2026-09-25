@@ -85,7 +85,7 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   (httpx, pyyaml) gives that up. `scripts/hybrid_edition_smoke.py` is its hybrid
   sibling in the same workflow: the packaged CLI booted with a platform token
   against standard-library fakes of the control plane, an OpenAI/Anthropic
-  provider and an MCP server, asserting on the requests the fakes recorded
+  provider, an MCP server and a search service, asserting on the requests the fakes recorded
   (resolve bodies, tokens, usage reports) as well as the responses. Same rules:
   standard library only, run under `--no-dev`, and no database, because a hybrid
   gateway runs none. `--image <tag>` runs the same walk against the built

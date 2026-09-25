@@ -11,11 +11,11 @@ gateway **sends**: a request body the deployed peer would reject merges green.
 
 This is that gate. It boots the packaged CLI as a subprocess with a platform
 token set, so hybrid mode is selected the way a deployment selects it, and
-stands up three standard-library fakes: the control plane, an OpenAI- and
-Anthropic-compatible provider, and a streamable-HTTP MCP server. Every fake
-records what it was asked, and the assertions are on those records as much as
-on the responses, because the record is the half of the wire contract no other
-test reads.
+stands up four standard-library fakes: the control plane, an OpenAI- and
+Anthropic-compatible provider, a streamable-HTTP MCP server, and a search
+service. Every fake records what it was asked, and the assertions are on those
+records as much as on the responses, because the record is the half of the wire
+contract no other test reads.
 
 It walks:
 
@@ -28,8 +28,8 @@ It walks:
    401) reach the caller with the platform's own detail, and no provider call
    or usage report is made for a request the platform refused.
 4. Managed web search: the Web Access resolve carries ``requested_tools``, the
-   search query reaches the platform-hosted backend with the gateway token, and
-   the result feeds the model's second turn.
+   search query reaches the deployment's own search service carrying no Otari
+   credential, and the result feeds the model's second turn.
 5. Managed web fetch is off by default: declaring it is refused before any
    resolve is attempted.
 6. MCP through the managed tool loop, inline and by workspace id: the id resolve
@@ -55,7 +55,7 @@ dev-only import on a hybrid code path fails here.
 attempts at the real OpenAI and Anthropic APIs, with keys read from
 ``OTARI_SMOKE_OPENAI_API_KEY`` and ``OTARI_SMOKE_ANTHROPIC_API_KEY`` (models from
 ``OTARI_SMOKE_OPENAI_MODEL`` and ``OTARI_SMOKE_ANTHROPIC_MODEL``). Managed web
-search then runs a real model against the fake search backend, or against Tavily
+search then runs a real model against the fake search service, or against Tavily
 when ``OTARI_SMOKE_TAVILY_API_KEY`` is also set. The fakes cannot record the
 provider side, so those assertions are skipped and the prompts force each tool
 with ``tool_choice``; what a live run adds is the class the fakes encode only a
@@ -111,6 +111,7 @@ API_ROOT = "/api/v1"
 PLATFORM_PREFIX = "/api/v1"
 # One header carries the caller's credential; hybrid forwards it as X-User-Token.
 KEY_HEADER = "Otari-Key"
+OTARI_CREDENTIAL_HEADERS = ("otari-key", "x-gateway-token", "x-user-token")
 
 GATEWAY_TOKEN = f"gw_hybrid_smoke_{secrets.token_hex(8)}"
 # One user token per control-plane behavior the smoke needs.
@@ -218,7 +219,7 @@ class Recorder:
 
 
 class _RecordingHandler(BaseHTTPRequestHandler):
-    """Common request plumbing for the three fakes."""
+    """Common request plumbing for the fakes."""
 
     protocol_version = "HTTP/1.1"
     server: _FakeServer
@@ -375,27 +376,6 @@ class _ControlPlaneHandler(_RecordingHandler):
         path = self._path()
         if path == f"{PLATFORM_PREFIX}/utils/health-check/":
             self._respond(200, {"status": "ok"})
-            return
-        if path == f"{PLATFORM_PREFIX}/gateway/web-search/search":
-            item = self._record("web-search/search", None)
-            if item.headers.get("x-gateway-token") != GATEWAY_TOKEN:
-                self._respond(401, {"detail": "bad gateway token on search"})
-                return
-            self._respond(
-                200,
-                {
-                    "results": [
-                        {
-                            "url": SEARCH_URL,
-                            "title": SEARCH_TITLE,
-                            "content": "snippet",
-                            # Supplied so the gateway does not try to retrieve the
-                            # page: retrieval is pinned to public addresses by design.
-                            "extracted_content": SEARCH_CONTENT,
-                        }
-                    ]
-                },
-            )
             return
         self._respond(404, {"detail": f"fake control plane has no GET {path}"})
 
@@ -815,6 +795,41 @@ class _McpHandler(_RecordingHandler):
         self._respond(200, {"jsonrpc": "2.0", "id": message["id"], "result": result})
 
 
+class FakeSearchService(_FakeServer):
+    """Serves the SearXNG search contract on an origin of its own.
+
+    A search backend is deployment infrastructure, so the data plane holds no credential to send it.
+    """
+
+    def __init__(self, bind_host: str = LOOPBACK) -> None:
+        super().__init__(_SearchHandler, bind_host)
+
+
+class _SearchHandler(_RecordingHandler):
+    server: FakeSearchService
+
+    def do_GET(self) -> None:  # noqa: N802
+        path = self._path()
+        if path != "/search":
+            self._respond(404, {"detail": f"fake search service has no GET {path}"})
+            return
+        self._record("search", None)
+        self._respond(
+            200,
+            {
+                "results": [
+                    {
+                        "url": SEARCH_URL,
+                        "title": SEARCH_TITLE,
+                        "content": "snippet",
+                        # Retrieval is pinned to public addresses, so the gateway cannot fetch this page.
+                        "extracted_content": SEARCH_CONTENT,
+                    }
+                ]
+            },
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Gateway configuration, environment and process
 # --------------------------------------------------------------------------- #
@@ -835,6 +850,7 @@ def hybrid_config(
     *,
     port: int,
     platform_base_url: str,
+    search_base_url: str,
     tavily_key: str | None = None,
     in_container: bool = False,
 ) -> dict[str, Any]:
@@ -842,16 +858,16 @@ def hybrid_config(
 
     No ``database_url``: a hybrid gateway runs no database. No ``sandbox_url``,
     so a provider-native code-execution declaration is forwarded untouched,
-    which is the path step 7 proves. ``web_search_url`` sits under the platform
-    base URL, which is what makes the gateway send its token on search queries.
+    which is the path step 7 proves.
+    ``web_search_url`` names a service of its own, so a search query carries no Otari credential.
     A live run adds Tavily, which the backend prefers over the URL.
     ``in_container`` leaves out ``host`` and ``port``, which the image's own
     environment owns and a config file cannot override.
     """
     config: dict[str, Any] = {
         "platform": {"base_url": platform_base_url, "resolve_timeout_ms": 5000},
-        # The gateway appends /search itself; the doc's GET {base}/gateway/web-search/search.
-        "web_search_url": f"{platform_base_url}/gateway/web-search",
+        # The gateway appends /search itself.
+        "web_search_url": search_base_url,
     }
     if not in_container:
         config["host"] = LOOPBACK
@@ -1085,6 +1101,7 @@ class Fakes:
     control_plane: FakeControlPlane
     provider: MockProvider
     mcp: FakeMcpServer
+    search: FakeSearchService
     # Real providers: the mock provider records nothing, and prompts force tools.
     live: LiveProviders | None = None
     # Otari-Attempt-ID of every 200 the caller received: the attempts that were
@@ -1229,7 +1246,7 @@ def check_platform_refusals(base_url: str, fakes: Fakes) -> None:
 
 
 def run_web_search(base_url: str, fakes: Fakes) -> None:
-    """Managed web search: resolve body, tokened search query, and the result reaching the model."""
+    """Managed web search: resolve body, credential-free search query, and the result reaching the model."""
     chats_before = len(fakes.provider.recorder.all("chat"))
     status, body, headers = _request(
         "POST",
@@ -1260,12 +1277,15 @@ def run_web_search(base_url: str, fakes: Fakes) -> None:
         log("Managed web search resolved with requested_tools and completed against Tavily")
         return
 
-    searches = fakes.control_plane.recorder.all("web-search/search")
-    _check(len(searches) >= 1, "the search backend was never queried")
-    _check(searches[0].headers.get("x-gateway-token") == GATEWAY_TOKEN, "the search query carried no gateway token")
+    searches = fakes.search.recorder.all("search")
+    _check(len(searches) >= 1, "the search service was never queried")
+    # An absence check would also pass on an empty dict.
+    _check(bool(searches[0].headers), "the search service recorded no request headers")
+    leaked = [name for name in OTARI_CREDENTIAL_HEADERS if searches[0].headers.get(name)]
+    _check(not leaked, f"the search query carried an Otari credential: {leaked}")
     _check(searches[0].query.get("format") == "json", f"search format: {searches[0].query!r}")
     if fakes.live:
-        log("Managed web search resolved with requested_tools; a real model queried the platform's backend")
+        log("Managed web search resolved with requested_tools; a real model queried the search service")
         return
     _check(len(searches) == 1, f"expected one search query, got {len(searches)}")
     _check(searches[0].query.get("q") == SEARCH_QUERY, f"search query: {searches[0].query!r}")
@@ -1275,7 +1295,7 @@ def run_web_search(base_url: str, fakes: Fakes) -> None:
     _check(REPLY in _content_of(body), f"the search-assisted completion did not finish: {body!r}")
     tool_message = json.dumps(chats[1].body.get("messages"))
     _check(SEARCH_TITLE in tool_message and SEARCH_URL in tool_message, "the result did not reach the model")
-    log("Managed web search resolved with requested_tools, queried the platform with the token, and fed the model")
+    log("Managed web search resolved with requested_tools, queried the search service, and fed the model")
 
 
 def check_web_fetch_is_off_by_default(base_url: str, fakes: Fakes) -> None:
@@ -1591,14 +1611,16 @@ def main(argv: list[str] | None = None) -> int:
             with (
                 serve(MockProvider(bind_host), "mock-provider") as provider,
                 serve(FakeMcpServer(bind_host), "fake-mcp") as mcp,
+                serve(FakeSearchService(bind_host), "fake-search") as search,
             ):
                 state = ControlPlaneState(provider_base_url=provider.base_url, mcp_url=mcp.mcp_url, live=live)
                 with serve(FakeControlPlane(state, bind_host), "fake-control-plane") as control_plane:
-                    fakes = Fakes(control_plane=control_plane, provider=provider, mcp=mcp, live=live)
+                    fakes = Fakes(control_plane=control_plane, provider=provider, mcp=mcp, search=search, live=live)
                     platform_base_url = f"{control_plane.base_url}{PLATFORM_PREFIX}"
                     config = hybrid_config(
                         port=port,
                         platform_base_url=platform_base_url,
+                        search_base_url=search.base_url,
                         tavily_key=live.tavily_key if live else None,
                         in_container=bool(args.image),
                     )
