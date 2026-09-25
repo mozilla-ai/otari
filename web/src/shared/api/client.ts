@@ -1,11 +1,14 @@
-// Thin fetch wrapper for the gateway's management API. The dashboard is served
-// from the same origin as the API, so paths are relative ("/models") and the
-// HttpOnly session cookie minted at sign-in rides along automatically (fetch
-// defaults to credentials: "same-origin"). A credential is sent exactly once, to
-// POST /v1/auth/session, and is never written to browser storage: it lives in
-// the sign-in form's state until the request goes out and is gone on reload.
+// Thin fetch wrapper for the gateway's management API. In this build the
+// dashboard is served from the same origin as the API, so paths are relative
+// ("/models") and the HttpOnly session cookie minted at sign-in rides along
+// automatically; `overlayRequestPolicy` is where a build that reaches the API
+// on another origin says so, and every request here asks it. A credential is
+// sent exactly once, to POST /v1/auth/session, and is never written to browser
+// storage: it lives in the sign-in form's state until the request goes out and
+// is gone on reload.
 
 import type { OAuthAuthorizeResponse, OAuthCallbackRequest } from "@/client"
+import { requestPolicy } from "@/shared/api/overlayRequestPolicy"
 import { getPasskeyAssertion } from "@/shared/helpers/webauthn"
 
 export class ApiError extends Error {
@@ -38,7 +41,17 @@ export const API_ROOT = "/api/v1"
 export const DASHBOARD_BUILD_PATH = "/dashboard-build.json"
 
 function apiUrl(path: string): string {
-  return `${API_ROOT}${path}`
+  return `${requestPolicy().origin}${API_ROOT}${path}`
+}
+
+// Every management request goes out through here, so the one decision about
+// where the API is and which credential reaches it is made once. A caller's
+// own `credentials` is kept, which nothing here passes today.
+function request(path: string, init: RequestInit): Promise<Response> {
+  return fetch(apiUrl(path), {
+    credentials: requestPolicy().credentials,
+    ...init,
+  })
 }
 
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
@@ -121,7 +134,7 @@ export async function createSession(
       : { email: credential.email, password: credential.password }
   let response: Response
   try {
-    response = await fetch(apiUrl("/auth/session"), {
+    response = await request("/auth/session", {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -274,7 +287,7 @@ async function publicGet(path: string): Promise<{
 }> {
   let response: Response
   try {
-    response = await fetch(apiUrl(path), {
+    response = await request(path, {
       method: "GET",
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -322,7 +335,7 @@ async function publicPost(
 }> {
   let response: Response
   try {
-    response = await fetch(apiUrl(path), {
+    response = await request(path, {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -364,7 +377,7 @@ async function publicPost(
 // cookie with this call's expiring one (see #557).
 export async function deleteSession(): Promise<void> {
   try {
-    await fetch(apiUrl("/auth/session"), {
+    await request("/auth/session", {
       method: "DELETE",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
@@ -501,7 +514,7 @@ export async function apiFetch<T>(
 
   let response: Response
   try {
-    response = await fetch(apiUrl(path), { ...init, headers, signal })
+    response = await request(path, { ...init, headers, signal })
   } catch (error) {
     if (isTimeout(error)) {
       throw new ApiError(0, timeoutMessage)
@@ -570,7 +583,7 @@ export async function apiStream(
 
   let response: Response
   try {
-    response = await fetch(apiUrl(path), { ...init, headers })
+    response = await request(path, { ...init, headers })
   } catch (error) {
     // An abort is the caller's own Stop control, not a fault, so it is left to
     // propagate as itself rather than being reported as an unreachable gateway.

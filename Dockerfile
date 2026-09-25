@@ -39,6 +39,7 @@ RUN pip install --no-cache-dir --upgrade pip uv
 
 COPY pyproject.toml uv.lock ./
 COPY src ./src
+COPY cli ./cli
 # The e2b extra lets `sandbox_provider: e2b` work from the published image; the
 # adapter imports it only when that provider is selected.
 RUN uv sync --frozen --no-dev --extra e2b
@@ -51,6 +52,7 @@ RUN useradd -m -u 1000 otari && chown otari:otari /app
 
 COPY --from=builder --chown=otari:otari /app/.venv /app/.venv
 COPY --chown=otari:otari src ./src
+COPY --chown=otari:otari cli ./cli
 COPY --from=web --chown=otari:otari /app/src/gateway/static/dashboard ./src/gateway/static/dashboard
 COPY --chown=otari:otari alembic ./alembic
 COPY --chown=otari:otari alembic.ini ./alembic.ini

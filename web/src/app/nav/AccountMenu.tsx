@@ -10,15 +10,19 @@ import {
   FiFileText,
   FiHardDrive,
   FiLogOut,
+  FiMessageCircle,
   FiMoon,
   FiSettings,
   FiShield,
 } from "react-icons/fi"
 
+import {
+  AccountBadge,
+  useAccountBadgeLabel,
+} from "@/app/nav/overlayAccountBadge"
 import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
 import { useSurfaceVisibility } from "@/app/nav/useNavVisibility"
 import type { OrganizationContext } from "@/client"
-import { Avatar } from "@/design-system/indicators/Avatar"
 import { useAuth } from "@/features/auth/AuthContext"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -152,6 +156,7 @@ function MenuItem({
   trailing,
   trailingIcon,
   ariaLabel,
+  className = "",
 }: {
   label: string
   /** A Feather mark, named at the call site and dressed here. */
@@ -163,6 +168,7 @@ function MenuItem({
   /** Fills the same lane as `trailing`, for a mark rather than a value. */
   trailingIcon?: ReactNode
   ariaLabel?: string
+  className?: string
 }) {
   return (
     <button
@@ -176,7 +182,7 @@ function MenuItem({
         isDisabled && title ? `${label} (${title})` : (ariaLabel ?? undefined)
       }
       onClick={onPress}
-      className={`${MENU_ROW} ${isDisabled ? MENU_ROW_DISABLED : MENU_ROW_RESTING}`}
+      className={`${MENU_ROW} ${isDisabled ? MENU_ROW_DISABLED : MENU_ROW_RESTING} ${className}`}
     >
       <Icon aria-hidden="true" className={MENU_ICON_CLASS} />
       <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -304,6 +310,7 @@ export function AccountMenu({
   deploymentLanding,
   triggerRef,
   onOpenDeploymentLevel,
+  onOpenFeedback,
 }: {
   isCollapsed: boolean
   /**
@@ -319,13 +326,22 @@ export function AccountMenu({
    * opens it as a level inside the drawer, and this popover has closed by then.
    */
   onOpenDeploymentLevel?: () => void
+  /**
+   * Below `md`, opens the feedback dialog, which the shell mounts outside this
+   * popover. From `md` up the top bar carries it beside Documentation.
+   */
+  onOpenFeedback?: () => void
 }) {
   const { logout } = useAuth()
-  const { docs_url, terms_url, privacy_url } = useDeployment()
+  const { docs_url, terms_url, privacy_url, feedback_enabled } = useDeployment()
   const hostsSurface = useSurfaceVisibility()
   const organization = useOrganizationContext()
   const [open, setOpen] = useState(false)
   const identity = sessionIdentity(organization.data?.caller)
+  const badgeLabel = useAccountBadgeLabel()
+  const triggerLabel = badgeLabel
+    ? `Account: ${identity.name}, ${badgeLabel}`
+    : `Account: ${identity.name}`
 
   return (
     <Popover isOpen={open} onOpenChange={setOpen}>
@@ -341,8 +357,9 @@ export function AccountMenu({
         // otherwise hears "Account" and never who is signed in. On the
         // collapsed rail the name is not rendered at all, so this is the only
         // place it could reach anybody there. `AppearanceControl` folds its own
-        // visible state in for the same reason.
-        aria-label={`Account: ${identity.name}`}
+        // visible state in for the same reason. What the badge shows follows
+        // the name when a build gives it words of its own.
+        aria-label={triggerLabel}
         // `expandedJustify` rather than a `justify-start` appended here: this is
         // a HeroUI `Button`, which arrives centered, and the collapsed rail
         // wants the monogram in the icon column instead.
@@ -352,7 +369,7 @@ export function AccountMenu({
           expandedJustify: "start",
         })}
       >
-        <Avatar initials={identity.initials} />
+        <AccountBadge initials={identity.initials} />
         {isCollapsed ? null : (
           <>
             <span className="min-w-0 flex-1 truncate text-left text-foreground">
@@ -476,6 +493,17 @@ export function AccountMenu({
               className="md:hidden"
             />
           )}
+          {feedback_enabled && onOpenFeedback ? (
+            <MenuItem
+              label="Feedback"
+              icon={FiMessageCircle}
+              className="md:hidden"
+              onPress={() => {
+                setOpen(false)
+                onOpenFeedback()
+              }}
+            />
+          ) : null}
           {terms_url ? (
             <MenuExternalLink
               label="Terms of service"

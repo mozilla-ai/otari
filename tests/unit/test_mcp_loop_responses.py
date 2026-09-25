@@ -34,13 +34,21 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop,
     responses_tool_loop_stream,
 )
-from gateway.services.sandbox_backend import CodeExecution
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecution
 from gateway.services.tool_format import (
     inject_purpose_hints_responses,
     openai_to_responses_tools,
 )
-from gateway.services.web_search_budget import WebSearchBudget
+from gateway.services.tools import ToolUseBudget
+from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
 from gateway.types.code_execution import ResultBlock
+
+_SEARCH = frozenset({WEB_SEARCH_TOOL_NAME})
+
+
+def _use_budget(max_uses: int) -> ToolUseBudget:
+    """A cap on the gateway's own searches, which is the tool these loops run."""
+    return ToolUseBudget(WEB_SEARCH_TOOL_NAME, max_uses)
 
 
 class _FakePool:
@@ -274,7 +282,8 @@ async def test_max_uses_stops_further_searches_and_announces_only_the_one_that_r
         completion_kwargs={"model": "fake", "input_data": [{"role": "user", "content": "hi"}]},
         pool=cast(Any, pool),
         max_iterations=5,
-        web_search_budget=WebSearchBudget(1),
+        use_budget=_use_budget(1),
+        native_tools=_SEARCH,
     )
 
     assert pool.calls == [("web_search", {"query": "first"})]
@@ -439,7 +448,7 @@ async def test_loop_mixed_capped_search_hides_refusal_and_returns_foreign_call(
         completion_kwargs={"model": "fake", "input_data": "go"},
         pool=cast(Any, pool),
         max_iterations=5,
-        web_search_budget=WebSearchBudget(0),
+        use_budget=_use_budget(0),
     )
 
     assert pool.calls == []
@@ -740,7 +749,8 @@ async def test_stream_max_uses_announces_only_the_search_that_ran(
             completion_kwargs={"model": "fake", "input_data": "go"},
             pool=cast(Any, pool),
             max_iterations=5,
-            web_search_budget=WebSearchBudget(1),
+            use_budget=_use_budget(1),
+            native_tools=_SEARCH,
         )
     ]
 
@@ -981,6 +991,7 @@ async def test_stream_announces_gateway_search_as_native_web_search_call(
             completion_kwargs={"model": "fake", "input_data": "go"},
             pool=cast(Any, pool),
             max_iterations=5,
+            native_tools=_SEARCH,
         )
     ]
 
@@ -1083,7 +1094,7 @@ async def test_stream_mixed_capped_search_hides_refusal_and_returns_foreign_call
             completion_kwargs={"model": "fake", "input_data": "go"},
             pool=cast(Any, pool),
             max_iterations=5,
-            web_search_budget=WebSearchBudget(0),
+            use_budget=_use_budget(0),
         )
     ]
 
@@ -1148,7 +1159,7 @@ async def test_a_gateway_execution_is_announced_as_a_code_interpreter_call(monke
         completion_kwargs={"model": "fake", "input_data": [{"role": "user", "content": "compute"}]},
         pool=cast(Any, _FakeSandboxPool()),
         max_iterations=5,
-        emit_native_code_execution=True,
+        native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
     )
 
     items = [item for item in (out.output or []) if getattr(item, "type", None) == "code_interpreter_call"]
@@ -1180,7 +1191,7 @@ async def test_a_mixed_batch_still_announces_the_gateway_execution(monkeypatch: 
         completion_kwargs={"model": "fake", "input_data": "go"},
         pool=cast(Any, pool),
         max_iterations=5,
-        emit_native_code_execution=True,
+        native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
     )
 
     assert pool.calls == [("code_execution", {"code": "print(1)"})]
@@ -1219,7 +1230,7 @@ async def test_a_streamed_mixed_batch_announces_the_execution_and_the_terminal_l
             completion_kwargs={"model": "fake", "input_data": "go"},
             pool=cast(Any, pool),
             max_iterations=5,
-            emit_native_code_execution=True,
+            native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
         )
     ]
 
@@ -1254,7 +1265,7 @@ async def test_a_failed_program_is_a_failed_interpreter_call(monkeypatch: pytest
         completion_kwargs={"model": "fake", "input_data": [{"role": "user", "content": "compute"}]},
         pool=cast(Any, _FakeSandboxPool(result=_exec_result(stdout="", stderr="boom", return_code=1))),
         max_iterations=5,
-        emit_native_code_execution=True,
+        native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
     )
 
     item = cast(Any, next(i for i in (out.output or []) if getattr(i, "type", None) == "code_interpreter_call"))
@@ -1315,7 +1326,7 @@ async def test_stream_announces_the_execution_as_a_code_interpreter_call(monkeyp
             completion_kwargs={"model": "fake", "input_data": "go"},
             pool=cast(Any, pool),
             max_iterations=5,
-            emit_native_code_execution=True,
+            native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
         )
     ]
 

@@ -18,9 +18,28 @@ import httpx
 import pytest
 from click.testing import CliRunner
 
-import gateway.cli as gateway_cli
+import otari_agent.hook as hook_cli
 
-_GATES_YAML = "schema_version: '1.0'\npolicy:\n  id: test\ngates: []\n"
+
+def _guardrail_path(root: Path) -> Path:
+    """`.otari/guardrails.yml` under `root`, with its parent directory created."""
+    path = root / hook_cli.GUARDRAIL_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+# One gate, and one that matches nothing: `otari hook` parses the guardrail
+# before it does anything with it, so an empty `gates:` is a guardrail that
+# does not parse rather than one with nothing to say.
+_GATES_YAML = (
+    "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n"
+    "  - id: inert\n"
+    "    type: path\n"
+    "    runs: [pre_tool_use.edit_target, stop.working_tree]\n"
+    "    enforcement: advisory\n"
+    "    forbidden: ['no-path-is-ever-called-this']\n"
+    "    message: m\n"
+)
 
 _FAKE_OTARI_PATH = "/opt/otari/.venv/bin/otari"
 
@@ -38,13 +57,13 @@ class _FakeResponse:
 
 @pytest.fixture(autouse=True)
 def _judge_log_in_tmp_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(gateway_cli, "_hook_judge_log_path", lambda: tmp_path / "judge-calls.log")
+    monkeypatch.setattr(hook_cli, "_hook_judge_log_path", lambda: tmp_path / "judge-calls.log")
 
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
-    (tmp_path / ".otari-gates.yml").write_text(_GATES_YAML, encoding="utf-8")
+    _guardrail_path(tmp_path).write_text(_GATES_YAML, encoding="utf-8")
     return tmp_path
 
 
@@ -52,7 +71,7 @@ def _invoke(payload: dict[str, Any], **extra_args: str) -> Any:
     args = ["--api-key", "test-key", "--harness", "codex"]
     for key, value in extra_args.items():
         args += [f"--{key.replace('_', '-')}", value]
-    return CliRunner().invoke(gateway_cli.hook, args, input=json.dumps(payload))
+    return CliRunner().invoke(hook_cli.hook, args, input=json.dumps(payload))
 
 
 # --- PreToolUse: apply_patch (Codex's own edit tool) ------------------------
@@ -82,7 +101,7 @@ def test_pretooluse_extracts_a_single_path_from_an_apply_patch_envelope(
     }
     result = _invoke(payload)
     assert result.exit_code == 2, result.output
-    assert captured["json"]["changed_paths"] == ["CHANGELOG.md"]
+    assert captured["json"]["paths"] == ["CHANGELOG.md"]
     assert captured["json"]["commands"] == []
 
 
@@ -111,7 +130,7 @@ def test_pretooluse_apply_patch_covers_every_file_it_touches(monkeypatch: pytest
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["changed_paths"] == ["src/new_module.py", "README.md", "old_file.py"]
+    assert captured["json"]["paths"] == ["src/new_module.py", "README.md", "old_file.py"]
 
 
 def test_pretooluse_apply_patch_rename_reports_both_old_and_new_path(
@@ -138,7 +157,7 @@ def test_pretooluse_apply_patch_rename_reports_both_old_and_new_path(
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["changed_paths"] == ["old_name.py", "new_name.py"]
+    assert captured["json"]["paths"] == ["old_name.py", "new_name.py"]
 
 
 def test_pretooluse_ignores_an_apply_patch_with_no_command(repo: Path) -> None:
@@ -180,7 +199,7 @@ def test_pretooluse_apply_patch_path_outside_the_repo_is_skipped(monkeypatch: py
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["changed_paths"] == ["CHANGELOG.md"]
+    assert captured["json"]["paths"] == ["CHANGELOG.md"]
 
 
 # --- PreToolUse: shell / Code Mode exec -------------------------------------
@@ -443,11 +462,11 @@ def test_codex_judge_transcript_extraction_keeps_only_assistant_output_text(tmp_
         + "\n",
         encoding="utf-8",
     )
-    assert gateway_cli._hook_extract_codex_judge_transcript(transcript) == "Reviewing now.\nFound an issue."
+    assert hook_cli._hook_extract_codex_judge_transcript(transcript) == "Reviewing now.\nFound an issue."
 
 
 def test_codex_judge_transcript_extraction_returns_empty_for_an_unreadable_file(tmp_path: Path) -> None:
-    assert gateway_cli._hook_extract_codex_judge_transcript(tmp_path / "missing.jsonl") == ""
+    assert hook_cli._hook_extract_codex_judge_transcript(tmp_path / "missing.jsonl") == ""
 
 
 # --- otari hook setup --harness codex ---------------------------------------
@@ -455,11 +474,11 @@ def test_codex_judge_transcript_extraction_returns_empty_for_an_unreadable_file(
 
 @pytest.fixture(autouse=True)
 def _fixed_otari_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gateway_cli, "_otari_binary_path", lambda: _FAKE_OTARI_PATH)
+    monkeypatch.setattr(hook_cli, "_otari_binary_path", lambda: _FAKE_OTARI_PATH)
 
 
 def _invoke_setup(*args: str, input: str | None = None) -> Any:  # noqa: A002 - matches CliRunner's own kwarg name
-    return CliRunner().invoke(gateway_cli.hook, ["setup", "--harness", "codex", *args], input=input)
+    return CliRunner().invoke(hook_cli.hook, ["setup", "--harness", "codex", *args], input=input)
 
 
 def test_setup_writes_codex_hooks_json_not_claude_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -475,14 +494,14 @@ def test_setup_writes_codex_hooks_json_not_claude_settings(tmp_path: Path, monke
     assert settings["hooks"]["Stop"][0]["hooks"][0]["command"] == f"{_FAKE_OTARI_PATH} hook --harness codex --api-key k"
 
 
-def test_setup_matcher_covers_bash_and_exec_when_a_command_match_gate_exists(
+def test_setup_matcher_covers_bash_and_exec_when_a_command_gate_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.chdir(tmp_path)
-    (tmp_path / ".otari-gates.yml").write_text(
+    _guardrail_path(tmp_path).write_text(
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: command_match\n    enforcement: required\n"
+        "  - id: g\n    type: command\n    runs: [pre_tool_use.command]\n    enforcement: required\n"
         '    forbidden: ["npm"]\n    message: m\n',
         encoding="utf-8",
     )

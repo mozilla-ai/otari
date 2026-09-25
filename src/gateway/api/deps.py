@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.auth.models import hash_key
 from gateway.container import Container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, X_API_KEY_HEADER, GatewayConfig
-from gateway.core.database import DATABASE_ERRORS, create_session, get_db
+from gateway.core.database import DATABASE_ERRORS, create_session, get_db, release_session
 from gateway.core.feature import CoreFeature
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
@@ -26,10 +26,12 @@ from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
+from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import BudgetRepositories
+from gateway.repositories.files import FileRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import OrganizationGuardrailDefinitionRepository, OrgProviderKeyRepository
@@ -37,8 +39,8 @@ from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
-from gateway.services.file_service import StagedFile
-from gateway.services.files import SandboxFileBridge
+from gateway.services.feedback import FeedbackService
+from gateway.services.files import FileService, SandboxFileBridge, StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.organization_pricing_service import OrganizationPricingService
@@ -53,6 +55,7 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
 )
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_service import WorkspaceService
+from gateway.services.workspace_scope import default_workspace_id
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -301,8 +304,28 @@ def _header_credentials_present(request: Request) -> bool:
 # Sec-Fetch-Site values under which a cookie may authenticate a request:
 # same-origin fetches (the dashboard itself) and non-site-initiated requests
 # ("none", e.g. a direct navigation). "same-site" is deliberately excluded, so a
-# sibling-subdomain page cannot ride the cookie.
+# sibling-subdomain page cannot ride the cookie; ``cookie_may_authenticate``
+# admits it only from an origin the deployment itself listed.
 _COOKIE_SAFE_FETCH_SITES = ("same-origin", "none")
+
+
+def cookie_may_authenticate(request: Request, config: GatewayConfig) -> bool:
+    """Whether the session cookie on this request may authenticate it.
+
+    A same-site request is admitted only when its ``Origin`` is one of
+    ``cors_allow_origins``: that list is where an operator names the origin an
+    edge serves the dashboard from, so a dashboard on a sibling host of this
+    process can hold a session here while every other sibling stays refused.
+    A ``*`` entry never matches, since a wildcard is not an origin and CORS
+    sends no credentials under one either.
+    """
+    fetch_site = request.headers.get("Sec-Fetch-Site")
+    if fetch_site is None or fetch_site in _COOKIE_SAFE_FETCH_SITES:
+        return True
+    if fetch_site != "same-site":
+        return False
+    origin = request.headers.get("Origin", "")
+    return bool(origin) and origin != "*" and origin in config.cors_allow_origins
 
 
 async def get_session_identity(
@@ -331,8 +354,7 @@ async def get_session_identity(
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
         return None
-    fetch_site = request.headers.get("Sec-Fetch-Site")
-    if fetch_site is not None and fetch_site not in _COOKIE_SAFE_FETCH_SITES:
+    if not cookie_may_authenticate(request, config):
         record_auth_failure("cross_site_cookie")
         return None
     try:
@@ -594,8 +616,8 @@ async def verify_catalog_reader_or_public(
     ``None`` is the anonymous caller, admitted only while ``public_catalog`` is on
     and only when the request carries no credential at all: a credential that is
     present and wrong is refused as it always was, never downgraded to a visitor.
-    The route is what narrows an anonymous read (the configured instances, the
-    deployment price list, no tenant rows); this only decides who is asking.
+    The route is what narrows an anonymous read (the deployment's own
+    offerings, the deployment price list, no tenant rows); this only decides who is asking.
 
     Throttled per client address on its own budget,
     ``public_catalog_rate_limit_per_minute``, the way the public auth routes
@@ -638,6 +660,15 @@ async def get_db_if_needed(
             yield db
 
 
+def build_file_service(uow: UnitOfWork, file_store: FileStoragePort, config: GatewayConfig) -> FileService:
+    """Build Files operations for a scoped output request or cleanup job."""
+
+    async def reject_unscoped_upload() -> uuid.UUID:
+        raise RuntimeError("Unscoped uploads are not supported in this context; specify a workspace.")
+
+    return FileService(uow, FileRepositories.on(uow), file_store, config, reject_unscoped_upload)
+
+
 def build_sandbox_file_bridge(
     *,
     raw_request: Request,
@@ -661,7 +692,7 @@ def build_sandbox_file_bridge(
     return SandboxFileBridge(
         file_store=file_store,
         config=config,
-        uow=uow,
+        files=build_file_service(uow, file_store, config),
         user_id=user_id,
         workspace_id=workspace_id,
         inputs=inputs,
@@ -863,6 +894,15 @@ def get_identity_provider_port(
     return container.resolve(IdentityProviderPort, db)
 
 
+def get_mcp_server_port(db: PortSessionDep, container: ContainerDep) -> McpServerPort:
+    """Resolve the MCP server adapter this build bound at startup.
+
+    Invariant: a deployment that holds the rows always has a session here, so
+    the refusal inside the adapter's builder is unreachable through this.
+    """
+    return container.resolve(McpServerPort, db)
+
+
 def get_model_provider_port(db: PortSessionDep, container: ContainerDep) -> ModelProviderPort:
     """Resolve the model-provider adapter this build bound at startup."""
     return container.resolve(ModelProviderPort, db)
@@ -967,6 +1007,7 @@ BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
 EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
 GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]
 IdentityProviderPortDep = Annotated[IdentityProviderPort, Depends(get_identity_provider_port)]
+McpServerPortDep = Annotated[McpServerPort, Depends(get_mcp_server_port)]
 ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_port)]
 
 
@@ -1030,6 +1071,52 @@ def get_file_store(request: Request) -> FileStoragePort:
     return store
 
 
+def get_file_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    file_store: Annotated[FileStoragePort, Depends(get_file_store)],
+) -> FileService:
+    """Build the request's files service on the request's Unit of Work."""
+    return FileService(uow, FileRepositories.on(uow), file_store, config, lambda: default_workspace_id(db))
+
+
+FileServiceDep = Annotated[FileService, Depends(get_file_service)]
+
+
+def get_file_store_if_needed(request: Request) -> FileStoragePort | None:
+    """Return the configured blob store in standalone mode, otherwise ``None``.
+
+    The counterpart of ``get_file_store``, for a route that serves both modes. A
+    hybrid gateway binds none, so the attribute is absent rather than set to None.
+    """
+    store: FileStoragePort | None = getattr(request.app.state, "file_store", None)
+    return store
+
+
+def get_file_service_if_needed(
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    file_store: Annotated[FileStoragePort | None, Depends(get_file_store_if_needed)],
+) -> FileService | None:
+    """Return the request's files service in standalone mode, otherwise ``None``.
+
+    The counterpart of ``get_file_service``, for a completion route that serves both
+    modes. Hybrid mode has no local database and no blob store, so a stored
+    ``file_id`` cannot be resolved there at all.
+
+    NOTE: a route must take its session from ``get_db_if_needed`` as well, for the
+    reason ``get_unit_of_work_if_needed`` gives.
+    """
+    if uow is None or db is None or file_store is None:
+        return None
+    return FileService(uow, FileRepositories.on(uow), file_store, config, lambda: default_workspace_id(db))
+
+
+OptionalFileServiceDep = Annotated[FileService | None, Depends(get_file_service_if_needed)]
+
+
 async def _caller_organization_id(
     db: Annotated[AsyncSession, Depends(get_db)],
     identity: CurrentIdentity,
@@ -1053,15 +1140,27 @@ async def _caller_organization_id(
 CallerOrganization = Annotated[uuid.UUID, Depends(_caller_organization_id)]
 
 
+async def get_feedback_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _authenticated: Annotated[str | None, Depends(verify_master_key)],
+) -> FeedbackService:
+    """Finish authentication's database work before waiting for the receiver."""
+    await release_session(db)
+    return FeedbackService()
+
+
 __all__ = [
     "BillingPortDep",
     "ContainerDep",
     "CallerOrganization",
     "CurrentIdentity",
     "EntitlementPortDep",
+    "FileServiceDep",
+    "OptionalFileServiceDep",
     "OverviewServiceDep",
     "GrowthSignalPortDep",
     "IdentityProviderPortDep",
+    "McpServerPortDep",
     "ModelProviderPortDep",
     "OrgProviderModelServiceDep",
     "TelemetryStoragePortDep",
@@ -1074,6 +1173,7 @@ __all__ = [
     "reset_config",
     "set_config",
     "get_db_if_needed",
+    "get_feedback_service",
     "get_file_store",
     "get_log_writer",
     "is_valid_master_key",

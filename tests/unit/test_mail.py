@@ -423,6 +423,23 @@ def test_whatever_can_send_links_permits_is_followable_from_an_inbox() -> None:
     assert mailer.link("/#/verify-email?token=t") == "https://app.example.com/ui/#/verify-email?token=t"
 
 
+def test_a_query_on_the_interface_address_travels_ahead_of_the_hash_route() -> None:
+    # An edge serving one interface for several deployments needs each link to
+    # say which one built it. Placed before the hash so the page's own location
+    # carries it, where the route's query would only reach the route.
+    mailer = Mailer(_ready(ui_base_url="https://app.example.com/ui/?edge=eu"))
+
+    assert mailer.link("/#/verify-email?token=abc") == "https://app.example.com/ui/?edge=eu#/verify-email?token=abc"
+    assert mailer.link("/x") == "https://app.example.com/ui/x?edge=eu"
+    assert mailer.link("/x?y=1") == "https://app.example.com/ui/x?y=1&edge=eu"
+
+
+def test_a_trailing_slash_inside_a_query_value_survives_the_link() -> None:
+    mailer = Mailer(_ready(ui_base_url="https://app.example.com/ui/?edge=team/"))
+
+    assert mailer.link("/#/verify-email?token=abc") == "https://app.example.com/ui/?edge=team/#/verify-email?token=abc"
+
+
 def test_link_does_not_double_a_trailing_slash() -> None:
     assert Mailer(_ready(public_base_url="https://otari.example.com/")).link("/x") == "https://otari.example.com/x"
 

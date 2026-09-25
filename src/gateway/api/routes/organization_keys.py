@@ -60,6 +60,7 @@ from gateway.api.routes.keys import (
 )
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
@@ -69,7 +70,6 @@ from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
-from gateway.services.tenancy.errors import WorkspaceNotFoundError
 from gateway.services.workspace_scope import organization_default_workspace_id
 
 router = APIRouter(

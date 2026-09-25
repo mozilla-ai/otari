@@ -65,7 +65,7 @@ moderations, rerank, and search. Provider support differs by endpoint, so use
 
 ### Request ID and inline cost
 
-Every Chat, Messages, and Responses response carries an `X-Otari-Request-ID`
+Every Chat, Messages, and Responses response carries an `Otari-Request-ID`
 header, streaming or not. In hybrid mode it is the platform's id for the
 request; a standalone gateway mints its own.
 

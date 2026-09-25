@@ -7,6 +7,7 @@ Each entry names the ``CoreFeature`` its own module declares, so nothing is buil
 Whether a listed feature runs is that feature's own ``enabled`` setting.
 """
 
+from gateway.api.routes.feedback import FEATURE as FEEDBACK
 from gateway.core.feature import CoreFeature
 
-CORE_FEATURES: tuple[CoreFeature, ...] = ()
+CORE_FEATURES: tuple[CoreFeature, ...] = (FEEDBACK,)

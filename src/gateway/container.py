@@ -36,6 +36,7 @@ from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.file_storage_adapter import build_file_storage_port
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
+from gateway.adapters.mcp_server_adapter import build_mcp_server_port
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.core.config import GatewayConfig
@@ -47,6 +48,7 @@ from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
+from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 
@@ -326,6 +328,22 @@ def _file_storage_port_factory(config: GatewayConfig | None) -> PortFactory[File
     return factory
 
 
+def _mcp_server_port_factory(config: GatewayConfig | None) -> PortFactory[McpServerPort]:
+    """The core ``McpServerPort`` factory, closed over this app's config.
+
+    Built per resolve rather than once, because the implementation that reads
+    rows needs the request's own session.
+    """
+
+    def factory(session: AsyncSession | None) -> McpServerPort:
+        if config is None:
+            msg = "McpServerPort needs the deployment config; build the container with it"
+            raise ContainerError(msg)
+        return build_mcp_server_port(config, session)
+
+    return factory
+
+
 def build_container(bootstrap_selector: str | None = None, config: GatewayConfig | None = None) -> Container:
     """Build the composition-root container for this deployment.
 
@@ -377,6 +395,10 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # bucket or any fsspec filesystem, whichever ``files_backend`` names. An
     # overlay binds a store of its own and changes nothing above the port.
     container.bind(FileStoragePort, _file_storage_port_factory(config))
+    # A workspace's MCP servers: the base reads this deployment's own rows
+    # where it holds them, and asks its peer where it does not. An overlay
+    # binds a source of its own and changes nothing above the port.
+    container.bind(McpServerPort, _mcp_server_port_factory(config))
     if config is not None:
         # Asked once, at build, rather than per request: selecting a hosted
         # provider is itself what publishes code execution on ``/v1/tools``, in

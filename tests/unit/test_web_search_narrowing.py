@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from gateway.services.tenancy.errors import WorkspaceWebSearchDomainsExcludedError
+from gateway.exceptions.tools_exceptions import WorkspaceWebSearchDomainsExcludedError
 from gateway.services.tenancy.workspace_web_search_service import (
     _MAX_DOMAINS,
     _MAX_RESULTS,

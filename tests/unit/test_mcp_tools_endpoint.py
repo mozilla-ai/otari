@@ -20,8 +20,8 @@ from fastapi.testclient import TestClient
 from mcp.types import ListToolsResult, ToolAnnotations
 from mcp.types import Tool as MCPTool
 
+from conftest import InstallControlPlane
 from gateway.api.deps import reset_config
-from gateway.api.routes import _platform as platform_module
 from gateway.api.routes import mcp as mcp_route
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
@@ -95,7 +95,7 @@ class _Platform:
 
 
 @pytest.fixture
-def platform(monkeypatch: pytest.MonkeyPatch) -> _Platform:
+def platform(monkeypatch: pytest.MonkeyPatch, control_plane_transport: InstallControlPlane) -> _Platform:
     fake = _Platform()
 
     async def post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> Any:
@@ -104,7 +104,7 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> _Platform:
         payload = {"servers": fake.servers} if fake.status_code == 200 else {"detail": "refused"}
         return httpx.Response(fake.status_code, json=payload)
 
-    monkeypatch.setattr(platform_module, "_post_platform", post)
+    control_plane_transport(post)
     return fake
 
 
@@ -141,7 +141,7 @@ def test_the_live_catalog_is_returned_with_the_stored_server_revision(
         ],
         "warnings": [],
     }
-    assert response.headers["X-Otari-Request-ID"]
+    assert response.headers["Otari-Request-ID"]
 
 
 def test_the_response_discloses_no_url_credential_or_allowlist(

@@ -13,7 +13,7 @@ from gateway.api.routes.usage import GATEWAY_TOOL_NAMES
 from gateway.core.config import GatewayConfig
 from gateway.services._tool_loop import ToolBackend
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, SandboxBackend
-from gateway.services.tools import BUILTIN_TOOLS, BuiltinTool
+from gateway.services.tools import BUILTIN_TOOLS, BuiltinTool, Dialect, native_rendering
 from gateway.services.web_retrieval_backend import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME, WebRetrievalBackend
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -71,6 +71,11 @@ def test_a_definition_names_its_tool_and_is_new_on_every_call(tool: BuiltinTool)
     assert tool.definition() is not definition, "a caller mutating one definition must not change the next"
 
 
+def test_a_listed_tool_can_be_put_in_a_set() -> None:
+    """A tool is identified by its name, so its renderings must not cost it its hash."""
+    assert len(set(BUILTIN_TOOLS)) == len(BUILTIN_TOOLS)
+
+
 def _backend_for(tool: BuiltinTool) -> ToolBackend:
     """The backend that runs ``tool``, built without opening a connection."""
     if tool.name == WEB_SEARCH_TOOL_NAME:
@@ -88,6 +93,21 @@ def test_the_backend_that_runs_a_tool_advertises_its_listed_definition(tool: Bui
     assert tool.definition() in backend.openai_tools
     assert backend.owns_tool(tool.name)
     assert tool.name in dict(backend.purpose_hints())
+
+
+@pytest.mark.parametrize("tool", BUILTIN_TOOLS, ids=lambda tool: tool.name)
+def test_a_listed_tool_is_reachable_by_name_in_every_dialect_it_renders(tool: BuiltinTool) -> None:
+    """The registry is how a loop finds a rendering, so every declared one must answer."""
+    for dialect, rendering in tool.native.items():
+        assert native_rendering(tool.name, dialect) is rendering
+    for dialect in Dialect:
+        if dialect not in tool.native:
+            assert native_rendering(tool.name, dialect) is None
+
+
+def test_a_name_the_registry_does_not_list_has_no_rendering() -> None:
+    """An MCP server may expose a tool of its own; nothing announces it natively."""
+    assert native_rendering("a_tool_an_mcp_server_supplied", Dialect.MESSAGES) is None
 
 
 @pytest.mark.parametrize(

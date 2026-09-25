@@ -24,6 +24,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.guardrails_exceptions import (
+    OrganizationGuardrailDefinitionAlreadyExistsError,
+    OrganizationGuardrailDefinitionArgumentsError,
+    OrganizationGuardrailDefinitionInUseError,
+    OrganizationGuardrailDefinitionLimitReachedError,
+    OrganizationGuardrailDefinitionNotFoundError,
+    OrganizationGuardrailDefinitionUnsafeUrlError,
+    OrganizationGuardrailNotBuildableError,
+    OrganizationGuardrailNotDefinableError,
+)
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError
 from gateway.models.guardrails import OrganizationGuardrail, OrganizationGuardrailDefinition
 from gateway.models.tenancy import Organization, User
 from gateway.repositories.tenancy import (
@@ -34,17 +45,6 @@ from gateway.repositories.tenancy import (
 )
 from gateway.services.secret_box import decrypt_secret, generate_secret_key
 from gateway.services.tenancy import organization_guardrail_runner as runner
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    OrganizationGuardrailDefinitionAlreadyExistsError,
-    OrganizationGuardrailDefinitionArgumentsError,
-    OrganizationGuardrailDefinitionInUseError,
-    OrganizationGuardrailDefinitionLimitReachedError,
-    OrganizationGuardrailDefinitionNotFoundError,
-    OrganizationGuardrailDefinitionUnsafeUrlError,
-    OrganizationGuardrailNotBuildableError,
-    OrganizationGuardrailNotDefinableError,
-)
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     MAX_DEFINITIONS_PER_ORGANIZATION,
     OrganizationGuardrailDefinitionCreate,

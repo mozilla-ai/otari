@@ -60,6 +60,19 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 from pydantic.json_schema import SkipJsonSchema
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.guardrails_exceptions import (
+    OrganizationGuardrailDefinitionAlreadyExistsError,
+    OrganizationGuardrailDefinitionArgumentsError,
+    OrganizationGuardrailDefinitionCheckFailedError,
+    OrganizationGuardrailDefinitionInUseError,
+    OrganizationGuardrailDefinitionLimitReachedError,
+    OrganizationGuardrailDefinitionNotFoundError,
+    OrganizationGuardrailDefinitionNotRunningError,
+    OrganizationGuardrailDefinitionUnsafeUrlError,
+    OrganizationGuardrailNotBuildableError,
+    OrganizationGuardrailNotDefinableError,
+)
+from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
 from gateway.models.guardrails import OrganizationGuardrailDefinition
 from gateway.models.secret_fields import REDACTED_VALUE, restore_redacted_values
@@ -76,19 +89,6 @@ from gateway.services.secret_box import (
     SecretDecryptionError,
     decrypt_secret,
     encrypt_secret,
-)
-from gateway.services.tenancy.errors import (
-    OrganizationGuardrailDefinitionAlreadyExistsError,
-    OrganizationGuardrailDefinitionArgumentsError,
-    OrganizationGuardrailDefinitionCheckFailedError,
-    OrganizationGuardrailDefinitionInUseError,
-    OrganizationGuardrailDefinitionLimitReachedError,
-    OrganizationGuardrailDefinitionNotFoundError,
-    OrganizationGuardrailDefinitionNotRunningError,
-    OrganizationGuardrailDefinitionUnsafeUrlError,
-    OrganizationGuardrailNotBuildableError,
-    OrganizationGuardrailNotDefinableError,
-    SecretBoxUnavailableTenancyError,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url

@@ -10,8 +10,8 @@ from collections.abc import Generator
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.agent_runtime.domain.evaluators import _command_segments, _contains_subsequence
 from gateway.core.config import API_ROOT, PLATFORM_TOKEN_ENV_VAR, GatewayConfig
+from otari_agent.domain.evaluators import _command_segments, _contains_subsequence
 
 from .conftest import build_test_client
 
@@ -21,7 +21,8 @@ policy:
   id: test/repo-quality
 gates:
   - id: no-scratch-files
-    type: changed_path
+    type: path
+    runs: [pre_tool_use.edit_target, stop.working_tree]
     enforcement: required
     forbidden: ["scratch/**"]
     message: Do not commit scratch files.
@@ -29,7 +30,7 @@ gates:
 
 _NO_NPM_POLICY = (
     'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-    "  - id: g\n    type: command_match\n    enforcement: required\n"
+    "  - id: g\n    type: command\n    runs: [pre_tool_use.command]\n    enforcement: required\n"
     '    forbidden: ["npm"]\n    message: m\n'
 )
 
@@ -43,7 +44,7 @@ def tokenized_commands(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         calls.append(command)
         return _command_segments(command)
 
-    monkeypatch.setattr("gateway.agent_runtime.domain.evaluators._command_segments", recording_command_segments)
+    monkeypatch.setattr("otari_agent.domain.evaluators._command_segments", recording_command_segments)
     return calls
 
 
@@ -55,7 +56,7 @@ def test_requires_authentication(client: TestClient) -> None:
 def test_passes_with_no_forbidden_changes(client: TestClient, api_key_header: dict[str, str]) -> None:
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _VALID_POLICY, "changed_paths": ["README.md"]},
+        json={"policy_yaml": _VALID_POLICY, "path_source": "stop.working_tree", "paths": ["README.md"]},
         headers=api_key_header,
     )
     assert response.status_code == 200, response.text
@@ -69,7 +70,11 @@ def test_passes_with_no_forbidden_changes(client: TestClient, api_key_header: di
 def test_blocks_on_a_forbidden_change(client: TestClient, master_key_header: dict[str, str]) -> None:
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _VALID_POLICY, "changed_paths": ["scratch/notes.txt"]},
+        json={
+            "policy_yaml": _VALID_POLICY,
+            "path_source": "stop.working_tree",
+            "paths": ["scratch/notes.txt"],
+        },
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -87,7 +92,7 @@ def test_an_empty_changed_paths_list_is_not_applicable_not_a_pass(
     """
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _VALID_POLICY, "changed_paths": []},
+        json={"policy_yaml": _VALID_POLICY, "path_source": "stop.working_tree", "paths": []},
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -101,7 +106,7 @@ def test_omitted_changed_paths_blocks_rather_than_passing(
 ) -> None:
     """Omitting the field says this caller never collects path evidence at
     all, which must not read as a pass. It used to default to `[]` and
-    certify every changed_path gate in the policy.
+    certify every path gate in the policy.
     """
     response = client.post(
         f"{API_ROOT}/hooks/check",
@@ -117,7 +122,7 @@ def test_omitted_changed_paths_blocks_rather_than_passing(
 def test_unsupported_gate_type_is_rejected_not_skipped(client: TestClient, master_key_header: dict[str, str]) -> None:
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: judge\n    enforcement: required\n    message: m\n"
+        "  - id: g\n    type: judge\n    runs: [stop.session]\n    enforcement: required\n    message: m\n"
     )
     response = client.post(
         f"{API_ROOT}/hooks/check",
@@ -155,13 +160,14 @@ def test_oversized_aggregate_workload_is_rejected(client: TestClient, master_key
     forbidden = [f'"pattern-{i:03d}-{"x" * 40}"' for i in range(100)]
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: changed_path\n    enforcement: required\n"
+        "  - id: g\n    type: path\n"
+        "    runs: [pre_tool_use.edit_target, stop.working_tree]\n    enforcement: required\n"
         f"    forbidden: [{', '.join(forbidden)}]\n    message: m\n"
     )
     changed_paths = [f"src/{'y' * 40}-{i:05d}.txt" for i in range(10_000)]
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "changed_paths": changed_paths},
+        json={"policy_yaml": policy, "path_source": "stop.working_tree", "paths": changed_paths},
         headers=master_key_header,
     )
     assert response.status_code == 422
@@ -178,7 +184,7 @@ def test_duplicated_globs_and_paths_resolve_quickly_instead_of_blocking(
     path_count * total_pattern_length is small when every string is one
     byte) yet, unmatched, cost 25,000,000 real match calls, which measured
     ~5s of synchronous blocking. Deduplicating at parse time and at the
-    evidence boundary (domain.policy, agent_runtime.domain.check.run_policy_check)
+    evidence boundary (domain.policy, otari_agent.domain.check.run_policy_check)
     collapses this to one pattern against one path.
 
     The budget below is deliberately far above what the deduplicated work
@@ -194,14 +200,15 @@ def test_duplicated_globs_and_paths_resolve_quickly_instead_of_blocking(
     quoted_b = '"b"'
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: changed_path\n    enforcement: required\n"
+        "  - id: g\n    type: path\n"
+        "    runs: [pre_tool_use.edit_target, stop.working_tree]\n    enforcement: required\n"
         f"    forbidden: [{', '.join([quoted_b] * 2500)}]\n    message: m\n"
     )
     changed_paths = ["a"] * 10_000
     start = time.time()
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "changed_paths": changed_paths},
+        json={"policy_yaml": policy, "path_source": "stop.working_tree", "paths": changed_paths},
         headers=master_key_header,
     )
     assert time.time() - start < 3.0
@@ -223,13 +230,14 @@ def test_many_distinct_short_globs_and_paths_trip_the_comparisons_bound(
     forbidden = [f'"p{i:04d}"' for i in range(2000)]
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: changed_path\n    enforcement: required\n"
+        "  - id: g\n    type: path\n"
+        "    runs: [pre_tool_use.edit_target, stop.working_tree]\n    enforcement: required\n"
         f"    forbidden: [{', '.join(forbidden)}]\n    message: m\n"
     )
     changed_paths = [f"q{i:04d}" for i in range(2000)]
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "changed_paths": changed_paths},
+        json={"policy_yaml": policy, "path_source": "stop.working_tree", "paths": changed_paths},
         headers=master_key_header,
     )
     assert response.status_code == 422
@@ -275,7 +283,11 @@ class TestHybridMode:
     def test_is_mounted_and_evaluates(self, hybrid_client: TestClient) -> None:
         response = hybrid_client.post(
             f"{API_ROOT}/hooks/check",
-            json={"policy_yaml": _VALID_POLICY, "changed_paths": ["scratch/notes.txt"]},
+            json={
+                "policy_yaml": _VALID_POLICY,
+                "path_source": "stop.working_tree",
+                "paths": ["scratch/notes.txt"],
+            },
             headers={"Authorization": "Bearer any-platform-user-token"},
         )
         assert response.status_code == 200, response.text
@@ -293,52 +305,56 @@ class TestHybridMode:
         """
         response = hybrid_client.post(
             f"{API_ROOT}/hooks/check",
-            json={"policy_yaml": _VALID_POLICY, "changed_paths": ["README.md"]},
+            json={
+                "policy_yaml": _VALID_POLICY,
+                "path_source": "stop.working_tree",
+                "paths": ["README.md"],
+            },
         )
         assert response.status_code == 401
 
 
-_COMMAND_MATCH_POLICY = """\
+_COMMAND_POLICY = """\
 schema_version: "1.0"
 policy:
   id: test/no-force-push
 gates:
   - id: no-force-push
-    type: command_match
+    type: command
+    runs: [pre_tool_use.command]
     enforcement: required
     forbidden: ["git push --force", "git push -f"]
     message: Force-pushing is not allowed.
 """
 
-_COMMAND_MATCH_USE_PNPM_POLICY = """\
+_COMMAND_USE_PNPM_POLICY = """\
 schema_version: "1.0"
 policy:
   id: test/use-pnpm
 gates:
   - id: use-pnpm
-    type: command_match
+    type: command
+    runs: [pre_tool_use.command]
     enforcement: required
     forbidden: ["npm"]
     message: Use pnpm, not npm.
 """
 
 
-def test_command_match_passes_when_no_forbidden_command_run(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_command_passes_when_no_forbidden_command_run(client: TestClient, master_key_header: dict[str, str]) -> None:
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _COMMAND_MATCH_POLICY, "commands": ["git push"]},
+        json={"policy_yaml": _COMMAND_POLICY, "commands": ["git push"]},
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
     assert response.json()["blocked"] is False
 
 
-def test_command_match_blocks_on_a_forbidden_command(client: TestClient, master_key_header: dict[str, str]) -> None:
+def test_command_blocks_on_a_forbidden_command(client: TestClient, master_key_header: dict[str, str]) -> None:
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _COMMAND_MATCH_POLICY, "commands": ["git push --force"]},
+        json={"policy_yaml": _COMMAND_POLICY, "commands": ["git push --force"]},
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -348,19 +364,25 @@ def test_command_match_blocks_on_a_forbidden_command(client: TestClient, master_
     assert body["results"][0]["detail"] == "git push --force"
 
 
-def test_changed_path_and_command_match_gates_preserve_declaration_order(
+def test_path_and_command_gates_preserve_declaration_order(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: no-force-push\n    type: command_match\n    enforcement: required\n"
+        "  - id: no-force-push\n    type: command\n    runs: [pre_tool_use.command]\n    enforcement: required\n"
         '    forbidden: ["git push --force"]\n    message: no force push\n'
-        "  - id: no-scratch-files\n    type: changed_path\n    enforcement: required\n"
+        "  - id: no-scratch-files\n    type: path\n"
+        "    runs: [pre_tool_use.edit_target, stop.working_tree]\n    enforcement: required\n"
         '    forbidden: ["scratch/**"]\n    message: no scratch files\n'
     )
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "commands": ["git push --force"], "changed_paths": ["scratch/x.txt"]},
+        json={
+            "policy_yaml": policy,
+            "commands": ["git push --force"],
+            "path_source": "stop.working_tree",
+            "paths": ["scratch/x.txt"],
+        },
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -369,18 +391,18 @@ def test_changed_path_and_command_match_gates_preserve_declaration_order(
     assert body["blocked"] is True
 
 
-def test_command_match_oversized_workload_is_rejected(client: TestClient, master_key_header: dict[str, str]) -> None:
+def test_command_oversized_workload_is_rejected(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Distinct, short forbidden phrases against many short, distinct commands:
 
-    little token content (cheap by _MAX_COMMAND_MATCH_WORK) but a large
-    number of phrase/command pairs, mirroring changed_path's own comparisons
+    little token content (cheap by _MAX_COMMAND_WORK) but a large
+    number of phrase/command pairs, mirroring path's own comparisons
     finding for the same reason: a byte/token-weighted budget alone
     understates many-short-items requests.
     """
     forbidden = [f'"p{i:04d}"' for i in range(500)]
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: command_match\n    enforcement: required\n"
+        "  - id: g\n    type: command\n    runs: [pre_tool_use.command]\n    enforcement: required\n"
         f"    forbidden: [{', '.join(forbidden)}]\n    message: m\n"
     )
     commands = [f"q{i:04d}" for i in range(2000)]
@@ -393,7 +415,7 @@ def test_command_match_oversized_workload_is_rejected(client: TestClient, master
     assert "comparisons" in response.json()["detail"]
 
 
-def test_command_match_work_estimate_charges_a_shared_phrase_per_gate(
+def test_command_work_estimate_charges_a_shared_phrase_per_gate(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     """Many gates sharing one identical, moderately long forbidden phrase.
@@ -403,9 +425,9 @@ def test_command_match_work_estimate_charges_a_shared_phrase_per_gate(
     estimate used to sum tokens per *distinct* phrase text
     (`sum(len(tokens) for tokens in phrase_cache.values())`), so 50 gates
     sharing one 20-token phrase counted as if only one gate carried it, while
-    evaluate_command_match still runs _contains_subsequence once per gate.
+    evaluate_command still runs _contains_subsequence once per gate.
     Chosen so the buggy estimate (a single phrase's 20 tokens times the
-    commands' 50,000 total tokens, 1,000,000) clears _MAX_COMMAND_MATCH_WORK,
+    commands' 50,000 total tokens, 1,000,000) clears _MAX_COMMAND_WORK,
     while the real, per-occurrence estimate (multiplied by all 50 gates,
     50,000,000) does not; command_comparisons (50 phrases * 500 commands =
     25,000) stays far under its own budget, isolating this to the token-work
@@ -413,7 +435,7 @@ def test_command_match_work_estimate_charges_a_shared_phrase_per_gate(
     """
     shared_phrase = " ".join(["a"] * 20)
     gates_yaml = "".join(
-        f"  - id: g{i}\n    type: command_match\n    enforcement: required\n"
+        f"  - id: g{i}\n    type: command\n    runs: [pre_tool_use.command]\n    enforcement: required\n"
         f'    forbidden: ["{shared_phrase}"]\n    message: m\n'
         for i in range(50)
     )
@@ -456,10 +478,10 @@ def test_many_whitespace_only_commands_do_not_stall_tokenizing(
     assert tokenized_commands == commands[:1]
 
 
-def test_a_policy_with_no_command_match_gate_never_tokenizes_commands(
+def test_a_policy_with_no_command_gate_never_tokenizes_commands(
     client: TestClient, master_key_header: dict[str, str], tokenized_commands: list[str]
 ) -> None:
-    """A policy with no command_match gate never tokenizes the submitted commands.
+    """A policy with no command gate never tokenizes the submitted commands.
 
     The commands are over the character budget, so the 200 also shows that budget is not applied.
     """
@@ -467,7 +489,12 @@ def test_a_policy_with_no_command_match_gate_never_tokenizes_commands(
     commands = [" " * 4000 + str(i) for i in range(600)]
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _VALID_POLICY, "changed_paths": [], "commands": commands},
+        json={
+            "policy_yaml": _VALID_POLICY,
+            "path_source": "stop.working_tree",
+            "paths": [],
+            "commands": commands,
+        },
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -484,12 +511,13 @@ def test_a_policy_with_no_command_match_gate_never_tokenizes_commands(
     assert tokenized_commands == commands[:1]
 
 
-def test_many_command_match_gates_do_not_retokenize_per_gate(
+def test_many_command_gates_do_not_retokenize_per_gate(
     client: TestClient, master_key_header: dict[str, str], tokenized_commands: list[str]
 ) -> None:
-    """Each command is tokenized once per request, however many command_match gates check it."""
+    """Each command is tokenized once per request, however many command gates check it."""
     gates_yaml = "".join(
-        f'  - id: g{i}\n    type: command_match\n    enforcement: required\n    forbidden: ["npm"]\n    message: m\n'
+        f"  - id: g{i}\n    type: command\n"
+        '    runs: [pre_tool_use.command]\n    enforcement: required\n    forbidden: ["npm"]\n    message: m\n'
         for i in range(100)
     )
     policy = 'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n' + gates_yaml
@@ -515,7 +543,7 @@ def test_apostrophe_in_a_trailing_comment_does_not_evade_a_required_gate(
     """
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: command_match\n    enforcement: required\n"
+        "  - id: g\n    type: command\n    runs: [pre_tool_use.command]\n    enforcement: required\n"
         '    forbidden: ["npm"]\n    message: m\n'
     )
     response = client.post(
@@ -543,11 +571,11 @@ def test_separator_only_commands_are_never_compared_against_a_phrase(
         comparisons += 1
         return _contains_subsequence(segment, phrase)
 
-    monkeypatch.setattr("gateway.agent_runtime.domain.evaluators._contains_subsequence", counting_contains_subsequence)
+    monkeypatch.setattr("otari_agent.domain.evaluators._contains_subsequence", counting_contains_subsequence)
     forbidden = [f'"p{i}"' for i in range(500)]
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: command_match\n    enforcement: required\n"
+        "  - id: g\n    type: command\n    runs: [pre_tool_use.command]\n    enforcement: required\n"
         f"    forbidden: [{', '.join(forbidden)}]\n    message: m\n"
     )
     commands = ["; " * 500 + " " * i for i in range(100)]
@@ -580,7 +608,7 @@ def test_multiline_command_with_a_leading_comment_still_blocks(
     """
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: command_match\n    enforcement: required\n"
+        "  - id: g\n    type: command\n    runs: [pre_tool_use.command]\n    enforcement: required\n"
         '    forbidden: ["npm"]\n    message: m\n'
     )
     response = client.post(
@@ -602,7 +630,7 @@ def test_escaped_quote_does_not_hide_a_later_command_as_a_bogus_comment(
     """
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: command_match\n    enforcement: required\n"
+        "  - id: g\n    type: command\n    runs: [pre_tool_use.command]\n    enforcement: required\n"
         '    forbidden: ["npm"]\n    message: m\n'
     )
     response = client.post(
@@ -625,25 +653,23 @@ def test_ansi_c_quoted_escaped_apostrophe_does_not_evade_a_required_gate(
     """
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _COMMAND_MATCH_USE_PNPM_POLICY, "commands": ["echo $'a\\' # b' && npm install"]},
+        json={"policy_yaml": _COMMAND_USE_PNPM_POLICY, "commands": ["echo $'a\\' # b' && npm install"]},
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
     assert response.json()["blocked"] is True
 
 
-def test_omitted_commands_blocks_a_required_command_match_gate(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_omitted_commands_blocks_a_required_command_gate(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Omitting `commands` from the request body entirely (as distinct from
 
     sending an explicit `[]`) means this caller never collected command
-    evidence at all. A required command_match gate must read that as
+    evidence at all. A required command gate must read that as
     `unknown` and block, not silently `pass`.
     """
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _COMMAND_MATCH_POLICY},
+        json={"policy_yaml": _COMMAND_POLICY},
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -664,7 +690,7 @@ def test_explicit_empty_commands_is_not_applicable_not_a_pass(
     """
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _COMMAND_MATCH_POLICY, "commands": []},
+        json={"policy_yaml": _COMMAND_POLICY, "commands": []},
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -680,6 +706,7 @@ policy:
 gates:
   - id: openapi-changed-needs-postman
     type: command_if_changed
+    runs: [stop.session]
     enforcement: required
     when_changed: ["docs/public/openapi.json"]
     require: ["make postman"]
@@ -694,7 +721,8 @@ def test_command_if_changed_passes_when_required_command_ran(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
-            "changed_paths": ["docs/public/openapi.json"],
+            "path_source": "stop.working_tree",
+            "paths": ["docs/public/openapi.json"],
             "commands": ["make postman"],
             "command_scope": "session",
         },
@@ -713,7 +741,8 @@ def test_command_if_changed_blocks_when_required_command_did_not_run(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
-            "changed_paths": ["docs/public/openapi.json"],
+            "path_source": "stop.working_tree",
+            "paths": ["docs/public/openapi.json"],
             "commands": ["git status"],
             "command_scope": "session",
         },
@@ -733,7 +762,8 @@ def test_command_if_changed_is_not_applicable_when_no_matching_path_changed(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
-            "changed_paths": ["README.md"],
+            "path_source": "stop.working_tree",
+            "paths": ["README.md"],
             "commands": [],
         },
         headers=master_key_header,
@@ -761,7 +791,8 @@ def test_command_if_changed_does_not_block_the_edit_that_triggers_it(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
-            "changed_paths": ["docs/public/openapi.json"],
+            "path_source": "stop.working_tree",
+            "paths": ["docs/public/openapi.json"],
             "commands": [],
         },
         headers=master_key_header,
@@ -782,7 +813,11 @@ def test_command_if_changed_blocks_when_commands_is_omitted(
     """
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _COMMAND_IF_CHANGED_POLICY, "changed_paths": ["docs/public/openapi.json"]},
+        json={
+            "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
+            "path_source": "stop.working_tree",
+            "paths": ["docs/public/openapi.json"],
+        },
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -794,7 +829,7 @@ def test_command_if_changed_blocks_when_commands_is_omitted(
 def test_command_if_changed_oversized_workload_is_rejected(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """when_changed's globs share changed_path's own match-work budget: a
+    """when_changed's globs share path's own match-work budget: a
 
     command_if_changed gate with a large enough when_changed list against a
     large enough changed_paths list should trip the same existing limit
@@ -804,14 +839,14 @@ def test_command_if_changed_oversized_workload_is_rejected(
     when_changed = [f'"pattern-{i:03d}-{"x" * 40}"' for i in range(100)]
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: command_if_changed\n    enforcement: required\n"
+        "  - id: g\n    type: command_if_changed\n    runs: [stop.session]\n    enforcement: required\n"
         f"    when_changed: [{', '.join(when_changed)}]\n"
         '    require: ["make postman"]\n    message: m\n'
     )
     changed_paths = [f"src/{'y' * 40}-{i:05d}.txt" for i in range(10_000)]
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "changed_paths": changed_paths},
+        json={"policy_yaml": policy, "path_source": "stop.working_tree", "paths": changed_paths},
         headers=master_key_header,
     )
     assert response.status_code == 422, response.text
@@ -829,7 +864,8 @@ def test_command_if_changed_defers_call_scoped_evidence(client: TestClient, mast
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
-            "changed_paths": ["docs/public/openapi.json"],
+            "path_source": "stop.working_tree",
+            "paths": ["docs/public/openapi.json"],
             "commands": ["git status"],
         },
         headers=master_key_header,
@@ -854,7 +890,8 @@ def test_command_if_changed_blocks_when_the_session_ran_no_commands(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _COMMAND_IF_CHANGED_POLICY,
-            "changed_paths": ["docs/public/openapi.json"],
+            "path_source": "stop.working_tree",
+            "paths": ["docs/public/openapi.json"],
             "commands": [],
             "command_scope": "session",
         },
@@ -866,9 +903,7 @@ def test_command_if_changed_blocks_when_the_session_ran_no_commands(
     assert body["results"][0]["outcome"] == "fail"
 
 
-def test_command_match_does_not_judge_session_scoped_evidence(
-    client: TestClient, master_key_header: dict[str, str]
-) -> None:
+def test_command_does_not_judge_session_scoped_evidence(client: TestClient, master_key_header: dict[str, str]) -> None:
     """A forbidden command is judged at the call about to run it.
 
     Session evidence only grows, so matching against it would fail every
@@ -880,7 +915,7 @@ def test_command_match_does_not_judge_session_scoped_evidence(
         response = client.post(
             f"{API_ROOT}/hooks/check",
             json={
-                "policy_yaml": _COMMAND_MATCH_POLICY,
+                "policy_yaml": _COMMAND_POLICY,
                 "commands": ["git push --force"],
                 "command_scope": scope,
             },
@@ -900,6 +935,7 @@ policy:
 gates:
   - id: follows-error-handling-pattern
     type: judge
+    runs: [stop.session]
     enforcement: advisory
     rubric: Does this change follow the repository's error-handling conventions?
     message: This change does not follow the error-handling conventions.
@@ -1021,6 +1057,7 @@ policy:
 gates:
   - id: follows-error-handling-pattern
     type: judge
+    runs: [stop.session]
     enforcement: advisory
     rubric: Does this change follow the repository's error-handling conventions?
     when_changed: ["src/**"]
@@ -1035,7 +1072,8 @@ def test_judge_gate_with_when_changed_is_not_applicable_when_nothing_matches(
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _WHEN_CHANGED_JUDGE_POLICY,
-            "changed_paths": ["docs/README.md"],
+            "path_source": "stop.working_tree",
+            "paths": ["docs/README.md"],
             "judge_results": [
                 {"gate_id": "follows-error-handling-pattern", "outcome": "fail", "reasoning": "should not matter"}
             ],
@@ -1072,7 +1110,8 @@ def test_judge_gate_with_when_changed_still_resolves_the_verdict_once_a_matching
         f"{API_ROOT}/hooks/check",
         json={
             "policy_yaml": _WHEN_CHANGED_JUDGE_POLICY,
-            "changed_paths": ["src/module.py"],
+            "path_source": "stop.working_tree",
+            "paths": ["src/module.py"],
             "judge_results": [
                 {"gate_id": "follows-error-handling-pattern", "outcome": "fail", "reasoning": "swallows exceptions"}
             ],
@@ -1098,7 +1137,11 @@ def test_judge_gate_with_when_changed_is_not_applicable_on_a_pretooluse_shaped_r
     """
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _WHEN_CHANGED_JUDGE_POLICY, "changed_paths": ["src/module.py"]},
+        json={
+            "policy_yaml": _WHEN_CHANGED_JUDGE_POLICY,
+            "path_source": "pre_tool_use.edit_target",
+            "paths": ["src/module.py"],
+        },
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -1110,7 +1153,7 @@ def test_judge_gate_with_when_changed_is_not_applicable_on_a_pretooluse_shaped_r
 def test_judge_when_changed_oversized_workload_is_rejected(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """A judge gate's `when_changed` globs share changed_path's own match-work
+    """A judge gate's `when_changed` globs share path's own match-work
 
     budget, the same as command_if_changed's own when_changed globs
     (test_command_if_changed_oversized_workload_is_rejected's own shape):
@@ -1121,13 +1164,13 @@ def test_judge_when_changed_oversized_workload_is_rejected(
     when_changed = [f'"pattern-{i:03d}-{"x" * 40}"' for i in range(100)]
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: judge\n    enforcement: advisory\n    rubric: r\n"
+        "  - id: g\n    type: judge\n    runs: [stop.session]\n    enforcement: advisory\n    rubric: r\n"
         f"    when_changed: [{', '.join(when_changed)}]\n    message: m\n"
     )
     changed_paths = [f"src/{'y' * 40}-{i:05d}.txt" for i in range(10_000)]
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "changed_paths": changed_paths},
+        json={"policy_yaml": policy, "path_source": "stop.working_tree", "paths": changed_paths},
         headers=master_key_header,
     )
     assert response.status_code == 422, response.text
@@ -1137,7 +1180,8 @@ def test_judge_when_changed_oversized_workload_is_rejected(
 def test_judge_gate_rejects_required_enforcement(client: TestClient, master_key_header: dict[str, str]) -> None:
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: judge\n    enforcement: required\n    rubric: r\n    message: m\n"
+        "  - id: g\n    type: judge\n"
+        "    runs: [stop.session]\n    enforcement: required\n    rubric: r\n    message: m\n"
     )
     response = client.post(
         f"{API_ROOT}/hooks/check",
@@ -1148,24 +1192,25 @@ def test_judge_gate_rejects_required_enforcement(client: TestClient, master_key_
     assert "judge" in response.json()["detail"]
 
 
-_CHECK_PASSED_POLICY = """\
+_VERIFIER_POLICY = """\
 schema_version: "1.0"
 policy:
   id: test/check-passed
 gates:
   - id: no-leftover-conflict-markers
-    type: check_passed
+    type: verifier
+    runs: [stop.verifier]
     enforcement: required
-    verifier: .otari-gates/verifiers/no-conflict-markers.sh
+    verifier: .otari-guardrails/verifiers/no-conflict-markers.sh
     message: A tracked file still carries a Git merge-conflict marker.
 """
 
 
-def test_check_passed_gate_relays_a_passing_verdict(client: TestClient, master_key_header: dict[str, str]) -> None:
+def test_verifier_gate_relays_a_passing_verdict(client: TestClient, master_key_header: dict[str, str]) -> None:
     response = client.post(
         f"{API_ROOT}/hooks/check",
         json={
-            "policy_yaml": _CHECK_PASSED_POLICY,
+            "policy_yaml": _VERIFIER_POLICY,
             "check_results": [{"gate_id": "no-leftover-conflict-markers", "outcome": "pass", "detail": ""}],
         },
         headers=master_key_header,
@@ -1176,10 +1221,10 @@ def test_check_passed_gate_relays_a_passing_verdict(client: TestClient, master_k
     assert body["results"][0]["outcome"] == "pass"
 
 
-def test_check_passed_gate_relays_a_failing_verdict_and_blocks(
+def test_verifier_gate_relays_a_failing_verdict_and_blocks(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """Unlike judge (always advisory), a check_passed gate can be required, so a failing
+    """Unlike judge (always advisory), a verifier gate can be required, so a failing
 
     verifier verdict genuinely sets `blocked`: its exit code is reproducible,
     not a model's opinion.
@@ -1187,7 +1232,7 @@ def test_check_passed_gate_relays_a_failing_verdict_and_blocks(
     response = client.post(
         f"{API_ROOT}/hooks/check",
         json={
-            "policy_yaml": _CHECK_PASSED_POLICY,
+            "policy_yaml": _VERIFIER_POLICY,
             "check_results": [
                 {"gate_id": "no-leftover-conflict-markers", "outcome": "fail", "detail": "conflicted.txt:2"}
             ],
@@ -1202,17 +1247,17 @@ def test_check_passed_gate_relays_a_failing_verdict_and_blocks(
     assert body["results"][0]["detail"] == "conflicted.txt:2"
 
 
-def test_check_passed_gate_is_not_applicable_when_check_results_is_omitted_entirely(
+def test_verifier_gate_is_not_applicable_when_check_results_is_omitted_entirely(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     """Omitting `check_results` (as `otari hook` does on `PreToolUse`, which never
 
-    runs check_passed gates) resolves `not_applicable`, not `unknown`, and
+    runs verifier gates) resolves `not_applicable`, not `unknown`, and
     never blocks even though this gate is required.
     """
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _CHECK_PASSED_POLICY},
+        json={"policy_yaml": _VERIFIER_POLICY},
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -1221,10 +1266,10 @@ def test_check_passed_gate_is_not_applicable_when_check_results_is_omitted_entir
     assert body["results"][0]["outcome"] == "not_applicable"
 
 
-def test_check_passed_gate_is_unknown_and_blocks_when_check_results_is_submitted_but_empty(
+def test_verifier_gate_is_unknown_and_blocks_when_check_results_is_submitted_but_empty(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """A caller that does run check_passed gates for this event (`Stop`) but collected
+    """A caller that does run verifier gates for this event (`Stop`) but collected
 
     nothing (an empty, not omitted, `check_results`) resolves `unknown` for a
     gate genuinely missing its verdict, unlike an omitted field entirely
@@ -1233,7 +1278,7 @@ def test_check_passed_gate_is_unknown_and_blocks_when_check_results_is_submitted
     """
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _CHECK_PASSED_POLICY, "check_results": []},
+        json={"policy_yaml": _VERIFIER_POLICY, "check_results": []},
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -1242,13 +1287,13 @@ def test_check_passed_gate_is_unknown_and_blocks_when_check_results_is_submitted
     assert body["results"][0]["outcome"] == "unknown"
 
 
-def test_check_passed_gate_reports_a_callers_verifier_error_and_blocks(
+def test_verifier_gate_reports_a_callers_verifier_error_and_blocks(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     response = client.post(
         f"{API_ROOT}/hooks/check",
         json={
-            "policy_yaml": _CHECK_PASSED_POLICY,
+            "policy_yaml": _VERIFIER_POLICY,
             "check_results": [
                 {
                     "gate_id": "no-leftover-conflict-markers",
@@ -1265,28 +1310,30 @@ def test_check_passed_gate_reports_a_callers_verifier_error_and_blocks(
     assert body["results"][0]["outcome"] == "error"
 
 
-_WHEN_CHANGED_CHECK_PASSED_POLICY = """\
+_WHEN_CHANGED_VERIFIER_POLICY = """\
 schema_version: "1.0"
 policy:
   id: test/check-passed-when-changed
 gates:
   - id: no-leftover-conflict-markers
-    type: check_passed
+    type: verifier
+    runs: [stop.verifier]
     enforcement: required
-    verifier: .otari-gates/verifiers/no-conflict-markers.sh
+    verifier: .otari-guardrails/verifiers/no-conflict-markers.sh
     when_changed: ["src/**"]
     message: A tracked file still carries a Git merge-conflict marker.
 """
 
 
-def test_check_passed_gate_with_when_changed_is_not_applicable_when_nothing_matches(
+def test_verifier_gate_with_when_changed_is_not_applicable_when_nothing_matches(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     response = client.post(
         f"{API_ROOT}/hooks/check",
         json={
-            "policy_yaml": _WHEN_CHANGED_CHECK_PASSED_POLICY,
-            "changed_paths": ["docs/README.md"],
+            "policy_yaml": _WHEN_CHANGED_VERIFIER_POLICY,
+            "path_source": "stop.working_tree",
+            "paths": ["docs/README.md"],
             "check_results": [
                 {"gate_id": "no-leftover-conflict-markers", "outcome": "fail", "detail": "should not matter"}
             ],
@@ -1299,13 +1346,13 @@ def test_check_passed_gate_with_when_changed_is_not_applicable_when_nothing_matc
     assert body["results"][0]["outcome"] == "not_applicable"
 
 
-def test_check_passed_gate_with_when_changed_is_unknown_when_change_evidence_was_not_submitted(
+def test_verifier_gate_with_when_changed_is_unknown_when_change_evidence_was_not_submitted(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     response = client.post(
         f"{API_ROOT}/hooks/check",
         json={
-            "policy_yaml": _WHEN_CHANGED_CHECK_PASSED_POLICY,
+            "policy_yaml": _WHEN_CHANGED_VERIFIER_POLICY,
             "check_results": [{"gate_id": "no-leftover-conflict-markers", "outcome": "pass", "detail": ""}],
         },
         headers=master_key_header,
@@ -1316,14 +1363,15 @@ def test_check_passed_gate_with_when_changed_is_unknown_when_change_evidence_was
     assert body["results"][0]["outcome"] == "unknown"
 
 
-def test_check_passed_gate_with_when_changed_still_resolves_the_verdict_once_a_matching_path_changed(
+def test_verifier_gate_with_when_changed_still_resolves_the_verdict_once_a_matching_path_changed(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     response = client.post(
         f"{API_ROOT}/hooks/check",
         json={
-            "policy_yaml": _WHEN_CHANGED_CHECK_PASSED_POLICY,
-            "changed_paths": ["src/module.py"],
+            "policy_yaml": _WHEN_CHANGED_VERIFIER_POLICY,
+            "path_source": "stop.working_tree",
+            "paths": ["src/module.py"],
             "check_results": [
                 {"gate_id": "no-leftover-conflict-markers", "outcome": "fail", "detail": "conflicted.txt:2"}
             ],
@@ -1337,7 +1385,7 @@ def test_check_passed_gate_with_when_changed_still_resolves_the_verdict_once_a_m
     assert body["results"][0]["detail"] == "conflicted.txt:2"
 
 
-def test_check_passed_gate_with_when_changed_is_not_applicable_on_a_pretooluse_shaped_request(
+def test_verifier_gate_with_when_changed_is_not_applicable_on_a_pretooluse_shaped_request(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     """The exact shape `otari hook` submits on a `PreToolUse` edit to a path this
@@ -1350,7 +1398,11 @@ def test_check_passed_gate_with_when_changed_is_not_applicable_on_a_pretooluse_s
     """
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": _WHEN_CHANGED_CHECK_PASSED_POLICY, "changed_paths": ["src/module.py"]},
+        json={
+            "policy_yaml": _WHEN_CHANGED_VERIFIER_POLICY,
+            "path_source": "pre_tool_use.edit_target",
+            "paths": ["src/module.py"],
+        },
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
@@ -1359,29 +1411,144 @@ def test_check_passed_gate_with_when_changed_is_not_applicable_on_a_pretooluse_s
     assert body["results"][0]["outcome"] == "not_applicable"
 
 
-def test_check_passed_when_changed_oversized_workload_is_rejected(
+def test_verifier_when_changed_oversized_workload_is_rejected(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """A check_passed gate's `when_changed` globs share changed_path's own match-work
+    """A verifier gate's `when_changed` globs share path's own match-work
 
     budget, the same as judge's own when_changed globs
     (test_judge_when_changed_oversized_workload_is_rejected's own shape):
-    evaluate_check_passed calls the same matched_changed_paths those globs
+    evaluate_verifier calls the same matched_changed_paths those globs
     are checked against, so excluding them from the budget would let a
-    policy with enough check_passed gates run that same unbounded match
+    policy with enough verifier gates run that same unbounded match
     work anyway.
     """
     when_changed = [f'"pattern-{i:03d}-{"x" * 40}"' for i in range(100)]
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
-        "  - id: g\n    type: check_passed\n    enforcement: required\n    verifier: v.sh\n"
+        "  - id: g\n    type: verifier\n    runs: [stop.verifier]\n    enforcement: required\n    verifier: v.sh\n"
         f"    when_changed: [{', '.join(when_changed)}]\n    message: m\n"
     )
     changed_paths = [f"src/{'y' * 40}-{i:05d}.txt" for i in range(10_000)]
     response = client.post(
         f"{API_ROOT}/hooks/check",
-        json={"policy_yaml": policy, "changed_paths": changed_paths},
+        json={"policy_yaml": policy, "path_source": "stop.working_tree", "paths": changed_paths},
         headers=master_key_header,
     )
     assert response.status_code == 422, response.text
     assert "match operations" in response.json()["detail"]
+
+
+def test_paths_without_a_source_are_refused_rather_than_guessed(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The new wire contract: a non-empty path list must say which moment it was read at.
+
+    Refused rather than defaulted because either default is a lie about real
+    paths: `pre_tool_use.edit_target` would make a Stop event's Git evidence
+    silently disable every working-tree gate, and `stop.working_tree` would
+    fail a working-tree gate over a write that has not happened yet.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _VALID_POLICY, "paths": ["CHANGELOG.md"]},
+        headers=master_key_header,
+    )
+    assert response.status_code == 422, response.text
+    assert "path_source" in response.json()["detail"]
+
+
+def test_an_empty_path_list_needs_no_source(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """`[]` carries no lie to prevent, and refusing it would take every command,
+
+    judge and verifier gate in the same policy down with it, none of which
+    ever look at path evidence.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _VALID_POLICY, "paths": [], "commands": []},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["blocked"] is False
+
+
+def test_paths_labeled_with_an_inapplicable_moment_are_refused(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """`RunsAt` admits six values on the wire, but a path can only be read at three.
+
+    A client that labels real paths `stop.session` would otherwise resolve every
+    path gate `not_applicable`: a 200 that silently enforces nothing. The wire is
+    the reachable case, since this endpoint is a plain HTTP API.
+    """
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _VALID_POLICY,
+            "paths": ["CHANGELOG.md"],
+            "path_source": "stop.session",
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 422, response.text
+    assert "no path gate can be declared to run at" in response.json()["detail"]
+
+
+_READ_POLICY = (
+    'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
+    "  - id: no-secret-reads\n    type: path\n    runs: [pre_tool_use.read_target]\n"
+    '    enforcement: required\n    forbidden: [".env", "**/.env"]\n    message: Secrets stay out of the transcript.\n'
+)
+
+
+def test_a_read_target_blocks_a_gate_that_asked_for_that_moment(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The wire shape `otari hook` submits for a `PreToolUse` call on `Read`."""
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _READ_POLICY,
+            "paths": ["config/.env"],
+            "path_source": "pre_tool_use.read_target",
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is True
+    assert body["results"][0]["outcome"] == "fail"
+
+
+@pytest.mark.parametrize("source", ["pre_tool_use.edit_target", "stop.working_tree"])
+def test_a_read_gate_ignores_every_other_moment(
+    client: TestClient, master_key_header: dict[str, str], source: str
+) -> None:
+    """A read is neither a write nor a change, so the same path must not fire it elsewhere."""
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={"policy_yaml": _READ_POLICY, "paths": ["config/.env"], "path_source": source},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert body["results"][0]["outcome"] == "not_applicable"
+
+
+def test_read_evidence_leaves_a_write_only_policy_alone(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """The compatibility claim on the wire: a policy written before reads existed is unchanged."""
+    response = client.post(
+        f"{API_ROOT}/hooks/check",
+        json={
+            "policy_yaml": _VALID_POLICY,
+            "paths": ["CHANGELOG.md"],
+            "path_source": "pre_tool_use.read_target",
+        },
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["blocked"] is False
+    assert all(result["outcome"] == "not_applicable" for result in body["results"])

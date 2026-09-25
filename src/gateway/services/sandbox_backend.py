@@ -49,7 +49,7 @@ from gateway.types.code_execution import ResultBlock
 if TYPE_CHECKING:
     from types import TracebackType
 
-    from gateway.services.file_service import StagedFile
+    from gateway.services.files import StagedFile
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)

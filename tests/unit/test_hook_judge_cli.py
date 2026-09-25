@@ -18,8 +18,16 @@ import httpx
 import pytest
 from click.testing import CliRunner
 
-import gateway.cli as gateway_cli
-from gateway.core.config import GatewayConfig
+import otari_agent.hook as hook_cli
+from otari_agent.domain.policy import parse_policy
+from otari_agent.settings import HookSettings
+
+
+def _guardrail_path(root: Path) -> Path:
+    """`.otari/guardrails.yml` under `root`, with its parent directory created."""
+    path = root / hook_cli.GUARDRAIL_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class _FakeResponse:
@@ -35,14 +43,12 @@ class _FakeResponse:
 
 @pytest.fixture(autouse=True)
 def _judge_log_in_tmp_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(gateway_cli, "_hook_judge_log_path", lambda: tmp_path / "judge-calls.log")
+    monkeypatch.setattr(hook_cli, "_hook_judge_log_path", lambda: tmp_path / "judge-calls.log")
 
 
 @pytest.fixture(autouse=True)
 def _config_stub(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        gateway_cli, "load_config", lambda config_path=None: GatewayConfig(master_key="test-master-key")
-    )
+    monkeypatch.setattr(hook_cli, "load_settings", lambda config_path=None: HookSettings(master_key="test-master-key"))
 
 
 def _gates_yaml(judge_cli: str | None = None) -> str:
@@ -53,6 +59,7 @@ def _gates_yaml(judge_cli: str | None = None) -> str:
         "gates:\n"
         "  - id: g\n"
         "    type: judge\n"
+        "    runs: [stop.session]\n"
         "    enforcement: advisory\n"
         "    rubric: r\n"
         f"{judge_cli_line}"
@@ -79,7 +86,7 @@ def _git_status_and_diff_run() -> Callable[..., subprocess.CompletedProcess[str]
 
 def _invoke(payload: dict[str, Any], *, harness: str = "claude-code", extra: list[str] | None = None) -> Any:
     args = ["--api-key", "test-key", "--harness", harness, *(extra or [])]
-    return CliRunner().invoke(gateway_cli.hook, args, input=json.dumps(payload))
+    return CliRunner().invoke(hook_cli.hook, args, input=json.dumps(payload))
 
 
 def _capture_post(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
@@ -94,7 +101,7 @@ def _capture_post(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 def test_claude_code_harness_defaults_to_the_claude_backend(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
     called_with: list[str] = []
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -117,7 +124,7 @@ def test_claude_code_harness_defaults_to_the_claude_backend(monkeypatch: pytest.
 
 
 def test_codex_harness_defaults_to_the_codex_backend(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
     called_with: list[str] = []
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -140,7 +147,7 @@ def test_codex_harness_defaults_to_the_codex_backend(monkeypatch: pytest.MonkeyP
 
 
 def test_codex_exec_is_invoked_read_only_and_non_interactive(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[0] == "git":
@@ -156,7 +163,7 @@ def test_codex_exec_is_invoked_read_only_and_non_interactive(monkeypatch: pytest
         assert "--skip-git-repo-check" in cmd, "the judge workdir is a plain directory, not a Git repo"
         assert "--ephemeral" in cmd, "a one-shot judge call must not leave a rollout file behind"
         assert "input" in kwargs, "the prompt is piped over stdin, matching claude -p's own choice"
-        assert kwargs.get("cwd") == gateway_cli._hook_judge_workdir()
+        assert kwargs.get("cwd") == hook_cli._hook_judge_workdir()
         return subprocess.CompletedProcess(
             args=cmd, returncode=0, stdout=json.dumps({"outcome": "fail", "reasoning": "no"}), stderr=""
         )
@@ -171,12 +178,12 @@ def test_codex_exec_is_invoked_read_only_and_non_interactive(monkeypatch: pytest
 
 
 def test_claude_gets_the_haiku_default_model_with_no_override(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[0] == "git":
             return _git_status_and_diff_run()(cmd, **kwargs)
-        assert cmd[cmd.index("--model") + 1] == gateway_cli._HOOK_JUDGE_DEFAULT_MODEL
+        assert cmd[cmd.index("--model") + 1] == hook_cli._HOOK_JUDGE_DEFAULT_MODEL
         return subprocess.CompletedProcess(
             args=cmd, returncode=0, stdout=json.dumps({"outcome": "pass", "reasoning": "ok"}), stderr=""
         )
@@ -192,7 +199,7 @@ def test_claude_gets_the_haiku_default_model_with_no_override(monkeypatch: pytes
 def test_judge_model_flag_overrides_the_default_for_the_codex_backend(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
-    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[0] == "git":
@@ -214,7 +221,7 @@ def test_judge_model_flag_overrides_the_default_for_the_codex_backend(
 
 def test_a_gates_own_judge_cli_overrides_the_harness_default(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     """A gate authored to require codex gets codex even from a Claude Code hook."""
-    (repo / ".otari-gates.yml").write_text(_gates_yaml(judge_cli="codex"), encoding="utf-8")
+    _guardrail_path(repo).write_text(_gates_yaml(judge_cli="codex"), encoding="utf-8")
     called_with: list[str] = []
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -237,7 +244,7 @@ def test_a_gates_own_judge_cli_overrides_the_harness_default(monkeypatch: pytest
 def test_judge_cli_flag_overrides_the_harness_default_but_not_a_gates_own(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
-    (repo / ".otari-gates.yml").write_text(_gates_yaml(judge_cli="claude"), encoding="utf-8")
+    _guardrail_path(repo).write_text(_gates_yaml(judge_cli="claude"), encoding="utf-8")
     called_with: list[str] = []
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -264,7 +271,7 @@ def test_judge_cli_flag_overrides_the_harness_default_but_not_a_gates_own(
 def test_judge_cli_flag_overrides_the_harness_default_when_the_gate_has_none(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
-    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
     called_with: list[str] = []
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -289,7 +296,7 @@ def test_judge_cli_flag_overrides_the_harness_default_when_the_gate_has_none(
 def test_judge_cli_falls_back_to_the_next_candidate_when_the_first_is_missing(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
-    (repo / ".otari-gates.yml").write_text(_gates_yaml(judge_cli="[claude, codex]"), encoding="utf-8")
+    _guardrail_path(repo).write_text(_gates_yaml(judge_cli="[claude, codex]"), encoding="utf-8")
     called_with: list[str] = []
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -313,7 +320,7 @@ def test_judge_cli_falls_back_to_the_next_candidate_when_the_first_is_missing(
 def test_reports_error_naming_every_candidate_tried_when_none_are_on_path(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
-    (repo / ".otari-gates.yml").write_text(_gates_yaml(judge_cli="[claude, codex]"), encoding="utf-8")
+    _guardrail_path(repo).write_text(_gates_yaml(judge_cli="[claude, codex]"), encoding="utf-8")
     monkeypatch.setattr(subprocess, "run", _git_status_and_diff_run())
     monkeypatch.setattr(shutil, "which", lambda name: None)
     captured = _capture_post(monkeypatch)
@@ -330,7 +337,7 @@ def test_reports_error_naming_every_candidate_tried_when_none_are_on_path(
 
 
 def test_dry_run_message_names_the_resolved_harness_default(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
     monkeypatch.setattr(subprocess, "run", _git_status_and_diff_run())
     captured = _capture_post(monkeypatch)
 
@@ -340,7 +347,7 @@ def test_dry_run_message_names_the_resolved_harness_default(monkeypatch: pytest.
 
 
 def test_judge_cli_flag_rejects_an_unsupported_backend(repo: Path) -> None:
-    (repo / ".otari-gates.yml").write_text(_gates_yaml(), encoding="utf-8")
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
     result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, extra=["--judge-cli", "gemini"])
     assert result.exit_code != 0
     assert "claude" in result.output and "codex" in result.output
@@ -357,11 +364,12 @@ def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.Monke
     gate_count = 5
     per_gate_seconds = 0.3
     gates_yaml = "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n" + "".join(
-        f"  - id: g{i}\n    type: judge\n    enforcement: advisory\n    rubric: r{i}\n    message: m{i}\n"
+        f"  - id: g{i}\n    type: judge\n"
+        "    runs: [stop.session]\n    enforcement: advisory\n    rubric: r{i}\n    message: m{i}\n"
         for i in range(gate_count)
     )
 
-    monkeypatch.setattr(gateway_cli, "_hook_collect_diff", lambda repo_root: "diff")
+    monkeypatch.setattr(hook_cli, "_hook_collect_diff", lambda repo_root: "diff")
 
     def fake_run_judge(
         rubric: str,
@@ -376,12 +384,11 @@ def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.Monke
         time.sleep(per_gate_seconds)
         return "pass", f"checked {rubric}"
 
-    monkeypatch.setattr(gateway_cli, "_hook_run_judge", fake_run_judge)
+    monkeypatch.setattr(hook_cli, "_hook_run_judge", fake_run_judge)
 
     start = time.monotonic()
-    results = gateway_cli._hook_collect_judge_verdicts(
-        gates_yaml,
-        repo / ".otari-gates.yml",
+    results = hook_cli._hook_collect_judge_verdicts(
+        parse_policy(gates_yaml, source="test.yml"),
         repo,
         None,
         [],
@@ -398,3 +405,163 @@ def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.Monke
     assert elapsed < gate_count * per_gate_seconds * 0.6, (
         f"took {elapsed:.2f}s for {gate_count} gates at {per_gate_seconds}s each -- looks sequential"
     )
+
+
+_JUDGE_AND_DETERMINISTIC_YAML = (
+    "schema_version: '1.0'\n"
+    "policy:\n  id: test\n"
+    "gates:\n"
+    "  - id: g\n"
+    "    type: judge\n"
+    "    runs: [stop.session]\n"
+    "    enforcement: advisory\n"
+    "    rubric: r\n"
+    "    message: m\n"
+    "  - id: ran-the-tests\n"
+    "    type: command_if_changed\n"
+    "    runs: [stop.session]\n"
+    "    enforcement: advisory\n"
+    "    when_changed: ['src/**']\n"
+    "    require: ['make test']\n"
+    "    message: You changed src but never ran the tests.\n"
+)
+
+
+def _advisory_failures(monkeypatch: pytest.MonkeyPatch, results: list[dict[str, Any]]) -> None:
+    """Answer the check with advisory failures only, so nothing blocks and the turn ends at exit 0."""
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _FakeResponse({"blocked": False, "results": results}))
+    monkeypatch.setattr(subprocess, "run", _git_status_and_diff_run())
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+
+
+def test_a_failing_judge_gate_reaches_the_model_as_additional_context(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """A judge gate is advisory by construction, so exit 2 is a channel it can never take.
+
+    `additionalContext` is the one Stop field that puts a finding in front of
+    the model without blocking the turn. Without it the model's own review of
+    the turn reaches everybody except the agent that could act on it, which is
+    the reason a rubric is written in the first place. The reasoning travels
+    too, not just the gate's fixed `message`: which line the judge objected to
+    is the whole of what makes the finding actionable.
+    """
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
+    _advisory_failures(
+        monkeypatch,
+        [
+            {
+                "gate_id": "g",
+                "enforcement": "advisory",
+                "outcome": "fail",
+                "message": "m",
+                "detail": "The endpoint at src/module.py:42 calls db.query() directly.",
+            }
+        ],
+    )
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert payload["hookSpecificOutput"]["hookEventName"] == "Stop"
+    assert "src/module.py:42" in context
+    assert "m" in context
+    # The person keeps their own channel: this adds a reader rather than
+    # moving the finding from one to the other.
+    assert "src/module.py:42" in payload["systemMessage"]
+
+
+def test_a_deterministic_advisory_gate_stays_out_of_additional_context(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """An author who wrote `advisory` on a gate that could have said `required` chose the quiet channel.
+
+    Only a judge gate is denied `required` by the parser, so only a judge gate
+    is owed a channel it did not choose to give up.
+    """
+    _guardrail_path(repo).write_text(_JUDGE_AND_DETERMINISTIC_YAML, encoding="utf-8")
+    _advisory_failures(
+        monkeypatch,
+        [
+            {
+                "gate_id": "ran-the-tests",
+                "enforcement": "advisory",
+                "outcome": "fail",
+                "message": "You changed src but never ran the tests.",
+            }
+        ],
+    )
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert "hookSpecificOutput" not in payload
+    assert "never ran the tests" in payload["systemMessage"]
+
+
+def test_additional_context_carries_the_judge_finding_alone(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """Both kinds failing on one Stop must not collapse into one channel.
+
+    The model is handed what it is owed and nothing else, so an advisory
+    finding its author aimed at a person does not become an instruction to the
+    agent by riding along beside a judge's.
+    """
+    _guardrail_path(repo).write_text(_JUDGE_AND_DETERMINISTIC_YAML, encoding="utf-8")
+    _advisory_failures(
+        monkeypatch,
+        [
+            {"gate_id": "g", "enforcement": "advisory", "outcome": "fail", "message": "judge says no"},
+            {
+                "gate_id": "ran-the-tests",
+                "enforcement": "advisory",
+                "outcome": "fail",
+                "message": "You changed src but never ran the tests.",
+            },
+        ],
+    )
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert "judge says no" in context
+    assert "never ran the tests" not in context
+    # The person still gets both, which is what systemMessage was always for.
+    assert "judge says no" in payload["systemMessage"]
+    assert "never ran the tests" in payload["systemMessage"]
+
+
+def test_a_judge_gate_that_could_not_run_is_not_reported_to_the_model(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """`error` means the model call produced no verdict, so no rubric was evaluated.
+
+    Passing it on as a judge finding would invent one, and the agent can do
+    nothing about a judge that failed to run in any case. The person still
+    hears it on `systemMessage`, which is where a guardrail that could not run
+    has always been reported.
+    """
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
+    _advisory_failures(
+        monkeypatch,
+        [
+            {
+                "gate_id": "g",
+                "enforcement": "advisory",
+                "outcome": "error",
+                "message": "m",
+                "detail": "claude exited 1: prompt is too long",
+            }
+        ],
+    )
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert "hookSpecificOutput" not in payload
+    assert "prompt is too long" in payload["systemMessage"]

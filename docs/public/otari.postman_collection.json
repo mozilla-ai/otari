@@ -1586,7 +1586,7 @@
         {
           "name": "List Catalog",
           "request": {
-            "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances at the deployment's\nrates and nothing that belongs to a tenant.",
+            "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances and the hosted\nmodels at the deployment's rates, and nothing that belongs to a tenant.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1757,6 +1757,44 @@
         }
       ],
       "name": "embeddings"
+    },
+    {
+      "item": [
+        {
+          "name": "Submit Feedback",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"message\": \"string\"\n}"
+            },
+            "description": "Send feedback privately to the Otari team.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "feedback"
+              ],
+              "raw": "{{baseUrl}}/api/v1/feedback"
+            }
+          }
+        }
+      ],
+      "name": "feedback"
     },
     {
       "item": [
@@ -2035,7 +2073,7 @@
               },
               "raw": "{\n  \"policy_yaml\": \"string\"\n}"
             },
-            "description": "Evaluate a submitted policy against submitted evidence.\n\nAuthenticated with either an API key or the master key (the router-level\ngate), like ``POST /api/v1/usage/external-events``: this identifies who\nsent the request, not whether its evidence is true. `blocked` is set when\na required gate's outcome is not `pass`/`not_applicable` (an unresolved\ngate never counts as a pass).\n\nThe actual parse-and-evaluate work is\n``agent_runtime.domain.check.run_policy_check``, shared with ``otari\nhook``'s own local evaluation: this route's own job is authentication,\ntranslating that function's tri-state request fields into its own typed\nones, and turning ``PolicyCheckError`` into a 422.",
+            "description": "Evaluate a submitted policy against submitted evidence.\n\nAuthenticated with either an API key or the master key (the router-level\ngate), like ``POST /api/v1/usage/external-events``: this identifies who\nsent the request, not whether its evidence is true. `blocked` is set when\na required gate's outcome is not `pass`/`not_applicable` (an unresolved\ngate never counts as a pass).\n\nThe actual parse-and-evaluate work is\n``otari_agent.domain.check.run_policy_check``, shared with ``otari\nhook``'s own local evaluation: this route's own job is authentication,\ntranslating that function's tri-state request fields into its own typed\nones, and turning ``PolicyCheckError`` into a 422.",
             "header": [
               {
                 "key": "Content-Type",

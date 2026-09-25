@@ -15,11 +15,8 @@ import pytest
 from gateway.api.routes._pipeline import ToolContext
 from gateway.api.routes.messages import _strip_gateway_minted_blocks
 from gateway.core.config import GatewayConfig
-from gateway.services.mcp_loop_messages import (
-    MCP_ACTIVITY_ID_PREFIX,
-    SERVER_TOOL_USE_ID_PREFIX,
-    WEB_SEARCH_TOOL_USE_ID_PREFIX,
-)
+from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX
+from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX
 
 
 def test_strips_the_minted_pair_but_keeps_the_text() -> None:
@@ -155,7 +152,7 @@ def _provider_pair() -> list[dict[str, Any]]:
     ]
 
 
-def _gateway_pair(tool_use_id: str = f"{WEB_SEARCH_TOOL_USE_ID_PREFIX}gw") -> list[dict[str, Any]]:
+def _gateway_pair(tool_use_id: str = f"{SERVER_TOOL_USE_ID_PREFIX}gw") -> list[dict[str, Any]]:
     """What the gateway mints: the reserved id prefix, encrypted_content empty."""
     return [
         {"type": "server_tool_use", "id": tool_use_id, "name": "web_search", "input": {"query": "y"}},
@@ -325,7 +322,7 @@ def test_a_provider_error_result_is_kept() -> None:
 
 def test_a_max_uses_error_result_and_its_call_are_stripped() -> None:
     """A capped gateway search must not be echoed back to the provider."""
-    gw = f"{WEB_SEARCH_TOOL_USE_ID_PREFIX}gw"
+    gw = f"{SERVER_TOOL_USE_ID_PREFIX}gw"
     messages: list[dict[str, Any]] = [
         {
             "role": "assistant",

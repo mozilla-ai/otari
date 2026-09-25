@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
+import { PublicAuthFields } from "@/features/auth/overlayPublicAuthFields"
 import { useSignup } from "@/shared/api/auth"
 import { ApiError } from "@/shared/api/client"
 import { emailFromHash } from "@/shared/helpers/hashParams"
@@ -157,6 +158,7 @@ export function SignupPage({ hash }: { hash: string }) {
           submit()
         }}
       >
+        <PublicAuthFields page="signup" isBusy={signup.isPending} />
         <AuthEmailField
           value={email}
           onChange={(next) => {

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from gateway.api.routes import _platform as platform_module
+from conftest import InstallControlPlane
 from gateway.api.routes._platform import _resolve_platform_code_execution
 
 
@@ -20,7 +20,9 @@ def _config(*, base_url: str | None = "https://platform.local") -> Any:
 
 
 @pytest.mark.asyncio
-async def test_resolve_returns_policy_dict(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_returns_policy_dict(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     captured: dict[str, Any] = {}
 
     async def fake_post(
@@ -40,7 +42,7 @@ async def test_resolve_returns_policy_dict(monkeypatch: pytest.MonkeyPatch) -> N
             },
         )
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     out = await _resolve_platform_code_execution(_config(), "tk_user")
 
@@ -56,11 +58,13 @@ async def test_resolve_returns_policy_dict(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_resolve_403_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_403_passes_through(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(403, json={"detail": "code execution disabled"})
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     from fastapi import HTTPException
 
@@ -71,11 +75,13 @@ async def test_resolve_403_passes_through(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_resolve_429_passthrough_with_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_429_passthrough_with_retry_after(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "30"})
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     from fastapi import HTTPException
 
@@ -87,11 +93,13 @@ async def test_resolve_429_passthrough_with_retry_after(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_resolve_5xx_maps_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_5xx_maps_to_502(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(503, text="busy")
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     from fastapi import HTTPException
 
@@ -101,11 +109,13 @@ async def test_resolve_5xx_maps_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_422_collapses_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_422_collapses_to_502(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(422, json={"detail": "schema mismatch"})
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     from fastapi import HTTPException
 
@@ -115,11 +125,13 @@ async def test_resolve_422_collapses_to_502(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_resolve_network_error_maps_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_network_error_maps_to_502(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         raise httpx.NetworkError("connection refused")
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     from fastapi import HTTPException
 

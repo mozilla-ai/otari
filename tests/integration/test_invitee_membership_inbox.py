@@ -19,6 +19,11 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.organizations_exceptions import (
+    InvitationAlreadyUsedError,
+    InvitationExpiredError,
+    InvitationNotFoundError,
+)
 from gateway.models.tenancy import (
     Invitation,
     InviteOrganizationMemberRequest,
@@ -38,11 +43,6 @@ from gateway.repositories.tenancy import (
 )
 from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.tenancy import OrganizationService
-from gateway.services.tenancy.errors import (
-    InvitationAlreadyUsedError,
-    InvitationExpiredError,
-    InvitationNotFoundError,
-)
 
 _TEST_CONFIG = GatewayConfig()
 

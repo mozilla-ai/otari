@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Liveness check for the gateway Docker image.
-# Starts PostgreSQL, runs the gateway container, and validates health endpoints.
+# Checks `otari --version`, starts PostgreSQL, runs the gateway container, and
+# validates health endpoints.
 #
 # Usage: ./scripts/docker_liveness_check.sh <image_tag>
 # Example: ./scripts/docker_liveness_check.sh otari-test:abc123
@@ -27,6 +28,21 @@ cleanup() {
 }
 
 trap cleanup EXIT
+
+# The image installs the CLI from the tree, where otari_agent.__version__ is the
+# unstamped 0.0.0, so `otari --version` has to fall back to OTARI_VERSION: the
+# image's own ENV, and the value the gateway reports. Compared inside the
+# container, so the script needs no copy of the build argument.
+echo "Testing otari --version reports the image version..."
+docker run --rm "$IMAGE_TAG" sh -c '
+    expected="otari, version $OTARI_VERSION"
+    actual="$(otari --version)"
+    echo "$actual"
+    if [ "$actual" != "$expected" ]; then
+        echo "Expected \"$expected\": the CLI did not pick up OTARI_VERSION"
+        exit 1
+    fi
+'
 
 echo "Starting PostgreSQL container..."
 docker run -d --name "$POSTGRES_CONTAINER" \

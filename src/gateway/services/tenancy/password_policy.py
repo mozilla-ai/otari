@@ -6,8 +6,8 @@ password) and ``user_service`` (signup, reset, change) apply the one rule:
 either without a cycle.
 """
 
+from gateway.exceptions.identity_exceptions import PasswordPolicyError
 from gateway.services.password_service import MAX_PASSWORD_BYTES, MIN_PASSWORD_LENGTH
-from gateway.services.tenancy.errors import PasswordPolicyError
 
 
 def validate_new_password(password: str) -> None:

@@ -264,7 +264,10 @@ list price is marked with the list price.
 
 With `public_catalog: true` (see [Configuration](configuration.md)), the same
 two routes and the same page are served to a visitor with no session, at the
-deployment's rates and for the configured providers only.
+deployment's rates and for the models the deployment itself serves: the
+configured providers, and on a managed platform its hosted models. A visitor's
+"Use this model" opens account creation instead of the drawer (sign-in where
+signup is closed), and the dashboard reopens that model on their first sign-in.
 
 ## Listing available models
 

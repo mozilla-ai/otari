@@ -704,3 +704,6 @@ export type OAuthAuthorizeResponse = Schemas["AuthorizeResponse"]
 export type OAuthCallbackRequest = Schemas["OAuthCallbackRequest"]
 
 export type * from "./local"
+
+export type FeedbackSubmission =
+  operations["feedback-submit_feedback"]["requestBody"]["content"]["application/json"]

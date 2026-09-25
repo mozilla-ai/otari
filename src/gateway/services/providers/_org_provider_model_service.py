@@ -46,6 +46,7 @@ from gateway.core.database import DATABASE_ERRORS
 from gateway.core.metered_pricing import quantize_rate
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import (
+    OrgProviderKeyNotFoundError,
     OrgProviderLastModelError,
     OrgProviderModelAlreadyOfferedError,
     OrgProviderModelNameRequiredError,
@@ -74,7 +75,6 @@ from gateway.services.model_discovery_service import ProviderDiscovery, test_pro
 from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
 from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
-from gateway.services.tenancy.errors import OrgProviderKeyNotFoundError
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
 

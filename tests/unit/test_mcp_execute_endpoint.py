@@ -26,9 +26,9 @@ from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 from mcp.types import CallToolResult, TextContent
 
+from conftest import InstallControlPlane
 from gateway import log_config
 from gateway.api.deps import reset_config
-from gateway.api.routes import _platform as platform_module
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
@@ -104,7 +104,7 @@ class _Platform:
 
 
 @pytest.fixture
-def platform(monkeypatch: pytest.MonkeyPatch) -> _Platform:
+def platform(monkeypatch: pytest.MonkeyPatch, control_plane_transport: InstallControlPlane) -> _Platform:
     fake = _Platform()
 
     async def post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> Any:
@@ -115,7 +115,7 @@ def platform(monkeypatch: pytest.MonkeyPatch) -> _Platform:
             return httpx.Response(fake.status_code, content=b"{")
         return httpx.Response(fake.status_code, json=fake.payload(), headers=response_headers)
 
-    monkeypatch.setattr(platform_module, "_post_platform", post)
+    control_plane_transport(post)
     return fake
 
 
@@ -204,7 +204,7 @@ def test_the_request_id_is_returned_on_success_without_touching_the_result(
     """The successful body stays the native MCP result, so the id rides a header."""
     response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body())
 
-    assert response.headers["X-Otari-Request-ID"]
+    assert response.headers["Otari-Request-ID"]
     assert "request_id" not in response.json()
 
 

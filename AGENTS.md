@@ -6,7 +6,7 @@ Scope: entire repo.
 `CLAUDE.md` is a one-line `@AGENTS.md` import of this file, not a symlink, so it survives Windows clones (Git for Windows checks symlinks out as plain text files by default). Always edit `AGENTS.md` directly; never modify `CLAUDE.md`. The same pairing is used in `web/` and `src/gateway/`.
 
 ## Project Snapshot
-- Project: `otari`, an OpenAI-compatible LLM gateway (API key management, budget enforcement, usage tracking). The Python package is named `gateway` (not `otari`): the `otari` distribution name on PyPI belongs to the Otari client SDK, which `any-llm-sdk` depends on, so a top-level `otari` import package here would collide with it. User-facing names (CLI, env vars, docs, OpenAPI title) are `otari`; only the internal import path stays `gateway`.
+- Project: `otari`, an OpenAI-compatible LLM gateway (API key management, budget enforcement, usage tracking). The Python package is named `gateway` (not `otari`): the `otari` distribution name on PyPI belongs to the Otari client SDK, which `any-llm-sdk` depends on, so a top-level `otari` import package here would collide with it. User-facing names (CLI, env vars, docs, OpenAPI title) are `otari`; only the internal import path stays `gateway`. The laptop-side code (the Agent Guardrails evaluator, the Claude Code transcript parser) lives in a uv workspace member at `cli/` (distribution `otari-agent`, import package `otari_agent`), which the gateway depends on and which may not import the gateway back.
 - Provider calls go through the `any-llm` SDK (`any_llm`), not hand-rolled HTTP clients. A change to how a provider call is made may not belong in this repo. Decide that before implementing, and say which side you landed on: [CONTRIBUTING.md](CONTRIBUTING.md#is-this-an-otari-change-or-an-any-llm-change).
 
 ## Skills & Scoped Instructions
@@ -45,6 +45,8 @@ comparing wording would fight that compression forever.
 ## Architecture (Big Picture)
 For the open-core OSS/enterprise seam (ports, adapters, the capability lines, and the rules for keeping the boundary), see [ARCHITECTURE.md](ARCHITECTURE.md). It is a north-star document describing the intended architecture, so ground current-state work in `src/gateway/`.
 
+Read it before adding a capability, introducing a port, or moving code across a layer. [Where new code goes](ARCHITECTURE.md#where-new-code-goes) says which kind of change lands where, and [Cardinal rules for contributors](ARCHITECTURE.md#cardinal-rules-for-contributors) holds the rules that keep the seam from eroding. Those rules are not advisory prose: the architecture check under [Lint / Typecheck](#lint--typecheck) is their mechanical half, and the [PR template](.github/pull_request_template.md) asks a change that alters a rule in `ARCHITECTURE.md` or in that script to name the rule and say why.
+
 ### Runtime modes
 - Mode is derived when `OTARI_MODE` is unset, and honored when set: `GatewayConfig.is_hybrid_mode` / `effective_mode` (`src/gateway/core/config.py`) return `hybrid` when the config field `mode` is `hybrid` (legacy `platform`) or, when `mode` is unset, when the platform token (`OTARI_AI_TOKEN`) is set; otherwise `standalone`. Startup validation (`validate_mode_selection`) rejects the conflicting combinations: `OTARI_MODE=hybrid` (legacy value `platform`) without a token, and `OTARI_MODE=standalone` or `OTARI_MODE=hosted` with a token set (the token would otherwise silently select hybrid). The token is resolved once at config-load time (cached on the config), not re-read from `os.getenv` on every access.
 - **Standalone**: provider credentials come from the `providers:` block in `config.yml`; users/keys/budgets/usage live in the local DB. All routers are registered.
@@ -55,8 +57,9 @@ For the open-core OSS/enterprise seam (ports, adapters, the capability lines, an
 The per-request flow (auth → budget → dispatch → reconciliation) spans several files and is documented in [src/gateway/AGENTS.md](src/gateway/AGENTS.md). Read it before changing request behavior.
 
 ## Lint / Typecheck
+- Prefer a `make` target to the tool it wraps, and read `make help` before reaching past one: the target list grows, so something that had no target last time may have one now. A target bundles checks the bare tool skips, which is how a check goes unrun when the tool is called directly. Where `make help` offers nothing, call the tool; formatting (`uv run ruff format`) and the dashboard's own checks (pnpm, below) are the gaps today.
 - Run lint checks with `make lint`; it runs the architecture check and then Ruff. **Ruff alone is not equivalent.**
-- The architecture check (`scripts/check_architecture.py`, also `make check-architecture`) enforces the `src/gateway/` layer rules: services must not import the API layer, repositories must not import services or the API layer, schemas must not import services, repositories, exceptions, the API layer or the composition root, API routes must not import `sqlalchemy.orm`, `gateway/main.py` must not import a route module, a service or a route must not import the feature registry (`gateway/features.py`), nothing under `gateway/` imports an entry-point discovery module (`importlib.metadata`, `importlib_metadata`, `pkg_resources`), repository modules end in `_repository.py` (a module that bundles a domain's repositories, in `_repositories.py`), `src/` holds no top-level package but `gateway`, and nothing under `services/` or `api/routes/` imports `sqlalchemy` or `sqlmodel` unless it is on that layer's baseline of modules that still do. Both baselines only shrink: an entry that stops importing either fails the check until it is removed. `services/` and `repositories/` gain no top-level module unless it is on the check's baseline of flat modules that exist, so new code goes in its domain's package. An entry whose module no longer exists fails the check until it is removed. Only the Unit of Work calls `commit()` or `rollback()`, unless the module is on the check's baseline of modules that still call either, only `repositories/` imports `session_for`, and only `get_unit_of_work` or a worker factory in `core/unit_of_work.py` constructs a `UnitOfWork`.
+- The architecture check (`scripts/check_architecture.py`, also `make check-architecture`) enforces the `src/gateway/` layer rules: services must not import the API layer, repositories must not import services or the API layer, schemas must not import services, repositories, exceptions, the API layer or the composition root, API routes must not import `sqlalchemy.orm`, `gateway/main.py` must not import a route module, a service or a route must not import the feature registry (`gateway/features.py`), nothing under `gateway/` imports an entry-point discovery module (`importlib.metadata`, `importlib_metadata`, `pkg_resources`), repository modules end in `_repository.py` (a module that bundles a domain's repositories, in `_repositories.py`), `src/` holds no top-level package but `gateway`, nothing under `cli/src/otari_agent` imports the gateway or the server stack it drags in (uvicorn, any-llm, SQLAlchemy, pydantic, FastAPI), and nothing under `services/` or `api/routes/` imports `sqlalchemy` or `sqlmodel` unless it is on that layer's baseline of modules that still do. Both baselines only shrink: an entry that stops importing either fails the check until it is removed. `services/` and `repositories/` gain no top-level module unless it is on the check's baseline of flat modules that exist, so new code goes in its domain's package. An entry whose module no longer exists fails the check until it is removed. Only the Unit of Work calls `commit()` or `rollback()`, unless the module is on the check's baseline of modules that still call either, only `repositories/` imports `session_for`, and only `get_unit_of_work` or a worker factory in `core/unit_of_work.py` constructs a `UnitOfWork`.
 - **`make lint` does not touch the dashboard.** `pnpm --dir web run lint` is its counterpart (Biome: formatting, recommended rules, and the `web/src/` layer boundaries), run separately in CI. See [web/AGENTS.md](web/AGENTS.md) for what those boundaries are and why the config mirrors `otari-ai/frontend`.
 - If introducing a formatter/linter, keep changes in a separate PR unless requested.
 
@@ -79,7 +82,24 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   PostgreSQL as CI does. Keep it standard-library only and keep it running under
   `--no-dev`: that is what makes it able to catch a dev-only or enterprise-only
   import that reached an OSS code path, and a single third-party import in it
-  (httpx, pyyaml) gives that up.
+  (httpx, pyyaml) gives that up. `scripts/hybrid_edition_smoke.py` is its hybrid
+  sibling in the same workflow: the packaged CLI booted with a platform token
+  against standard-library fakes of the control plane, an OpenAI/Anthropic
+  provider and an MCP server, asserting on the requests the fakes recorded
+  (resolve bodies, tokens, usage reports) as well as the responses. Same rules:
+  standard library only, run under `--no-dev`, and no database, because a hybrid
+  gateway runs none. `--image <tag>` runs the same walk against the built
+  container instead of the source checkout, which `otari-docker-build.yml` does
+  after its liveness check: the image pins `OTARI_HOST`/`OTARI_PORT` as env, and
+  env beats a mounted config file, so an image that boots but cannot serve a
+  request fails only there. A streamed leg covers SSE end to end and the `ttft_ms`
+  only a streamed attempt reports; the streamed *tool loop* is held back by #1504,
+  where a hybrid stream that runs a gateway tool truncates and goes unbilled.
+  `--live` swaps the provider fake for the real OpenAI and
+  Anthropic APIs (`OTARI_SMOKE_*_API_KEY`, Tavily optional) and runs from
+  `otari-live-providers.yml` on pushes to `main`, the commit the otari.ai dev
+  gateway deploys; it is not a PR gate, because forks carry no secrets and a real
+  model is not deterministic enough to block a merge on.
 - Two tests assert the provider-error sanitization by making a real outbound call (`test_error_detail_leakage.py::test_provider_error_does_not_leak_details`, `test_streaming_error_event.py::test_streaming_creation_error_returns_http_error`). With no network egress the upstream fails differently and both report a status mismatch, so treat them as environment noise rather than a regression, and confirm a change against the rest of the suite.
 - `tests/integration/test_mcp_dependency_ceiling.py::test_mcp_constraint_resolves_to_an_importable_version` also needs network egress, to install `mcp` fresh from PyPI into a throwaway venv. Unlike the two above, a missing egress here does not look like a status mismatch: it fails hard after burning both `@pytest.mark.flaky` reruns. It also skips outright (not fails) when `uv` is not on `PATH`.
 - `tests/unit/test_url_safety.py` and `tests/unit/test_web_search_backend.py` need DNS, which is a third signature again: the code under test resolves a hostname to an IP to decide whether an address is safe, so with no resolver it gets the hostname back and the failure reads `ValueError: 'example.com' does not appear to be an IPv4 or IPv6 address`. Six tests across the two files, all passing where DNS is available. Nothing about the address checks is wrong; confirm with `python -c "import socket; socket.gethostbyname('example.com')"` before treating one as a regression.
@@ -107,6 +127,13 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   schema cannot carry; `tests/unit/test_code_execution_contract.py` fails when the two
   disagree, and `scripts/check_code_execution_conformance.py` checks a live backend
   against it.
+- The Homebrew formula in `mozilla-ai/homebrew-tap` (`Formula/otari.rb`) is rendered at
+  release by `otari-homebrew.yml` from `packaging/homebrew/otari.rb.tmpl` and `uv.lock`
+  (`scripts/homebrew_formula.py`, standard library only). Never edit the tap's copy; change
+  the template, and `make homebrew-formula` shows the result. Its resource stanzas are the
+  light CLI's dependency closure with each package's sdist URL and hash from the lock, so
+  `tests/unit/test_homebrew_formula.py` fails a PR that adds a heavy or wheel-only dependency
+  to `cli/`.
 - `CHANGELOG.md` and the GitHub Release body are generated from Conventional
   Commits by git-cliff (`cliff.toml`) at release time, not per-PR. Because PRs are
   squash-merged, the PR title is what git-cliff parses; `otari-pr-title.yml`
@@ -136,12 +163,31 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   gateway-owned mirror model would silently drop any content block type a
   future mcp adds), so the cost is paid here rather than in the response shape.
 
+## Docs
+`docs/` is the published documentation, and [docs/index.md](docs/index.md) is its map,
+grouped by reader: start here, operators, integrators, platform builders, contributors.
+Read the page covering the area you are changing before you change it, and update that
+page in the same PR when behavior moves. Nothing fails when a docs page goes stale,
+unlike the artifacts above, so a reader finds the drift rather than CI.
+
+Some pages bind code rather than describe it:
+
+- [docs/domains.md](docs/domains.md) is the backend's target shape. It assigns every
+  module under `services/`, `api/routes/`, `models/` and `repositories/` to one domain
+  and gives what each layer holds. New backend code goes where that page puts its
+  domain, not beside the code it most resembles.
+- [docs/hybrid-mode-protocol.md](docs/hybrid-mode-protocol.md) and
+  [docs/code-execution-protocol.md](docs/code-execution-protocol.md) are the wire
+  contracts a peer implements. They are normative for the semantics a schema cannot
+  carry, so a change to the wire is a change to the page first.
+
 ## Repository Conventions
 - Prefer minimal, targeted edits over broad refactors, and match the import order and typing style of the file you are in (`TYPE_CHECKING` for type-only imports where it helps, as in `routes/_helpers.py`).
 - Add a comment only where the logic is not obvious; keep docstrings concise and meaningful on public functions and classes. Do not restate the code, narrate the change, or record what the code used to do: the commit message is where that belongs. Leave the comments around a change shorter than you found them: prune narration, repeated rationale, and implementation history as you touch them.
 - A docblock belongs immediately above the declaration it describes, and the way it stops doing so is an insertion. When you add a declaration beside an existing documented one, put the new pair above or below the whole block, never between a block and what it documents, and do not move the existing declaration to make room: moving it is what opens the gap the next insertion falls into. Four of these are in the tree, three of them written in one day, and none is reachable by lint, typecheck or any test, because a comment over the wrong thing compiles. `grep -rP -l '\*/\n[ \t]*/\*\*' web/src` finds it: two docblocks with nothing between them but horizontal space. The horizontal-only class is the whole discriminator, because a module header sits a **blank** line above the first declaration's own block while a stranded block is **flush** against the next one, the declaration that separated them having moved. `\s*` spans the blank line and turns the ordinary arrangement into eight false positives. Still not a gate: a section comment deliberately placed above another block is legal, so a hit is worth reading rather than presumed wrong. And do not add `-z`: the shell's `grep` is ugrep, which has `-P`, but any `z` among the flags routes the call to the system BSD grep, which does not, and the query then dies with a usage block that scrolls like output while a pipe reports its own exit code instead of the failure.
 - A workaround for an any-llm gap is a legitimate change here. Keep it minimal and follow the convention in [CONTRIBUTING.md](CONTRIBUTING.md#when-the-fix-is-upstream-but-otari-cannot-wait) (`service_tier` in `src/gateway/api/routes/chat.py` is the worked example).
 - Preserve security-relevant behavior: header parsing, auth checks, and the error-detail boundary. Do not leak internals in public error responses, and never log secrets, tokens, or raw API keys (the one-time bootstrap key print is the deliberate exception).
+- Otari's own HTTP headers are named `Otari-*`, never `X-`. RFC 6648 (BCP 178) says creators of new parameters "SHOULD NOT prefix their parameter names with 'X-' or similar constructs": https://datatracker.ietf.org/doc/html/rfc6648. No lint rule or type error reaches that, so `tests/unit/test_header_naming.py` holds the gate: every `X-` literal under `src/gateway` is classified either as a name Otari inherited and cannot rename alone (`x-api-key` is Anthropic's, `X-RateLimit-*` is what clients already parse) or as a literal naming no header at all (`x-ai` is a provider id), and anything unclassified fails. Both lists only shrink, so a retired name cannot sit there pre-authorizing a future one. Scoping the check to `X-Otari-` is the obvious move and the wrong one: it passes a header of ours spelled any other way, which is how `X-Correlation-ID` survived the first sweep. `src/gateway` is the whole scope, because that is where a header reaches the wire, so the `x-otari-optional` OpenAPI specification extension under `docs/public/` is never scanned, and that spec requires its prefix anyway. The open case is the two platform tokens, `X-Gateway-Token` and `X-User-Token`, in #1486: they are request headers on a two-sided contract, so otari.ai must accept a new name before Otari can send one.
 - Keep test additions next to the behavior they cover: unit for pure logic, integration for route or database behavior.
 - CI runs Python 3.14 (`.github/workflows/otari-tests.yml`), matching the Docker image; the package still supports 3.13+ (`requires-python = ">=3.13"`).
 
@@ -149,10 +195,15 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 - If you touched API routes or schemas, run relevant integration tests first.
 - If you touched DB models/repositories, run related integration tests and migration paths.
 - If you touched config loading, run config/env tests in `tests/integration`.
-- If you touched CLI behavior, run `tests/unit/test_gateway_cli.py`.
+- If you touched CLI behavior, run `tests/unit/test_gateway_cli.py`, `tests/unit/test_otari_agent_cli.py`, `tests/unit/test_hook_cli.py` and `tests/unit/test_hook_setup_cli.py`.
 - If you touched auth headers or key handling, run key-management and auth-related tests.
 - If OpenAPI-affecting code changed, including a route docstring, regenerate and commit **both**
   generated artifacts (see Generated Artifacts above).
+- If you moved code across a layer, added a port, or bound an adapter, check the change
+  against [Cardinal rules for contributors](ARCHITECTURE.md#cardinal-rules-for-contributors)
+  and run `make lint`.
+- If you changed behavior a docs page describes, update that page in the same PR (see Docs
+  above). A new backend module owes [docs/domains.md](docs/domains.md) its domain.
 
 ## Writing style
 

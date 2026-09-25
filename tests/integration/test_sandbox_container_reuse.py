@@ -154,8 +154,8 @@ def test_a_response_names_the_sandbox_it_holds_and_the_next_request_resumes_it(
     assert container["id"].startswith(CONTAINER_ID_PREFIX)
     assert container["expires_at"]
     # Every dialect gets the headers; Messages also gets Anthropic's own field.
-    assert first.headers["X-Otari-Container-Id"] == container["id"]
-    assert first.headers["X-Otari-Container-Expires-At"]
+    assert first.headers["Otari-Container-Id"] == container["id"]
+    assert first.headers["Otari-Container-Expires-At"]
     assert port.opened == [{"resume": None, "keep_alive_s": 600.0}]
 
     second = _post(client, api_key_header, _body(container["id"]), port)
@@ -265,7 +265,7 @@ def test_a_request_that_asks_for_nothing_holds_nothing(
 
     assert response.status_code == 200, response.text
     assert response.json().get("container") is None
-    assert "X-Otari-Container-Id" not in response.headers
+    assert "Otari-Container-Id" not in response.headers
     assert port.opened == [{"resume": None, "keep_alive_s": None}], "nothing was asked to be held"
 
 
@@ -400,7 +400,7 @@ def test_a_backend_that_will_not_hold_a_session_reports_no_container(
 
     assert response.status_code == 200, response.text
     assert response.json().get("container") is None
-    assert "X-Otari-Container-Id" not in response.headers
+    assert "Otari-Container-Id" not in response.headers
 
 
 def test_an_oversized_container_id_is_not_echoed_back_whole(
@@ -441,7 +441,7 @@ def test_with_reuse_off_nothing_is_held_reported_or_resumable(
 
     assert response.status_code == 200, response.text
     assert "container" not in response.json()
-    assert "X-Otari-Container-Id" not in response.headers
+    assert "Otari-Container-Id" not in response.headers
     assert port.opened == [{"resume": None, "keep_alive_s": None}]
 
     refused = _post(reuse_off_client, headers, _body(f"{CONTAINER_ID_PREFIX}anything"), port)

@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions import TenancyConflictError, TenancyForbiddenError
+from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
 from gateway.models.playground import (
     MAX_FAVORITE_MODELS,
     MAX_SAVED_COMPARISONS,
@@ -48,11 +50,6 @@ from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
-from gateway.services.tenancy.errors import (
-    TenancyConflictError,
-    TenancyForbiddenError,
-    WorkspaceNotFoundError,
-)
 from gateway.services.workspace_scope import organization_default_workspace_id
 from gateway.types.session_principal import SessionPrincipal
 
@@ -62,7 +59,7 @@ RetainedContent = Literal["conversations", "comparisons"]
 # ``HTTPException``, because this slice authorizes through ``services/tenancy/``
 # and that family is what the handler registered in ``gateway.main`` renders.
 # The status belongs to the condition rather than to the endpoint, which is the
-# rule ``services/tenancy/errors.py`` states.
+# rule ``gateway.exceptions`` states.
 _SPEND_IDENTITY_REVOKED = "Your spend identity has been deactivated on this deployment; ask an operator to restore it."
 _NO_WORKSPACE = "You are not a member of a workspace on this deployment; ask an operator to add you to one."
 

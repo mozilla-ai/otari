@@ -1371,6 +1371,113 @@
         "title": "Annotations",
         "type": "object"
       },
+      "AnthropicFileDeleted": {
+        "description": "Anthropic's answer to a delete.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "file_deleted",
+            "default": "file_deleted",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "AnthropicFileDeleted",
+        "type": "object"
+      },
+      "AnthropicFileList": {
+        "description": "A page of files in Anthropic's list shape, whose cursor is an opaque token.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AnthropicFileMetadata"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page"
+          }
+        },
+        "required": [
+          "data",
+          "next_page"
+        ],
+        "title": "AnthropicFileList",
+        "type": "object"
+      },
+      "AnthropicFileMetadata": {
+        "description": "One file in the ``FileMetadata`` shape of Anthropic's GA Files API.\n\n``expires_at`` is always present and ``None`` for a file kept indefinitely.\n``downloadable`` is always true, because the gateway serves every stored file's bytes back.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "downloadable": {
+            "const": true,
+            "default": true,
+            "title": "Downloadable",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mime_type": {
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "type": {
+            "const": "file",
+            "default": "file",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "mime_type",
+          "size_bytes",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "AnthropicFileMetadata",
+        "type": "object"
+      },
       "AudioContent": {
         "additionalProperties": true,
         "description": "Audio content for a message.",
@@ -3421,7 +3528,7 @@
       },
       "CheckVerdictRequest": {
         "additionalProperties": false,
-        "description": "One check_passed gate's verdict, as the caller's own verifier run produced it.\n\nMirrors ``JudgeVerdictRequest`` field-for-field: ``gate_id`` echoes back\nthe gate the policy itself named (same bound, same reason), ``outcome``\nis the caller's own report of the verifier's exit code (0/1/anything\nelse, mapped by the caller to pass/fail/error), and ``detail`` is the\nverifier's captured stdout, capped the same way ``reasoning`` is.",
+        "description": "One verifier gate's verdict, as the caller's own verifier run produced it.\n\nMirrors ``JudgeVerdictRequest`` field-for-field: ``gate_id`` echoes back\nthe gate the policy itself named (same bound, same reason), ``outcome``\nis the caller's own report of the verifier's exit code (0/1/anything\nelse, mapped by the caller to pass/fail/error), and ``detail`` is the\nverifier's captured stdout, capped the same way ``reasoning`` is.",
         "properties": {
           "detail": {
             "default": "",
@@ -4635,6 +4742,11 @@
             "description": "Where this deployment's documentation lives, when it is not the operator guide bundled with the gateway. Set, the dashboard's Documentation links open it in a new tab; null, they go to the bundled guide at /#/docs, which stays served either way. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.",
             "title": "Docs Url"
           },
+          "feedback_enabled": {
+            "description": "Whether this deployment accepts deliberate feedback submissions.",
+            "title": "Feedback Enabled",
+            "type": "boolean"
+          },
           "mail_ready": {
             "description": "Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this control plane sends carries such a link, which is why this is one flag and not one per feature. False for a hybrid gateway, whose control plane is otari.ai and which sends no mail of its own.",
             "title": "Mail Ready",
@@ -4716,6 +4828,18 @@
             "title": "Sign In Methods",
             "type": "array"
           },
+          "site_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where this deployment's public website lives. Set, the logo on the pages a visitor reaches without an account links to it; null, it links to the public catalog where public_catalog is true, and is not a link otherwise. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.",
+            "title": "Site Url"
+          },
           "surfaces": {
             "description": "Management API groups this deployment serves, sorted, which is what its dashboard pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis, and this is the deployment (topology) axis. Empty for a hybrid gateway.",
             "items": {
@@ -4746,11 +4870,13 @@
           "docs_url",
           "terms_url",
           "privacy_url",
+          "site_url",
           "sign_in_methods",
           "maintenance_mode",
           "passkeys_ready",
           "oauth_providers",
           "open_signup",
+          "feedback_enabled",
           "mail_ready"
         ],
         "title": "DeploymentBootstrap",
@@ -7192,6 +7318,10 @@
                 "type": "string"
               },
               {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
                 "type": "null"
               }
             ],
@@ -8066,6 +8196,136 @@
           "effective_price_per_million"
         ],
         "title": "OfferingUsage",
+        "type": "object"
+      },
+      "OpenAIFileDeleted": {
+        "description": "OpenAI's answer to a delete.",
+        "properties": {
+          "deleted": {
+            "const": true,
+            "default": true,
+            "title": "Deleted",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "object": {
+            "const": "file",
+            "default": "file",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "OpenAIFileDeleted",
+        "type": "object"
+      },
+      "OpenAIFileList": {
+        "description": "A page of files in OpenAI's list shape, whose cursor is the last entry's ID.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OpenAIFileObject"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "first_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Id"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "last_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Id"
+          },
+          "object": {
+            "const": "list",
+            "default": "list",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "has_more",
+          "first_id",
+          "last_id"
+        ],
+        "title": "OpenAIFileList",
+        "type": "object"
+      },
+      "OpenAIFileObject": {
+        "description": "One file in OpenAI's file object shape.",
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "object": {
+            "const": "file",
+            "default": "file",
+            "title": "Object",
+            "type": "string"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "bytes",
+          "created_at",
+          "expires_at",
+          "filename",
+          "purpose"
+        ],
+        "title": "OpenAIFileObject",
         "type": "object"
       },
       "OrgProviderAvailableModelsPublic": {
@@ -11194,22 +11454,6 @@
         "additionalProperties": false,
         "description": "A policy body plus the evidence to check it against, both caller-supplied.",
         "properties": {
-          "changed_paths": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "maxItems": 10000,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).",
-            "title": "Changed Paths"
-          },
           "check_results": {
             "anyOf": [
               {
@@ -11223,7 +11467,7 @@
                 "type": "null"
               }
             ],
-            "description": "Verifier verdicts the caller collected for this request's check_passed gates.",
+            "description": "Verifier verdicts the caller collected for this request's verifier gates.",
             "title": "Check Results"
           },
           "command_scope": {
@@ -11267,6 +11511,42 @@
             ],
             "description": "Model verdicts the caller collected for this request's judge gates.",
             "title": "Judge Results"
+          },
+          "path_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pre_tool_use.edit_target",
+                  "pre_tool_use.read_target",
+                  "pre_tool_use.command",
+                  "stop.working_tree",
+                  "stop.session",
+                  "stop.verifier"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which moment `paths` was read at, matching the `runs` values a path gate declares. Only three of the six `runs` values are legal here, because only those three are moments a path can be read at: `pre_tool_use.edit_target` for a write tool's own target before it runs, `pre_tool_use.read_target` for a read tool's, and `stop.working_tree` for `git status` once the turn is over. Required whenever `paths` is non-empty, and rejected with a 422 if omitted or set to any other value: either would resolve every path gate `not_applicable`, which loses enforcement without reporting anything. An empty `paths` needs no source.",
+            "title": "Path Source"
+          },
+          "paths": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 10000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Repo-relative paths this moment of the session puts in scope: what `git status --porcelain` reports, or the single target a tool call is about to write or read. `path_source` says which.",
+            "title": "Paths"
           },
           "policy_yaml": {
             "maxLength": 262144,
@@ -21049,7 +21329,7 @@
     },
     "/api/v1/catalog/models": {
       "get": {
-        "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances at the deployment's\nrates and nothing that belongs to a tenant.",
+        "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances and the hosted\nmodels at the deployment's rates, and nothing that belongs to a tenant.",
         "operationId": "catalog-list_catalog",
         "parameters": [
           {
@@ -21331,6 +21611,67 @@
         ]
       }
     },
+    "/api/v1/feedback": {
+      "post": {
+        "description": "Send feedback privately to the Otari team.",
+        "operationId": "feedback-submit_feedback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "message": {
+                    "maxLength": 4000,
+                    "minLength": 1,
+                    "title": "Message",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "message"
+                ],
+                "title": "FeedbackSubmission",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "413": {
+            "description": "Feedback exceeds 32 KiB."
+          },
+          "415": {
+            "description": "Only application/json is accepted."
+          },
+          "422": {
+            "description": "Invalid feedback fields."
+          },
+          "429": {
+            "description": "Feedback limit reached. Retry-After gives the wait in seconds."
+          },
+          "503": {
+            "description": "Delivery could not be confirmed."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Submit Feedback",
+        "tags": [
+          "feedback"
+        ]
+      }
+    },
     "/api/v1/files": {
       "get": {
         "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.\n\nEach flavor pages with its own cursor.\nOpenAI's ``after`` names the last file of the previous page, and ``has_more`` says whether to ask again.\nAnthropic's ``next_page`` is passed back as ``page``, and ``ids[]`` reads up to 100 named files in one page.\nA cursor whose file has since been deleted or has expired is still a position.\nAn ``after`` the caller never owned is a 404, and a ``page`` token this gateway did not issue is a 400.",
@@ -21468,9 +21809,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Files-List Files",
-                  "type": "object"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenAIFileList"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AnthropicFileList"
+                    }
+                  ],
+                  "title": "Response Files-List Files"
                 }
               }
             },
@@ -21518,9 +21865,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Files-Create File",
-                  "type": "object"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenAIFileObject"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AnthropicFileMetadata"
+                    }
+                  ],
+                  "title": "Response Files-Create File"
                 }
               }
             },
@@ -21587,9 +21940,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Files-Delete File",
-                  "type": "object"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenAIFileDeleted"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AnthropicFileDeleted"
+                    }
+                  ],
+                  "title": "Response Files-Delete File"
                 }
               }
             },
@@ -21654,9 +22013,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Files-Get File",
-                  "type": "object"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenAIFileObject"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AnthropicFileMetadata"
+                    }
+                  ],
+                  "title": "Response Files-Get File"
                 }
               }
             },
@@ -21844,7 +22209,7 @@
     },
     "/api/v1/hooks/check": {
       "post": {
-        "description": "Evaluate a submitted policy against submitted evidence.\n\nAuthenticated with either an API key or the master key (the router-level\ngate), like ``POST /api/v1/usage/external-events``: this identifies who\nsent the request, not whether its evidence is true. `blocked` is set when\na required gate's outcome is not `pass`/`not_applicable` (an unresolved\ngate never counts as a pass).\n\nThe actual parse-and-evaluate work is\n``agent_runtime.domain.check.run_policy_check``, shared with ``otari\nhook``'s own local evaluation: this route's own job is authentication,\ntranslating that function's tri-state request fields into its own typed\nones, and turning ``PolicyCheckError`` into a 422.",
+        "description": "Evaluate a submitted policy against submitted evidence.\n\nAuthenticated with either an API key or the master key (the router-level\ngate), like ``POST /api/v1/usage/external-events``: this identifies who\nsent the request, not whether its evidence is true. `blocked` is set when\na required gate's outcome is not `pass`/`not_applicable` (an unresolved\ngate never counts as a pass).\n\nThe actual parse-and-evaluate work is\n``otari_agent.domain.check.run_policy_check``, shared with ``otari\nhook``'s own local evaluation: this route's own job is authentication,\ntranslating that function's tri-state request fields into its own typed\nones, and turning ``PolicyCheckError`` into a 422.",
         "operationId": "hooks-check_policy",
         "requestBody": {
           "content": {

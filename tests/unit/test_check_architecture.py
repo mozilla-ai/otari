@@ -1,4 +1,4 @@
-"""Unit tests for the architecture check (layer rules over src/gateway)."""
+"""Unit tests for the architecture check (layer rules over src/gateway and cli/src/otari_agent)."""
 
 import importlib.util
 import sys
@@ -36,6 +36,9 @@ def _point_main_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
     monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
     monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
+    monkeypatch.setattr(check, "CLI_ROOT", tmp_path / "cli" / "src")
+    # main() refuses to run without the light CLI's root, so every temporary tree gets an empty one.
+    _write(tmp_path, "cli/src/otari_agent/__init__.py", "")
     for name in [name for name in vars(check) if name.endswith("_BASELINE")]:
         monkeypatch.setattr(check, name, ())
 
@@ -328,6 +331,54 @@ def test_main_discovers_tests_root_and_fails_on_overlay_import(tmp_path: Path, m
     _point_main_at(tmp_path, monkeypatch)
     assert check.main() == 0
     _write(tmp_path, "tests/unit/test_thing.py", "from gateway.overlay.billing import charge\n")
+    assert check.main() == 1
+
+
+@pytest.mark.parametrize(
+    "forbidden",
+    ["gateway.core.config", "uvicorn", "any_llm", "sqlalchemy", "sqlmodel", "pydantic", "pydantic_settings", "fastapi"],
+)
+def test_light_cli_importing_the_server_stack_is_flagged(tmp_path: Path, forbidden: str) -> None:
+    file_path = _write(tmp_path, "otari_agent/hook.py", f"from {forbidden} import thing\n")
+    assert check.check_file(file_path, tmp_path) == [(1, forbidden, "Forbidden import in Light CLI (otari-agent)")]
+
+
+def test_light_cli_may_import_its_own_dependencies(tmp_path: Path) -> None:
+    imports = "import click\nimport httpx\nimport yaml\nfrom dotenv import load_dotenv\n"
+    file_path = _write(tmp_path, "otari_agent/hook.py", imports)
+    assert check.check_file(file_path, tmp_path) == []
+
+
+def test_the_light_cli_attach_point_may_name_the_gateway_cli(tmp_path: Path) -> None:
+    file_path = _write(tmp_path, "otari_agent/cli.py", "from gateway.cli import register\n")
+    assert check.check_file(file_path, tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    ("statement", "module"),
+    [("from gateway.core.config import load_config", "gateway.core.config"), ("import gateway", "gateway")],
+)
+def test_the_attach_point_may_not_import_the_rest_of_the_gateway(tmp_path: Path, statement: str, module: str) -> None:
+    file_path = _write(tmp_path, "otari_agent/cli.py", f"{statement}\n")
+    assert check.check_file(file_path, tmp_path) == [(1, module, "Forbidden import in Light CLI (otari-agent)")]
+
+
+def test_the_light_cli_attach_point_still_may_not_import_the_server_stack(tmp_path: Path) -> None:
+    file_path = _write(tmp_path, "otari_agent/cli.py", "import uvicorn\n")
+    assert check.check_file(file_path, tmp_path) == [(1, "uvicorn", "Forbidden import in Light CLI (otari-agent)")]
+
+
+def test_light_cli_may_not_discover_entry_points(tmp_path: Path) -> None:
+    file_path = _write(tmp_path, "otari_agent/cli.py", "from importlib.metadata import version\n")
+    assert check.check_file(file_path, tmp_path) == [(1, "importlib.metadata", _DISCOVERY_MESSAGE)]
+
+
+def test_main_walks_the_light_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path, "src/gateway/__init__.py", "")
+    _write(tmp_path, "tests/unit/test_thing.py", "")
+    _point_main_at(tmp_path, monkeypatch)
+    assert check.main() == 0
+    _write(tmp_path, "cli/src/otari_agent/hook.py", "from gateway.core.config import load_config\n")
     assert check.main() == 1
 
 

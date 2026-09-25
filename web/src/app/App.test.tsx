@@ -1,7 +1,11 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import App from "@/app/App"
 import { Provider } from "@/app/provider"
+import {
+  rememberModel,
+  takeRememberedModel,
+} from "@/features/models/publicCatalog"
 import { API_ROOT, apiFetch, siteFetch } from "@/shared/api/client"
 import { bootstrap } from "@/tests/fixtures"
 
@@ -51,6 +55,42 @@ describe("App", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Loading page…")
     expect(await screen.findByText("Lazy overview")).toBeInTheDocument()
     expect(document.title).toBe("Overview · Otari")
+  })
+
+  it("reopens the model a visitor chose once their session starts", async () => {
+    window.localStorage.setItem("otari.dashboard.hasSession", "1")
+    vi.mocked(siteFetch).mockResolvedValue({
+      build: "test-build",
+      version: "1.0.0",
+    } as never)
+    vi.mocked(apiFetch).mockResolvedValue([] as never)
+    rememberModel("z-ai/glm-5.3")
+    window.location.hash = "#/"
+
+    renderApp(bootstrap())
+
+    await waitFor(() =>
+      expect(window.location.hash).toBe("#/models/z-ai/glm-5.3"),
+    )
+    expect(takeRememberedModel()).toBeNull()
+  })
+
+  it("lets a deep link win over the remembered model", () => {
+    window.localStorage.setItem("otari.dashboard.hasSession", "1")
+    vi.mocked(siteFetch).mockResolvedValue({
+      build: "test-build",
+      version: "1.0.0",
+    } as never)
+    vi.mocked(apiFetch).mockResolvedValue([] as never)
+    rememberModel("z-ai/glm-5.3")
+    window.location.hash = "#/keys"
+
+    renderApp(bootstrap())
+
+    // Decided on the first render, before the router mounts.
+    expect(window.location.hash).toBe("#/keys")
+    // Forgotten all the same: it was this session's to use or lose.
+    expect(takeRememberedModel()).toBeNull()
   })
 
   it("asks a local-operator deployment to sign in", () => {
@@ -155,7 +195,6 @@ describe("App", () => {
     expect(
       await screen.findByRole("heading", { name: "Models" }),
     ).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Sign in" })).toBeInTheDocument()
     expect(
       screen.queryByRole("heading", { name: "Sign in to Otari" }),
     ).toBeNull()

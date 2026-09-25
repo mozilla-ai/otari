@@ -27,15 +27,23 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
-from gateway.core.config import API_ROOT, API_VERSION
-from gateway.models.tools import FileObject
+from gateway.core.config import API_ROOT, API_VERSION, GatewayConfig
+from gateway.models.files import FileObject
 from gateway.services.file_extractors import ExtractionResult
+
+from .conftest import build_test_client
 
 
 @pytest.fixture
 def tmp_file_store(client: TestClient, tmp_path: Path) -> None:
     """Point the app's blob store at a temp dir (default writes to cwd)."""
     cast(Any, client.app).state.file_store = LocalDirFileStore(str(tmp_path))
+
+
+@pytest.fixture
+def files_off_client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    """A client on a deployment that does not serve files."""
+    yield from build_test_client(test_config.model_copy(update={"files_enabled": False}))
 
 
 def _make_completion() -> Any:
@@ -756,8 +764,8 @@ def test_sweep_reclaims_expired_and_deleted_files(
     from sqlalchemy.engine import make_url
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+    from gateway.api.deps import build_file_service
     from gateway.core.unit_of_work import UnitOfWork
-    from gateway.services.files import sweep_files
 
     def _upload(name: str) -> str:
         resp = client.post(
@@ -785,8 +793,10 @@ def test_sweep_reclaims_expired_and_deleted_files(
     async def _sweep() -> int:
         engine = create_async_engine(make_url(test_config.database_url).set(drivername="postgresql+asyncpg"))
         try:
-            async with async_sessionmaker(engine)() as db, UnitOfWork(db) as uow:
-                batch = await sweep_files(uow, store, batch_size=10)
+            async with async_sessionmaker(engine)() as db:
+                uow = UnitOfWork(db)
+                files = build_file_service(uow, store, test_config)
+                batch = await files.sweep(batch_size=10)
                 return batch.reclaimed
         finally:
             await engine.dispose()
@@ -814,8 +824,8 @@ def test_sweep_pages_past_rows_whose_blob_will_not_delete(
     from sqlalchemy.engine import make_url
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+    from gateway.api.deps import build_file_service
     from gateway.core.unit_of_work import UnitOfWork
-    from gateway.services.files import sweep_files
 
     ids = []
     for name in ("stuck-1.txt", "stuck-2.txt", "fine.txt"):
@@ -842,9 +852,11 @@ def test_sweep_pages_past_rows_whose_blob_will_not_delete(
     async def _sweep_two_batches() -> list[tuple[int, int]]:
         engine = create_async_engine(make_url(test_config.database_url).set(drivername="postgresql+asyncpg"))
         try:
-            async with async_sessionmaker(engine)() as db, UnitOfWork(db) as uow:
-                first = await sweep_files(uow, store, batch_size=2)
-                second = await sweep_files(uow, store, batch_size=2, after=first.cursor)
+            async with async_sessionmaker(engine)() as db:
+                uow = UnitOfWork(db)
+                files = build_file_service(uow, store, test_config)
+                first = await files.sweep(batch_size=2)
+                second = await files.sweep(batch_size=2, after=first.cursor)
                 return [(first.seen, first.reclaimed), (second.seen, second.reclaimed)]
         finally:
             await engine.dispose()
@@ -856,3 +868,103 @@ def test_sweep_pages_past_rows_whose_blob_will_not_delete(
     remaining = {row.id for row in db_session.query(FileObject).filter(FileObject.id.in_(ids)).all()}
     assert remaining == {ids[0], ids[1]}
     assert not (tmp_path / refs[ids[2]]).exists()
+
+
+def test_a_deployment_that_does_not_serve_files_refuses_every_verb(
+    files_off_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """``files_enabled`` off answers 404 everywhere, so the API reads as unmounted."""
+    upload = files_off_client.post(
+        f"{API_ROOT}/files",
+        headers=master_key_header,
+        files={"file": ("a.txt", b"x", "text/plain")},
+        data={"user": "someone"},
+    )
+    listing = files_off_client.get(f"{API_ROOT}/files", headers=master_key_header, params={"user": "someone"})
+    read = files_off_client.get(f"{API_ROOT}/files/file-x", headers=master_key_header, params={"user": "someone"})
+
+    assert [resp.status_code for resp in (upload, listing, read)] == [404, 404, 404]
+    assert upload.json()["detail"] == "File uploads are disabled"
+
+
+def test_a_disabled_deployment_refuses_before_it_reads_the_request(
+    files_off_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """A surface that is not served answers the same way to every caller.
+
+    The refusal comes before the request is parsed and before the caller is
+    authenticated, so a disabled deployment cannot be told from an unmounted one
+    by sending a request it would otherwise refuse for another reason.
+    """
+    # A master-key request with no ``user`` is a 400 on a deployment that serves files.
+    no_user = files_off_client.post(
+        f"{API_ROOT}/files", headers=master_key_header, files={"file": ("a.txt", b"x", "text/plain")}
+    )
+    # ``ids[]`` with ``limit`` is a 400 on a deployment that serves files.
+    bad_params = files_off_client.get(
+        f"{API_ROOT}/files",
+        headers={**master_key_header, "anthropic-version": "2023-06-01"},
+        params={"ids[]": "file-a", "limit": 5, "user": "someone"},
+    )
+    unauthenticated = files_off_client.get(f"{API_ROOT}/files/file-x")
+
+    assert [resp.status_code for resp in (no_user, bad_params, unauthenticated)] == [404, 404, 404]
+    assert no_user.json()["detail"] == "File uploads are disabled"
+
+
+def test_a_storage_failure_answers_a_generic_500(
+    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None, tmp_path: Path
+) -> None:
+    """A 5xx names no internals: the condition goes to the log, the caller gets the house detail."""
+
+    class _UnreadableStore(LocalDirFileStore):
+        def get_stream(self, storage_ref: str) -> Any:
+            raise OSError("disk gone")
+
+    resp = client.post(
+        f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"payload", "text/plain")}
+    )
+    assert resp.status_code == 200, resp.text
+    file_id = resp.json()["id"]
+
+    cast(Any, client.app).state.file_store = _UnreadableStore(str(tmp_path))
+    failed = client.get(f"{API_ROOT}/files/{file_id}/content", headers=api_key_header)
+
+    assert failed.status_code == 500
+    assert failed.json() == {"detail": "Internal server error"}
+
+
+def test_a_file_id_that_could_name_nothing_is_a_404(client: TestClient, api_key_header: dict[str, str]) -> None:
+    """A NUL in an ID reaches a bind parameter, so the refusal must not become a driver error."""
+    resp = client.get(f"{API_ROOT}/files/file-%00x", headers=api_key_header)
+
+    assert resp.status_code == 404, resp.text
+
+
+def test_one_unusable_id_does_not_fail_a_batch_lookup(
+    client: TestClient, api_key_header: dict[str, str], tmp_file_store: None, test_config: Any
+) -> None:
+    """A provider that announces an impossible ID must not cost the batch its valid files."""
+    import asyncio
+
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from gateway.core.unit_of_work import UnitOfWork
+    from gateway.repositories.files import FileRepository
+
+    resp = client.post(
+        f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"payload", "text/plain")}
+    )
+    assert resp.status_code == 200, resp.text
+    stored = str(resp.json()["id"])
+
+    async def _lookup() -> set[str]:
+        engine = create_async_engine(make_url(test_config.database_url).set(drivername="postgresql+asyncpg"))
+        try:
+            async with async_sessionmaker(engine)() as db, UnitOfWork(db) as uow:
+                return await FileRepository(uow).existing_ids([stored, "file-\x00x"])
+        finally:
+            await engine.dispose()
+
+    assert asyncio.run(_lookup()) == {stored}

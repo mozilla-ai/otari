@@ -3,6 +3,7 @@ import { useState } from "react"
 import { FiAlertCircle, FiChevronRight, FiEye, FiEyeOff } from "react-icons/fi"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { useAuth } from "@/features/auth/AuthContext"
+import { PublicAuthFields } from "@/features/auth/overlayPublicAuthFields"
 import type { SignInCredential } from "@/shared/api/client"
 import {
   ApiError,
@@ -622,6 +623,15 @@ export function Login() {
             void submit()
           }}
         >
+          <PublicAuthFields
+            page="login"
+            isBusy={
+              isSubmitting ||
+              isSigningOut ||
+              isPasskeyPending ||
+              pendingProvider !== undefined
+            }
+          />
           {usesPassword ? (
             <>
               <TextField

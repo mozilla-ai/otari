@@ -52,11 +52,13 @@ import { PendingPage } from "@/app/PendingPage"
 import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
+import { FeedbackDialog } from "@/features/feedback/FeedbackDialog"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { UnpricedUsageWarning } from "@/features/models/UnpricedUsageWarning"
 import { canManage } from "@/features/organization/roles"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useDocumentTitle } from "@/shared/hooks/useDocumentTitle"
 import { useEntitlements } from "@/shared/hooks/useEntitlements"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
@@ -477,6 +479,10 @@ export function AppShell() {
 }
 
 function AppShellChrome() {
+  const { feedback_enabled } = useDeployment()
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const feedbackTriggerRef = useRef<HTMLButtonElement>(null)
+
   // Navigation is data: the shell renders whatever the registry declares and
   // decides visibility from the deployment and the entitlements,
   // rather than each page asking what it is running against.
@@ -939,7 +945,9 @@ function AppShellChrome() {
               <WorkspaceSwitcher isCollapsed={effectiveCollapsed} />
             )}
           </div>
-          <div className="flex min-h-0 flex-1 flex-col gap-4 p-3">
+          {/* No bottom padding: the account band closes the rail, so it sits on
+              the viewport's edge the way the scope band sits on the top. */}
+          <div className="flex min-h-0 flex-1 flex-col gap-4 px-3 pt-3">
             <nav
               // Named because the header's breadcrumb is a navigation landmark
               // too, and two unnamed ones give a screen-reader user no way to tell
@@ -1106,6 +1114,10 @@ function AppShellChrome() {
               <div className="-mx-3 flex h-14 shrink-0 items-center border-t border-border">
                 <AccountMenu
                   isCollapsed={effectiveCollapsed}
+                  onOpenFeedback={() => {
+                    closeMobileNav()
+                    setFeedbackOpen(true)
+                  }}
                   triggerRef={accountTriggerRef}
                   // Below `md` the Deployment row opens a level inside the
                   // drawer instead of navigating: the popover it lives in is
@@ -1174,7 +1186,10 @@ function AppShellChrome() {
               </button>
               <Breadcrumbs pathname={pathname} />
             </div>
-            <TopBarActions />
+            <TopBarActions
+              onOpenFeedback={() => setFeedbackOpen(true)}
+              feedbackTriggerRef={feedbackTriggerRef}
+            />
           </header>
           <main
             ref={mainRef}
@@ -1205,6 +1220,15 @@ function AppShellChrome() {
           </main>
         </div>
       </div>
+      {feedback_enabled ? (
+        <FeedbackDialog
+          isOpen={feedbackOpen}
+          onOpenChange={setFeedbackOpen}
+          // Below `md` the drawer has closed by then, and the menu row inside it
+          // with it, so the control that reopens the drawer takes focus.
+          returnFocusRef={isMobile ? toggleRef : feedbackTriggerRef}
+        />
+      ) : null}
     </div>
   )
 }

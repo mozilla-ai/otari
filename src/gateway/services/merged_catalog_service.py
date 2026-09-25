@@ -47,6 +47,7 @@ from gateway.services.pricing_service import (
 from gateway.services.provider_kwargs import is_deployment_instance_key, normalize_pricing_key, split_selector
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.organization_model_access import (
+    hosted_allowlist_entries,
     resolve_default_workspace_offered_keys,
     resolve_hosted_models,
     resolve_organization_byo_providers,
@@ -465,19 +466,25 @@ async def catalog_scope(
     A master key, and a session that operates the deployment, are unrestricted.
     Any other session gets what its organization can reach,
     and the workspace-scoped rows only for workspaces it may see.
-    A visitor to the public catalog gets the configured instances alone.
+    A visitor to the public catalog gets the configured instances and what the
+    hosted port advertises deployment-wide.
     ``include_offered=False`` leaves out the organization's offered models, for
     the deployment-wide view the selector index is built from, which reads every
     organization's offerings separately.
     """
-    # A visitor, while the catalog is public: the deployment's configured
-    # instances and nothing that belongs to a tenant. Not a member of anything,
+    # A visitor, while the catalog is public: what the deployment itself
+    # serves, its configured instances and the hosted port's deployment-wide
+    # roster, and nothing that belongs to a tenant. Not a member of anything,
     # so no BYO key, no workspace's aliases or policies.
     if anonymous:
+        hosted_models = await resolve_hosted_models(model_provider, None)
+        hosted = frozenset(hosted_models)
+        allowlist = {f"{instance}:*" for instance in config.providers}
+        allowlist |= hosted_allowlist_entries(hosted_models, hosted)
         return CatalogScope(
-            allowlist=[f"{instance}:*" for instance in config.providers],
+            allowlist=sorted(allowlist),
             reads_workspace_layer=False,
-            deployment_supplied_providers=frozenset(),
+            deployment_supplied_providers=hosted,
             offered_keys=frozenset(),
         )
     if session_identity is not None:
@@ -573,8 +580,8 @@ async def build_merged_catalog(
 ) -> MergedCatalog:
     """Merge discovery, stored prices, defaults, aliases and policies for one caller.
 
-    ``anonymous`` is the public catalog's visitor, who is answered from the
-    configured instances alone; see :func:`catalog_scope`.
+    ``anonymous`` is the public catalog's visitor, who is answered from what
+    the deployment itself serves; see :func:`catalog_scope`.
 
     ``cached_only`` builds the view without dialing any provider, for a caller
     that runs off the request path; see :func:`discover_all_models`.

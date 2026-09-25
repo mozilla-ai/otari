@@ -21,6 +21,10 @@ own client's exceptions before they reach a caller.
 A malformed ``storage_ref`` is a ``ValueError`` instead, because a ref that
 escapes the store's root is a caller error rather than a storage failure.
 
+An adapter reaches its backend through ``asyncio.to_thread`` rather than an
+AnyIO primitive. ``delete`` runs while a cancellation unwinds, and an AnyIO
+checkpoint inside a cancelled scope raises before the backend is reached.
+
 Stability: this interface is not frozen while Otari is pre-1.0.
 Overlay authors should pin a released tag and expect the shape to move.
 """

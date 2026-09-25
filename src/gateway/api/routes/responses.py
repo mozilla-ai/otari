@@ -16,7 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CodeExecutionPortDep,
+    McpServerPortDep,
     ModelProviderPortDep,
+    OptionalFileServiceDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
@@ -55,7 +57,7 @@ from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.models.tools import CodeExecutor
-from gateway.services.file_service import StagedFile
+from gateway.services.files import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_responses import (
@@ -65,7 +67,7 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop_stream,
 )
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
-from gateway.services.web_search_budget import WebSearchBudget
+from gateway.services.tools import Dialect, ToolUseBudget
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 
@@ -309,7 +311,7 @@ class _ResponsesAdapter:
     and friends.
     """
 
-    name = "responses"
+    name = Dialect.RESPONSES
     endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = RESPONSES_STREAM_FORMAT
     log_success_without_usage = True
@@ -397,24 +399,18 @@ class _ResponsesAdapter:
         max_iterations: int,
         on_first_response: Callable[[], None] | None = None,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
-        web_search_budget: WebSearchBudget | None = None,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: ToolUseBudget | None = None,
     ) -> ResponsesResponse:
-        # ``emit_native_web_search`` is accepted for interface parity and ignored:
-        # this format announces a gateway-run search natively on every request
-        # (see docs/tools.md), so the Anthropic-shaped opt-in has nothing to add.
-        # ``web_search_budget`` is not: the cap bounds what the caller is billed
-        # for, which every format owes whether or not it can describe the search.
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
         # the platform-attempt path so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
-        if emit_native_code_execution:
-            extra["emit_native_code_execution"] = True
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
+        if native_tools:
+            extra["native_tools"] = native_tools
         return await responses_tool_loop(
             completion_kwargs=kwargs,
             pool=pool,
@@ -428,15 +424,14 @@ class _ResponsesAdapter:
         pool: ToolBackend,
         max_iterations: int,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
-        web_search_budget: WebSearchBudget | None = None,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: ToolUseBudget | None = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
         extra: dict[str, Any] = {}
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
-        if emit_native_code_execution:
-            extra["emit_native_code_execution"] = True
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
+        if native_tools:
+            extra["native_tools"] = native_tools
         return responses_tool_loop_stream(
             completion_kwargs=kwargs,
             pool=pool,
@@ -520,10 +515,12 @@ async def create_response(
     request_body: ResponsesRequest,
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    files: OptionalFileServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
     code_execution_port: CodeExecutionPortDep,
+    mcp_server_port: McpServerPortDep,
 ) -> dict[str, Any] | StreamingResponse:
     """OpenAI-compatible Responses endpoint.
 
@@ -559,8 +556,7 @@ async def create_response(
             config=config,
             provider=provider,
             model=model,
-            db=db,
-            raw_request=raw_request,
+            files=files,
             user_id=user_id,
             instance=instance,
             workspace_id=workspace_id,
@@ -660,6 +656,7 @@ async def create_response(
         tools_header=request_body.tools_header,
         code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
         code_execution_port=code_execution_port,
+        mcp_server_port=mcp_server_port,
         sandbox_containers=build_sandbox_container_registry(
             config=config,
             uow=ctx.uow,

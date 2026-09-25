@@ -1,17 +1,17 @@
-"""Data access for the file rows the ``/v1/files`` API serves."""
+"""Data access for the file rows the Files API serves."""
 
 from gateway.repositories.files.file_repository import (
+    FilePageQuery,
+    FileRepository,
     OutputFileRow,
-    delete_file_rows,
-    existing_file_ids,
-    reclaimable_files,
-    record_output_file,
+    could_name_a_file,
 )
+from gateway.repositories.files.files_repositories import FileRepositories
 
 __all__ = [
+    "FilePageQuery",
+    "FileRepositories",
+    "FileRepository",
     "OutputFileRow",
-    "delete_file_rows",
-    "existing_file_ids",
-    "reclaimable_files",
-    "record_output_file",
+    "could_name_a_file",
 ]

@@ -972,8 +972,8 @@ export interface paths {
          *     Prices are the caller's: an organization's override where one applies, else
          *     the deployment's row, else the genai-prices default. Aliases and routing
          *     policies are not models and are not listed; see Routing. A visitor, where
-         *     the catalog is public, sees the configured instances at the deployment's
-         *     rates and nothing that belongs to a tenant.
+         *     the catalog is public, sees the configured instances and the hosted
+         *     models at the deployment's rates, and nothing that belongs to a tenant.
          */
         get: operations["catalog-list_catalog"];
         put?: never;
@@ -1082,6 +1082,26 @@ export interface paths {
          *     - API key without user field: Use the shared "default" user
          */
         post: operations["embeddings-create_embedding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Feedback
+         * @description Send feedback privately to the Otari team.
+         */
+        post: operations["feedback-submit_feedback"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1267,7 +1287,7 @@ export interface paths {
          *     gate never counts as a pass).
          *
          *     The actual parse-and-evaluate work is
-         *     ``agent_runtime.domain.check.run_policy_check``, shared with ``otari
+         *     ``otari_agent.domain.check.run_policy_check``, shared with ``otari
          *     hook``'s own local evaluation: this route's own job is authentication,
          *     translating that function's tri-state request fields into its own typed
          *     ones, and turning ``PolicyCheckError`` into a 422.
@@ -6036,6 +6056,63 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * AnthropicFileDeleted
+         * @description Anthropic's answer to a delete.
+         */
+        AnthropicFileDeleted: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default file_deleted
+             * @constant
+             */
+            type: "file_deleted";
+        };
+        /**
+         * AnthropicFileList
+         * @description A page of files in Anthropic's list shape, whose cursor is an opaque token.
+         */
+        AnthropicFileList: {
+            /** Data */
+            data: components["schemas"]["AnthropicFileMetadata"][];
+            /** Next Page */
+            next_page: string | null;
+        };
+        /**
+         * AnthropicFileMetadata
+         * @description One file in the ``FileMetadata`` shape of Anthropic's GA Files API.
+         *
+         *     ``expires_at`` is always present and ``None`` for a file kept indefinitely.
+         *     ``downloadable`` is always true, because the gateway serves every stored file's bytes back.
+         */
+        AnthropicFileMetadata: {
+            /** Created At */
+            created_at: string;
+            /**
+             * Downloadable
+             * @default true
+             * @constant
+             */
+            downloadable: true;
+            /** Expires At */
+            expires_at: string | null;
+            /** Filename */
+            filename: string;
+            /** Id */
+            id: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Type
+             * @default file
+             * @constant
+             */
+            type: "file";
+        };
+        /**
          * AudioContent
          * @description Audio content for a message.
          */
@@ -6960,7 +7037,7 @@ export interface components {
         };
         /**
          * CheckVerdictRequest
-         * @description One check_passed gate's verdict, as the caller's own verifier run produced it.
+         * @description One verifier gate's verdict, as the caller's own verifier run produced it.
          *
          *     Mirrors ``JudgeVerdictRequest`` field-for-field: ``gate_id`` echoes back
          *     the gate the policy itself named (same bound, same reason), ``outcome``
@@ -7509,6 +7586,11 @@ export interface components {
              */
             docs_url: string | null;
             /**
+             * Feedback Enabled
+             * @description Whether this deployment accepts deliberate feedback submissions.
+             */
+            feedback_enabled: boolean;
+            /**
              * Mail Ready
              * @description Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this control plane sends carries such a link, which is why this is one flag and not one per feature. False for a hybrid gateway, whose control plane is otari.ai and which sends no mail of its own.
              */
@@ -7560,6 +7642,11 @@ export interface components {
              * @description How POST /api/v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; past that it stays the credential for the management API but is no longer a dashboard login. 'password' is offered while any active identity holds one, which is not the same question and not always the later half of it: a member can hold a password on a deployment whose operator never claimed it, so both typed credentials can appear together. 'passkey' appears alongside either when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.
              */
             sign_in_methods: ("master_key" | "password" | "passkey")[];
+            /**
+             * Site Url
+             * @description Where this deployment's public website lives. Set, the logo on the pages a visitor reaches without an account links to it; null, it links to the public catalog where public_catalog is true, and is not a link otherwise. A link target an operator configured, validated at startup as an absolute http(s) URL carrying no credential, since this response is unauthenticated.
+             */
+            site_url: string | null;
             /**
              * Surfaces
              * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis, and this is the deployment (topology) axis. Empty for a hybrid gateway.
@@ -8850,7 +8937,9 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             /** Container */
-            container?: string | null;
+            container?: string | {
+                [key: string]: unknown;
+            } | null;
             /** Context Management */
             context_management?: {
                 [key: string]: unknown;
@@ -9207,6 +9296,70 @@ export interface components {
             spend_usd: number;
             /** Total Tokens */
             total_tokens: number;
+        };
+        /**
+         * OpenAIFileDeleted
+         * @description OpenAI's answer to a delete.
+         */
+        OpenAIFileDeleted: {
+            /**
+             * Deleted
+             * @default true
+             * @constant
+             */
+            deleted: true;
+            /** Id */
+            id: string;
+            /**
+             * Object
+             * @default file
+             * @constant
+             */
+            object: "file";
+        };
+        /**
+         * OpenAIFileList
+         * @description A page of files in OpenAI's list shape, whose cursor is the last entry's ID.
+         */
+        OpenAIFileList: {
+            /** Data */
+            data: components["schemas"]["OpenAIFileObject"][];
+            /** First Id */
+            first_id: string | null;
+            /** Has More */
+            has_more: boolean;
+            /** Last Id */
+            last_id: string | null;
+            /**
+             * Object
+             * @default list
+             * @constant
+             */
+            object: "list";
+        };
+        /**
+         * OpenAIFileObject
+         * @description One file in OpenAI's file object shape.
+         */
+        OpenAIFileObject: {
+            /** Bytes */
+            bytes: number;
+            /** Created At */
+            created_at: number;
+            /** Expires At */
+            expires_at: number | null;
+            /** Filename */
+            filename: string;
+            /** Id */
+            id: string;
+            /**
+             * Object
+             * @default file
+             * @constant
+             */
+            object: "file";
+            /** Purpose */
+            purpose: string;
         };
         /**
          * OrgProviderAvailableModelsPublic
@@ -10843,13 +10996,8 @@ export interface components {
          */
         PolicyCheckRequest: {
             /**
-             * Changed Paths
-             * @description Repo-relative paths the caller observed changed (e.g. `git status --porcelain`).
-             */
-            changed_paths?: string[] | null;
-            /**
              * Check Results
-             * @description Verifier verdicts the caller collected for this request's check_passed gates.
+             * @description Verifier verdicts the caller collected for this request's verifier gates.
              */
             check_results?: components["schemas"]["CheckVerdictRequest"][] | null;
             /**
@@ -10869,6 +11017,16 @@ export interface components {
              * @description Model verdicts the caller collected for this request's judge gates.
              */
             judge_results?: components["schemas"]["JudgeVerdictRequest"][] | null;
+            /**
+             * Path Source
+             * @description Which moment `paths` was read at, matching the `runs` values a path gate declares. Only three of the six `runs` values are legal here, because only those three are moments a path can be read at: `pre_tool_use.edit_target` for a write tool's own target before it runs, `pre_tool_use.read_target` for a read tool's, and `stop.working_tree` for `git status` once the turn is over. Required whenever `paths` is non-empty, and rejected with a 422 if omitted or set to any other value: either would resolve every path gate `not_applicable`, which loses enforcement without reporting anything. An empty `paths` needs no source.
+             */
+            path_source?: ("pre_tool_use.edit_target" | "pre_tool_use.read_target" | "pre_tool_use.command" | "stop.working_tree" | "stop.session" | "stop.verifier") | null;
+            /**
+             * Paths
+             * @description Repo-relative paths this moment of the session puts in scope: what `git status --porcelain` reports, or the single target a tool call is about to write or read. `path_source` says which.
+             */
+            paths?: string[] | null;
             /** Policy Yaml */
             policy_yaml: string;
         };
@@ -15329,6 +15487,66 @@ export interface operations {
             };
         };
     };
+    "feedback-submit_feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Message */
+                    message: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Feedback exceeds 32 KiB. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Only application/json is accepted. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid feedback fields. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Feedback limit reached. Retry-After gives the wait in seconds. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Delivery could not be confirmed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     "files-list_files": {
         parameters: {
             query?: {
@@ -15353,9 +15571,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OpenAIFileList"] | components["schemas"]["AnthropicFileList"];
                 };
             };
             /** @description Validation Error */
@@ -15388,9 +15604,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OpenAIFileObject"] | components["schemas"]["AnthropicFileMetadata"];
                 };
             };
             /** @description Validation Error */
@@ -15423,9 +15637,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OpenAIFileObject"] | components["schemas"]["AnthropicFileMetadata"];
                 };
             };
             /** @description Validation Error */
@@ -15458,9 +15670,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["OpenAIFileDeleted"] | components["schemas"]["AnthropicFileDeleted"];
                 };
             };
             /** @description Validation Error */

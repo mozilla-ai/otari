@@ -19,6 +19,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from gateway.core.addresses import normalized_address
 from gateway.core.env import otari_env
 from gateway.core.settings.budgets import BudgetSettings
+from gateway.core.settings.feedback import FeedbackSettings
 from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
@@ -72,7 +73,12 @@ ROUTER_TASK_HEADER = "Otari-Router-Task"
 # Response header naming one inference request: the platform's id in hybrid mode,
 # minted by the gateway in standalone. Clients use it to correlate a response with
 # its usage record.
-REQUEST_ID_HEADER = "X-Otari-Request-ID"
+REQUEST_ID_HEADER = "Otari-Request-ID"
+# Response header naming the single provider attempt that served the request, or
+# the last one tried when every attempt failed. One request id spans several
+# attempt ids, so this is the finer grained of the two. Hybrid mode only: a
+# standalone gateway resolves no attempts to name.
+ATTEMPT_ID_HEADER = "Otari-Attempt-ID"
 # The version this deployment's API is served under. The root is built from it
 # rather than parsed back out of it, so nothing has to guess where the version
 # segment sits in a path.
@@ -247,11 +253,20 @@ def _get_platform_token_from_env() -> str | None:
     return token or None
 
 
+# Self-hosted backends any-llm calls without a key although each declares a
+# credential variable: each tolerates a missing key in ``_verify_and_set_api_key``
+# and defaults to a localhost or LAN base URL, so a bare ``vllm:my-model`` reaches
+# a local server with nothing configured. The declaration alone cannot tell them
+# from a keyed provider, so they are listed by hand and drift-guarded in
+# ``tests/unit/test_provider_instances.py``.
+KEYLESS_SELF_HOSTED_PROVIDERS = frozenset({"cascadia", "llamacpp", "lmstudio", "otari", "vllm"})
+
+
 def provider_credential_env_names(provider_type: str) -> tuple[str, ...] | None:
     """Environment variables any-llm reads for a provider's credential.
 
     Returns an empty tuple when the provider needs no API key: the keyless local
-    backends (ollama, llamacpp, llamafile) declare the literal string ``"None"``,
+    backends ollama and llamafile declare the literal string ``"None"``,
     and a provider authenticating through a cloud SDK (Vertex AI) declares an
     empty name. Returns ``None`` when the provider cannot be inspected at all
     (not a known implementation, or an optional SDK dependency that is not
@@ -295,6 +310,16 @@ class ModelCapabilityConfig(BaseModel):
     )
 
 
+def _strip_path_slashes(url: str) -> str:
+    """Drop trailing slashes from a URL's path, leaving any query as written.
+
+    A slash at the end of a query value (``?edge=team/``) is part of that value,
+    and stripping the whole string would hand every link a different one.
+    """
+    location, separator, query = url.partition("?")
+    return f"{location.rstrip('/')}{separator}{query}"
+
+
 def _host_of(url: str | None) -> str:
     """The bare hostname of an absolute URL, or "" if there isn't one.
 
@@ -335,7 +360,7 @@ class RelyingParty(NamedTuple):
 
 # Gotcha: fields are ordered last base first, then this class's own.
 # The settings view keeps that order, so moving a base reorders it.
-class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
+class GatewayConfig(BudgetSettings, PricingSettings, FeedbackSettings, BaseSettings):
     """Gateway configuration with support for YAML files and environment variables."""
 
     model_config = SettingsConfigDict(
@@ -519,6 +544,16 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
             "that stores its data locally and reports nothing outward. Set it and the row "
             "becomes a link to the notice. A link target an operator configured, held to the "
             "same bar as docs_url."
+        ),
+    )
+    site_url: Annotated[str | None, Shown(SettingsGroup.GENERAL)] = Field(
+        default=None,
+        description=(
+            "Where this deployment's public website lives, as an absolute http(s) URL "
+            "(e.g. 'https://otari.ai/'). Set, the logo on the pages a visitor reaches "
+            "without an account (the sign-in pages and the public model catalog) links to it; "
+            "unset, it links to the catalog where one is published, and is not a link "
+            "otherwise. A link target an operator configured, held to the same bar as docs_url."
         ),
     )
     data_plane_url: Annotated[str | None, Shown(SettingsGroup.GENERAL)] = Field(
@@ -880,8 +915,8 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         default=False,
         description=(
             "Serve GET /api/v1/catalog/models and the dashboard's Models pages to a visitor with no session or "
-            "key. An anonymous read sees the configured provider instances priced from the deployment "
-            "list and the defaults, and nothing tenant-specific. Off by default."
+            "key. An anonymous read sees the configured provider instances and the hosted models, priced "
+            "from the deployment list and the defaults, and nothing tenant-specific. Off by default."
         ),
     )
     files_enabled: Annotated[bool, Shown(SettingsGroup.FILES)] = Field(
@@ -1341,11 +1376,33 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
 
     @property
     def effective_ui_base_url(self) -> str:
-        """Where a browser reaches this deployment's interface, with no trailing slash.
+        """Where a browser reaches this deployment's interface, with no trailing slash on its path.
 
         ``ui_base_url`` when set, ``public_base_url`` otherwise, empty when neither is.
         """
-        return (self.ui_base_url or "").strip().rstrip("/") or (self.public_base_url or "").strip().rstrip("/")
+        return _strip_path_slashes((self.ui_base_url or "").strip()) or _strip_path_slashes(
+            (self.public_base_url or "").strip()
+        )
+
+    def ui_link(self, path: str) -> str:
+        """An absolute link into the interface, or ``path`` itself when the address is unknown.
+
+        A query on ``ui_base_url`` travels with every link, placed before the hash
+        route: ``https://app.example.com/ui/?edge=a`` and ``/#/verify-email?token=t``
+        give ``https://app.example.com/ui/?edge=a#/verify-email?token=t``, which is
+        the one order a browser keeps the query in the page's own location rather
+        than in the route's.
+        """
+        base = self.effective_ui_base_url
+        if not base:
+            return path
+        location, _, query = base.partition("?")
+        location = location.rstrip("/")
+        if not query:
+            return f"{location}{path}"
+        before, hash_mark, route = path.partition("#")
+        joiner = "&" if "?" in before else "?"
+        return f"{location}{before}{joiner}{query}{hash_mark}{route}"
 
     @property
     def effective_mail_transport(self) -> str:
@@ -1773,7 +1830,7 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         env_names = provider_credential_env_names(instance)
         # Empty: a keyless backend, nothing to warn about. None: a provider we
         # cannot inspect, so we do not know that a credential is needed.
-        if not env_names:
+        if not env_names or instance in KEYLESS_SELF_HOSTED_PROVIDERS:
             return
         if any(os.getenv(name) for name in env_names):
             return
@@ -2017,7 +2074,7 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
             raise ValueError(msg)
         return normalized
 
-    @field_validator("docs_url", "terms_url", "privacy_url")
+    @field_validator("docs_url", "terms_url", "privacy_url", "site_url")
     @classmethod
     def _validate_link_url(cls, value: str | None, info: ValidationInfo) -> str | None:
         """Reject a menu link that is not an absolute http(s) URL.
@@ -2059,19 +2116,21 @@ class GatewayConfig(BudgetSettings, PricingSettings, BaseSettings):
         Absolute, so that what this builds is absolute too: the same value has to
         survive a redirect and an inbox, and a relative reference means nothing
         in the second. A path-prefixed interface writes the whole URL, the way
-        ``public_base_url`` already does.
+        ``public_base_url`` already does. A query string is kept, since an edge
+        that serves one interface for several deployments may need each link to
+        say which one built it; ``ui_link`` places it ahead of the hash route.
         """
         stripped = (value or "").strip()
         if not stripped:
             return None
-        normalized = stripped.rstrip("/")
+        normalized = _strip_path_slashes(stripped)
         if not normalized:
             # Slashes alone, which would otherwise strip to empty and read as
             # unset. Refused rather than silently answered by public_base_url.
             msg = f"ui_base_url must be an absolute http(s) URL, got '{value}'"
             raise ValueError(msg)
-        if "?" in normalized or "#" in normalized:
-            msg = "ui_base_url must carry no query string or fragment"
+        if "#" in normalized:
+            msg = "ui_base_url must carry no fragment"
             raise ValueError(msg)
         parsed = urlsplit(normalized)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:

@@ -11,14 +11,14 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-from gateway.cli import cli
-from gateway.services.claude_code_import import (
+from otari_agent.claude_code_import import (
     normalize_model,
     parse_since,
     provider_for_model,
     scan_transcripts,
     session_label,
 )
+from otari_agent.cli import cli
 
 
 def _assistant_line(
@@ -553,7 +553,7 @@ def test_a_transport_failure_stops_with_a_message_rather_than_a_traceback(
 
 def test_a_batch_size_above_the_endpoints_cap_is_a_usage_error(tmp_path: Path, fake_httpx: type[_FakeClient]) -> None:
     """The cap belongs to the endpoint, so the CLI reads it rather than restating a number."""
-    from gateway.services.external_usage_service import MAX_EVENTS_PER_BATCH
+    from otari_agent.usage_import import MAX_EVENTS_PER_BATCH
 
     result = CliRunner().invoke(
         cli,

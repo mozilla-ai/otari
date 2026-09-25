@@ -1736,6 +1736,84 @@ main {
   border-color: var(--field-border);
 }
 
+/* The feedback dialog's motion, keyed on the `data-feedback-*` hooks the
+   component renders. Every number is a `--feedback-*` property read through its
+   default, so a value set on `:root` retunes it without touching the component.
+   Enter only: the compose unmounts at once, and what arrives in its place
+   animates in. The frame's own enter and exit are HeroUI's modal motion. */
+@keyframes otari-feedback-enter {
+  from {
+    opacity: 0;
+    translate: 0 var(--feedback-from-offset, 0);
+    scale: var(--feedback-from-scale, 1);
+  }
+}
+
+/* The thank-you arriving in the frame the compose just left. */
+[data-feedback-view="sent"] {
+  --feedback-from-offset: var(--feedback-swap-offset, 0.25rem);
+  animation: otari-feedback-enter var(--feedback-swap-duration, 200ms)
+    var(--feedback-swap-ease, ease-out) both;
+}
+
+[data-feedback-part="mark"] {
+  --feedback-from-offset: 0;
+  --feedback-from-scale: var(--feedback-mark-scale-from, 0.9);
+  animation: otari-feedback-enter var(--feedback-mark-duration, 250ms)
+    var(--feedback-swap-ease, ease-out) var(--feedback-mark-delay, 60ms) both;
+}
+
+/* Title then body, one stagger apart. */
+[data-feedback-part="title"],
+[data-feedback-part="body"] {
+  --feedback-from-offset: var(--feedback-text-offset, 0.25rem);
+  animation: otari-feedback-enter var(--feedback-swap-duration, 200ms)
+    var(--feedback-swap-ease, ease-out) var(--feedback-text-delay, 100ms) both;
+}
+[data-feedback-part="body"] {
+  animation-delay: calc(
+    var(--feedback-text-delay, 100ms) +
+    var(--feedback-text-stagger, 60ms)
+  );
+}
+
+/* The guard taking the footer. */
+[data-feedback-footer="guard"] > * {
+  --feedback-from-offset: var(--feedback-guard-offset, 0.125rem);
+  animation: otari-feedback-enter var(--feedback-guard-duration, 150ms)
+    var(--feedback-swap-ease, ease-out) both;
+}
+
+/* The spinner replaces the label while a send is in flight.
+   `--feedback-spinner-delay` can hold the label for quick sends. */
+[data-feedback-send="pending"] [data-feedback-send-label] {
+  animation: otari-feedback-hide 0s linear var(--feedback-spinner-delay, 0ms)
+    both;
+}
+[data-feedback-send="pending"] [data-feedback-send-spinner] {
+  animation: otari-feedback-enter 0s linear var(--feedback-spinner-delay, 0ms)
+    both;
+}
+@keyframes otari-feedback-hide {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Reduced motion: no motion at all. The house reset above loses to the
+   shorthands here on specificity, so this block zeroes them itself; the `both`
+   fill still lands every element in its end state. */
+@media (prefers-reduced-motion: reduce) {
+  [data-feedback-view],
+  [data-feedback-part],
+  [data-feedback-footer] > * {
+    --feedback-from-offset: 0;
+    --feedback-from-scale: 1;
+    animation-duration: 0.01ms;
+    animation-delay: 0s;
+  }
+}
+
 .otari-toolbar .button--ghost,
 .otari-actions .button--ghost,
 .otari-pagination .button--ghost,
@@ -2405,7 +2483,18 @@ main {
 
    The selection box is held with them rather than left to scroll: it acts on the
    row, and a checkbox that has slid away from the row it selects is worse than
-   no pin at all. */
+   no pin at all.
+
+   The box is only there when some row on the page is bulk-editable, so the
+   offsets start from a variable that drops to zero when Time is the first
+   column. Fixed offsets pushed every held lane a box-width right of where it
+   sits, and Model then covered the start of Routing. */
+.otari-activity-table {
+  --activity-pin-start: 3rem;
+}
+.otari-activity-table:has(.table__column[data-key="time"]:first-child) {
+  --activity-pin-start: 0rem;
+}
 .otari-activity-table .table__column:first-child,
 .otari-activity-table .table__row .table__cell:first-child {
   position: sticky;
@@ -2416,21 +2505,21 @@ main {
 .otari-activity-table .table__column[data-key="time"],
 .otari-activity-table .table__cell[data-key="time"] {
   position: sticky;
-  left: 3rem;
+  left: var(--activity-pin-start);
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="user"],
 .otari-activity-table .table__cell[data-key="user"] {
   position: sticky;
-  left: 10.5rem;
+  left: calc(var(--activity-pin-start) + 7.5rem);
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="model"],
 .otari-activity-table .table__cell[data-key="model"] {
   position: sticky;
-  left: 19.875rem;
+  left: calc(var(--activity-pin-start) + 16.875rem);
   z-index: 1;
   background-color: var(--color-background);
 }
@@ -2443,6 +2532,10 @@ main {
 .otari-mcp-table .table__row .table__cell {
   height: 3.25rem;
   padding-block: 0;
+}
+.otari-mcp-table .table__column[data-key="server_id"] {
+  width: 9.5rem;
+  min-width: 9.5rem;
 }
 .otari-mcp-table .table__column[data-key="token"] {
   width: 8.75rem;

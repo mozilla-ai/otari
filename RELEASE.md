@@ -37,7 +37,7 @@ The release runs in two halves so the changelog is reviewable before the tag:
 For a local preview of what the next release notes will look like, run
 `make changelog` (set `GITHUB_TOKEN` to resolve PR and author links).
 
-Two workflows react to the published Release:
+Three workflows react to the published Release:
 
 - **`otari-docker.yml`** builds and pushes the multi-arch image to Docker Hub,
   tagged `{{version}}` (e.g. `0.4.0`), `{{major}}.{{minor}}` (e.g. `0.4`), and the
@@ -46,6 +46,13 @@ Two workflows react to the published Release:
   `info.version`.
 - **`otari-sdk-codegen.yml`** regenerates each SDK's typed core, stamps the
   release version into the core, and opens a regeneration PR on each SDK repo.
+- **`otari-homebrew.yml`** ships the agent-side CLI (`cli/`, distribution
+  `otari-agent`) to `mozilla-ai/homebrew-tap`. It stamps the version into the
+  package, builds its sdist, renders `Formula/otari.rb` from
+  `packaging/homebrew/otari.rb.tmpl` and the lock (`scripts/homebrew_formula.py`),
+  uploads the sdist, the pinned requirements and the formula to the Release,
+  installs and `brew test`s the formula on a macOS runner, then commits it to
+  the tap, so `brew install mozilla-ai/tap/otari` follows every release.
 
 ### Continuous (non-release) builds
 
@@ -108,6 +115,12 @@ release PR body. It does not stop the release.
   the image.
 - `SDK_CODEGEN_TOKEN`, used by `otari-sdk-codegen.yml` to open regeneration PRs
   on the SDK repos.
+- `HOMEBREW_TAP_GITHUB_TOKEN`, used by `otari-homebrew.yml` to push
+  `Formula/otari.rb` to `mozilla-ai/homebrew-tap`. It is the org secret mcpd
+  and cq publish with, granted per repository, so an org admin has to add this
+  repository to it. Until then the workflow's build and macOS jobs still run
+  and the rendered formula sits on the Release as `otari.rb`; only the push to
+  the tap fails.
 - `RELEASE_APP_CLIENT_ID` (a repository variable, not a secret) and
   `RELEASE_APP_PRIVATE_KEY`, used by `otari-release.yml` and
   `otari-tag-release.yml`. They identify the `otari-bot` GitHub App, org-owned

@@ -124,7 +124,7 @@ class LocalDirFileStore:
                     total += len(chunk)
                     await asyncio.to_thread(handle.write, chunk)
         except BaseException:
-            # The chunk source (e.g. the route's size-cap check, or a client
+            # The chunk source (e.g. the files service's size cap, or a client
             # disconnect) failed partway through; don't leave a truncated blob
             # with no storage_ref pointing at it, since the caller never gets a
             # ref back to clean it up. BaseException includes CancelledError,

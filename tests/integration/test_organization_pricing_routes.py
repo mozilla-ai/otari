@@ -23,6 +23,13 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.exceptions import TenancyValidationError
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError
+from gateway.exceptions.pricing_exceptions import (
+    OrganizationPricingManagedModelError,
+    OrganizationPricingNotFoundError,
+    OrganizationPricingOverlapError,
+)
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing, OrganizationModelPricing
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace
@@ -43,13 +50,6 @@ from gateway.services.organization_pricing_service import (
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import credential_ladder_exhausted, get_provider_kwargs
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    OrganizationPricingManagedModelError,
-    OrganizationPricingNotFoundError,
-    OrganizationPricingOverlapError,
-    TenancyValidationError,
-)
 from gateway.services.tenancy.org_provider_key_service import refresh_org_provider_cache, reset_org_provider_cache
 from gateway.services.workspace_scope import (
     organization_for_key_id,

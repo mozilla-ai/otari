@@ -29,14 +29,16 @@ class RateLimiter:
     """Simple sliding-window rate limiter.
 
     Tracks request timestamps per user and rejects requests that exceed
-    the configured requests-per-minute (RPM) limit.
+    the configured requests-per-minute (RPM) limit. ``window_sec`` widens the
+    window for a limit counted over longer than a minute; ``rpm`` is then the
+    allowance per window.
     """
 
     _CLEANUP_INTERVAL = 1000
 
-    def __init__(self, rpm: int) -> None:
+    def __init__(self, rpm: int, *, window_sec: float = 60.0) -> None:
         self._rpm = rpm
-        self._window_sec = 60.0
+        self._window_sec = window_sec
         self._requests: dict[str, deque[float]] = defaultdict(deque)
         self._call_count = 0
 

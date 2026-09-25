@@ -76,6 +76,7 @@ the corresponding startup value after the database is available.
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the bundled genai-prices catalog when no stored price exists. |
 | `pricing_refresh` | What a scheduled genai-prices check does with an update: `manual`, `review`, or `auto`. |
+| `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting, unavailable in hybrid mode. See [Product feedback](#product-feedback). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -225,7 +226,8 @@ every restart is distinguishable from one set in the dashboard.
 `public_catalog: true` serves `GET /api/v1/catalog/models` and the dashboard's
 Models page to a visitor with no credential, so a deployment can show what it
 serves before anyone signs up. A visitor sees the configured `providers:`
-instances only, priced at the deployment's rates, and never an organization's
+instances and any hosted models the deployment serves, priced at the
+deployment's rates, and never an organization's
 override, key-scoped allow-list, or usage. A caller who sends a credential is
 served as that caller, valid or not. The setting is off by default, off in
 hybrid mode, and can be changed at runtime.
@@ -245,7 +247,9 @@ running N workers serves up to N times the configured number.
 
 In hosted mode a visitor sees the same thing a visitor sees anywhere else: the
 process-wide `providers:` instances, which in that mode are the deployment's
-own rather than any tenant's, priced at the deployment's rates. No
+own rather than any tenant's, and the deployment-wide roster of the hosted
+models it pays for (what `ModelProviderPort.get_hosted_models` answers with no
+organization), priced at the deployment's rates. No
 organization's providers, overrides, or usage are public, whatever the flag is
 set to.
 
@@ -376,7 +380,16 @@ Each is independent. Unset, the Terms of service row is absent and the Data &
 Privacy row stays disabled. A deployment whose dashboard sits beside a site that
 owns the documents points at that site. `GET /api/v1/bootstrap` publishes both
 addresses unauthenticated, so a credential in either is refused at startup, the
-way `data_plane_url` refuses one. The same check covers `docs_url`.
+way `data_plane_url` refuses one. The same check covers `docs_url` and
+`site_url`.
+
+## The public site
+
+A deployment with a website of its own (a landing page beside the dashboard)
+sets `site_url` or `OTARI_SITE_URL` to its absolute HTTP or HTTPS address. The
+logo on the pages a visitor reaches without an account (the sign-in pages and
+the public model catalog) then links there. Unset, it links to the catalog where
+the deployment publishes one, and is not a link otherwise.
 
 ## The interface address
 
@@ -395,8 +408,16 @@ ui_base_url: "https://app.example.com/dashboard"
 
 Unset, `public_base_url` answers for it. Supply an absolute http(s) URL with no
 trailing slash; a relative one would survive the redirect and mean nothing in an
-inbox. Credentials, query strings and fragments are refused: this value travels
-in a redirect and into outgoing mail.
+inbox. Credentials and fragments are refused: this value travels in a redirect
+and into outgoing mail. A query string is kept and placed ahead of the hash
+route in every link (`https://app.example.com/dashboard/?edge=a#/verify-email?token=…`),
+for an edge that serves one interface for several deployments and needs each
+link to say which one built it.
+
+A dashboard served from a sibling host of this process may hold a session here
+only when that host is listed in `cors_allow_origins`: the session cookie is
+`SameSite=Strict`, and a same-site request from any origin not on that list is
+refused.
 
 Left unset on a split deployment, an OAuth callback lands the browser on an
 origin holding none of the sign-in state it started with, and the sign-in fails
@@ -434,3 +455,37 @@ This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
 contributed route. See [Architecture](../ARCHITECTURE.md) for the extension
 boundary.
+
+## Product feedback
+
+Signed-in dashboard users can choose **Feedback**, beside Documentation in the
+top bar (in the account menu on a phone), to send a message to the Otari team.
+The team receives it privately in Slack. Only the message is sent: no email,
+screenshot, page URL, account identifier, deployment identifier, or usage
+history is attached. Opening the form, typing, and canceling make no outbound
+request.
+
+The gateway forwards the message to
+`https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the
+browser's cookies, authorization, referrer, or IP headers. Network peers still
+see connection metadata, so this is private feedback, not anonymous feedback.
+Keep request-body capture disabled for the feedback endpoint in any additional
+logging or tracing you configure.
+
+Feedback is on by default. To turn it off, set `feedback_enabled: false` in
+YAML or `OTARI_FEEDBACK_ENABLED=false`, then restart. Off, the endpoint is not
+mounted and the Feedback entry is hidden. Standalone and hosted deployments
+offer it; hybrid gateways never do. This setting is visible in Settings but
+cannot be changed there at runtime.
+
+The otari.ai intake is not live yet, so until it is, every send fails with the
+form's "didn't reach us" message and the gateway logs the receiver's status.
+
+Each signed-in person (and the master key) can send five messages every ten
+minutes; past that the gateway answers `429` with `Retry-After`.
+
+Feedback text accepts up to 4,000 Unicode code points. The gateway waits up to
+10 seconds for the receiver and does not retry automatically. An unconfirmed
+submission stays in the form until the person retries or explicitly discards
+it. Drafts are held only in memory and disappear on page reload. A manual retry
+after an unconfirmed delivery can produce a duplicate.

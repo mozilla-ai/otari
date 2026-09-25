@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_ROOT
-from gateway.models.tools import FileObject
+from gateway.models.files import FileObject
 
 CHART = b"\x89PNG\r\n\x1a\nfake chart bytes"
 

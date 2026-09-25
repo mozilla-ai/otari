@@ -25,6 +25,7 @@ from any_llm.types.messages import (
 )
 from fastapi.testclient import TestClient
 
+from conftest import InstallControlPlane
 from gateway.api.deps import reset_config
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
@@ -143,7 +144,7 @@ def test_hybrid_mode_requires_credentials(platform_client: TestClient) -> None:
 
 def test_hybrid_mode_maps_resolve_unauthorized(
     platform_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     async def fake_post_platform(
         url: str,
@@ -153,7 +154,7 @@ def test_hybrid_mode_maps_resolve_unauthorized(
     ) -> httpx.Response:
         return httpx.Response(401, json={"detail": "Invalid user token"})
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
 
     response = platform_client.post(
         f"{API_ROOT}/messages",
@@ -174,6 +175,7 @@ def test_hybrid_mode_maps_resolve_unauthorized(
 def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     usage_reports: list[dict[str, Any]] = []
     attempt_id = "3f1b6a1e-0000-4000-8000-000000000002"
@@ -208,7 +210,7 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
         assert kwargs["api_key"] == "sk-platform-key"
         return _message_response()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
     response = platform_client.post(
@@ -222,8 +224,8 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     )
 
     assert response.status_code == 200, response.text
-    assert response.headers["X-Correlation-ID"] == attempt_id
-    assert response.headers["X-Otari-Request-ID"] == "req-1"
+    assert response.headers["Otari-Attempt-ID"] == attempt_id
+    assert response.headers["Otari-Request-ID"] == "req-1"
     assert response.json()["usage"]["cost_usd"] == "0.012345"
     assert response.json()["usage"]["pricing_source"] == "managed"
     assert usage_reports == [
@@ -246,6 +248,7 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
 def test_hybrid_mode_reports_one_hour_cache_write_subset(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A 1h cache write is reported as a subset of the cache-write total (#856)."""
     usage_reports: list[dict[str, Any]] = []
@@ -268,7 +271,7 @@ def test_hybrid_mode_reports_one_hour_cache_write_subset(
     async def fake_amessages(**kwargs: Any) -> MessageResponse:
         return _message_response_with_1h_cache_write()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
     response = platform_client.post(
@@ -290,6 +293,7 @@ def test_hybrid_mode_reports_one_hour_cache_write_subset(
 def test_hybrid_mode_falls_through_on_first_attempt_failure(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """When the primary attempt fails with a retryable error, the runner moves
     to the next attempt and the client sees the second attempt's response.
@@ -327,7 +331,7 @@ def test_hybrid_mode_falls_through_on_first_attempt_failure(
             )
         return _message_response("from-fallback")
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
     response = platform_client.post(
@@ -342,7 +346,7 @@ def test_hybrid_mode_falls_through_on_first_attempt_failure(
 
     assert response.status_code == 200, response.text
     assert response.json()["content"][0]["text"] == "from-fallback"
-    assert response.headers["X-Correlation-ID"] == "att-fallback"
+    assert response.headers["Otari-Attempt-ID"] == "att-fallback"
     # Both attempts hit upstream — the first one failed, the second succeeded.
     assert len(calls) == 2
     # Both attempts reported usage: error for the primary, success for the fallback.
@@ -354,6 +358,7 @@ def test_hybrid_mode_falls_through_on_first_attempt_failure(
 def test_hybrid_mode_falls_through_on_404_model_unavailable(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A 404 from the primary (deprecated/renamed/retired model) is retryable;
     the runner falls through to the next attempt instead of failing the whole
@@ -392,7 +397,7 @@ def test_hybrid_mode_falls_through_on_404_model_unavailable(
             )
         return _message_response("from-fallback")
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
     response = platform_client.post(
@@ -407,13 +412,14 @@ def test_hybrid_mode_falls_through_on_404_model_unavailable(
 
     assert response.status_code == 200, response.text
     assert response.json()["content"][0]["text"] == "from-fallback"
-    assert response.headers["X-Correlation-ID"] == "att-fallback"
+    assert response.headers["Otari-Attempt-ID"] == "att-fallback"
     assert len(calls) == 2, "404 on the primary must fall through to the next attempt"
 
 
 def test_hybrid_mode_returns_502_and_reports_every_attempt_when_all_fail(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """All attempts failing with retryable errors → 502 with the all-failed
     detail wording, and each attempt's error outcome is still reported back to
@@ -449,7 +455,7 @@ def test_hybrid_mode_returns_502_and_reports_every_attempt_when_all_fail(
             response=httpx.Response(500, request=httpx.Request("POST", "http://upstream")),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
     response = platform_client.post(
@@ -468,6 +474,7 @@ def test_hybrid_mode_returns_502_and_reports_every_attempt_when_all_fail(
     assert response.json() == {
         "detail": {"type": "error", "error": {"type": "api_error", "message": "All upstream providers failed"}}
     }
+    assert response.headers["Otari-Attempt-ID"] == "att-2"
     # Each failed attempt is reported exactly once, despite the terminal 502. A
     # set would mask a double-report (the dropped-then-also-flushed bug), so pin
     # the exact count and contents: the inline flush and the dropped background
@@ -483,6 +490,7 @@ def test_hybrid_mode_returns_502_and_reports_every_attempt_when_all_fail(
 def test_hybrid_mode_falls_through_on_provider_400(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A provider 400 advances to the next candidate like every pre-lock-in failure."""
     calls: list[dict[str, Any]] = []
@@ -515,7 +523,7 @@ def test_hybrid_mode_falls_through_on_provider_400(
             response=httpx.Response(400, request=httpx.Request("POST", "http://upstream")),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
     response = platform_client.post(
@@ -541,7 +549,7 @@ def test_hybrid_mode_falls_through_on_provider_400(
 
 def test_hybrid_mode_resolves_workspace_mcp_server_ids(
     platform_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """``mcp_server_ids`` triggers a second platform call to swap workspace
     ids for inline MCP configs. The resolved configs are merged into the
@@ -579,7 +587,7 @@ def test_hybrid_mode_resolves_workspace_mcp_server_ids(
             )
         return httpx.Response(204)
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
 
     # The tool loop is patched so we don't need a real MCP server. We just
     # need to confirm the resolve-mcp-servers call happened (the request
@@ -590,7 +598,7 @@ def test_hybrid_mode_resolves_workspace_mcp_server_ids(
         pool: Any,
         max_iterations: int,
         on_first_response: Any = None,
-        emit_native_web_search: bool = False,
+        native_tools: frozenset[str] = frozenset(),
     ) -> MessageResponse:
         return _message_response()
 
@@ -676,6 +684,7 @@ def _two_attempt_resolve_response_anthropic_first(*, request_id: str) -> httpx.R
 def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Non-streaming MCP request: first attempt errors before any tool round
     completes → the gateway falls through to the second attempt and returns
@@ -707,7 +716,7 @@ def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
             raise _FakeAuthError("simulated upstream 401 on primary")
         return _message_response("from-fallback")
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.MCPClientPool", _FakeMcpPool)
     monkeypatch.setattr("gateway.services.mcp_loop_messages.amessages", fake_loop_amessages)
 
@@ -723,7 +732,7 @@ def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     )
 
     assert response.status_code == 200, response.text
-    assert response.headers["X-Correlation-ID"] == "tool-att-fallback"
+    assert response.headers["Otari-Attempt-ID"] == "tool-att-fallback"
     body = response.json()
     assert body["content"][0]["text"] == "from-fallback"
     # Both attempts were tried in order — confirms the [:1] collapse is gone.
@@ -737,6 +746,7 @@ def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
 def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Non-streaming MCP request: first attempt returns a tool_use (lock-in
     fires via ``on_first_response``), then upstream dies on round 2. The
@@ -786,7 +796,7 @@ def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
         # Round 2 (still on attempt 1 — lock-in is in effect) — upstream dies.
         raise RuntimeError("simulated upstream 5xx on round 2")
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.MCPClientPool", _FakeMcpPool)
     monkeypatch.setattr("gateway.services.mcp_loop_messages.amessages", fake_loop_amessages)
 
@@ -814,7 +824,7 @@ def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
 
 def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
     platform_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Tool-loop streaming returns settled cost on the terminal usage event."""
     usage_reports: list[dict[str, Any]] = []
@@ -842,7 +852,7 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
             },
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
 
     # Patch the streaming tool loop to a no-op generator so we don't need a
     # real MCP server. Return a single message_delta-like event so the
@@ -885,8 +895,8 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
             headers={"Authorization": "Bearer user_test_token"},
         ) as response:
             assert response.status_code == 200, response.read().decode()
-            assert response.headers["X-Correlation-ID"] == attempt_id
-            assert response.headers["X-Otari-Request-ID"] == "req-1"
+            assert response.headers["Otari-Attempt-ID"] == attempt_id
+            assert response.headers["Otari-Request-ID"] == "req-1"
             wire = response.read().decode()
 
     assert '"cost_usd":"0.012345"' in wire
@@ -898,7 +908,7 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
 
 def test_hybrid_mode_tool_loop_streaming_forwards_session_label(
     platform_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """The streaming success closure (``build_streaming_response._on_complete``)
     on the hybrid tool-loop streaming path (now ``run_streaming_with_fallback``,
@@ -916,7 +926,7 @@ def test_hybrid_mode_tool_loop_streaming_forwards_session_label(
         usage_reports.append(body)
         return httpx.Response(204)
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
 
     from unittest.mock import AsyncMock, patch
 
@@ -991,7 +1001,7 @@ def test_hybrid_mode_count_tokens_requires_credentials(
 
 def test_hybrid_mode_count_tokens_validates_token(
     platform_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A present-but-invalid bearer token is rejected: hybrid mode resolves
     the token rather than just checking the header exists.
@@ -1005,7 +1015,7 @@ def test_hybrid_mode_count_tokens_validates_token(
     ) -> httpx.Response:
         return httpx.Response(401, json={"detail": "Invalid user token"})
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
 
     response = platform_client.post(
         f"{API_ROOT}/messages/count_tokens",
@@ -1025,6 +1035,7 @@ def test_hybrid_mode_count_tokens_validates_token(
 def test_hybrid_mode_count_tokens_succeeds_without_provider_call(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A valid token resolves, and the count is returned without any upstream
     provider call (counting is local).
@@ -1045,7 +1056,7 @@ def test_hybrid_mode_count_tokens_succeeds_without_provider_call(
     async def fail_amessages(**kwargs: Any) -> MessageResponse:
         raise AssertionError("count_tokens must not call the provider")
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fail_amessages)
 
     response = platform_client.post(
@@ -1064,6 +1075,7 @@ def test_hybrid_mode_count_tokens_succeeds_without_provider_call(
 def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A single-attempt streaming request that fails before its first chunk
     surfaces the classified status (404) in the Anthropic envelope, not a
@@ -1089,7 +1101,7 @@ def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
             response=httpx.Response(404, request=httpx.Request("POST", "http://upstream")),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
     response = platform_client.post(
@@ -1111,7 +1123,7 @@ def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
 
 def test_hybrid_mode_preamble_rejection_uses_anthropic_envelope_and_keeps_retry_after(
     platform_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A platform-resolve rejection in the hybrid preamble (here a 429) is
     delivered in the Anthropic error envelope with the matching error.type, and
@@ -1128,7 +1140,7 @@ def test_hybrid_mode_preamble_rejection_uses_anthropic_envelope_and_keeps_retry_
             return httpx.Response(429, json={"detail": "rate limited"}, headers={"Retry-After": "30"})
         return httpx.Response(204)
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
 
     response = platform_client.post(
         f"{API_ROOT}/messages",
@@ -1150,6 +1162,7 @@ def test_hybrid_mode_preamble_rejection_uses_anthropic_envelope_and_keeps_retry_
 def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Streaming MCP request on /api/v1/messages: the first attempt errors before
     yielding any event, so the gateway falls through to the second attempt and
@@ -1189,7 +1202,7 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
             ),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.MCPClientPool", _FakeMcpPool)
     monkeypatch.setattr("gateway.api.routes.messages.anthropic_tool_loop_stream", fake_loop_stream)
 
@@ -1206,8 +1219,8 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     )
 
     assert response.status_code == 200, response.text
-    assert response.headers["X-Correlation-ID"] == "tool-att-fallback"
-    assert response.headers["X-Otari-Request-ID"] == "tool-stream-req-1"
+    assert response.headers["Otari-Attempt-ID"] == "tool-att-fallback"
+    assert response.headers["Otari-Request-ID"] == "tool-stream-req-1"
     assert "message_delta" in response.text
     # Both attempts were tried in order: the tool-loop gate is gone.
     assert calls == ["sk-ant-broken", "sk-ant-real"]
@@ -1220,7 +1233,13 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
 # ---------- container continuity on a shared upstream account ----------
 
 
-def _container_route(monkeypatch: pytest.MonkeyPatch, *, managed: bool, calls: list[str]) -> None:
+def _container_route(
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+    *,
+    managed: bool,
+    calls: list[str],
+) -> None:
     """Wire a single-attempt route whose credential is managed or BYO."""
 
     async def fake_post_platform(
@@ -1250,18 +1269,29 @@ def _container_route(monkeypatch: pytest.MonkeyPatch, *, managed: bool, calls: l
         calls.append(str(kwargs.get("container")))
         return _message_response()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
 
 
+@pytest.mark.parametrize(
+    "container",
+    [
+        "container_01ABC",
+        {"id": "container_01ABC"},
+        {"skills": [{"type": "anthropic", "skill_id": "pptx"}]},
+    ],
+    ids=["id", "object-with-id", "object-with-skills-only"],
+)
 def test_container_is_refused_on_a_managed_credential(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    container: str | dict[str, Any],
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A managed attempt runs on an account many workspaces share, so a
-    caller-chosen container id would address another tenant's state."""
+    caller-chosen container would address or create state on that account."""
     calls: list[str] = []
-    _container_route(monkeypatch, managed=True, calls=calls)
+    _container_route(monkeypatch, control_plane_transport, managed=True, calls=calls)
 
     response = platform_client.post(
         f"{API_ROOT}/messages",
@@ -1269,7 +1299,7 @@ def test_container_is_refused_on_a_managed_credential(
             "model": "claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 100,
-            "container": "container_01ABC",
+            "container": container,
         },
         headers={"Authorization": "Bearer user_test_token"},
     )
@@ -1284,10 +1314,11 @@ def test_container_is_refused_on_a_managed_credential(
 def test_container_reaches_a_byo_credential(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """On the workspace's own key the container is already the caller's."""
     calls: list[str] = []
-    _container_route(monkeypatch, managed=False, calls=calls)
+    _container_route(monkeypatch, control_plane_transport, managed=False, calls=calls)
 
     response = platform_client.post(
         f"{API_ROOT}/messages",
@@ -1306,7 +1337,7 @@ def test_container_reaches_a_byo_credential(
 
 def test_a_managed_attempt_anywhere_on_the_route_refuses_the_container(
     platform_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Which attempt serves the request is decided during fallback, past the
     gate, so a managed fallback behind a BYO primary still refuses."""
@@ -1324,7 +1355,7 @@ def test_a_managed_attempt_anywhere_on_the_route_refuses_the_container(
         managed["managed"] = True
         return httpx.Response(200, json=_resolve_payload([byo, managed]))
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
 
     response = platform_client.post(
         f"{API_ROOT}/messages",
@@ -1344,10 +1375,11 @@ def test_a_managed_attempt_anywhere_on_the_route_refuses_the_container(
 def test_a_request_without_a_container_is_untouched_by_the_gate(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """The gate reads a field the overwhelming majority of requests never set."""
     calls: list[str] = []
-    _container_route(monkeypatch, managed=True, calls=calls)
+    _container_route(monkeypatch, control_plane_transport, managed=True, calls=calls)
 
     response = platform_client.post(
         f"{API_ROOT}/messages",
@@ -1396,6 +1428,7 @@ class _FakeSandboxBackend:
 def test_container_auto_for_the_gateway_sandbox_passes_a_managed_credential(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """``auto`` names no provider container: it asks this gateway to hold its own
     sandbox, so a managed route runs the request and the provider never sees it."""
@@ -1417,7 +1450,7 @@ def test_container_auto_for_the_gateway_sandbox_passes_a_managed_credential(
         calls.append(str(kwargs.get("container")))
         return _message_response()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
     monkeypatch.setattr("gateway.services.mcp_loop_messages.amessages", fake_loop_amessages)
 
@@ -1440,11 +1473,12 @@ def test_container_auto_for_the_gateway_sandbox_passes_a_managed_credential(
 def test_container_auto_without_the_gateway_sandbox_is_still_refused(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Past the managed gate, ``auto`` on a provider-run request is refused as the
     gateway word it is, so the exemption cannot put it on the shared account."""
     calls: list[str] = []
-    _container_route(monkeypatch, managed=True, calls=calls)
+    _container_route(monkeypatch, control_plane_transport, managed=True, calls=calls)
 
     response = platform_client.post(
         f"{API_ROOT}/messages",

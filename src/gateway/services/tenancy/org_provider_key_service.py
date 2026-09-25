@@ -53,6 +53,19 @@ from sqlmodel import col
 
 from gateway.core.config import PROVIDER_TYPE_ALIASES
 from gateway.core.database import create_session
+from gateway.exceptions.providers_exceptions import (
+    OrgDefaultProviderKeyConflictError,
+    OrgProviderKeyAlreadyExistsError,
+    OrgProviderKeyArchivedError,
+    OrgProviderKeyDisabledForWorkspaceError,
+    OrgProviderKeyNameRequiredError,
+    OrgProviderKeyNotArchivedError,
+    OrgProviderKeyNotFoundError,
+    OrgProviderKeyUnknownProviderError,
+    OrgProviderKeyUnsafeApiBaseError,
+    WorkspaceProviderKeyOverrideConflictError,
+)
+from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
 from gateway.models.provider_keys import (
     OrgProviderKey,
@@ -87,19 +100,6 @@ from gateway.services.secret_box import (
     encrypt_secret,
 )
 from gateway.services.tenancy import authorization
-from gateway.services.tenancy.errors import (
-    OrgDefaultProviderKeyConflictError,
-    OrgProviderKeyAlreadyExistsError,
-    OrgProviderKeyArchivedError,
-    OrgProviderKeyDisabledForWorkspaceError,
-    OrgProviderKeyNameRequiredError,
-    OrgProviderKeyNotArchivedError,
-    OrgProviderKeyNotFoundError,
-    OrgProviderKeyUnknownProviderError,
-    OrgProviderKeyUnsafeApiBaseError,
-    SecretBoxUnavailableTenancyError,
-    WorkspaceProviderKeyOverrideConflictError,
-)
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 

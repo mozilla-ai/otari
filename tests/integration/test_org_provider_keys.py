@@ -18,6 +18,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
+from gateway.exceptions.providers_exceptions import (
+    OrgProviderKeyAlreadyExistsError,
+    OrgProviderKeyArchivedError,
+    OrgProviderKeyDisabledForWorkspaceError,
+    OrgProviderKeyNotArchivedError,
+    OrgProviderKeyNotFoundError,
+    WorkspaceProviderKeyOverrideConflictError,
+)
 from gateway.models.provider_keys import (
     OrgProviderKey,
 )
@@ -39,16 +48,6 @@ from gateway.schemas.providers import (
 from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import OrgProviderKeyService
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    OrgProviderKeyAlreadyExistsError,
-    OrgProviderKeyArchivedError,
-    OrgProviderKeyDisabledForWorkspaceError,
-    OrgProviderKeyNotArchivedError,
-    OrgProviderKeyNotFoundError,
-    WorkspaceNotFoundError,
-    WorkspaceProviderKeyOverrideConflictError,
-)
 from gateway.services.tenancy.org_provider_key_service import (
     cached_org_model_restriction,
     refresh_org_provider_cache,

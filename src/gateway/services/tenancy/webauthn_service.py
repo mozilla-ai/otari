@@ -70,15 +70,7 @@ from webauthn.helpers.structs import (
 )
 
 from gateway.core.config import GatewayConfig, RelyingParty
-from gateway.log_config import logger
-from gateway.models.tenancy import (
-    WEBAUTHN_CHALLENGE_TTL_SECONDS,
-    User,
-    WebAuthnChallenge,
-    WebAuthnCredential,
-    WebAuthnCredentialPublic,
-)
-from gateway.services.tenancy.errors import (
+from gateway.exceptions.identity_exceptions import (
     PasskeyAlreadyRegisteredError,
     PasskeyCeremonyError,
     PasskeyLimitReachedError,
@@ -86,6 +78,14 @@ from gateway.services.tenancy.errors import (
     PasskeyNotFoundError,
     PasskeySignInFailedError,
     PasskeysNotConfiguredError,
+)
+from gateway.log_config import logger
+from gateway.models.tenancy import (
+    WEBAUTHN_CHALLENGE_TTL_SECONDS,
+    User,
+    WebAuthnChallenge,
+    WebAuthnCredential,
+    WebAuthnCredentialPublic,
 )
 
 # How many passkeys one identity may hold. Generous rather than tight: the

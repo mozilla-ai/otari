@@ -7,10 +7,8 @@ module is the same thing against the local database, for a standalone
 deployment that has no platform to ask.
 
 **Where it plugs in.** A request names stored servers with `mcp_server_ids`.
-Hybrid mode resolves those through the platform
-(`api/routes/_platform._resolve_platform_mcp_servers`); standalone mode
-resolves them here, through :func:`resolve_workspace_mcp_servers`, called at
-admission in `prepare_gateway_tools` where the request's session is live and
+A deployment that holds the rows resolves them here, through
+:func:`resolve_workspace_mcp_servers`, called at admission where the request's session is live and
 `RequestContext.workspace_id` already names the workspace its key belongs to.
 That is the seam otari#655 settled and otari#678 wrote down; MCP is the
 exception that decision names, because there is no deployment-wide server list
@@ -49,6 +47,13 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
+from gateway.exceptions.tools_exceptions import (
+    WorkspaceMcpServerAlreadyExistsError,
+    WorkspaceMcpServerLimitReachedError,
+    WorkspaceMcpServerNotFoundError,
+    WorkspaceMcpServerUnsafeUrlError,
+)
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.tenancy import User
 from gateway.models.tools import WorkspaceMcpServer
@@ -59,13 +64,6 @@ from gateway.services.secret_box import (
     encrypt_secret,
 )
 from gateway.services.tenancy import authorization
-from gateway.services.tenancy.errors import (
-    SecretBoxUnavailableTenancyError,
-    WorkspaceMcpServerAlreadyExistsError,
-    WorkspaceMcpServerLimitReachedError,
-    WorkspaceMcpServerNotFoundError,
-    WorkspaceMcpServerUnsafeUrlError,
-)
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.url_safety import UnsafeURLError, redact_url_secrets, validate_mcp_url
 
@@ -241,13 +239,9 @@ async def resolve_workspace_mcp_servers(
 ) -> list[McpServerConfig]:
     """Swap a request's ``mcp_server_ids`` for the workspace's stored configs.
 
-    The standalone counterpart of `_platform._resolve_platform_mcp_servers`,
-    and deliberately the same contract: ids are de-duplicated with their order
-    preserved, an id naming no server *in this workspace* raises
-    :class:`WorkspaceMcpServerNotFoundError` (the platform answers 404 for the
-    same case, so the two modes refuse identically), and a disabled server is
-    skipped rather than refused, so one decommissioned server does not break a
-    caller whose stored id list still names it.
+    IDs are de-duplicated with their order preserved.
+    An ID naming no server *in this workspace* raises :class:`WorkspaceMcpServerNotFoundError`.
+    A disabled server is skipped rather than refused.
 
     No authorization check, and none is missing: ``workspace_id`` comes off the
     key that authenticated the request (`services/workspace_scope.py`), never
@@ -307,8 +301,7 @@ async def resolve_workspace_mcp_server(
 ) -> ResolvedMcpServer | None:
     """Resolve one stored server for the caller-orchestrated MCP endpoints.
 
-    The standalone counterpart of `_platform._resolve_platform_mcp_server`, and
-    the singular sibling of :func:`resolve_workspace_mcp_servers`. It differs
+    The singular sibling of :func:`resolve_workspace_mcp_servers`. It differs
     from that one in the two ways the stored-server endpoints need. It reports a
     disabled server instead of skipping it, because a disabled server is a
     named 404 here rather than one entry quietly missing from a list; and it

@@ -326,7 +326,9 @@ def test_mcp_servers_dispatches_through_responses_tool_loop(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> Response:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> Response:
         seen["completion_kwargs"] = completion_kwargs
         seen["pool"] = pool
         seen["max_iterations"] = max_iterations
@@ -372,7 +374,9 @@ def test_code_execution_dispatches_through_sandbox_backend(
 
     pool_seen: list[Any] = []
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> Response:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> Response:
         pool_seen.append(pool)
         return _response()
 
@@ -416,7 +420,9 @@ def test_managed_web_tool_dispatches_through_web_retrieval_backend(
 
     pool_seen: list[Any] = []
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> Response:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> Response:
         pool_seen.append(pool)
         return _response()
 
@@ -455,7 +461,7 @@ def test_web_search_max_uses_reaches_the_responses_tool_loop(
 
     Counterpart to
     ``test_messages_route_dispatch.test_intercept_routes_provider_keywords_to_the_gateway_backend``:
-    the adapter's ``web_search_budget`` plumbing is only reachable through the route,
+    the adapter's ``use_budget`` plumbing is only reachable through the route,
     so the unit tests that call the loop functions directly cannot cover it.
     """
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
@@ -467,9 +473,10 @@ def test_web_search_max_uses_reaches_the_responses_tool_loop(
         completion_kwargs: Any,
         pool: Any,
         max_iterations: int,
-        web_search_budget: Any = None,
+        use_budget: Any = None,
+        native_tools: frozenset[str] = frozenset(),
     ) -> Response:
-        budgets_seen.append(web_search_budget)
+        budgets_seen.append(use_budget)
         return _response()
 
     fake_backend = AsyncMock()
@@ -668,7 +675,9 @@ def test_max_tool_iterations_exceeded_returns_422(
 
     from gateway.services.mcp_loop_responses import MaxToolIterationsExceeded
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> Response:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> Response:
         raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
 
     fake_backend = AsyncMock()
@@ -874,7 +883,7 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
     seen: dict[str, Any] = {}
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> AsyncIterator[ResponseStreamEvent]:
         seen["pool"] = pool
         seen["max_iterations"] = max_iterations
@@ -932,7 +941,7 @@ def test_stream_code_execution_dispatches_through_sandbox(
     pool_seen: list[Any] = []
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> AsyncIterator[ResponseStreamEvent]:
         pool_seen.append(pool)
         yield _stream_completed_event()

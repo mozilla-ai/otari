@@ -46,6 +46,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions import TenancyValidationError
+from gateway.exceptions.pricing_exceptions import (
+    OrganizationPricingManagedModelError,
+    OrganizationPricingNotFoundError,
+    OrganizationPricingOverlapError,
+)
 from gateway.models.money import to_usd, to_usd_or_none
 from gateway.models.pricing import API_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
 from gateway.models.tenancy import User as TenancyUser
@@ -58,12 +64,6 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import is_deployment_instance_key, split_selector
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
-from gateway.services.tenancy.errors import (
-    OrganizationPricingManagedModelError,
-    OrganizationPricingNotFoundError,
-    OrganizationPricingOverlapError,
-    TenancyValidationError,
-)
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
 

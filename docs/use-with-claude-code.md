@@ -94,7 +94,8 @@ idempotency, and pricing behavior.
 The exporter above carries sessions that run after it is configured. Everything
 Claude Code did before that is already on disk, one JSONL transcript per session
 under `~/.claude/projects`. `otari import claude-code` reads those transcripts and
-posts them to the same import endpoint:
+posts them to the same import endpoint. The command installs on its own, without
+the server: `brew install mozilla-ai/tap/otari`.
 
 ```bash
 export OTARI_URL="https://otari.example.com"

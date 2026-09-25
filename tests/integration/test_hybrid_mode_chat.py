@@ -15,6 +15,7 @@ from any_llm.types.completion import (
 )
 from fastapi.testclient import TestClient
 
+from conftest import InstallControlPlane
 from gateway.api.deps import reset_config
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
@@ -61,8 +62,8 @@ def test_hybrid_mode_requires_credentials(platform_client: TestClient) -> None:
 )
 def test_hybrid_mode_accepts_standalone_credential_headers(
     platform_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
     headers: dict[str, str],
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Hybrid mode reads the same headers as standalone mode, so a key keeps
     working when a caller moves between deployments; only who verifies the
@@ -78,7 +79,7 @@ def test_hybrid_mode_accepts_standalone_credential_headers(
         forwarded_tokens.append(headers["X-User-Token"])
         return httpx.Response(401, json={"detail": "Invalid user token"})
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
 
     response = platform_client.post(
         f"{API_ROOT}/chat/completions",
@@ -95,7 +96,7 @@ def test_hybrid_mode_accepts_standalone_credential_headers(
 
 def test_hybrid_mode_maps_resolve_unauthorized(
     platform_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     async def fake_post_platform(
         url: str,
@@ -105,7 +106,7 @@ def test_hybrid_mode_maps_resolve_unauthorized(
     ) -> httpx.Response:
         return httpx.Response(401, json={"detail": "Invalid user token"})
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
 
     response = platform_client.post(
         f"{API_ROOT}/chat/completions",
@@ -120,6 +121,7 @@ def test_hybrid_mode_maps_resolve_unauthorized(
 def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     usage_reports: list[dict[str, Any]] = []
 
@@ -186,7 +188,7 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
             ),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -196,7 +198,7 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     )
 
     assert response.status_code == 200
-    assert response.headers["X-Correlation-ID"] == "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68"
+    assert response.headers["Otari-Attempt-ID"] == "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68"
     assert response.json()["usage"]["cost_usd"] == "0.012345"
     assert response.json()["usage"]["pricing_source"] == "managed"
     assert usage_reports == [
@@ -261,6 +263,7 @@ def _fake_bedrock_chat_completion() -> ChatCompletion:
 def test_hybrid_mode_forwards_bedrock_classic_key_pair_via_client_args(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A Bedrock attempt using the classic IAM access-key/secret-key shape
     reaches the ``acompletion()`` call under ``client_args`` (not flat), with
@@ -298,7 +301,7 @@ def test_hybrid_mode_forwards_bedrock_classic_key_pair_via_client_args(
         }
         return _fake_bedrock_chat_completion()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -313,6 +316,7 @@ def test_hybrid_mode_forwards_bedrock_classic_key_pair_via_client_args(
 def test_hybrid_mode_forwards_bedrock_bearer_token_via_client_args(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A Bedrock attempt using the bearer-token ("Bedrock API key") shape (no
     aws_access_key_id in extra_params) gets a pre-built, unsigned boto3
@@ -344,7 +348,7 @@ def test_hybrid_mode_forwards_bedrock_bearer_token_via_client_args(
         assert client_args["client"].meta.region_name == "us-west-2"
         return _fake_bedrock_chat_completion()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -359,6 +363,7 @@ def test_hybrid_mode_forwards_bedrock_bearer_token_via_client_args(
 def test_hybrid_mode_forwards_session_label_and_strips_it_upstream(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A request-body ``session_label`` reaches the platform usage report (for
     cost attribution) but is stripped before the provider call."""
@@ -411,7 +416,7 @@ def test_hybrid_mode_forwards_session_label_and_strips_it_upstream(
             usage=CompletionUsage(prompt_tokens=10, completion_tokens=7, total_tokens=17),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -439,6 +444,7 @@ def test_hybrid_mode_forwards_session_label_and_strips_it_upstream(
 def test_hybrid_mode_accepts_legacy_resolve_shape(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """An older otari (pre-fallback) returns a flat resolve payload.
 
@@ -485,7 +491,7 @@ def test_hybrid_mode_accepts_legacy_resolve_shape(
             usage=CompletionUsage(prompt_tokens=4, completion_tokens=2, total_tokens=6),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -495,9 +501,9 @@ def test_hybrid_mode_accepts_legacy_resolve_shape(
     )
 
     assert response.status_code == 200
-    # Gateway maps the legacy correlation_id onto attempt_id, so X-Correlation-ID
+    # Gateway maps the legacy correlation_id onto attempt_id, so Otari-Attempt-ID
     # still carries the same value as before.
-    assert response.headers["X-Correlation-ID"] == "9b2cce4a-5e91-4c19-9ad5-17a83f72b001"
+    assert response.headers["Otari-Attempt-ID"] == "9b2cce4a-5e91-4c19-9ad5-17a83f72b001"
     assert usage_reports[0]["correlation_id"] == "9b2cce4a-5e91-4c19-9ad5-17a83f72b001"
     assert usage_reports[0]["status"] == "success"
 
@@ -505,6 +511,7 @@ def test_hybrid_mode_accepts_legacy_resolve_shape(
 def test_hybrid_mode_maps_provider_timeout(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     async def fake_post_platform(
         url: str,
@@ -537,7 +544,7 @@ def test_hybrid_mode_maps_provider_timeout(
     async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
         raise TimeoutError("provider timeout")
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -553,6 +560,7 @@ def test_hybrid_mode_maps_provider_timeout(
 def test_hybrid_mode_falls_through_on_sdk_wrapped_connection_error(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """The first attempt fails with the OpenAI SDK's own ``APIConnectionError``
     (how a real DNS failure / connection refused / TLS error actually reaches
@@ -623,7 +631,7 @@ def test_hybrid_mode_falls_through_on_sdk_wrapped_connection_error(
             usage=CompletionUsage(prompt_tokens=5, completion_tokens=1, total_tokens=6),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -633,7 +641,7 @@ def test_hybrid_mode_falls_through_on_sdk_wrapped_connection_error(
     )
 
     assert response.status_code == 200
-    assert response.headers["X-Correlation-ID"] == "conn-err-att-good"
+    assert response.headers["Otari-Attempt-ID"] == "conn-err-att-good"
     assert calls == ["https://unreachable.example.com/v1", "https://api.openai.com/v1"]
 
     error_reports = [r for r in usage_reports if r.get("status") == "error"]
@@ -645,6 +653,7 @@ def test_hybrid_mode_falls_through_on_sdk_wrapped_connection_error(
 def test_hybrid_mode_falls_through_when_a_provider_account_is_out_of_credit(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """The first attempt's provider account has no credit left, which Anthropic
     reports as a 400 ``invalid_request_error`` rather than a 402. An empty wallet
@@ -731,7 +740,7 @@ def test_hybrid_mode_falls_through_when_a_provider_account_is_out_of_credit(
             usage=CompletionUsage(prompt_tokens=5, completion_tokens=1, total_tokens=6),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -741,7 +750,7 @@ def test_hybrid_mode_falls_through_when_a_provider_account_is_out_of_credit(
     )
 
     assert response.status_code == 200
-    assert response.headers["X-Correlation-ID"] == "billing-att-funded"
+    assert response.headers["Otari-Attempt-ID"] == "billing-att-funded"
     assert calls == ["anthropic:claude-haiku-4-5", "openai:gpt-4o-mini"]
 
     error_reports = [r for r in usage_reports if r.get("status") == "error"]
@@ -752,7 +761,7 @@ def test_hybrid_mode_falls_through_when_a_provider_account_is_out_of_credit(
 
 def test_hybrid_mode_propagates_resolve_rate_limit_retry_after(
     platform_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     async def fake_post_platform(
         url: str,
@@ -762,7 +771,7 @@ def test_hybrid_mode_propagates_resolve_rate_limit_retry_after(
     ) -> httpx.Response:
         return httpx.Response(429, json={"detail": "Rate limited"}, headers={"Retry-After": "11"})
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
 
     response = platform_client.post(
         f"{API_ROOT}/chat/completions",
@@ -778,6 +787,7 @@ def test_hybrid_mode_propagates_resolve_rate_limit_retry_after(
 def test_hybrid_mode_usage_retries_only_transient_failures(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     usage_calls: list[dict[str, Any]] = []
 
@@ -828,7 +838,7 @@ def test_hybrid_mode_usage_retries_only_transient_failures(
             usage=CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -842,7 +852,7 @@ def test_hybrid_mode_usage_retries_only_transient_failures(
 
 def test_hybrid_mode_maps_resolve_validation_error_to_bad_gateway(
     platform_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     async def fake_post_platform(
         url: str,
@@ -852,7 +862,7 @@ def test_hybrid_mode_maps_resolve_validation_error_to_bad_gateway(
     ) -> httpx.Response:
         return httpx.Response(422, json={"detail": "missing headers"})
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
 
     response = platform_client.post(
         f"{API_ROOT}/chat/completions",
@@ -866,7 +876,7 @@ def test_hybrid_mode_maps_resolve_validation_error_to_bad_gateway(
 
 def test_hybrid_mode_forwards_resolve_400_detail(
     platform_client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A 400 from the platform resolve endpoint (a deliberate, caller-safe
     rejection such as a Bedrock BYO key using an auth shape that can't be
@@ -884,7 +894,7 @@ def test_hybrid_mode_forwards_resolve_400_detail(
             json={"detail": "This Bedrock provider key uses a bearer-token credential."},
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
 
     response = platform_client.post(
         f"{API_ROOT}/chat/completions",
@@ -904,6 +914,7 @@ def test_hybrid_mode_forwards_resolve_400_detail(
 def test_hybrid_mode_streaming_returns_inline_cost_and_forces_usage(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     from collections.abc import AsyncIterator
 
@@ -963,7 +974,7 @@ def test_hybrid_mode_streaming_returns_inline_cost_and_forces_usage(
 
         return stream()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     with platform_client.stream(
@@ -987,6 +998,7 @@ def test_hybrid_mode_streaming_returns_inline_cost_and_forces_usage(
 def test_hybrid_mode_streaming_falls_through_on_first_attempt_failure(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Streaming request whose first attempt errors before any chunk → falls
     through to the second attempt; client sees a clean 200 SSE stream from
@@ -1075,7 +1087,7 @@ def test_hybrid_mode_streaming_falls_through_on_first_attempt_failure(
 
         return _success_stream()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -1089,11 +1101,11 @@ def test_hybrid_mode_streaming_falls_through_on_first_attempt_failure(
     )
 
     assert response.status_code == 200
-    assert response.headers["X-Correlation-ID"] == "stream-att-openai"
-    # StreamingResponse builds its own response object, so X-Otari-Request-ID
+    assert response.headers["Otari-Attempt-ID"] == "stream-att-openai"
+    # StreamingResponse builds its own response object, so Otari-Request-ID
     # has to be set in the StreamingResponse headers directly — assigning to
     # the dependency-injected Response object doesn't propagate.
-    assert response.headers["X-Otari-Request-ID"] == "stream-req-1"
+    assert response.headers["Otari-Request-ID"] == "stream-req-1"
     # Both attempts were tried in order — anthropic first, then openai succeeded.
     assert [m for m in calls if "anthropic" in m or "openai" in m] == [
         "anthropic:claude-haiku-4-5",
@@ -1121,6 +1133,7 @@ def test_hybrid_mode_streaming_falls_through_on_first_attempt_failure(
 def test_hybrid_mode_streaming_returns_502_when_all_attempts_fail(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """If every attempt fails before yielding, the gateway returns 502 with
     the multi-attempt error wording instead of starting an SSE stream."""
@@ -1164,7 +1177,7 @@ def test_hybrid_mode_streaming_returns_502_when_all_attempts_fail(
     async def fake_acompletion(**kwargs: Any) -> Any:
         raise RuntimeError("simulated upstream failure")
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -1179,11 +1192,13 @@ def test_hybrid_mode_streaming_returns_502_when_all_attempts_fail(
 
     assert response.status_code == 502
     assert response.json() == {"detail": "All upstream providers failed"}
+    assert response.headers["Otari-Attempt-ID"] == "att-b"
 
 
 def test_hybrid_mode_streaming_returns_504_when_all_attempts_time_out(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """If every attempt fails with the OpenAI SDK's own ``APITimeoutError``
     (not a raw ``httpx`` exception; see the non-streaming
@@ -1232,7 +1247,7 @@ def test_hybrid_mode_streaming_returns_504_when_all_attempts_time_out(
     async def fake_acompletion(**kwargs: Any) -> Any:
         raise openai.APITimeoutError(request=httpx.Request("POST", "http://upstream"))
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -1247,11 +1262,13 @@ def test_hybrid_mode_streaming_returns_504_when_all_attempts_time_out(
 
     assert response.status_code == 504
     assert response.json() == {"detail": "All upstream providers timed out"}
+    assert response.headers["Otari-Attempt-ID"] == "att-b"
 
 
 def test_hybrid_mode_streaming_returns_429_when_all_attempts_are_rate_limited(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A route exhausted by rate limits keeps the 429. Flattening it into the
     generic 502 would tell a client that has just been asked to back off that it
@@ -1308,7 +1325,7 @@ def test_hybrid_mode_streaming_returns_429_when_all_attempts_are_rate_limited(
         # failure's window an exhausted route forwards.
         raise _RateLimited("12" if len(upstream_calls) == 1 else "34")
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -1323,6 +1340,7 @@ def test_hybrid_mode_streaming_returns_429_when_all_attempts_are_rate_limited(
 
     assert response.status_code == 429
     assert response.json() == {"detail": "All upstream providers rate-limited this request"}
+    assert response.headers["Otari-Attempt-ID"] == "att-b"
     # A 429 advances the plan, so both attempts really ran: the aggregate is
     # reached by exhausting the route, not by one attempt failing outright.
     assert len(upstream_calls) == 2
@@ -1333,6 +1351,7 @@ def test_hybrid_mode_streaming_returns_429_when_all_attempts_are_rate_limited(
 def test_hybrid_mode_streaming_reports_every_attempt_when_all_fail(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """When every streaming attempt fails before its first chunk, each attempt's
     error outcome is still reported back to the platform. The terminal 502 drops
@@ -1385,7 +1404,7 @@ def test_hybrid_mode_streaming_reports_every_attempt_when_all_fail(
             response=httpx.Response(500, request=httpx.Request("POST", "http://upstream")),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -1492,6 +1511,7 @@ def _two_attempt_resolve_response(*, request_id: str) -> httpx.Response:
 def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Non-streaming MCP request: first attempt errors before any tool round
     completes → the gateway falls through to the second attempt and returns
@@ -1532,7 +1552,7 @@ def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
             usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.MCPClientPool", _FakeMcpPool)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
@@ -1547,7 +1567,7 @@ def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     )
 
     assert response.status_code == 200
-    assert response.headers["X-Correlation-ID"] == "tool-att-openai"
+    assert response.headers["Otari-Attempt-ID"] == "tool-att-openai"
     body = response.json()
     assert body["choices"][0]["message"]["content"] == "hello from openai"
     # Both attempts were tried in order — confirms the [:1] collapse is gone.
@@ -1561,6 +1581,7 @@ def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
 def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Non-streaming MCP request: first attempt returns a tool_call (lock-in
     fires), then upstream dies on round 2. The gateway must NOT try the
@@ -1608,7 +1629,7 @@ def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
         # Round 2 (still on attempt 1 — lock-in is in effect) — upstream dies.
         raise RuntimeError("simulated upstream 5xx on round 2")
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.MCPClientPool", _FakeMcpPool)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
@@ -1667,6 +1688,7 @@ class _CappedSearchBackend:
 def test_hybrid_mode_web_search_cap_is_not_refilled_by_a_streaming_fallover(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """``max_uses`` bounds the request, not each attempt of it.
 
@@ -1743,7 +1765,7 @@ def test_hybrid_mode_web_search_cap_is_not_refilled_by_a_streaming_fallover(
 
         return _stream()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", _CappedSearchBackend)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
@@ -1772,6 +1794,7 @@ def test_hybrid_mode_web_search_cap_is_not_refilled_by_a_streaming_fallover(
 def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Streaming MCP request: first attempt errors before yielding any
     chunk → gateway falls through to the second attempt and streams its
@@ -1821,7 +1844,7 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
 
         return _stream()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.MCPClientPool", _FakeMcpPool)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
@@ -1837,7 +1860,7 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     )
 
     assert response.status_code == 200
-    assert response.headers["X-Correlation-ID"] == "tool-att-openai"
+    assert response.headers["Otari-Attempt-ID"] == "tool-att-openai"
     assert calls == ["anthropic:claude-haiku-4-5", "openai:gpt-4o-mini"]
     assert "hello" in response.text
 
@@ -1926,6 +1949,7 @@ def test_hybrid_mode_web_access_contract_matrix(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     case: dict[str, Any],
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Mirror the control-plane request and response contract through the HTTP route."""
     requested_tools = case["expected_requested_tools"]
@@ -1962,7 +1986,7 @@ def test_hybrid_mode_web_access_contract_matrix(
             usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", _FakeWebSearchBackend)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
@@ -1983,6 +2007,7 @@ def test_hybrid_mode_web_access_contract_matrix(
 def test_hybrid_mode_web_search_403_when_disabled(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """An `otari_web_search` request whose workspace has web search disabled
     is rejected with 403 before any provider call."""
@@ -1997,7 +2022,7 @@ def test_hybrid_mode_web_search_403_when_disabled(
             return httpx.Response(200, json={"enabled": False, "authorized_tools": []})
         return httpx.Response(204)
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
 
     response = platform_client.post(
         f"{API_ROOT}/chat/completions",
@@ -2016,6 +2041,7 @@ def test_hybrid_mode_web_search_403_when_disabled(
 def test_hybrid_mode_web_search_merges_workspace_config(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """When enabled, the resolved workspace config is merged into the tool
     entry with per-request values winning over workspace defaults."""
@@ -2058,7 +2084,7 @@ def test_hybrid_mode_web_search_merges_workspace_config(
             usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", _FakeWebSearchBackend)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
@@ -2090,6 +2116,7 @@ def test_hybrid_mode_web_search_merges_workspace_config(
 def test_hybrid_mode_web_search_forwards_token_to_platform_backend(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """When OTARI_WEB_SEARCH_URL points at the platform itself, the gateway
     forwards its platform token as X-Gateway-Token so the platform-hosted
@@ -2123,7 +2150,7 @@ def test_hybrid_mode_web_search_forwards_token_to_platform_backend(
             usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", _FakeWebSearchBackend)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
@@ -2144,6 +2171,7 @@ def test_hybrid_mode_web_search_forwards_token_to_platform_backend(
 def test_hybrid_mode_web_search_empty_request_list_keeps_workspace_policy(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A request `allowed_domains: []` reads as "no preference" and must NOT clear
     the workspace allow-list — empty/falsy per-request values fall back to the
@@ -2183,7 +2211,7 @@ def test_hybrid_mode_web_search_empty_request_list_keeps_workspace_policy(
             usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", _FakeWebSearchBackend)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
@@ -2207,6 +2235,7 @@ def test_hybrid_mode_web_search_empty_request_list_keeps_workspace_policy(
 def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A single-attempt streaming request that fails before its first chunk
     surfaces the classified status (404), not a generic 502."""
@@ -2245,7 +2274,7 @@ def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
             response=httpx.Response(404, request=httpx.Request("POST", "http://upstream")),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -2260,11 +2289,13 @@ def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
 
     assert response.status_code == 404
     assert response.json() == {"detail": "The requested model was not found on the provider"}
+    assert response.headers["Otari-Attempt-ID"] == "att-a"
 
 
 def test_hybrid_mode_streaming_falls_through_on_provider_400(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A provider 400 advances through every streaming candidate before aggregate failure."""
     usage_reports: list[dict[str, Any]] = []
@@ -2316,7 +2347,7 @@ def test_hybrid_mode_streaming_falls_through_on_provider_400(
             response=httpx.Response(400, request=httpx.Request("POST", "http://upstream")),
         )
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -2406,6 +2437,7 @@ def _sandbox_loop_completion() -> ChatCompletion:
 def test_platform_mode_sandbox_403_when_disabled(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """An otari_code_execution request whose workspace has code execution disabled
     is rejected with 403 before any provider call."""
@@ -2420,7 +2452,7 @@ def test_platform_mode_sandbox_403_when_disabled(
             return httpx.Response(200, json={"enabled": False})
         return httpx.Response(204)
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
 
     response = platform_client.post(
         f"{API_ROOT}/chat/completions",
@@ -2439,6 +2471,7 @@ def test_platform_mode_sandbox_403_when_disabled(
 def test_platform_mode_sandbox_applies_workspace_default_purpose_hint(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """When enabled and the request omits a purpose_hint, the workspace
     default_purpose_hint is applied to the sandbox tool surface."""
@@ -2457,7 +2490,7 @@ def test_platform_mode_sandbox_applies_workspace_default_purpose_hint(
     async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
         return _sandbox_loop_completion()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
@@ -2478,6 +2511,7 @@ def test_platform_mode_sandbox_applies_workspace_default_purpose_hint(
 def test_platform_mode_sandbox_uses_the_deployments_own_image_and_no_tool_allow_list(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Hybrid keeps its own arrangement for the two columns #740 added.
 
@@ -2504,7 +2538,7 @@ def test_platform_mode_sandbox_uses_the_deployments_own_image_and_no_tool_allow_
     async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
         return _sandbox_loop_completion()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
@@ -2526,6 +2560,7 @@ def test_platform_mode_sandbox_uses_the_deployments_own_image_and_no_tool_allow_
 def test_platform_mode_streaming_sandbox_gets_the_same_image(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """The fallback-walking stream builds a backend of its own, so it needs its own case.
 
@@ -2576,7 +2611,7 @@ def test_platform_mode_streaming_sandbox_gets_the_same_image(
 
         return _stream()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
@@ -2598,6 +2633,7 @@ def test_platform_mode_streaming_sandbox_gets_the_same_image(
 def test_platform_mode_sandbox_per_request_hint_wins(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """A per-request purpose_hint overrides the workspace default."""
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
@@ -2615,7 +2651,7 @@ def test_platform_mode_sandbox_per_request_hint_wins(
     async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
         return _sandbox_loop_completion()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
@@ -2636,6 +2672,7 @@ def test_platform_mode_sandbox_per_request_hint_wins(
 def test_platform_mode_sandbox_applies_workspace_max_iterations_cap(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """The workspace's resolved code-exec max_iterations caps the tool loop.
     The request omits max_tool_iterations, so the workspace cap (2) binds over
@@ -2657,7 +2694,7 @@ def test_platform_mode_sandbox_applies_workspace_max_iterations_cap(
         captured["max_iterations"] = kwargs["max_iterations"]
         return _sandbox_loop_completion()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
     monkeypatch.setattr("gateway.api.routes.chat.mcp_tool_loop", fake_mcp_tool_loop)
 
@@ -2680,6 +2717,7 @@ def test_platform_mode_sandbox_unreachable_returns_502(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     unavailable: bool,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Hybrid non-streaming chat with the sandbox backend down surfaces the
     backend-specific 502, not a generic provider error or a 500. Regression
@@ -2715,7 +2753,7 @@ def test_platform_mode_sandbox_unreachable_returns_502(
         async def __aexit__(self, *exc: object) -> None:
             return None
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _DownSandboxBackend)
 
     response = platform_client.post(
@@ -2743,6 +2781,7 @@ def test_platform_mode_sandbox_unreachable_returns_502(
 def test_platform_mode_web_search_unreachable_returns_502(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
 ) -> None:
     """Hybrid non-streaming chat with the web-search backend down surfaces the
     backend-specific 502 (same regression as the sandbox variant)."""
@@ -2773,7 +2812,7 @@ def test_platform_mode_web_search_unreachable_returns_502(
     def fake_build_web_search_backend(**kwargs: Any) -> _DownWebSearchBackend:
         return _DownWebSearchBackend()
 
-    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", fake_build_web_search_backend)
 
     response = platform_client.post(

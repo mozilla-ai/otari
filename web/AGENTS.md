@@ -95,6 +95,14 @@ Overlay navigation uses the empty seam modules under `src/app/nav/` for new
 sections, items inserted into base sections, and label overrides. Keep their
 types aligned with otari-ai.
 
+Three more seams let a build whose one dashboard reaches several deployments
+say which: `shared/api/overlayRequestPolicy.ts` (the origin and credential every
+management request uses, settled before the bootstrap is read),
+`features/auth/overlayPublicAuthFields.tsx` (a control above the address on the
+pages that post one), and `app/nav/overlayAccountBadge.tsx` (the mark on the
+account control, the monogram here). Each ships inert; `src/overlaySeams.test.ts`
+lists every seam and checks it is reached by its `@/…` specifier.
+
 ## Icons
 
 Icons come from `react-icons/fi`, the library the sidebar and the nav registry

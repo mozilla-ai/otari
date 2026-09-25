@@ -225,7 +225,7 @@ Both endpoints share one error body:
 
 `detail` is a fixed safe message per category; `code` and `execution_state` are
 stable enums. `request_id` is an opaque Otari request id, present in every error
-body and returned in `X-Otari-Request-ID` on success and failure alike, which is
+body and returned in `Otari-Request-ID` on success and failure alike, which is
 why a successful body stays the plain MCP result. No error carries a server URL,
 a credential, a header, your arguments, a result, a platform detail, or raw
 exception text.

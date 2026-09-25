@@ -16,7 +16,7 @@ import pytest
 from any_llm import LLMProvider
 from any_llm.types.files import AsyncFileDownload
 
-from gateway.services.files.provider_files import (
+from gateway.services.files._provider_files import (
     _TIMEOUT,
     FileOverBudgetError,
     ProviderCredential,
@@ -447,7 +447,7 @@ def test_for_run_needs_a_credential(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     config: Any = SimpleNamespace()
-    monkeypatch.setattr("gateway.services.files.provider_files.get_provider_kwargs", lambda *args, **kwargs: {})
+    monkeypatch.setattr("gateway.services.files._provider_files.get_provider_kwargs", lambda *args, **kwargs: {})
 
     with pytest.raises(LookupError):
         ProviderFileClient.for_run(config, provider="anthropic", provider_instance="anthropic", workspace_id=None)

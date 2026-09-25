@@ -37,9 +37,11 @@ on:
     branches: [ main, develop ]
     paths:
       - 'src/gateway/**'
+      - 'cli/**'
       - 'alembic/**'
       - 'alembic.ini'
       - 'scripts/oss_edition_smoke.py'
+      - 'scripts/hybrid_edition_smoke.py'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-oss-edition.yml'
@@ -47,9 +49,11 @@ on:
     branches: [ main ]
     paths:
       - 'src/gateway/**'
+      - 'cli/**'
       - 'alembic/**'
       - 'alembic.ini'
       - 'scripts/oss_edition_smoke.py'
+      - 'scripts/hybrid_edition_smoke.py'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-oss-edition.yml'
@@ -89,15 +93,34 @@ jobs:
     # discovered packages, an unsatisfiable pin) is invisible until someone tries
     # to ship the OSS edition, and otari-docker.yml only finds it after merge.
     #
-    # The artifacts are proof that the recipe works, and are deliberately not what
-    # gets booted below. A wheel install cannot migrate: alembic/ is not package
-    # data, and _run_migrations resolves it relative to the package
-    # (src/gateway/core/database.py), which only lands next to it in a source
-    # layout. The published image is that source layout (`uv sync` over COPY src,
-    # plus COPY alembic), so booting the same way is what makes this gate resemble
-    # the deployment rather than a distribution nobody ships.
+    # The gateway's artifacts are proof that the recipe works, and are
+    # deliberately not what gets booted below. A wheel install cannot migrate:
+    # alembic/ is not package data, and _run_migrations resolves it relative to
+    # the package (src/gateway/core/database.py), which only lands next to it in
+    # a source layout. The published image is that source layout (`uv sync` over
+    # COPY src, plus COPY alembic), so booting the same way is what makes this
+    # gate resemble the deployment rather than a distribution nobody ships.
     - name: Build the OSS distribution
-      run: uv build
+      run: uv build --all-packages
+
+    # The light CLI's sdist is the one artifact that does ship (Homebrew installs
+    # it, otari-homebrew.yml), so it is installed alone, from its exported
+    # closure, into a venv outside the checkout (inside it, `uv pip` picks up
+    # the workspace constraints). A dependency that reached cli/ from the gateway
+    # fails here on the PR, not on the release.
+    - name: Install the light CLI alone and smoke it
+      run: |
+        uv export --frozen --package otari-agent --no-dev --no-emit-workspace -o dist/requirements.txt
+        DIST="$PWD/dist"
+        cd "$(mktemp -d)"
+        uv venv light --python 3.14
+        uv pip install --python light/bin/python --require-hashes -r "$DIST/requirements.txt"
+        uv pip install --python light/bin/python --no-deps "$DIST"/otari_agent-*.tar.gz
+        light/bin/otari --version
+        printf '{}' | light/bin/otari hook
+        light/bin/otari import claude-code --dry-run --projects-dir "$(mktemp -d)" | grep -q "Nothing to import"
+        ! light/bin/otari serve >/dev/null 2>&1
+        light/bin/python -c "import sys, otari_agent.cli; assert 'gateway' not in sys.modules"
 
     # Runtime dependencies only, no dev group: that is what lets the smoke detect
     # a dev-only or enterprise-only import on an OSS path.
@@ -108,3 +131,33 @@ jobs:
       run: >-
         uv run --frozen --no-dev python scripts/oss_edition_smoke.py
         --database-url postgresql://otari:otari@127.0.0.1:5432/otari
+
+  # The other edition the same build ships: a gateway attached to a control
+  # plane. The dev gateway at otari.ai deploys from main on every merge against
+  # a control plane pinned to an older release, so this is the one place a
+  # change to what the gateway *sends* over docs/hybrid-mode-protocol.md is
+  # checked before it is live. scripts/hybrid_edition_smoke.py boots the
+  # packaged CLI with a platform token against standard-library fakes of the
+  # control plane, an OpenAI/Anthropic provider and an MCP server, and asserts
+  # on the requests those fakes recorded as much as on the responses.
+  #
+  # No PostgreSQL: a hybrid gateway runs no database, and booting one here would
+  # hide a hybrid code path that quietly grew a database dependency.
+  hybrid-edition:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      with:
+        python-version: "3.14"
+
+    - name: Install the OSS edition
+      run: uv sync --frozen --no-dev
+
+    - name: Boot the hybrid gateway and smoke its tool paths
+      run: uv run --frozen --no-dev python scripts/hybrid_edition_smoke.py

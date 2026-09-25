@@ -33,20 +33,23 @@ from gateway.log_config import logger
 from gateway.services import mcp_loop_messages as messages_loop_module
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import (
-    SERVER_TOOL_USE_ID_PREFIX,
-    WEB_SEARCH_TOOL_USE_ID_PREFIX,
     MaxToolIterationsExceeded,
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
-from gateway.services.sandbox_backend import CodeExecution
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecution
 from gateway.services.tool_format import (
     inject_purpose_hints_anthropic,
     openai_to_anthropic_tools,
 )
-from gateway.services.web_retrieval_backend import WEB_RETRIEVAL_RESULT_MAX_BYTES
-from gateway.services.web_search_budget import WebSearchBudget
+from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, ToolUseBudget
+from gateway.services.web_retrieval_backend import WEB_RETRIEVAL_RESULT_MAX_BYTES, WEB_SEARCH_TOOL_NAME
 from gateway.types.code_execution import ResultBlock
+
+
+def _use_budget(max_uses: int) -> ToolUseBudget:
+    """A cap on the gateway's own searches, which is the tool these loops run."""
+    return ToolUseBudget(WEB_SEARCH_TOOL_NAME, max_uses)
 
 
 class _FakePool:
@@ -1408,7 +1411,7 @@ async def test_native_blocks_prepended_to_final_content(monkeypatch: pytest.Monk
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, pool),
         max_iterations=5,
-        emit_native_web_search=True,
+        native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
     )
 
     # The pair comes before the model's answer, because the search happened first.
@@ -1419,7 +1422,7 @@ async def test_native_blocks_prepended_to_final_content(monkeypatch: pytest.Monk
     # The result block is paired to its server_tool_use by id, as a client expects.
     assert tool_result.tool_use_id == server_use.id
     # Reserved prefix: this is what tells an echoed pair from a provider's own.
-    assert server_use.id.startswith(WEB_SEARCH_TOOL_USE_ID_PREFIX)
+    assert server_use.id.startswith(SERVER_TOOL_USE_ID_PREFIX)
     citation = tool_result.content[0]
     assert citation.url == "https://python.org"
     assert citation.title == "Python"
@@ -1440,7 +1443,7 @@ async def test_nonstream_native_search_results_respect_the_result_byte_limit(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, pool),
         max_iterations=5,
-        emit_native_web_search=True,
+        native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
     )
 
     tool_result = cast(Any, result.content[1])
@@ -1473,7 +1476,7 @@ async def test_failed_search_contributes_no_native_blocks(monkeypatch: pytest.Mo
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, pool),
         max_iterations=5,
-        emit_native_web_search=True,
+        native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
     )
 
     assert [b.type for b in result.content] == ["text"]
@@ -1489,7 +1492,7 @@ async def test_tool_error_search_contributes_no_native_blocks(monkeypatch: pytes
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, pool),
         max_iterations=5,
-        emit_native_web_search=True,
+        native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
     )
 
     assert [b.type for b in result.content] == ["text"]
@@ -1505,7 +1508,7 @@ async def test_hits_without_a_url_are_dropped_from_citations(monkeypatch: pytest
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, pool),
         max_iterations=5,
-        emit_native_web_search=True,
+        native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
     )
 
     citations = cast(Any, result.content[1]).content
@@ -1526,7 +1529,7 @@ async def test_non_web_search_tool_gets_no_native_blocks(monkeypatch: pytest.Mon
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, pool),
         max_iterations=5,
-        emit_native_web_search=True,
+        native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
     )
 
     assert [b.type for b in result.content] == ["text"]
@@ -1545,7 +1548,7 @@ async def test_native_blocks_for_each_of_several_searches(monkeypatch: pytest.Mo
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, _FakeSearchPool()),
         max_iterations=5,
-        emit_native_web_search=True,
+        native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
     )
 
     assert [b.type for b in result.content] == [
@@ -1583,8 +1586,8 @@ async def test_native_max_uses_stops_further_searches_and_reports_an_error(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, pool),
         max_iterations=5,
-        emit_native_web_search=True,
-        web_search_budget=WebSearchBudget(1),
+        native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
+        use_budget=_use_budget(1),
     )
 
     assert pool.calls == [("web_search", {"query": "first"})]
@@ -1647,8 +1650,8 @@ async def test_stream_native_max_uses_stops_further_searches_and_reports_an_erro
             completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
             pool=cast(Any, pool),
             max_iterations=5,
-            emit_native_web_search=True,
-            web_search_budget=WebSearchBudget(1),
+            native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
+            use_budget=_use_budget(1),
         )
     ]
 
@@ -1690,8 +1693,8 @@ async def test_native_max_uses_error_block_is_anthropic_schema_only(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, _FakeSearchPool()),
         max_iterations=5,
-        emit_native_web_search=True,
-        web_search_budget=WebSearchBudget(1),
+        native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
+        use_budget=_use_budget(1),
     )
 
     error_content = cast(Any, cast(Any, result.content[3]).content)
@@ -1722,8 +1725,8 @@ async def test_native_max_uses_is_not_spent_by_a_failed_search(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, pool),
         max_iterations=5,
-        emit_native_web_search=True,
-        web_search_budget=WebSearchBudget(1),
+        native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
+        use_budget=_use_budget(1),
     )
 
     assert pool.calls == [("web_search", {"query": "first"}), ("web_search", {"query": "second"})]
@@ -1801,7 +1804,7 @@ async def test_stream_emits_native_blocks_with_gapless_indices(monkeypatch: pyte
             completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
             pool=cast(Any, pool),
             max_iterations=5,
-            emit_native_web_search=True,
+            native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
         )
     ]
 
@@ -1917,7 +1920,7 @@ async def test_stream_tool_error_search_contributes_no_native_blocks(monkeypatch
             completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
             pool=cast(Any, pool),
             max_iterations=5,
-            emit_native_web_search=True,
+            native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
         )
     ]
 
@@ -1944,7 +1947,7 @@ async def test_mixed_batch_still_emits_native_blocks(monkeypatch: pytest.MonkeyP
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, pool),
         max_iterations=5,
-        emit_native_web_search=True,
+        native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
     )
 
     types = [b.type for b in result.content]
@@ -2021,8 +2024,8 @@ async def test_stream_mixed_batch_exit_still_honors_the_cap(
             completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
             pool=cast(Any, pool),
             max_iterations=5,
-            emit_native_web_search=True,
-            web_search_budget=WebSearchBudget(1),
+            native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
+            use_budget=_use_budget(1),
         )
     ]
 
@@ -2065,7 +2068,7 @@ async def test_stream_mixed_batch_emits_native_blocks_before_the_terminal(
             completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
             pool=cast(Any, pool),
             max_iterations=5,
-            emit_native_web_search=True,
+            native_tools=frozenset({WEB_SEARCH_TOOL_NAME}),
         )
     ]
 
@@ -2159,7 +2162,7 @@ async def test_native_code_execution_pair_is_prepended_to_the_final_content(monk
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, _FakeSandboxPool()),
         max_iterations=5,
-        emit_native_code_execution=True,
+        native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
     )
 
     assert [b.type for b in result.content] == ["server_tool_use", "code_execution_tool_result", "text"]
@@ -2188,7 +2191,7 @@ async def test_a_program_that_failed_is_still_reported_natively(monkeypatch: pyt
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, _FakeSandboxPool(result=_exec_result(stdout="", stderr="ZeroDivisionError", return_code=1))),
         max_iterations=5,
-        emit_native_code_execution=True,
+        native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
     )
 
     tool_result = cast(Any, result.content[1])
@@ -2209,7 +2212,7 @@ async def test_an_unreachable_sandbox_is_reported_as_the_native_error_shape(monk
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, _FakeSandboxPool(fail=True)),
         max_iterations=5,
-        emit_native_code_execution=True,
+        native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
     )
 
     tool_result = cast(Any, result.content[1])
@@ -2268,7 +2271,7 @@ async def test_stream_announces_the_execution_as_native_blocks(monkeypatch: pyte
             completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
             pool=cast(Any, pool),
             max_iterations=5,
-            emit_native_code_execution=True,
+            native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
         )
     ]
 
@@ -2304,7 +2307,7 @@ async def test_native_result_announces_a_stored_file_the_block_did_not_name(monk
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
         pool=cast(Any, _DiffPool()),
         max_iterations=5,
-        emit_native_code_execution=True,
+        native_tools=frozenset({CODE_EXECUTION_TOOL_NAME}),
     )
 
     tool_result = cast(Any, result.content[1])

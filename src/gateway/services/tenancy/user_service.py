@@ -55,17 +55,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
-from gateway.models.tenancy import User
-from gateway.repositories.tenancy import UserRepository
-from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
-from gateway.services.mail import Mailer
-from gateway.services.password_service import (
-    hash_password_async,
-    verify_absent_password_async,
-    verify_password_async,
-)
-from gateway.services.tenancy.email_address import validated_email
-from gateway.services.tenancy.errors import (
+from gateway.exceptions.identity_exceptions import (
     CurrentPasswordIncorrectError,
     EmailAlreadyInUseError,
     EmailNotVerifiedError,
@@ -76,6 +66,16 @@ from gateway.services.tenancy.errors import (
     UnmodifiedPasswordError,
     VerificationTokenInvalidError,
 )
+from gateway.models.tenancy import User
+from gateway.repositories.tenancy import UserRepository
+from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
+from gateway.services.mail import Mailer
+from gateway.services.password_service import (
+    hash_password_async,
+    verify_absent_password_async,
+    verify_password_async,
+)
+from gateway.services.tenancy.email_address import validated_email
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.password_policy import validate_new_password

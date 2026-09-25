@@ -123,12 +123,22 @@ function mockApi() {
 // No router on purpose: the page renders ahead of the session, where the app
 // has not mounted one, so a component that reached for a router hook here
 // would be the bug the test exists to catch.
-function renderPage(modelId?: string) {
+function renderPage(
+  modelId?: string,
+  openSignup = false,
+  overrides: Parameters<typeof bootstrap>[0] = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <DeploymentProvider value={bootstrap({ public_catalog: true })}>
+    <DeploymentProvider
+      value={bootstrap({
+        public_catalog: true,
+        open_signup: openSignup,
+        ...overrides,
+      })}
+    >
       <QueryClientProvider client={client}>
         <PublicCatalogPage modelId={modelId} />
       </QueryClientProvider>
@@ -142,7 +152,7 @@ describe("PublicCatalogPage", () => {
     window.location.hash = ""
   })
 
-  it("lists the catalog for a visitor with a way to sign in and nothing to edit", async () => {
+  it("lists the catalog for a visitor and nothing to edit", async () => {
     const fetchMock = mockApi()
     renderPage()
 
@@ -151,10 +161,6 @@ describe("PublicCatalogPage", () => {
     expect(
       within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }),
     ).toHaveAttribute("href", "#/models/z-ai/glm-5.3")
-    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
-      "href",
-      "#/",
-    )
     expect(screen.getByText(/deployment's list rates/)).toBeInTheDocument()
     // A visitor has no organization to ask about, and asking would be a 401.
     expect(
@@ -182,18 +188,93 @@ describe("PublicCatalogPage", () => {
     )
   })
 
-  it("tells a visitor to sign in before the request to copy", async () => {
+  it("starts an account from Use this model, sign-in while signup is closed", async () => {
     mockApi()
     renderPage("z-ai/glm-5.3")
+
+    const use = await screen.findByRole("link", { name: "Use this model" })
+    expect(use).toHaveAttribute("href", "#/")
+    // No drawer for a visitor: there is no key to send its request with.
+    expect(screen.queryByRole("button", { name: "Use this model" })).toBeNull()
+  })
+
+  it("starts an account from Use this model at signup where it is open", async () => {
+    mockApi()
+    renderPage("z-ai/glm-5.3", true)
+
+    expect(
+      await screen.findByRole("link", { name: "Use this model" }),
+    ).toHaveAttribute("href", "#/signup")
+  })
+
+  it("carries the site's navbar, and the logo goes back to the catalog without a site", async () => {
+    mockApi()
+    renderPage()
+
+    const nav = screen.getByRole("navigation", { name: "Site" })
+    const models = within(nav).getByRole("link", { name: "Models" })
+    expect(models).toHaveAttribute("href", "#/models")
+    expect(models).toHaveAttribute("aria-current", "page")
+    expect(within(nav).getByRole("link", { name: "Log in" })).toHaveAttribute(
+      "href",
+      "#/",
+    )
+    // The bundled guide sits behind sign-in, so a visitor gets the docs on GitHub.
+    expect(
+      within(nav).getByRole("link", { name: "Documentation" }),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/mozilla-ai/otari/blob/main/docs/index.md",
+    )
+    expect(within(nav).getByRole("link", { name: "GitHub" })).toHaveAttribute(
+      "href",
+      "https://github.com/mozilla-ai/otari",
+    )
+    // Signup is closed on this deployment, so there is nothing to offer.
+    expect(within(nav).queryByRole("link", { name: "Sign up" })).toBeNull()
+    expect(screen.getByRole("link", { name: "Otari home" })).toHaveAttribute(
+      "href",
+      "#/models",
+    )
+    await screen.findByRole("list", { name: "Models" })
+  })
+
+  it("links the logo to the deployment's site and offers signup where it is open", async () => {
+    mockApi()
+    renderPage(undefined, true, {
+      site_url: "https://otari.ai/",
+      docs_url: "https://docs.otari.ai/en/",
+    })
+
+    expect(screen.getByRole("link", { name: "Otari home" })).toHaveAttribute(
+      "href",
+      "https://otari.ai/",
+    )
+    const nav = screen.getByRole("navigation", { name: "Site" })
+    expect(within(nav).getByRole("link", { name: "Sign up" })).toHaveAttribute(
+      "href",
+      "#/signup",
+    )
+    expect(
+      within(nav).getByRole("link", { name: "Documentation" }),
+    ).toHaveAttribute("href", "https://docs.otari.ai/en/")
+    await screen.findByRole("list", { name: "Models" })
+  })
+
+  it("opens the same destinations from the menu at phone width", async () => {
+    mockApi()
+    renderPage()
     const user = userEvent.setup()
 
-    await user.click(
-      await screen.findByRole("button", { name: "Use this model" }),
-    )
+    await user.click(screen.getByRole("button", { name: "Open menu" }))
 
-    const drawer = await screen.findByRole("dialog", { name: "Use this model" })
-    expect(
-      within(drawer).getByRole("link", { name: "Sign in" }),
-    ).toHaveAttribute("href", "#/")
+    const menu = await screen.findByRole("dialog", { name: "Menu" })
+    for (const name of ["Models", "Documentation", "GitHub", "Log in"]) {
+      expect(within(menu).getByRole("link", { name })).toBeInTheDocument()
+    }
+    expect(within(menu).getByRole("link", { name: "Models" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    )
   })
 })

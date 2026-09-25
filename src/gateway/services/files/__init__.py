@@ -1,19 +1,43 @@
-"""File-domain services that are not part of the original flat modules.
+"""The files domain: uploaded files, their lifecycle, and the sweep that gives their storage back."""
 
-``file_service.py`` and ``file_extractors.py`` next door still serve uploads
-and document understanding; this package holds what has been written since the
-layout rule took effect.
-"""
-
-from gateway.services.files.file_sweeper import SweepBatch, run_file_sweeper, sweep_files
-from gateway.services.files.provider_files import ProviderFile, produced_files_for
-from gateway.services.files.sandbox_bridge import SandboxFileBridge
+from gateway.services.files._metadata import expiry_for, guess_mime_type
+from gateway.services.files._provider_files import ProviderFile, produced_files_for
+from gateway.services.files._sandbox_bridge import SandboxFileBridge
+from gateway.services.files._service import (
+    DEFAULT_LIST_LIMIT,
+    MAX_LIST_LIMIT,
+    FileContent,
+    FileDialect,
+    FileListing,
+    FilePage,
+    FileScope,
+    FileService,
+    NewFile,
+    NewOutput,
+    SweepBatch,
+)
+from gateway.services.files._staging import CODE_EXECUTION_OUTPUT_PURPOSE, StagedFile, sandbox_path_for
+from gateway.services.files._sweeper import run_file_sweeper
 
 __all__ = [
+    "CODE_EXECUTION_OUTPUT_PURPOSE",
+    "DEFAULT_LIST_LIMIT",
+    "MAX_LIST_LIMIT",
+    "FileContent",
+    "FileDialect",
+    "FileListing",
+    "FilePage",
+    "FileScope",
+    "FileService",
+    "NewFile",
+    "NewOutput",
     "ProviderFile",
     "SandboxFileBridge",
+    "StagedFile",
     "SweepBatch",
+    "expiry_for",
+    "guess_mime_type",
     "produced_files_for",
     "run_file_sweeper",
-    "sweep_files",
+    "sandbox_path_for",
 ]

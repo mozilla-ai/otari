@@ -33,7 +33,14 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop,
     mcp_tool_loop_stream,
 )
-from gateway.services.web_search_budget import WebSearchBudget
+from gateway.services.tools import ToolUseBudget
+from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
+
+
+def _use_budget(max_uses: int) -> ToolUseBudget:
+    """A cap on the gateway's own searches, which is the tool these loops run."""
+    return ToolUseBudget(WEB_SEARCH_TOOL_NAME, max_uses)
+
 
 _FinishReason = Literal["stop", "length", "tool_calls", "content_filter", "function_call"]
 
@@ -343,7 +350,7 @@ async def test_max_uses_stops_further_searches_and_reports_a_tool_error(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
         pool=cast(Any, pool),
         max_iterations=5,
-        web_search_budget=WebSearchBudget(1),
+        use_budget=_use_budget(1),
     )
 
     assert pool.calls == [("web_search", {"query": "first"})]
@@ -384,7 +391,7 @@ async def test_stream_max_uses_stops_further_searches(monkeypatch: pytest.Monkey
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
         pool=cast(Any, pool),
         max_iterations=5,
-        web_search_budget=WebSearchBudget(1),
+        use_budget=_use_budget(1),
     ):
         pass
 
@@ -417,7 +424,7 @@ async def test_max_uses_is_not_spent_by_a_failed_search(monkeypatch: pytest.Monk
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
         pool=cast(Any, pool),
         max_iterations=5,
-        web_search_budget=WebSearchBudget(1),
+        use_budget=_use_budget(1),
     )
 
     assert pool.calls == [("web_search", {"query": "first"}), ("web_search", {"query": "second"})]

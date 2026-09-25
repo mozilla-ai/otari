@@ -29,25 +29,30 @@ from contextlib import aclosing
 from typing import TYPE_CHECKING, Any
 
 from any_llm import aresponses
-from openai.types.responses import ResponseCodeInterpreterToolCall, ResponseFunctionWebSearch
+from openai.types.responses import ResponseCodeInterpreterToolCall
 from openai.types.responses.response_code_interpreter_tool_call import OutputImage, OutputLogs
-from openai.types.responses.response_function_web_search import ActionSearch
 from openai.types.responses.response_output_item_added_event import ResponseOutputItemAddedEvent
 from openai.types.responses.response_output_item_done_event import ResponseOutputItemDoneEvent
 
 from gateway.log_config import logger
 from gateway.services._tool_loop import StreamAction, run_tool_loop, run_tool_loop_stream
-from gateway.services.file_service import guess_mime_type
+from gateway.services.files import guess_mime_type
 from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
     MaxToolIterationsExceeded,
     ToolBackend,
 )
-from gateway.services.sandbox_backend import CodeExecution
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecution
 from gateway.services.tool_format import openai_to_responses_tools
-from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
-from gateway.services.web_search_budget import MAX_USES_EXCEEDED_ERROR, WebSearchBudget, is_capped_search
+from gateway.services.tools import (
+    MAX_USES_EXCEEDED_ERROR,
+    Dialect,
+    NativeCall,
+    ToolUseBudget,
+    is_capped_call,
+    native_rendering,
+)
 
 if TYPE_CHECKING:
     from any_llm.types.responses import Response, ResponseStreamEvent
@@ -89,25 +94,22 @@ async def _execute_function_calls(
     pool: ToolBackend,
     items: list[Any],
     *,
-    budget: WebSearchBudget | None = None,
+    budget: ToolUseBudget | None = None,
     refused_call_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Run each owned function_call and return the Responses function_call_output items.
 
     Tool failures convert to a ``[tool error] ...`` string in the output so the
     model can recover. Only cancellation-class exceptions escape; same idiom
-    as :func:`gateway.services.mcp_loop._execute_mcp_calls`. A search past
-    ``budget`` is refused as one of those errors. When supplied,
-    ``refused_call_ids`` records that decision at its source so no native
-    ``web_search_call`` item claims a search that never ran.
+    as :func:`gateway.services.mcp_loop._execute_mcp_calls`. A call past ``budget``
+    is refused as one of those errors. When supplied, ``refused_call_ids`` records
+    that decision at its source, so a tool announces a refused call the way its own
+    rendering says to rather than as one that ran.
     """
     out: list[dict[str, Any]] = []
     for item in items:
-        try:
-            args = json.loads(item.arguments or "{}")
-        except json.JSONDecodeError:
-            args = {}
-        capped = is_capped_search(budget, pool, item.name)
+        args = _parsed_arguments(item.arguments)
+        capped = is_capped_call(budget, pool, item.name)
         if capped and budget is not None and budget.exhausted():
             if refused_call_ids is not None:
                 refused_call_ids.add(str(item.call_id))
@@ -202,23 +204,6 @@ def _reoutput_indexed(event: Any, visible_index: int) -> Any:
     return event.model_copy(update={"output_index": visible_index})
 
 
-def _web_search_call_item(call_id: str, query: str) -> ResponseFunctionWebSearch:
-    """The Responses API's native "the server ran a search" output item.
-
-    This is the one place the gateway's own tool work is expressible in a
-    provider's native vocabulary: ``ResponseFunctionWebSearch`` needs only an id,
-    an action, and a status, all of which the gateway legitimately knows. The
-    Anthropic equivalent is not expressible, because its result block requires an
-    Anthropic-signed ``encrypted_content`` blob (see docs/tools.md).
-    """
-    return ResponseFunctionWebSearch(
-        id=call_id,
-        action=ActionSearch(type="search", query=query),
-        status="completed",
-        type="web_search_call",
-    )
-
-
 # The gateway's own ``code_interpreter_call`` item ids. OpenAI issues ``ci_``
 # ids, so a reserved prefix is what lets an echoed item be told apart from one
 # describing a run OpenAI's own interpreter did (see ``routes/responses.py``).
@@ -271,35 +256,51 @@ def _code_interpreter_call_item(
     )
 
 
+def _parsed_arguments(raw: Any) -> dict[str, Any]:
+    """The call's arguments, empty where the model sent something unusable."""
+    try:
+        parsed = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _native_items(call: NativeCall, pool: ToolBackend, tools: frozenset[str], *, refused: bool) -> list[Any]:
+    """Native items announcing one gateway-run call, if this caller asked to hear about it.
+
+    A refused call is announced through its tool's refusal rendering, which for a
+    search is nothing: no search ran. An MCP call has no native equivalent at all and
+    stays invisible.
+    """
+    if call.name not in tools:
+        return []
+    rendering = native_rendering(call.name, Dialect.RESPONSES)
+    if rendering is None:
+        return []
+    return rendering.refused(call) if refused else rendering.ran(call, pool)
+
+
 def _native_items_for(
     owned: list[Any],
     pool: ToolBackend,
-    refused: set[str] | None = None,
+    refused_call_ids: set[str] | None = None,
     *,
-    emit_code_execution: bool = False,
+    tools: frozenset[str] = frozenset(),
 ) -> list[Any]:
-    """Native items for the gateway-run calls among ``owned``.
+    """Native items for the gateway-run calls among ``owned`` whose tool ``tools`` names.
 
-    ``web_search`` always maps to a ``web_search_call``, since the item needs only
-    an id, a query and a status. A call the ``max_uses`` cap refused is invisible:
-    no search ran, so there is nothing to announce. ``code_execution`` maps to a
-    ``code_interpreter_call`` only for a caller that declared the tool in
-    OpenAI's vocabulary (``emit_code_execution``), read off the executions the
-    sandbox backend kept for the calls just awaited. An MCP call has no native
-    equivalent and stays invisible.
+    ``code_execution`` maps to a ``code_interpreter_call``, read off the executions the
+    sandbox backend kept for the calls just awaited rather than off the calls themselves.
     """
     items: list[Any] = []
     for item in owned:
-        if getattr(item, "name", None) != WEB_SEARCH_TOOL_NAME:
-            continue
-        if refused and (getattr(item, "call_id", "") or "") in refused:
-            continue
-        try:
-            query = str(json.loads(getattr(item, "arguments", "") or "{}").get("query") or "")
-        except json.JSONDecodeError:
-            query = ""
-        items.append(_web_search_call_item(getattr(item, "call_id", "") or "", query))
-    items.extend(_code_interpreter_items(pool, emit=emit_code_execution))
+        call = NativeCall(
+            str(getattr(item, "name", "") or ""),
+            str(getattr(item, "call_id", "") or ""),
+            _parsed_arguments(getattr(item, "arguments", "")),
+        )
+        items.extend(_native_items(call, pool, tools, refused=bool(refused_call_ids and call.id in refused_call_ids)))
+    items.extend(_code_interpreter_items(pool, emit=CODE_EXECUTION_TOOL_NAME in tools))
     return items
 
 
@@ -336,41 +337,37 @@ async def _execute_stream_owned(
     state: "_ResponsesStreamState",
     pool: ToolBackend,
     *,
-    budget: WebSearchBudget | None = None,
-    emit_code_execution: bool = False,
+    budget: ToolUseBudget | None = None,
+    tools: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     """Run the stream's gateway-owned function calls, returning their output items.
 
     Shared by the continue path and the mixed-batch exit so both parse the buffered
-    arguments identically. Refusals are recorded on ``state`` because
-    ``synthetic_events`` runs afterwards and must not announce a search that the
-    cap stopped.
+    arguments identically. Each call's native items are minted here rather than in
+    ``synthetic_events``, which runs afterwards and holds no backend to read them from.
     """
     results: list[dict[str, Any]] = []
     for spec in state.owned_specs:
-        try:
-            args = json.loads(spec.get("arguments") or "{}")
-        except json.JSONDecodeError:
-            args = {}
-        capped = is_capped_search(budget, pool, spec["name"])
+        args = _parsed_arguments(spec.get("arguments"))
+        call = NativeCall(str(spec["name"]), str(spec.get("call_id") or ""), args)
+        capped = is_capped_call(budget, pool, call.name)
         if capped and budget is not None and budget.exhausted():
-            state.refused_call_ids.add(str(spec["call_id"]))
-            results.append(
-                {"type": "function_call_output", "call_id": spec["call_id"], "output": MAX_USES_EXCEEDED_ERROR}
-            )
+            state.native_items.extend(_native_items(call, pool, tools, refused=True))
+            results.append({"type": "function_call_output", "call_id": call.id, "output": MAX_USES_EXCEEDED_ERROR})
             continue
         try:
-            text = await pool.call_tool(spec["name"], args)
+            text = await pool.call_tool(call.name, args)
         except MaxToolIterationsExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 (same tool-error-as-message idiom as the non-stream loop)
-            logger.warning("MCP tool %s execution failed: %s", spec["name"], exc)
+            logger.warning("MCP tool %s execution failed: %s", call.name, exc)
             text = f"[tool error] {exc}"
         else:
             if capped and budget is not None:
                 budget.record(text)
-        results.append({"type": "function_call_output", "call_id": spec["call_id"], "output": text})
-    state.code_interpreter_items.extend(_code_interpreter_items(pool, emit=emit_code_execution))
+        state.native_items.extend(_native_items(call, pool, tools, refused=False))
+        results.append({"type": "function_call_output", "call_id": call.id, "output": text})
+    state.code_interpreter_items.extend(_code_interpreter_items(pool, emit=CODE_EXECUTION_TOOL_NAME in tools))
     return results
 
 
@@ -427,11 +424,9 @@ class _ResponsesStreamState:
         self.compaction_items: dict[int, Any] = {}
         self.deferred_completed: ResponseStreamEvent | None = None
         self.owned_specs: list[dict[str, Any]] = []
-        # ``call_id``s the max_uses cap refused this iteration, so their native
-        # ``web_search_call`` item is not emitted.
-        self.refused_call_ids: set[str] = set()
-        # Native items for this iteration's gateway-run code executions, minted
-        # right after the calls ran and drained by ``synthetic_events``.
+        # Native items for this iteration's gateway-run calls, minted right after
+        # each call ran and drained by ``synthetic_events``.
+        self.native_items: list[Any] = []
         self.code_interpreter_items: list[ResponseCodeInterpreterToolCall] = []
         # Output items the gateway runs itself. Their events are swallowed: the
         # client can never be sent a ``function_call_output`` for a call the
@@ -452,11 +447,13 @@ class _ResponsesToolLoopStrategy:
 
     transcript_key = "input_data"
 
-    def __init__(self, *, budget: WebSearchBudget | None = None, emit_native_code_execution: bool = False) -> None:
+    def __init__(self, *, budget: ToolUseBudget | None = None, native_tools: frozenset[str] = frozenset()) -> None:
         # Absent unless the caller capped the searches, which keeps the shared
         # instance in ``_strategy_for`` free of per-request state.
         self._budget = budget
-        self._emit_native_code_execution = emit_native_code_execution
+        # The gateway-run tools this caller declared in OpenAI's own words, so each
+        # one's items go out only to a client that asked in the vocabulary.
+        self._native_tools = native_tools
 
     def coerce_transcript(self, value: Any) -> list[Any]:
         return _coerce_input_to_list(value)
@@ -510,11 +507,11 @@ class _ResponsesToolLoopStrategy:
         # Mixed-batch exit: the owned subset runs for its side effects. Collect
         # its native items too, since ``fold_usage`` runs on that path and
         # prepends them, so the caller still sees the search or run it paid for.
-        refused: set[str] = set()
-        outputs = await _execute_function_calls(pool, owned, budget=self._budget, refused_call_ids=refused)
+        refused_call_ids: set[str] = set()
+        outputs = await _execute_function_calls(pool, owned, budget=self._budget, refused_call_ids=refused_call_ids)
         if acc is not None:
             acc["native_items"].extend(
-                _native_items_for(owned, pool, refused, emit_code_execution=self._emit_native_code_execution)
+                _native_items_for(owned, pool, refused_call_ids, tools=self._native_tools)
             )
         return outputs
 
@@ -565,7 +562,7 @@ class _ResponsesToolLoopStrategy:
             acc["compactions"].extend(_compaction_items(output))
             acc["native_items"].extend(
                 _native_items_for(
-                    owned, pool, refused_call_ids, emit_code_execution=self._emit_native_code_execution
+                    owned, pool, refused_call_ids, tools=self._native_tools
                 )
             )
 
@@ -726,7 +723,7 @@ class _ResponsesToolLoopStrategy:
         # it announces the runs natively before the round exits.
         if state.owned_specs:
             await _execute_stream_owned(
-                state, pool, budget=self._budget, emit_code_execution=self._emit_native_code_execution
+                state, pool, budget=self._budget, tools=self._native_tools
             )
             for event in self.synthetic_events(state, acc):
                 yield event
@@ -759,30 +756,15 @@ class _ResponsesToolLoopStrategy:
     def synthetic_events(
         self, state: _ResponsesStreamState, acc: dict[str, Any]
     ) -> list[ResponseStreamEvent]:
-        """Announce gateway-run searches in the Responses API's native vocabulary.
+        """Announce this iteration's gateway-run calls in the Responses API's own vocabulary.
 
-        The raw ``function_call`` events were swallowed (the client can never be
-        sent their output), so a ``web_search_call`` item takes their place: it is
-        what an OpenAI-hosted search would have emitted, and unlike the Anthropic
-        equivalent it is expressible without forging provider-signed content.
-
-        A gateway-run code execution is announced as a ``code_interpreter_call``
-        for a caller that declared the tool in OpenAI's vocabulary. An MCP call
-        has no native item and stays invisible on the wire.
+        The raw ``function_call`` events were swallowed (the client can never be sent
+        their output), so each tool's native item takes their place. The items were
+        minted where the calls ran, since this hook holds no backend to read them from.
         """
         events: list[ResponseStreamEvent] = []
-        items: list[Any] = []
-        for spec in state.owned_specs:
-            if spec.get("name") != WEB_SEARCH_TOOL_NAME:
-                continue
-            if str(spec.get("call_id")) in state.refused_call_ids:
-                continue
-            try:
-                query = str(json.loads(spec.get("arguments") or "{}").get("query") or "")
-            except json.JSONDecodeError:
-                query = ""
-            items.append(_web_search_call_item(spec.get("call_id") or "", query))
-        items.extend(state.code_interpreter_items)
+        items = [*state.native_items, *state.code_interpreter_items]
+        state.native_items = []
         state.code_interpreter_items = []
         acc.setdefault("native_items", []).extend(items)
         for item in items:
@@ -829,7 +811,7 @@ class _ResponsesToolLoopStrategy:
         transcript.extend(_items_to_dicts(replay_items))
         transcript.extend(
             await _execute_stream_owned(
-                state, pool, budget=self._budget, emit_code_execution=self._emit_native_code_execution
+                state, pool, budget=self._budget, tools=self._native_tools
             )
         )
         return
@@ -840,17 +822,17 @@ _RESPONSES_STRATEGY = _ResponsesToolLoopStrategy()
 
 
 def _strategy_for(
-    budget: WebSearchBudget | None, *, emit_native_code_execution: bool = False
+    budget: ToolUseBudget | None, *, native_tools: frozenset[str] = frozenset()
 ) -> _ResponsesToolLoopStrategy:
     """The shared strategy, or a per-request one when either option is set.
 
-    Only a capped request, or one owed native interpreter items, has anything
+    Only a capped request, or one owed a tool's native items, has anything
     per-request to hold, so every other request keeps reusing the single
     module-level instance.
     """
-    if budget is None and not emit_native_code_execution:
+    if budget is None and not native_tools:
         return _RESPONSES_STRATEGY
-    return _ResponsesToolLoopStrategy(budget=budget, emit_native_code_execution=emit_native_code_execution)
+    return _ResponsesToolLoopStrategy(budget=budget, native_tools=native_tools)
 
 
 async def responses_tool_loop(
@@ -859,8 +841,8 @@ async def responses_tool_loop(
     pool: ToolBackend,
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
-    web_search_budget: WebSearchBudget | None = None,
-    emit_native_code_execution: bool = False,
+    use_budget: ToolUseBudget | None = None,
+    native_tools: frozenset[str] = frozenset(),
 ) -> Response:
     """Non-streaming OpenAI Responses tool-use loop.
 
@@ -884,7 +866,7 @@ async def responses_tool_loop(
     reasoning items that can't be replayed against another provider.
     """
     return await run_tool_loop(
-        strategy=_strategy_for(web_search_budget, emit_native_code_execution=emit_native_code_execution),
+        strategy=_strategy_for(use_budget, native_tools=native_tools),
         completion_kwargs=completion_kwargs,
         pool=pool,
         max_iterations=max_iterations,
@@ -897,8 +879,8 @@ async def responses_tool_loop_stream(
     completion_kwargs: dict[str, Any],
     pool: ToolBackend,
     max_iterations: int,
-    web_search_budget: WebSearchBudget | None = None,
-    emit_native_code_execution: bool = False,
+    use_budget: ToolUseBudget | None = None,
+    native_tools: frozenset[str] = frozenset(),
 ) -> AsyncGenerator[ResponseStreamEvent, None]:
     """Streaming OpenAI Responses tool-use loop.
 
@@ -919,7 +901,7 @@ async def responses_tool_loop_stream(
     # instead of waiting for event-loop async-generator finalization.
     async with aclosing(
         run_tool_loop_stream(
-            strategy=_strategy_for(web_search_budget, emit_native_code_execution=emit_native_code_execution),
+            strategy=_strategy_for(use_budget, native_tools=native_tools),
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,

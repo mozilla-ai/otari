@@ -116,7 +116,7 @@ Content-Type: application/json
 Otari iterates `attempts` in order. On a provider failure before a response is
 committed, it moves to the next entry; on success it stops. The `attempt_id` of
 the entry that ultimately succeeded (or the last one tried, on total failure) is what Otari echoes
-back via `X-Correlation-ID` and reports through `/gateway/usage`.
+back via `Otari-Attempt-ID` and reports through `/gateway/usage`.
 
 `extra_params` (optional, omitted for most providers) carries provider-specific
 credential/client fields beyond `api_key`/`api_base`: for example AWS
@@ -157,7 +157,7 @@ boto3 client and AWS has two distinct credential shapes:
 
 `request_id` groups every `attempt_id` from the same resolve call so the
 platform can attribute spend, render trace timelines, and emit fallback events.
-Otari also surfaces it as the `X-Otari-Request-ID` response header.
+Otari also surfaces it as the `Otari-Request-ID` response header.
 
 `fallback_enabled` is informational, set by the platform when its routing
 policy actually allows fallback (i.e. the policy has multiple enabled entries
@@ -265,10 +265,11 @@ The caller-orchestrated endpoints send exactly one id:
 ```
 
 Otari reads `name`, `url`, `authorization_token`, `purpose_hint`, and
-`allowed_tools` off each entry in `servers`; for the tool loop, a missing
-`servers` key is treated as an empty list. The same URL-safety rules as inline
-MCP configs apply once the configs are resolved (SSRF guard, no bearer token
-over cleartext `http://`).
+`allowed_tools` off each entry in `servers`. Every answer must carry the
+`servers` key. An empty list says the peer resolved none. An answer omitting the
+key is one Otari cannot read. The same URL-safety rules as inline MCP configs
+apply once the configs are resolved (SSRF guard, no bearer token over cleartext
+`http://`).
 
 For a caller-orchestrated request, exactly one returned entry is bound to the
 one id Otari requested. A legacy entry may omit `id` and `enabled`; Otari uses
@@ -278,6 +279,11 @@ list is the legacy representation of a disabled server and becomes
 A missing or malformed `servers` list, multiple entries, malformed recognized
 fields, or an explicit id that does not match remain
 `502 mcp_resolution_failed`.
+
+For a tool-loop request, a missing or malformed `servers` list is also
+`502 mcp_resolution_failed`. A request naming stored servers is refused rather
+than dispatched without them. A caller cannot tell an emptied tool list from a
+model that chose not to call one, and the attempt is billed either way.
 
 New peers should return `id` and `enabled`. When present, `id` must match the
 request and `enabled` must be a JSON boolean; `enabled: false` becomes the same

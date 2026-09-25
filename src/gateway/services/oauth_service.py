@@ -59,13 +59,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT, OAUTH_PROVIDERS, GatewayConfig
+from gateway.exceptions.identity_exceptions import OAuthExchangeError, OAuthNotConfiguredError, OAuthStateError
 from gateway.log_config import logger
 from gateway.models.tenancy import OAUTH_STATE_TTL_SECONDS, OAuthPendingState
-from gateway.services.tenancy.errors import (
-    OAuthExchangeError,
-    OAuthNotConfiguredError,
-    OAuthStateError,
-)
 
 # Which scopes each provider is asked for, and what it calls itself.
 #
@@ -177,8 +173,8 @@ def callback_landing_target(config: GatewayConfig, provider: str, query: str) ->
     is what a reverse proxy may already have rewritten, and this has to name a
     URL in the browser's address bar rather than in this process.
     """
-    target = f"{config.effective_ui_base_url}/#/auth/{quote(provider, safe='')}/callback"
-    return f"{target}?{query}" if query else target
+    route = f"/#/auth/{quote(provider, safe='')}/callback"
+    return config.ui_link(f"{route}?{query}" if query else route)
 
 
 class _DatabaseStateStore:

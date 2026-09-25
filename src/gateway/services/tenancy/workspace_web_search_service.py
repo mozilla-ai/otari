@@ -57,10 +57,10 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.tools_exceptions import WorkspaceWebSearchDomainsExcludedError
 from gateway.models.tenancy import User, Workspace
 from gateway.models.tools import WorkspaceWebSearchConfig
 from gateway.services.tenancy import authorization
-from gateway.services.tenancy.errors import WorkspaceWebSearchDomainsExcludedError
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
 from gateway.services.web_retrieval_policy import (

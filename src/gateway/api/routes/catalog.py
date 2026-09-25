@@ -91,8 +91,8 @@ from gateway.services.selector_index_service import (
 from gateway.services.workspace_scope import organization_for_key_id
 
 # ``verify_catalog_reader_or_public`` rather than ``verify_catalog_reader``: a
-# visitor reads too while ``public_catalog`` is on, and is answered from the
-# configured instances alone. Every other route in the process keeps its gate.
+# visitor reads too while ``public_catalog`` is on, and is answered from what
+# the deployment itself serves. Every other route in the process keeps its gate.
 router = APIRouter(
     prefix="/catalog",
     tags=["catalog"],
@@ -685,8 +685,8 @@ async def list_catalog(
     Prices are the caller's: an organization's override where one applies, else
     the deployment's row, else the genai-prices default. Aliases and routing
     policies are not models and are not listed; see Routing. A visitor, where
-    the catalog is public, sees the configured instances at the deployment's
-    rates and nothing that belongs to a tenant.
+    the catalog is public, sees the configured instances and the hosted
+    models at the deployment's rates, and nothing that belongs to a tenant.
     """
     merged = await _merged_for(db, config, caller, session_identity, model_provider)
     grouped = await _group(db, config, merged, caller=caller, session_identity=session_identity)

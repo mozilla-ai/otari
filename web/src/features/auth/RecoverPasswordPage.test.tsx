@@ -4,7 +4,9 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RecoverPasswordPage } from "@/features/auth/RecoverPasswordPage"
 import { ApiError, apiFetch } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
+import { bootstrap } from "@/tests/fixtures"
 
 // The network boundary, not the hooks: the real hooks, their query keys, and
 // the mutation state the page branches on all stay live.
@@ -18,11 +20,13 @@ function renderPage() {
     defaultOptions: { mutations: { retry: false } },
   })
   return render(
-    <ThemeProvider>
-      <QueryClientProvider client={client}>
-        <RecoverPasswordPage />
-      </QueryClientProvider>
-    </ThemeProvider>,
+    <DeploymentProvider value={bootstrap()}>
+      <ThemeProvider>
+        <QueryClientProvider client={client}>
+          <RecoverPasswordPage />
+        </QueryClientProvider>
+      </ThemeProvider>
+    </DeploymentProvider>,
   )
 }
 
@@ -36,7 +40,21 @@ afterEach(() => {
   window.location.hash = ""
 })
 
+vi.mock("@/features/auth/overlayPublicAuthFields", () => ({
+  PublicAuthFields: ({ page, isBusy }: { page: string; isBusy: boolean }) => (
+    <p>{`fields for ${page}, ${isBusy ? "busy" : "idle"}`}</p>
+  ),
+}))
+
 describe("RecoverPasswordPage", () => {
+  it("renders the edition's own fields ahead of the address", () => {
+    renderPage()
+
+    expect(
+      screen.getByText("fields for recover-password, idle"),
+    ).toBeInTheDocument()
+  })
+
   it("confirms in the conditional rather than reporting on the address", async () => {
     vi.mocked(apiFetch).mockResolvedValue({ message: "…" } as never)
     const user = userEvent.setup()

@@ -6,13 +6,15 @@ build-backend = "setuptools.build_meta"
 # Distribution + import package stay `gateway`: the `otari` name on PyPI is the
 # Otari client SDK (a transitive dep via any-llm-sdk), so a top-level `otari`
 # package here would collide with it. User-facing names (CLI, env vars, docs)
-# are `otari`; only the internal import path remains `gateway`.
+# are `otari`; only the internal import path remains `gateway`. The laptop-side
+# CLI is the workspace member at cli/ (distribution `otari-agent`, import
+# package `otari_agent`), which owns the `otari` console script.
 name = "gateway"
 version = "0.0.0"
 description = "otari, an OpenAI-compatible LLM gateway"
 requires-python = ">=3.13"
 dependencies = [
-    "any-llm-sdk[all]>=1.28.0",
+    "any-llm-sdk[all]>=1.29.0",
     # The built-in guardrail catalog (`services/guardrail_catalog.py`) and the
     # runner that builds an organization's definitions from it
     # (`services/tenancy/organization_guardrail_runner.py`). The extras are the
@@ -78,6 +80,10 @@ dependencies = [
     # Artifacts").
     "mcp>=1.28.1,<1.29.0",
     "opentelemetry-api>=1.39.1",
+    # The laptop-side CLI, a workspace member at cli/. The gateway needs it for
+    # the Agent Gates evaluator the Hook Server runs (otari_agent.domain) and
+    # so that `uv sync` installs the `otari` console script it owns.
+    "otari-agent",
     "pillow>=12.3.0",
     "pypdfium2>=4.30.0",
     "prometheus-client>=0.20.0",
@@ -157,9 +163,6 @@ dev = [
     "testcontainers[postgres]>=4.0.0",
 ]
 
-[project.scripts]
-otari = "gateway.cli:main"
-
 [tool.uv]
 # Otari is deployed as a Linux server and developed on Linux / macOS; it is
 # never packaged for Windows. Pinning the resolution environments keeps the
@@ -187,6 +190,12 @@ environments = [
 # own maintainer sets the real floor. Revisit if Otari is ever published as a
 # wheel people pip-install directly.
 constraint-dependencies = ["authlib>=1.7.2"]
+
+[tool.uv.workspace]
+members = ["cli"]
+
+[tool.uv.sources]
+otari-agent = { workspace = true }
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -219,7 +228,7 @@ gateway = [
 [tool.ruff]
 target-version = "py313"
 line-length = 120
-src = ["src", "tests", "scripts"]
+src = ["src", "cli/src", "tests", "scripts"]
 # `demo/` is shell scripts; nothing for ruff to do there.
 extend-exclude = ["demo/"]
 
@@ -233,7 +242,7 @@ select = ["E", "F", "I", "PERF"]
 [tool.mypy]
 python_version = "3.13"
 strict = true
-files = ["src", "tests", "scripts"]
+files = ["src", "cli/src", "tests", "scripts"]
 # Standalone web-search adapters are independent services (own Dockerfile +
 # requirements), not part of the gateway package. They each ship a top-level
 # `app.py`, so type-checking them together trips mypy's duplicate-module guard.

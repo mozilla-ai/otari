@@ -50,6 +50,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, is_valid_master_key, record_auth_failure
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.identity_exceptions import EmailNotVerifiedError, InvalidCredentialsError
 from gateway.log_config import logger
 from gateway.models.tenancy import User as TenancyUser
 from gateway.rate_limit import RateLimiter
@@ -65,7 +66,6 @@ from gateway.services.dashboard_session_service import (
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.password_service import MAX_PASSWORD_BYTES
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
-from gateway.services.tenancy.errors import EmailNotVerifiedError, InvalidCredentialsError
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import authenticate, operator_has_password

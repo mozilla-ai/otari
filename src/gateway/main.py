@@ -15,13 +15,15 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from typing_extensions import override
 
 from gateway import features
-from gateway.api.deps import set_config
+from gateway.api.deps import build_file_service, set_config
 from gateway.api.main import register_routers
 from gateway.container import Container, build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
 from gateway.core.feature import Worker
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
+from gateway.exceptions import TenancyError
+from gateway.exceptions.control_plane_exceptions import ControlPlaneError
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
@@ -35,6 +37,7 @@ from gateway.services.budgets import run_reservation_sweeper
 from gateway.services.catalog_selectors import reset_selector_index
 from gateway.services.code_execution.container_sweeper import run_sandbox_container_sweeper
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
+from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import run_file_sweeper
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
@@ -79,7 +82,6 @@ from gateway.services.search_tool_store_service import (
 )
 from gateway.services.secret_box import validate_secret_key
 from gateway.services.selector_index_service import run_selector_index_refresher
-from gateway.services.tenancy.errors import TenancyError
 from gateway.services.tenancy.org_provider_key_service import (
     load_org_provider_keys_at_startup,
     reset_org_provider_cache,
@@ -183,7 +185,10 @@ def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutin
     """
     if not config.files_enabled or config.files_sweep_interval_sec <= 0:
         return None
-    return run_file_sweeper(config.files_sweep_interval_sec, container.resolve(FileStoragePort, None))
+    file_store = container.resolve(FileStoragePort, None)
+    return run_file_sweeper(
+        config.files_sweep_interval_sec, lambda uow: build_file_service(uow, file_store, config)
+    )
 
 
 def _start_container_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:
@@ -599,10 +604,10 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
 async def _tenancy_error_handler(_: Request, exc: Exception) -> Response:
     """Render a tenancy domain error as the status it carries.
 
-    One handler for the whole family, so a rehomed service keeps raising domain
-    errors and no tenancy route needs a try/except (see
-    `gateway.services.tenancy.errors`). The body matches FastAPI's own
-    ``HTTPException`` shape, so a client cannot tell which layer answered.
+    One handler for the whole family, so a service keeps raising domain errors
+    and no route needs a try/except (see `gateway.exceptions`). The body matches
+    FastAPI's own ``HTTPException`` shape, so a client cannot tell which layer
+    answered.
 
     A 4xx message is written for the caller and is rendered as it is. A 5xx one
     is not: it describes the deployment rather than the request, and
@@ -621,6 +626,23 @@ async def _tenancy_error_handler(_: Request, exc: Exception) -> Response:
             content={"detail": "Internal server error"},
         )
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+
+async def _control_plane_error_handler(_: Request, exc: Exception) -> Response:
+    """Render a control plane failure as the answer the caller has always had.
+
+    Registered ahead of the tenancy family it belongs to, which would replace a
+    502 body with the generic internal-error detail and drop a rate limit's
+    ``Retry-After``. Both are part of this deployment's published contract with
+    a caller, so a peer's refusal reaches them whole.
+    """
+    if not isinstance(exc, ControlPlaneError):  # pragma: no cover - registered for ControlPlaneError only
+        raise exc
+    if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+        logger.error("Control plane request failed: %s", exc.message)
+    retry_after = getattr(exc, "retry_after", None)
+    headers = {"Retry-After": retry_after} if retry_after else None
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message}, headers=headers)
 
 
 async def _validation_error_handler(_: Request, exc: Exception) -> Response:
@@ -882,6 +904,8 @@ def create_app(config: GatewayConfig) -> FastAPI:
     else:
         app.state.login_rate_limiter = None
 
+    app.state.feedback_rate_limiter = new_feedback_rate_limiter() if config.feedback_enabled else None
+
     if config.public_catalog_rate_limit_per_minute is not None:
         app.state.public_catalog_rate_limiter = RateLimiter(config.public_catalog_rate_limit_per_minute)
     else:
@@ -902,6 +926,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     register_routers(app, config)
     app.add_exception_handler(TenancyError, _tenancy_error_handler)
+    app.add_exception_handler(ControlPlaneError, _control_plane_error_handler)
     app.add_exception_handler(RequestValidationError, _validation_error_handler)
 
     if config.enable_metrics:

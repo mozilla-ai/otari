@@ -49,6 +49,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.usage_source import integration_traffic, served_here
+from gateway.exceptions.organizations_exceptions import (
+    WorkspaceActivationUnavailableError,
+    WorkspaceAlreadyActivatedError,
+)
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
 from gateway.models.tenancy import User, Workspace, WorkspaceActivationState
@@ -56,10 +60,6 @@ from gateway.models.usage import UsageLog
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import authorization
-from gateway.services.tenancy.errors import (
-    WorkspaceActivationUnavailableError,
-    WorkspaceAlreadyActivatedError,
-)
 from gateway.services.tenancy.organization_service import OrganizationService
 
 # What the guide calls the key it mints, as the Keys page shows it. One name for

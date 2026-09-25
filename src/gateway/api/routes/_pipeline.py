@@ -81,7 +81,6 @@ from gateway.api.routes._platform import (
     _report_platform_usage,
     _resolve_platform_code_execution,
     _resolve_platform_credentials,
-    _resolve_platform_mcp_servers,
     _resolve_platform_web_search,
     is_provider_billing_error,
     record_abandoned_attempt,
@@ -90,6 +89,7 @@ from gateway.api.routes._platform import (
     upstream_exception_chain,
     upstream_exception_shape,
     upstream_retry_after,
+    with_attempt_id,
 )
 from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
@@ -106,7 +106,6 @@ from gateway.api.routes._tools import (
     _web_search_intercept_enabled,
     decide_code_executor,
     declares_code_execution,
-    declares_native_web_search,
     first_provider_code_execution_tool,
     native_code_execution_dialect,
     parse_code_execution_header,
@@ -114,7 +113,7 @@ from gateway.api.routes._tools import (
     resolve_code_executor_preference,
     web_search_max_results_baseline,
 )
-from gateway.core.config import REQUEST_ID_HEADER, GatewayConfig
+from gateway.core.config import ATTEMPT_ID_HEADER, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.env import otari_env
 from gateway.core.metered_pricing import calculate_metered_cost, quantize_cost
@@ -124,6 +123,11 @@ from gateway.core.usage import (
     cache_tokens_in_prompt_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
+)
+from gateway.exceptions.tools_exceptions import (
+    McpServerResolutionFailedError,
+    WorkspaceMcpServerNotFoundError,
+    WorkspaceWebSearchDomainsExcludedError,
 )
 from gateway.inflight import track_request
 from gateway.log_config import logger
@@ -138,6 +142,7 @@ from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import CodeExecutor
 from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import CodeExecutionPort
+from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budgets import (
@@ -199,10 +204,6 @@ from gateway.services.sandbox_backend import (
     SandboxUnavailableError,
 )
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
-from gateway.services.tenancy.errors import (
-    WorkspaceMcpServerNotFoundError,
-    WorkspaceWebSearchDomainsExcludedError,
-)
 from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.services.tenancy.organization_guardrail_runner import handle as guardrail_handle
 from gateway.services.tenancy.organization_guardrail_service import (
@@ -214,7 +215,6 @@ from gateway.services.tenancy.workspace_code_execution_policy_service import (
     ResolvedCodeExecutionPolicy,
     resolve_workspace_code_execution_policy,
 )
-from gateway.services.tenancy.workspace_mcp_server_service import resolve_workspace_mcp_servers
 from gateway.services.tenancy.workspace_web_search_service import (
     MAX_WEB_SEARCH_DOMAINS,
     InvalidStoredWebSearchDomainError,
@@ -227,6 +227,7 @@ from gateway.services.tool_usage import (
     TOOL_METER_NAMESPACE,
     ToolUsageTally,
 )
+from gateway.services.tools import Dialect, ToolUseBudget, native_rendering
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.web_retrieval_backend import (
@@ -244,7 +245,6 @@ from gateway.services.web_retrieval_policy import (
     intersect_domain_allow_lists,
     union_domain_block_lists,
 )
-from gateway.services.web_search_budget import WebSearchBudget
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -310,7 +310,6 @@ def record_inline_cost_settlement(outcome: str) -> None:
 DB_UNAVAILABLE_DETAIL = "Database session unavailable"
 API_KEY_VALIDATION_FAILED_DETAIL = "API key validation failed"
 API_KEY_NO_USER_DETAIL = "API key has no associated user"
-MCP_SERVER_IDS_UNAVAILABLE_DETAIL = "mcp_server_ids is unavailable for this request"
 MCP_SERVER_TOKEN_UNREADABLE_DETAIL = "A configured MCP server's authorization token could not be read"
 MCP_SERVER_URL_UNSAFE_DETAIL = "A configured MCP server's URL failed its safety check"
 MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL = (
@@ -448,17 +447,33 @@ UNPRICED_TOOL_DETAIL_TEMPLATE = (
 
 
 class ErrorKind(Enum):
-    """Coarse error category an adapter maps onto its wire envelope.
+    """Coarse error category, for a dialect that names one on the wire.
 
-    The chat and responses formats raise plain ``HTTPException`` and ignore
-    the kind; the Anthropic messages format maps it to the ``error.type``
-    field of its error body.
+    The set covers every category a dialect distinguishes, so an error can say what it is.
     """
 
-    INVALID_REQUEST = auto()
     API = auto()
+    AUTHENTICATION = auto()
+    INVALID_REQUEST = auto()
+    NOT_FOUND = auto()
     PERMISSION = auto()
     RATE_LIMIT = auto()
+
+
+# An error flattened into an ``HTTPException`` no longer carries its kind, so a
+# status stands in for one here.
+_STATUS_ERROR_KINDS = {
+    status.HTTP_400_BAD_REQUEST: ErrorKind.INVALID_REQUEST,
+    status.HTTP_401_UNAUTHORIZED: ErrorKind.AUTHENTICATION,
+    status.HTTP_403_FORBIDDEN: ErrorKind.PERMISSION,
+    status.HTTP_404_NOT_FOUND: ErrorKind.NOT_FOUND,
+    status.HTTP_429_TOO_MANY_REQUESTS: ErrorKind.RATE_LIMIT,
+}
+
+
+def error_kind_for_status(status_code: int) -> ErrorKind:
+    """The kind a bare status implies, falling back to ``API``."""
+    return _STATUS_ERROR_KINDS.get(status_code, ErrorKind.API)
 
 
 class ProviderErrorMapping(NamedTuple):
@@ -782,7 +797,7 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
     tests can monkeypatch them there.
     """
 
-    name: str
+    name: Dialect
     endpoint: str
     stream_format: StreamFormat
 
@@ -839,9 +854,8 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         max_iterations: int,
         on_first_response: Callable[[], None] | None = None,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
-        web_search_budget: WebSearchBudget | None = None,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: ToolUseBudget | None = None,
     ) -> ResultT: ...
 
     def open_tool_loop_stream(
@@ -850,9 +864,8 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         pool: ToolBackend,
         max_iterations: int,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
-        web_search_budget: WebSearchBudget | None = None,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: ToolUseBudget | None = None,
     ) -> AsyncIterator[ChunkT]: ...
 
     def inject_hints(
@@ -928,7 +941,7 @@ class RequestContext:
         request_id: str | None = None,
     ) -> None:
         self.config = config
-        # Sent to the client as ``X-Otari-Request-ID``: the platform's id in hybrid
+        # Sent to the client as ``Otari-Request-ID``: the platform's id in hybrid
         # mode, one minted by this gateway in standalone.
         self.request_id = request_id
         self.db = db
@@ -2105,8 +2118,8 @@ async def resolve_request_context(
                 # a keyed request, the session's for a Playground one, and None
                 # only for the master key, which has no key and resolves to the
                 # default workspace, where narrowing would hide an operator's own
-                # file references. `fetch_file` reads None as "every workspace",
-                # matching the /api/v1/files routes.
+                # file references. The files service reads None as "every
+                # workspace", matching the /api/v1/files routes.
                 post_chars, vision_usage = await normalize_messages(
                     user_id,
                     gate_impl,
@@ -2312,7 +2325,7 @@ class ToolContext:
         self.tally = ToolUsageTally()
         # Successful Search calls spend the caller's cap across all routing attempts.
         cap = self.max_web_search_uses
-        self.web_search_budget = WebSearchBudget(cap) if cap is not None else None
+        self.use_budget = ToolUseBudget(WEB_SEARCH_TOOL_NAME, cap) if cap is not None else None
         # Search and Fetch share a separate attempted-call cap across routing attempts.
         self.web_retrieval_counter = WebRetrievalCounter()
 
@@ -2377,12 +2390,34 @@ class ToolContext:
         return name if isinstance(name, str) and name else None
 
     @property
-    def emit_native_web_search(self) -> bool:
-        """Whether this request should get Anthropic-native server-tool blocks back."""
-        return self.use_web_search and declares_native_web_search(self.web_search_tool_entry)
+    def declared_gateway_tools(self) -> dict[str, dict[str, Any] | None]:
+        """Each built-in tool this request runs, by name, with the caller's declaration of it."""
+        declared = {
+            WEB_SEARCH_TOOL_NAME: (self.web_search_tool_entry, self.use_web_search),
+            WEB_FETCH_TOOL_NAME: (self.web_fetch_tool_entry, self.use_web_fetch),
+            CODE_EXECUTION_TOOL_NAME: (self.sandbox_tool_entry, self.use_sandbox),
+        }
+        return {name: entry for name, (entry, in_use) in declared.items() if in_use}
+
+    def native_tools(self, dialect: Dialect) -> frozenset[str]:
+        """The built-in tools this request announces in ``dialect``'s own server-tool vocabulary.
+
+        A caller who declared a tool in a provider's words is owed that provider's
+        items back, and each tool's registry entry decides whether its declaration
+        asks for them. Code execution answers from :attr:`native_code_execution_dialect`
+        instead, because the dialect loops still build its blocks themselves.
+        """
+        names = {
+            name
+            for name, entry in self.declared_gateway_tools.items()
+            if (rendering := native_rendering(name, dialect)) is not None and rendering.declared(entry)
+        }
+        if self.use_sandbox and self.native_code_execution_dialect == dialect:
+            names.add(CODE_EXECUTION_TOOL_NAME)
+        return frozenset(names)
 
     @property
-    def native_code_execution_dialect(self) -> str | None:
+    def native_code_execution_dialect(self) -> Dialect | None:
         """The wire format whose native code-execution blocks this request expects.
 
         Set only when the gateway runs a declaration made in a provider's own
@@ -2398,9 +2433,9 @@ class ToolContext:
     def max_web_search_uses(self) -> int | None:
         """The web-search use cap, when the caller supplied one.
 
-        Not gated on :attr:`emit_native_web_search`: the cap bounds what the request
-        is billed for, so it is honored on every declaration shape and in every wire
-        format. Only the *refusal* is format-specific, an Anthropic
+        Not gated on :meth:`native_tools`: the cap bounds what the request is billed
+        for, so it is honored on every declaration shape and in every wire format.
+        Only the *refusal* is format-specific, an Anthropic
         ``max_uses_exceeded`` result block where the caller can read one and a plain
         tool error everywhere else.
 
@@ -2681,37 +2716,24 @@ async def _resolve_organization_guardrails(
 async def _resolve_mcp_server_ids(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
+    mcp_server_port: McpServerPort,
     mcp_server_ids: list[uuid.UUID],
 ) -> list[McpServerConfig]:
     """Swap a request's ``mcp_server_ids`` for the configs they name.
 
-    One field, two sources, chosen by mode: hybrid asks the platform, which
-    owns the workspace's stored servers there, and standalone reads
-    ``workspace_mcp_servers`` for the workspace the request's key belongs to
-    (otari#658). The workspace is `RequestContext.workspace_id`, resolved at
-    auth off the key and never from a header, which is the seam otari#655
-    settled; MCP is the exception that decision names, since there is no
-    deployment-wide server list for a workspace row to narrow.
+    The port answers from wherever this deployment keeps them.
+    The workspace comes off the key at authentication and never off a header.
 
-    Both modes refuse an unknown id with a 404, so a caller moving between them
-    sees one contract. A standalone request with no database session or no
-    resolved workspace cannot resolve anything, and is refused rather than
-    served with the ids silently dropped.
+    Every deployment refuses an unknown ID with a 404, so the status a caller
+    sees does not change with the deployment it reached.
     """
-    if ctx.hybrid_mode:
-        assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
-        return await _resolve_platform_mcp_servers(
-            config=ctx.config,
-            user_token=ctx.user_token,
-            mcp_server_ids=mcp_server_ids,
-        )
-
-    if ctx.db is None or ctx.workspace_id is None:
-        raise adapter.error(400, MCP_SERVER_IDS_UNAVAILABLE_DETAIL, ErrorKind.INVALID_REQUEST)
+    scope = McpServerScope(workspace_id=ctx.workspace_id, user_token=ctx.user_token)
     try:
-        return await resolve_workspace_mcp_servers(ctx.db, workspace_id=ctx.workspace_id, server_ids=mcp_server_ids)
+        return await mcp_server_port.resolve_many(scope, mcp_server_ids)
     except WorkspaceMcpServerNotFoundError as exc:
-        raise adapter.error(404, exc.message, ErrorKind.INVALID_REQUEST) from exc
+        raise adapter.error(404, exc.message, ErrorKind.NOT_FOUND) from exc
+    except McpServerResolutionFailedError as exc:
+        raise adapter.error(exc.status_code, exc.message, ErrorKind.API) from exc
     except (SecretBoxUnavailableError, SecretDecryptionError) as exc:
         # The operator's problem, not the caller's, and the underlying message
         # names the environment variable, so it stays in the log.
@@ -2846,6 +2868,7 @@ async def prepare_gateway_tools(
     tools: list[dict[str, Any]] | None,
     mcp_servers: list[McpServerConfig] | None,
     mcp_server_ids: list[uuid.UUID] | None,
+    mcp_server_port: McpServerPort,
     max_tool_iterations: int | None,
     tools_header: str | None,
     code_execution_header: str | None = None,
@@ -2910,19 +2933,15 @@ async def prepare_gateway_tools(
                 inline_names.add(server.name)
             await _validate_mcp_server_urls(adapter, mcp_servers)
         if mcp_server_ids:
-            stored_servers = await _resolve_mcp_server_ids(adapter, ctx, mcp_server_ids)
+            stored_servers = await _resolve_mcp_server_ids(adapter, ctx, mcp_server_port, mcp_server_ids)
             await _validate_mcp_server_urls(
                 adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
             )
             stored_name_counts = Counter(server.name for server in stored_servers)
-            # Standalone cannot reach this: `uq_workspace_mcp_servers_workspace_name`
-            # makes stored names unique per workspace and `resolve_workspace_mcp_servers`
-            # de-duplicates the ids. Hybrid can, because `_resolve_platform_mcp_servers`
-            # returns the platform's payload verbatim, so that uniqueness is a remote
-            # promise rather than a local invariant. It answers the way an unsafe stored
-            # URL does, since a stored duplicate is workspace configuration the caller
-            # can neither see nor fix: a fixed 500 detail, with the names and the
-            # workspace in the log.
+            # Only a peer's answer can hold a duplicate name, because a unique
+            # index and de-duplicated ids rule one out locally. It is workspace
+            # configuration the caller cannot fix, so the detail is fixed and the
+            # names go to the log.
             if len(stored_name_counts) != len(stored_servers):
                 logger.error(
                     "Stored MCP servers do not have unique names for workspace %s: %s",
@@ -4161,8 +4180,8 @@ def _loop_options(tool_ctx: ToolContext) -> dict[str, Any]:
     one request draws on the same one.
     """
     options: dict[str, Any] = {}
-    if tool_ctx.web_search_budget is not None:
-        options["web_search_budget"] = tool_ctx.web_search_budget
+    if tool_ctx.use_budget is not None:
+        options["use_budget"] = tool_ctx.use_budget
     return options
 
 
@@ -4237,22 +4256,20 @@ def _container_headers(lease: ContainerLease | None) -> dict[str, str]:
     if lease is None:
         return {}
     return {
-        "X-Otari-Container-Id": lease.container_id,
-        "X-Otari-Container-Expires-At": lease.expires_at.isoformat(),
+        "Otari-Container-Id": lease.container_id,
+        "Otari-Container-Expires-At": lease.expires_at.isoformat(),
     }
 
 
-def _sandbox_loop_options(adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext) -> dict[str, Any]:
-    """Sandbox-loop kwargs, presence-encoded like :func:`_loop_options`.
+def _native_loop_options(adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext) -> dict[str, Any]:
+    """Native-emission loop kwargs, presence-encoded like :func:`_loop_options`.
 
-    The native flag travels only when this request's declaration is in the
-    adapter's own vocabulary: an Anthropic-dated keyword on Messages, OpenAI's
-    ``code_interpreter`` on Responses. A caller who said ``otari_code_execution``
-    gets the plain result it always has.
+    The set travels only when it names something, so a request owed nothing in this
+    adapter's vocabulary passes no kwarg at all and a format with no vocabulary of its
+    own never sees one.
     """
-    if tool_ctx.native_code_execution_dialect != adapter.name:
-        return {}
-    return {"emit_native_code_execution": True}
+    native_tools = tool_ctx.native_tools(adapter.name)
+    return {"native_tools": native_tools} if native_tools else {}
 
 
 async def dispatch_non_stream(
@@ -4282,7 +4299,7 @@ async def dispatch_non_stream(
                 backend,
                 tool_ctx.max_tool_iterations,
                 on_first_response,
-                **_sandbox_loop_options(adapter, tool_ctx),
+                **_native_loop_options(adapter, tool_ctx),
                 **_container_loop_option(adapter, backend),
             )
 
@@ -4294,7 +4311,7 @@ async def dispatch_non_stream(
             web_backend,
             tool_ctx.max_tool_iterations,
             on_first_response,
-            emit_native_web_search=tool_ctx.emit_native_web_search,
+            **_native_loop_options(adapter, tool_ctx),
             **_loop_options(tool_ctx),
         )
 
@@ -4328,9 +4345,8 @@ async def _eager_backend_stream(
             hinted,
             backend,
             tool_ctx.max_tool_iterations,
-            emit_native_web_search=tool_ctx.emit_native_web_search,
+            **_native_loop_options(adapter, tool_ctx),
             **_loop_options(tool_ctx),
-            **(_sandbox_loop_options(adapter, tool_ctx) if tool_ctx.use_sandbox else {}),
             **(_container_loop_option(adapter, backend) if tool_ctx.use_sandbox else {}),
         ):
             yield event
@@ -4710,7 +4726,7 @@ def build_streaming_response(
     # ``Response`` object does not propagate to streaming responses.
     headers: dict[str, str] = dict(rate_limit_headers(rate_limit_info)) if rate_limit_info else {}
     if platform_correlation_id:
-        headers["X-Correlation-ID"] = platform_correlation_id
+        headers[ATTEMPT_ID_HEADER] = platform_correlation_id
     if request_id:
         headers[REQUEST_ID_HEADER] = request_id
     if extra_headers:
@@ -5062,9 +5078,8 @@ async def run_streaming_with_fallback(
             kwargs,
             pool_for_loop,
             tool_ctx.max_tool_iterations,
-            emit_native_web_search=tool_ctx.emit_native_web_search,
+            **_native_loop_options(adapter, tool_ctx),
             **_loop_options(tool_ctx),
-            **(_sandbox_loop_options(adapter, tool_ctx) if tool_ctx.use_sandbox else {}),
         )
 
     # See run_platform_non_stream: BackgroundTasks only run after a successful
@@ -5126,7 +5141,12 @@ async def run_streaming_with_fallback(
                 await _flush_pending_usage_reports(config, pending_error_reports, route.request_id, session_label)
         finally:
             await backend_stack.aclose()
-        raise
+        if not isinstance(exc, Exception):
+            raise
+        # Only this frame knows which attempt was tried last, so the terminal
+        # error is mapped here.
+        last_attempt_id = pending_error_reports[-1].attempt_id if pending_error_reports else None
+        raise_all_streaming_attempts_failed(adapter, exc, route, last_attempt_id)
 
     if tool_mode:
         logger.info(
@@ -5191,8 +5211,13 @@ def raise_all_streaming_attempts_failed(
     adapter: FormatAdapter[Any, Any],
     exc: Exception,
     route: ResolvedRoute,
+    last_attempt_id: str | None = None,
 ) -> NoReturn:
-    """Map pre-stream failures, preserving sandbox retry hints and provider status."""
+    """Map pre-stream failures, preserving sandbox retry hints and provider status.
+
+    ``last_attempt_id`` names the attempt that failed last, which the hybrid
+    protocol owes the caller on total failure.
+    """
     if isinstance(exc, SandboxNotReachableError):
         logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
         raise _sandbox_error(adapter, exc) from exc
@@ -5201,18 +5226,21 @@ def raise_all_streaming_attempts_failed(
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
     if len(route.attempts) <= 1:
-        raise adapter.provider_error(exc) from exc
+        raise with_attempt_id(adapter.provider_error(exc), last_attempt_id) from exc
     kind, status_code = upstream_exception_shape(exc)
     if kind == "timeout":
-        raise adapter.error(504, ALL_PROVIDERS_TIMED_OUT_DETAIL, ErrorKind.API) from exc
+        timed_out = adapter.error(504, ALL_PROVIDERS_TIMED_OUT_DETAIL, ErrorKind.API)
+        raise with_attempt_id(timed_out, last_attempt_id) from exc
     if status_code == 429:
-        raise adapter.error(
+        rate_limited = adapter.error(
             429,
             ALL_PROVIDERS_RATE_LIMITED_DETAIL,
             ErrorKind.RATE_LIMIT,
             provider_error_headers(exc, 429),
-        ) from exc
-    raise adapter.error(502, ALL_PROVIDERS_FAILED_DETAIL, ErrorKind.API) from exc
+        )
+        raise with_attempt_id(rate_limited, last_attempt_id) from exc
+    all_failed = adapter.error(502, ALL_PROVIDERS_FAILED_DETAIL, ErrorKind.API)
+    raise with_attempt_id(all_failed, last_attempt_id) from exc
 
 
 async def run_platform_non_stream(
@@ -5289,7 +5317,7 @@ async def run_platform_non_stream(
         )
 
     def _on_attempt_success(attempt: ResolvedAttempt) -> None:
-        response.headers["X-Correlation-ID"] = attempt.attempt_id
+        response.headers[ATTEMPT_ID_HEADER] = attempt.attempt_id
         if rate_limit_info:
             for key, value in rate_limit_headers(rate_limit_info).items():
                 response.headers[key] = value

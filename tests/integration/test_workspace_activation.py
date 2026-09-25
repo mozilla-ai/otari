@@ -19,6 +19,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.organizations_exceptions import (
+    NotAuthorizedError,
+    WorkspaceActivationUnavailableError,
+    WorkspaceAlreadyActivatedError,
+    WorkspaceNotFoundError,
+)
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import Organization, User, Workspace, WorkspaceActivationState
 from gateway.models.usage import UsageLog
@@ -33,12 +39,6 @@ from gateway.repositories.tenancy import (
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services import playground_dispatch
 from gateway.services.secret_box import generate_secret_key
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    WorkspaceActivationUnavailableError,
-    WorkspaceAlreadyActivatedError,
-    WorkspaceNotFoundError,
-)
 from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
     WorkspaceActivationService,

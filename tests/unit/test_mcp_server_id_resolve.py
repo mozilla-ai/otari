@@ -1,4 +1,4 @@
-"""Unit tests for resolving workspace-scoped MCP server ids via the platform service."""
+"""Resolving workspace-scoped MCP server ids against a peer control plane."""
 
 from __future__ import annotations
 
@@ -9,10 +9,18 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from gateway.api.routes import _platform as platform_module
-from gateway.api.routes._platform import _resolve_platform_mcp_servers
+from conftest import InstallControlPlane
+from gateway.adapters.mcp_server_adapter import RemoteMcpServers
+from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
+from gateway.exceptions.tools_exceptions import McpServerResolutionFailedError
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.ports.mcp_server_port import McpServerScope
 from gateway.services.tenancy.workspace_mcp_server_service import MAX_MCP_SERVERS_PER_WORKSPACE
+
+
+def _scope(user_token: str = "tk_user") -> McpServerScope:
+    """The scope a hybrid caller supplies, which carries a token and no workspace."""
+    return McpServerScope(workspace_id=None, user_token=user_token)
 
 
 def _config(*, base_url: str | None = "https://platform.local") -> Any:
@@ -27,7 +35,9 @@ def _ok_response(servers: list[dict[str, Any]]) -> httpx.Response:
 
 
 @pytest.mark.asyncio
-async def test_repeated_ids_are_sent_once_in_request_order(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_repeated_ids_are_sent_once_in_request_order(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     """Hybrid de-duplicates ids like the standalone path, so a repeat cannot resolve twice.
 
     Two resolved servers sharing a name are a 500 in `prepare_gateway_tools`,
@@ -43,17 +53,19 @@ async def test_repeated_ids_are_sent_once_in_request_order(monkeypatch: pytest.M
         captured["body"] = body
         return _ok_response([])
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     first = uuid.UUID("11111111-1111-1111-1111-111111111111")
     second = uuid.UUID("22222222-2222-2222-2222-222222222222")
-    await _resolve_platform_mcp_servers(_config(), "tk_user", [first, second, first])
+    await RemoteMcpServers(_config()).resolve_many(_scope(), [first, second, first])
 
     assert captured["body"]["mcp_server_ids"] == [str(first), str(second)]
 
 
 @pytest.mark.asyncio
-async def test_resolve_returns_configs(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_returns_configs(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     captured: dict[str, Any] = {}
 
     async def fake_post(
@@ -75,10 +87,10 @@ async def test_resolve_returns_configs(monkeypatch: pytest.MonkeyPatch) -> None:
             ]
         )
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
     ids = [uuid.UUID("11111111-1111-1111-1111-111111111111")]
-    out = await _resolve_platform_mcp_servers(_config(), "tk_user", ids)
+    out = await RemoteMcpServers(_config()).resolve_many(_scope(), ids)
 
     assert isinstance(out[0], McpServerConfig)
     assert out[0].name == "calendar"
@@ -93,106 +105,108 @@ async def test_resolve_returns_configs(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_empty_servers_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_empty_servers_returns_empty(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return _ok_response([])
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
-    out = await _resolve_platform_mcp_servers(_config(), "tk", [uuid.uuid4()])
+    control_plane_transport(fake_post)
+    out = await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert out == []
 
 
 @pytest.mark.asyncio
-async def test_resolve_404_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_404_passes_through(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(404, json={"detail": "MCPServer not found"})
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException) as ei:
-        await _resolve_platform_mcp_servers(_config(), "tk", [uuid.uuid4()])
+    with pytest.raises(ControlPlaneError) as ei:
+        await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 404
-    assert ei.value.detail == "MCPServer not found"
+    assert ei.value.message == "MCPServer not found"
 
 
 @pytest.mark.asyncio
-async def test_resolve_5xx_maps_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_5xx_maps_to_502(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(503, text="busy")
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException) as ei:
-        await _resolve_platform_mcp_servers(_config(), "tk", [uuid.uuid4()])
+    with pytest.raises(ControlPlaneError) as ei:
+        await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 502
 
 
 @pytest.mark.asyncio
-async def test_resolve_network_error_maps_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_network_error_maps_to_502(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         raise httpx.NetworkError("connection refused")
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException) as ei:
-        await _resolve_platform_mcp_servers(_config(), "tk", [uuid.uuid4()])
+    with pytest.raises(ControlPlaneError) as ei:
+        await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 502
 
 
 @pytest.mark.asyncio
 async def test_resolve_misconfigured_platform_500() -> None:
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException) as ei:
-        await _resolve_platform_mcp_servers(_config(base_url=None), "tk", [uuid.uuid4()])
+    with pytest.raises(ControlPlaneError) as ei:
+        await RemoteMcpServers(_config(base_url=None)).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 500
 
 
 @pytest.mark.asyncio
-async def test_resolve_429_passthrough_with_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_429_passthrough_with_retry_after(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     """A platform 429 should forward verbatim (status + Retry-After header)
     so clients can back off correctly, matching `_resolve_platform_credentials`."""
 
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "30"})
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException) as ei:
-        await _resolve_platform_mcp_servers(_config(), "tk", [uuid.uuid4()])
+    with pytest.raises(ControlPlaneRefusedError) as ei:
+        await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 429
-    assert ei.value.headers == {"Retry-After": "30"}
-    assert ei.value.detail == "slow down"
+    assert ei.value.retry_after == "30"
+    assert ei.value.message == "slow down"
 
 
 @pytest.mark.asyncio
-async def test_resolve_402_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_402_passthrough(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     """402 (payment required / quota) should forward verbatim, matching
     `_resolve_platform_credentials`'s behavior for the same code."""
 
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(402, json={"detail": "quota exhausted"})
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException) as ei:
-        await _resolve_platform_mcp_servers(_config(), "tk", [uuid.uuid4()])
+    with pytest.raises(ControlPlaneError) as ei:
+        await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 402
-    assert ei.value.detail == "quota exhausted"
+    assert ei.value.message == "quota exhausted"
 
 
 @pytest.mark.asyncio
-async def test_resolve_422_collapses_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_422_collapses_to_502(
+    control_plane_transport: InstallControlPlane,
+) -> None:
     """422 from the platform indicates a gateway↔platform schema mismatch,
     not something the caller can usefully act on — collapse to 502 like
     `_resolve_platform_credentials` does."""
@@ -200,12 +214,10 @@ async def test_resolve_422_collapses_to_502(monkeypatch: pytest.MonkeyPatch) -> 
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(422, json={"detail": "schema mismatch"})
 
-    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+    control_plane_transport(fake_post)
 
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException) as ei:
-        await _resolve_platform_mcp_servers(_config(), "tk", [uuid.uuid4()])
+    with pytest.raises(ControlPlaneError) as ei:
+        await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 502
 
 
@@ -219,3 +231,54 @@ def test_the_request_bound_admits_every_server_a_workspace_can_hold() -> None:
     nothing pointing at the cause.
     """
     assert MAX_MCP_SERVER_IDS >= MAX_MCP_SERVERS_PER_WORKSPACE
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_empty_list_resolves_to_no_servers(
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    """An empty list is how a peer says it resolved none, and it is served."""
+
+    async def fake_post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> Any:
+        return httpx.Response(200, json={"servers": []})
+
+    control_plane_transport(fake_post)
+
+    out = await RemoteMcpServers(_config()).resolve_many(
+        _scope("tk"), [uuid.uuid4()]
+    )
+
+    assert out == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param([], id="the answer is not an object"),
+        pytest.param({}, id="the servers key is absent"),
+        pytest.param({"servers": None}, id="servers is null"),
+        pytest.param({"servers": {"a": 1}}, id="servers is an object"),
+        pytest.param({"servers": "none"}, id="servers is a string"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_an_unreadable_answer_is_a_resolution_failure(
+    payload: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    """An unreadable answer never resolves to no servers.
+
+    Resolving it to none would serve a request that named stored servers without any of them, and bill it.
+    """
+
+    async def fake_post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> Any:
+        return httpx.Response(200, json=payload)
+
+    control_plane_transport(fake_post)
+
+    with pytest.raises(McpServerResolutionFailedError):
+        await RemoteMcpServers(_config()).resolve_many(
+            _scope("tk"), [uuid.uuid4()]
+        )

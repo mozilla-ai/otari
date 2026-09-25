@@ -16,7 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CodeExecutionPortDep,
+    McpServerPortDep,
     ModelProviderPortDep,
+    OptionalFileServiceDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
@@ -57,8 +59,9 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.models.tools import CodeExecutor
 from gateway.ports.code_execution_port import CodeExecutionPort
+from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
-from gateway.services.file_service import StagedFile
+from gateway.services.files import FileService, StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
     MAX_TOOL_ITERATIONS_CAP,
@@ -67,7 +70,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop,
     mcp_tool_loop_stream,
 )
-from gateway.services.web_search_budget import WebSearchBudget
+from gateway.services.tools import Dialect, ToolUseBudget
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 from gateway.types.session_principal import SessionPrincipal
@@ -176,7 +179,7 @@ class _ChatAdapter:
     and friends.
     """
 
-    name = "chat"
+    name = Dialect.CHAT
     stream_format: StreamFormat = OPENAI_STREAM_FORMAT
     log_success_without_usage = True
 
@@ -275,23 +278,22 @@ class _ChatAdapter:
         max_iterations: int,
         on_first_response: Callable[[], None] | None = None,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
-        web_search_budget: WebSearchBudget | None = None,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: ToolUseBudget | None = None,
     ) -> ChatCompletion:
-        # The two ``emit_native_*`` flags are accepted for interface parity and
-        # ignored: this format has no native vocabulary for a server-side tool
-        # call, so a gateway-run search or execution stays invisible on the wire
-        # (see docs/tools.md).
-        # ``web_search_budget`` is not: the cap bounds what the caller is billed
+        # ``native_tools`` is accepted for interface parity and always empty: this
+        # format has no native vocabulary for a server-side tool call, so a
+        # gateway-run search or execution stays invisible on the wire (see
+        # docs/tools.md).
+        # ``use_budget`` is not: the cap bounds what the caller is billed
         # for, which every format owes whether or not it can describe the search.
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
         # the platform-attempt path so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
         return await mcp_tool_loop(
             completion_kwargs=kwargs,
             pool=pool,
@@ -305,13 +307,12 @@ class _ChatAdapter:
         pool: ToolBackend,
         max_iterations: int,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
-        web_search_budget: WebSearchBudget | None = None,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: ToolUseBudget | None = None,
     ) -> AsyncIterator[ChatCompletionChunk]:
         extra: dict[str, Any] = {}
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
         return mcp_tool_loop_stream(
             completion_kwargs=kwargs,
             pool=pool,
@@ -396,10 +397,12 @@ async def chat_completions(
     request: ChatCompletionRequest,
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    files: OptionalFileServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
     code_execution_port: CodeExecutionPortDep,
+    mcp_server_port: McpServerPortDep,
 ) -> ChatCompletion | StreamingResponse:
     """OpenAI-compatible chat completions endpoint.
 
@@ -418,10 +421,12 @@ async def chat_completions(
         request=request,
         db=db,
         uow=uow,
+        files=files,
         config=config,
         log_writer=log_writer,
         model_provider=model_provider,
         code_execution_port=code_execution_port,
+        mcp_server_port=mcp_server_port,
     )
 
 
@@ -433,10 +438,12 @@ async def run_chat_completion(
     request: ChatCompletionRequest,
     db: AsyncSession | None,
     uow: UnitOfWork | None,
+    files: FileService | None,
     config: GatewayConfig,
     log_writer: LogWriter,
     model_provider: ModelProviderPort,
     code_execution_port: CodeExecutionPort | None,
+    mcp_server_port: McpServerPort,
     session_principal: SessionPrincipal | None = None,
 ) -> ChatCompletion | StreamingResponse:
     """Serve one chat completion, from the resolved preamble to the response.
@@ -485,8 +492,7 @@ async def run_chat_completion(
             config=config,
             provider=provider,
             model=model,
-            db=db,
-            raw_request=raw_request,
+            files=files,
             user_id=user_id,
             instance=instance,
             workspace_id=workspace_id,
@@ -539,6 +545,7 @@ async def run_chat_completion(
         tools_header=request.tools_header,
         code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
         code_execution_port=code_execution_port,
+        mcp_server_port=mcp_server_port,
         sandbox_containers=build_sandbox_container_registry(
             config=config,
             uow=ctx.uow,

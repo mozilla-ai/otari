@@ -22,6 +22,13 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.exceptions.identity_exceptions import (
+    BootstrapOperatorProtectedError,
+    DeploymentAdministrationUnavailableError,
+    DeploymentUserNotFoundError,
+    DeploymentUserSelfChangeError,
+    EmptyDeploymentUserUpdateError,
+)
 from gateway.models.platform import RuntimeSetting
 from gateway.models.tenancy import (
     DashboardSession,
@@ -37,13 +44,6 @@ from gateway.services.dashboard_session_service import (
     hash_session_token,
 )
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
-from gateway.services.tenancy.errors import (
-    BootstrapOperatorProtectedError,
-    DeploymentAdministrationUnavailableError,
-    DeploymentUserNotFoundError,
-    DeploymentUserSelfChangeError,
-    EmptyDeploymentUserUpdateError,
-)
 from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 
 

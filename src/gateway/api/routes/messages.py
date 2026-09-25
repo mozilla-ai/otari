@@ -19,7 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CodeExecutionPortDep,
+    McpServerPortDep,
     ModelProviderPortDep,
+    OptionalFileServiceDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     extract_credential_token,
@@ -40,6 +42,7 @@ from gateway.api.routes._pipeline import (
     _requested_container,
     classify_provider_error,
     default_attempt_kwargs,
+    error_kind_for_status,
     prepare_gateway_tools,
     provider_error_headers,
     raise_all_streaming_attempts_failed,
@@ -67,21 +70,19 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.models.tools import CodeExecutor
 from gateway.services.code_execution import ContainerLease
-from gateway.services.file_service import StagedFile
+from gateway.services.files import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_messages import (
     MAX_TOOL_ITERATIONS_CAP,
     MCP_ACTIVITY_ID_PREFIX,
     MCP_CLIENT_BETA,
-    SERVER_TOOL_USE_ID_PREFIX,
-    WEB_SEARCH_TOOL_USE_ID_PREFIX,
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
-from gateway.services.web_search_budget import WebSearchBudget
+from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, Dialect, ToolUseBudget
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 
@@ -221,7 +222,7 @@ def _is_gateway_minted_result(block: Any) -> bool:
     """Whether a ``web_search_tool_result`` block was minted by this gateway.
 
     Provenance is the reserved id prefix the gateway mints its ``server_tool_use``
-    with (``mcp_loop_messages.WEB_SEARCH_TOOL_USE_ID_PREFIX``), matched here on the
+    with (:data:`~gateway.services.tools.SERVER_TOOL_USE_ID_PREFIX`), matched here on the
     ``tool_use_id`` the result carries back. Anthropic issues ``srvtoolu_`` ids of its
     own and cannot produce that prefix, so a provider's blocks survive untouched
     whatever they contain, including a ``max_uses_exceeded`` error from its own capped
@@ -236,7 +237,7 @@ def _is_gateway_minted_result(block: Any) -> bool:
     """
     if not isinstance(block, dict) or block.get("type") != "web_search_tool_result":
         return False
-    if str(block.get("tool_use_id") or "").startswith(WEB_SEARCH_TOOL_USE_ID_PREFIX):
+    if str(block.get("tool_use_id") or "").startswith(SERVER_TOOL_USE_ID_PREFIX):
         return True
     hits = block.get("content")
     if not isinstance(hits, list):
@@ -406,16 +407,15 @@ _ERR_AUTHENTICATION = "authentication_error"
 _ERR_NOT_FOUND = "not_found_error"
 _ERR_RATE_LIMIT = "rate_limit_error"
 
-# Anthropic error.type keyed by HTTP status, used when re-wrapping a plain-string
-# HTTPException into the Anthropic envelope: classified provider failures plus
-# preamble auth/permission/resolve rejections. Unlisted statuses (e.g. the 502
-# used for a credentials fault, or a 500) fall back to api_error.
-_STATUS_TO_ANTHROPIC_TYPE = {
-    400: _ERR_INVALID_REQUEST,
-    401: _ERR_AUTHENTICATION,
-    403: _ERR_PERMISSION,
-    404: _ERR_NOT_FOUND,
-    429: _ERR_RATE_LIMIT,
+# Every Anthropic ``error.type`` comes from this table. A bare status reaches it
+# through ``error_kind_for_status``, so one status cannot be classified two ways.
+_ERROR_KIND_TO_ANTHROPIC_TYPE = {
+    ErrorKind.API: _ERR_API,
+    ErrorKind.AUTHENTICATION: _ERR_AUTHENTICATION,
+    ErrorKind.INVALID_REQUEST: _ERR_INVALID_REQUEST,
+    ErrorKind.NOT_FOUND: _ERR_NOT_FOUND,
+    ErrorKind.PERMISSION: _ERR_PERMISSION,
+    ErrorKind.RATE_LIMIT: _ERR_RATE_LIMIT,
 }
 
 
@@ -431,7 +431,7 @@ def _ensure_anthropic_error(exc: HTTPException) -> HTTPException:
     """
     if not isinstance(exc.detail, str):
         return exc
-    error_type = _STATUS_TO_ANTHROPIC_TYPE.get(exc.status_code, _ERR_API)
+    error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[error_kind_for_status(exc.status_code)]
     return HTTPException(
         status_code=exc.status_code,
         detail={"type": "error", "error": {"type": error_type, "message": exc.detail}},
@@ -442,13 +442,6 @@ def _ensure_anthropic_error(exc: HTTPException) -> HTTPException:
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'metadata.user_id' is required in request body"
 _USER_FORBIDDEN = "'metadata.user_id' does not match the authenticated API key's user"
 _PROVIDER_ERROR = "The request could not be completed by the provider"
-
-_ERROR_KIND_TO_ANTHROPIC_TYPE = {
-    ErrorKind.INVALID_REQUEST: _ERR_INVALID_REQUEST,
-    ErrorKind.API: _ERR_API,
-    ErrorKind.PERMISSION: _ERR_PERMISSION,
-    ErrorKind.RATE_LIMIT: _ERR_RATE_LIMIT,
-}
 
 
 def _billable_messages_usage(usage: Any) -> GatewayUsage:
@@ -532,7 +525,7 @@ class _MessagesAdapter:
     and friends.
     """
 
-    name = "messages"
+    name = Dialect.MESSAGES
     endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = ANTHROPIC_STREAM_FORMAT
     # A successful non-streaming call without provider usage data skips the
@@ -552,7 +545,7 @@ class _MessagesAdapter:
     def provider_error(self, exc: BaseException) -> HTTPException:
         mapping = classify_provider_error(exc)
         if mapping is not None:
-            error_type = _STATUS_TO_ANTHROPIC_TYPE.get(mapping.status_code, _ERR_API)
+            error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[error_kind_for_status(mapping.status_code)]
             return _anthropic_error(
                 error_type,
                 mapping.detail,
@@ -623,9 +616,8 @@ class _MessagesAdapter:
         max_iterations: int,
         on_first_response: Callable[[], None] | None = None,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
-        web_search_budget: WebSearchBudget | None = None,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: ToolUseBudget | None = None,
         container: ContainerLease | None = None,
     ) -> MessageResponse:
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
@@ -633,10 +625,10 @@ class _MessagesAdapter:
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
-        if emit_native_code_execution:
-            extra["emit_native_code_execution"] = True
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
+        if native_tools:
+            extra["native_tools"] = native_tools
         if container is not None:
             extra["container"] = container
         provider_kwargs, _ = _split_client_betas(kwargs)
@@ -644,7 +636,6 @@ class _MessagesAdapter:
             completion_kwargs=provider_kwargs,
             pool=pool,
             max_iterations=max_iterations,
-            emit_native_web_search=emit_native_web_search,
             **extra,
         )
 
@@ -654,26 +645,24 @@ class _MessagesAdapter:
         pool: ToolBackend,
         max_iterations: int,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
-        web_search_budget: WebSearchBudget | None = None,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: ToolUseBudget | None = None,
         container: ContainerLease | None = None,
     ) -> AsyncIterator[MessageStreamEvent]:
         provider_kwargs, emit_native_mcp = _split_client_betas(kwargs)
         extra: dict[str, Any] = {}
         if emit_native_mcp:
             extra["emit_native_mcp"] = True
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
-        if emit_native_code_execution:
-            extra["emit_native_code_execution"] = True
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
+        if native_tools:
+            extra["native_tools"] = native_tools
         if container is not None:
             extra["container"] = container
         return anthropic_tool_loop_stream(
             completion_kwargs=provider_kwargs,
             pool=pool,
             max_iterations=max_iterations,
-            emit_native_web_search=emit_native_web_search,
             **extra,
         )
 
@@ -711,7 +700,7 @@ CONTAINER_ON_MANAGED_CREDENTIAL_DETAIL = (
 )
 
 
-def _reject_container_on_managed_credential(ctx: RequestContext, container: str) -> None:
+def _reject_container_on_managed_credential(ctx: RequestContext, container: str | dict[str, Any]) -> None:
     """Refuse a caller-chosen container id when the upstream account is not the caller's.
 
     A container id names an execution environment and the files uploaded into it,
@@ -761,10 +750,12 @@ async def create_message(
     request: MessagesRequest,
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    files: OptionalFileServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
     code_execution_port: CodeExecutionPortDep,
+    mcp_server_port: McpServerPortDep,
 ) -> dict[str, Any] | StreamingResponse:
     """Anthropic Messages API-compatible endpoint.
 
@@ -807,8 +798,7 @@ async def create_message(
             config=config,
             provider=provider,
             model=model,
-            db=db,
-            raw_request=raw_request,
+            files=files,
             user_id=user_id,
             instance=instance,
             workspace_id=workspace_id,
@@ -880,6 +870,7 @@ async def create_message(
         tools_header=request.tools_header,
         code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
         code_execution_port=code_execution_port,
+        mcp_server_port=mcp_server_port,
         # Anthropic's own field, which is where an Anthropic SDK puts the id it
         # read off the last response. Resolved at admission against this caller's
         # leases; the provider never sees it when the sandbox runs the code.

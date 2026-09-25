@@ -16,6 +16,8 @@ import pytest_asyncio
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
+from gateway.exceptions.tools_exceptions import SandboxImageNotAllowedError, SandboxToolsUnrunnableError
 from gateway.models.tenancy import Organization, User, Workspace
 from gateway.models.tools import WorkspaceCodeExecutionPolicy
 from gateway.repositories.tenancy import (
@@ -26,12 +28,6 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAMES
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    SandboxImageNotAllowedError,
-    SandboxToolsUnrunnableError,
-    WorkspaceNotFoundError,
-)
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
     SERVED_TOOL_NAMES,
     WorkspaceCodeExecutionPolicyService,

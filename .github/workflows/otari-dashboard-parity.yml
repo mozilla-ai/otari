@@ -22,6 +22,7 @@ on:
       # The gateway that serves the bundle and answers every request these flows
       # make, tenancy, auth, usage and the deployment bootstrap included.
       - 'src/gateway/**'
+      - 'cli/**'
       # The dashboard bundles this guide (web/src/features/docs/DocsPage.tsx), so a
       # change to it changes the built app.
       - 'docs/dashboard.md'
@@ -35,6 +36,7 @@ on:
     paths:
       - 'web/**'
       - 'src/gateway/**'
+      - 'cli/**'
       - 'docs/dashboard.md'
       - 'pyproject.toml'
       - 'uv.lock'

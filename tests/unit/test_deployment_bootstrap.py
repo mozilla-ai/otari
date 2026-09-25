@@ -67,12 +67,14 @@ def _hosted(
     *,
     terms_url: str | None = None,
     privacy_url: str | None = None,
+    site_url: str | None = None,
 ) -> GatewayConfig:
     return GatewayConfig(
         mode="hosted",
         database_url=f"sqlite:///{tmp_path / 'bootstrap.db'}",
         master_key=MASTER_KEY,
         data_plane_url=data_plane_url,
+        site_url=site_url,
         terms_url=terms_url,
         privacy_url=privacy_url,
     )
@@ -107,9 +109,11 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         "docs_url": None,
         "terms_url": None,
         "privacy_url": None,
+        "site_url": None,
         "maintenance_mode": False,
         "passkeys_ready": False,
         "oauth_providers": [],
+        "feedback_enabled": True,
         "mail_ready": False,
         "public_catalog": False,
         "open_signup": False,
@@ -430,9 +434,11 @@ def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: p
         "docs_url": None,
         "terms_url": None,
         "privacy_url": None,
+        "site_url": None,
         "maintenance_mode": False,
         "passkeys_ready": False,
         "oauth_providers": [],
+        "feedback_enabled": False,
         "mail_ready": False,
         "public_catalog": False,
         "open_signup": False,
@@ -598,6 +604,27 @@ def test_a_hybrid_gateway_carries_its_own_legal_pages_too(monkeypatch: pytest.Mo
     assert body["privacy_url"] == "https://otari.ai/privacy"
 
 
+def test_site_url_is_published_for_the_public_catalogs_logo(tmp_path: Path) -> None:
+    """Where the logo on the pages ahead of a session goes, for a hosted platform with a site of its own."""
+    app = create_app(_hosted(tmp_path, site_url="https://otari.ai/"))
+
+    with TestClient(app) as client:
+        body = client.get(f"{API_ROOT}/bootstrap").json()
+
+    assert body["site_url"] == "https://otari.ai/"
+
+
+def test_site_url_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("OTARI_SITE_URL", "https://otari.ai/")
+    assert GatewayConfig(database_url=f"sqlite:///{tmp_path / 'env.db'}").site_url == "https://otari.ai/"
+
+
+@pytest.mark.parametrize("configured", ["javascript:alert(1)", "otari.ai", "/"])
+def test_a_site_url_that_is_not_an_http_link_is_refused_at_load(configured: str) -> None:
+    with pytest.raises(ValidationError, match="site_url"):
+        GatewayConfig(site_url=configured)
+
+
 @pytest.mark.parametrize("field", ["terms_url", "privacy_url"])
 def test_a_legal_url_is_read_from_the_environment(field: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """OTARI_TERMS_URL and OTARI_PRIVACY_URL are the whole configuration surface a container needs."""
@@ -624,7 +651,7 @@ def test_a_blank_legal_url_is_an_unset_one(field: str) -> None:
     assert getattr(GatewayConfig.model_validate({field: "   "}), field) is None
 
 
-@pytest.mark.parametrize("field", ["docs_url", "terms_url", "privacy_url"])
+@pytest.mark.parametrize("field", ["docs_url", "terms_url", "privacy_url", "site_url"])
 @pytest.mark.parametrize(
     "configured",
     ["https://token@otari.ai/terms", "https://user:secret@otari.ai/terms"],

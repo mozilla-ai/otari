@@ -30,6 +30,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.exceptions import TenancyError, TenancyNotFoundError
+from gateway.exceptions.organizations_exceptions import ForeignTenancyError
 from gateway.log_config import logger
 from gateway.models.platform import RuntimeSetting
 from gateway.models.tenancy import Organization, User
@@ -41,11 +43,6 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.repositories.users_repository import get_or_create_attribution_user
-from gateway.services.tenancy.errors import (
-    ForeignTenancyError,
-    TenancyError,
-    TenancyNotFoundError,
-)
 from gateway.services.tenancy.membership_listener import MembershipListener
 
 # Stored in runtime_settings, and deliberately not a SETTABLE_KEY, so

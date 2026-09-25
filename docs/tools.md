@@ -148,8 +148,8 @@ This is the same contract as Anthropic's `container` and OpenAI's
   `code_interpreter` tool entry. Every `code_interpreter_call` item carries the
   id as `container_id`; send it back as `"container": "otari_cntr_…"` on that
   entry.
-- On every dialect, the response headers `X-Otari-Container-Id` and
-  `X-Otari-Container-Expires-At` name it, and the `otari_code_execution` tool
+- On every dialect, the response headers `Otari-Container-Id` and
+  `Otari-Container-Expires-At` name it, and the `otari_code_execution` tool
   entry takes a `container` string, `"auto"` or an id.
 
 `sandbox_container_idle_ttl_sec` (600 by default) is how long a held sandbox

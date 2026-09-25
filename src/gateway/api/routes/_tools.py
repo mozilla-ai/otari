@@ -39,8 +39,10 @@ from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.tools import CodeExecutor
 from gateway.services.tool_usage import ToolUsageTally
+from gateway.services.tools import Dialect
 from gateway.services.web_retrieval_backend import (
     DEFAULT_MAX_RESULTS,
+    WEB_SEARCH_NATIVE_TYPE_PREFIX,
     WEB_SEARCH_TOOL_NAME,
     WebRetrievalBackend,
     WebRetrievalCounter,
@@ -80,7 +82,6 @@ class Tool(StrEnum):
 # future Anthropic versions (``web_search_20991231``) and OpenAI's Responses
 # spellings (``web_search_preview``) working without a release here.
 _BARE_WEB_SEARCH_TYPE = "web_search"
-_VERSIONED_WEB_SEARCH_PREFIX = "web_search_"
 
 
 def _is_web_search_tool_type(type_value: Any) -> bool:
@@ -104,28 +105,12 @@ def _is_provider_web_search_tool_type(type_value: Any) -> bool:
     """
     if not isinstance(type_value, str):
         return False
-    return type_value == _BARE_WEB_SEARCH_TYPE or type_value.startswith(_VERSIONED_WEB_SEARCH_PREFIX)
+    return type_value == _BARE_WEB_SEARCH_TYPE or type_value.startswith(WEB_SEARCH_NATIVE_TYPE_PREFIX)
 
 
 def _is_any_web_search_tool_type(type_value: Any) -> bool:
     """The gateway-managed type or a provider-named keyword."""
     return _is_web_search_tool_type(type_value) or _is_provider_web_search_tool_type(type_value)
-
-
-def declares_native_web_search(tool_entry: dict[str, Any] | None) -> bool:
-    """Whether the caller declared web search in a provider's *native* vocabulary.
-
-    True for a dated/preview keyword (``web_search_20250305``), which is what the
-    Anthropic SDK, Claude Code, and Claude Desktop send and what makes them expect
-    ``server_tool_use`` / ``web_search_tool_result`` blocks back so a citations
-    panel has something to render. False for ``otari_web_search`` and for the bare
-    ``web_search`` short form: neither implies the native response shape, so those
-    callers keep receiving the plain-text result they always have.
-    """
-    if not tool_entry:
-        return False
-    type_value = tool_entry.get("type")
-    return isinstance(type_value, str) and type_value.startswith(_VERSIONED_WEB_SEARCH_PREFIX)
 
 
 def _is_code_execution_tool_type(type_value: Any) -> bool:
@@ -158,9 +143,9 @@ _OPENAI_CODE_INTERPRETER_TYPE = "code_interpreter"
 # native form on Chat Completions, and the bare ``code_execution`` short form is
 # nobody's, so a request declaring it is never natively served and ``auto``
 # always runs it here.
-_NATIVE_CODE_EXECUTION: dict[str, tuple[str, str]] = {
-    _VERSIONED_CODE_EXECUTION_PREFIX: ("anthropic", "messages"),
-    _OPENAI_CODE_INTERPRETER_TYPE: ("openai", "responses"),
+_NATIVE_CODE_EXECUTION: dict[str, tuple[str, Dialect]] = {
+    _VERSIONED_CODE_EXECUTION_PREFIX: ("anthropic", Dialect.MESSAGES),
+    _OPENAI_CODE_INTERPRETER_TYPE: ("openai", Dialect.RESPONSES),
 }
 
 
@@ -198,7 +183,7 @@ def first_provider_code_execution_tool(tools: list[dict[str, Any]] | None) -> di
     return None
 
 
-def native_code_execution_dialect(tool_entry: dict[str, Any] | None) -> str | None:
+def native_code_execution_dialect(tool_entry: dict[str, Any] | None) -> Dialect | None:
     """The wire format whose native result blocks the caller expects, or ``None``.
 
     ``"messages"`` for Anthropic's dated keyword, which is what the Anthropic SDK
@@ -219,7 +204,7 @@ def native_code_execution_dialect(tool_entry: dict[str, Any] | None) -> str | No
     return None
 
 
-def provider_runs_code_natively(tool_entry: dict[str, Any] | None, *, provider: str | None, dialect: str) -> bool:
+def provider_runs_code_natively(tool_entry: dict[str, Any] | None, *, provider: str | None, dialect: Dialect) -> bool:
     """Whether the dispatched provider would run this declaration in its own sandbox.
 
     True only when the keyword is the provider's own vocabulary *and* the request
@@ -502,7 +487,7 @@ def web_search_declaration_forms(config: GatewayConfig | None = None) -> list[st
     """
     forms = [str(Tool.WEB_SEARCH)]
     if _web_search_intercept_enabled(config):
-        forms += [_BARE_WEB_SEARCH_TYPE, f"{_VERSIONED_WEB_SEARCH_PREFIX}<date>"]
+        forms += [_BARE_WEB_SEARCH_TYPE, f"{WEB_SEARCH_NATIVE_TYPE_PREFIX}<date>"]
     return forms
 
 

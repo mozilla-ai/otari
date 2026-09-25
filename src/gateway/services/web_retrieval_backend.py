@@ -51,6 +51,10 @@ tracer = trace.get_tracer(__name__)
 
 
 WEB_SEARCH_TOOL_NAME = "web_search"
+# The dated and preview spellings of a provider's own web-search tool type
+# (``web_search_20250305``, ``web_search_preview``). A caller using one is asking in
+# the provider's own vocabulary rather than the gateway's.
+WEB_SEARCH_NATIVE_TYPE_PREFIX = "web_search_"
 WEB_FETCH_TOOL_NAME = "web_fetch"
 MAX_WEB_RETRIEVAL_CALLS = 10
 
