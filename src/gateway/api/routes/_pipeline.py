@@ -445,14 +445,9 @@ UNPRICED_TOOL_DETAIL_TEMPLATE = (
 
 
 class ErrorKind(Enum):
-    """Coarse error category an adapter maps onto its wire envelope.
+    """Coarse error category, for a dialect that names one on the wire.
 
-    The chat and responses formats raise plain ``HTTPException`` and ignore
-    the kind; the Anthropic messages format maps it to the ``error.type``
-    field of its error body.
-
-    The set covers every category a dialect distinguishes, so an error can
-    always say what it is rather than leaving a reader of its status to guess.
+    The set covers every category a dialect distinguishes, so an error can say what it is.
     """
 
     API = auto()
@@ -463,9 +458,8 @@ class ErrorKind(Enum):
     RATE_LIMIT = auto()
 
 
-# The kind a status implies, for an error that reached a dialect already
-# flattened into an ``HTTPException`` and so no longer carrying its own. Code
-# that still has the error says the kind instead of being classified here.
+# An error flattened into an ``HTTPException`` no longer carries its kind, so a
+# status stands in for one here.
 _STATUS_ERROR_KINDS = {
     status.HTTP_400_BAD_REQUEST: ErrorKind.INVALID_REQUEST,
     status.HTTP_401_UNAUTHORIZED: ErrorKind.AUTHENTICATION,

@@ -41,6 +41,7 @@ from gateway.api.routes._pipeline import (
     _requested_container,
     classify_provider_error,
     default_attempt_kwargs,
+    error_kind_for_status,
     prepare_gateway_tools,
     provider_error_headers,
     raise_all_streaming_attempts_failed,
@@ -405,16 +406,15 @@ _ERR_AUTHENTICATION = "authentication_error"
 _ERR_NOT_FOUND = "not_found_error"
 _ERR_RATE_LIMIT = "rate_limit_error"
 
-# Anthropic error.type keyed by HTTP status, used when re-wrapping a plain-string
-# HTTPException into the Anthropic envelope: classified provider failures plus
-# preamble auth/permission/resolve rejections. Unlisted statuses (e.g. the 502
-# used for a credentials fault, or a 500) fall back to api_error.
-_STATUS_TO_ANTHROPIC_TYPE = {
-    400: _ERR_INVALID_REQUEST,
-    401: _ERR_AUTHENTICATION,
-    403: _ERR_PERMISSION,
-    404: _ERR_NOT_FOUND,
-    429: _ERR_RATE_LIMIT,
+# Every Anthropic ``error.type`` comes from this table. A bare status reaches it
+# through ``error_kind_for_status``, so one status cannot be classified two ways.
+_ERROR_KIND_TO_ANTHROPIC_TYPE = {
+    ErrorKind.API: _ERR_API,
+    ErrorKind.AUTHENTICATION: _ERR_AUTHENTICATION,
+    ErrorKind.INVALID_REQUEST: _ERR_INVALID_REQUEST,
+    ErrorKind.NOT_FOUND: _ERR_NOT_FOUND,
+    ErrorKind.PERMISSION: _ERR_PERMISSION,
+    ErrorKind.RATE_LIMIT: _ERR_RATE_LIMIT,
 }
 
 
@@ -430,7 +430,7 @@ def _ensure_anthropic_error(exc: HTTPException) -> HTTPException:
     """
     if not isinstance(exc.detail, str):
         return exc
-    error_type = _STATUS_TO_ANTHROPIC_TYPE.get(exc.status_code, _ERR_API)
+    error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[error_kind_for_status(exc.status_code)]
     return HTTPException(
         status_code=exc.status_code,
         detail={"type": "error", "error": {"type": error_type, "message": exc.detail}},
@@ -441,13 +441,6 @@ def _ensure_anthropic_error(exc: HTTPException) -> HTTPException:
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'metadata.user_id' is required in request body"
 _USER_FORBIDDEN = "'metadata.user_id' does not match the authenticated API key's user"
 _PROVIDER_ERROR = "The request could not be completed by the provider"
-
-_ERROR_KIND_TO_ANTHROPIC_TYPE = {
-    ErrorKind.INVALID_REQUEST: _ERR_INVALID_REQUEST,
-    ErrorKind.API: _ERR_API,
-    ErrorKind.PERMISSION: _ERR_PERMISSION,
-    ErrorKind.RATE_LIMIT: _ERR_RATE_LIMIT,
-}
 
 
 def _billable_messages_usage(usage: Any) -> GatewayUsage:
@@ -551,7 +544,7 @@ class _MessagesAdapter:
     def provider_error(self, exc: BaseException) -> HTTPException:
         mapping = classify_provider_error(exc)
         if mapping is not None:
-            error_type = _STATUS_TO_ANTHROPIC_TYPE.get(mapping.status_code, _ERR_API)
+            error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[error_kind_for_status(mapping.status_code)]
             return _anthropic_error(
                 error_type,
                 mapping.detail,
