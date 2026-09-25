@@ -292,7 +292,7 @@ scope and not only its filter set. Nothing else narrows it, and
 ## Agent Guardrails
 
 `otari_agent.domain` (in the `otari-agent` workspace member, `cli/`) evaluates
-a caller-submitted guardrail policy against caller-submitted evidence.
+a caller-submitted `.otari-guardrails.yml` policy against caller-submitted evidence.
 Everything under it is pure: no filesystem, network, subprocess, or clock
 access. Otari never reads a caller's repository itself. It lives beside the CLI
 rather than in the gateway so `otari hook` installs without the server;

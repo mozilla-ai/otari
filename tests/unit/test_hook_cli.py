@@ -2571,6 +2571,13 @@ def test_hook_run_check_verifier_caps_detail_length(tmp_path: Path) -> None:
     assert len(detail) == hook_cli._HOOK_MAX_CHECK_DETAIL_LENGTH
 
 
+# Wall-clock, so a loaded machine can push five 0.3s subprocesses past the
+# bound while the code under test is doing exactly what it should. Measured
+# locally at roughly one failure in three under load, passing alone. Reruns
+# rather than a looser bound: the bound is the assertion, and widening it far
+# enough to never flake would stop it telling a concurrent run from a
+# sequential one.
+@pytest.mark.flaky(reruns=2, reruns_delay=1)
 def test_verifier_gates_run_concurrently_not_sequentially(tmp_path: Path) -> None:
     """Five verifier gates, each a real script sleeping ~0.3s, must finish in
     well under 5 * 0.3s: `_hook_collect_check_verdicts` runs verifiers through a
