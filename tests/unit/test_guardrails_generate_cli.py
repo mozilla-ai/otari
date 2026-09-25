@@ -778,3 +778,43 @@ def test_generate_outside_the_composed_set_is_not_refused(repo: Path, monkeypatc
     result = _invoke(monkeypatch, "--guardrail-file", str(repo / "snippets" / "draft.yml"), keys="yy")
     assert result.exit_code == 0, result.output
     assert (repo / "snippets" / "draft.yml").is_file()
+
+
+def _fill_to_the_limit(repo: Path) -> None:
+    for index in range(MAX_POLICY_FILES):
+        path = repo / hook_cli.GUARDRAIL_DIR / f"f{index}.yml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_EXISTING_GATES_WITH_COMMENT.replace("no-force-push", f"g{index}"), encoding="utf-8")
+
+
+@pytest.mark.parametrize("spelling", ["relative", "absolute", "through-a-symlinked-parent"])
+def test_the_file_limit_holds_however_the_target_is_spelled(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, spelling: str
+) -> None:
+    """The guard compares paths, so an unresolved target would read as "outside the set".
+
+    A relative `--guardrail-file` is the obvious spelling; one reached through
+    a symlinked parent is the one that hides, because it is absolute and looks
+    already-normalized. Either slipping through creates the file that makes
+    the whole guardrail unloadable, which stops every gate in it.
+    """
+    _fill_to_the_limit(repo)
+    if spelling == "relative":
+        target = Path(hook_cli.GUARDRAIL_DIR) / "new.yml"
+    elif spelling == "absolute":
+        target = repo / hook_cli.GUARDRAIL_DIR / "new.yml"
+    else:
+        link = repo.parent / f"link-to-{repo.name}"
+        link.symlink_to(repo, target_is_directory=True)
+        target = link / hook_cli.GUARDRAIL_DIR / "new.yml"
+    _stub_claude_only(monkeypatch)
+
+    def fail_if_called(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("the model must not be called for a proposal that cannot be written")
+
+    monkeypatch.setattr(subprocess, "run", fail_if_called)
+
+    result = _invoke(monkeypatch, "--guardrail-file", str(target))
+    assert result.exit_code != 0, result.output
+    assert "stop being enforced" in result.output
+    assert not (repo / hook_cli.GUARDRAIL_DIR / "new.yml").exists()

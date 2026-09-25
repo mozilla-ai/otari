@@ -2816,6 +2816,15 @@ def _joins_the_composed_set(target: Path, root: Path) -> bool:
 
     `--guardrail-file` can name somewhere the hook never reads, in which case
     a new file there changes the composed set not at all.
+
+    Both paths must already be resolved, which is why the caller resolves
+    ``target`` rather than leaving it as typed: this compares paths, and every
+    unresolved spelling of a path inside the set compares unequal to the
+    resolved one. A relative `--guardrail-file` is the obvious case, and an
+    absolute one reached through a symlinked parent is the less obvious one
+    (`/tmp` is a link to `/private/tmp` on macOS, so every path under it has
+    two spellings). Either would read as "outside the set" and skip the
+    file-count guard the caller runs on the strength of this answer.
     """
     if target == root / GUARDRAIL_FILE:
         return True
@@ -2939,7 +2948,10 @@ def guardrails_generate(
             "pass --source to point at a smaller/narrower doc."
         )
 
-    target = guardrail_file_option if guardrail_file_option is not None else _generate_target(root)
+    # Resolved, not as typed: `--guardrail-file` accepts any spelling, and
+    # every check below compares it against paths under the resolved repo
+    # root. See `_joins_the_composed_set`.
+    target = (guardrail_file_option if guardrail_file_option is not None else _generate_target(root)).resolve()
 
     # Before the model call, not after: writing the file that takes the set
     # past MAX_POLICY_FILES would report success and leave the repo with a
