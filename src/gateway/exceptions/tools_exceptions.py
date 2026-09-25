@@ -1,6 +1,14 @@
 """Errors that the tools domain may raise, each carrying the status it renders as."""
 
-from gateway.exceptions import TenancyConflictError, TenancyForbiddenError, TenancyNotFoundError, TenancyValidationError
+from fastapi import status
+
+from gateway.exceptions import (
+    TenancyConflictError,
+    TenancyError,
+    TenancyForbiddenError,
+    TenancyNotFoundError,
+    TenancyValidationError,
+)
 
 
 class WorkspaceMcpServerNotFoundError(TenancyNotFoundError):
@@ -87,7 +95,21 @@ class SandboxImageNotAllowedError(TenancyValidationError):
     """
 
 
+class McpServerResolutionFailedError(TenancyError):
+    """An MCP server could not be resolved.
+
+    The message is fixed because the underlying detail quotes the stored server
+    URL or its credential.
+    """
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+
+    def __init__(self, message: str = "MCP server resolution failed") -> None:
+        super().__init__(message)
+
+
 __all__ = [
+    "McpServerResolutionFailedError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",
     "WorkspaceMcpServerAlreadyExistsError",
