@@ -21,9 +21,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, cast
+from urllib.parse import urlsplit
 
 import click
 import yaml
+from click.core import ParameterSource
 
 from otari_agent.domain.check import PolicyCheckError, check_policy
 from otari_agent.domain.evaluators import matched_changed_paths
@@ -311,6 +313,42 @@ def _failing_summary(failing: list[dict[str, Any]]) -> str:
         + (f" [{gate['source']}]" if gate.get("source") else "")
         for gate in failing
     )
+
+
+def _remote_mode_reason(ctx: click.Context) -> str:
+    """Which flag or envvar turned remote mode on, and how to turn it off.
+
+    An exported `OTARI_URL` or `OTARI_API_KEY` switches the mode with nothing
+    on the command line to show for it, so a failure that does not name the
+    variable leaves no trail back to it.
+    """
+    causes: list[str] = []
+    fixes: list[str] = []
+    for param, flag, envvar in (("url", "--url", "OTARI_URL"), ("api_key", "--api-key", "OTARI_API_KEY")):
+        source = ctx.get_parameter_source(param)
+        if source is ParameterSource.ENVIRONMENT:
+            causes.append(f"{envvar} is set")
+            fixes.append(f"unset {envvar}")
+        elif source is ParameterSource.COMMANDLINE:
+            causes.append(f"{flag} was given")
+            fixes.append(f"drop {flag}")
+    if not causes:
+        return ""
+    # Either setting alone keeps remote mode on, so a fix naming only one would not get out of it.
+    return (
+        f"Remote mode is on because {' and '.join(causes)}; "
+        f"start that gateway, or {' and '.join(fixes)} to check locally."
+    )
+
+
+def _redact_url_credentials(text: str, url: str) -> str:
+    """`text` with any credentials embedded in `url` (`https://user:secret@host`) masked."""
+    parts = urlsplit(url)
+    userinfo = parts.netloc.rpartition("@")[0]
+    for secret in (userinfo, parts.password):
+        if secret:
+            text = text.replace(secret, "***")
+    return text
 
 
 def _guardrail_moved_notice(root: Path) -> str | None:
@@ -1760,7 +1798,7 @@ def hook(
     or 2 (block, stderr shown to the agent). Never blocks on a problem that is
     not a required gate failing: a missing or malformed policy, or (only in
     the opt-in remote mode) an unreachable gateway or a missing credential,
-    all exit 0, with a message on stderr where there is one worth surfacing.
+    all exit 0, and each says so through `_hook_not_enforcing`.
 
     `--harness` picks which payload/transcript shape is expected and which
     tool names are read as an edit vs. a command (see
@@ -1924,7 +1962,7 @@ def hook(
     elif event == "Stop":
         collected = _hook_collect_changed_paths(root)
         if collected is None:
-            click.echo("otari hook: could not read Git state, not blocking.", err=True)
+            _hook_not_enforcing("could not read Git state; no gate is being enforced.")
             return
         paths = collected
         path_source = "stop.working_tree"
@@ -2011,7 +2049,7 @@ def hook(
                 ),
             )
         except PolicyCheckError as exc:
-            click.echo(f"otari hook: could not evaluate {guardrail_name} ({exc}), not blocking.", err=True)
+            _hook_not_enforcing(f"could not evaluate {guardrail_name} ({exc}); no gate is being enforced.")
             return
         failing = [
             {
@@ -2033,6 +2071,7 @@ def hook(
         # or a central place data about the check could eventually land.
         import httpx
 
+        remote_reason = _remote_mode_reason(ctx)
         policy_yaml = _merged_guardrail_yaml(sources, guardrail_name)
         if len(policy_yaml.encode("utf-8")) > MAX_POLICY_BYTES:
             _hook_not_enforcing(
@@ -2048,7 +2087,7 @@ def hook(
             # An unreadable or malformed config file, or a port that is not a
             # number: a setup problem, not a required gate failing, so it falls
             # under this command's own fail-open contract.
-            click.echo(f"otari hook: could not load config ({exc}), not blocking.", err=True)
+            _hook_not_enforcing(f"could not load config ({exc}); no gate is being enforced. {remote_reason}")
             return
         # host is a bind address (0.0.0.0 is the documented default), not a
         # connect target; a client dials localhost instead.
@@ -2056,7 +2095,7 @@ def hook(
         resolved_url = url or f"http://{connect_host}:{settings.port}"
         resolved_key = api_key or settings.master_key
         if not resolved_key:
-            click.echo("otari hook: no API key or master key resolved, not blocking.", err=True)
+            _hook_not_enforcing(f"no API key or master key resolved; no gate is being enforced. {remote_reason}")
             return
 
         try:
@@ -2090,20 +2129,32 @@ def hook(
             # say what was actually wrong (a policy this build cannot parse, or
             # evidence over one of the route's limits).
             detail = exc.response.text[:500]
-            click.echo(
-                f"otari hook: {resolved_url} rejected the check ({exc.response.status_code}: {detail}), not blocking.",
-                err=True,
+            _hook_not_enforcing(
+                _redact_url_credentials(
+                    f"{resolved_url} rejected the check ({exc.response.status_code}: {detail}); "
+                    f"no gate is being enforced. {remote_reason}",
+                    resolved_url,
+                )
             )
             return
         except httpx.HTTPError as exc:
-            click.echo(f"otari hook: could not reach {resolved_url} ({exc}), not blocking.", err=True)
+            _hook_not_enforcing(
+                _redact_url_credentials(
+                    f"could not reach {resolved_url} ({exc}); no gate is being enforced. {remote_reason}", resolved_url
+                )
+            )
             return
         except (ValueError, TypeError, KeyError) as exc:
             # A body that is not JSON, or is JSON of a shape this command does not
             # recognize. Same fail-open contract as an unreachable gateway: this
             # command blocks on a required gate failing and on nothing else, so a
             # response it cannot read must not surface as a traceback.
-            click.echo(f"otari hook: unreadable response from {resolved_url} ({exc!r}), not blocking.", err=True)
+            _hook_not_enforcing(
+                _redact_url_credentials(
+                    f"unreadable response from {resolved_url} ({exc!r}); no gate is being enforced. {remote_reason}",
+                    resolved_url,
+                )
+            )
             return
 
     # `failing` mirrors Outcome's own non-blocking set (types.py), not just

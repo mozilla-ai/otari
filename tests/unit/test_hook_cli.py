@@ -20,6 +20,7 @@ import pytest
 from click.testing import CliRunner
 
 import otari_agent.hook as hook_cli
+from otari_agent.domain.check import PolicyCheckError
 from otari_agent.domain.policy import parse_policy
 from otari_agent.settings import HookSettings
 
@@ -83,6 +84,11 @@ def _invoke(payload: dict[str, Any], **extra_args: str) -> Any:
     for key, value in extra_args.items():
         args += [f"--{key.replace('_', '-')}", value]
     return CliRunner().invoke(hook_cli.hook, args, input=json.dumps(payload))
+
+
+def _system_message(result: Any) -> str:
+    """The `systemMessage` on stdout: what Claude Code shows for a hook that exits 0, unlike stderr."""
+    return str(json.loads(result.stdout)["systemMessage"])
 
 
 def test_pretooluse_blocks_a_forbidden_edit(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -316,8 +322,10 @@ def test_a_rejected_check_does_not_block_and_does_not_blame_the_network(
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert "rejected the check (422" in result.output
-    assert "could not reach" not in result.output
+    message = _system_message(result)
+    assert "rejected the check (422" in message
+    assert "could not reach" not in message
+    assert "--api-key was given" in message
 
 
 def test_pretooluse_ignores_a_bash_call_with_no_command(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -845,7 +853,9 @@ def test_stop_event_does_not_block_when_git_status_fails(monkeypatch: pytest.Mon
     monkeypatch.setattr(subprocess, "run", fake_run)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)})
     assert result.exit_code == 0, result.output
-    assert "could not read Git state" in result.output
+    message = _system_message(result)
+    assert "could not read Git state" in message
+    assert "no gate is being enforced" in message
 
 
 def test_unrecognized_event_is_a_no_op(repo: Path) -> None:
@@ -957,7 +967,9 @@ def test_url_alone_without_a_resolvable_credential_does_not_block(monkeypatch: p
     }
     result = CliRunner().invoke(hook_cli.hook, ["--url", "http://gw.example:9000"], input=json.dumps(payload))
     assert result.exit_code == 0, result.output
-    assert "no API key or master key resolved" in result.output
+    message = _system_message(result)
+    assert "no API key or master key resolved" in message
+    assert "--url was given" in message
 
 
 def test_invalid_config_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -980,7 +992,7 @@ def test_invalid_config_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Pa
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert "could not load config" in result.output
+    assert "could not load config" in _system_message(result)
 
 
 @pytest.mark.parametrize(
@@ -1021,7 +1033,7 @@ def test_unreadable_response_does_not_block(
     }
     result = _invoke(payload)
     assert result.exit_code == 0, f"{case}: {result.output}"
-    assert "unreadable response" in result.output, case
+    assert "unreadable response" in _system_message(result), case
 
 
 def test_a_gate_result_missing_display_fields_does_not_crash(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -1064,7 +1076,101 @@ def test_unreachable_gateway_does_not_block(monkeypatch: pytest.MonkeyPatch, rep
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert "could not reach" in result.output
+    message = _system_message(result)
+    assert "could not reach" in message
+    assert "no gate is being enforced" in message
+    assert "--api-key was given" in message
+
+
+def test_an_exported_otari_url_is_named_when_its_gateway_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, config_stub: None
+) -> None:
+    """`OTARI_URL` alone switches to remote mode. A shell that exports it for
+    some other reason must hear which variable did it and how to get out.
+    """
+
+    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
+    }
+    result = CliRunner().invoke(
+        hook_cli.hook, [], input=json.dumps(payload), env={"OTARI_URL": "http://localhost:1", "OTARI_API_KEY": None}
+    )
+    assert result.exit_code == 0, result.output
+    message = _system_message(result)
+    assert "OTARI_URL is set" in message
+    assert "unset OTARI_URL" in message
+
+
+def test_every_setting_that_keeps_remote_mode_on_is_named(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, config_stub: None
+) -> None:
+    """Either setting alone keeps remote mode on, so clearing only the first one named would not get out of it."""
+
+    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
+    }
+    result = CliRunner().invoke(
+        hook_cli.hook,
+        ["--url", "http://localhost:1"],
+        input=json.dumps(payload),
+        env={"OTARI_URL": None, "OTARI_API_KEY": "exported-key"},
+    )
+    assert result.exit_code == 0, result.output
+    message = _system_message(result)
+    assert "--url was given and OTARI_API_KEY is set" in message
+    assert "drop --url and unset OTARI_API_KEY" in message
+
+
+def test_credentials_in_the_gateway_url_are_not_shown(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        raise httpx.ConnectError(f"could not connect to {url}")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
+    }
+    result = _invoke(payload, url="https://alice:hunter2@gw.example")
+    assert result.exit_code == 0, result.output
+    assert "hunter2" not in result.output
+    assert "hunter2" not in result.stderr
+    assert "https://***@gw.example" in _system_message(result)
+
+
+def test_a_local_evaluation_error_does_not_block_and_says_so(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    def raise_check_error(*args: object, **kwargs: object) -> None:
+        raise PolicyCheckError("evidence over a limit")
+
+    monkeypatch.setattr(hook_cli, "check_policy", raise_check_error)
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
+    }
+    result = CliRunner().invoke(
+        hook_cli.hook, [], input=json.dumps(payload), env={"OTARI_URL": None, "OTARI_API_KEY": None}
+    )
+    assert result.exit_code == 0, result.output
+    message = _system_message(result)
+    assert "could not evaluate" in message
+    assert "no gate is being enforced" in message
 
 
 def test_api_key_alone_opts_into_remote_and_falls_back_to_configured_localhost(
