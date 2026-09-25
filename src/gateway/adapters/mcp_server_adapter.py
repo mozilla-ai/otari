@@ -124,6 +124,7 @@ def build_mcp_server_port(config: GatewayConfig, session: AsyncSession | None) -
     """
     if deployment_for(config).supports(Plane.CONTROL):
         if session is None:
-            raise McpServerResolutionFailedError
+            msg = "a session is required when this deployment holds its own MCP server rows"
+            raise ValueError(msg)
         return LocalMcpServers(session)
     return RemoteMcpServers(config)

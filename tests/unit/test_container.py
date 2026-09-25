@@ -21,6 +21,7 @@ from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
+from gateway.adapters.mcp_server_adapter import RemoteMcpServers
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.container import (
@@ -39,6 +40,7 @@ from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
+from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 
@@ -132,6 +134,25 @@ def test_file_storage_refuses_a_container_built_without_config() -> None:
 
     with pytest.raises(ContainerError, match="FileStoragePort"):
         container.resolve(FileStoragePort, NO_SESSION)
+
+
+def test_mcp_servers_refuse_a_deployment_that_holds_the_rows_and_has_no_session() -> None:
+    """A deployment reading its own rows cannot do so without the request's session.
+
+    The refusal is a wiring fault rather than a failed resolve, so it must not
+    reach a caller as this deployment's MCP resolution error.
+    """
+    container = build_container(config=GatewayConfig())
+
+    with pytest.raises(ValueError, match="a session is required"):
+        container.resolve(McpServerPort, NO_SESSION)
+
+
+def test_mcp_servers_need_no_session_where_a_peer_holds_the_rows() -> None:
+    """A deployment with a peer reads no rows of its own, so it is built without one."""
+    container = build_container(config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}))
+
+    assert isinstance(container.resolve(McpServerPort, NO_SESSION), RemoteMcpServers)
 
 
 def test_resolve_refuses_a_port_nothing_bound() -> None:

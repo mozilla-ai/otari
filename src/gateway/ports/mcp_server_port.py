@@ -54,4 +54,9 @@ class McpServerPort(Protocol):
         ...
 
 
-__all__ = ["McpServerPort", "McpServerResolutionFailedError", "McpServerScope", "WorkspaceMcpServerNotFoundError"]
+__all__ = [
+    "McpServerPort",
+    "McpServerResolutionFailedError",
+    "McpServerScope",
+    "WorkspaceMcpServerNotFoundError",
+]
