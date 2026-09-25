@@ -669,10 +669,9 @@ def test_the_grouped_catalog_lists_a_hosted_model_for_a_member(client: TestClien
         client.cookies.clear()
 
 
-def test_the_grouped_catalog_labels_a_hosted_offering_hosted(client: TestClient, world: _World) -> None:
-    """An offering labeled ``organization`` is one the organization may price."""
-    bind_model_provider(client, HostedModelProvider("mistral"))
-    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
+def _credentials_as(client: TestClient, world: _World, who: str) -> dict[str, str]:
+    """Each offering's ``credential`` in the grouped catalog, by selector."""
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
     credentials: dict[str, str] = {}
     try:
         listing = client.get(f"{API_ROOT}/catalog/models")
@@ -684,9 +683,23 @@ def test_the_grouped_catalog_labels_a_hosted_offering_hosted(client: TestClient,
                 credentials[offering["selector"]] = offering["credential"]
     finally:
         client.cookies.clear()
+    return credentials
+
+
+def test_the_grouped_catalog_labels_a_hosted_offering_hosted(client: TestClient, world: _World) -> None:
+    """An offering labeled ``organization`` is one the organization may price."""
+    bind_model_provider(client, HostedModelProvider("mistral"))
+    credentials = _credentials_as(client, world, "alpha_member")
 
     assert credentials[_MISTRAL_MODEL] == "hosted"
     assert credentials[_OPENAI_MODEL] == "organization"
+
+
+def test_the_grouped_catalog_labels_a_hosted_offering_hosted_for_an_operator(client: TestClient, world: _World) -> None:
+    """The operator may price a hosted model, but its key is still the deployment's, not their organization's."""
+    bind_model_provider(client, HostedModelProvider("mistral"))
+
+    assert _credentials_as(client, world, "superuser")[_MISTRAL_MODEL] == "hosted"
 
 
 def test_an_operator_session_flags_no_hosted_model(client: TestClient, world: _World) -> None:
@@ -699,6 +712,51 @@ def test_an_operator_session_flags_no_hosted_model(client: TestClient, world: _W
 
 _OPENAI_ADVERTISED = {"openai": {"gpt-4o-mini"}}
 """The deployment advertises one of its two priced openai models; the other was switched off."""
+
+
+@pytest.mark.parametrize(
+    ("disabled_in_alpha_two", "advertised_credential"),
+    [
+        pytest.param(False, "organization", id="byo-key-in-every-workspace"),
+        pytest.param(True, "hosted", id="one-workspace-disables-the-byo-key"),
+    ],
+)
+def test_the_operators_credential_label_is_decided_per_model(
+    client: TestClient,
+    world: _World,
+    db_session_factory: Callable[[], Session],
+    disabled_in_alpha_two: bool,
+    advertised_credential: str,
+) -> None:
+    """Alpha's openai key does not turn the whole provider into the organization's.
+
+    The advertised model is the organization's only while every workspace calls
+    it on Alpha's key, the line the member's flag draws; the model the deployment
+    switched off is reached on Alpha's key or not at all, so it stays the
+    organization's either way.
+    """
+    bind_model_provider(client, HostedModelProvider("openai", "mistral", models=_OPENAI_ADVERTISED))
+    if disabled_in_alpha_two:
+        session = db_session_factory()
+        try:
+            session.add(
+                WorkspaceProviderKeyOverride(
+                    workspace_id=world.workspaces["alpha_two"],
+                    organization_id=world.alpha,
+                    org_provider_key_id=world.keys["alpha_openai"],
+                    is_default=False,
+                    disabled=True,
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+    credentials = _credentials_as(client, world, "superuser")
+
+    assert credentials[_OPENAI_MODEL] == advertised_credential
+    assert credentials[_OPENAI_OTHER] == "organization"
+    assert credentials[_MISTRAL_MODEL] == "hosted"
 
 
 def test_the_deployment_advertises_which_hosted_models_a_member_is_shown(client: TestClient, world: _World) -> None:

@@ -46,6 +46,7 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import is_deployment_instance_key, normalize_pricing_key, split_selector
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
+from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_model_access import (
     hosted_allowlist_entries,
     resolve_default_workspace_offered_keys,
@@ -415,6 +416,35 @@ class CatalogScope:
     and for the master key, which dispatch from one workspace.
     """
 
+    deployment_key_models: HostedModels = field(default_factory=dict)
+    """What the caller reaches on a deployment-owned key, by provider, for the credential label.
+
+    The hosted roster less every provider the organization's own key serves
+    wherever this caller dispatches from. Wider than
+    ``deployment_supplied_providers`` for an operator, who may price a hosted
+    model and so sees it unflagged, but still does not hold its key.
+    """
+
+
+def served_on_deployment_key(hosted_models: HostedModels, model_key: str) -> bool:
+    """Whether ``model_key`` names a model the caller reaches on a deployment-owned key.
+
+    Decided per model, not per provider: a model the port does not advertise
+    is reached on the organization's own key or not at all.
+    """
+    split = split_selector(model_key)
+    if split is None:
+        return False
+    provider, model = split
+    if provider not in hosted_models:
+        return False
+    roster = hosted_models[provider]
+    return roster is None or model in roster
+
+
+def _without(hosted_models: HostedModels, providers: frozenset[str]) -> HostedModels:
+    return {provider: roster for provider, roster in hosted_models.items() if provider not in providers}
+
 
 def withheld_as_unadvertised(config: GatewayConfig, scope: CatalogScope, model_key: str) -> bool:
     """Whether a priced key names a hosted model the deployment does not advertise.
@@ -486,6 +516,7 @@ async def catalog_scope(
             reads_workspace_layer=False,
             deployment_supplied_providers=hosted,
             offered_keys=frozenset(),
+            deployment_key_models=hosted_models,
         )
     if session_identity is not None:
         if await DeploymentUserService(db).has_administration_access(session_identity):
@@ -497,17 +528,28 @@ async def catalog_scope(
             # from the catalog they were told it joined.
             organization_id: uuid.UUID | None = session_identity.active_organization_id
             hosted_models = await resolve_hosted_models(model_provider, organization_id)
+            # Read only once something is advertised: neither reader consults
+            # them otherwise, and the keys cost a decryption each.
+            operator_byo_providers: frozenset[str] = frozenset()
+            organization_key_providers: frozenset[str] = frozenset()
+            if hosted_models:
+                operator_byo_providers = await resolve_organization_byo_providers(db, organization_id)
+                if organization_id is not None:
+                    organization_key_providers = await OrgProviderKeyService(db).get_byo_providers(
+                        organization_id=organization_id
+                    )
             return CatalogScope(
                 allowlist=None,
                 reads_workspace_layer=True,
                 deployment_supplied_providers=frozenset(),
                 offered_keys=await _operator_offered_keys(db, session_identity) if include_offered else frozenset(),
                 hosted_models=hosted_models,
-                # Read only once something is advertised: the withhold never
-                # consults it otherwise, and the keys cost a decryption each.
-                byo_providers=(
-                    await resolve_organization_byo_providers(db, organization_id) if hosted_models else frozenset()
-                ),
+                byo_providers=operator_byo_providers,
+                # The label's line is the member flag's, not the withhold's: a
+                # key one workspace calls on leaves the deployment paying for
+                # the others, so only a key every workspace calls on takes a
+                # provider out.
+                deployment_key_models=_without(hosted_models, organization_key_providers),
             )
         scope = await resolve_session_catalog_scope(db, config, user=session_identity, model_provider=model_provider)
         return CatalogScope(
@@ -547,6 +589,7 @@ async def catalog_scope(
         ),
         hosted_models=hosted_models,
         byo_providers=byo_providers,
+        deployment_key_models=_without(hosted_models, byo_providers),
     )
 
 
@@ -564,6 +607,8 @@ class MergedCatalog:
     dynamic_policies: dict[str, PolicySpec]
     discovered_keys: set[str]
     """The selectors phase 1 heard from a provider, as opposed to only priced."""
+    deployment_key_models: HostedModels = field(default_factory=dict)
+    """What the caller reaches on a deployment-owned key; see :attr:`CatalogScope.deployment_key_models`."""
 
 
 async def build_merged_catalog(
@@ -791,6 +836,7 @@ async def build_merged_catalog(
         aliases=aliases,
         dynamic_policies=dynamic_policies,
         discovered_keys=discovered_keys,
+        deployment_key_models=scope.deployment_key_models,
     )
 
 
