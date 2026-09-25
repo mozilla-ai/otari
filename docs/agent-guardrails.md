@@ -204,7 +204,9 @@ Every gate declares an `id` unique across the whole guardrail, a `type`, an
 
 `enforcement` is `required` or `advisory`. A `required` gate blocks: the tool
 call is refused, or the turn does not end. An `advisory` gate warns and the work
-continues.
+continues. A `judge` gate's warning also reaches the agent, not only you, since
+`advisory` is the only enforcement it is allowed; see
+[Who hears an advisory finding](agent-guardrails-reference.md#who-hears-an-advisory-finding).
 
 `runs` says when the gate fires and what it can see there. The two moments a
 write rule uses are covered in

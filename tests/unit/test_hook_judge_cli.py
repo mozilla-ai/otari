@@ -405,3 +405,131 @@ def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.Monke
     assert elapsed < gate_count * per_gate_seconds * 0.6, (
         f"took {elapsed:.2f}s for {gate_count} gates at {per_gate_seconds}s each -- looks sequential"
     )
+
+
+_JUDGE_AND_DETERMINISTIC_YAML = (
+    "schema_version: '1.0'\n"
+    "policy:\n  id: test\n"
+    "gates:\n"
+    "  - id: g\n"
+    "    type: judge\n"
+    "    runs: [stop.session]\n"
+    "    enforcement: advisory\n"
+    "    rubric: r\n"
+    "    message: m\n"
+    "  - id: ran-the-tests\n"
+    "    type: command_if_changed\n"
+    "    runs: [stop.session]\n"
+    "    enforcement: advisory\n"
+    "    when_changed: ['src/**']\n"
+    "    require: ['make test']\n"
+    "    message: You changed src but never ran the tests.\n"
+)
+
+
+def _advisory_failures(monkeypatch: pytest.MonkeyPatch, results: list[dict[str, Any]]) -> None:
+    """Answer the check with advisory failures only, so nothing blocks and the turn ends at exit 0."""
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _FakeResponse({"blocked": False, "results": results}))
+    monkeypatch.setattr(subprocess, "run", _git_status_and_diff_run())
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+
+
+def test_a_failing_judge_gate_reaches_the_model_as_additional_context(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """A judge gate is advisory by construction, so exit 2 is a channel it can never take.
+
+    `additionalContext` is the one Stop field that puts a finding in front of
+    the model without blocking the turn. Without it the model's own review of
+    the turn reaches everybody except the agent that could act on it, which is
+    the reason a rubric is written in the first place. The reasoning travels
+    too, not just the gate's fixed `message`: which line the judge objected to
+    is the whole of what makes the finding actionable.
+    """
+    _guardrail_path(repo).write_text(_gates_yaml(), encoding="utf-8")
+    _advisory_failures(
+        monkeypatch,
+        [
+            {
+                "gate_id": "g",
+                "enforcement": "advisory",
+                "outcome": "fail",
+                "message": "m",
+                "detail": "The endpoint at src/module.py:42 calls db.query() directly.",
+            }
+        ],
+    )
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert payload["hookSpecificOutput"]["hookEventName"] == "Stop"
+    assert "src/module.py:42" in context
+    assert "m" in context
+    # The person keeps their own channel: this adds a reader rather than
+    # moving the finding from one to the other.
+    assert "src/module.py:42" in payload["systemMessage"]
+
+
+def test_a_deterministic_advisory_gate_stays_out_of_additional_context(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    """An author who wrote `advisory` on a gate that could have said `required` chose the quiet channel.
+
+    Only a judge gate is denied `required` by the parser, so only a judge gate
+    is owed a channel it did not choose to give up.
+    """
+    _guardrail_path(repo).write_text(_JUDGE_AND_DETERMINISTIC_YAML, encoding="utf-8")
+    _advisory_failures(
+        monkeypatch,
+        [
+            {
+                "gate_id": "ran-the-tests",
+                "enforcement": "advisory",
+                "outcome": "fail",
+                "message": "You changed src but never ran the tests.",
+            }
+        ],
+    )
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert "hookSpecificOutput" not in payload
+    assert "never ran the tests" in payload["systemMessage"]
+
+
+def test_additional_context_carries_the_judge_finding_alone(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """Both kinds failing on one Stop must not collapse into one channel.
+
+    The model is handed what it is owed and nothing else, so an advisory
+    finding its author aimed at a person does not become an instruction to the
+    agent by riding along beside a judge's.
+    """
+    _guardrail_path(repo).write_text(_JUDGE_AND_DETERMINISTIC_YAML, encoding="utf-8")
+    _advisory_failures(
+        monkeypatch,
+        [
+            {"gate_id": "g", "enforcement": "advisory", "outcome": "fail", "message": "judge says no"},
+            {
+                "gate_id": "ran-the-tests",
+                "enforcement": "advisory",
+                "outcome": "fail",
+                "message": "You changed src but never ran the tests.",
+            },
+        ],
+    )
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)}, harness="claude-code")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert "judge says no" in context
+    assert "never ran the tests" not in context
+    # The person still gets both, which is what systemMessage was always for.
+    assert "judge says no" in payload["systemMessage"]
+    assert "never ran the tests" in payload["systemMessage"]

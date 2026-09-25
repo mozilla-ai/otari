@@ -271,12 +271,46 @@ def _hook_not_enforcing(message: str) -> None:
     the one state this must not be quiet about, because a session with no
     enforcement looks exactly like a session that passed every check.
 
-    Both channels, not one: stdout's `systemMessage` is what a person and the
-    model actually see, and the stderr line is what a CI log or `--debug`
-    transcript keeps.
+    Both channels, not one: stdout's `systemMessage` is what a person sees,
+    and the stderr line is what a CI log or `--debug` transcript keeps.
+    Neither reaches the model, which is right here: a guardrail that stopped
+    running is the operator's problem to fix, not the turn's.
     """
     click.echo(f"otari hook: {message}", err=True)
     click.echo(json.dumps({"systemMessage": f"otari hook: {message}"}))
+
+
+def _failing_summary(failing: list[dict[str, Any]]) -> str:
+    """One indented line per failing gate, for both the human and the model channel.
+
+    `[x]` marks a required gate and `[!]` an advisory one, so a reader sees at
+    a glance which line is the one that blocked.
+
+    `detail` carries the specific "why" behind `message`'s generic, fixed
+    policy text (a judge gate's own model reasoning, a path gate's matched
+    paths, ...); without it, every gate of the same id shows the exact same
+    static line no matter what a judge model actually found. Bounded at 500
+    characters the way this command's other error details are, since
+    `reasoning` itself can run to _HOOK_MAX_JUDGE_REASONING_LENGTH (4,096),
+    far too long for one line.
+
+    `source` is set only where the guardrail was composed from more than one
+    file, which is exactly when naming the file saves a reader from hunting
+    for which one to edit. A single-file repo would only be told what it
+    already knows.
+
+    `.get()`, not `[...]`: a gate dict from an older or otherwise mismatched
+    `otari serve` behind `--url` may be missing a field, and must not raise
+    KeyError outside the caller's fail-open protection and surface as a
+    traceback in place of the message this command promises.
+    """
+    return "\n".join(
+        f"  [{'x' if gate.get('enforcement') == 'required' else '!'}] "
+        f"{gate.get('gate_id', '?')}: {gate.get('message', '(no message)')}"
+        + (f" ({str(gate['detail'])[:500]})" if gate.get("detail") else "")
+        + (f" [{gate['source']}]" if gate.get("source") else "")
+        for gate in failing
+    )
 
 
 def _guardrail_moved_notice(root: Path) -> str | None:
@@ -2078,32 +2112,7 @@ def hook(
     if not failing:
         return
 
-    # .get(), not [...]: the try/except above only protects the shape checks
-    # that build `failing` itself (result["results"], gate["outcome"]), not a
-    # gate dict's other fields. A gate missing 'enforcement'/'gate_id'/
-    # 'message' (an older or otherwise mismatched otari serve behind --url)
-    # must not raise KeyError here, outside that protection, and surface as a
-    # traceback in place of the fail-open message this command promises.
-    # detail carries the specific "why" behind message's generic, fixed
-    # policy text (a judge gate's own model reasoning, a path gate's
-    # matched paths, ...); without it, every gate of the same id shows the
-    # exact same static line no matter what a judge model actually found
-    # (confirmed: a real verdict naming "src/module.py:42" surfaced only the
-    # configured message, never that). Bounded the same way the error
-    # details elsewhere in this command are, at 500 characters: `reasoning`
-    # itself can run up to _HOOK_MAX_JUDGE_REASONING_LENGTH (4,096), too long
-    # for one stderr line.
-    # `source` is set only where the guardrail was composed from more than
-    # one file, which is exactly when naming the file saves a reader from
-    # hunting for which one to edit. A single-file repo would only be told
-    # what it already knows.
-    summary = "\n".join(
-        f"  [{'x' if gate.get('enforcement') == 'required' else '!'}] "
-        f"{gate.get('gate_id', '?')}: {gate.get('message', '(no message)')}"
-        + (f" ({str(gate['detail'])[:500]})" if gate.get("detail") else "")
-        + (f" [{gate['source']}]" if gate.get("source") else "")
-        for gate in failing
-    )
+    summary = _failing_summary(failing)
     if blocked:
         # stop_hook_active is the harness's own signal that this Stop is
         # already the continuation a previous block forced. It matters because
@@ -2135,11 +2144,34 @@ def hook(
     # An advisory gate failed but nothing required did: warn without
     # blocking. Checking `blocked` alone here would silently drop this,
     # since only a required failure can ever set it true. Exit 0 with a
-    # plain stderr message is invisible to the user: Claude Code only
-    # surfaces a non-blocking hook's stderr in its own debug log, never in
-    # the transcript or to the model. `systemMessage` on stdout is the
-    # documented field for a visible, non-blocking hook message.
-    click.echo(json.dumps({"systemMessage": f"otari hook: advisory warning(s) ({harness}, {event}):\n{summary}"}))
+    # plain stderr message is invisible: Claude Code only surfaces a
+    # non-blocking hook's stderr in its own debug log, never in the
+    # transcript. `systemMessage` on stdout is the documented field for a
+    # visible, non-blocking hook message.
+    output: dict[str, Any] = {"systemMessage": f"otari hook: advisory warning(s) ({harness}, {event}):\n{summary}"}
+    # A judge gate is advisory by construction: `domain/policy.py` rejects
+    # `required` on one, so exit 2, the only path whose stderr Claude Code
+    # feeds to the model, is a channel it can never take. Left at
+    # `systemMessage` alone, a model's finding about the turn would reach
+    # everyone except the one reader able to act on it, which is the whole
+    # point of asking a model to review the turn in the first place. `Stop`'s
+    # `additionalContext` lands in the transcript for the model to see on the
+    # next turn without blocking this one, so a judge finding always takes it.
+    # Only a judge finding: a deterministic gate whose author chose
+    # `advisory` over `required` had the blocking channel available and
+    # declined it, and keeps the quieter one they asked for.
+    judge_ids = {gate.id for gate in spec.gates if isinstance(gate, JudgeGate)}
+    judge_failures = [gate for gate in failing if gate.get("gate_id") in judge_ids]
+    if judge_failures and event == "Stop":
+        output["hookSpecificOutput"] = {
+            "hookEventName": "Stop",
+            "additionalContext": (
+                "otari hook: a judge guardrail reviewed this turn and did not pass. It is advisory, "
+                "so nothing was blocked; fix what it found, or say why it does not apply.\n"
+                f"{_failing_summary(judge_failures)}"
+            ),
+        }
+    click.echo(json.dumps(output))
 
 
 def _otari_binary_path() -> str:
