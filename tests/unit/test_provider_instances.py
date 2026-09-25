@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import uuid
+from collections.abc import Iterator
 
 import pytest
 import yaml
@@ -17,6 +19,7 @@ from gateway.core.config import (
     provider_credential_env_names,
 )
 from gateway.log_config import logger as gateway_logger
+from gateway.services import provider_kwargs
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import (
     _AMBIENT_CREDENTIAL_PROVIDERS,
@@ -558,3 +561,84 @@ def test_candidate_model_keys_accepts_string_provider_from_any_llm(monkeypatch: 
     monkeypatch.setattr(AnyLLM, "split_model_provider", lambda _selector: ("registry-only", "model"))
 
     assert _candidate_model_keys("registry-only:model") == ["registry-only:model", "registry-only/model"]
+
+
+# ---------------------------------------------------------------------------
+# Deprecated env-var fallback for an undeclared provider (#1626)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def undeclared_env_warnings(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> Iterator[pytest.LogCaptureFixture]:
+    """Capture gateway warnings with the once-per-provider memory cleared."""
+    monkeypatch.setattr(provider_kwargs, "_undeclared_env_warned", set())
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _capture_gateway_logs(caplog)
+    try:
+        yield caplog
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
+def test_undeclared_provider_on_env_var_warns_once(
+    monkeypatch: pytest.MonkeyPatch, undeclared_env_warnings: pytest.LogCaptureFixture
+) -> None:
+    """The warning names the provider and its variable, never the value, and is not repeated per request."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
+    config = GatewayConfig(providers={})
+
+    get_provider_kwargs(config, LLMProvider.ANTHROPIC)
+    get_provider_kwargs(config, LLMProvider.ANTHROPIC)
+
+    records = [r for r in undeclared_env_warnings.records if "not declared under providers:" in r.getMessage()]
+    assert len(records) == 1
+    message = records[0].getMessage()
+    assert "'anthropic'" in message and "ANTHROPIC_API_KEY" in message
+    assert "sk-ant-secret-value" not in message
+
+
+def test_declared_provider_on_env_var_warns_nothing(
+    monkeypatch: pytest.MonkeyPatch, undeclared_env_warnings: pytest.LogCaptureFixture
+) -> None:
+    """A declared entry reading its key from the env var is the supported shape."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    config = GatewayConfig(providers={"anthropic": {"api_key": "sk-ant-test"}})
+
+    get_provider_kwargs(config, LLMProvider.ANTHROPIC)
+
+    assert "not declared" not in undeclared_env_warnings.text
+
+
+def test_undeclared_provider_without_env_var_warns_nothing(
+    undeclared_env_warnings: pytest.LogCaptureFixture,
+) -> None:
+    """No env var means no fallback in use; the request fails on its own terms."""
+    get_provider_kwargs(GatewayConfig(providers={}), LLMProvider.ANTHROPIC)
+
+    assert "not declared" not in undeclared_env_warnings.text
+
+
+def test_organization_key_counts_as_declared(
+    monkeypatch: pytest.MonkeyPatch, undeclared_env_warnings: pytest.LogCaptureFixture
+) -> None:
+    """An organization-scoped provider key is a declaration too, even with the env var also set."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr(provider_kwargs, "cached_org_provider_kwargs", lambda _ws, _p: {"api_key": "sk-org"})
+
+    get_provider_kwargs(GatewayConfig(providers={}), LLMProvider.ANTHROPIC, workspace_id=uuid.uuid4())
+
+    assert "not declared" not in undeclared_env_warnings.text
+
+
+@pytest.mark.parametrize("mode", ["hybrid", "hosted"])
+def test_undeclared_env_provider_warns_nothing_outside_standalone(
+    mode: str, monkeypatch: pytest.MonkeyPatch, undeclared_env_warnings: pytest.LogCaptureFixture
+) -> None:
+    """Hybrid resolves credentials from the platform and hosted serves no inference."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    get_provider_kwargs(GatewayConfig(mode=mode, providers={}), LLMProvider.ANTHROPIC)
+
+    assert "not declared" not in undeclared_env_warnings.text

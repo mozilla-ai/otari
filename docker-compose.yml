@@ -63,8 +63,8 @@ services:
       # callers who want a custom framing should set their own system message.
       - OTARI_TOOLS_HEADER=${OTARI_TOOLS_HEADER:-}
       # Pass provider API keys from host env so config.yml stays free of
-      # secrets. any-llm/the underlying SDK picks them up when the config
-      # doesn't override.
+      # secrets: reference them there as `api_key: ${OPENAI_API_KEY}` under
+      # the provider's `providers:` entry.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # Fernet key that encrypts provider credentials added through the admin

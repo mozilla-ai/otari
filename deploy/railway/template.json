@@ -1,7 +1,7 @@
 {
   "_comment": "Reviewable snapshot of the Otari + Postgres Railway template. A Railway multi-service template is a platform-hosted object that cannot be fully round-tripped from a repo file, so this is the human source of truth for what the live template contains, not a file Railway imports. The live template lives on the mozilla-ai Railway account; its deploy link is the Deploy on Railway button in README.md. When the live template changes, update this snapshot and deploy/railway/README.md in the same PR.",
   "name": "Otari",
-  "description": "Self-hosted Otari, an OpenAI-compatible LLM gateway, in front of key-only providers (OpenAI, Anthropic, Mistral, Gemini), backed by a managed Postgres database. Bring a provider key, get virtual API keys, budgets, and usage tracking.",
+  "description": "Self-hosted Otari, an OpenAI-compatible LLM gateway, in front of key-only providers (OpenAI, Anthropic, Mistral, Gemini), backed by a managed Postgres database. Add provider keys on the dashboard, get virtual API keys, budgets, and usage tracking.",
   "services": {
     "otari": {
       "name": "otari",
@@ -29,17 +29,17 @@
         "OTARI_REQUIRE_PRICING": {
           "defaultValue": "false",
           "isOptional": false,
-          "description": "Set to false so an env-only deploy serves models that have no configured pricing. The image default is true (fail-closed), which would reject every model until pricing is configured."
+          "description": "Set to false so a fresh deploy serves models that have no configured pricing. The image default is true (fail-closed), which would reject every model until pricing is configured."
         },
         "OTARI_DEFAULT_PRICING": {
           "defaultValue": "true",
           "isOptional": false,
-          "description": "Fall back to community-maintained default pricing (the bundled genai-prices dataset) for models you have not priced explicitly. The image default is false; pre-set to true here so an env-only deploy meters common models out of the box. Prices you set in the dashboard or via /api/v1/pricing always override the fallback."
+          "description": "Fall back to community-maintained default pricing (the bundled genai-prices dataset) for models you have not priced explicitly. The image default is false; pre-set to true here so a fresh deploy meters common models out of the box. Prices you set in the dashboard or via /api/v1/pricing always override the fallback."
         },
-        "OPENAI_API_KEY": {
-          "defaultValue": "",
-          "isOptional": true,
-          "description": "OpenAI API key. Optional: set at least one provider key for the gateway to serve traffic. Any any-llm provider works by adding its native env var (ANTHROPIC_API_KEY, MISTRAL_API_KEY, GEMINI_API_KEY, ...); see https://docs.mozilla.ai/any-llm/providers/ for the current list."
+        "OTARI_SECRET_KEY": {
+          "defaultValue": "${{secret(43, \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_\")}}=",
+          "isOptional": false,
+          "description": "Fernet key that encrypts the provider credentials you add on the dashboard's Providers page. Auto-generated on deploy (43 url-safe characters plus '='); keep it, since losing it makes stored credentials unrecoverable."
         }
       }
     },

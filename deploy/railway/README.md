@@ -2,8 +2,8 @@
 
 One-click deploy of a self-hosted [Otari](https://github.com/mozilla-ai/otari)
 gateway in front of key-only providers (OpenAI, Anthropic, Mistral, Gemini),
-backed by a managed Postgres database. No local setup, bring a provider key and
-go.
+backed by a managed Postgres database. No local setup: deploy, then add your
+provider keys on the dashboard.
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/otari-railway-template-demo)
 
@@ -23,7 +23,7 @@ API key is minted on startup with no extra steps.
 
 ## Configuration
 
-The template wires the two services together and asks for a provider key. All of
+The template wires the two services together and generates the keys it needs. All of
 Otari's scalar config is reachable through `OTARI_<FIELD>` environment variables;
 the snapshot of what the template sets lives in [`template.json`](template.json).
 
@@ -31,25 +31,24 @@ the snapshot of what the template sets lives in [`template.json`](template.json)
 | --- | --- | --- |
 | `OTARI_DATABASE_URL` | `${{Postgres.DATABASE_URL}}` | Pre-wired; leave as-is. |
 | `OTARI_MASTER_KEY` | auto-generated (`${{secret(48)}}`) | Auto-set; read it from the otari service's Variables tab. |
-| `OTARI_REQUIRE_PRICING` | `false` | Pre-set, so an env-only deploy serves models that have no configured pricing. |
+| `OTARI_SECRET_KEY` | auto-generated Fernet key | Encrypts the provider credentials you add on the Providers page. Keep it: losing it makes them unrecoverable. |
+| `OTARI_REQUIRE_PRICING` | `false` | Pre-set, so a fresh deploy serves models that have no configured pricing. |
 | `OTARI_DEFAULT_PRICING` | `true` | Pre-set, so common models are metered from the bundled genai-prices dataset without configuring each one. Prices you set in the dashboard or via `/api/v1/pricing` always override it. |
-| `OPENAI_API_KEY` | your key | Optional input. Set at least one provider key (see below). |
 
 Notes:
 
-- The deploy form prompts for `OPENAI_API_KEY` as a convenience, but it is
-  optional, and you are not limited to OpenAI. Set the key(s) for whichever
-  providers you will use; at least one is needed for the gateway to serve
-  traffic. To use another provider, add a variable with its native env var name
-  (for example `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, or `GEMINI_API_KEY`); the
-  underlying [`any-llm`](https://github.com/mozilla-ai/any-llm) SDK reads these
-  directly. See any-llm's [supported providers](https://docs.mozilla.ai/any-llm/providers/)
-  for the current list.
+- Providers are added after deploy, on the dashboard's Providers page (sign in
+  with the master key). That declares the provider, so it serves requests and
+  its models are listed. Any [any-llm provider](https://docs.mozilla.ai/any-llm/providers/)
+  works. To keep keys in Railway variables instead, declare the providers
+  through `OTARI_CONFIG_YAML` with `api_key: ${ANTHROPIC_API_KEY}` references;
+  see [Full config via environment](../../docs/configuration.md#full-config-via-environment).
+  Setting a provider's native variable without declaring it is deprecated.
 - Otari normalizes a `postgresql://` URL to the async driver automatically, so
   Railway's `DATABASE_URL` works without edits.
 - `OTARI_REQUIRE_PRICING=false` is deliberate. The image default is `true`
   (fail-closed), which rejects any model without configured pricing; that would
-  make an env-only deploy unusable until pricing is added. To serve priced
+  make a fresh deploy unusable until pricing is added. To serve priced
   models instead, supply `pricing` (and any other structured config like custom
   `api_base` or Vertex settings) through `OTARI_CONFIG_YAML` / `OTARI_CONFIG_B64`;
   see [Full config via environment](../../docs/configuration.md#full-config-via-environment).
@@ -64,11 +63,12 @@ Notes:
 ## Deploy
 
 1. Click **Deploy on Railway** above.
-2. Fill in at least one provider key. The master key is generated for you.
-3. Deploy. Railway provisions Postgres, pulls the Otari image, runs migrations on
-   startup, and bootstraps a first-use API key.
-4. Generate a public domain for the otari service (Settings → Networking) if you
-   want to call it from outside Railway.
+2. Deploy. The master key and secret key are generated for you. Railway
+   provisions Postgres, pulls the Otari image, runs migrations on startup, and
+   bootstraps a first-use API key.
+3. Generate a public domain for the otari service (Settings → Networking).
+4. Open that domain, sign in with the master key (from the Variables tab), and
+   add at least one provider on the Providers page.
 
 ## Verify
 
@@ -94,8 +94,8 @@ curl "$OTARI_URL/api/v1/chat/completions" \
   }'
 ```
 
-Use the provider that matches the key you supplied (for example `anthropic:...`,
-`mistral:...`, or `gemini:...`).
+Use a provider you added (for example `anthropic:...`, `mistral:...`, or
+`gemini:...`).
 
 ## Maintaining the template
 

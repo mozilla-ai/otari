@@ -5,7 +5,8 @@
 # Image: https://hub.docker.com/r/mzdotai/otari
 #
 # Pattern: image-wrapper (official mzdotai/otari image; no source build on Render)
-# Env-only standalone: Otari web + managed Postgres (auto_migrate + bootstrap key).
+# Standalone: Otari web + managed Postgres (auto_migrate + bootstrap key).
+# Providers are added after deploy on the dashboard's Providers page.
 
 previews:
   generation: "off"
@@ -49,17 +50,11 @@ projects:
                 value: "true"
               - key: OTARI_BOOTSTRAP_API_KEY
                 value: "true"
-              # Provider credentials (any-llm). Prompted on initial Blueprint
-              # create so deployers can fill whichever providers they use.
-              # At least one is needed to serve traffic; leave unused keys blank.
-              - key: OPENAI_API_KEY
-                sync: false
-              - key: ANTHROPIC_API_KEY
-                sync: false
-              - key: MISTRAL_API_KEY
-                sync: false
-              - key: GEMINI_API_KEY
-                sync: false
+              # Fernet key encrypting the provider credentials added on the
+              # Providers page. A generated value is a base64-encoded 256-bit
+              # value, which is a valid Fernet key.
+              - key: OTARI_SECRET_KEY
+                generateValue: true
 
         databases:
           - name: otari-db

@@ -50,7 +50,12 @@ Run an ephemeral standalone gateway with Docker:
 docker run --rm -p 8000:8000 \
   -e OTARI_MASTER_KEY=SET_A_MASTER_KEY \
   -e OPENAI_API_KEY=YOUR_OPENAI_KEY \
-  -e OTARI_CONFIG_YAML='default_pricing: true' \
+  -e OTARI_CONFIG_YAML='
+default_pricing: true
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+' \
   mzdotai/otari:latest \
   otari serve
 ```

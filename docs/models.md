@@ -33,8 +33,9 @@ standalone configuration, pricing, aliases, and routing policies.
 
 ## Configuring a provider
 
-A provider can come from `config.yml`, its native credential environment
-variable, or the standalone Providers page:
+Declare a provider under `providers` in `config.yml`, or add it on the
+standalone Providers page. Either way it serves requests and its models are
+discovered. Supply the key from the environment with a `${VAR}` reference:
 
 ```yaml
 providers:
@@ -42,9 +43,10 @@ providers:
     api_key: ${OPENAI_API_KEY}
 ```
 
-A native variable such as `OPENAI_API_KEY` can be enough to dispatch a direct
-request. Add the provider to `providers` when you also want model discovery or
-explicit client settings.
+A provider that is not declared is still called when its native variable (such
+as `OPENAI_API_KEY`) is set, but its models are not listed. That fallback is
+deprecated: the gateway logs a warning naming the provider, and a future
+release will refuse the request.
 
 Provider support is endpoint-specific. A provider that supports chat may not
 support Responses, images, audio, rerank, or batches. Unsupported combinations

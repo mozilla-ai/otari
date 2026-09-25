@@ -39,9 +39,10 @@ export OTARI_MASTER_KEY="..."
 export OTARI_DEFAULT_PRICING=true
 ```
 
-Provider SDKs also read their native credential variables, including
-`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, and
-`GEMINI_API_KEY`.
+Provider credentials come from the environment through `${VAR}` references
+in the `providers` map (see [Provider configuration](#provider-configuration)).
+Setting a provider's native variable, such as `OPENAI_API_KEY`, without
+declaring the provider is deprecated; see [Models](models.md#configuring-a-provider).
 
 Booleans accept `true`, `false`, `1`, `0`, `yes`, `no`, `on`, and
 `off`, without regard to case.

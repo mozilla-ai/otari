@@ -39,6 +39,7 @@ from any_llm.exceptions import AnyLLMError
 
 from gateway.auth.vertex_auth import setup_vertex_environment
 from gateway.core.config import KEYLESS_SELF_HOSTED_PROVIDERS, GatewayConfig, provider_credential_env_names
+from gateway.log_config import logger
 from gateway.services.alias_service import resolve_effective_alias
 from gateway.services.catalog_selectors import resolve_catalog_selector
 from gateway.services.policy_store import resolve_effective_policy
@@ -87,6 +88,10 @@ _AMBIENT_CREDENTIAL_PROVIDERS = frozenset({"bedrock", "sagemaker"})
 # and no key takes the keyless placeholder, so it never reaches a caller alone.
 _NON_CREDENTIAL_KWARGS = frozenset({"client_args"})
 
+# Providers already warned about reaching any-llm on their env var alone, so the
+# deprecation is logged once per provider per process rather than per request.
+_undeclared_env_warned: set[str] = set()
+
 
 def _kwargs_carry_a_credential(kwargs: dict[str, Any]) -> bool:
     """Whether anything in a resolved provider's kwargs could authenticate a call.
@@ -109,6 +114,34 @@ def _provider_env_key_present(provider: LLMProvider) -> bool:
     the config layer so both agree on which variables carry a credential.
     """
     return any(os.getenv(name) for name in provider_credential_env_names(provider.value) or ())
+
+
+def _warn_undeclared_env_provider(config: GatewayConfig, provider: LLMProvider) -> None:
+    """Log, once per provider, that a standalone call rides the env-var fallback.
+
+    Reached when nothing declares the provider (no ``config.providers`` entry, no
+    organization-scoped key) and any-llm will authenticate from the provider's
+    native variable instead. That fallback is deprecated: such a provider serves
+    requests but is missing from model discovery. Hybrid mode resolves every
+    credential from the platform and hosted mode serves no inference, so neither
+    warns.
+    """
+    if config.is_hybrid_mode or config.is_hosted_mode or provider.value in _undeclared_env_warned:
+        return
+    env_name = next((name for name in provider_credential_env_names(provider.value) or () if os.getenv(name)), None)
+    if env_name is None:
+        return
+    _undeclared_env_warned.add(provider.value)
+    logger.warning(
+        "Provider '%s' is not declared under providers: and is being called with its %s environment variable. "
+        "This fallback is deprecated and will stop working in a future release, and the provider's models are "
+        "not listed meanwhile. Declare it in config.yml (providers: {%s: {api_key: ${%s}}}) or on the "
+        "dashboard's Providers page.",
+        provider.value,
+        env_name,
+        provider.value,
+        env_name,
+    )
 
 
 def keyless_placeholder_api_key(provider: LLMProvider, api_base: Any, api_key: Any) -> str | None:
@@ -218,6 +251,8 @@ def get_provider_kwargs(
             kwargs = {k: v for k, v in provider_config.items() if k != "client_args"}
             if "client_args" in provider_config:
                 kwargs["client_args"] = provider_config["client_args"]
+    else:
+        _warn_undeclared_env_provider(config, provider)
 
     placeholder = keyless_placeholder_api_key(provider, kwargs.get("api_base"), kwargs.get("api_key"))
     if placeholder is not None:
