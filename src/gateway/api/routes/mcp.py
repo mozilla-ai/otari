@@ -54,7 +54,7 @@ from gateway.api.deps import (
 # parameters and every request fails validation before the handler runs.
 from gateway.core.config import API_ROOT, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import release_session
-from gateway.exceptions.control_plane_exceptions import ControlPlaneError
+from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
 from gateway.exceptions.tools_exceptions import McpServerResolutionFailedError
 from gateway.inflight import track_request
 from gateway.log_config import logger
@@ -261,7 +261,7 @@ def _retry_hint(exc: StarletteHTTPException | ControlPlaneError) -> str | None:
     """The ``Retry-After`` hint the refusal carries."""
     if isinstance(exc, StarletteHTTPException):
         return (exc.headers or {}).get("Retry-After")
-    return getattr(exc, "retry_after", None)
+    return exc.retry_after if isinstance(exc, ControlPlaneRefusedError) else None
 
 router = APIRouter(prefix="/mcp", tags=["mcp"], route_class=_McpRoute)
 

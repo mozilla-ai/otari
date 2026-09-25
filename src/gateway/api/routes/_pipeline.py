@@ -1775,6 +1775,9 @@ async def resolve_request_context(
     # Earliest point in the shared handler preamble; anchors the request's
     # latency_ms (measured monotonically, so it is immune to wall-clock steps).
     started_at = time.monotonic()
+    # Before the reservation, so a container that cannot answer refuses without
+    # leaving a hold behind.
+    mcp_servers = get_container(raw_request).resolve(McpServerPort, db)
     hybrid_mode = config.is_hybrid_mode
     route: ResolvedRoute | None = None
     user_token: str | None = None
@@ -2222,7 +2225,7 @@ async def resolve_request_context(
         reservation=reservation,
         started_at=started_at,
         workspace_id=workspace_id,
-        mcp_servers=get_container(raw_request).resolve(McpServerPort, db),
+        mcp_servers=mcp_servers,
         resolved_provider=resolved_provider,
         plan=plan,
         estimate_inputs=estimate_inputs,
@@ -2724,15 +2727,11 @@ async def _resolve_mcp_server_ids(
 ) -> list[McpServerConfig]:
     """Swap a request's ``mcp_server_ids`` for the configs they name.
 
-    One field, two sources, chosen by mode.
-    A hybrid gateway asks the control plane, which owns the workspace's stored servers there.
-    A standalone one reads its own rows for the workspace the request's key belongs to.
-    That workspace comes off the key at authentication and never off a header.
+    The port answers from wherever this deployment keeps them.
+    The workspace comes off the key at authentication and never off a header.
 
-    Both modes refuse an unknown id with a 404 and the same error type, so a caller moving
-    between them sees one contract.
-    A standalone request with no database session or no resolved workspace cannot resolve
-    anything, and is refused rather than served with the ids silently dropped.
+    Every deployment refuses an unknown id with a 404 and the same error type,
+    so a caller moving between them sees one contract.
     """
     if ctx.mcp_servers is None:
         raise adapter.error(400, MCP_SERVER_IDS_UNAVAILABLE_DETAIL, ErrorKind.INVALID_REQUEST)

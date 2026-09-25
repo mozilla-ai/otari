@@ -52,37 +52,47 @@ class RemoteMcpServers(McpServerPort):
     def __init__(self, config: GatewayConfig) -> None:
         self._config = config
 
-    async def _ask(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[Any]:
+    async def _ask(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[Any] | None:
         """The ``servers`` entry of the peer's answer.
 
         Ids are de-duplicated with their order kept, because the protocol does not
         say what the peer answers for a repeated id.
         """
+        if not scope.user_token:
+            raise McpServerResolutionFailedError
         payload = await resolve(
             self._config,
-            user_token=scope.user_token or "",
+            user_token=scope.user_token,
             endpoint=ResolveEndpoint.MCP_SERVERS,
             body={"mcp_server_ids": [str(uid) for uid in dict.fromkeys(server_ids)]},
         )
         servers = payload.get("servers") if isinstance(payload, dict) else None
-        if not isinstance(servers, list):
-            raise McpServerResolutionFailedError
-        return servers
+        return servers if isinstance(servers, list) else None
 
     async def resolve_many(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
-        return [
-            McpServerConfig(
-                name=entry["name"],
-                url=entry["url"],
-                authorization_token=entry.get("authorization_token"),
-                purpose_hint=entry.get("purpose_hint"),
-                allowed_tools=entry.get("allowed_tools"),
-            )
-            for entry in await self._ask(scope, server_ids)
-        ]
+        # An answer naming no servers resolves to none rather than refusing, which
+        # is the contract this side has always had.
+        entries = await self._ask(scope, server_ids) or []
+        try:
+            return [
+                McpServerConfig(
+                    name=entry["name"],
+                    url=entry["url"],
+                    authorization_token=entry.get("authorization_token"),
+                    purpose_hint=entry.get("purpose_hint"),
+                    allowed_tools=entry.get("allowed_tools"),
+                )
+                for entry in entries
+            ]
+        except (ValidationError, KeyError, TypeError):
+            # The underlying error quotes the answer, which carries the stored
+            # URL and credential, so it reaches neither the caller nor the log.
+            raise McpServerResolutionFailedError from None
 
     async def resolve_one(self, scope: McpServerScope, server_id: uuid.UUID) -> ResolvedMcpServer | None:
         servers = await self._ask(scope, [server_id])
+        if servers is None:
+            raise McpServerResolutionFailedError
         if not servers:
             # An older peer omits a disabled server rather than reporting one.
             # Both mean the caller cannot reach it.

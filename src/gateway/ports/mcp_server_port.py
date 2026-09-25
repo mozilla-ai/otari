@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
-from gateway.exceptions.tools_exceptions import WorkspaceMcpServerNotFoundError
+from gateway.exceptions.tools_exceptions import McpServerResolutionFailedError, WorkspaceMcpServerNotFoundError
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 
 
@@ -40,6 +40,7 @@ class McpServerPort(Protocol):
 
         Raises:
             WorkspaceMcpServerNotFoundError: an id names no server this scope reaches.
+            McpServerResolutionFailedError: the answer could not be read.
         """
         ...
 
@@ -48,8 +49,11 @@ class McpServerPort(Protocol):
 
         A disabled server is returned carrying its state rather than omitted, so
         a caller can tell it apart from an id that reaches nothing.
+
+        Raises:
+            McpServerResolutionFailedError: the answer could not be read.
         """
         ...
 
 
-__all__ = ["McpServerPort", "McpServerScope", "WorkspaceMcpServerNotFoundError"]
+__all__ = ["McpServerResolutionFailedError", "McpServerPort", "McpServerScope", "WorkspaceMcpServerNotFoundError"]
