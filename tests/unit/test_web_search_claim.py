@@ -11,6 +11,7 @@ from gateway.api.routes._tools import (
     first_provider_web_search_tool,
     parse_web_search_header,
     provider_runs_web_search_natively,
+    web_search_header_conflicts,
 )
 from gateway.models.tools import CodeExecutor
 from gateway.services.tools import Dialect
@@ -25,6 +26,10 @@ OPENAI_BARE = {"type": "web_search"}
         (ANTHROPIC_DATED, "anthropic", Dialect.MESSAGES, True),
         (OPENAI_BARE, "openai", Dialect.RESPONSES, True),
         ({"type": "web_search_preview"}, "openai", Dialect.RESPONSES, True),
+        ({"type": "web_search_preview_2025_03_11"}, "openai", Dialect.RESPONSES, True),
+        (ANTHROPIC_DATED, "openai", Dialect.RESPONSES, False),
+        (OPENAI_BARE, "anthropic", Dialect.MESSAGES, False),
+        ({"type": "web_search_preview"}, "anthropic", Dialect.MESSAGES, False),
         (ANTHROPIC_DATED, "bedrock", Dialect.MESSAGES, False),
         (ANTHROPIC_DATED, "openai", Dialect.MESSAGES, False),
         (ANTHROPIC_DATED, "anthropic", Dialect.CHAT, False),
@@ -44,6 +49,7 @@ def _claims(
     intercept: bool = False,
     backend_configured: bool = True,
     provider: str | None = "bedrock",
+    providers: list[str | None] | None = None,
     entry: dict[str, Any] | None = ANTHROPIC_DATED,
 ) -> bool:
     return claims_provider_web_search(
@@ -51,7 +57,7 @@ def _claims(
         requested=requested,
         intercept=intercept,
         backend_configured=backend_configured,
-        provider=provider,
+        providers=[provider] if providers is None else providers,
         dialect=Dialect.MESSAGES,
     )
 
@@ -74,16 +80,38 @@ def test_auto_claims_a_search_the_provider_cannot_run() -> None:
     assert _claims(requested=CodeExecutor.AUTO, provider="bedrock")
 
 
-def test_auto_wins_over_interception() -> None:
-    assert not _claims(requested=CodeExecutor.AUTO, intercept=True, provider="anthropic")
+@pytest.mark.parametrize(
+    ("providers", "claimed"),
+    [(["anthropic", "anthropic"], False), (["anthropic", "bedrock"], True), ([], True)],
+    ids=["all-native", "non-native-fallback", "unknown-chain"],
+)
+def test_auto_claims_unless_every_candidate_runs_the_search(providers: list[str | None], claimed: bool) -> None:
+    assert _claims(requested=CodeExecutor.AUTO, providers=providers) is claimed
+
+
+@pytest.mark.parametrize("requested", list(CodeExecutor))
+def test_the_header_cannot_undo_interception(requested: CodeExecutor) -> None:
+    assert _claims(requested=requested, intercept=True, provider="anthropic")
 
 
 def test_otari_claims_even_a_native_search() -> None:
     assert _claims(requested=CodeExecutor.OTARI, provider="anthropic")
 
 
-def test_provider_wins_over_interception() -> None:
-    assert not _claims(requested=CodeExecutor.PROVIDER, intercept=True, provider="bedrock")
+@pytest.mark.parametrize(
+    ("requested", "intercept", "conflicts"),
+    [
+        (CodeExecutor.PROVIDER, True, True),
+        (CodeExecutor.AUTO, True, False),
+        (CodeExecutor.OTARI, True, False),
+        (None, True, False),
+        (CodeExecutor.PROVIDER, False, False),
+    ],
+)
+def test_only_provider_under_interception_conflicts(
+    requested: CodeExecutor | None, intercept: bool, conflicts: bool
+) -> None:
+    assert web_search_header_conflicts(requested, intercept=intercept) is conflicts
 
 
 @pytest.mark.parametrize("requested", [None, *CodeExecutor])

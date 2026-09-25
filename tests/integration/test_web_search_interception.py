@@ -99,13 +99,13 @@ def test_intercepted_declaration_runs_the_gateway_search(
     assert search.await_count == 1, "the gateway's search backend never ran"
 
 
-@pytest.mark.parametrize("tool_type", ["web_fetch_20250910", "web_fetch_20260209"])
+@pytest.mark.parametrize("tool_type", ["web_search_20250305", "web_fetch_20250910", "web_fetch_20260209"])
 def test_declaration_is_forwarded_when_interception_is_off(
     client: TestClient,
     api_key_header: dict[str, str],
     tool_type: str,
 ) -> None:
-    """Default behavior: a provider fetch keyword reaches the provider and no gateway search runs."""
+    """Default behavior: the keyword reaches the provider and no gateway search runs."""
     search = AsyncMock(return_value="never called")
     captured: dict[str, Any] = {}
 
