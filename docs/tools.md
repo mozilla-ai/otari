@@ -355,8 +355,14 @@ is unacceptable.
 ### Web search
 
 Otari reaches a licensed search API directly. Set `web_search_provider` to
-`tavily` or `brave` and `web_search_provider_api_key` to that provider's key;
-the key stays in the gateway process and never reaches a caller.
+`tavily`, `brave` or `serply` and `web_search_provider_api_key` to that
+provider's key; the key stays in the gateway process and never reaches a
+caller.
+
+`tavily` returns extracted page text with its hits, so a search skips the
+fetch-and-extract pass the other two need. `brave` and `serply` return snippets,
+and `serply` reads Google's index. All three take `time_range` in
+`provider_options` as `day`, `week`, `month` or `year`.
 
 For evaluation, the bundled SearXNG backend needs no key:
 

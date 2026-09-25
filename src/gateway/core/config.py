@@ -165,7 +165,7 @@ SEARCH_PROVIDERS = ("exa", "searxng")
 # service. Declared here for the same reason as SEARCH_PROVIDERS above: startup
 # validation rejects an unknown ``web_search_provider`` without the config layer
 # importing `gateway.services.web_search_providers`, which imports this name.
-WEB_SEARCH_PROVIDERS = ("tavily", "brave")
+WEB_SEARCH_PROVIDERS = ("tavily", "brave", "serply")
 # Providers that authenticate with an API key, so a tool declaring one of them
 # without a key is a misconfiguration. A SearXNG-shaped backend is normally
 # keyless (the bundled container, a self-hosted adapter), which is why the key
@@ -1180,7 +1180,7 @@ class GatewayConfig(BudgetSettings, PricingSettings, FeedbackSettings, BaseSetti
     web_search_provider: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
         default=None,
         description=(
-            "Licensed search API the web-search backend calls directly ('tavily' or 'brave'), "
+            "Licensed search API the web-search backend calls directly ('tavily', 'brave' or 'serply'), "
             "instead of the SearXNG-shaped service web_search_url names. Requires "
             "web_search_provider_api_key. When both are set, web_search_url is not needed."
         ),
