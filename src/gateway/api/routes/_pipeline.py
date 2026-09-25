@@ -2252,7 +2252,6 @@ class ToolContext:
         use_sandbox: bool,
         sandbox_tool_entry: dict[str, Any] | None,
         code_execution_port: CodeExecutionPort | None,
-        sandbox_auth_token: str | None,
         sandbox_exec_timeout_s: int | None = None,
         sandbox_session_image: str | None = None,
         sandbox_allowed_tools: frozenset[str] | None = None,
@@ -2283,7 +2282,6 @@ class ToolContext:
         # The adapter that runs this request's code, resolved from the container
         # by the route. None outside a request, where nothing opens a sandbox.
         self.code_execution_port = code_execution_port
-        self.sandbox_auth_token = sandbox_auth_token
         # The execution budget one sandbox call gets. A workspace policy may only
         # lower it, so the deployment's default is the ceiling rather than a value
         # a policy replaces.
@@ -2348,7 +2346,6 @@ class ToolContext:
             # backend widens it (``_CALLS_PER_ROUND_ALLOWANCE``) rather than
             # taking it as the number of executions a request can make.
             max_executions=self.max_tool_iterations,
-            auth_token=self.sandbox_auth_token,
             image=self.sandbox_session_image,
             allowed_tools=self.sandbox_allowed_tools,
             tally=self.tally,
@@ -2958,14 +2955,8 @@ async def prepare_gateway_tools(
                 raise adapter.error(400, MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL, ErrorKind.INVALID_REQUEST)
             mcp_servers = (mcp_servers or []) + stored_servers
 
-        # Read the effective config value (dashboard override / env / YAML), falling
-        # back to the env var so pure-env deployments are unchanged. A dashboard
-        # override mutates ctx.config, so it hot-applies on the next request.
-        # Only the hybrid-mode question below reads it now, which is whether the
-        # backend this deployment points at is the platform's own: what runs the
-        # code is the port, and a hosted provider has no URL at all.
-        sandbox_url: str | None = ctx.config.sandbox_url or otari_env("SANDBOX_URL") or None
-        # Whether code can run here is therefore the deployment's answer, not the URL.
+        # Whether code can run here is the deployment's answer rather than a URL:
+        # what runs the code is the port, and a hosted provider has no URL at all.
         sandbox_available = ctx.config.sandbox_configured()
         try:
             requested_executor = parse_code_execution_header(code_execution_header)
@@ -3005,13 +2996,6 @@ async def prepare_gateway_tools(
         if names_held_sandbox and sandbox_available and requested_executor in (None, CodeExecutor.AUTO):
             requested_executor = CodeExecutor.OTARI
 
-        # Forwarded to the sandbox backend as `Authorization: Bearer`. Only set in
-        # hybrid mode when the backend IS the platform (its URL is under the
-        # platform base URL the gateway already trusts this token with for resolve):
-        # the platform-hosted /api/v1/sandbox proxy authenticates the caller's workspace
-        # token and derives tenancy + per-workspace code-exec policy from it. Never
-        # leak it to a standalone exec-service an operator pointed the URL at.
-        sandbox_auth_token: str | None = None
         sandbox_max_iterations: int | None = None
         sandbox_exec_timeout_s: int | None = None
         # The image the session is leased against, and the tool kinds the backend
@@ -3096,10 +3080,6 @@ async def prepare_gateway_tools(
             assert sandbox_tool_entry is not None
             if mcp_servers:
                 raise adapter.error(400, SANDBOX_MCP_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
-            if ctx.hybrid_mode:
-                assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
-                if sandbox_url is not None and url_targets_platform(sandbox_url, ctx.config.platform.get("base_url")):
-                    sandbox_auth_token = ctx.user_token
             # The policy narrows what the deployment allows and never widens it: a
             # veto, two ceilings applied with ``min`` further down and in
             # ``ToolContext``, a hint that fills in only when the request gave none,
@@ -3362,7 +3342,6 @@ async def prepare_gateway_tools(
         use_sandbox=use_sandbox,
         sandbox_tool_entry=sandbox_tool_entry,
         code_execution_port=code_execution_port,
-        sandbox_auth_token=sandbox_auth_token,
         sandbox_exec_timeout_s=sandbox_exec_timeout_s,
         sandbox_session_image=sandbox_session_image,
         sandbox_allowed_tools=sandbox_allowed_tools,
