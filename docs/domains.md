@@ -250,9 +250,16 @@ retrieval and code execution.
   `tenancy/workspace_code_execution_policy_service.py`, `code_execution/`
 - Repositories: `code_execution/`
 - Exceptions: `tools_exceptions.py`
-- Ports: `code_execution_port.py`
-- Adapters: `code_execution_adapter.py`, `e2b_code_execution_adapter.py`
+- Ports: `code_execution_port.py`, `mcp_server_port.py`
+- Adapters: `code_execution_adapter.py`, `e2b_code_execution_adapter.py`,
+  `mcp_server_adapter.py`
 - Models: `tools.py`, `mcp.py`
+
+`mcp_server_port.py` names where a workspace's MCP servers come from. One
+deployment holds those rows and another asks a peer that holds them for it, so
+the composition root binds the implementation and no caller reads a mode. A
+resolved server is connected to directly; neither implementation proxies MCP
+traffic.
 
 **The tool test.** A tool is something the model calls during a request. The
 domain holds the registry, the loop and each tool's settings. A capability the
