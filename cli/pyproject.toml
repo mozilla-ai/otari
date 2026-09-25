@@ -1,6 +1,6 @@
 [build-system]
 # 77 is the first setuptools that accepts a PEP 639 SPDX string in `license`.
-requires = ["setuptools>=77"]
+requires = ["setuptools>=84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
