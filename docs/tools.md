@@ -38,18 +38,24 @@ them on Otari's configured backend instead. Interception is off by default
 because enabling it changes who performs searches for providers that already
 support a native search tool.
 
-A request can choose for itself with the `Otari-Web-Search` header, which wins
-over the deployment setting:
+Without interception, a request can choose for itself with the
+`Otari-Web-Search` header:
 
-- `auto` runs the declaration on Otari's backend only when the dispatched
-  provider cannot run it. Only Anthropic's dated keyword on `/api/v1/messages`
-  against an Anthropic model, and OpenAI's keywords on `/api/v1/responses`
-  against an OpenAI model, are forwarded. So a request written for Claude's
+- `auto` runs the declaration on Otari's backend unless every model the request
+  may reach, fallbacks included, can run it natively. Only Anthropic's dated
+  keyword (`web_search_<date>`) on `/api/v1/messages` against an Anthropic
+  model, and OpenAI's `web_search` / `web_search_preview` on `/api/v1/responses`
+  against an OpenAI model, count as native. So a request written for Claude's
   search keeps searching when its model is swapped for one with no search of its
   own, and on Messages a dated keyword is still answered with
   `server_tool_use` / `web_search_tool_result` blocks.
 - `otari` always runs it on Otari's backend.
 - `provider` always forwards it.
+
+The header can add a claim but never remove one: with `web_search_intercept`
+on, every search runs on Otari's backend whatever the header says, and
+`provider` is refused with a 403, because interception is what puts every
+search under the workspace's web-search policy and tool pricing.
 
 Whenever Otari runs the search, the rules for a gateway-run search apply: the
 workspace's web-search policy, tool pricing, and the restriction on combining it

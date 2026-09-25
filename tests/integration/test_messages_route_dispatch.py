@@ -1960,6 +1960,34 @@ def test_an_unknown_web_search_header_value_is_rejected(
     assert "Otari-Web-Search must be one of auto, otari, provider" in resp.text
 
 
+def test_the_header_cannot_hand_an_intercepted_search_to_the_provider(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interception puts every search under the workspace policy and tool pricing,
+    so `Otari-Web-Search: provider` is refused rather than letting a caller opt out."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
+    forwarded = AsyncMock()
+
+    with patch("gateway.api.routes.messages.amessages", new=forwarded):
+        resp = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [{"type": "web_search_20250305"}],
+            },
+            headers={**api_key_header, WEB_SEARCH_HEADER: "provider"},
+        )
+
+    assert resp.status_code == 403, resp.text
+    assert "cannot hand it to the provider" in resp.text
+    forwarded.assert_not_awaited()
+
+
 def test_intercept_without_a_backend_forwards_rather_than_400s(
     client: TestClient,
     api_key_header: dict[str, str],
