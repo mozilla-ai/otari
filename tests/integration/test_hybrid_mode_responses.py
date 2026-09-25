@@ -411,6 +411,47 @@ def test_hybrid_mode_falls_through_on_first_attempt_failure(
     assert reports_by_id["att-fallback"]["is_final_attempt"] is True
 
 
+def test_hybrid_mode_single_attempt_failure_names_the_attempt(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    """A lone attempt keeps its classified upstream status and names the attempt.
+
+    A single attempt takes the classifier's terminal path rather than the
+    aggregate 502, so the attempt id has to be attached on both.
+    """
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(200, json=_resolve_payload([_attempt(0, "att-only", "gpt-4o-mini", "sk-1")]))
+        return httpx.Response(204)
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        raise httpx.HTTPStatusError(
+            "404",
+            request=httpx.Request("POST", "http://upstream"),
+            response=httpx.Response(404, request=httpx.Request("POST", "http://upstream")),
+        )
+
+    control_plane_transport(fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.responses.aresponses", fake_aresponses)
+
+    response = platform_client.post(
+        f"{API_ROOT}/responses",
+        json={"model": "gpt-4o-mini", "input": "hi"},
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 404
+    assert response.headers["Otari-Attempt-ID"] == "att-only"
+
+
 def test_hybrid_mode_returns_502_when_all_attempts_fail(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -455,6 +496,7 @@ def test_hybrid_mode_returns_502_when_all_attempts_fail(
 
     assert response.status_code == 502
     assert response.json() == {"detail": "All upstream providers failed"}
+    assert response.headers["Otari-Attempt-ID"] == "att-2"
     reports_by_id = {report["correlation_id"]: report for report in usage_reports}
     assert reports_by_id["att-1"]["is_final_attempt"] is False
     assert reports_by_id["att-2"]["is_final_attempt"] is True

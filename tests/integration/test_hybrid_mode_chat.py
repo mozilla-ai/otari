@@ -1192,6 +1192,7 @@ def test_hybrid_mode_streaming_returns_502_when_all_attempts_fail(
 
     assert response.status_code == 502
     assert response.json() == {"detail": "All upstream providers failed"}
+    assert response.headers["Otari-Attempt-ID"] == "att-b"
 
 
 def test_hybrid_mode_streaming_returns_504_when_all_attempts_time_out(
@@ -1261,6 +1262,7 @@ def test_hybrid_mode_streaming_returns_504_when_all_attempts_time_out(
 
     assert response.status_code == 504
     assert response.json() == {"detail": "All upstream providers timed out"}
+    assert response.headers["Otari-Attempt-ID"] == "att-b"
 
 
 def test_hybrid_mode_streaming_returns_429_when_all_attempts_are_rate_limited(
@@ -1338,6 +1340,7 @@ def test_hybrid_mode_streaming_returns_429_when_all_attempts_are_rate_limited(
 
     assert response.status_code == 429
     assert response.json() == {"detail": "All upstream providers rate-limited this request"}
+    assert response.headers["Otari-Attempt-ID"] == "att-b"
     # A 429 advances the plan, so both attempts really ran: the aggregate is
     # reached by exhausting the route, not by one attempt failing outright.
     assert len(upstream_calls) == 2
@@ -2286,6 +2289,7 @@ def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
 
     assert response.status_code == 404
     assert response.json() == {"detail": "The requested model was not found on the provider"}
+    assert response.headers["Otari-Attempt-ID"] == "att-a"
 
 
 def test_hybrid_mode_streaming_falls_through_on_provider_400(

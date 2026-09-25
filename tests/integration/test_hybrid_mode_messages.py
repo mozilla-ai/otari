@@ -474,6 +474,7 @@ def test_hybrid_mode_returns_502_and_reports_every_attempt_when_all_fail(
     assert response.json() == {
         "detail": {"type": "error", "error": {"type": "api_error", "message": "All upstream providers failed"}}
     }
+    assert response.headers["Otari-Attempt-ID"] == "att-2"
     # Each failed attempt is reported exactly once, despite the terminal 502. A
     # set would mask a double-report (the dropped-then-also-flushed bug), so pin
     # the exact count and contents: the inline flush and the dropped background

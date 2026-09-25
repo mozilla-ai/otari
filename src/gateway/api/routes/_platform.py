@@ -27,7 +27,7 @@ from openai import APIConnectionError as _OpenAIAPIConnectionError
 from openai import APITimeoutError as _OpenAIAPITimeoutError
 from pydantic import BaseModel, Field, ValidationError
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
 from gateway.core.usage import (
     cache_read_tokens_of,
     cache_write_1h_tokens_of,
@@ -261,7 +261,27 @@ def default_attempt_kwargs(
     return merged
 
 
-def _provider_failure_http_exc(exc: BaseException, *, fallback_detail: str) -> HTTPException:
+def with_attempt_id(exc: HTTPException, attempt_id: str | None) -> HTTPException:
+    """Name the provider attempt a terminal hybrid response is about.
+
+    The hybrid protocol promises the attempt id of the entry that succeeded, or
+    of the last one tried when every attempt failed, so a caller can correlate a
+    failure with the attempt its usage report names. ``None`` is for a failure
+    that reached no attempt and leaves the response unchanged. Stamps ``exc`` in
+    place and returns it, so it can wrap a raise.
+    """
+    if attempt_id is None:
+        return exc
+    exc.headers = {**(exc.headers or {}), ATTEMPT_ID_HEADER: attempt_id}
+    return exc
+
+
+def _provider_failure_http_exc(
+    exc: BaseException,
+    *,
+    fallback_detail: str,
+    attempt_id: str | None = None,
+) -> HTTPException:
     """Build the terminal HTTPException for a failed platform attempt.
 
     Reuses the shared provider-error classifier so platform-mode failures get
@@ -270,7 +290,8 @@ def _provider_failure_http_exc(exc: BaseException, *, fallback_detail: str) -> H
     ``fallback_detail`` when the failure has no signal we can safely surface.
     The classifier applies its caller-fault versus gateway-fault detail split,
     so caller-fault details are sanitized provider diagnostics and gateway-fault
-    details remain fixed strings.
+    details remain fixed strings. ``attempt_id``, when given, names the attempt
+    the failure is about.
     """
     # Deferred import: _pipeline imports this module, so importing it at module
     # scope would be circular.
@@ -278,12 +299,18 @@ def _provider_failure_http_exc(exc: BaseException, *, fallback_detail: str) -> H
 
     mapping = classify_provider_error(exc)
     if mapping is not None:
-        return HTTPException(
-            status_code=mapping.status_code,
-            detail=mapping.detail,
-            headers=provider_error_headers(exc, mapping.status_code),
+        return with_attempt_id(
+            HTTPException(
+                status_code=mapping.status_code,
+                detail=mapping.detail,
+                headers=provider_error_headers(exc, mapping.status_code),
+            ),
+            attempt_id,
         )
-    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=fallback_detail)
+    return with_attempt_id(
+        HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=fallback_detail),
+        attempt_id,
+    )
 
 
 async def run_platform_attempts(
@@ -430,9 +457,13 @@ async def run_platform_attempts(
             # message on this attempt. Subsequent failures cannot be
             # transparently retried on another provider.
             if locked_in:
-                raise _provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
+                raise _provider_failure_http_exc(
+                    exc, fallback_detail="LLM provider error", attempt_id=attempt.attempt_id
+                ) from exc
             if not retryable:
-                raise _provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
+                raise _provider_failure_http_exc(
+                    exc, fallback_detail="LLM provider error", attempt_id=attempt.attempt_id
+                ) from exc
             failures.append(_AttemptFailure(attempt.position, attempt.provider, attempt.model, error_class))
             continue
 
@@ -450,18 +481,20 @@ async def run_platform_attempts(
     is_single_attempt = len(attempts) <= 1
     if last_exc is not None and upstream_exception_shape(last_exc)[0] == "timeout":
         detail = "LLM provider timeout" if is_single_attempt else "All upstream providers timed out"
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail=detail,
+        raise with_attempt_id(
+            HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=detail),
+            attempts[-1].attempt_id,
         ) from last_exc
     # A single attempt has one identifiable upstream failure we can classify;
     # a multi-attempt fallthrough aggregates heterogeneous failures, so it keeps
     # the generic 502 rather than attributing one provider's status to the set.
     if is_single_attempt and last_exc is not None:
-        raise _provider_failure_http_exc(last_exc, fallback_detail="LLM provider error") from last_exc
-    raise HTTPException(
-        status_code=status.HTTP_502_BAD_GATEWAY,
-        detail="All upstream providers failed",
+        raise _provider_failure_http_exc(
+            last_exc, fallback_detail="LLM provider error", attempt_id=attempts[-1].attempt_id
+        ) from last_exc
+    raise with_attempt_id(
+        HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="All upstream providers failed"),
+        attempts[-1].attempt_id,
     ) from last_exc
 
 

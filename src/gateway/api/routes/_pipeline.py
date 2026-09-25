@@ -90,6 +90,7 @@ from gateway.api.routes._platform import (
     upstream_exception_chain,
     upstream_exception_shape,
     upstream_retry_after,
+    with_attempt_id,
 )
 from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
@@ -5105,7 +5106,12 @@ async def run_streaming_with_fallback(
                 await _flush_pending_usage_reports(config, pending_error_reports, route.request_id, session_label)
         finally:
             await backend_stack.aclose()
-        raise
+        if not isinstance(exc, Exception):
+            raise
+        # Only this frame knows which attempt was tried last, so the terminal
+        # error is mapped here.
+        last_attempt_id = pending_error_reports[-1].attempt_id if pending_error_reports else None
+        raise_all_streaming_attempts_failed(adapter, exc, route, last_attempt_id)
 
     if tool_mode:
         logger.info(
@@ -5170,8 +5176,13 @@ def raise_all_streaming_attempts_failed(
     adapter: FormatAdapter[Any, Any],
     exc: Exception,
     route: ResolvedRoute,
+    last_attempt_id: str | None = None,
 ) -> NoReturn:
-    """Map pre-stream failures, preserving sandbox retry hints and provider status."""
+    """Map pre-stream failures, preserving sandbox retry hints and provider status.
+
+    ``last_attempt_id`` names the attempt that failed last, which the hybrid
+    protocol owes the caller on total failure.
+    """
     if isinstance(exc, SandboxNotReachableError):
         logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
         raise _sandbox_error(adapter, exc) from exc
@@ -5180,18 +5191,21 @@ def raise_all_streaming_attempts_failed(
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
     if len(route.attempts) <= 1:
-        raise adapter.provider_error(exc) from exc
+        raise with_attempt_id(adapter.provider_error(exc), last_attempt_id) from exc
     kind, status_code = upstream_exception_shape(exc)
     if kind == "timeout":
-        raise adapter.error(504, ALL_PROVIDERS_TIMED_OUT_DETAIL, ErrorKind.API) from exc
+        timed_out = adapter.error(504, ALL_PROVIDERS_TIMED_OUT_DETAIL, ErrorKind.API)
+        raise with_attempt_id(timed_out, last_attempt_id) from exc
     if status_code == 429:
-        raise adapter.error(
+        rate_limited = adapter.error(
             429,
             ALL_PROVIDERS_RATE_LIMITED_DETAIL,
             ErrorKind.RATE_LIMIT,
             provider_error_headers(exc, 429),
-        ) from exc
-    raise adapter.error(502, ALL_PROVIDERS_FAILED_DETAIL, ErrorKind.API) from exc
+        )
+        raise with_attempt_id(rate_limited, last_attempt_id) from exc
+    all_failed = adapter.error(502, ALL_PROVIDERS_FAILED_DETAIL, ErrorKind.API)
+    raise with_attempt_id(all_failed, last_attempt_id) from exc
 
 
 async def run_platform_non_stream(
