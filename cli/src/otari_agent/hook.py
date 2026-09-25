@@ -2817,18 +2817,21 @@ def _joins_the_composed_set(target: Path, root: Path) -> bool:
     `--guardrail-file` can name somewhere the hook never reads, in which case
     a new file there changes the composed set not at all.
 
-    Both paths must already be resolved, which is why the caller resolves
-    ``target`` rather than leaving it as typed: this compares paths, and every
-    unresolved spelling of a path inside the set compares unequal to the
-    resolved one. A relative `--guardrail-file` is the obvious case, and an
-    absolute one reached through a symlinked parent is the less obvious one
-    (`/tmp` is a link to `/private/tmp` on macOS, so every path under it has
-    two spellings). Either would read as "outside the set" and skip the
-    file-count guard the caller runs on the strength of this answer.
+    Every path here is resolved, on both sides of the comparison, because this
+    compares paths and any two spellings of one path compare unequal. The
+    caller resolves ``target``: a relative `--guardrail-file` is the obvious
+    spelling, and an absolute one reached through a symlinked parent is the
+    less obvious one (`/tmp` is a link to `/private/tmp` on macOS, so every
+    path under it has two). The set side is resolved here for the case this
+    feature invites: `.otari/guardrails` itself symlinked at a directory
+    shared between repositories, where the files are discovered through the
+    link but a resolved target lands outside the lexical path. Either way the
+    answer would be a wrong "outside the set", and the caller skips the
+    file-count guard on the strength of it.
     """
-    if target == root / GUARDRAIL_FILE:
+    if target == (root / GUARDRAIL_FILE).resolve():
         return True
-    return target.suffix in _GUARDRAIL_SUFFIXES and target.is_relative_to(root / GUARDRAIL_DIR)
+    return target.suffix in _GUARDRAIL_SUFFIXES and target.is_relative_to((root / GUARDRAIL_DIR).resolve())
 
 
 def _generate_target(root: Path) -> Path:

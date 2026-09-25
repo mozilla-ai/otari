@@ -787,7 +787,7 @@ def _fill_to_the_limit(repo: Path) -> None:
         path.write_text(_EXISTING_GATES_WITH_COMMENT.replace("no-force-push", f"g{index}"), encoding="utf-8")
 
 
-@pytest.mark.parametrize("spelling", ["relative", "absolute", "through-a-symlinked-parent"])
+@pytest.mark.parametrize("spelling", ["relative", "absolute", "through-a-symlinked-parent", "a-symlinked-set"])
 def test_the_file_limit_holds_however_the_target_is_spelled(
     repo: Path, monkeypatch: pytest.MonkeyPatch, spelling: str
 ) -> None:
@@ -798,15 +798,29 @@ def test_the_file_limit_holds_however_the_target_is_spelled(
     already-normalized. Either slipping through creates the file that makes
     the whole guardrail unloadable, which stops every gate in it.
     """
-    _fill_to_the_limit(repo)
-    if spelling == "relative":
-        target = Path(hook_cli.GUARDRAIL_DIR) / "new.yml"
-    elif spelling == "absolute":
+    if spelling == "a-symlinked-set":
+        # The shape this feature invites: one directory of rules shared
+        # between repositories. The files are discovered through the link, so
+        # the count is right, while a resolved target lands outside the
+        # lexical `.otari/guardrails` unless that side is resolved too.
+        shared = repo.parent / "shared-rules"
+        shared.mkdir()
+        (repo / ".otari").mkdir(parents=True, exist_ok=True)
+        (repo / hook_cli.GUARDRAIL_DIR).symlink_to(shared, target_is_directory=True)
+        for index in range(MAX_POLICY_FILES):
+            body = _EXISTING_GATES_WITH_COMMENT.replace("no-force-push", f"g{index}")
+            (shared / f"f{index}.yml").write_text(body, encoding="utf-8")
         target = repo / hook_cli.GUARDRAIL_DIR / "new.yml"
     else:
-        link = repo.parent / f"link-to-{repo.name}"
-        link.symlink_to(repo, target_is_directory=True)
-        target = link / hook_cli.GUARDRAIL_DIR / "new.yml"
+        _fill_to_the_limit(repo)
+        if spelling == "relative":
+            target = Path(hook_cli.GUARDRAIL_DIR) / "new.yml"
+        elif spelling == "absolute":
+            target = repo / hook_cli.GUARDRAIL_DIR / "new.yml"
+        else:
+            link = repo.parent / f"link-to-{repo.name}"
+            link.symlink_to(repo, target_is_directory=True)
+            target = link / hook_cli.GUARDRAIL_DIR / "new.yml"
     _stub_claude_only(monkeypatch)
 
     def fail_if_called(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -814,7 +828,11 @@ def test_the_file_limit_holds_however_the_target_is_spelled(
 
     monkeypatch.setattr(subprocess, "run", fail_if_called)
 
-    result = _invoke(monkeypatch, "--guardrail-file", str(target))
+    # No --guardrail-file for the symlinked set: the default target is what
+    # lands outside the lexical directory there, so passing one would test a
+    # different path than the one that broke.
+    extra = [] if spelling == "a-symlinked-set" else ["--guardrail-file", str(target)]
+    result = _invoke(monkeypatch, *extra)
     assert result.exit_code != 0, result.output
     assert "stop being enforced" in result.output
     assert not (repo / hook_cli.GUARDRAIL_DIR / "new.yml").exists()
