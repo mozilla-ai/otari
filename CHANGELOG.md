@@ -4,6 +4,16 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.12.1](https://github.com/mozilla-ai/otari/releases/tag/v0.12.1) - 2026-09-25
+
+
+
+### Features
+
+- **guardrails:** Make a gate's message optional in [#1734](https://github.com/mozilla-ai/otari/pull/1734) by [@agpituk](https://github.com/agpituk) ([`98c44a9`](https://github.com/mozilla-ai/otari/commit/98c44a95a4f1eb114d0c1f496b0b8737f3599312))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.12.0...v0.12.1
 ## [0.12.0](https://github.com/mozilla-ai/otari/releases/tag/v0.12.0) - 2026-09-25
 
 
