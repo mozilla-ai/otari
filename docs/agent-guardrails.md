@@ -2,15 +2,15 @@
 
 A **guardrail** is a repo-owned intent about what a coding agent may do to your
 working tree ("do not hand-edit the changelog"), and a **gate** is one check
-that enforces it. A guardrail is one or more gates: `.otari-guardrails.yml`
-names the intent under `policy.id` and lists the gates under `gates`, so one
-policy file is one guardrail. Most of this page is about gates, because the
+that enforces it. A guardrail is one or more gates: a guardrail file names
+the intent under `policy.id` and lists the gates under `gates`, and a repo
+composes as many files as it has concerns. Most of this page is about gates, because the
 gate is where the rule is actually written.
 
 A gate checks evidence a caller reports about what a coding agent (or you) did
 to the working tree, not what a transcript claims. Otari evaluates that
 caller-reported evidence; it does not read the caller's repository itself.
-Guardrails live in `.otari-guardrails.yml`, committed alongside the code they
+Guardrails live in `.otari/`, committed alongside the code they
 check, so they survive an agent swap and a clone the same way the rest of the
 repo does.
 
@@ -32,7 +32,7 @@ This is the first slice. It ships:
   `judge`, and `verifier`.
 - `otari hook --harness claude-code` and `otari hook --harness codex`, real
   installed commands that read a Claude Code or Codex hook payload, collect
-  the evidence it implies, and evaluate the repo's own `.otari-guardrails.yml`
+  the evidence it implies, and evaluate the repo's own guardrail files
   against it in process, no server or credential required. Given `--url`
   and/or `--api-key` (or their `OTARI_URL`/`OTARI_API_KEY` envvars), they
   instead call `POST /api/v1/hooks/check` on a gateway over HTTP.
@@ -41,14 +41,14 @@ This is the first slice. It ships:
 - `otari hook setup`, which registers it: writes a `PreToolUse` and a `Stop`
   hook entry into the harness's own settings (`.claude/settings.local.json`
   for Claude Code, `.codex/hooks.json` for Codex) and, if this repo has no
-  `.otari-guardrails.yml` yet, offers to scaffold a starter one. No reusable packs
+  guardrail yet, offers to scaffold a starter `.otari/guardrails.yml`. No reusable packs
   yet. The Codex integration is newer and less exercised against a real
   session than the Claude Code one; in particular, a session that runs
   through Codex's own Code Mode does not yet get a `PreToolUse` dispatch at
   all for a shell/apply_patch call it wraps in JS (openai/codex#23411, open
   upstream), so only `Stop`'s own Git-status fallback and transcript scan
   reach it today.
-- `otari guardrails generate`, which proposes a starting `.otari-guardrails.yml` from a
+- `otari guardrails generate`, which proposes a starting guardrail from a
   repo's own AGENTS.md/CLAUDE.md: one model call to draft candidate gates,
   then an interactive accept/reject/edit pass over each one before it is
   appended. See "Generating gates from AGENTS.md/CLAUDE.md" below.
@@ -58,10 +58,85 @@ This is the first slice. It ships:
 
 This is a hook protocol, not a local filesystem reader: Otari never opens a
 caller's repository itself. The caller (an agent hook today; a native
-dispatcher eventually) reads its own `.otari-guardrails.yml` and collects its own
+dispatcher eventually) reads its own guardrail files and collects its own
 Git evidence, then submits both in one request.
 
-## The gates file: `.otari-guardrails.yml`
+## Where guardrails live: `.otari/`
+
+One dot-directory, organized inside, the way `.github/`, `.vscode/` and
+`.circleci/` do it. Inside it, a guardrail is either one file or a directory
+of them, whichever suits the repo:
+
+```
+.otari/                        .otari/
+  guardrails.yml                 guardrails/
+  verifiers/                       git-safety.yml
+    no-conflict-markers.sh         generated-artifacts.yml
+                                   architecture/
+                                     layering.yml
+                                     repository-pattern.yml
+                                 verifiers/
+                                   no-conflict-markers.sh
+```
+
+Neither is the older shape. Start with `guardrails.yml`, which is what
+`otari hook setup` scaffolds; move to `guardrails/` when one file stops being
+the natural unit, and group by concern, because the thing someone shares, or
+lifts out of another repo, is a file. `otari hook` reads every `.yml` and
+`.yaml` under `guardrails/`, nested ones included.
+
+A repo can have both. `guardrails.yml` composes first, and the directory
+beside it composes after, which is exactly what a repo looks like partway
+through splitting one file into several. Nothing has to be finished in one
+go, and nothing warns about being in between.
+
+Coming from `.otari-guardrails.yml`, which sat at the repository root: move it
+to `.otari/guardrails.yml`, unchanged. Nothing reads the old path, so a repo
+that still has one is enforcing no gates at all. `otari hook` says so on every
+event until it moves, as a visible `systemMessage` rather than only on stderr,
+which Claude Code shows in its debug log alone.
+
+A `verifier` gate's script lives under `.otari/verifiers/`, a sibling of both
+shapes rather than something inside either, so there is never a non-guardrail
+file under the scanned directory to mistake for one. The gate names the script
+by repo-relative path, so any path works; this is the convention, not a
+requirement.
+
+### Composition rules
+
+These are about a guardrail made of several files. A single `guardrails.yml`
+meets all of them for free.
+
+- **Every file parses on its own.** Each carries its own `schema_version`,
+  `policy` block and `gates` list. That is what makes a shared guardrail a
+  file rather than a patch: drop it in, or lift it out, unchanged. It is also
+  why splitting `guardrails.yml` is a move rather than a rewrite.
+- **Composition fails if any file fails.** One unparseable file means no
+  guardrail, not a partial one, and `otari hook` then fails open with a line
+  on stderr naming the file. Run `otari guardrails validate` after editing.
+- **A gate id is unique across the whole set.** A collision is a loud error
+  naming both files, never last-one-wins. This is the one thing several files
+  make easy to get wrong and no single file can show, which is why
+  `otari guardrails validate` composes by default.
+- **Every file declares the same `schema_version`.**
+- **Order is not contract.** Files compose in repo-relative path order, and
+  that order is only ever a tiebreak. What decides which `judge` and
+  `verifier` gates survive their per-run caps is `priority` on the gate
+  itself (see [Gate types](#gate-types)), so a gate that must run says so
+  rather than depending on where its filename sorts. Numeric filename
+  prefixes buy nothing here.
+- **Limits are per file**: `MAX_POLICY_BYTES` (256 KiB) applies to each file,
+  so a file legal on its own stays legal wherever it is dropped. The set is
+  bounded by file count instead, `MAX_POLICY_FILES` (64). A set past that
+  limit does not compose at all, so `otari guardrails generate` refuses to
+  write the file that would take it there rather than reporting success and
+  leaving every gate unenforced.
+
+When a guardrail built from several files blocks, the failing gate names the
+file that declared it, so there is one place to go and edit. A repo with one
+file is not told what it already knows.
+
+## The gates file
 
 ```yaml
 schema_version: "1.0"
@@ -87,6 +162,9 @@ gates:
     message: Force-pushing is not allowed; use --force-with-lease if you must.
 ```
 
+This is `.otari/guardrails.yml`, or one file of a guardrail split across
+several; both parse identically.
+
 - `schema_version`: currently only `"1.0"`.
 
 > **A policy written before `runs` existed no longer parses.** Every gate now
@@ -108,6 +186,27 @@ Parsing is strict on purpose: duplicate keys, unknown fields, and an
 unsupported `schema_version` or gate `type` all fail loudly (`422`) rather
 than being silently ignored. A policy the parser could not fully understand
 must never evaluate as "no gates".
+
+### `priority`, on the two gate types that are capped
+
+A `judge` gate and a `verifier` gate may declare an integer `priority`
+(default `0`). It matters only when more of them apply to one Stop event than
+`otari hook` will run: the run keeps the highest priorities, and gates sharing
+a value keep the order they were declared in.
+
+Nothing else reads it. A `path`, `command` or `command_if_changed` gate costs
+a match against evidence already collected, so every one of them always runs
+and declaring `priority` on one is an error rather than a no-op.
+
+```yaml
+  - id: no-narrative-comments
+    type: judge
+    runs: [stop.session]
+    enforcement: advisory
+    priority: 10          # runs even when five other judge gates also apply
+    rubric: Does this diff add a comment that restates the code?
+    message: Narration belongs in the commit message.
+```
 
 ## When a gate runs: `runs`
 
@@ -607,8 +706,8 @@ truth for "how many times has this repo's judge gate actually run."
 
 Each `judge` gate costs one model invocation, not a near-instant pattern
 match like the other three gate types, so `otari hook` evaluates at most 5
-per `Stop` event (declaration order; the rest are skipped with a stderr
-message naming which) rather than letting one event's resource use grow
+per `Stop` event (highest `priority` first, declaration order within a tie;
+the rest are skipped with a stderr message naming which) rather than letting one event's resource use grow
 without bound as a policy gains judge gates. Applicable gates run
 concurrently, not one after another (a bounded thread pool,
 `_HOOK_GATE_MAX_WORKERS` in `cli.py`, shared with `verifier`'s own
@@ -633,7 +732,7 @@ already passed reports `error` without attempting the call at all.
 A gate whose verdict comes from a verifier script's own exit status, not a
 glob, a phrase, or a model. `verifier` is a repo-relative path to an
 executable script *in the calling repo* (e.g.
-`.otari-guardrails/verifiers/no-conflict-markers.sh`), not a closed set of
+`.otari/verifiers/no-conflict-markers.sh`), not a closed set of
 otari-shipped implementations: anyone can write one and add the gate that
 runs it, without an otari code change or release. Unlike `judge`,
 `enforcement` is not restricted to `advisory`: a verifier's exit code is
@@ -645,7 +744,7 @@ reproducible the way a glob or phrase match is, not a model's opinion, so a
     type: verifier
     runs: [stop.verifier]
     enforcement: required
-    verifier: .otari-guardrails/verifiers/no-conflict-markers.sh
+    verifier: .otari/verifiers/no-conflict-markers.sh
     message: >-
       A tracked file still carries a Git merge-conflict marker
       (<<<<<<</=======/>>>>>>>). Resolve the conflict and remove the
@@ -680,7 +779,7 @@ the policy names. `command` and `command_if_changed` inspect the
 command text the agent submitted, `path` matches globs, and `judge`
 sends a prompt to `claude -p`; none of them runs a script the repo supplies.
 The boundary this sits behind is the repo itself. A script checked into the
-repo, named by that repo's own `.otari-guardrails.yml`, is the same trust level
+repo, named by that repo's own guardrail, is the same trust level
 as a Makefile target, a pre-commit hook, or the test suite, every one of
 which a contributor already runs on a branch they have checked out.
 Resolving the verifier against the repo root, and refusing a path that
@@ -768,7 +867,7 @@ that writes to a fixed temporary path, or that mutates the tree itself
 in a way it could not before gates ran concurrently.
 
 This repo dogfoods two. `no-leftover-conflict-markers` runs
-`.otari-guardrails/verifiers/no-conflict-markers.sh`, which fails when a tracked
+`.otari/verifiers/no-conflict-markers.sh`, which fails when a tracked
 file still has a line starting with `<<<<<<<`, `=======`, or `>>>>>>>`. It
 uses `git grep`, not the system `grep` binary: `git grep` is compiled into
 `git` itself and behaves the same on every platform `git` runs on, so this
@@ -782,7 +881,7 @@ same script reported `pass`, `fail` (with the offending lines on stdout), and
 `error` (not a git repository) identically on both.
 
 `no-stranded-docblocks` runs
-`.otari-guardrails/verifiers/no-stranded-docblocks.py`, AGENTS.md's own stranded-
+`.otari/verifiers/no-stranded-docblocks.py`, AGENTS.md's own stranded-
 docblock detector (`\*/\n[ \t]*/\*\*`), reimplemented as a Python script
 rather than a policy-level allowlist entry: this is the exact check the
 abandoned prototype hardcoded into `cli.py` behind a closed set of
@@ -808,7 +907,7 @@ problems" trade a diff-scoped linter already makes.
 
 ## Generating gates from AGENTS.md/CLAUDE.md
 
-Writing a `.otari-guardrails.yml` by hand means finding the rules worth checking
+Writing a guardrail by hand means finding the rules worth checking
 in a repo's own AGENTS.md (or CLAUDE.md, when that is the only doc a repo
 has) and turning prose into the gate schema above. `otari guardrails generate`
 does the first pass: it resolves a locally installed model CLI (`claude -p`
@@ -835,9 +934,15 @@ hook actually runs.
 It only ever appends: existing gates and their comments are left untouched
 (the new gate is spliced into the `gates:` sequence as raw text, not a
 round-tripped YAML dump that would drop them, at whatever column that
-sequence's own items already use), and a repo with no `.otari-guardrails.yml`
-yet gets a starter `schema_version`/`policy` header scaffolded around the
-first accepted gate. Splicing text is a heuristic where the policy loader
+sequence's own items already use), and a file that does not exist yet gets a
+starter `schema_version`/`policy` header scaffolded around the first accepted
+gate. Accepted gates go to whichever shape the repo already keeps:
+`.otari/guardrails.yml`, or `.otari/guardrails/generated.yml` in a repo that
+keeps a directory, rather than into somebody's hand-organized file.
+`--guardrail-file` names somewhere else. A proposal reusing an id already declared anywhere in
+the composed guardrail is skipped without prompting, naming the file that has
+it: across files a duplicate id is not a shadowed gate but a guardrail that
+stops loading at all. Splicing text is a heuristic where the policy loader
 is a parser, so nothing is written until `parse_policy` accepts the result:
 a layout the splice misreads costs a refusal with the file left alone,
 never a corrupted policy. That is the difference that matters, because
@@ -855,7 +960,7 @@ already declined.
 
 A guardrail is otherwise only checked when it runs, which is the worst moment
 to learn something about it: a gate that silently does not match looks exactly
-like a clean result. `otari guardrails validate` reads the file and reports
+like a clean result. `otari guardrails validate` reads the guardrail and reports
 what running it would have taught, without running anything and without
 contacting a gateway.
 
@@ -863,7 +968,13 @@ contacting a gateway.
 otari guardrails validate
 otari guardrails validate --command "npm install lodash"
 otari guardrails validate --path CHANGELOG.md
+otari guardrails validate --guardrail-file somebody-elses-snippet.yml
 ```
+
+With no `--guardrail-file` it composes everything the hook composes, which is
+what finds a gate id declared in two files and a judge-gate total no one file
+shows. `--guardrail-file` narrows it to one file, which is how a snippet
+from somewhere else is checked before it is dropped in.
 
 An **error** is a gate that provably cannot do its job, whatever the session
 does. Everything `parse_policy` already refuses (an unsupported
@@ -917,9 +1028,11 @@ intended:
   backstop. A gate that runs only at `stop.working_tree` is not warned about:
   after the fact, but complete over the tree.
 - More `judge` or `verifier` gates than one `Stop` event evaluates (five and
-  twenty respectively), naming which ones fall past the cap in declaration
-  order. Both caps apply after `when_changed` filtering, so this is the worst
-  case: a session where every one of them applies at once.
+  twenty respectively), naming which ones fall past the cap. Both caps apply
+  after `when_changed` filtering, so this is the worst case: a session where
+  every one of them applies at once. This is the check a composed guardrail
+  most needs and no single file can do: a directory is what makes the total
+  invisible.
 
 None of these blocks on its own, because each has a legitimate exception.
 `--strict` makes a warning non-zero too, which is what a CI invocation wants.
@@ -941,13 +1054,13 @@ and `verifier` gates in the `Stop` block are reported as `would run` or
 something actually run that validate deliberately does not run, and for a
 judge gate that is one model call, which is worth knowing the cost of before
 the session pays it. The per-Stop caps are applied here too, to the gates
-`when_changed` selected and in declaration order, so a gate the hook would
+`when_changed` selected and in `priority` order, so a gate the hook would
 drop reads `skipped` rather than promising a call that never happens. A gate firing in a dry run is the answer to the question
 asked, not a failure, so it does not change the exit status.
 
 ```
 $ otari guardrails validate --path docs/public/openapi.json --command "make postman"
-.otari-guardrails.yml: otari/repo-quality, 22 gate(s), schema 1.0.
+.otari/guardrails: composed from 8 files, 24 gate(s), schema 1.0.
 0 error(s), 0 warning(s).
 
 PreToolUse, Bash: make postman
@@ -967,13 +1080,13 @@ Stop, the finished turn: 1 changed path(s), 1 command(s)
   ...
 ```
 
-`--guardrail-file` checks a file other than `.otari-guardrails.yml` in the repo
-root.
+`--guardrail-file` checks one file on its own instead of everything the repo
+composes.
 
 ## Calling the Hook Server
 
 `otari hook` does not need this by default: it evaluates the local
-`.otari-guardrails.yml` in process (see "Status" above), and reaches this endpoint
+guardrail in process (see "Status" above), and reaches this endpoint
 only when it is given `--url` and/or `--api-key` (or their `OTARI_URL`/
 `OTARI_API_KEY` envvars). Opting into it is for whoever wants a shared or
 hosted gateway, rather than the machine the agent is running on, to be the
@@ -988,7 +1101,7 @@ its evidence is true.
 $ python3 -c '
 import json, urllib.request
 body = json.dumps({
-    "policy_yaml": open(".otari-guardrails.yml").read(),
+    "policy_yaml": open(".otari/guardrails/generated-artifacts.yml").read(),
     "path_source": "stop.working_tree",
     "paths": ["CHANGELOG.md"],
     "commands": ["git push --force"],
@@ -1039,7 +1152,7 @@ required gate rather than passing it. Request/response fields:
 
 | Field | Meaning |
 | --- | --- |
-| `policy_yaml` | The full text of the caller's `.otari-guardrails.yml`, read and submitted by the caller. |
+| `policy_yaml` | One policy document, read and submitted by the caller. The route takes one body per request, so `otari hook` merges a guardrail built from several files into one document before sending it; see [Composition rules](#composition-rules). |
 | `path_source` | Which moment `paths` was read at, matching the `runs` values a gate declares: `pre_tool_use.edit_target` for a write tool's own target before it runs, `pre_tool_use.read_target` for a read tool's, `stop.working_tree` for `git status` once the turn is over. Required whenever `paths` is **non-empty**; an empty list needs none, because it carries no paths to misattribute. Refused rather than defaulted when absent, and refused too when it names a moment no path gate can declare (`stop.session`, `stop.verifier`, `pre_tool_use.command`), since either would resolve every path gate `not_applicable` and lose enforcement without a word. Defaulting would be just as wrong: `pre_tool_use.edit_target` would make a Stop event's Git evidence silently disable every working-tree gate, `stop.working_tree` would fail a working-tree gate over a write that has not happened, and any of them would put a read in front of a gate that only ever asked about writes. |
 | `paths` | Repo-relative paths this moment puts in scope: what the caller observed changed, or the single target a tool call is about to write or read, with `path_source` saying which. Send `[]` if evidence was collected and there is none (a `path` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects path evidence at all (a required `path` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
 | `commands` | Shell commands the caller observed run or is about to run. Send `[]` if evidence was collected and there is none right now (a `command` gate resolves `not_applicable`); omit it (or send `null`) if this caller never collects command evidence at all (a required `command` gate resolves `unknown` and blocks, rather than reading the absence as a pass). |
@@ -1167,7 +1280,7 @@ would also foreclose ever attaching a hook to this specific call on purpose,
 which is very nearly the point of a `judge` gate calling out to a model at
 all. A dedicated directory under `~/.otari/`, not the repo being judged and
 not the shared system temp root, is a stable, otari-owned place a future
-judge-specific hook or its own `.otari-guardrails.yml` could live, the same
+judge-specific hook or its own guardrail could live, the same
 reasoning `_hook_judge_log_path` already applies to the audit log. This
 guarantee is narrower than `--safe-mode`'s (project-scoped only, not a
 hypothetical user- or enterprise-level hook), which does not matter here
@@ -1189,8 +1302,8 @@ blocking proves nothing about whether an interactive session's own
    install's own
    `otari hook --harness claude-code`; Claude Code passes its own
    `hook_event_name` in the payload, so one callback serves both. If this
-   repo has no `.otari-guardrails.yml` yet, it offers to write a small starter
-   one first, so there is something to check rather than a hook that always
+   repo has no guardrail yet, it offers to write a small starter
+   `.otari/guardrails.yml` first, so there is something to check rather than a hook that always
    passes.
 
    The `PreToolUse` `matcher` it writes only includes `Bash` when the policy
@@ -1237,7 +1350,7 @@ blocking proves nothing about whether an interactive session's own
    secret in argv. Fixed then, not now.
 
 2. Try something a gate forbids: `Edit` `CHANGELOG.md`, or ask for
-   `npm install` (this repo's own `.otari-guardrails.yml` enforces pnpm; see
+   `npm install` (this repo's own guardrail enforces pnpm; see
    `web/AGENTS.md`). Either tool call itself is refused before it runs; for
    the edit, `git status` afterward shows nothing changed, because the edit
    never happened.

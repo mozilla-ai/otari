@@ -1,4 +1,4 @@
-"""Unit tests for `otari guardrails generate`, the AGENTS.md/CLAUDE.md -> .otari-guardrails.yml proposer.
+"""Unit tests for `otari guardrails generate`, the AGENTS.md/CLAUDE.md -> guardrail proposer.
 
 Mocks the CLI boundary (shutil.which, subprocess.run) so these run with no
 `claude`/`codex` installed and no real model call; the schema every accepted
@@ -17,7 +17,15 @@ import pytest
 from click.testing import CliRunner
 
 import otari_agent.hook as hook_cli
-from otari_agent.domain.policy import parse_policy
+from otari_agent.domain.policy import MAX_POLICY_FILES, parse_policy
+
+
+def _guardrail_path(root: Path) -> Path:
+    """`.otari/guardrails.yml` under `root`, with its parent directory created."""
+    path = root / hook_cli.GUARDRAIL_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
 
 _EXISTING_GATES_WITH_COMMENT = (
     'schema_version: "1.0"\n'
@@ -69,6 +77,15 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / "AGENTS.md").write_text("# Rules\nCHANGELOG.md is generated; never hand-edit it.\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     return tmp_path
+
+
+def _default_target(repo: Path) -> Path:
+    """Where `otari guardrails generate` writes when the repo has no guardrail yet.
+
+    The single file, the same shape `otari hook setup` scaffolds. A repo that
+    keeps a directory instead gets `generated.yml` inside it.
+    """
+    return repo / hook_cli.GUARDRAIL_FILE
 
 
 def _stub_claude_only(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -180,7 +197,7 @@ def test_oversize_source_is_rejected_before_any_cli_call(repo: Path, monkeypatch
 def test_an_unparseable_existing_gates_file_is_rejected_before_any_cli_call(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (repo / ".otari-guardrails.yml").write_text("not: valid: yaml: at: all:\n  - [", encoding="utf-8")
+    _guardrail_path(repo).write_text("not: valid: yaml: at: all:\n  - [", encoding="utf-8")
 
     def fail_if_called(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         raise AssertionError("subprocess.run should not be called when the existing policy fails to parse")
@@ -200,7 +217,7 @@ def test_accepting_a_valid_proposal_writes_it_and_it_parses(repo: Path, monkeypa
     assert result.exit_code == 0, result.output
     assert "Added 1 gate(s)" in result.output
 
-    gates_file = repo / ".otari-guardrails.yml"
+    gates_file = _default_target(repo)
     text = gates_file.read_text(encoding="utf-8")
     spec = parse_policy(text, source=str(gates_file))
     assert [gate.id for gate in spec.gates] == ["no-hand-edited-changelog"]
@@ -213,32 +230,32 @@ def test_declining_a_valid_proposal_writes_nothing(repo: Path, monkeypatch: pyte
     result = _invoke(monkeypatch, keys="yn")
     assert result.exit_code == 0, result.output
     assert "Added 0 gate(s)" in result.output
-    assert not (repo / ".otari-guardrails.yml").exists()
+    assert not (_default_target(repo)).exists()
 
 
 def test_skips_a_proposal_whose_id_already_exists_without_prompting(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (repo / ".otari-guardrails.yml").write_text(_EXISTING_GATES_WITH_COMMENT, encoding="utf-8")
+    _guardrail_path(repo).write_text(_EXISTING_GATES_WITH_COMMENT, encoding="utf-8")
     duplicate = {**_VALID_PROPOSAL, "id": "no-force-push"}
     _stub_claude_only(monkeypatch)
     _stub_cli_output(monkeypatch, json.dumps([duplicate]))
 
     result = _invoke(monkeypatch)  # no confirmation input needed: nothing should prompt
     assert result.exit_code == 0, result.output
-    assert "Skipping 'no-force-push': already in .otari-guardrails.yml." in result.output
+    assert "Skipping 'no-force-push': already in .otari/guardrails.yml." in result.output
     assert "Added 0 gate(s)" in result.output
 
 
 def test_appending_preserves_existing_comments_and_gates(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (repo / ".otari-guardrails.yml").write_text(_EXISTING_GATES_WITH_COMMENT, encoding="utf-8")
+    _guardrail_path(repo).write_text(_EXISTING_GATES_WITH_COMMENT, encoding="utf-8")
     _stub_claude_only(monkeypatch)
     _stub_cli_output(monkeypatch, json.dumps([_VALID_PROPOSAL]))
 
     result = _invoke(monkeypatch, keys="yy")
     assert result.exit_code == 0, result.output
 
-    text = (repo / ".otari-guardrails.yml").read_text(encoding="utf-8")
+    text = _guardrail_path(repo).read_text(encoding="utf-8")
     assert "a hand-written comment that must survive" in text
     spec = parse_policy(text, source="check")
     assert {gate.id for gate in spec.gates} == {"no-force-push", "no-hand-edited-changelog"}
@@ -249,7 +266,7 @@ def test_appending_inserts_before_a_later_top_level_key_not_at_eof(repo: Path, m
     carry no order requirement): the new gate must land inside the `gates:` sequence, before
     whatever top-level key follows it, not appended after that key at end of file.
     """
-    (repo / ".otari-guardrails.yml").write_text(
+    _guardrail_path(repo).write_text(
         'schema_version: "1.0"\n'
         "gates:\n"
         "  - id: existing\n"
@@ -270,7 +287,7 @@ def test_appending_inserts_before_a_later_top_level_key_not_at_eof(repo: Path, m
     result = _invoke(monkeypatch, keys="yy")
     assert result.exit_code == 0, result.output
 
-    text = (repo / ".otari-guardrails.yml").read_text(encoding="utf-8")
+    text = _guardrail_path(repo).read_text(encoding="utf-8")
     assert text.rstrip().endswith("description: unusual order, gates before policy")
     spec = parse_policy(text, source="check")
     assert {gate.id for gate in spec.gates} == {"existing", "no-hand-edited-changelog"}
@@ -284,14 +301,14 @@ def test_no_existing_gates_file_creates_one_named_after_the_repo_directory(
 
     result = _invoke(monkeypatch, keys="yy")
     assert result.exit_code == 0, result.output
-    text = (repo / ".otari-guardrails.yml").read_text(encoding="utf-8")
+    text = (_default_target(repo)).read_text(encoding="utf-8")
     assert parse_policy(text, source="check").policy_id == f"{repo.name}/guardrails"
 
 
 def test_gates_file_flag_creates_missing_parent_directories(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_claude_only(monkeypatch)
     _stub_cli_output(monkeypatch, json.dumps([_VALID_PROPOSAL]))
-    target = repo / "nested" / "dir" / ".otari-guardrails.yml"
+    target = repo / "nested" / "dir" / "guardrails.yml"
 
     result = _invoke(monkeypatch, "--guardrail-file", str(target), keys="yy")
     assert result.exit_code == 0, result.output
@@ -308,7 +325,7 @@ def test_invalid_proposal_declining_edit_is_skipped(repo: Path, monkeypatch: pyt
     assert result.exit_code == 0, result.output
     assert "does not pass validation" in result.output
     assert "Added 0 gate(s)" in result.output
-    assert not (repo / ".otari-guardrails.yml").exists()
+    assert not (_default_target(repo)).exists()
 
 
 def test_editing_an_invalid_proposal_can_fix_and_accept_it(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -323,7 +340,7 @@ def test_editing_an_invalid_proposal_can_fix_and_accept_it(repo: Path, monkeypat
     result = _invoke(monkeypatch, keys="yyy")
     assert result.exit_code == 0, result.output
     assert "Added 1 gate(s)" in result.output
-    text = (repo / ".otari-guardrails.yml").read_text(encoding="utf-8")
+    text = (_default_target(repo)).read_text(encoding="utf-8")
     spec = parse_policy(text, source="check")
     assert spec.gates[0].id == "bad-judge"
     assert spec.gates[0].enforcement == "advisory"
@@ -344,7 +361,7 @@ def test_edit_choice_on_a_valid_proposal_lets_you_change_it_before_accepting(
     # "e" (edit) then "y" (accept the edited gate)
     result = _invoke(monkeypatch, keys="yey")
     assert result.exit_code == 0, result.output
-    text = (repo / ".otari-guardrails.yml").read_text(encoding="utf-8")
+    text = (_default_target(repo)).read_text(encoding="utf-8")
     spec = parse_policy(text, source="check")
     assert spec.gates[0].id == "renamed-gate"
 
@@ -357,7 +374,7 @@ def test_a_declined_edit_keeps_the_previous_candidate(repo: Path, monkeypatch: p
     result = _invoke(monkeypatch, keys="yey")
     assert result.exit_code == 0, result.output
     assert "No changes made." in result.output
-    text = (repo / ".otari-guardrails.yml").read_text(encoding="utf-8")
+    text = (_default_target(repo)).read_text(encoding="utf-8")
     spec = parse_policy(text, source="check")
     assert spec.gates[0].id == "no-hand-edited-changelog"
 
@@ -370,7 +387,7 @@ def test_quit_stops_processing_further_proposals(repo: Path, monkeypatch: pytest
     result = _invoke(monkeypatch, keys="yq")
     assert result.exit_code == 0, result.output
     assert "Stopped early. Added 0 gate(s)" in result.output
-    assert not (repo / ".otari-guardrails.yml").exists()
+    assert not (_default_target(repo)).exists()
 
 
 def test_declining_the_cli_confirmation_aborts_without_calling_the_cli(
@@ -560,7 +577,7 @@ def test_appending_matches_the_files_own_column_zero_sequence_style(
     two-space item spliced in front of column-0 ones is invalid YAML, which `otari hook`
     then fails *open* on, silently disabling every gate in the policy.
     """
-    (repo / ".otari-guardrails.yml").write_text(
+    _guardrail_path(repo).write_text(
         'schema_version: "1.0"\n'
         "policy:\n"
         "  id: demo/guardrails\n"
@@ -580,7 +597,7 @@ def test_appending_matches_the_files_own_column_zero_sequence_style(
     result = _invoke(monkeypatch, keys="yy")
     assert result.exit_code == 0, result.output
 
-    text = (repo / ".otari-guardrails.yml").read_text(encoding="utf-8")
+    text = _guardrail_path(repo).read_text(encoding="utf-8")
     spec = parse_policy(text, source="check")
     assert {gate.id for gate in spec.gates} == {"existing", "no-hand-edited-changelog"}
     assert "\n- id: no-hand-edited-changelog\n" in text, text
@@ -590,7 +607,7 @@ def test_a_splice_that_would_not_parse_is_refused_with_the_file_untouched(tmp_pa
     """The splice is a text heuristic where the loader is a parser, so the write is gated
     on `parse_policy` accepting the result rather than on the heuristic being right.
     """
-    gates_file = tmp_path / ".otari-guardrails.yml"
+    gates_file = tmp_path / "guardrails.yml"
     original = 'schema_version: "1.0"\npolicy:\n  id: t\ngates:\n  - id: e\n'
     gates_file.write_text(original, encoding="utf-8")
 
@@ -605,7 +622,7 @@ def test_scaffolded_policy_id_survives_an_unusual_directory_name(tmp_path: Path)
     """A directory name is not guaranteed to be a bare YAML scalar; one containing ": "
     would otherwise scaffold a header that does not parse at all.
     """
-    gates_file = tmp_path / ".otari-guardrails.yml"
+    gates_file = tmp_path / "guardrails.yml"
     hook_cli._gates_generate_append(gates_file, "weird: name", dict(_VALID_PROPOSAL))
 
     spec = parse_policy(gates_file.read_text(encoding="utf-8"), source="check")
@@ -662,4 +679,102 @@ def test_a_proposal_missing_runs_is_refused_before_anything_is_written(
     assert "needs a non-empty 'runs'" in result.output
     assert "pre_tool_use.edit_target, pre_tool_use.read_target, stop.working_tree" in result.output
     assert "Added 0 gate(s)" in result.output
-    assert not (repo / ".otari-guardrails.yml").exists()
+    assert not (_default_target(repo)).exists()
+
+
+def test_an_id_used_in_another_composed_file_is_skipped(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A duplicate id across files does not shadow a gate, it stops the guardrail loading at all."""
+    other = repo / hook_cli.GUARDRAIL_DIR / "shell.yml"
+    other.parent.mkdir(parents=True, exist_ok=True)
+    other.write_text(_EXISTING_GATES_WITH_COMMENT, encoding="utf-8")
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([{**_VALID_PROPOSAL, "id": "no-force-push"}]))
+
+    result = _invoke(monkeypatch)
+    assert result.exit_code == 0, result.output
+    assert "Skipping 'no-force-push': already in .otari/guardrails/shell.yml." in result.output
+    assert "Added 0 gate(s)" in result.output
+
+
+def test_generate_appends_to_the_single_file_when_the_repo_keeps_one(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Whichever shape the repo already keeps, rather than introducing the other."""
+    _guardrail_path(repo).write_text(_EXISTING_GATES_WITH_COMMENT, encoding="utf-8")
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([_VALID_PROPOSAL]))
+
+    result = _invoke(monkeypatch, keys="yy")
+    assert result.exit_code == 0, result.output
+    assert not (repo / hook_cli.GUARDRAIL_DIR).is_dir()
+    assert "no-hand-edited-changelog" in _guardrail_path(repo).read_text(encoding="utf-8")
+
+
+def test_generate_writes_inside_a_directory_only_guardrail(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A file of its own, rather than dropping generated gates into a hand-organized one."""
+    existing = repo / hook_cli.GUARDRAIL_DIR / "mine.yml"
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text(_EXISTING_GATES_WITH_COMMENT, encoding="utf-8")
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([_VALID_PROPOSAL]))
+
+    result = _invoke(monkeypatch, keys="yy")
+    assert result.exit_code == 0, result.output
+    assert not _default_target(repo).exists()
+    generated = repo / hook_cli.GUARDRAIL_DIR / "generated.yml"
+    assert "no-hand-edited-changelog" in generated.read_text(encoding="utf-8")
+    assert existing.read_text(encoding="utf-8") == _EXISTING_GATES_WITH_COMMENT
+
+
+def test_generate_refuses_the_file_that_would_break_the_composition(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Writing the (MAX+1)-th file reports success and leaves nothing enforced.
+
+    Every gate already in the set stops being checked, because the hook fails
+    open on a guardrail it cannot compose. Refused before the model call, so
+    the run costs nothing either.
+    """
+    for index in range(MAX_POLICY_FILES):
+        path = repo / hook_cli.GUARDRAIL_DIR / f"f{index}.yml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_EXISTING_GATES_WITH_COMMENT.replace("no-force-push", f"g{index}"), encoding="utf-8")
+    _stub_claude_only(monkeypatch)
+
+    def fail_if_called(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("the model must not be called for a proposal that cannot be written")
+
+    monkeypatch.setattr(subprocess, "run", fail_if_called)
+
+    result = _invoke(monkeypatch)
+    assert result.exit_code != 0
+    assert "stop being enforced" in result.output
+    assert not (repo / hook_cli.GUARDRAIL_DIR / "generated.yml").exists()
+
+
+def test_generate_still_appends_to_an_existing_file_at_the_limit(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The escape hatch the refusal names: appending adds no file, so it stays legal."""
+    for index in range(MAX_POLICY_FILES):
+        path = repo / hook_cli.GUARDRAIL_DIR / f"f{index}.yml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_EXISTING_GATES_WITH_COMMENT.replace("no-force-push", f"g{index}"), encoding="utf-8")
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([_VALID_PROPOSAL]))
+
+    result = _invoke(monkeypatch, "--guardrail-file", str(repo / hook_cli.GUARDRAIL_DIR / "f0.yml"), keys="yy")
+    assert result.exit_code == 0, result.output
+    assert "Added 1 gate(s)" in result.output
+
+
+def test_generate_outside_the_composed_set_is_not_refused(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A path the hook never reads adds nothing to the set, so the limit does not apply."""
+    for index in range(MAX_POLICY_FILES):
+        path = repo / hook_cli.GUARDRAIL_DIR / f"f{index}.yml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_EXISTING_GATES_WITH_COMMENT.replace("no-force-push", f"g{index}"), encoding="utf-8")
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([_VALID_PROPOSAL]))
+
+    result = _invoke(monkeypatch, "--guardrail-file", str(repo / "snippets" / "draft.yml"), keys="yy")
+    assert result.exit_code == 0, result.output
+    assert (repo / "snippets" / "draft.yml").is_file()

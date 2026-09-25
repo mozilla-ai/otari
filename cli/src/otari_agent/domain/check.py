@@ -11,7 +11,7 @@ own evidence; this only ever computes over what it was given.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from otari_agent.domain.evaluators import (
     evaluate_command,
@@ -38,6 +38,7 @@ from otari_agent.domain.types import (
     JudgeVerdict,
     PathEvidence,
     PathGate,
+    PolicySpec,
     RunsAt,
     VerifierGate,
 )
@@ -143,12 +144,41 @@ def run_policy_check(
     that evidence kind at all (resolves ``unknown``/``not_applicable``
     depending on the gate type); ``()``/``[]`` means it collected some and
     there is none (resolves ``not_applicable``).
+
+    A caller holding a parsed policy already, such as one that composed a
+    directory of files, calls :func:`check_policy` instead; this is that
+    function plus the parse.
     """
     try:
         spec = parse_policy(policy_yaml, source=source)
     except PolicyError as exc:
         raise PolicyCheckError(str(exc)) from exc
+    return check_policy(
+        spec,
+        paths=paths,
+        commands=commands,
+        path_source=path_source,
+        command_scope=command_scope,
+        judge_results=judge_results,
+        check_results=check_results,
+    )
 
+
+def check_policy(
+    spec: PolicySpec,
+    *,
+    paths: Sequence[str] | None,
+    commands: Sequence[str] | None,
+    path_source: RunsAt | None = None,
+    command_scope: EvidenceScope = "call",
+    judge_results: Sequence[JudgeVerdict] | None = None,
+    check_results: Sequence[CheckVerdict] | None = None,
+) -> PolicyCheckResult:
+    """Evaluate an already-parsed policy against the given evidence.
+
+    The evidence arguments mean exactly what :func:`run_policy_check`'s own
+    do; that function is this one plus a parse.
+    """
     for path in paths or ():
         if len(path) > _MAX_PATH_LENGTH:
             raise PolicyCheckError(f"paths entry exceeds {_MAX_PATH_LENGTH} characters.")
@@ -275,6 +305,12 @@ def run_policy_check(
         )
         for gate in spec.gates
     )
+    # Attached here rather than passed down to every evaluator: which file
+    # declared a gate says nothing about how it evaluates, and threading it
+    # through five evaluator signatures to arrive unchanged would only spread
+    # the fact around. Empty for a single-file policy (PolicySpec.gate_sources).
+    if spec.gate_sources:
+        results = tuple(replace(result, source=spec.gate_sources.get(result.gate_id)) for result in results)
     blocked = any(result.enforcement == "required" and result.outcome.is_blocking for result in results)
 
     return PolicyCheckResult(

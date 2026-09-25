@@ -13,6 +13,14 @@ from click.testing import CliRunner, Result
 
 import otari_agent.hook as hook_cli
 
+
+def _guardrail_path(root: Path) -> Path:
+    """`.otari/guardrails.yml` under `root`, with its parent directory created."""
+    path = root / hook_cli.GUARDRAIL_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 _HEADER = 'schema_version: "1.0"\npolicy:\n  id: demo/guardrails\ngates:\n'
 
 _CLEAN = _HEADER + (
@@ -77,7 +85,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _write(repo: Path, policy: str) -> None:
-    (repo / ".otari-guardrails.yml").write_text(policy, encoding="utf-8")
+    _guardrail_path(repo).write_text(policy, encoding="utf-8")
 
 
 def _invoke(*args: str) -> Result:
@@ -94,7 +102,8 @@ def test_fails_outside_a_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 def test_says_where_to_start_when_there_is_no_guardrail_file(repo: Path) -> None:
     result = _invoke()
     assert result.exit_code != 0
-    assert "otari guardrails generate" in result.output
+    assert "otari hook setup" in result.output
+    assert hook_cli.GUARDRAIL_DIR in result.output
 
 
 def test_a_clean_guardrail_reports_nothing_and_exits_zero(repo: Path) -> None:
@@ -401,3 +410,77 @@ def test_a_path_resolving_out_of_the_repo_is_still_checked_by_its_own_name(
     assert "not checked" not in pre_block
     # Git reports the link itself, so Stop covered this even before the fix.
     assert "fires      no-escape-md (required)" in stop_block
+
+
+def _write_into(repo: Path, relative: str, policy: str) -> None:
+    path = repo / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(policy, encoding="utf-8")
+
+
+def _one_gate(gate_id: str, policy_id: str = "demo/part") -> str:
+    return (
+        f'schema_version: "1.0"\npolicy:\n  id: {policy_id}\ngates:\n'
+        f"  - id: {gate_id}\n"
+        "    type: path\n"
+        "    runs: [pre_tool_use.edit_target, stop.working_tree]\n"
+        "    enforcement: required\n"
+        f'    forbidden: ["{gate_id}.txt"]\n'
+        f"    message: no {gate_id}\n"
+    )
+
+
+def test_the_whole_directory_is_checked_by_default(repo: Path) -> None:
+    _write_into(repo, ".otari/guardrails/a.yml", _one_gate("a1"))
+    _write_into(repo, ".otari/guardrails/architecture/b.yml", _one_gate("b1"))
+    result = _invoke()
+    assert result.exit_code == 0, result.output
+    assert "composed from 2 files" in result.output
+    assert "2 gate(s)" in result.output
+
+
+def test_a_gate_id_declared_twice_across_files_is_reported(repo: Path) -> None:
+    """The cross-file check no single file can do, and the reason validate composes by default."""
+    _write_into(repo, ".otari/guardrails/a.yml", _one_gate("shared"))
+    _write_into(repo, ".otari/guardrails/b.yml", _one_gate("shared"))
+    result = _invoke()
+    assert result.exit_code != 0
+    assert ".otari/guardrails/a.yml" in result.output
+    assert ".otari/guardrails/b.yml" in result.output
+
+
+def test_a_finding_names_the_file_that_declared_its_gate(repo: Path) -> None:
+    _write_into(repo, ".otari/guardrails/clean.yml", _one_gate("fine"))
+    _write_into(
+        repo,
+        ".otari/guardrails/broken.yml",
+        'schema_version: "1.0"\npolicy:\n  id: demo/broken\ngates:\n'
+        "  - id: edit-only\n"
+        "    type: path\n"
+        "    runs: [pre_tool_use.edit_target]\n"
+        "    enforcement: required\n"
+        '    forbidden: ["x.txt"]\n'
+        "    message: m\n",
+    )
+    result = _invoke()
+    assert "edit-only (.otari/guardrails/broken.yml)" in result.output
+
+
+def test_guardrail_file_checks_one_file_on_its_own(repo: Path) -> None:
+    """How a snippet from somewhere else is checked before it is dropped in."""
+    _write_into(repo, ".otari/guardrails/a.yml", _one_gate("a1"))
+    snippet = repo / "snippet.yml"
+    snippet.write_text(_one_gate("a1", policy_id="somewhere/else"), encoding="utf-8")
+    result = _invoke("--guardrail-file", str(snippet))
+    assert result.exit_code == 0, result.output
+    assert "somewhere/else" in result.output
+    assert "composed from" not in result.output
+
+
+def test_the_single_file_composes_before_the_directory(repo: Path) -> None:
+    """What a repo looks like partway through splitting one file into several."""
+    _write(repo, _one_gate("from-the-file", policy_id="demo/file"))
+    _write_into(repo, ".otari/guardrails/a.yml", _one_gate("a1"))
+    result = _invoke("--path", "from-the-file.txt")
+    assert result.exit_code == 0, result.output
+    assert "fires      from-the-file (required) in .otari/guardrails.yml" in result.output

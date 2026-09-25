@@ -7,9 +7,11 @@ either pulling in YAML parsing.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal, get_args
+from types import MappingProxyType
+from typing import Literal, TypeVar, get_args
 
 Enforcement = Literal["required", "advisory"]
 
@@ -244,6 +246,13 @@ class JudgeGate:
     conventions is not re-judged, at real model-call cost, on a session that
     never touched application code.
 
+    ``priority`` orders this gate against the policy's other judge gates
+    when more of them apply to one Stop event than the caller will run (see
+    :func:`by_priority`). Higher runs first; gates sharing a value keep
+    declaration order. It exists so that which judge gates a capped run keeps
+    is something a gate says about itself, rather than a consequence of where
+    its file happened to sort in a composed policy.
+
     ``judge_cli`` is optional and names which locally-installed CLI(s)
     ``otari hook`` may use to make the model call this gate needs, in
     preference order; the first one whose own binary is found on ``PATH``
@@ -265,6 +274,7 @@ class JudgeGate:
     message: str
     when_changed: tuple[str, ...] = ()
     judge_cli: tuple[str, ...] | None = None
+    priority: int = 0
     type: Literal["judge"] = "judge"
 
 
@@ -273,7 +283,7 @@ class VerifierGate:
     """A gate whose verdict comes from a repo-local verifier script's own exit status.
 
     ``verifier`` is a repo-relative path to an executable script in the
-    calling repo (e.g. ``.otari-guardrails/verifiers/no-conflict-markers.sh``), not
+    calling repo (e.g. ``.otari/verifiers/no-conflict-markers.sh``), not
     a closed set of otari-shipped implementations. Otari itself never runs
     it, the same way it never reads a caller's repository for any other gate:
     the caller (``otari hook``) runs the script with ``cwd`` at the repo
@@ -302,6 +312,9 @@ class VerifierGate:
     same name, the same repo-relative POSIX glob grammar
     ``PathGate.forbidden`` uses. Empty (the default) means this gate
     always applies.
+
+    ``priority`` means what :class:`JudgeGate`'s own does, and for the same
+    reason: this is the other gate type the caller caps per run.
     """
 
     id: str
@@ -310,6 +323,7 @@ class VerifierGate:
     verifier: str
     message: str
     when_changed: tuple[str, ...] = ()
+    priority: int = 0
     type: Literal["verifier"] = "verifier"
 
 
@@ -317,14 +331,43 @@ class VerifierGate:
 # policy loader's dispatch on ``type`` silently stops covering it.
 GateSpec = PathGate | CommandGate | CommandIfChangedGate | JudgeGate | VerifierGate
 
+# The two gate types a caller caps per run, and therefore the only ones whose
+# ``priority`` means anything. A path, command or command_if_changed gate
+# costs a match against evidence already in hand, so every one of them always
+# runs and none needs ordering.
+CappedGate = TypeVar("CappedGate", JudgeGate, VerifierGate)
+
+
+def by_priority(gates: Sequence[CappedGate]) -> list[CappedGate]:
+    """Order gates the way a per-run cap should keep them: highest ``priority`` first.
+
+    Stable, so gates sharing a priority stay in declaration order, which for a
+    composed policy is file order and then position within the file. That
+    ordering is a tiebreak and nothing more: a gate that must survive the cap
+    says so with ``priority`` rather than relying on where its file sorts.
+    """
+    return sorted(gates, key=lambda gate: -gate.priority)
+
 
 @dataclass(frozen=True, slots=True)
 class PolicySpec:
-    """A parsed, validated ``.otari-guardrails.yml``."""
+    """A parsed, validated guardrail: one ``.yml`` file, or a composed directory of them.
+
+    ``gate_sources`` maps a gate id to the file that declared it, and is
+    populated only for a composed policy (``domain.policy.compose_policy``); a
+    single-file policy leaves it empty, since its caller already knows the one
+    file every gate came from. Keyed on gate id because composition refuses a
+    duplicate id across the whole set, which is what makes the mapping total.
+
+    A read-only view, the same discipline every other field here follows in
+    being a tuple: a frozen spec that hands out a mutable dict is only frozen
+    by convention.
+    """
 
     schema_version: str
     policy_id: str
     gates: tuple[GateSpec, ...]
+    gate_sources: Mapping[str, str] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
@@ -462,10 +505,17 @@ class CheckEvidence:
 
 @dataclass(frozen=True, slots=True)
 class GateResult:
-    """One gate's evaluated outcome."""
+    """One gate's evaluated outcome.
+
+    ``source`` names the file that declared the gate, and is set only where a
+    policy was composed from more than one (see
+    :attr:`PolicySpec.gate_sources`). Without it, a failure in a six-file
+    policy sends the reader hunting for which file to edit.
+    """
 
     gate_id: str
     enforcement: Enforcement
     outcome: Outcome
     message: str
     detail: str | None = None
+    source: str | None = None

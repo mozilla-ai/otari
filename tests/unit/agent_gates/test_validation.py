@@ -1,7 +1,7 @@
 """`validate_policy`: what a guardrail would otherwise teach by running badly.
 
 Two of these are regressions in the literal sense. This repo's own
-`.otari-guardrails.yml` carries a comment for each, recording a footgun found
+guardrail carries a comment for each, recording a footgun found
 by a gate quietly not matching (`**/CLAUDE.md` alone) or matching the wrong
 thing (a bare `npm` phrase). Both are mechanical properties of the gate
 grammar, so both are checkable before the gate ever runs.
@@ -225,7 +225,7 @@ def test_judge_gates_past_the_per_stop_cap_are_named_in_declaration_order() -> N
     assert len(findings) == 1
     severity, gate_id, message = findings[0]
     assert (severity, gate_id) == ("warning", None)
-    assert "these are skipped in declaration order: j5, j6" in message
+    assert "these are skipped: j5, j6" in message
 
 
 def test_judge_gates_at_the_cap_do_not_warn() -> None:
@@ -420,7 +420,7 @@ def test_verifier_gates_past_their_own_cap_are_warned_about_too() -> None:
     severity, gate_id, message = findings[0]
     assert (severity, gate_id) == ("warning", None)
     assert "4 verifier gates, over the 3" in message
-    assert "skipped in declaration order: v3" in message
+    assert "these are skipped: v3" in message
 
 
 def test_verifier_gates_at_their_cap_do_not_warn() -> None:

@@ -5,9 +5,10 @@ coding agent. It talks HTTP to a running gateway and needs none of the server.
 
 | Command | What it does |
 |---|---|
-| `otari hook` | The callback a coding agent's hook calls. Evaluates the repository's `.otari-guardrails.yml` in process; see `docs/agent-guardrails.md`. |
+| `otari hook` | The callback a coding agent's hook calls. Composes the repository's guardrail files under `.otari/guardrails/` and evaluates them in process; see `docs/agent-guardrails.md`. |
 | `otari hook setup` | Registers that callback in the agent's own settings file. |
-| `otari guardrails generate` | Proposes `.otari-guardrails.yml` gates from the repository's own `AGENTS.md` or `CLAUDE.md`, one at a time. |
+| `otari guardrails generate` | Proposes guardrail gates from the repository's own `AGENTS.md` or `CLAUDE.md`, one at a time. |
+| `otari guardrails validate` | Checks the composed guardrail offline, and dry-runs it against a command or a path. |
 | `otari import claude-code` | Backfills Claude Code usage from local transcripts into a gateway. |
 | `otari --version` | The version this distribution was built as, or `OTARI_VERSION` where a deployment sets it (the Docker image does). |
 

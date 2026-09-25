@@ -16,6 +16,14 @@ from click.testing import CliRunner
 import otari_agent.hook as hook_cli
 from otari_agent.settings import HookSettings
 
+
+def _guardrail_path(root: Path) -> Path:
+    """`.otari/guardrails.yml` under `root`, with its parent directory created."""
+    path = root / hook_cli.GUARDRAIL_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 _FAKE_OTARI_PATH = "/opt/otari/.venv/bin/otari"
 
 _PATH_ONLY_GATES = (
@@ -71,7 +79,7 @@ def test_fails_outside_a_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 def test_declining_the_starter_policy_still_registers_the_hook(repo: Path) -> None:
     result = _invoke("--api-key", "k", input="n\n")
     assert result.exit_code == 0, result.output
-    assert not (repo / ".otari-guardrails.yml").exists()
+    assert not _guardrail_path(repo).exists()
     settings = _read_settings(repo)
     entry = settings["hooks"]["PreToolUse"][0]
     assert entry["matcher"] == "Edit|Write|NotebookEdit"
@@ -79,17 +87,19 @@ def test_declining_the_starter_policy_still_registers_the_hook(repo: Path) -> No
 
 
 def test_accepting_the_starter_policy_writes_one_and_its_command_gate_adds_bash(repo: Path) -> None:
+    """The single file, the smaller of the two shapes to start with."""
     result = _invoke("--api-key", "k", input="y\n")
     assert result.exit_code == 0, result.output
-    gates_file = repo / ".otari-guardrails.yml"
+    gates_file = repo / hook_cli.GUARDRAIL_FILE
     assert gates_file.is_file()
+    assert not (repo / hook_cli.GUARDRAIL_DIR).is_dir()
     assert "command" in gates_file.read_text(encoding="utf-8")
     settings = _read_settings(repo)
     assert settings["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Bash"
 
 
 def test_an_existing_path_only_policy_keeps_bash_out_of_the_matcher(repo: Path) -> None:
-    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     result = _invoke("--api-key", "k")
     assert result.exit_code == 0, result.output
     settings = _read_settings(repo)
@@ -97,7 +107,7 @@ def test_an_existing_path_only_policy_keeps_bash_out_of_the_matcher(repo: Path) 
 
 
 def test_an_existing_command_policy_adds_bash_to_the_matcher(repo: Path) -> None:
-    (repo / ".otari-guardrails.yml").write_text(_COMMAND_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_COMMAND_GATES, encoding="utf-8")
     result = _invoke("--api-key", "k")
     assert result.exit_code == 0, result.output
     settings = _read_settings(repo)
@@ -111,7 +121,7 @@ def test_an_existing_read_policy_adds_read_to_the_matcher(repo: Path) -> None:
     `path` type, so the matcher has to be picked from `runs` rather than from
     the gate type the way Bash's is.
     """
-    (repo / ".otari-guardrails.yml").write_text(_READ_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_READ_GATES, encoding="utf-8")
     result = _invoke("--api-key", "k")
     assert result.exit_code == 0, result.output
     settings = _read_settings(repo)
@@ -119,7 +129,7 @@ def test_an_existing_read_policy_adds_read_to_the_matcher(repo: Path) -> None:
 
 
 def test_a_policy_with_no_read_gate_keeps_read_out_of_the_matcher(repo: Path) -> None:
-    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     result = _invoke("--api-key", "k")
     assert result.exit_code == 0, result.output
     assert "Read" not in _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"]
@@ -131,7 +141,7 @@ def test_a_read_and_command_policy_earns_both_extra_groups(repo: Path) -> None:
         "  - id: c\n    type: command\n    runs: [pre_tool_use.command]\n"
         '    enforcement: required\n    forbidden: ["npm install"]\n    message: m\n'
     )
-    (repo / ".otari-guardrails.yml").write_text(combined, encoding="utf-8")
+    _guardrail_path(repo).write_text(combined, encoding="utf-8")
     result = _invoke("--api-key", "k")
     assert result.exit_code == 0, result.output
     settings = _read_settings(repo)
@@ -140,7 +150,7 @@ def test_a_read_and_command_policy_earns_both_extra_groups(repo: Path) -> None:
 
 def test_codex_has_no_read_group_to_add(repo: Path) -> None:
     """Codex has no read tool: its reads go through the shell, where they are command evidence."""
-    (repo / ".otari-guardrails.yml").write_text(_READ_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_READ_GATES, encoding="utf-8")
     result = _invoke("--harness", "codex", "--api-key", "k")
     assert result.exit_code == 0, result.output
     settings = json.loads((repo / ".codex" / "hooks.json").read_text(encoding="utf-8"))
@@ -149,7 +159,7 @@ def test_codex_has_no_read_group_to_add(repo: Path) -> None:
 
 
 def test_an_unparseable_policy_defaults_to_the_narrower_matcher(repo: Path) -> None:
-    (repo / ".otari-guardrails.yml").write_text("not: valid: yaml: at: all:\n  - [", encoding="utf-8")
+    _guardrail_path(repo).write_text("not: valid: yaml: at: all:\n  - [", encoding="utf-8")
     result = _invoke("--api-key", "k")
     assert result.exit_code == 0, result.output
     settings = _read_settings(repo)
@@ -157,7 +167,7 @@ def test_an_unparseable_policy_defaults_to_the_narrower_matcher(repo: Path) -> N
 
 
 def test_explicit_api_key_flag_skips_resolution_and_prompting(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
 
     def fail_if_called(config_path: str | None = None) -> HookSettings:
         raise AssertionError("load_settings should not be called when --api-key is given")
@@ -177,7 +187,7 @@ def test_no_api_key_means_no_credential_resolution_or_prompt(repo: Path, monkeyp
     neither one, so `setup` must not resolve a `master_key` from config (even
     when one is configured) or prompt for anything to get the same result.
     """
-    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
 
     def fail_if_called(config_path: str | None = None) -> HookSettings:
         raise AssertionError("load_settings should not be called when --api-key is not given either")
@@ -191,7 +201,7 @@ def test_no_api_key_means_no_credential_resolution_or_prompt(repo: Path, monkeyp
 
 
 def test_rerunning_updates_the_existing_entry_instead_of_duplicating_it(repo: Path) -> None:
-    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     first = _invoke("--api-key", "first-key")
     assert first.exit_code == 0, first.output
     assert "Added" in first.output
@@ -207,7 +217,7 @@ def test_rerunning_updates_the_existing_entry_instead_of_duplicating_it(repo: Pa
 
 
 def test_rerunning_preserves_unrelated_hooks_and_permissions(repo: Path) -> None:
-    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     settings_path = repo / ".claude" / "settings.local.json"
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text(
@@ -250,7 +260,7 @@ def test_registers_both_pretooluse_and_stop_hooks(repo: Path) -> None:
 
 
 def test_rerunning_updates_the_stop_entry_instead_of_duplicating_it(repo: Path) -> None:
-    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     first = _invoke("--api-key", "first-key")
     assert first.exit_code == 0, first.output
     assert "Added the Stop hook" in first.output
@@ -266,7 +276,7 @@ def test_rerunning_updates_the_stop_entry_instead_of_duplicating_it(repo: Path) 
 
 
 def test_stop_hook_registration_preserves_an_unrelated_stop_entry(repo: Path) -> None:
-    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     settings_path = repo / ".claude" / "settings.local.json"
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text(
@@ -284,7 +294,7 @@ def test_stop_hook_registration_preserves_an_unrelated_stop_entry(repo: Path) ->
 
 
 def test_rejects_an_existing_settings_file_that_is_not_valid_json(repo: Path) -> None:
-    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     settings_path = repo / ".claude" / "settings.local.json"
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text("{not valid json", encoding="utf-8")
@@ -297,7 +307,7 @@ def test_rejects_an_existing_settings_file_that_is_not_valid_json(repo: Path) ->
 
 
 def test_rejects_a_non_object_hooks_section(repo: Path) -> None:
-    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     settings_path = repo / ".claude" / "settings.local.json"
     settings_path.parent.mkdir(parents=True)
     original = json.dumps({"hooks": ["not", "an", "object"]})
@@ -310,7 +320,7 @@ def test_rejects_a_non_object_hooks_section(repo: Path) -> None:
 
 
 def test_rejects_a_non_array_pretooluse_list(repo: Path) -> None:
-    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     settings_path = repo / ".claude" / "settings.local.json"
     settings_path.parent.mkdir(parents=True)
     original = json.dumps({"hooks": {"PreToolUse": "not-a-list"}})
@@ -335,7 +345,7 @@ def test_rejects_a_non_array_stop_list(repo: Path) -> None:
     narrower: the malformed hooks.Stop value itself is never touched, and
     PreToolUse is registered correctly despite the later failure.
     """
-    (repo / ".otari-guardrails.yml").write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     settings_path = repo / ".claude" / "settings.local.json"
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text(json.dumps({"hooks": {"Stop": "not-a-list"}}), encoding="utf-8")
@@ -350,3 +360,33 @@ def test_rejects_a_non_array_stop_list(repo: Path) -> None:
         settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         == f"{_FAKE_OTARI_PATH} hook --harness claude-code --api-key k"
     )
+
+
+def test_setup_leaves_an_existing_directory_guardrail_alone(repo: Path) -> None:
+    existing = repo / hook_cli.GUARDRAIL_DIR / "mine.yml"
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    result = _invoke("--api-key", "k")
+    assert result.exit_code == 0, result.output
+    assert not (repo / hook_cli.GUARDRAIL_DIR / "starter.yml").exists()
+    assert existing.read_text(encoding="utf-8") == _PATH_ONLY_GATES
+
+
+def test_a_command_gate_in_a_composed_directory_still_widens_the_matcher(repo: Path) -> None:
+    command_gate = (
+        'schema_version: "1.0"\npolicy:\n  id: demo/shell\ngates:\n'
+        "  - id: no-force-push\n"
+        "    type: command\n"
+        "    runs: [pre_tool_use.command]\n"
+        "    enforcement: advisory\n"
+        '    forbidden: ["git push --force"]\n'
+        "    message: m\n"
+    )
+    for relative, body in ((hook_cli.GUARDRAIL_FILE, _PATH_ONLY_GATES), (".otari/guardrails/shell.yml", command_gate)):
+        path = repo / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+    result = _invoke("--api-key", "k")
+    assert result.exit_code == 0, result.output
+    assert _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Bash"

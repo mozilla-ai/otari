@@ -1,7 +1,8 @@
 """`otari hook`, `otari hook setup` and the `otari guardrails` group: the agent-side half of Agent Guardrails.
 
 Reads one hook payload from a supported coding agent, collects the evidence it
-names, evaluates the repository's `.otari-guardrails.yml` in process (or, when opted
+names, composes the repository's own guardrail files and evaluates them in
+process (or, when opted
 in, asks a gateway's Hook Server to) and answers in the harness's own exit-code
 protocol. See docs/agent-guardrails.md.
 """
@@ -24,13 +25,21 @@ from typing import Any, Literal, NamedTuple, cast
 import click
 import yaml
 
-from otari_agent.domain.check import PolicyCheckError, run_policy_check
+from otari_agent.domain.check import PolicyCheckError, check_policy
 from otari_agent.domain.evaluators import matched_changed_paths
-from otari_agent.domain.policy import PolicyError, parse_policy
+from otari_agent.domain.policy import (
+    MAX_POLICY_BYTES,
+    MAX_POLICY_FILES,
+    PolicyError,
+    PolicyFile,
+    compose_policy,
+    parse_policy,
+)
 from otari_agent.domain.types import (
     CheckVerdict,
     CommandGate,
     EvidenceScope,
+    GateResult,
     JudgeGate,
     JudgeVerdict,
     Outcome,
@@ -38,6 +47,7 @@ from otari_agent.domain.types import (
     PolicySpec,
     RunsAt,
     VerifierGate,
+    by_priority,
 )
 from otari_agent.domain.validation import validate_policy
 from otari_agent.settings import API_KEY_HEADER, API_ROOT, load_settings
@@ -223,6 +233,198 @@ def _hook_find_repo_root(start: Path) -> Path | None:
         if (candidate / ".git").exists():
             return candidate
     return None
+
+
+# The one dot-directory this tool asks a repository for, organized inside the
+# way `.github/`, `.vscode/` and `.circleci/` are. Any script a `verifier`
+# gate names lives under `verifiers/`, a sibling of whichever guardrail shape
+# is in use rather than something inside it.
+#
+# Two shapes, and neither is the older one: `guardrails.yml` when one file
+# says it all, `guardrails/` when it is worth splitting by concern. A repo can
+# have both, which is what an ordinary "this got long, split the rest out"
+# looks like partway through; the file composes first.
+GUARDRAIL_FILE = ".otari/guardrails.yml"
+GUARDRAIL_DIR = ".otari/guardrails"
+
+# Both spellings, because the one a file happens to carry is not worth a
+# silently ignored guardrail.
+_GUARDRAIL_SUFFIXES = frozenset({".yml", ".yaml"})
+
+# Where a guardrail lived before it moved under `.otari/`. Nothing reads it,
+# and the only thing this name is for is saying so: a repo still carrying one
+# has no guardrail this build can find, so every gate in it, `required` ones
+# included, has stopped being enforced. That is the one state worth a message
+# on every hook event, because it is silent otherwise and looks exactly like a
+# repo that passes every check.
+_MOVED_GUARDRAIL_FILE = ".otari-guardrails.yml"
+
+
+def _hook_not_enforcing(message: str) -> None:
+    """Report, visibly, that this event enforced nothing, and leave the turn unblocked.
+
+    stderr alone will not do it. Claude Code surfaces a non-blocking hook's
+    stderr in its own debug log and nowhere else, never in the transcript and
+    never to the model (the advisory-warning tail at the end of `hook` records
+    the same finding), so a guardrail that has quietly stopped running would
+    announce itself only to whoever thinks to turn on debug output. That is
+    the one state this must not be quiet about, because a session with no
+    enforcement looks exactly like a session that passed every check.
+
+    Both channels, not one: stdout's `systemMessage` is what a person and the
+    model actually see, and the stderr line is what a CI log or `--debug`
+    transcript keeps.
+    """
+    click.echo(f"otari hook: {message}", err=True)
+    click.echo(json.dumps({"systemMessage": f"otari hook: {message}"}))
+
+
+def _guardrail_moved_notice(root: Path) -> str | None:
+    """The "your guardrail is not running" line for a repo still on the old path, or None."""
+    if not (root / _MOVED_GUARDRAIL_FILE).is_file():
+        return None
+    return (
+        f"{_MOVED_GUARDRAIL_FILE} is not read any more and no gate in it is being enforced. "
+        f"Move it to {GUARDRAIL_FILE}, or split it into {GUARDRAIL_DIR}/."
+    )
+
+
+def _hook_discover_guardrail_files(root: Path) -> list[Path]:
+    """Every guardrail file this repo composes, in the order they compose.
+
+    `.otari/guardrails.yml` first where it exists, then every `.yml`/`.yaml`
+    under `.otari/guardrails/`, ordered by repo-relative path. The file first
+    is the least surprising for a repo splitting a guardrail it already had,
+    and the order is only ever a tiebreak: `priority` on a gate is what
+    decides which judge and verifier gates survive a capped run
+    (`domain.types.by_priority`), so nothing here is load-bearing beyond
+    being stable.
+
+    The scan is recursive, so gates can be grouped by concern
+    (`architecture/repository-pattern.yml`). Nothing has to be excluded from
+    it: a verifier script lives under `.otari/verifiers/`, outside the scanned
+    root entirely, so there is no non-guardrail file down there to mistake for
+    one. `Path.glob` does not descend through a symlinked directory, so the
+    scan cannot be walked out of the repo either.
+    """
+    files: list[Path] = []
+    single = root / GUARDRAIL_FILE
+    if single.is_file():
+        files.append(single)
+    directory = root / GUARDRAIL_DIR
+    if directory.is_dir():
+        files.extend(
+            sorted(
+                (path for path in directory.glob("**/*") if path.suffix in _GUARDRAIL_SUFFIXES and path.is_file()),
+                key=lambda path: path.relative_to(root).as_posix(),
+            )
+        )
+    return files
+
+
+def _composed_guardrail_id(files: list[Path], root: Path) -> str:
+    """A name for the composed set, for a report that has to call it something.
+
+    Where it came from, not an identity assembled out of the parts: each file
+    keeps its own `policy.id`, and a composed set has no declared one. Which
+    file a given gate came from travels per gate instead
+    (`PolicySpec.gate_sources`), which is what a reader actually needs.
+
+    One file is named as itself, since there is a real file to point at.
+    """
+    if len(files) == 1:
+        return _guardrails_relative_to(files[0], root) or files[0].name
+    if files and files[0] == root / GUARDRAIL_FILE:
+        return f"{GUARDRAIL_FILE} + {GUARDRAIL_DIR}/"
+    return GUARDRAIL_DIR
+
+
+class GuardrailReadError(Exception):
+    """A discovered guardrail file could not be read. The message names it.
+
+    Its own type so a caller catches it beside `PolicyError` and phrases one
+    outcome for "this repo's guardrail could not be loaded", whether the file
+    was unreadable or its contents unparseable.
+    """
+
+
+def _read_guardrail_files(files: list[Path], root: Path) -> list[PolicyFile]:
+    """Read every discovered file, naming the one that fails.
+
+    `is_file()` during discovery does not guarantee the read that follows
+    succeeds (a race, a permissions change, a non-UTF-8 file), and
+    `UnicodeDecodeError` does not name the file it was reading, so the path
+    is put into the message here rather than left to the caller to guess.
+    """
+    sources: list[PolicyFile] = []
+    for path in files:
+        try:
+            name = path.relative_to(root).as_posix()
+        except ValueError:
+            # `otari guardrails validate --guardrail-file` may name a file
+            # outside the repo, which is how a snippet is checked before being
+            # dropped in; it has no repo-relative spelling to report it by.
+            name = path.as_posix()
+        try:
+            body = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise GuardrailReadError(f"could not read {name} ({exc})") from exc
+        sources.append(PolicyFile(name=name, body=body))
+    return sources
+
+
+def _compose_guardrail(sources: list[PolicyFile], policy_id: str) -> PolicySpec:
+    """Parse one guardrail file, or compose several, into a single spec.
+
+    One file goes through `parse_policy` rather than a one-element
+    composition, so a repo with a single guardrail keeps reporting that
+    file's own `policy.id` and gets no per-gate source it has no use for.
+    """
+    if len(sources) == 1:
+        return parse_policy(sources[0].body, source=sources[0].name)
+    return compose_policy(sources, policy_id=policy_id)
+
+
+def _hook_guardrail_spec(root: Path) -> PolicySpec | None:
+    """This repo's composed guardrail, or None when it has none, cannot read it, or cannot parse it.
+
+    For a caller that only wants to look at the gates and has nothing useful
+    to say about a broken guardrail, which is what `otari hook setup` and
+    `_guardrail_allows_bash` both want. A caller that has to report the
+    failure reads the pieces itself.
+    """
+    files = _hook_discover_guardrail_files(root)
+    if not files:
+        return None
+    try:
+        return _compose_guardrail(_read_guardrail_files(files, root), _composed_guardrail_id(files, root))
+    except (GuardrailReadError, PolicyError):
+        return None
+
+
+def _merged_guardrail_yaml(sources: list[PolicyFile], policy_id: str) -> str:
+    """One YAML document carrying every composed file's gates, for the opt-in remote mode.
+
+    `POST /hooks/check` takes one policy body per request, so a composed
+    guardrail is merged back into one document here rather than changing that
+    contract for a mode most callers never turn on. Nothing is lost by it: the
+    gates are the already-validated mappings from each file, and which file a
+    gate came from is matched back from `PolicySpec.gate_sources`, which this
+    process holds either way.
+
+    A single-file guardrail is sent exactly as it sits on disk, comments and
+    all, so the common case puts nothing on the wire that was not written by
+    hand.
+    """
+    if len(sources) == 1:
+        return sources[0].body
+    documents = [yaml.safe_load(source.body) for source in sources]
+    merged = {
+        "schema_version": documents[0]["schema_version"],
+        "policy": {"id": policy_id, "description": f"Composed from {len(sources)} guardrail files."},
+        "gates": [gate for document in documents for gate in document["gates"]],
+    }
+    return yaml.safe_dump(merged, sort_keys=False)
 
 
 def _hook_collect_changed_paths(repo_root: Path) -> list[str] | None:
@@ -736,7 +938,7 @@ def _hook_judge_workdir() -> Path:
     gate calling out to a model at all. A dedicated directory under
     `~/.otari/` (not the shared system temp root, and not the repo being
     judged) is a stable, otari-owned place a future judge-specific hook or
-    its own `.otari-guardrails.yml` could live, the same reasoning
+    its own guardrail could live, the same reasoning
     `_hook_judge_log_path` already applies to the audit log. Today it holds
     nothing, so nothing resolves from it: no hooks, since Claude Code walks
     up from `cwd` looking for a `.claude/settings.local.json` and finds none
@@ -1100,8 +1302,7 @@ def _hook_run_judge(
 
 
 def _hook_collect_judge_verdicts(
-    policy_yaml: str,
-    gates_file: Path,
+    spec: PolicySpec,
     repo_root: Path,
     transcript_path: str | None,
     changed_paths: list[str],
@@ -1114,14 +1315,9 @@ def _hook_collect_judge_verdicts(
     """Run every applicable judge gate in the local policy, one model-CLI call each,
     up to `_HOOK_GATE_MAX_WORKERS` of them concurrently.
 
-    Parses the policy locally with the same pure `domain.policy.parse_policy`
-    `run_policy_check` itself uses below, purely to find which gates are
-    judge gates and read their `rubric`/`when_changed`; that later call
-    re-parses and validates the same `policy_yaml` on its own, so a mismatch
-    here only means judge evidence for a gate that call would reject anyway.
-    A local parse failure collects no verdicts rather than raising: the
-    fail-open call to `run_policy_check` below still gets the same policy
-    text and reports the same error on it.
+    Reads `rubric`/`when_changed` off the already-parsed policy the caller
+    evaluates below, so there is one parse of a guardrail per hook event and
+    no way for the gates judged here to differ from the gates checked there.
 
     A judge gate with `when_changed` is skipped locally, before ever reading
     the diff/transcript or shelling out to `claude -p`, when none of
@@ -1159,29 +1355,26 @@ def _hook_collect_judge_verdicts(
     `deadline` are read-only from every worker's own perspective, and
     `_hook_judge_workdir()` is a directory each `claude -p`/`codex exec`
     subprocess uses independently, not a file the workers write themselves).
-    The returned list keeps every gate's declaration order:
+    The returned list keeps the order the gates run in:
     `ThreadPoolExecutor.map` yields results in the order its inputs were
     given, not completion order.
     """
-    try:
-        spec = parse_policy(policy_yaml, source=str(gates_file))
-    except PolicyError:
-        return []
-
     changed_paths_tuple = tuple(changed_paths)
-    judge_gates = [
-        gate
-        for gate in spec.gates
-        if isinstance(gate, JudgeGate)
-        and (not gate.when_changed or matched_changed_paths(gate.when_changed, changed_paths_tuple))
-    ]
+    judge_gates = by_priority(
+        [
+            gate
+            for gate in spec.gates
+            if isinstance(gate, JudgeGate)
+            and (not gate.when_changed or matched_changed_paths(gate.when_changed, changed_paths_tuple))
+        ]
+    )
     if not judge_gates:
         return []
     if len(judge_gates) > _HOOK_JUDGE_MAX_GATES_PER_RUN:
         skipped = [gate.id for gate in judge_gates[_HOOK_JUDGE_MAX_GATES_PER_RUN:]]
         click.echo(
             f"otari hook: {len(judge_gates):,} judge gates in this guardrail, over the "
-            f"{_HOOK_JUDGE_MAX_GATES_PER_RUN:,} limit; skipping: {', '.join(skipped)}.",
+            f"{_HOOK_JUDGE_MAX_GATES_PER_RUN:,} limit; skipping the lowest priority: {', '.join(skipped)}.",
             err=True,
         )
         judge_gates = judge_gates[:_HOOK_JUDGE_MAX_GATES_PER_RUN]
@@ -1389,22 +1582,14 @@ def _hook_kill_process_group(process: subprocess.Popen[str]) -> None:
 
 
 def _hook_collect_check_verdicts(
-    policy_yaml: str,
-    gates_file: Path,
+    spec: PolicySpec,
     repo_root: Path,
     changed_paths: list[str],
 ) -> list[dict[str, str]]:
     """Run every applicable verifier gate's verifier locally; return check_results.
 
-    Structured exactly like `_hook_collect_judge_verdicts`: parses the policy
-    locally with the same pure `domain.policy.parse_policy` `run_policy_check`
-    itself uses below, purely to find which gates are verifier gates and
-    read their `verifier`/`when_changed`; that later call re-parses and
-    validates the same `policy_yaml` on its own, so a mismatch here only
-    means check evidence for a gate that call would reject anyway. A local
-    parse failure collects no verdicts rather than raising: the fail-open
-    call to `run_policy_check` below still gets the same policy text and
-    reports the same error on it.
+    Structured exactly like `_hook_collect_judge_verdicts`, and reads its
+    gates off the same already-parsed policy the caller evaluates below.
 
     A gate with `when_changed` is skipped locally, before ever running its
     verifier, when none of `changed_paths` matches its globs
@@ -1425,30 +1610,27 @@ def _hook_collect_check_verdicts(
     verifier that is not safe under that (one that writes to a fixed
     temporary path another verifier might also use, or that mutates the
     working tree itself rather than only reading it, e.g. `git stash`) can
-    now race in a way it could not before this build. `.otari-guardrails/verifiers/`
+    now race in a way it could not before this build. `.otari/verifiers/`
     in this repo only ever reads the tree (`git status`/`git diff`, a file
     scan), which is safe under concurrency for free; a verifier that needs to
     write should not assume it is the only one running.
     """
-    try:
-        spec = parse_policy(policy_yaml, source=str(gates_file))
-    except PolicyError:
-        return []
-
     changed_paths_tuple = tuple(changed_paths)
-    check_gates = [
-        gate
-        for gate in spec.gates
-        if isinstance(gate, VerifierGate)
-        and (not gate.when_changed or matched_changed_paths(gate.when_changed, changed_paths_tuple))
-    ]
+    check_gates = by_priority(
+        [
+            gate
+            for gate in spec.gates
+            if isinstance(gate, VerifierGate)
+            and (not gate.when_changed or matched_changed_paths(gate.when_changed, changed_paths_tuple))
+        ]
+    )
     if not check_gates:
         return []
     if len(check_gates) > _HOOK_CHECK_MAX_GATES_PER_RUN:
         skipped = [gate.id for gate in check_gates[_HOOK_CHECK_MAX_GATES_PER_RUN:]]
         click.echo(
             f"otari hook: {len(check_gates):,} verifier gates in this guardrail, over the "
-            f"{_HOOK_CHECK_MAX_GATES_PER_RUN:,} limit; skipping: {', '.join(skipped)}.",
+            f"{_HOOK_CHECK_MAX_GATES_PER_RUN:,} limit; skipping the lowest priority: {', '.join(skipped)}.",
             err=True,
         )
         check_gates = check_gates[:_HOOK_CHECK_MAX_GATES_PER_RUN]
@@ -1530,7 +1712,7 @@ def hook(
 
     Reads one JSON hook payload on stdin, collects the evidence that payload
     carries (a PreToolUse call's own target path, or a Stop event's Git
-    status), and evaluates it against the local `.otari-guardrails.yml` itself, in
+    status), and evaluates it against the local guardrail itself, in
     process, through `otari_agent.domain.check.run_policy_check`: no server,
     no credential, needed for this by default. `--url`/`--api-key` (or
     `OTARI_URL`/`OTARI_API_KEY`) are the opt-in exception: give either and
@@ -1573,18 +1755,26 @@ def hook(
     if root is None:
         return
 
-    gates_file = root / ".otari-guardrails.yml"
-    if not gates_file.is_file():
+    guardrail_files = _hook_discover_guardrail_files(root)
+    if not guardrail_files:
+        # Silence is right for a repo that never had a guardrail, and wrong for
+        # one whose guardrail this build stopped finding; see
+        # `_guardrail_moved_notice`.
+        moved = _guardrail_moved_notice(root)
+        if moved is not None:
+            _hook_not_enforcing(moved)
         return
+    guardrail_name = _composed_guardrail_id(guardrail_files, root)
     try:
-        policy_yaml = gates_file.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        # Same fail-open contract as every other evidence-collection failure
-        # in this command: `is_file()` above does not guarantee a following
-        # read succeeds (a race, a permissions change, a non-UTF-8 file), and
-        # an uncaught exception here would exit nonzero before ever reaching
-        # httpx.post, skipping every gate in the policy for this event.
-        click.echo(f"otari hook: could not read {gates_file} ({exc}), not blocking.", err=True)
+        sources = _read_guardrail_files(guardrail_files, root)
+        spec = _compose_guardrail(sources, guardrail_name)
+    except (GuardrailReadError, PolicyError) as exc:
+        # Fail-open, like every other collection failure in this command: a
+        # guardrail this build cannot load must not exit nonzero and block the
+        # turn on its own malformedness. Said visibly, though, because
+        # composing several files puts this state within reach of a file
+        # somebody else added rather than only the one you just edited.
+        _hook_not_enforcing(f"could not load {guardrail_name} ({exc}); no gate is being enforced.")
         return
 
     paths: list[str] = []
@@ -1736,8 +1926,7 @@ def hook(
             commands = _bound_commands_for_submission(commands)
 
         judge_results = _hook_collect_judge_verdicts(
-            policy_yaml,
-            gates_file,
+            spec,
             root,
             transcript_path,
             paths,
@@ -1746,7 +1935,7 @@ def hook(
             harness=harness,
             judge_cli_override=judge_cli,
         )
-        check_results = _hook_collect_check_verdicts(policy_yaml, gates_file, root, paths)
+        check_results = _hook_collect_check_verdicts(spec, root, paths)
     else:
         return  # An event this harness integration does not check yet.
 
@@ -1756,9 +1945,8 @@ def hook(
     # needs a running gateway, a credential, or the network at all.
     if url is None and api_key is None:
         try:
-            check_result = run_policy_check(
-                policy_yaml,
-                source=str(gates_file),
+            check_result = check_policy(
+                spec,
                 paths=paths,
                 commands=commands,
                 path_source=path_source,
@@ -1789,7 +1977,7 @@ def hook(
                 ),
             )
         except PolicyCheckError as exc:
-            click.echo(f"otari hook: could not evaluate {gates_file} ({exc}), not blocking.", err=True)
+            click.echo(f"otari hook: could not evaluate {guardrail_name} ({exc}), not blocking.", err=True)
             return
         failing = [
             {
@@ -1798,6 +1986,7 @@ def hook(
                 "outcome": gate_result.outcome.value,
                 "message": gate_result.message,
                 "detail": gate_result.detail,
+                "source": gate_result.source,
             }
             for gate_result in check_result.results
             if gate_result.outcome.value not in ("pass", "not_applicable")
@@ -1809,6 +1998,15 @@ def hook(
         # For whoever wants a shared/hosted gateway to be the one deciding,
         # or a central place data about the check could eventually land.
         import httpx
+
+        policy_yaml = _merged_guardrail_yaml(sources, guardrail_name)
+        if len(policy_yaml.encode("utf-8")) > MAX_POLICY_BYTES:
+            _hook_not_enforcing(
+                f"{guardrail_name} composes to more than the {MAX_POLICY_BYTES:,} bytes the Hook Server "
+                "accepts in one request, so no gate is being enforced. Evaluate it locally "
+                "(drop --url/--api-key) or split the check across fewer gates."
+            )
+            return
 
         try:
             settings = load_settings(config)
@@ -1845,6 +2043,11 @@ def hook(
             response.raise_for_status()
             result = response.json()
             failing = [gate for gate in result["results"] if gate["outcome"] not in ("pass", "not_applicable")]
+            # The route evaluated one merged document and has no file names to
+            # report; they are restored here from the composition this process
+            # did, so a failure reads the same whichever mode produced it.
+            for gate in failing:
+                gate["source"] = spec.gate_sources.get(str(gate.get("gate_id", "")))
             blocked = result["blocked"]
         except httpx.HTTPStatusError as exc:
             # Split from the transport branch below on purpose: the request did
@@ -1890,10 +2093,15 @@ def hook(
     # details elsewhere in this command are, at 500 characters: `reasoning`
     # itself can run up to _HOOK_MAX_JUDGE_REASONING_LENGTH (4,096), too long
     # for one stderr line.
+    # `source` is set only where the guardrail was composed from more than
+    # one file, which is exactly when naming the file saves a reader from
+    # hunting for which one to edit. A single-file repo would only be told
+    # what it already knows.
     summary = "\n".join(
         f"  [{'x' if gate.get('enforcement') == 'required' else '!'}] "
         f"{gate.get('gate_id', '?')}: {gate.get('message', '(no message)')}"
         + (f" ({str(gate['detail'])[:500]})" if gate.get("detail") else "")
+        + (f" [{gate['source']}]" if gate.get("source") else "")
         for gate in failing
     )
     if blocked:
@@ -1974,12 +2182,11 @@ class _MatcherNeeds(NamedTuple):
     read: bool
 
 
-def _gates_file_matcher_needs(gates_file: Path) -> _MatcherNeeds:
-    """Which matcher groups this guardrail file earns, parsed the way the Hook Server parses it.
+def _guardrail_matcher_needs(spec: PolicySpec | None) -> _MatcherNeeds:
+    """Which matcher groups this repo's composed guardrail earns.
 
-    A missing or unparseable policy earns neither, the narrowest matcher:
-    setup cannot know what a broken policy would have wanted, and a round trip
-    is otherwise harmless but pointless to pay for nothing.
+    A missing or unparseable guardrail (``None``) earns neither, the narrowest
+    matcher: setup cannot know what a broken guardrail would have wanted.
 
     `bash` deliberately does not consult any gate's `runs`, which looks like it
     should matter and does not: no `runs` value a path gate can name is
@@ -1993,12 +2200,7 @@ def _gates_file_matcher_needs(gates_file: Path) -> _MatcherNeeds:
     `read` is the opposite: it turns on `runs` alone, since a read gate and an
     edit gate are the same `path` type and nothing else tells them apart.
     """
-    if not gates_file.is_file():
-        return _MatcherNeeds(bash=False, read=False)
-
-    try:
-        spec = parse_policy(gates_file.read_text(encoding="utf-8"), source=str(gates_file))
-    except PolicyError:
+    if spec is None:
         return _MatcherNeeds(bash=False, read=False)
     return _MatcherNeeds(
         bash=any(isinstance(gate, CommandGate) for gate in spec.gates),
@@ -2052,7 +2254,8 @@ def _starter_gates_yaml(repo_name: str) -> str:
         # A path nothing legitimately generates, on purpose. A gate over a
         # generated file warns on the very command that regenerates it, which
         # is the trap this repo's own policy documents twice (see the
-        # postman-collection and pyproject gates in .otari-guardrails.yml).
+        # postman-collection and pyproject gates in
+        # .otari/guardrails/generated-artifacts.yml).
         "    runs: [pre_tool_use.edit_target, stop.working_tree]\n"
         "    enforcement: advisory\n"
         '    forbidden: [".env", "**/.env"]\n'
@@ -2170,29 +2373,36 @@ def hook_setup(harness: str, api_key: str | None) -> None:
     _HOOK_SETUP_BY_HARNESS) so registering it is not a manual JSON edit. Both
     point at the same otari hook invocation; the harness passes its own
     hook_event_name in the payload, so one callback serves either event.
-    Offers to scaffold a starter .otari-guardrails.yml when this repo has none
-    yet, and picks the PreToolUse matcher (whether it needs to cover the shell
-    tool, the read tool, or both) from whatever gates the policy turns out to
-    have; Stop needs no matcher; see docs/agent-guardrails.md for why both are
-    registered unconditionally.
+    Offers to scaffold a starter .otari/guardrails.yml when this repo has no
+    guardrail yet, and picks the PreToolUse matcher (whether it needs to cover
+    the shell tool, the read tool, or both) from whatever gates the guardrail
+    turns out to have; Stop needs no matcher; see docs/agent-guardrails.md for
+    why both are registered unconditionally.
     """
     root = _hook_find_repo_root(Path.cwd())
     if root is None:
         raise click.ClickException("Not inside a Git repository.")
 
-    gates_file = root / ".otari-guardrails.yml"
-    if not gates_file.is_file():
-        if click.confirm(f"No {gates_file.name} found in {root}. Create a starter guardrail?", default=True):
-            gates_file.write_text(_starter_gates_yaml(root.name), encoding="utf-8")
-            click.echo(f"Wrote {gates_file}.")
+    # The single file, not a directory holding one: it is the smaller thing to
+    # start with, and splitting it later is moving gates into
+    # `.otari/guardrails/` rather than a migration.
+    if not _hook_discover_guardrail_files(root):
+        moved = _guardrail_moved_notice(root)
+        if moved is not None:
+            click.echo(moved)
+        starter = root / GUARDRAIL_FILE
+        if click.confirm(f"No guardrail found in {root}. Create a starter {GUARDRAIL_FILE}?", default=True):
+            starter.parent.mkdir(parents=True, exist_ok=True)
+            starter.write_text(_starter_gates_yaml(root.name), encoding="utf-8")
+            click.echo(f"Wrote {starter}. Split it into {GUARDRAIL_DIR}/ when it grows.")
         else:
             click.echo(
                 f"Skipping. otari hook will still be registered below, but every gate check "
-                f"passes until {gates_file.name} exists; see docs/agent-guardrails.md."
+                f"passes until {GUARDRAIL_FILE} or {GUARDRAIL_DIR}/ exists; see docs/agent-guardrails.md."
             )
 
     setup = _HOOK_SETUP_BY_HARNESS[harness]
-    needs = _gates_file_matcher_needs(gates_file)
+    needs = _guardrail_matcher_needs(_hook_guardrail_spec(root))
     matcher_parts = [setup.edit_matcher]
     if needs.read and setup.read_matcher is not None:
         matcher_parts.append(setup.read_matcher)
@@ -2312,7 +2522,7 @@ for command_if_changed, optional (defaults to "always") for the other two.
 def _gates_generate_build_prompt(*, doc_name: str, doc_text: str, existing_ids: frozenset[str]) -> str:
     existing_ids_text = ", ".join(sorted(existing_ids)) if existing_ids else "(none yet)"
     return (
-        "You are proposing gates for an otari `.otari-guardrails.yml` guardrail: mechanical "
+        "You are proposing gates for an otari guardrail: mechanical "
         "rules a coding agent's own hook checks against its working tree and "
         "commands before proceeding.\n\n"
         f"{_GATES_GENERATE_SCHEMA_REFERENCE}\n"
@@ -2342,7 +2552,7 @@ def _gates_generate_run_cli(argv: list[str], prompt: str, *, label: str) -> str:
     command's own prompt asks for. Runs from `_hook_judge_workdir()`, the
     same isolated directory a judge gate's own model call uses and for the
     same reason (see that function's own docstring): this repo's own
-    `.otari-guardrails.yml` can register `otari hook` on `Stop`, and running this
+    guardrail can register `otari hook` on `Stop`, and running this
     call from the repo it is reading would let that fire for this call too.
     """
     try:
@@ -2423,7 +2633,7 @@ def _gates_generate_validate_gate(gate_dict: dict[str, Any]) -> None:
     """Raise PolicyError unless `gate_dict` is a well-formed gate on its own.
 
     Wraps it in a minimal policy skeleton and runs it through the exact
-    parser a submitted `.otari-guardrails.yml`/Hook Server request goes through
+    parser a submitted guardrail/Hook Server request goes through
     (`otari_agent.domain.policy.parse_policy`), so a hallucinated field,
     type, or a `judge` gate proposed as `required` is caught here, before
     this ever gets appended to the real file, not the first time the hook
@@ -2505,7 +2715,7 @@ def _gates_generate_read_choice(message: str, choices: str, default: str) -> str
 
 
 def _gates_generate_render_list_item(gate_dict: dict[str, Any], indent: str = "  ") -> str:
-    """Render one accepted gate as a block-sequence item for `.otari-guardrails.yml`, its
+    """Render one accepted gate as a block-sequence item for a guardrail file, its
     `- ` marker at `indent`.
 
     Deliberately plain block style throughout (PyYAML's own default), not
@@ -2557,7 +2767,7 @@ def _gates_generate_append(gates_file: Path, repo_name: str, gate_dict: dict[str
 
     Splices raw text rather than round-tripping the file through a YAML
     dump, so every hand-written comment already in it (as in this repo's
-    own `.otari-guardrails.yml`) survives untouched. `schema_version`, `policy`,
+    own guardrail) survives untouched. `schema_version`, `policy`,
     and `gates` are a policy's only top-level keys
     (domain/policy.py's `_TOP_LEVEL_FIELDS`), so the end of the `gates:`
     sequence is wherever a following line returns to column 0 without being
@@ -2601,6 +2811,32 @@ def _gates_generate_append(gates_file: Path, repo_name: str, gate_dict: dict[str
     _gates_generate_write_checked(gates_file, "".join(new_lines))
 
 
+def _joins_the_composed_set(target: Path, root: Path) -> bool:
+    """Whether creating ``target`` would add a file to what the hook composes.
+
+    `--guardrail-file` can name somewhere the hook never reads, in which case
+    a new file there changes the composed set not at all.
+    """
+    if target == root / GUARDRAIL_FILE:
+        return True
+    return target.suffix in _GUARDRAIL_SUFFIXES and target.is_relative_to(root / GUARDRAIL_DIR)
+
+
+def _generate_target(root: Path) -> Path:
+    """Where accepted gates go when `--guardrail-file` names nowhere.
+
+    Whichever shape the repo already keeps: the single file where it has one,
+    a file of its own under the directory where it has that instead, rather
+    than dropping generated gates into somebody's hand-organized file. A repo
+    with neither gets the single file, the same starting shape
+    `otari hook setup` scaffolds.
+    """
+    single = root / GUARDRAIL_FILE
+    if single.is_file() or not (root / GUARDRAIL_DIR).is_dir():
+        return single
+    return root / GUARDRAIL_DIR / "generated.yml"
+
+
 def _gates_generate_write_checked(gates_file: Path, new_text: str) -> None:
     """Write `new_text` only once `parse_policy` accepts it; refuse, untouched, otherwise."""
     try:
@@ -2629,7 +2865,7 @@ def _gates_generate_parse_edit(edited: str | None, *, fallback: dict[str, Any]) 
 
 @click.group(name="guardrails")
 def guardrails() -> None:
-    """Work with a repo's `.otari-guardrails.yml` guardrail."""
+    """Work with a repo's guardrail: .otari/guardrails.yml, or the files under .otari/guardrails/."""
 
 
 @guardrails.command(name="generate")
@@ -2644,7 +2880,10 @@ def guardrails() -> None:
     "guardrail_file_option",
     type=click.Path(dir_okay=False, path_type=Path),
     default=None,
-    help="Guardrail file to append accepted gates to. Defaults to .otari-guardrails.yml in the repo root.",
+    help=(
+        f"Guardrail file to append accepted gates to. Defaults to {GUARDRAIL_FILE}, or "
+        f"{GUARDRAIL_DIR}/generated.yml in a repo that keeps its guardrail as a directory."
+    ),
 )
 @click.option(
     "--cli",
@@ -2669,7 +2908,7 @@ def guardrails_generate(
     cli_override: tuple[str, ...] | None,
     model: str | None,
 ) -> None:
-    """Propose `.otari-guardrails.yml` gates from a repo's own AGENTS.md/CLAUDE.md, one at a time.
+    """Propose guardrail gates from a repo's own AGENTS.md/CLAUDE.md, one at a time.
 
     Resolves a locally installed model CLI (`claude -p` or `codex exec`,
     whichever is found on PATH first; no otari server, no otari credential)
@@ -2700,14 +2939,40 @@ def guardrails_generate(
             "pass --source to point at a smaller/narrower doc."
         )
 
-    target = guardrail_file_option if guardrail_file_option is not None else root / ".otari-guardrails.yml"
-    existing_ids: set[str] = set()
-    if target.is_file():
+    target = guardrail_file_option if guardrail_file_option is not None else _generate_target(root)
+
+    # Before the model call, not after: writing the file that takes the set
+    # past MAX_POLICY_FILES would report success and leave the repo with a
+    # guardrail the hook refuses to compose, which fails open. Every gate
+    # already in the set, this one included, would stop being enforced, and
+    # the command that did it would have said "Added 1 gate(s)".
+    composed = _hook_discover_guardrail_files(root)
+    if not target.is_file() and _joins_the_composed_set(target, root) and len(composed) >= MAX_POLICY_FILES:
+        raise click.ClickException(
+            f"{root} already composes {len(composed)} guardrail files, the most this build reads "
+            f"({MAX_POLICY_FILES}). Adding {_guardrails_relative_to(target, root) or target} would make the "
+            "whole guardrail unloadable, so every gate in it would stop being enforced. Pass "
+            "--guardrail-file to append to one of the existing files instead."
+        )
+
+    # Every id already in use anywhere the hook composes, not only in the file
+    # being appended to: a gate id is unique across the whole composed
+    # guardrail, so a duplicate landing in a second file would not be a
+    # shadowed gate but a guardrail that stops loading altogether, and a
+    # guardrail that fails to load enforces nothing.
+    # Which file each is in, not just that it is taken: with several files in
+    # play, "already in the guardrail" leaves a reader opening each one to
+    # find out where.
+    existing_ids: dict[str, str] = {}
+    for path in dict.fromkeys([*composed, target]):
+        if not path.is_file():
+            continue
         try:
-            existing_spec = parse_policy(target.read_text(encoding="utf-8"), source=str(target))
-        except PolicyError as exc:
-            raise click.ClickException(f"{target} does not currently parse: {exc}") from exc
-        existing_ids = {gate.id for gate in existing_spec.gates}
+            existing_spec = parse_policy(path.read_text(encoding="utf-8"), source=str(path))
+        except (OSError, UnicodeDecodeError, PolicyError) as exc:
+            raise click.ClickException(f"{path} does not currently parse: {exc}") from exc
+        name = _guardrails_relative_to(path, root) or path.name
+        existing_ids.update({gate.id: name for gate in existing_spec.gates})
 
     candidates = cli_override if cli_override is not None else _GATES_GENERATE_DEFAULT_CLI_ORDER
     resolved = _hook_resolve_judge_cli(candidates)
@@ -2756,7 +3021,7 @@ def guardrails_generate(
                 click.secho("Skipping a proposal with no valid 'id'.", fg="yellow")
                 break
             if gate_id in existing_ids:
-                click.secho(f"Skipping {gate_id!r}: already in {target.name}.", fg="yellow")
+                click.secho(f"Skipping {gate_id!r}: already in {existing_ids[gate_id]}.", fg="yellow")
                 break
 
             try:
@@ -2775,7 +3040,7 @@ def guardrails_generate(
             choice = _gates_generate_read_choice("Add this gate? [y]es/[n]o/[e]dit/[q]uit: ", "yneq", "n")
             if choice == "y":
                 _gates_generate_append(target, root.name, current)
-                existing_ids.add(gate_id)
+                existing_ids[gate_id] = _guardrails_relative_to(target, root) or target.name
                 accepted += 1
                 click.secho(f"Added {gate_id!r} to {target}.", fg="green")
                 break
@@ -2793,6 +3058,11 @@ def guardrails_generate(
 # Wide enough for the longest dry-run label ("would run"), so every gate id
 # starts in the same column whichever moment is being reported.
 _VALIDATE_LABEL_WIDTH = 9
+
+
+def _declared_in(result: GateResult) -> str:
+    """`` in <file>`` for a gate from a composed guardrail, empty for a single-file one."""
+    return f" in {result.source}" if result.source else ""
 
 
 def _guardrails_probe_verifier(repo_root: Path, verifier: str) -> str | None:
@@ -2881,9 +3151,7 @@ def _guardrails_repo_relative(repo_root: Path, path: str) -> tuple[str, str]:
 
 
 def _guardrails_dry_run(
-    policy_yaml: str,
     spec: PolicySpec,
-    source: str,
     *,
     heading: str,
     paths: list[str],
@@ -2903,15 +3171,14 @@ def _guardrails_dry_run(
     session it applies to.
 
     Both of those types carry a per-Stop cap, applied to the gates
-    `when_changed` selected, in declaration order. The preview applies the
+    `when_changed` selected, highest `priority` first. The preview applies the
     same caps for the same reason it mirrors the evidence shape: a preview
     that promises six model calls where the hook makes five is wrong about
     exactly the number it exists to report.
     """
     try:
-        check = run_policy_check(
-            policy_yaml,
-            source=source,
+        check = check_policy(
+            spec,
             paths=paths,
             commands=commands,
             path_source=path_source,
@@ -2923,19 +3190,19 @@ def _guardrails_dry_run(
     click.echo()
     click.echo(heading)
     changed = tuple(paths)
+
     # Which gates survive each cap, resolved up front so the loop below can
     # report a gate `when_changed` selected but the cap then dropped. Mirrors
     # _hook_collect_judge_verdicts/_hook_collect_check_verdicts: filter by
-    # when_changed, then take the first N in declaration order.
-    running: set[str] = set()
-    for gate_type, limit in ((JudgeGate, _HOOK_JUDGE_MAX_GATES_PER_RUN), (VerifierGate, _HOOK_CHECK_MAX_GATES_PER_RUN)):
-        applicable = [
-            gate
-            for gate in spec.gates
-            if isinstance(gate, gate_type)
-            and (not gate.when_changed or matched_changed_paths(gate.when_changed, changed))
-        ]
-        running.update(gate.id for gate in applicable[:limit])
+    # when_changed, order by priority, then take the first N.
+    def applies(gate: JudgeGate | VerifierGate) -> bool:
+        return not gate.when_changed or bool(matched_changed_paths(gate.when_changed, changed))
+
+    judges = by_priority([gate for gate in spec.gates if isinstance(gate, JudgeGate) and applies(gate)])
+    verifiers = by_priority([gate for gate in spec.gates if isinstance(gate, VerifierGate) and applies(gate)])
+    running = {gate.id for gate in judges[:_HOOK_JUDGE_MAX_GATES_PER_RUN]} | {
+        gate.id for gate in verifiers[:_HOOK_CHECK_MAX_GATES_PER_RUN]
+    }
 
     elsewhere = 0
     for gate, result in zip(spec.gates, check.results, strict=True):
@@ -2954,7 +3221,10 @@ def _guardrails_dry_run(
                 cost = ", one model call" if kind == "judge" else ""
                 click.echo(f"  {'would run':<{_VALIDATE_LABEL_WIDTH}}  {gate.id} ({kind}, {gate.enforcement}{cost})")
         elif result.outcome is Outcome.FAIL:
-            click.secho(f"  {'fires':<{_VALIDATE_LABEL_WIDTH}}  {gate.id} ({gate.enforcement})", fg="yellow")
+            click.secho(
+                f"  {'fires':<{_VALIDATE_LABEL_WIDTH}}  {gate.id} ({gate.enforcement}){_declared_in(result)}",
+                fg="yellow",
+            )
         elif result.outcome is Outcome.PASS:
             click.echo(f"  {'quiet':<{_VALIDATE_LABEL_WIDTH}}  {gate.id} ({gate.enforcement})")
         else:
@@ -2969,7 +3239,10 @@ def _guardrails_dry_run(
     "guardrail_file_option",
     type=click.Path(dir_okay=False, path_type=Path),
     default=None,
-    help="Guardrail file to check. Defaults to .otari-guardrails.yml in the repo root.",
+    help=(
+        "Check this one file on its own, the way a shared snippet is checked before it is dropped in. "
+        "Defaults to everything the repo composes."
+    ),
 )
 @click.option(
     "--command",
@@ -2990,7 +3263,15 @@ def guardrails_validate(
     dry_run_paths: tuple[str, ...],
     strict: bool,
 ) -> None:
-    """Check `.otari-guardrails.yml` without running it, and try it against a command or a path.
+    """Check this repo's guardrail without running it, and try it against a command or a path.
+
+    Checks everything the hook composes: `.otari/guardrails.yml` where a repo
+    keeps one file, and every `.yml`/`.yaml` under `.otari/guardrails/`,
+    nested ones included. Cross-file problems are found here and only here,
+    because no single file can show them: a gate id declared twice across the
+    set, or more judge gates in total than one Stop event will run.
+    `--guardrail-file` narrows it back to one file, which is how a snippet
+    from somewhere else is checked before being dropped in.
 
     Offline and gateway-free: it parses the guardrail the same way a
     submitted one is parsed, then reports what running it would have taught
@@ -3016,16 +3297,28 @@ def guardrails_validate(
     if root is None:
         raise click.ClickException("Not inside a Git repository.")
 
-    target = guardrail_file_option if guardrail_file_option is not None else root / ".otari-guardrails.yml"
-    if not target.is_file():
-        raise click.ClickException(f"No guardrail file at {target}. `otari guardrails generate` starts one.")
+    if guardrail_file_option is not None:
+        if not guardrail_file_option.is_file():
+            raise click.ClickException(
+                f"No guardrail file at {guardrail_file_option}. `otari guardrails generate` starts one."
+            )
+        files = [guardrail_file_option]
+    else:
+        files = _hook_discover_guardrail_files(root)
+        if not files:
+            moved = _guardrail_moved_notice(root)
+            raise click.ClickException(
+                moved
+                or (
+                    f"No guardrail in {root}: no {GUARDRAIL_FILE} and nothing under {GUARDRAIL_DIR}/. "
+                    "`otari hook setup` starts one."
+                )
+            )
+
+    target = _composed_guardrail_id(files, root) if guardrail_file_option is None else str(guardrail_file_option)
     try:
-        policy_yaml = target.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        raise click.ClickException(f"Could not read {target} as UTF-8 text: {exc}") from exc
-    try:
-        spec = parse_policy(policy_yaml, source=str(target))
-    except PolicyError as exc:
+        spec = _compose_guardrail(_read_guardrail_files(files, root), target)
+    except (GuardrailReadError, PolicyError) as exc:
         raise click.ClickException(str(exc)) from exc
 
     findings = validate_policy(
@@ -3034,9 +3327,14 @@ def guardrails_validate(
         verifier_gate_limit=_HOOK_CHECK_MAX_GATES_PER_RUN,
         probe_verifier=lambda verifier: _guardrails_probe_verifier(root, verifier),
     )
-    click.echo(f"{target}: {spec.policy_id}, {len(spec.gates)} gate(s), schema {spec.schema_version}.")
+    # `policy_id` is the composed set's own name where several files compose,
+    # which is `target` again; one file declares its own, worth showing.
+    declared = "" if spec.policy_id == target else f" {spec.policy_id},"
+    composed = f" composed from {len(files)} files," if len(files) > 1 else ""
+    click.echo(f"{target}:{declared}{composed} {len(spec.gates)} gate(s), schema {spec.schema_version}.")
     for finding in findings:
-        where = f"{finding.gate_id}: " if finding.gate_id is not None else ""
+        in_file = spec.gate_sources.get(finding.gate_id or "")
+        where = f"{finding.gate_id}{f' ({in_file})' if in_file else ''}: " if finding.gate_id is not None else ""
         click.secho(
             f"  {finding.severity}: {where}{finding.message}",
             fg="red" if finding.severity == "error" else "yellow",
@@ -3047,9 +3345,7 @@ def guardrails_validate(
 
     for command in dry_run_commands:
         _guardrails_dry_run(
-            policy_yaml,
             spec,
-            str(target),
             heading=f"PreToolUse, Bash: {command}",
             paths=[],
             path_source="pre_tool_use.command",
@@ -3060,9 +3356,7 @@ def guardrails_validate(
     dry_run_targets = [_guardrails_repo_relative(root, path) for path in dry_run_paths]
     for edit_target, working_tree in dry_run_targets:
         _guardrails_dry_run(
-            policy_yaml,
             spec,
-            str(target),
             heading=f"PreToolUse, Edit/Write: {edit_target}",
             paths=[edit_target],
             path_source="pre_tool_use.edit_target",
@@ -3076,9 +3370,7 @@ def guardrails_validate(
         # one of them.
         if checks_reads:
             _guardrails_dry_run(
-                policy_yaml,
                 spec,
-                str(target),
                 heading=f"PreToolUse, Read: {edit_target}",
                 paths=[edit_target],
                 path_source="pre_tool_use.read_target",
@@ -3087,9 +3379,7 @@ def guardrails_validate(
             )
     if dry_run_commands or dry_run_paths:
         _guardrails_dry_run(
-            policy_yaml,
             spec,
-            str(target),
             heading=(
                 f"Stop, the finished turn: {len(dry_run_targets)} changed path(s), {len(dry_run_commands)} command(s)"
             ),

@@ -20,7 +20,26 @@ from click.testing import CliRunner
 
 import otari_agent.hook as hook_cli
 
-_GATES_YAML = "schema_version: '1.0'\npolicy:\n  id: test\ngates: []\n"
+
+def _guardrail_path(root: Path) -> Path:
+    """`.otari/guardrails.yml` under `root`, with its parent directory created."""
+    path = root / hook_cli.GUARDRAIL_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+# One gate, and one that matches nothing: `otari hook` parses the guardrail
+# before it does anything with it, so an empty `gates:` is a guardrail that
+# does not parse rather than one with nothing to say.
+_GATES_YAML = (
+    "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n"
+    "  - id: inert\n"
+    "    type: path\n"
+    "    runs: [pre_tool_use.edit_target, stop.working_tree]\n"
+    "    enforcement: advisory\n"
+    "    forbidden: ['no-path-is-ever-called-this']\n"
+    "    message: m\n"
+)
 
 _FAKE_OTARI_PATH = "/opt/otari/.venv/bin/otari"
 
@@ -44,7 +63,7 @@ def _judge_log_in_tmp_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
-    (tmp_path / ".otari-guardrails.yml").write_text(_GATES_YAML, encoding="utf-8")
+    _guardrail_path(tmp_path).write_text(_GATES_YAML, encoding="utf-8")
     return tmp_path
 
 
@@ -480,7 +499,7 @@ def test_setup_matcher_covers_bash_and_exec_when_a_command_gate_exists(
 ) -> None:
     (tmp_path / ".git").mkdir()
     monkeypatch.chdir(tmp_path)
-    (tmp_path / ".otari-guardrails.yml").write_text(
+    _guardrail_path(tmp_path).write_text(
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
         "  - id: g\n    type: command\n    runs: [pre_tool_use.command]\n    enforcement: required\n"
         '    forbidden: ["npm"]\n    message: m\n',

@@ -30,6 +30,7 @@ from otari_agent.domain.types import (
     PathGate,
     PolicySpec,
     VerifierGate,
+    by_priority,
 )
 
 # An error is a gate that provably cannot do its job: its verifier is
@@ -123,7 +124,8 @@ def unreachable_glob(glob: str) -> str | None:
 # satisfies the gate, so `["make a", "make b"]` passes once `make a` has run,
 # and an author who wrote `make a && make b` wanted both. One gate per required
 # command is how this repo's own guardrail spells that (see the
-# `openapi-changed-needs-generator` comment in .otari-guardrails.yml).
+# `openapi-changed-needs-generator` comment in
+# .otari/guardrails/generated-artifacts.yml).
 _SPLIT_ADVICE = {
     "forbidden": "Split it into one phrase per command; any one of them matching refuses the call.",
     "require": (
@@ -338,18 +340,22 @@ def validate_policy(
     # apply after `when_changed` filtering, so this counts the worst case: a
     # session where every one of them applies at once. Said that way rather
     # than flatly, because a well-scoped policy may never reach either.
-    for label, limit, ids in (
-        ("judge", judge_gate_limit, [g.id for g in spec.gates if isinstance(g, JudgeGate)]),
-        ("verifier", verifier_gate_limit, [g.id for g in spec.gates if isinstance(g, VerifierGate)]),
-    ):
+    #
+    # Named in the order the cap itself keeps them (`by_priority`), not in
+    # declaration order, so the gates reported as skipped are the ones that
+    # really would be.
+    judge_ids = [gate.id for gate in by_priority([g for g in spec.gates if isinstance(g, JudgeGate)])]
+    verifier_ids = [gate.id for gate in by_priority([g for g in spec.gates if isinstance(g, VerifierGate)])]
+    for label, limit, ids in (("judge", judge_gate_limit, judge_ids), ("verifier", verifier_gate_limit, verifier_ids)):
         if len(ids) > limit:
             findings.append(
                 Finding(
                     "warning",
                     None,
                     f"{len(ids)} {label} gates, over the {limit} one Stop event evaluates. On a "
-                    f"session where every one applies, these are skipped in declaration order: "
-                    f"{', '.join(ids[limit:])}. Scope them with when_changed so fewer apply at once.",
+                    f"session where every one applies, these are skipped: {', '.join(ids[limit:])}. "
+                    "Scope them with when_changed so fewer apply at once, or raise the priority of "
+                    "the ones that must run.",
                 )
             )
 

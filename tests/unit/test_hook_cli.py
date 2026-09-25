@@ -20,9 +20,30 @@ import pytest
 from click.testing import CliRunner
 
 import otari_agent.hook as hook_cli
+from otari_agent.domain.policy import parse_policy
 from otari_agent.settings import HookSettings
 
-_GATES_YAML = "schema_version: '1.0'\npolicy:\n  id: test\ngates: []\n"
+
+def _guardrail_path(root: Path) -> Path:
+    """`.otari/guardrails.yml` under `root`, with its parent directory created."""
+    path = root / hook_cli.GUARDRAIL_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+# One gate, and one that matches nothing, because `otari hook` now parses the
+# guardrail before it does anything with it (composing a directory needs the
+# gates, not just the bytes), so an empty `gates:` is a guardrail that does not
+# parse rather than one with nothing to say.
+_GATES_YAML = (
+    "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n"
+    "  - id: inert\n"
+    "    type: path\n"
+    "    runs: [pre_tool_use.edit_target, stop.working_tree]\n"
+    "    enforcement: advisory\n"
+    "    forbidden: ['no-path-is-ever-called-this']\n"
+    "    message: m\n"
+)
 
 
 class _FakeResponse:
@@ -45,7 +66,7 @@ def _judge_log_in_tmp_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
-    (tmp_path / ".otari-guardrails.yml").write_text(_GATES_YAML, encoding="utf-8")
+    _guardrail_path(tmp_path).write_text(_GATES_YAML, encoding="utf-8")
     return tmp_path
 
 
@@ -348,7 +369,7 @@ def test_stop_event_evaluates_locally_and_blocks_on_git_status(monkeypatch: pyte
     path's evidence collection and evaluation are wired together correctly
     end to end.
     """
-    (repo / ".otari-guardrails.yml").write_text(
+    _guardrail_path(repo).write_text(
         'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
         "  - id: g\n    type: path\n"
         "    runs: [pre_tool_use.edit_target, stop.working_tree]\n    enforcement: required\n"
@@ -850,7 +871,7 @@ def test_a_non_utf8_policy_file_does_not_block(tmp_path: Path) -> None:
     evidence-collection failure in this command already has.
     """
     (tmp_path / ".git").mkdir()
-    (tmp_path / ".otari-guardrails.yml").write_bytes(b'schema_version: "1.0"\npolicy:\n  id: x\n# caf\xe9\ngates: []\n')
+    _guardrail_path(tmp_path).write_bytes(b'schema_version: "1.0"\npolicy:\n  id: x\n# caf\xe9\ngates: []\n')
     result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
     assert result.exit_code == 0, result.output
     assert "could not read" in result.output
@@ -869,7 +890,7 @@ def test_malformed_stdin_is_a_no_op() -> None:
 def test_no_flags_evaluates_locally_with_no_credential_needed(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     """No `--api-key`/`--url` is the default now, not a missing-setup case:
 
-    `otari hook` evaluates `.otari-guardrails.yml` in process
+    `otari hook` evaluates `.otari/guardrails.yml` in process
     (`otari_agent.domain.check.run_policy_check`) and calls `httpx.post`
     only when either flag opts into the other, HTTP-backed mode. A required
     gate still blocks with no credential, no config, and no server at all.
@@ -879,7 +900,7 @@ def test_no_flags_evaluates_locally_with_no_credential_needed(monkeypatch: pytes
         raise AssertionError("httpx.post should not be called for the default, local evaluation path")
 
     monkeypatch.setattr(httpx, "post", fail_if_called)
-    (repo / ".otari-guardrails.yml").write_text(
+    _guardrail_path(repo).write_text(
         'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
         "  - id: g\n    type: path\n"
         "    runs: [pre_tool_use.edit_target, stop.working_tree]\n    enforcement: required\n"
@@ -898,13 +919,13 @@ def test_no_flags_evaluates_locally_with_no_credential_needed(monkeypatch: pytes
 
 
 def test_malformed_local_policy_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    """The local evaluation path's own fail-open contract: a policy
+    """The local evaluation path's own fail-open contract: a guardrail this
 
-    `run_policy_check` cannot parse must report and exit 0, the same as
-    every other evidence-collection failure this command handles, not raise.
+    build cannot parse must report and exit 0, the same as every other
+    evidence-collection failure this command handles, not raise.
     """
     monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
-    (repo / ".otari-guardrails.yml").write_text("not: valid: yaml: at: all:\n  - [", encoding="utf-8")
+    _guardrail_path(repo).write_text("not: valid: yaml: at: all:\n  - [", encoding="utf-8")
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
@@ -913,7 +934,7 @@ def test_malformed_local_policy_does_not_block(monkeypatch: pytest.MonkeyPatch, 
     }
     result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(payload))
     assert result.exit_code == 0, result.output
-    assert "could not evaluate" in result.output
+    assert "could not load" in result.output
 
 
 def test_url_alone_without_a_resolvable_credential_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -1137,7 +1158,7 @@ _JUDGE_GATES_YAML = (
 @pytest.fixture
 def judge_repo(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
-    (tmp_path / ".otari-guardrails.yml").write_text(_JUDGE_GATES_YAML, encoding="utf-8")
+    _guardrail_path(tmp_path).write_text(_JUDGE_GATES_YAML, encoding="utf-8")
     return tmp_path
 
 
@@ -1827,7 +1848,7 @@ def test_stop_event_bounds_total_judge_time_so_a_required_gate_still_reaches_the
         "  - id: judge-2\n    type: judge\n"
         "    runs: [stop.session]\n    enforcement: advisory\n    rubric: r2\n    message: m2\n"
     )
-    (tmp_path / ".otari-guardrails.yml").write_text(gates_yaml, encoding="utf-8")
+    _guardrail_path(tmp_path).write_text(gates_yaml, encoding="utf-8")
 
     claude_call_count = 0
 
@@ -1926,7 +1947,7 @@ def test_stop_event_with_a_non_utf8_diff_still_blocks_a_required_gate(
         "  - id: follows-pattern\n    type: judge\n    runs: [stop.session]\n    enforcement: advisory\n"
         '    rubric: r\n    when_changed: ["src/**"]\n    message: m\n'
     )
-    (tmp_path / ".otari-guardrails.yml").write_text(gates_yaml, encoding="utf-8")
+    _guardrail_path(tmp_path).write_text(gates_yaml, encoding="utf-8")
 
     captured: dict[str, Any] = {}
 
@@ -1953,11 +1974,11 @@ def test_stop_event_with_a_non_utf8_diff_still_blocks_a_required_gate(
         input=json.dumps({"hook_event_name": "Stop", "cwd": str(tmp_path)}),
     )
     assert result.exit_code == 2, result.output
-    # .otari-guardrails.yml itself is untracked here (written after the initial commit,
+    # .otari/guardrails.yml itself is untracked here (written after the initial commit,
     # for a self-contained test repo) and so is real, expected changed-path evidence
     # too, alongside the two files this test cares about.
     assert sorted(captured["json"]["paths"]) == [
-        ".otari-guardrails.yml",
+        ".otari/guardrails.yml",
         "CHANGELOG.md",
         "src/gateway/latin.py",
     ]
@@ -2007,7 +2028,7 @@ def test_stop_event_caps_the_number_of_judge_gates_evaluated(monkeypatch: pytest
         f"    runs: [stop.session]\n    enforcement: advisory\n    rubric: r{i}\n    message: m{i}\n"
         for i in range(gate_count)
     )
-    (tmp_path / ".otari-guardrails.yml").write_text(gates_yaml, encoding="utf-8")
+    _guardrail_path(tmp_path).write_text(gates_yaml, encoding="utf-8")
 
     claude_call_count = 0
 
@@ -2061,7 +2082,7 @@ def test_stop_event_skips_a_when_changed_judge_gate_that_does_not_apply(
         "  - id: judge-src-only\n    type: judge\n    runs: [stop.session]\n    enforcement: advisory\n"
         "    rubric: r\n    when_changed: [src/**]\n    message: m\n"
     )
-    (tmp_path / ".otari-guardrails.yml").write_text(gates_yaml, encoding="utf-8")
+    _guardrail_path(tmp_path).write_text(gates_yaml, encoding="utf-8")
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
@@ -2096,7 +2117,7 @@ def test_stop_event_runs_a_when_changed_judge_gate_that_applies(
         "  - id: judge-src-only\n    type: judge\n    runs: [stop.session]\n    enforcement: advisory\n"
         "    rubric: r\n    when_changed: [src/**]\n    message: m\n"
     )
-    (tmp_path / ".otari-guardrails.yml").write_text(gates_yaml, encoding="utf-8")
+    _guardrail_path(tmp_path).write_text(gates_yaml, encoding="utf-8")
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
@@ -2568,7 +2589,7 @@ def test_verifier_gates_run_concurrently_not_sequentially(tmp_path: Path) -> Non
     )
 
     start = time.monotonic()
-    results = hook_cli._hook_collect_check_verdicts(gates_yaml, tmp_path / ".otari-guardrails.yml", tmp_path, [])
+    results = hook_cli._hook_collect_check_verdicts(parse_policy(gates_yaml, source="test.yml"), tmp_path, [])
     elapsed = time.monotonic() - start
 
     assert [result["gate_id"] for result in results] == [f"g{i}" for i in range(gate_count)]
@@ -2599,9 +2620,7 @@ _CHECK_GATES_YAML_TEMPLATE = (
 def check_repo(tmp_path: Path) -> Path:
     (tmp_path / ".git").mkdir()
     _write_verifier(tmp_path, "verify.sh", "exit 0")
-    (tmp_path / ".otari-guardrails.yml").write_text(
-        _CHECK_GATES_YAML_TEMPLATE.format(verifier="verify.sh"), encoding="utf-8"
-    )
+    _guardrail_path(tmp_path).write_text(_CHECK_GATES_YAML_TEMPLATE.format(verifier="verify.sh"), encoding="utf-8")
     return tmp_path
 
 
@@ -2651,9 +2670,7 @@ def test_stop_event_submits_a_check_verdict_from_the_verifier_script(
 def test_stop_event_submits_a_failing_check_verdict_and_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     _write_verifier(tmp_path, "verify.sh", 'echo "conflicted.txt:2"\nexit 1')
-    (tmp_path / ".otari-guardrails.yml").write_text(
-        _CHECK_GATES_YAML_TEMPLATE.format(verifier="verify.sh"), encoding="utf-8"
-    )
+    _guardrail_path(tmp_path).write_text(_CHECK_GATES_YAML_TEMPLATE.format(verifier="verify.sh"), encoding="utf-8")
 
     monkeypatch.setattr(subprocess, "run", _git_status_only_run())
     captured: dict[str, Any] = {}
@@ -2731,7 +2748,7 @@ def test_stop_event_skips_verifier_gates_that_when_changed_excludes(
         "    when_changed: ['src/**']\n"
         "    message: m\n"
     )
-    (tmp_path / ".otari-guardrails.yml").write_text(policy, encoding="utf-8")
+    _guardrail_path(tmp_path).write_text(policy, encoding="utf-8")
 
     monkeypatch.setattr(subprocess, "run", _git_status_only_run(git_status_stdout=" M docs/README.md\0"))
     captured: dict[str, Any] = {}
@@ -2754,18 +2771,36 @@ def test_collect_check_verdicts_skips_gates_over_the_per_run_limit(tmp_path: Pat
         "    runs: [stop.verifier]\n    enforcement: required\n    verifier: verify.sh\n    message: m"
         for i in range(hook_cli._HOOK_CHECK_MAX_GATES_PER_RUN + 1)
     )
-    gates_file = tmp_path / ".otari-guardrails.yml"
-    policy_yaml = "\n".join(gates_yaml) + "\n"
-    gates_file.write_text(policy_yaml, encoding="utf-8")
+    spec = parse_policy("\n".join(gates_yaml) + "\n", source="test.yml")
 
-    results = hook_cli._hook_collect_check_verdicts(policy_yaml, gates_file, tmp_path, [])
+    results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [])
     assert len(results) == hook_cli._HOOK_CHECK_MAX_GATES_PER_RUN
     assert {r["outcome"] for r in results} == {"pass"}
 
 
-def test_collect_check_verdicts_returns_empty_for_an_unparseable_policy(tmp_path: Path) -> None:
-    gates_file = tmp_path / ".otari-guardrails.yml"
-    assert hook_cli._hook_collect_check_verdicts("not: valid: yaml: at: all:", gates_file, tmp_path, []) == []
+def test_collect_check_verdicts_keeps_the_highest_priority_gates_over_the_limit(tmp_path: Path) -> None:
+    """The cap keeps `priority`, not declaration order.
+
+    The gate declared last is the one that must survive, which is the whole
+    point of the field: in a guardrail composed from several files, where a
+    gate sits is a consequence of filenames rather than of what it is for.
+    """
+    _write_verifier(tmp_path, "verify.sh", "exit 0")
+    over_the_limit = hook_cli._HOOK_CHECK_MAX_GATES_PER_RUN + 1
+    gates_yaml = ["schema_version: '1.0'\npolicy:\n  id: test\ngates:"]
+    gates_yaml.extend(
+        f"  - id: g{i}\n    type: verifier\n"
+        "    runs: [stop.verifier]\n    enforcement: required\n    verifier: verify.sh\n    message: m"
+        + (f"\n    priority: {10 if i == over_the_limit - 1 else 0}")
+        for i in range(over_the_limit)
+    )
+    spec = parse_policy("\n".join(gates_yaml) + "\n", source="test.yml")
+
+    results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [])
+    ran = [result["gate_id"] for result in results]
+    assert ran[0] == f"g{over_the_limit - 1}"
+    assert len(ran) == hook_cli._HOOK_CHECK_MAX_GATES_PER_RUN
+    assert "g0" in ran
 
 
 def _read_payload(repo: Path, target: str) -> dict[str, Any]:
@@ -2793,10 +2828,10 @@ def test_a_symlink_out_of_the_repo_does_not_carry_the_gate_with_it(
     outside = repo.parent / "shared-secrets.env"
     outside.write_text("OPENAI_API_KEY=sk-leaked\n", encoding="utf-8")
     (repo / ".env").symlink_to(outside)
-    (repo / ".otari-guardrails.yml").write_text(
+    _guardrail_path(repo).write_text(
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
         "  - id: no-secret-reads\n    type: path\n    runs: [pre_tool_use.read_target]\n"
-        '    enforcement: required\n    forbidden: [".env"]\n    message: no\n',
+        '    enforcement: required\n    forbidden: [".env"]\n    message: "no"\n',
         encoding="utf-8",
     )
     captured: dict[str, Any] = {}
@@ -2884,3 +2919,249 @@ def test_a_target_outside_the_repo_under_both_spellings_submits_nothing(
     result = _invoke(_read_payload(repo, str(outside)))
     assert result.exit_code == 0, result.output
     assert not called
+
+
+def _write_guardrail(root: Path, relative: str, *gate_ids: str) -> None:
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    gates = "".join(
+        f"  - id: {gate_id}\n"
+        "    type: path\n"
+        "    runs: [pre_tool_use.edit_target, stop.working_tree]\n"
+        "    enforcement: required\n"
+        f"    forbidden: ['{gate_id}.txt']\n"
+        f"    message: {gate_id} is forbidden\n"
+        for gate_id in gate_ids
+    )
+    path.write_text(f"schema_version: '1.0'\npolicy:\n  id: {relative}\ngates:\n{gates}", encoding="utf-8")
+
+
+def test_discovery_finds_nested_files_after_the_single_one(tmp_path: Path) -> None:
+    """`.otari/guardrails.yml` first, then the directory recursively, each by repo-relative path."""
+    (tmp_path / ".git").mkdir()
+    _guardrail_path(tmp_path).write_text(_GATES_YAML, encoding="utf-8")
+    _write_guardrail(tmp_path, ".otari/guardrails/zebra.yml", "z")
+    _write_guardrail(tmp_path, ".otari/guardrails/architecture/layering.yml", "l")
+    _write_guardrail(tmp_path, ".otari/guardrails/alpha.yaml", "a")
+
+    found = [path.relative_to(tmp_path).as_posix() for path in hook_cli._hook_discover_guardrail_files(tmp_path)]
+    assert found == [
+        ".otari/guardrails.yml",
+        ".otari/guardrails/alpha.yaml",
+        ".otari/guardrails/architecture/layering.yml",
+        ".otari/guardrails/zebra.yml",
+    ]
+
+
+def test_discovery_ignores_a_file_that_is_not_yaml(tmp_path: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails/real.yml", "r")
+    (tmp_path / ".otari/guardrails/README.md").write_text("notes", encoding="utf-8")
+    found = [path.name for path in hook_cli._hook_discover_guardrail_files(tmp_path)]
+    assert found == ["real.yml"]
+
+
+def test_a_composed_directory_blocks_and_names_the_file_that_did_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails/git-safety.yml", "secrets")
+    _write_guardrail(tmp_path, ".otari/guardrails/architecture/layering.yml", "layers")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(tmp_path),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(tmp_path / "layers.txt")},
+    }
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(payload))
+    assert result.exit_code == 2, result.output
+    assert "layers is forbidden" in result.output
+    assert "[.otari/guardrails/architecture/layering.yml]" in result.output
+
+
+def test_a_gate_id_declared_in_two_files_fails_open_naming_both(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A guardrail that cannot compose must not block the turn on its own malformedness."""
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails/a.yml", "shared")
+    _write_guardrail(tmp_path, ".otari/guardrails/b.yml", "shared")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(tmp_path),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(tmp_path / "shared.txt")},
+    }
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(payload))
+    assert result.exit_code == 0, result.output
+    # Visible, for the reason the moved-path test above spells out: composing
+    # several files makes this reachable through a file someone else added.
+    message = json.loads(result.stdout)["systemMessage"]
+    assert "no gate is being enforced" in message
+    assert ".otari/guardrails/a.yml" in message
+    assert ".otari/guardrails/b.yml" in message
+
+
+def test_remote_mode_submits_one_merged_document_for_a_composed_guardrail(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`POST /hooks/check` takes one body, so composition is merged back rather than changing that contract."""
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails/a.yml", "a1")
+    _write_guardrail(tmp_path, ".otari/guardrails/b.yml", "b1")
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke(
+        {
+            "hook_event_name": "PreToolUse",
+            "cwd": str(tmp_path),
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(tmp_path / "a1.txt")},
+        }
+    )
+    assert result.exit_code == 0, result.output
+    submitted = parse_policy(captured["json"]["policy_yaml"], source="submitted")
+    assert [gate.id for gate in submitted.gates] == ["a1", "b1"]
+
+
+def test_remote_mode_sends_a_single_file_guardrail_verbatim(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    """Comments and all: the common case puts nothing on the wire that was not written by hand."""
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke(
+        {
+            "hook_event_name": "PreToolUse",
+            "cwd": str(repo),
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
+        }
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["policy_yaml"] == _GATES_YAML
+
+
+def test_remote_mode_restores_the_file_name_the_route_cannot_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails/a.yml", "a1")
+    _write_guardrail(tmp_path, ".otari/guardrails/b.yml", "b1")
+
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *a, **k: _FakeResponse(
+            {
+                "blocked": True,
+                "results": [{"gate_id": "b1", "enforcement": "required", "outcome": "fail", "message": "no"}],
+            }
+        ),
+    )
+    result = _invoke(
+        {
+            "hook_event_name": "PreToolUse",
+            "cwd": str(tmp_path),
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(tmp_path / "docs/README.md")},
+        }
+    )
+    assert result.exit_code == 2, result.output
+    assert "[.otari/guardrails/b.yml]" in result.output
+
+
+def test_a_single_file_guardrail_names_no_file_in_its_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A repo with one guardrail file would only be told what it already knows."""
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails/only.yml", "solo")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(tmp_path),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(tmp_path / "solo.txt")},
+    }
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(payload))
+    assert result.exit_code == 2, result.output
+    assert "solo is forbidden" in result.output
+    assert ".otari/guardrails/only.yml" not in result.output
+
+
+def test_a_repo_still_on_the_moved_path_is_told_its_guardrail_stopped_running(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Silence here would look exactly like a repo that passes every check.
+
+    The file moved under `.otari/`, so a repo carrying the old one has no
+    guardrail this build finds, and every `required` gate in it has quietly
+    stopped blocking.
+    """
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".otari-guardrails.yml").write_text(_GATES_YAML, encoding="utf-8")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(tmp_path),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(tmp_path / "CHANGELOG.md")},
+    }
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(payload))
+    assert result.exit_code == 0, result.output
+    # On stdout as a systemMessage, not only on stderr: Claude Code shows a
+    # non-blocking hook's stderr in its debug log alone, so a stderr-only
+    # warning about enforcement being off is itself invisible.
+    assert json.loads(result.stdout)["systemMessage"].endswith(
+        ".otari-guardrails.yml is not read any more and no gate in it is being enforced. "
+        "Move it to .otari/guardrails.yml, or split it into .otari/guardrails/."
+    )
+
+
+def test_a_repo_with_no_guardrail_at_all_stays_silent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The other half of the rule: nothing to say to a repo that never had one."""
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(tmp_path),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(tmp_path / "CHANGELOG.md")},
+    }
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(payload))
+    assert result.exit_code == 0
+    assert result.output == ""
+
+
+def test_an_oversize_composed_guardrail_does_not_block_the_turn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The Hook Server takes one body per request, so a set that outgrows it fails open."""
+    (tmp_path / ".git").mkdir()
+    for index in range(4):
+        _write_guardrail(tmp_path, f".otari/guardrails/f{index}.yml", *[f"g{index}x{n}" for n in range(900)])
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = _invoke(
+        {
+            "hook_event_name": "PreToolUse",
+            "cwd": str(tmp_path),
+            "tool_name": "Edit",
+            "tool_input": {"file_path": str(tmp_path / "g0x0.txt")},
+        }
+    )
+    assert result.exit_code == 0, result.output
+    assert "no gate is being enforced" in json.loads(result.stdout)["systemMessage"]

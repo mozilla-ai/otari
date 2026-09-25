@@ -1,5 +1,7 @@
 import pytest
+import yaml
 
+import otari_agent.domain.policy as policy_module
 from otari_agent.domain.policy import MAX_GATE_ID_LENGTH, PolicyError, parse_policy
 from otari_agent.domain.types import (
     CommandGate,
@@ -7,6 +9,15 @@ from otari_agent.domain.types import (
     JudgeGate,
     PathGate,
     VerifierGate,
+)
+
+_ONE_GATE = (
+    "  - id: g\n"
+    "    type: path\n"
+    "    runs: [stop.working_tree]\n"
+    "    enforcement: required\n"
+    '    forbidden: ["x.txt"]\n'
+    "    message: m\n"
 )
 
 VALID_POLICY = """\
@@ -24,7 +35,7 @@ gates:
 
 
 def test_parses_a_valid_policy() -> None:
-    spec = parse_policy(VALID_POLICY, source=".otari-guardrails.yml")
+    spec = parse_policy(VALID_POLICY, source=".otari/guardrails.yml")
     assert spec.schema_version == "1.0"
     assert spec.policy_id == "otari/repo-quality"
     assert len(spec.gates) == 1
@@ -323,7 +334,7 @@ def test_judge_gate_rejects_an_oversized_rubric() -> None:
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
         "  - id: g\n    type: judge\n"
-        "    runs: [stop.session]\n    enforcement: advisory\n    rubric: {'x' * 20_000}\n    message: m\n"
+        f"    runs: [stop.session]\n    enforcement: advisory\n    rubric: {'x' * 20_000}\n    message: m\n"
     )
     with pytest.raises(PolicyError, match="rubric"):
         parse_policy(policy, source="test.yml")
@@ -432,14 +443,14 @@ def test_parses_a_valid_verifier_policy() -> None:
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
         "  - id: no-leftover-conflict-markers\n    type: verifier\n"
         "    runs: [stop.verifier]\n    enforcement: required\n"
-        "    verifier: .otari-guardrails/verifiers/no-conflict-markers.sh\n    message: m\n"
+        "    verifier: .otari/verifiers/no-conflict-markers.sh\n    message: m\n"
     )
     spec = parse_policy(policy, source="test.yml")
     assert len(spec.gates) == 1
     gate = spec.gates[0]
     assert isinstance(gate, VerifierGate)
     assert gate.enforcement == "required"
-    assert gate.verifier == ".otari-guardrails/verifiers/no-conflict-markers.sh"
+    assert gate.verifier == ".otari/verifiers/no-conflict-markers.sh"
 
 
 def test_verifier_gate_accepts_required_enforcement() -> None:
@@ -503,7 +514,7 @@ def test_verifier_gate_rejects_an_oversized_verifier() -> None:
     policy = (
         'schema_version: "1.0"\npolicy:\n  id: x\ngates:\n'
         "  - id: g\n    type: verifier\n"
-        "    runs: [stop.verifier]\n    enforcement: required\n    verifier: {'v' * 5_000}\n"
+        f"    runs: [stop.verifier]\n    enforcement: required\n    verifier: {'v' * 5_000}\n"
         "    message: m\n"
     )
     with pytest.raises(PolicyError, match="verifier"):
@@ -554,3 +565,28 @@ def test_unhashable_yaml_mapping_key_is_rejected_not_a_500() -> None:
     policy = 'schema_version: "1.0"\npolicy:\n  id: x\ngates: []\n? [a, b]\n: c\n'
     with pytest.raises(PolicyError):
         parse_policy(policy, source="test.yml")
+
+
+def test_a_duplicate_key_is_refused_by_whichever_loader_is_installed() -> None:
+    """The fast loader and the readable one must agree on what they refuse.
+
+    `domain/policy.py` parses with libyaml where PyYAML exposes it and with
+    the pure-Python loader otherwise, with the duplicate-key constructor
+    registered on both. Registering it on only one would make this build's
+    behavior depend on how PyYAML happened to be compiled.
+    """
+    body = 'schema_version: "1.0"\npolicy:\n  id: x\n  id: y\ngates:\n' + _ONE_GATE
+    for loader in {policy_module._DuplicateKeyLoader, policy_module._fast_loader}:
+        with pytest.raises(yaml.constructor.ConstructorError, match="duplicate key"):
+            yaml.load(body, Loader=loader)
+    with pytest.raises(PolicyError, match="duplicate key"):
+        parse_policy(body, source="test.yml")
+
+
+def test_a_yaml_error_keeps_the_offending_line_and_a_caret() -> None:
+    """The snippet libyaml's own error marks do not carry, which is most of what makes one readable."""
+    with pytest.raises(PolicyError) as excinfo:
+        parse_policy('schema_version: "1.0"\npolicy:\n  id: x\n   bad: indent\n', source="test.yml")
+    message = str(excinfo.value)
+    assert "bad: indent" in message
+    assert "^" in message
