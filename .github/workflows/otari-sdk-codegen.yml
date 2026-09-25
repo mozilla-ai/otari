@@ -128,8 +128,17 @@ jobs:
           path: sdk-repo
           branch: sdk-codegen/client-core
           delete-branch: true
-          commit-message: "chore: regenerate SDK client core from Otari OpenAPI spec"
-          title: "Regenerate SDK client core from Otari OpenAPI spec"
+          # Both strings carry the same conventional-commit prefix, because which
+          # one becomes the squash commit varies: GitHub's COMMIT_OR_PR_TITLE
+          # setting takes the commit subject for a single-commit PR and the PR
+          # title once someone pushes a second commit, and one SDK repo is set to
+          # PR_TITLE outright. Every SDK releases with release-please, so a subject
+          # it does not recognize drops the whole squash from the changelog, taking
+          # any hand-written commit on the branch down with it. "feat" because a
+          # regenerated core is changed public API surface; retitle to "feat!" when
+          # the diff carries a break.
+          commit-message: "feat: regenerate SDK client core from Otari OpenAPI spec"
+          title: "feat: regenerate SDK client core from Otari OpenAPI spec"
           body: |
             Automated regeneration of the generated typed client core (all
             endpoints) from the Otari OpenAPI spec. The hand-written shell
