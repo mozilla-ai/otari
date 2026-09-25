@@ -59,6 +59,7 @@ from gateway.exceptions.tools_exceptions import McpServerResolutionFailedError
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
+from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.rate_limit import check_rate_limit
 from gateway.repositories.users_repository import get_active_user
 
@@ -106,7 +107,6 @@ if TYPE_CHECKING:
     from fastapi import Response
 
     from gateway.models.mcp import ResolvedMcpServer
-from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 
 EXECUTE_ENDPOINT = "/v1/mcp/execute"
 TOOLS_ENDPOINT = "/v1/mcp/servers/{mcp_server_id}/tools"
@@ -262,6 +262,7 @@ def _retry_hint(exc: StarletteHTTPException | ControlPlaneError) -> str | None:
     if isinstance(exc, StarletteHTTPException):
         return (exc.headers or {}).get("Retry-After")
     return exc.retry_after if isinstance(exc, ControlPlaneRefusedError) else None
+
 
 router = APIRouter(prefix="/mcp", tags=["mcp"], route_class=_McpRoute)
 

@@ -8,8 +8,7 @@ deployment that has no platform to ask.
 
 **Where it plugs in.** A request names stored servers with `mcp_server_ids`.
 A deployment that holds the rows resolves them here, through
-:func:`resolve_workspace_mcp_servers`, called at
-admission in `prepare_gateway_tools` where the request's session is live and
+:func:`resolve_workspace_mcp_servers`, called at admission where the request's session is live and
 `RequestContext.workspace_id` already names the workspace its key belongs to.
 That is the seam otari#655 settled and otari#678 wrote down; MCP is the
 exception that decision names, because there is no deployment-wide server list
@@ -240,12 +239,9 @@ async def resolve_workspace_mcp_servers(
 ) -> list[McpServerConfig]:
     """Swap a request's ``mcp_server_ids`` for the workspace's stored configs.
 
-    Ids are de-duplicated with their order
-    preserved, an id naming no server *in this workspace* raises
-    :class:`WorkspaceMcpServerNotFoundError` (the platform answers 404 for the
-    same case, so the two modes refuse identically), and a disabled server is
-    skipped rather than refused, so one decommissioned server does not break a
-    caller whose stored id list still names it.
+    IDs are de-duplicated with their order preserved.
+    An ID naming no server *in this workspace* raises :class:`WorkspaceMcpServerNotFoundError`.
+    A disabled server is skipped rather than refused.
 
     No authorization check, and none is missing: ``workspace_id`` comes off the
     key that authenticated the request (`services/workspace_scope.py`), never

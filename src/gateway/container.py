@@ -395,6 +395,9 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # bucket or any fsspec filesystem, whichever ``files_backend`` names. An
     # overlay binds a store of its own and changes nothing above the port.
     container.bind(FileStoragePort, _file_storage_port_factory(config))
+    # A workspace's MCP servers: the base reads this deployment's own rows
+    # where it holds them, and asks its peer where it does not. An overlay
+    # binds a source of its own and changes nothing above the port.
     container.bind(McpServerPort, _mcp_server_port_factory(config))
     if config is not None:
         # Asked once, at build, rather than per request: selecting a hosted
