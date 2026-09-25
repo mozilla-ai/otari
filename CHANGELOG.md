@@ -4,6 +4,34 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.12.0](https://github.com/mozilla-ai/otari/releases/tag/v0.12.0) - 2026-09-25
+
+
+
+### Bug Fixes
+
+- **web:** Align activity pinned columns when no selection column renders in [#1633](https://github.com/mozilla-ai/otari/pull/1633) by [@daavoo](https://github.com/daavoo) ([`02cc6e9`](https://github.com/mozilla-ai/otari/commit/02cc6e9960c855fbad5e94b51f6d52908b32f8e8))
+- **hybrid:** Name the last attempt tried on a total failure in [#1709](https://github.com/mozilla-ai/otari/pull/1709) by [@peteski22](https://github.com/peteski22) ([`2215e11`](https://github.com/mozilla-ai/otari/commit/2215e110ba74b70e201ccd54b134e0d03a2c9c0e))
+- **hook:** Report every fail-open exit where the agent can see it in [#1721](https://github.com/mozilla-ai/otari/pull/1721) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`33f7cb2`](https://github.com/mozilla-ai/otari/commit/33f7cb2cc23d053a19cc495e1bda50531a80096e))
+- **cli:** Make the agent-side CLI explain itself on a first run in [#1722](https://github.com/mozilla-ai/otari/pull/1722) by [@agpituk](https://github.com/agpituk) ([`7534fde`](https://github.com/mozilla-ai/otari/commit/7534fde9c6c663adc6b20f0e8f2b6f7077addcd8))
+- **mcp:** Refuse an unknown server id alike in both modes in [#1706](https://github.com/mozilla-ai/otari/pull/1706) by [@peteski22](https://github.com/peteski22) ([`5e57c06`](https://github.com/mozilla-ai/otari/commit/5e57c063b60f64a564edcfe7cd7a0cd74276f3d8))
+- **BREAKING:** **mcp:** Refuse a peer answer that omits the servers key in [#1716](https://github.com/mozilla-ai/otari/pull/1716) by [@peteski22](https://github.com/peteski22) ([`ec42446`](https://github.com/mozilla-ai/otari/commit/ec42446117f4ee9b184842e59e61954f7d753018))
+
+
+### Features
+
+- **BREAKING:** **policy-checks:** Say when every gate runs, and what it can see there in [#1677](https://github.com/mozilla-ai/otari/pull/1677) by [@agpituk](https://github.com/agpituk) ([`db4b73d`](https://github.com/mozilla-ai/otari/commit/db4b73da15600494d877c7d65a29ea9503c26aa9))
+- **BREAKING:** **policy-checks:** Rename Agent Gates to Agent Guardrails in [#1685](https://github.com/mozilla-ai/otari/pull/1685) by [@agpituk](https://github.com/agpituk) ([`d7c771f`](https://github.com/mozilla-ai/otari/commit/d7c771f25e5f2588ed35f810f2c006de5f455024))
+- **dashboard:** Link the sign-in header's logo back to the site in [#1686](https://github.com/mozilla-ai/otari/pull/1686) by [@jigjigjig](https://github.com/jigjigjig) ([`463fba5`](https://github.com/mozilla-ai/otari/commit/463fba50bcbee9683e464254859e99276b7d061b))
+- **policy-checks:** Check a guardrail offline with `otari guardrails validate` in [#1693](https://github.com/mozilla-ai/otari/pull/1693) by [@agpituk](https://github.com/agpituk) ([`44c2ae4`](https://github.com/mozilla-ai/otari/commit/44c2ae40a0ec2ea4c6b0b160dd795f3a232dc23b))
+- **BREAKING:** **policy-checks:** Refuse a read before the file enters the transcript in [#1696](https://github.com/mozilla-ai/otari/pull/1696) by [@agpituk](https://github.com/agpituk) ([`0c06ac4`](https://github.com/mozilla-ai/otari/commit/0c06ac414f2da9724fa20f0b45e27750a59acec6))
+- **BREAKING:** **gateway:** In-product feedback is on by default on upgrade; feedback_enabled: false turns it off in [#1676](https://github.com/mozilla-ai/otari/pull/1676) by [@jigjigjig](https://github.com/jigjigjig) ([`55a9336`](https://github.com/mozilla-ai/otari/commit/55a933674e771b2995dfa6e0fba950ca0ad30e52))
+- **BREAKING:** **policy-checks:** Compose a guardrail from .otari/guardrails/ in [#1704](https://github.com/mozilla-ai/otari/pull/1704) by [@agpituk](https://github.com/agpituk) ([`a9ebcb4`](https://github.com/mozilla-ai/otari/commit/a9ebcb43694285599fc1c6b647016749cb7a0b6d))
+- **BREAKING:** **api:** Rename Otari's X- prefixed response headers in [#1667](https://github.com/mozilla-ai/otari/pull/1667) by [@peteski22](https://github.com/peteski22) ([`7ce2279`](https://github.com/mozilla-ai/otari/commit/7ce227924bd6bf4c21bcd36bb0bff10e807115a8))
+- **policy-checks:** Deliver a judge gate's finding to the agent, not only the person in [#1719](https://github.com/mozilla-ai/otari/pull/1719) by [@agpituk](https://github.com/agpituk) ([`981353c`](https://github.com/mozilla-ai/otari/commit/981353c696d4b1e786180814df7c3af9d18a6aad))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.11.0...v0.12.0
 ## [0.11.0](https://github.com/mozilla-ai/otari/releases/tag/v0.11.0) - 2026-09-24
 
 
