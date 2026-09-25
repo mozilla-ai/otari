@@ -430,7 +430,7 @@ export function credentialLabel(
 ): string {
   switch (credential) {
     case "organization":
-      return "your key"
+      return "org key"
     case "hosted":
       return "hosted"
     default:

@@ -113,7 +113,7 @@ CatalogCaller = tuple[APIKey | None, bool] | None
 
 
 class CatalogCredential(StrEnum):
-    """Who may price a catalog offering."""
+    """Whose key serves a catalog offering, which also says who may price it."""
 
     DEPLOYMENT = "deployment"
     ORGANIZATION = "organization"
@@ -170,9 +170,9 @@ class CatalogOffering(BaseModel):
     provider_type: str = Field(description="The any-llm implementation behind the instance.")
     credential: CatalogCredential = Field(
         description=(
-            "Who may price it: `deployment` for a `providers:` instance the operator configured, "
+            "Whose key serves it: `deployment` for a `providers:` instance the operator configured, "
             "`hosted` for a provider the deployment pays for in any workspace of the viewer's organization, "
-            "`organization` for one the viewer's organization may set its own rate for. "
+            "`organization` for one on the organization's own key, which it may set its own rate for. "
             "A workspace can still call a `hosted` provider with the organization's own key."
         ),
     )
@@ -450,7 +450,9 @@ async def _group(
                 short_selector=short_selector_for(obj.id, organization_id=organization_id),
                 provider=instance,
                 provider_type=provider_type,
-                credential=_get_credential(config, instance, deployment_managed=obj.deployment_managed),
+                credential=_get_credential(
+                    config, instance, hosted=obj.deployment_managed or instance in merged.hosted_providers
+                ),
                 discovered=obj.id in merged.discovered_keys,
                 context_window=(metadata.context_window if metadata else None) or obj.context_window,
                 max_output_tokens=metadata.max_output_tokens if metadata else None,
@@ -491,8 +493,8 @@ async def _with_usage(db: AsyncSession, grouped: _Grouped, members: list[_Offeri
     return [member.wire.model_copy(update={"usage_30d": usage.get(member.wire.selector)}) for member in members]
 
 
-def _get_credential(config: GatewayConfig, instance: str, *, deployment_managed: bool) -> CatalogCredential:
-    """Returns who may price an offering.
+def _get_credential(config: GatewayConfig, instance: str, *, hosted: bool) -> CatalogCredential:
+    """Returns whose key serves an offering.
 
     ``config`` refuses the reserved hosted instance name in ``providers:``,
     so an offering carrying it came from an overlay.
@@ -501,7 +503,7 @@ def _get_credential(config: GatewayConfig, instance: str, *, deployment_managed:
         return CatalogCredential.HOSTED
     if instance in config.providers:
         return CatalogCredential.DEPLOYMENT
-    return CatalogCredential.HOSTED if deployment_managed else CatalogCredential.ORGANIZATION
+    return CatalogCredential.HOSTED if hosted else CatalogCredential.ORGANIZATION
 
 
 def _first(values: Iterable[str | None]) -> str | None:
