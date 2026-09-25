@@ -564,6 +564,12 @@ class MergedCatalog:
     dynamic_policies: dict[str, PolicySpec]
     discovered_keys: set[str]
     """The selectors phase 1 heard from a provider, as opposed to only priced."""
+    hosted_providers: frozenset[str] = frozenset()
+    """Providers the caller reaches on a deployment-owned key rather than one of its own.
+
+    Wider than ``deployment_managed`` for an operator, who may price a hosted
+    model and so sees it unflagged, but still does not hold its key.
+    """
 
 
 async def build_merged_catalog(
@@ -791,6 +797,7 @@ async def build_merged_catalog(
         aliases=aliases,
         dynamic_policies=dynamic_policies,
         discovered_keys=discovered_keys,
+        hosted_providers=scope.deployment_supplied_providers | (frozenset(scope.hosted_models) - scope.byo_providers),
     )
 
 

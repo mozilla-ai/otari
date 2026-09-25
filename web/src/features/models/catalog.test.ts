@@ -4,6 +4,7 @@ import type { CatalogModelSummary } from "@/client"
 import {
   activeFilterCount,
   compareModels,
+  credentialLabel,
   EMPTY_FILTERS,
   filterModels,
   makerKeyOf,
@@ -301,6 +302,14 @@ describe("options", () => {
         pricing: "custom",
       }),
     ).toBe(5)
+  })
+})
+
+describe("credentialLabel", () => {
+  it("names whose key serves the offering", () => {
+    expect(credentialLabel("organization")).toBe("org key")
+    expect(credentialLabel("hosted")).toBe("hosted")
+    expect(credentialLabel("deployment")).toBe("deployment")
   })
 })
 

@@ -6609,7 +6609,7 @@ export interface components {
         };
         /**
          * CatalogCredential
-         * @description Who may price a catalog offering.
+         * @description Whose key serves a catalog offering, which also says who may price it.
          * @enum {string}
          */
         CatalogCredential: "deployment" | "organization" | "hosted";
@@ -6835,7 +6835,7 @@ export interface components {
         CatalogOffering: {
             /** Context Window */
             context_window?: number | null;
-            /** @description Who may price it: `deployment` for a `providers:` instance the operator configured, `hosted` for a provider the deployment pays for in any workspace of the viewer's organization, `organization` for one the viewer's organization may set its own rate for. A workspace can still call a `hosted` provider with the organization's own key. */
+            /** @description Whose key serves it: `deployment` for a `providers:` instance the operator configured, `hosted` for a provider the deployment pays for in any workspace of the viewer's organization, `organization` for one on the organization's own key, which it may set its own rate for. A workspace can still call a `hosted` provider with the organization's own key. */
             credential: components["schemas"]["CatalogCredential"];
             /**
              * Discovered

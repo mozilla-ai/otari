@@ -669,10 +669,9 @@ def test_the_grouped_catalog_lists_a_hosted_model_for_a_member(client: TestClien
         client.cookies.clear()
 
 
-def test_the_grouped_catalog_labels_a_hosted_offering_hosted(client: TestClient, world: _World) -> None:
-    """An offering labeled ``organization`` is one the organization may price."""
-    bind_model_provider(client, HostedModelProvider("mistral"))
-    client.cookies.set(SESSION_COOKIE_NAME, world.sessions["alpha_member"])
+def _credentials_as(client: TestClient, world: _World, who: str) -> dict[str, str]:
+    """Each offering's ``credential`` in the grouped catalog, by selector."""
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
     credentials: dict[str, str] = {}
     try:
         listing = client.get(f"{API_ROOT}/catalog/models")
@@ -684,9 +683,23 @@ def test_the_grouped_catalog_labels_a_hosted_offering_hosted(client: TestClient,
                 credentials[offering["selector"]] = offering["credential"]
     finally:
         client.cookies.clear()
+    return credentials
+
+
+def test_the_grouped_catalog_labels_a_hosted_offering_hosted(client: TestClient, world: _World) -> None:
+    """An offering labeled ``organization`` is one the organization may price."""
+    bind_model_provider(client, HostedModelProvider("mistral"))
+    credentials = _credentials_as(client, world, "alpha_member")
 
     assert credentials[_MISTRAL_MODEL] == "hosted"
     assert credentials[_OPENAI_MODEL] == "organization"
+
+
+def test_the_grouped_catalog_labels_a_hosted_offering_hosted_for_an_operator(client: TestClient, world: _World) -> None:
+    """The operator may price a hosted model, but its key is still the deployment's, not their organization's."""
+    bind_model_provider(client, HostedModelProvider("mistral"))
+
+    assert _credentials_as(client, world, "superuser")[_MISTRAL_MODEL] == "hosted"
 
 
 def test_an_operator_session_flags_no_hosted_model(client: TestClient, world: _World) -> None:
