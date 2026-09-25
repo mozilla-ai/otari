@@ -64,7 +64,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import extract_credential_token, verify_api_key_or_master_key
+from gateway.api.deps import extract_credential_token, get_container, verify_api_key_or_master_key
 from gateway.api.routes._attempts import walk_attempts
 from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
 from gateway.api.routes._platform import (
@@ -81,7 +81,6 @@ from gateway.api.routes._platform import (
     _report_platform_usage,
     _resolve_platform_code_execution,
     _resolve_platform_credentials,
-    _resolve_platform_mcp_servers,
     _resolve_platform_web_search,
     is_provider_billing_error,
     record_abandoned_attempt,
@@ -125,7 +124,11 @@ from gateway.core.usage import (
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
 )
-from gateway.exceptions.tools_exceptions import WorkspaceMcpServerNotFoundError, WorkspaceWebSearchDomainsExcludedError
+from gateway.exceptions.tools_exceptions import (
+    McpServerResolutionFailedError,
+    WorkspaceMcpServerNotFoundError,
+    WorkspaceWebSearchDomainsExcludedError,
+)
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Histogram
@@ -139,6 +142,7 @@ from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import CodeExecutor
 from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import CodeExecutionPort
+from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budgets import (
@@ -211,7 +215,6 @@ from gateway.services.tenancy.workspace_code_execution_policy_service import (
     ResolvedCodeExecutionPolicy,
     resolve_workspace_code_execution_policy,
 )
-from gateway.services.tenancy.workspace_mcp_server_service import resolve_workspace_mcp_servers
 from gateway.services.tenancy.workspace_web_search_service import (
     MAX_WEB_SEARCH_DOMAINS,
     InvalidStoredWebSearchDomainError,
@@ -929,6 +932,7 @@ class RequestContext:
         reservation: ReservationHandle | None,
         started_at: float,
         workspace_id: uuid.UUID | None = None,
+        mcp_servers: McpServerPort | None = None,
         resolved_provider: ResolvedProvider | None = None,
         plan: CompiledPlan | None = None,
         estimate_inputs: "EstimateInputs | None" = None,
@@ -966,6 +970,7 @@ class RequestContext:
         # so a request whose gate-check selector was unparseable still gets
         # organization-scoped provider keys on its real dispatch attempt.
         self.workspace_id = workspace_id
+        self.mcp_servers = mcp_servers
         self.rate_limit_info = rate_limit_info
         self.reservation = reservation
         # USD already written onto a failure row for gateway-run tool calls. A
@@ -2217,6 +2222,7 @@ async def resolve_request_context(
         reservation=reservation,
         started_at=started_at,
         workspace_id=workspace_id,
+        mcp_servers=get_container(raw_request).resolve(McpServerPort, db),
         resolved_provider=resolved_provider,
         plan=plan,
         estimate_inputs=estimate_inputs,
@@ -2728,20 +2734,15 @@ async def _resolve_mcp_server_ids(
     A standalone request with no database session or no resolved workspace cannot resolve
     anything, and is refused rather than served with the ids silently dropped.
     """
-    if ctx.hybrid_mode:
-        assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
-        return await _resolve_platform_mcp_servers(
-            config=ctx.config,
-            user_token=ctx.user_token,
-            mcp_server_ids=mcp_server_ids,
-        )
-
-    if ctx.db is None or ctx.workspace_id is None:
+    if ctx.mcp_servers is None:
         raise adapter.error(400, MCP_SERVER_IDS_UNAVAILABLE_DETAIL, ErrorKind.INVALID_REQUEST)
+    scope = McpServerScope(workspace_id=ctx.workspace_id, user_token=ctx.user_token)
     try:
-        return await resolve_workspace_mcp_servers(ctx.db, workspace_id=ctx.workspace_id, server_ids=mcp_server_ids)
+        return await ctx.mcp_servers.resolve_many(scope, mcp_server_ids)
     except WorkspaceMcpServerNotFoundError as exc:
         raise adapter.error(404, exc.message, ErrorKind.NOT_FOUND) from exc
+    except McpServerResolutionFailedError as exc:
+        raise adapter.error(exc.status_code, exc.message, ErrorKind.API) from exc
     except (SecretBoxUnavailableError, SecretDecryptionError) as exc:
         # The operator's problem, not the caller's, and the underlying message
         # names the environment variable, so it stays in the log.

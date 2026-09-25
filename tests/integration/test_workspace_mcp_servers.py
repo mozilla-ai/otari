@@ -24,6 +24,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.adapters.mcp_server_adapter import build_mcp_server_port
 from gateway.api.routes import chat, messages
 from gateway.api.routes._pipeline import RequestContext, prepare_gateway_tools
 from gateway.api.routes.chat import ChatCompletionRequest
@@ -631,6 +632,7 @@ def _request_context(
     return RequestContext(
         config=GatewayConfig(),
         db=db,
+        mcp_servers=build_mcp_server_port(GatewayConfig(), db),
         uow=UnitOfWork(db),
         log_writer=None,  # type: ignore[arg-type]
         hybrid_mode=False,
