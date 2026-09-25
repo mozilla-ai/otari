@@ -2730,8 +2730,8 @@ async def _resolve_mcp_server_ids(
     The port answers from wherever this deployment keeps them.
     The workspace comes off the key at authentication and never off a header.
 
-    Every deployment refuses an unknown id with a 404 and the same error type,
-    so a caller moving between them sees one contract.
+    Every deployment refuses an unknown id with a 404, so the status a caller
+    sees does not change with the deployment it reached.
     """
     if ctx.mcp_servers is None:
         raise adapter.error(400, MCP_SERVER_IDS_UNAVAILABLE_DETAIL, ErrorKind.INVALID_REQUEST)
