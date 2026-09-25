@@ -56,10 +56,8 @@ class ResolvedMcpServer(BaseModel):
     check compares, and ``enabled`` is what separates the disabled-server 404
     from a server the caller cannot see at all.
 
-    Lives here rather than beside either resolver because both modes produce it:
-    ``_platform._resolve_platform_mcp_server`` in hybrid mode and
-    ``workspace_mcp_server_service.resolve_workspace_mcp_server`` in standalone,
-    and a service may not import the API layer.
+    Lives here rather than beside either resolver, because both produce it and
+    a port may name only a model.
     """
 
     # Extra keys are ignored so a platform that grows a field does not break a

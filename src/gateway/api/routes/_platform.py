@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import math
-import uuid
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any, Literal, NamedTuple, TypeVar
 
@@ -36,16 +35,9 @@ from gateway.core.usage import (
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
-from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
 from gateway.services.control_plane import ResolveEndpoint, resolve, transport
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
-from gateway.services.mcp_stateless import (
-    CODE_RESOLUTION_FAILED,
-    CODE_SERVER_NOT_FOUND,
-    ExecutionState,
-    McpExecutionError,
-)
 from gateway.services.provider_kwargs import split_selector
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
@@ -885,92 +877,6 @@ def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
         return True, f"http_{status_code}"
 
     return True, "unknown"
-
-
-async def _resolve_platform_mcp_servers(
-    config: GatewayConfig,
-    user_token: str,
-    mcp_server_ids: list[uuid.UUID],
-) -> list[McpServerConfig]:
-    """Swap workspace-scoped MCP server ids for inline configs by calling the platform.
-
-    Ids are de-duplicated with their order preserved, which is the contract
-    `resolve_workspace_mcp_servers` states the two modes share. It matters more
-    than a saved round trip now that two resolved servers sharing a name are a
-    500 (`prepare_gateway_tools`): the protocol does not say what the platform
-    answers for a repeated id, so sending one twice must not be able to make a
-    request fail on a duplicate the caller never really asked for.
-    """
-    payload = await _post_resolve(
-        config,
-        user_token=user_token,
-        endpoint=ResolveEndpoint.MCP_SERVERS,
-        body={"mcp_server_ids": [str(uid) for uid in dict.fromkeys(mcp_server_ids)]},
-    )
-    return [
-        McpServerConfig(
-            name=s["name"],
-            url=s["url"],
-            authorization_token=s.get("authorization_token"),
-            purpose_hint=s.get("purpose_hint"),
-            allowed_tools=s.get("allowed_tools"),
-        )
-        for s in payload.get("servers", [])
-    ]
-
-
-async def _resolve_platform_mcp_server(
-    config: GatewayConfig,
-    user_token: str,
-    mcp_server_id: uuid.UUID,
-) -> ResolvedMcpServer:
-    """Resolve one stored MCP server for the stored-server endpoints.
-
-    The same platform resolver `_resolve_platform_mcp_servers` calls, with a
-    one-id request. A current peer may echo ``id`` and ``enabled``; an older peer
-    returns only the connection config and omits a disabled server. Exactly one
-    legacy entry is therefore bound to the only id requested and treated as
-    enabled. An explicit id must still match, and an explicit enabled value must
-    still be a strict boolean (R-RES-1).
-
-    An empty list is the legacy disabled-server answer and is indistinguishable
-    here from an inaccessible server, which is also the public 404 contract.
-    Several entries, a mismatched id, a missing ``servers`` list, or a field
-    Otari cannot read remain resolution failures.
-
-    Raises:
-        McpExecutionError: the server was inaccessible, or the answer was not a
-            matching, well-formed entry.
-        HTTPException: the platform itself refused, for the route to classify.
-    """
-    payload = await _post_resolve(
-        config,
-        user_token=user_token,
-        endpoint=ResolveEndpoint.MCP_SERVERS,
-        body={"mcp_server_ids": [str(mcp_server_id)]},
-    )
-    servers = payload.get("servers") if isinstance(payload, dict) else None
-    if not isinstance(servers, list):
-        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502)
-    if not servers:
-        raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
-    if len(servers) != 1:
-        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502)
-
-    entry = servers[0]
-    if isinstance(entry, dict):
-        entry = dict(entry)
-        entry.setdefault("id", mcp_server_id)
-        entry.setdefault("enabled", True)
-    try:
-        resolved = ResolvedMcpServer.model_validate(entry)
-    except ValidationError:
-        # No detail from the validator travels: it would quote the resolver's
-        # own payload, which carries the stored URL and credential.
-        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
-    if resolved.id != mcp_server_id:
-        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502)
-    return resolved
 
 
 async def _resolve_platform_web_search(

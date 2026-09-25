@@ -258,7 +258,7 @@ def _classify(status_code: int) -> tuple[str, ExecutionState, int]:
 
 
 def _retry_hint(exc: StarletteHTTPException | ControlPlaneError) -> str | None:
-    """The ``Retry-After`` the refusal carried, wherever it carried it."""
+    """The ``Retry-After`` hint the refusal carries."""
     if isinstance(exc, StarletteHTTPException):
         return (exc.headers or {}).get("Retry-After")
     return getattr(exc, "retry_after", None)

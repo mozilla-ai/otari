@@ -14,11 +14,12 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
-from fastapi import HTTPException
 
 from conftest import InstallControlPlane
-from gateway.api.routes._platform import _resolve_platform_mcp_server
-from gateway.services.mcp_stateless import ExecutionState, McpExecutionError
+from gateway.adapters.mcp_server_adapter import RemoteMcpServers
+from gateway.exceptions.control_plane_exceptions import ControlPlaneError
+from gateway.exceptions.tools_exceptions import McpServerResolutionFailedError
+from gateway.ports.mcp_server_port import McpServerScope
 
 SERVER_ID = uuid.UUID("2c948a61-dc96-4cd8-96bb-8e1434bf424e")
 OTHER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -68,7 +69,8 @@ async def test_the_matching_entry_is_resolved(
 ) -> None:
     captured = _platform_returns({"servers": [_entry()]}, control_plane_transport)
 
-    server = await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
+    server = await RemoteMcpServers(_config()).resolve_one(McpServerScope(user_token="tk_user"), SERVER_ID)
+    assert server is not None
 
     assert server.id == SERVER_ID
     assert server.url == "https://mcp.example.com/mcp"
@@ -88,7 +90,8 @@ async def test_a_legacy_entry_is_bound_to_the_only_requested_id(
     del entry["enabled"]
     _platform_returns({"servers": [entry]}, control_plane_transport)
 
-    server = await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
+    server = await RemoteMcpServers(_config()).resolve_one(McpServerScope(user_token="tk_user"), SERVER_ID)
+    assert server is not None
 
     assert server.id == SERVER_ID
     assert server.enabled is True
@@ -102,7 +105,8 @@ async def test_a_disabled_server_resolves_and_says_so(
     """The 404 belongs to the route's outcome ladder, which both modes share."""
     _platform_returns({"servers": [_entry(enabled=False)]}, control_plane_transport)
 
-    server = await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
+    server = await RemoteMcpServers(_config()).resolve_one(McpServerScope(user_token="tk_user"), SERVER_ID)
+    assert server is not None
 
     assert server.enabled is False
 
@@ -115,12 +119,7 @@ async def test_a_legacy_empty_answer_is_server_not_found(
     """Legacy peers omit a disabled server, which has the same public outcome."""
     _platform_returns({"servers": []}, control_plane_transport)
 
-    with pytest.raises(McpExecutionError) as raised:
-        await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
-
-    assert raised.value.code == "mcp_server_not_found"
-    assert raised.value.execution_state is ExecutionState.NOT_STARTED
-    assert raised.value.status_code == 404
+    assert await RemoteMcpServers(_config()).resolve_one(McpServerScope(user_token="tk_user"), SERVER_ID) is None
 
 
 @pytest.mark.asyncio
@@ -133,7 +132,8 @@ async def test_an_absent_allowlist_stays_absent(
     del entry["allowed_tools"]
     _platform_returns({"servers": [entry]}, control_plane_transport)
 
-    server = await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
+    server = await RemoteMcpServers(_config()).resolve_one(McpServerScope(user_token="tk_user"), SERVER_ID)
+    assert server is not None
 
     assert server.allowed_tools is None
 
@@ -160,11 +160,9 @@ async def test_anything_but_one_matching_entry_is_a_resolution_failure(
 ) -> None:
     _platform_returns(payload, control_plane_transport)
 
-    with pytest.raises(McpExecutionError) as raised:
-        await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
+    with pytest.raises(McpServerResolutionFailedError) as raised:
+        await RemoteMcpServers(_config()).resolve_one(McpServerScope(user_token="tk_user"), SERVER_ID)
 
-    assert raised.value.code == "mcp_resolution_failed"
-    assert raised.value.execution_state is ExecutionState.NOT_STARTED
     assert raised.value.status_code == 502
 
 
@@ -175,7 +173,7 @@ async def test_the_platforms_own_refusal_is_left_for_the_route_to_classify(
 ) -> None:
     _platform_returns({"detail": "no such server"}, control_plane_transport, status_code=404)
 
-    with pytest.raises(HTTPException) as raised:
-        await _resolve_platform_mcp_server(_config(), "tk_user", SERVER_ID)
+    with pytest.raises(ControlPlaneError) as raised:
+        await RemoteMcpServers(_config()).resolve_one(McpServerScope(user_token="tk_user"), SERVER_ID)
 
     assert raised.value.status_code == 404

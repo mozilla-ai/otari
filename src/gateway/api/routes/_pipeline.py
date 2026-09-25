@@ -2946,14 +2946,10 @@ async def prepare_gateway_tools(
                 adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
             )
             stored_name_counts = Counter(server.name for server in stored_servers)
-            # Standalone cannot reach this: `uq_workspace_mcp_servers_workspace_name`
-            # makes stored names unique per workspace and `resolve_workspace_mcp_servers`
-            # de-duplicates the ids. Hybrid can, because `_resolve_platform_mcp_servers`
-            # returns the platform's payload verbatim, so that uniqueness is a remote
-            # promise rather than a local invariant. It answers the way an unsafe stored
-            # URL does, since a stored duplicate is workspace configuration the caller
-            # can neither see nor fix: a fixed 500 detail, with the names and the
-            # workspace in the log.
+            # Only a peer's answer can hold a duplicate name, because a unique
+            # index and de-duplicated ids rule one out locally. It is workspace
+            # configuration the caller cannot fix, so the detail is fixed and the
+            # names go to the log.
             if len(stored_name_counts) != len(stored_servers):
                 logger.error(
                     "Stored MCP servers do not have unique names for workspace %s: %s",

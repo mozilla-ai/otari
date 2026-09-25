@@ -19,7 +19,7 @@ import json
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -57,8 +57,9 @@ from gateway.api.routes._pipeline import (
 from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import WorkspaceMcpServerNotFoundError
-from gateway.models.mcp import McpServerConfig
+from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.pricing import PriceSource
+from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budgets import ReservationHandle
 from gateway.services.tenancy.workspace_web_search_service import ResolvedWebSearchConfig
@@ -99,6 +100,26 @@ def _tool_ctx(**overrides: Any) -> ToolContext:
 _ORGANIZATION_ID = uuid.UUID("99999999-9999-9999-9999-999999999999")
 
 
+_ResolveMany = Callable[[McpServerScope, list[uuid.UUID]], Awaitable[list[McpServerConfig]]]
+
+
+class _Servers(McpServerPort):
+    """A port whose plural resolve does what a case needs.
+
+    The singular resolve answers that it reaches nothing, which is a real answer
+    rather than a refusal to have one.
+    """
+
+    def __init__(self, resolve_many: _ResolveMany) -> None:
+        self._resolve_many = resolve_many
+
+    async def resolve_many(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+        return await self._resolve_many(scope, server_ids)
+
+    async def resolve_one(self, scope: McpServerScope, server_id: uuid.UUID) -> ResolvedMcpServer | None:
+        return None
+
+
 def _ctx(
     config: GatewayConfig,
     *,
@@ -110,10 +131,12 @@ def _ctx(
     organization_id: uuid.UUID | None = _ORGANIZATION_ID,
     hybrid_mode: bool = False,
     user_token: str | None = None,
+    mcp_servers: Any = None,
 ) -> RequestContext:
     return RequestContext(
         config=config,
         db=db,
+        mcp_servers=mcp_servers,
         uow=None,
         log_writer=log_writer,
         hybrid_mode=hybrid_mode,
@@ -1817,12 +1840,17 @@ async def test_unknown_mcp_server_id_releases_reservation(monkeypatch: pytest.Mo
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    async def missing(*args: Any, **kwargs: Any) -> list[Any]:
+    async def missing(scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
         raise WorkspaceMcpServerNotFoundError("11111111-1111-1111-1111-111111111111")
 
-    monkeypatch.setattr(pipeline, "resolve_workspace_mcp_servers", missing)
 
-    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    ctx = _ctx(
+        GatewayConfig(),
+        db=cast(Any, object()),
+        reservation=_reservation(),
+        workspace_id=uuid.uuid4(),
+        mcp_servers=_Servers(missing),
+    )
     with pytest.raises(HTTPException) as exc_info:
         await _call_prepare_gateway_tools(ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")])
 
@@ -1858,12 +1886,17 @@ async def test_duplicate_mcp_server_name_against_a_stored_server_releases_reserv
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    async def stored(*args: Any, **kwargs: Any) -> list[McpServerConfig]:
+    async def stored(scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
         return [McpServerConfig(name="tools", url="https://93.184.216.35/mcp")]
 
-    monkeypatch.setattr(pipeline, "resolve_workspace_mcp_servers", stored)
 
-    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    ctx = _ctx(
+        GatewayConfig(),
+        db=cast(Any, object()),
+        reservation=_reservation(),
+        workspace_id=uuid.uuid4(),
+        mcp_servers=_Servers(stored),
+    )
     with pytest.raises(HTTPException) as exc_info:
         await _call_prepare_gateway_tools(
             ctx,
@@ -1943,26 +1976,29 @@ async def test_an_inline_duplicate_is_refused_before_the_url_safety_check(
 async def test_stored_mcp_servers_sharing_a_name_are_an_operator_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Two *stored* servers sharing a name is broken workspace config, not a bad request.
+    """Two *stored* servers sharing a name is broken workspace configuration, not a bad request.
 
-    Unreachable in standalone (`uq_workspace_mcp_servers_workspace_name`, plus
-    `resolve_workspace_mcp_servers` de-duplicates the ids), so the resolve is
-    stubbed to produce what hybrid can: `_resolve_platform_mcp_servers` returns
-    the platform's payload verbatim, and that uniqueness is the platform's
-    promise rather than a local invariant (otari#792 review).
+    A unique index and de-duplicated ids rule it out where the rows are held, so
+    the port is stubbed to answer the way a peer can: verbatim, with uniqueness
+    its promise rather than a local invariant.
     """
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    async def stored(*args: Any, **kwargs: Any) -> list[McpServerConfig]:
+    async def stored(scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
         return [
             McpServerConfig(name="tools", url="https://93.184.216.34/mcp"),
             McpServerConfig(name="tools", url="https://93.184.216.35/mcp"),
         ]
 
-    monkeypatch.setattr(pipeline, "resolve_workspace_mcp_servers", stored)
 
-    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    ctx = _ctx(
+        GatewayConfig(),
+        db=cast(Any, object()),
+        reservation=_reservation(),
+        workspace_id=uuid.uuid4(),
+        mcp_servers=_Servers(stored),
+    )
     with pytest.raises(HTTPException) as exc_info:
         await _call_prepare_gateway_tools(
             ctx,
@@ -1988,13 +2024,17 @@ async def test_a_database_failure_releases_the_reservation(monkeypatch: pytest.M
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    async def failing(*args: Any, **kwargs: Any) -> list[Any]:
+    async def failing(scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
         raise SQLAlchemyError("connection reset")
 
-    monkeypatch.setattr(pipeline, "resolve_workspace_mcp_servers", failing)
-
     db = AsyncMock()
-    ctx = _ctx(GatewayConfig(), db=cast(Any, db), reservation=_reservation(), workspace_id=uuid.uuid4())
+    ctx = _ctx(
+        GatewayConfig(),
+        db=cast(Any, db),
+        reservation=_reservation(),
+        workspace_id=uuid.uuid4(),
+        mcp_servers=_Servers(failing),
+    )
     with pytest.raises(SQLAlchemyError):
         await _call_prepare_gateway_tools(ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")])
 
@@ -2008,18 +2048,23 @@ async def test_a_release_that_also_fails_reraises_the_original(monkeypatch: pyte
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
-    async def failing(*args: Any, **kwargs: Any) -> list[Any]:
+    async def failing(scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
         raise SQLAlchemyError("connection reset")
 
     async def failing_release(*args: Any, **kwargs: Any) -> None:
         raise SQLAlchemyError("still down")
 
-    monkeypatch.setattr(pipeline, "resolve_workspace_mcp_servers", failing)
     monkeypatch.setattr(pipeline, "release_reservation", failing_release)
 
     db = AsyncMock()
     db.rollback.side_effect = SQLAlchemyError("still down")
-    ctx = _ctx(GatewayConfig(), db=cast(Any, db), reservation=_reservation(), workspace_id=uuid.uuid4())
+    ctx = _ctx(
+        GatewayConfig(),
+        db=cast(Any, db),
+        reservation=_reservation(),
+        workspace_id=uuid.uuid4(),
+        mcp_servers=_Servers(failing),
+    )
     with pytest.raises(SQLAlchemyError, match="connection reset"):
         await _call_prepare_gateway_tools(ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")])
 
