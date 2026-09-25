@@ -24,7 +24,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.routes import chat
+from gateway.api.routes import chat, messages
 from gateway.api.routes._pipeline import RequestContext, prepare_gateway_tools
 from gateway.api.routes.chat import ChatCompletionRequest
 from gateway.core.config import GatewayConfig
@@ -809,6 +809,31 @@ async def test_prepare_gateway_tools_refuses_an_unknown_id(async_db: AsyncSessio
         )
 
     assert exc_info.value.status_code == 404
+
+
+async def test_the_anthropic_envelope_names_an_unknown_id_as_not_found(async_db: AsyncSession) -> None:
+    """A hybrid gateway answers `not_found_error` for this, so a caller moving between them sees one contract."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await prepare_gateway_tools(
+            adapter=messages._ADAPTER,
+            ctx=_request_context(async_db, workspace.id, organization.id),
+            response=Response(),
+            guardrails=None,
+            guardrail_text="",
+            tools=None,
+            mcp_servers=None,
+            mcp_server_ids=[uuid.uuid4()],
+            max_tool_iterations=None,
+            tools_header=None,
+        )
+
+    assert exc_info.value.status_code == 404
+    assert isinstance(exc_info.value.detail, dict)
+    assert exc_info.value.detail["error"]["type"] == "not_found_error"
 
 
 # --------------------------------------------------------------------------- #

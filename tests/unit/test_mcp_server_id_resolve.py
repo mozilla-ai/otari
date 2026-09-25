@@ -11,6 +11,7 @@ import pytest
 
 from conftest import InstallControlPlane
 from gateway.api.routes._platform import _resolve_platform_mcp_servers
+from gateway.api.routes.messages import _ensure_anthropic_error
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.tenancy.workspace_mcp_server_service import MAX_MCP_SERVERS_PER_WORKSPACE
 
@@ -123,6 +124,11 @@ async def test_resolve_404_passes_through(
         await _resolve_platform_mcp_servers(_config(), "tk", [uuid.uuid4()])
     assert ei.value.status_code == 404
     assert ei.value.detail == "MCPServer not found"
+
+    enveloped = _ensure_anthropic_error(ei.value)
+
+    assert isinstance(enveloped.detail, dict)
+    assert enveloped.detail["error"]["type"] == "not_found_error"
 
 
 @pytest.mark.asyncio

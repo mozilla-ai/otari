@@ -2718,18 +2718,15 @@ async def _resolve_mcp_server_ids(
 ) -> list[McpServerConfig]:
     """Swap a request's ``mcp_server_ids`` for the configs they name.
 
-    One field, two sources, chosen by mode: hybrid asks the platform, which
-    owns the workspace's stored servers there, and standalone reads
-    ``workspace_mcp_servers`` for the workspace the request's key belongs to
-    (otari#658). The workspace is `RequestContext.workspace_id`, resolved at
-    auth off the key and never from a header, which is the seam otari#655
-    settled; MCP is the exception that decision names, since there is no
-    deployment-wide server list for a workspace row to narrow.
+    One field, two sources, chosen by mode.
+    A hybrid gateway asks the control plane, which owns the workspace's stored servers there.
+    A standalone one reads its own rows for the workspace the request's key belongs to.
+    That workspace comes off the key at authentication and never off a header.
 
-    Both modes refuse an unknown id with a 404, so a caller moving between them
-    sees one contract. A standalone request with no database session or no
-    resolved workspace cannot resolve anything, and is refused rather than
-    served with the ids silently dropped.
+    Both modes refuse an unknown id with a 404 and the same error type, so a caller moving
+    between them sees one contract.
+    A standalone request with no database session or no resolved workspace cannot resolve
+    anything, and is refused rather than served with the ids silently dropped.
     """
     if ctx.hybrid_mode:
         assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
@@ -2744,7 +2741,7 @@ async def _resolve_mcp_server_ids(
     try:
         return await resolve_workspace_mcp_servers(ctx.db, workspace_id=ctx.workspace_id, server_ids=mcp_server_ids)
     except WorkspaceMcpServerNotFoundError as exc:
-        raise adapter.error(404, exc.message, ErrorKind.INVALID_REQUEST) from exc
+        raise adapter.error(404, exc.message, ErrorKind.NOT_FOUND) from exc
     except (SecretBoxUnavailableError, SecretDecryptionError) as exc:
         # The operator's problem, not the caller's, and the underlying message
         # names the environment variable, so it stays in the log.
