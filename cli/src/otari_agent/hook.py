@@ -1720,7 +1720,29 @@ def _hook_collect_check_verdicts(
         return list(executor.map(run_one, check_gates))
 
 
-@click.group(name="hook", invoke_without_command=True)
+def _stdin_is_a_terminal() -> bool:
+    """Whether this process was typed at, rather than piped a hook payload.
+
+    A named function rather than an inline `sys.stdin.isatty()` so a test can
+    choose which of the two it is: `CliRunner` swaps `sys.stdin` out for the
+    duration of a call, so patching the stream itself never reaches the check.
+
+    Answers False for a stdin that is closed or absent rather than raising.
+    Both cases raise again on the `json.load` below, which this command
+    already fails open on, and that is the behavior to keep: asking the
+    question earlier must not turn a quiet no-op into a traceback.
+    """
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except ValueError:
+        return False
+
+
+@click.group(
+    name="hook",
+    invoke_without_command=True,
+    short_help="Agent Guardrails callback; register it with `otari hook setup`.",
+)
 @click.option(
     "--harness",
     type=click.Choice(["claude-code", "codex"]),
@@ -1728,15 +1750,24 @@ def _hook_collect_check_verdicts(
     show_default=True,
     help="Agent integration sending this callback.",
 )
+# Hidden with the two flags it serves: `load_settings` is called on the remote
+# path alone, so this resolves nothing for a local evaluation.
 @click.option(
     "--config",
     "-c",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
+    hidden=True,
     help="Path to config YAML file, used to resolve --url/--api-key when they are not given.",
 )
-@click.option("--url", envvar="OTARI_URL", default=None, help="Base URL of the Otari gateway.")
-@click.option("--api-key", envvar="OTARI_API_KEY", default=None, help="Credential for the Hook Server.")
+# Hidden until the Hook Server is reworked. `POST /api/v1/hooks/check`
+# evaluates the submitted guardrail with the same `run_policy_check` this
+# command already calls in process and stores nothing, so choosing it today
+# buys a network round trip, a credential and seven fail-open exits (#1699,
+# #1720) for the verdict already in hand. Hidden, not removed: the flags and
+# their environment variables keep working for anyone already on that path.
+@click.option("--url", envvar="OTARI_URL", default=None, hidden=True, help="Base URL of the Otari gateway.")
+@click.option("--api-key", envvar="OTARI_API_KEY", default=None, hidden=True, help="Credential for the Hook Server.")
 @click.option(
     "--judge-model",
     envvar="OTARI_HOOK_JUDGE_MODEL",
@@ -1780,40 +1811,44 @@ def hook(
     judge_cli: tuple[str, ...] | None,
     judge_dry_run: bool,
 ) -> None:
-    """Native callback entry point for a supported agent's hook protocol.
+    """The callback a coding agent invokes. Run `otari hook setup` to register it.
 
     Reads one JSON hook payload on stdin, collects the evidence that payload
     carries (a PreToolUse call's own target path, or a Stop event's Git
-    status), and evaluates it against the local guardrail itself, in
-    process, through `otari_agent.domain.check.run_policy_check`: no server,
-    no credential, needed for this by default. `--url`/`--api-key` (or
-    `OTARI_URL`/`OTARI_API_KEY`) are the opt-in exception: give either and
-    this instead calls a gateway's `POST /api/v1/hooks/check` over HTTP the
-    way every version of this command before local evaluation existed did,
-    for whoever wants a shared/hosted gateway to be the one deciding rather
-    than the machine the agent is running on. See docs/agent-guardrails.md.
+    status), and checks it against this repository's guardrail in process.
+    No server and no credential are involved. See docs/agent-guardrails.md.
 
     Exit code is this harness's own protocol, not otari policy check's:
     Claude Code's and Codex's PreToolUse and Stop hooks both take 0 (proceed)
     or 2 (block, stderr shown to the agent). Never blocks on a problem that is
-    not a required gate failing: a missing or malformed policy, or (only in
-    the opt-in remote mode) an unreachable gateway or a missing credential,
-    all exit 0, and each says so through `_hook_not_enforcing`.
+    not a required gate failing: a missing or malformed guardrail exits 0,
+    and says so where both the person and the agent can see it.
 
-    `--harness` picks which payload/transcript shape is expected and which
-    tool names are read as an edit vs. a command (see
-    `_HOOK_COMMAND_TOOL_FIELDS_BY_HARNESS`, `_CODEX_PATCH_TOOL_NAME`); Codex's
-    own Code Mode wraps shell/apply_patch calls in a JS snippet rather than
+    `--harness` picks which payload and transcript shape is expected, and
+    which tool names are read as an edit rather than a command. Codex's own
+    Code Mode wraps shell and apply_patch calls in a JS snippet rather than
     naming one tool, and its PreToolUse dispatch does not yet cover that
-    surface at all (openai/codex#23411), so a `path`/`command`
-    gate scoped to `PreToolUse` will not see a Code Mode edit until upstream
-    fixes that; `Stop`'s own Git-status fallback and transcript scan still do.
+    surface at all (openai/codex#23411), so a `path` or `command` gate scoped
+    to `PreToolUse` will not see a Code Mode edit until upstream fixes that;
+    `Stop`'s own Git-status fallback and transcript scan still do.
 
     A group, not a plain command, so `otari hook setup` can live alongside
     it: invoked with no subcommand (the shape every existing settings file
     already calls), it runs the callback above unchanged.
     """
     if ctx.invoked_subcommand is not None:
+        return
+
+    # Typed at a terminal rather than piped in by a harness. The `json.load`
+    # below would block on an empty stdin with no prompt and no output, which
+    # is what a person exploring the CLI hits first: `otari hook` is the only
+    # thing `otari --help` says about Agent Guardrails, and running it hangs.
+    if _stdin_is_a_terminal():
+        click.echo(ctx.get_help())
+        click.echo(
+            "\nA coding agent invokes this with a hook payload on stdin; it is not run by hand. "
+            "Run `otari hook setup` to register it in this repository."
+        )
         return
 
     try:
@@ -2448,9 +2483,12 @@ _HOOK_SETUP_BY_HARNESS = {
     show_default=True,
     help="Agent integration to configure.",
 )
+# Hidden alongside `hook`'s own --url/--api-key, and for the same reason: it
+# registers the remote mode, which is the one being reworked.
 @click.option(
     "--api-key",
     default=None,
+    hidden=True,
     help=(
         "Embed this credential in the generated command, opting the registered hook into checking "
         "against a gateway over HTTP instead of evaluating the guardrail locally. Omit for the default: "
@@ -2458,18 +2496,17 @@ _HOOK_SETUP_BY_HARNESS = {
     ),
 )
 def hook_setup(harness: str, api_key: str | None) -> None:
-    """Register otari hook in a supported agent's own settings.
+    """Register otari hook in this repository, in a supported agent's own settings.
 
     Writes or updates a PreToolUse hook entry and a Stop hook entry in the
-    harness's own personal, gitignored settings file (see
-    _HOOK_SETUP_BY_HARNESS) so registering it is not a manual JSON edit. Both
-    point at the same otari hook invocation; the harness passes its own
-    hook_event_name in the payload, so one callback serves either event.
-    Offers to scaffold a starter .otari/guardrails.yml when this repo has no
-    guardrail yet, and picks the PreToolUse matcher (whether it needs to cover
-    the shell tool, the read tool, or both) from whatever gates the guardrail
-    turns out to have; Stop needs no matcher; see docs/agent-guardrails.md for
-    why both are registered unconditionally.
+    harness's own personal, gitignored settings file so registering it is not
+    a manual JSON edit. Both point at the same otari hook invocation; the
+    harness passes its own hook_event_name in the payload, so one callback
+    serves either event. Offers to scaffold a starter .otari/guardrails.yml
+    when this repo has no guardrail yet, and picks the PreToolUse matcher
+    (whether it needs to cover the shell tool, the read tool, or both) from
+    whatever gates the guardrail turns out to have; Stop needs no matcher;
+    see docs/agent-guardrails.md for why both are registered unconditionally.
     """
     root = _hook_find_repo_root(Path.cwd())
     if root is None:
@@ -2967,9 +3004,12 @@ def _gates_generate_parse_edit(edited: str | None, *, fallback: dict[str, Any]) 
     return parsed
 
 
-@click.group(name="guardrails")
+@click.group(
+    name="guardrails",
+    short_help="Agent Guardrails: check and generate this repo's own rules.",
+)
 def guardrails() -> None:
-    """Work with a repo's guardrail: .otari/guardrails.yml, or the files under .otari/guardrails/."""
+    """Agent Guardrails: this repo's own rules, in .otari/guardrails.yml or under .otari/guardrails/."""
 
 
 @guardrails.command(name="generate")

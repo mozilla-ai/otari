@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -3278,3 +3279,56 @@ def test_an_oversize_composed_guardrail_does_not_block_the_turn(
     )
     assert result.exit_code == 0, result.output
     assert "no gate is being enforced" in json.loads(result.stdout)["systemMessage"]
+
+
+def test_a_terminal_stdin_shows_help_instead_of_blocking(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Typed at a terminal, `otari hook` explains itself rather than hanging on stdin.
+
+    `otari --help` names `hook` and nothing else about Agent Guardrails, so
+    this is the first thing a person runs. Reading stdin unconditionally left
+    them at a cursor with no prompt and no output until they interrupted it.
+    """
+    monkeypatch.setattr(hook_cli, "_stdin_is_a_terminal", lambda: True)
+
+    result = CliRunner().invoke(hook_cli.hook, [], input="")
+
+    assert result.exit_code == 0, result.output
+    assert "otari hook setup" in result.output
+    assert "not run by hand" in result.output
+
+
+def test_a_closed_stdin_stays_a_quiet_no_op(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The terminal check must not turn the closed-stdin fail-open into a traceback.
+
+    `isatty()` raises on a closed stream, and it is now asked before the
+    `json.load` whose own failure this command already swallows.
+    """
+
+    class _ClosedStdin:
+        def isatty(self) -> bool:
+            raise ValueError("I/O operation on closed file")
+
+    monkeypatch.setattr(sys, "stdin", _ClosedStdin())
+
+    assert hook_cli._stdin_is_a_terminal() is False
+
+
+def test_help_does_not_advertise_the_hook_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The remote mode is hidden while it is being reworked; `setup` is what the help points at.
+
+    The flags still work when passed deliberately (every other remote-mode
+    test in this module passes `--api-key`); they are just not offered.
+    """
+    monkeypatch.setattr(hook_cli, "_stdin_is_a_terminal", lambda: False)
+
+    result = CliRunner().invoke(hook_cli.hook, ["--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "--url" not in result.output
+    assert "--api-key" not in result.output
+    assert "--config" not in result.output
+    assert "setup" in result.output
+
+    setup_help = CliRunner().invoke(hook_cli.hook, ["setup", "--help"])
+    assert setup_help.exit_code == 0, setup_help.output
+    assert "--api-key" not in setup_help.output
