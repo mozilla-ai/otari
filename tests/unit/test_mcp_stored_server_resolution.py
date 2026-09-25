@@ -17,12 +17,24 @@ import pytest
 
 from conftest import InstallControlPlane
 from gateway.adapters.mcp_server_adapter import RemoteMcpServers
+from gateway.api.routes.mcp import _Principal, _resolve_server
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError
 from gateway.exceptions.tools_exceptions import McpServerResolutionFailedError
 from gateway.ports.mcp_server_port import McpServerScope
+from gateway.services.mcp_stateless import (
+    CODE_RESOLUTION_FAILED,
+    CODE_SERVER_NOT_FOUND,
+    ExecutionState,
+    McpExecutionError,
+)
 
 SERVER_ID = uuid.UUID("2c948a61-dc96-4cd8-96bb-8e1434bf424e")
 OTHER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+
+
+def _scope(user_token: str = "tk_user") -> McpServerScope:
+    """The scope a hybrid caller supplies, which carries a token and no workspace."""
+    return McpServerScope(workspace_id=None, user_token=user_token)
 
 
 def _config() -> Any:
@@ -69,7 +81,7 @@ async def test_the_matching_entry_is_resolved(
 ) -> None:
     captured = _platform_returns({"servers": [_entry()]}, control_plane_transport)
 
-    server = await RemoteMcpServers(_config()).resolve_one(McpServerScope(user_token="tk_user"), SERVER_ID)
+    server = await RemoteMcpServers(_config()).resolve_one(_scope(), SERVER_ID)
     assert server is not None
 
     assert server.id == SERVER_ID
@@ -90,7 +102,7 @@ async def test_a_legacy_entry_is_bound_to_the_only_requested_id(
     del entry["enabled"]
     _platform_returns({"servers": [entry]}, control_plane_transport)
 
-    server = await RemoteMcpServers(_config()).resolve_one(McpServerScope(user_token="tk_user"), SERVER_ID)
+    server = await RemoteMcpServers(_config()).resolve_one(_scope(), SERVER_ID)
     assert server is not None
 
     assert server.id == SERVER_ID
@@ -105,7 +117,7 @@ async def test_a_disabled_server_resolves_and_says_so(
     """The 404 belongs to the route's outcome ladder, which both modes share."""
     _platform_returns({"servers": [_entry(enabled=False)]}, control_plane_transport)
 
-    server = await RemoteMcpServers(_config()).resolve_one(McpServerScope(user_token="tk_user"), SERVER_ID)
+    server = await RemoteMcpServers(_config()).resolve_one(_scope(), SERVER_ID)
     assert server is not None
 
     assert server.enabled is False
@@ -119,7 +131,7 @@ async def test_a_legacy_empty_answer_is_server_not_found(
     """Legacy peers omit a disabled server, which has the same public outcome."""
     _platform_returns({"servers": []}, control_plane_transport)
 
-    assert await RemoteMcpServers(_config()).resolve_one(McpServerScope(user_token="tk_user"), SERVER_ID) is None
+    assert await RemoteMcpServers(_config()).resolve_one(_scope(), SERVER_ID) is None
 
 
 @pytest.mark.asyncio
@@ -132,7 +144,7 @@ async def test_an_absent_allowlist_stays_absent(
     del entry["allowed_tools"]
     _platform_returns({"servers": [entry]}, control_plane_transport)
 
-    server = await RemoteMcpServers(_config()).resolve_one(McpServerScope(user_token="tk_user"), SERVER_ID)
+    server = await RemoteMcpServers(_config()).resolve_one(_scope(), SERVER_ID)
     assert server is not None
 
     assert server.allowed_tools is None
@@ -161,7 +173,7 @@ async def test_anything_but_one_matching_entry_is_a_resolution_failure(
     _platform_returns(payload, control_plane_transport)
 
     with pytest.raises(McpServerResolutionFailedError) as raised:
-        await RemoteMcpServers(_config()).resolve_one(McpServerScope(user_token="tk_user"), SERVER_ID)
+        await RemoteMcpServers(_config()).resolve_one(_scope(), SERVER_ID)
 
     assert raised.value.status_code == 502
 
@@ -174,6 +186,52 @@ async def test_the_platforms_own_refusal_is_left_for_the_route_to_classify(
     _platform_returns({"detail": "no such server"}, control_plane_transport, status_code=404)
 
     with pytest.raises(ControlPlaneError) as raised:
-        await RemoteMcpServers(_config()).resolve_one(McpServerScope(user_token="tk_user"), SERVER_ID)
+        await RemoteMcpServers(_config()).resolve_one(_scope(), SERVER_ID)
 
     assert raised.value.status_code == 404
+
+
+class _PortAnswering:
+    """A port that gives ``resolve_one`` one fixed answer."""
+
+    def __init__(self, answer: Any = None, raises: Exception | None = None) -> None:
+        self._answer = answer
+        self._raises = raises
+
+    async def resolve_many(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> Any:
+        raise NotImplementedError
+
+    async def resolve_one(self, scope: McpServerScope, server_id: uuid.UUID) -> Any:
+        if self._raises is not None:
+            raise self._raises
+        return self._answer
+
+
+@pytest.mark.parametrize("workspace_id", [None, uuid.uuid4()], ids=["a peer holds the rows", "this deployment does"])
+@pytest.mark.asyncio
+async def test_an_id_reaching_nothing_is_the_same_refusal_wherever_the_rows_live(
+    workspace_id: uuid.UUID | None,
+) -> None:
+    """Both deployments refuse an unreachable ID with one code, state and status."""
+    principal = _Principal(user_token="tk_user", workspace_id=workspace_id)
+
+    with pytest.raises(McpExecutionError) as raised:
+        await _resolve_server(principal, _PortAnswering(answer=None), SERVER_ID)
+
+    assert raised.value.code == CODE_SERVER_NOT_FOUND
+    assert raised.value.execution_state is ExecutionState.NOT_STARTED
+    assert raised.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_answer_is_the_resolution_failure_this_contract_publishes() -> None:
+    """The port's failure reaches the caller as a 502, not as an unhandled 500."""
+    principal = _Principal(user_token="tk_user", workspace_id=None)
+    port = _PortAnswering(raises=McpServerResolutionFailedError())
+
+    with pytest.raises(McpExecutionError) as raised:
+        await _resolve_server(principal, port, SERVER_ID)
+
+    assert raised.value.code == CODE_RESOLUTION_FAILED
+    assert raised.value.execution_state is ExecutionState.NOT_STARTED
+    assert raised.value.status_code == 502
