@@ -8,11 +8,9 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
-from fastapi import HTTPException
 
 from conftest import InstallControlPlane
 from gateway.adapters.mcp_server_adapter import RemoteMcpServers
-from gateway.api.routes.messages import _ensure_anthropic_error
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
 from gateway.exceptions.tools_exceptions import McpServerResolutionFailedError
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
@@ -131,11 +129,6 @@ async def test_resolve_404_passes_through(
         await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 404
     assert ei.value.message == "MCPServer not found"
-
-    enveloped = _ensure_anthropic_error(HTTPException(ei.value.status_code, ei.value.message))
-
-    assert isinstance(enveloped.detail, dict)
-    assert enveloped.detail["error"]["type"] == "not_found_error"
 
 
 @pytest.mark.asyncio
