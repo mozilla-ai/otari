@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CodeExecutionPortDep,
+    McpServerPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
     build_sandbox_container_registry,
@@ -519,6 +520,7 @@ async def create_response(
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
     code_execution_port: CodeExecutionPortDep,
+    mcp_server_port: McpServerPortDep,
 ) -> dict[str, Any] | StreamingResponse:
     """OpenAI-compatible Responses endpoint.
 
@@ -654,6 +656,7 @@ async def create_response(
         tools_header=request_body.tools_header,
         code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
         code_execution_port=code_execution_port,
+        mcp_server_port=mcp_server_port,
         sandbox_containers=build_sandbox_container_registry(
             config=config,
             uow=ctx.uow,

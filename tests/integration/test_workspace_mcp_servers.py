@@ -632,7 +632,6 @@ def _request_context(
     return RequestContext(
         config=GatewayConfig(),
         db=db,
-        mcp_servers=build_mcp_server_port(GatewayConfig(), db),
         uow=UnitOfWork(db),
         log_writer=None,  # type: ignore[arg-type]
         hybrid_mode=False,
@@ -668,6 +667,7 @@ async def test_prepare_gateway_tools_hands_the_tool_loop_the_workspaces_servers(
     tool_ctx = await prepare_gateway_tools(
         adapter=chat._ADAPTER,
         ctx=_request_context(async_db, workspace.id, organization.id),
+        mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
         response=Response(),
         guardrails=None,
         guardrail_text="",
@@ -695,6 +695,7 @@ async def test_prepare_gateway_tools_merges_stored_servers_after_inline_ones(asy
     tool_ctx = await prepare_gateway_tools(
         adapter=chat._ADAPTER,
         ctx=_request_context(async_db, workspace.id, organization.id),
+        mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
         response=Response(),
         guardrails=None,
         guardrail_text="",
@@ -723,6 +724,7 @@ async def test_prepare_gateway_tools_is_unchanged_when_nothing_is_configured(asy
     tool_ctx = await prepare_gateway_tools(
         adapter=chat._ADAPTER,
         ctx=_request_context(async_db, workspace.id, organization.id),
+        mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
         response=Response(),
         guardrails=None,
         guardrail_text="",
@@ -775,6 +777,7 @@ async def test_a_stored_servers_unsafe_url_is_not_named_to_the_caller(
         await prepare_gateway_tools(
             adapter=chat._ADAPTER,
             ctx=_request_context(async_db, workspace.id, organization.id),
+            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
             response=Response(),
             guardrails=None,
             guardrail_text="",
@@ -800,6 +803,7 @@ async def test_prepare_gateway_tools_refuses_an_unknown_id(async_db: AsyncSessio
         await prepare_gateway_tools(
             adapter=chat._ADAPTER,
             ctx=_request_context(async_db, workspace.id, organization.id),
+            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
             response=Response(),
             guardrails=None,
             guardrail_text="",
@@ -823,6 +827,7 @@ async def test_the_anthropic_envelope_names_an_unknown_id_as_not_found(async_db:
         await prepare_gateway_tools(
             adapter=messages._ADAPTER,
             ctx=_request_context(async_db, workspace.id, organization.id),
+            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
             response=Response(),
             guardrails=None,
             guardrail_text="",

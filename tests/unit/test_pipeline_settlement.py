@@ -103,6 +103,11 @@ _ORGANIZATION_ID = uuid.UUID("99999999-9999-9999-9999-999999999999")
 _ResolveMany = Callable[[McpServerScope, list[uuid.UUID]], Awaitable[list[McpServerConfig]]]
 
 
+async def _resolves_to_nothing(scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
+    """Resolve to no servers, for a case that is not about stored servers."""
+    return []
+
+
 class _Servers(McpServerPort):
     """A port whose plural resolve does what a case needs.
 
@@ -131,12 +136,10 @@ def _ctx(
     organization_id: uuid.UUID | None = _ORGANIZATION_ID,
     hybrid_mode: bool = False,
     user_token: str | None = None,
-    mcp_servers: Any = None,
 ) -> RequestContext:
     return RequestContext(
         config=config,
         db=db,
-        mcp_servers=mcp_servers,
         uow=None,
         log_writer=log_writer,
         hybrid_mode=hybrid_mode,
@@ -1412,6 +1415,7 @@ async def _call_prepare_gateway_tools(ctx: RequestContext, **overrides: Any) -> 
         "tools": None,
         "mcp_servers": None,
         "mcp_server_ids": None,
+        "mcp_server_port": _Servers(_resolves_to_nothing),
         "max_tool_iterations": None,
         "tools_header": None,
     }
@@ -1820,8 +1824,6 @@ async def test_a_request_without_a_workspace_is_refused_before_any_tool_resolves
     server invariant rather than something the caller sent wrong. What the case
     is really about is that the request is refused rather than served with its
     tool configuration silently dropped, and that the hold does not survive it.
-    `_resolve_mcp_server_ids` keeps its own guard on the same condition; it is
-    simply no longer the first to run.
     """
     settlement = _Settlement()
     settlement.install(monkeypatch)
@@ -1843,16 +1845,18 @@ async def test_unknown_mcp_server_id_releases_reservation(monkeypatch: pytest.Mo
     async def missing(scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
         raise WorkspaceMcpServerNotFoundError("11111111-1111-1111-1111-111111111111")
 
-
     ctx = _ctx(
         GatewayConfig(),
         db=cast(Any, object()),
         reservation=_reservation(),
         workspace_id=uuid.uuid4(),
-        mcp_servers=_Servers(missing),
     )
     with pytest.raises(HTTPException) as exc_info:
-        await _call_prepare_gateway_tools(ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")])
+        await _call_prepare_gateway_tools(
+            ctx,
+            mcp_server_port=_Servers(missing),
+            mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")],
+        )
 
     assert exc_info.value.status_code == 404
     assert settlement.refunded == 1
@@ -1889,17 +1893,16 @@ async def test_duplicate_mcp_server_name_against_a_stored_server_releases_reserv
     async def stored(scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
         return [McpServerConfig(name="tools", url="https://93.184.216.35/mcp")]
 
-
     ctx = _ctx(
         GatewayConfig(),
         db=cast(Any, object()),
         reservation=_reservation(),
         workspace_id=uuid.uuid4(),
-        mcp_servers=_Servers(stored),
     )
     with pytest.raises(HTTPException) as exc_info:
         await _call_prepare_gateway_tools(
             ctx,
+            mcp_server_port=_Servers(stored),
             mcp_servers=[McpServerConfig(name="tools", url="https://93.184.216.34/mcp")],
             mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")],
         )
@@ -1991,17 +1994,16 @@ async def test_stored_mcp_servers_sharing_a_name_are_an_operator_error(
             McpServerConfig(name="tools", url="https://93.184.216.35/mcp"),
         ]
 
-
     ctx = _ctx(
         GatewayConfig(),
         db=cast(Any, object()),
         reservation=_reservation(),
         workspace_id=uuid.uuid4(),
-        mcp_servers=_Servers(stored),
     )
     with pytest.raises(HTTPException) as exc_info:
         await _call_prepare_gateway_tools(
             ctx,
+            mcp_server_port=_Servers(stored),
             mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")],
         )
 
@@ -2033,10 +2035,13 @@ async def test_a_database_failure_releases_the_reservation(monkeypatch: pytest.M
         db=cast(Any, db),
         reservation=_reservation(),
         workspace_id=uuid.uuid4(),
-        mcp_servers=_Servers(failing),
     )
     with pytest.raises(SQLAlchemyError):
-        await _call_prepare_gateway_tools(ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")])
+        await _call_prepare_gateway_tools(
+            ctx,
+            mcp_server_port=_Servers(failing),
+            mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")],
+        )
 
     assert settlement.refunded == 1
     assert db.rollback.await_count == 1, "the session is rolled back first, or the release cannot run"
@@ -2063,10 +2068,13 @@ async def test_a_release_that_also_fails_reraises_the_original(monkeypatch: pyte
         db=cast(Any, db),
         reservation=_reservation(),
         workspace_id=uuid.uuid4(),
-        mcp_servers=_Servers(failing),
     )
     with pytest.raises(SQLAlchemyError, match="connection reset"):
-        await _call_prepare_gateway_tools(ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")])
+        await _call_prepare_gateway_tools(
+            ctx,
+            mcp_server_port=_Servers(failing),
+            mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")],
+        )
 
 
 @pytest.mark.asyncio

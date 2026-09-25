@@ -64,7 +64,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import extract_credential_token, get_container, verify_api_key_or_master_key
+from gateway.api.deps import extract_credential_token, verify_api_key_or_master_key
 from gateway.api.routes._attempts import walk_attempts
 from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
 from gateway.api.routes._platform import (
@@ -310,7 +310,6 @@ def record_inline_cost_settlement(outcome: str) -> None:
 DB_UNAVAILABLE_DETAIL = "Database session unavailable"
 API_KEY_VALIDATION_FAILED_DETAIL = "API key validation failed"
 API_KEY_NO_USER_DETAIL = "API key has no associated user"
-MCP_SERVER_IDS_UNAVAILABLE_DETAIL = "mcp_server_ids is unavailable for this request"
 MCP_SERVER_TOKEN_UNREADABLE_DETAIL = "A configured MCP server's authorization token could not be read"
 MCP_SERVER_URL_UNSAFE_DETAIL = "A configured MCP server's URL failed its safety check"
 MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL = (
@@ -932,7 +931,6 @@ class RequestContext:
         reservation: ReservationHandle | None,
         started_at: float,
         workspace_id: uuid.UUID | None = None,
-        mcp_servers: McpServerPort | None = None,
         resolved_provider: ResolvedProvider | None = None,
         plan: CompiledPlan | None = None,
         estimate_inputs: "EstimateInputs | None" = None,
@@ -970,7 +968,6 @@ class RequestContext:
         # so a request whose gate-check selector was unparseable still gets
         # organization-scoped provider keys on its real dispatch attempt.
         self.workspace_id = workspace_id
-        self.mcp_servers = mcp_servers
         self.rate_limit_info = rate_limit_info
         self.reservation = reservation
         # USD already written onto a failure row for gateway-run tool calls. A
@@ -1775,9 +1772,6 @@ async def resolve_request_context(
     # Earliest point in the shared handler preamble; anchors the request's
     # latency_ms (measured monotonically, so it is immune to wall-clock steps).
     started_at = time.monotonic()
-    # Before the reservation, so a container that cannot answer refuses without
-    # leaving a hold behind.
-    mcp_servers = get_container(raw_request).resolve(McpServerPort, db)
     hybrid_mode = config.is_hybrid_mode
     route: ResolvedRoute | None = None
     user_token: str | None = None
@@ -2225,7 +2219,6 @@ async def resolve_request_context(
         reservation=reservation,
         started_at=started_at,
         workspace_id=workspace_id,
-        mcp_servers=mcp_servers,
         resolved_provider=resolved_provider,
         plan=plan,
         estimate_inputs=estimate_inputs,
@@ -2723,6 +2716,7 @@ async def _resolve_organization_guardrails(
 async def _resolve_mcp_server_ids(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
+    mcp_server_port: McpServerPort,
     mcp_server_ids: list[uuid.UUID],
 ) -> list[McpServerConfig]:
     """Swap a request's ``mcp_server_ids`` for the configs they name.
@@ -2730,14 +2724,12 @@ async def _resolve_mcp_server_ids(
     The port answers from wherever this deployment keeps them.
     The workspace comes off the key at authentication and never off a header.
 
-    Every deployment refuses an unknown id with a 404, so the status a caller
+    Every deployment refuses an unknown ID with a 404, so the status a caller
     sees does not change with the deployment it reached.
     """
-    if ctx.mcp_servers is None:
-        raise adapter.error(400, MCP_SERVER_IDS_UNAVAILABLE_DETAIL, ErrorKind.INVALID_REQUEST)
     scope = McpServerScope(workspace_id=ctx.workspace_id, user_token=ctx.user_token)
     try:
-        return await ctx.mcp_servers.resolve_many(scope, mcp_server_ids)
+        return await mcp_server_port.resolve_many(scope, mcp_server_ids)
     except WorkspaceMcpServerNotFoundError as exc:
         raise adapter.error(404, exc.message, ErrorKind.NOT_FOUND) from exc
     except McpServerResolutionFailedError as exc:
@@ -2876,6 +2868,7 @@ async def prepare_gateway_tools(
     tools: list[dict[str, Any]] | None,
     mcp_servers: list[McpServerConfig] | None,
     mcp_server_ids: list[uuid.UUID] | None,
+    mcp_server_port: McpServerPort,
     max_tool_iterations: int | None,
     tools_header: str | None,
     code_execution_header: str | None = None,
@@ -2940,7 +2933,7 @@ async def prepare_gateway_tools(
                 inline_names.add(server.name)
             await _validate_mcp_server_urls(adapter, mcp_servers)
         if mcp_server_ids:
-            stored_servers = await _resolve_mcp_server_ids(adapter, ctx, mcp_server_ids)
+            stored_servers = await _resolve_mcp_server_ids(adapter, ctx, mcp_server_port, mcp_server_ids)
             await _validate_mcp_server_urls(
                 adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
             )
