@@ -147,8 +147,13 @@ class PathGate:
     enforcement: Enforcement
     runs: tuple[RunsAt, ...]
     forbidden: tuple[str, ...]
-    message: str
+    message: str = ""
     type: Literal["path"] = "path"
+
+    @property
+    def failure_message(self) -> str:
+        """This gate's own wording, or the generic line when it declares none."""
+        return self.message or "A path this gate forbids was matched."
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,8 +184,13 @@ class CommandGate:
     enforcement: Enforcement
     runs: tuple[RunsAt, ...]
     forbidden: tuple[str, ...]
-    message: str
+    message: str = ""
     type: Literal["command"] = "command"
+
+    @property
+    def failure_message(self) -> str:
+        """This gate's own wording, or the generic line when it declares none."""
+        return self.message or "A command this gate forbids was run."
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,8 +218,13 @@ class CommandIfChangedGate:
     runs: tuple[RunsAt, ...]
     when_changed: tuple[str, ...]
     require: tuple[str, ...]
-    message: str
+    message: str = ""
     type: Literal["command_if_changed"] = "command_if_changed"
+
+    @property
+    def failure_message(self) -> str:
+        """This gate's own wording, or the generic line when it declares none."""
+        return self.message or "A watched path changed without this gate's required command."
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,11 +286,22 @@ class JudgeGate:
     enforcement: Literal["advisory"]
     runs: tuple[RunsAt, ...]
     rubric: str
-    message: str
+    message: str = ""
     when_changed: tuple[str, ...] = ()
     judge_cli: tuple[str, ...] | None = None
     priority: int = 0
     type: Literal["judge"] = "judge"
+
+    @property
+    def failure_message(self) -> str:
+        """This gate's own wording, or the generic line when it declares none.
+
+        The rubric is not the fallback: it is written as an instruction to the
+        judging model ("Check whether this diff..."), which reads as a
+        non-sequitur to the person who tripped it. The model's own reasoning
+        arrives as `detail` and is the specific half anyway.
+        """
+        return self.message or "This turn did not meet this gate's rubric."
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,10 +347,15 @@ class VerifierGate:
     enforcement: Enforcement
     runs: tuple[RunsAt, ...]
     verifier: str
-    message: str
+    message: str = ""
     when_changed: tuple[str, ...] = ()
     priority: int = 0
     type: Literal["verifier"] = "verifier"
+
+    @property
+    def failure_message(self) -> str:
+        """This gate's own wording, or the generic line when it declares none."""
+        return self.message or "This gate's verifier reported a failure."
 
 
 # Extend this alias as a new gate type lands; do not let one skip it, or the

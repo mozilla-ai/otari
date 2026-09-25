@@ -44,7 +44,15 @@ several; both parse identically.
 - `policy.id`: a name for the policy, echoed back in the response.
 - `gates`: a non-empty list. Every gate needs a unique `id` (at most
   `MAX_GATE_ID_LENGTH`, 200 characters), a `type`, an `enforcement` (`required` blocks; `advisory` only
-  warns), a `runs` list (see [When a gate runs](#when-a-gate-runs-runs)), and a `message` shown on failure.
+  warns), and a `runs` list (see [When a gate runs](#when-a-gate-runs-runs)).
+- `message` is optional, and shown on failure ahead of the specifics. Each gate
+  type falls back to a line of its own (`A path this gate forbids was matched.`),
+  so write one where it says something the gate's other fields do not: the
+  mitigation to apply instead, or the doc section the rule came from. On a
+  `judge` gate that usually means leaving it out, because the `rubric` already
+  states the rule and the model's own reasoning supplies the specifics; a
+  message that adds the mitigation rather than restating the rubric still earns
+  its place (see `no-narrative-comments` above).
 
 Parsing is strict on purpose: duplicate keys, unknown fields, and an
 unsupported `schema_version` or gate `type` all fail loudly rather than
@@ -413,7 +421,6 @@ suppresses a warning, never a block.
     runs: [stop.session]
     enforcement: advisory
     rubric: Does this change follow the repository's error-handling conventions?
-    message: This change may not follow the error-handling conventions; take a look.
 ```
 
 `when_changed` is optional, the same repo-relative POSIX glob grammar
@@ -433,7 +440,6 @@ evidence it already collected for `path` gates.
     enforcement: advisory
     rubric: Does this change follow the repository's error-handling conventions?
     when_changed: ["src/**"]
-    message: This change may not follow the error-handling conventions; take a look.
 ```
 
 `judge_cli` is also optional: a string or ordered list naming which locally
@@ -458,7 +464,6 @@ shape.
     enforcement: advisory
     rubric: Does this change follow the repository's error-handling conventions?
     judge_cli: [claude, codex]
-    message: This change may not follow the error-handling conventions; take a look.
 ```
 
 The evaluator never calls a model itself, the same way it never reads the

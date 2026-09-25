@@ -637,7 +637,7 @@ def evaluate_command(
             gate_id=gate.id,
             enforcement=gate.enforcement,
             outcome=Outcome.FAIL,
-            message=gate.message,
+            message=gate.failure_message,
             detail=", ".join(matched),
         )
     return GateResult(
@@ -730,7 +730,7 @@ def evaluate_command_if_changed(
             gate_id=gate.id,
             enforcement=gate.enforcement,
             outcome=Outcome.FAIL,
-            message=gate.message,
+            message=gate.failure_message,
             detail=", ".join(matched_paths),
         )
 
@@ -758,7 +758,7 @@ def evaluate_command_if_changed(
         gate_id=gate.id,
         enforcement=gate.enforcement,
         outcome=Outcome.FAIL,
-        message=gate.message,
+        message=gate.failure_message,
         detail=", ".join(matched_paths),
     )
 
@@ -814,7 +814,7 @@ def evaluate_path(gate: PathGate, evidence: PathEvidence | None) -> GateResult:
             gate_id=gate.id,
             enforcement=gate.enforcement,
             outcome=Outcome.FAIL,
-            message=gate.message,
+            message=gate.failure_message,
             detail=", ".join(matched),
         )
     return GateResult(
@@ -913,7 +913,7 @@ def evaluate_judge(gate: JudgeGate, path_evidence: PathEvidence | None, evidence
             gate_id=gate.id,
             enforcement=gate.enforcement,
             outcome=Outcome.FAIL,
-            message=gate.message,
+            message=gate.failure_message,
             detail=verdict.reasoning or None,
         )
 
@@ -989,7 +989,7 @@ def evaluate_verifier(
             gate_id=gate.id,
             enforcement=gate.enforcement,
             outcome=Outcome.FAIL,
-            message=gate.message,
+            message=gate.failure_message,
             detail=verdict.detail or None,
         )
 

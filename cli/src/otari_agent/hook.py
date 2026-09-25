@@ -2593,9 +2593,14 @@ _GATES_GENERATE_MAX_PROPOSALS = 15
 _GATES_GENERATE_SCHEMA_REFERENCE = """A gate is one YAML mapping with these fields:
 
 Common to every gate: `id` (unique, short, kebab-case, at most 200 characters),
-`type`, `enforcement` (`required` or `advisory`), `message` (shown when it
-fails; should point back at the rule/section it came from), and `runs`, a
-non-empty list naming when the gate runs and what it can see there. Each gate
+`type`, `enforcement` (`required` or `advisory`), and `runs`, a
+non-empty list naming when the gate runs and what it can see there.
+
+`message` is optional and each gate type has a generic fallback, so propose one
+only where it says something the gate's own fields do not: the mitigation to
+apply instead ("use --force-with-lease"), or the doc section the rule came
+from. On a `judge` gate, propose one only if it names the mitigation; a message that
+restates the rubric sitting one field above it is the same sentence twice. Each gate
 type accepts only certain `runs` values, and there is no default:
 
 - path: `pre_tool_use.edit_target`, `pre_tool_use.read_target`, `stop.working_tree`, or any combination

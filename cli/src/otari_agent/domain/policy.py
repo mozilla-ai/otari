@@ -366,9 +366,15 @@ def _parse_gate(raw: Any) -> GateSpec:
     # type can't carry; cast documents that this narrowing is deliberate.
     enforcement_value = cast(Enforcement, enforcement)
 
-    message = raw.get("message")
-    if not isinstance(message, str) or not message:
-        raise PolicyError(f"Gate {gate_id!r} is missing a non-empty 'message'.")
+    # Optional: a gate's own fields already say what it checks, and each gate
+    # type derives a generic line from them (see `failure_message`), so
+    # demanding this only forced an author to restate the rule. It was worst on
+    # a judge gate, whose rubric states it at length one field above, which is
+    # why a generated one kept arriving without it.
+    message = raw.get("message", "")
+    if not isinstance(message, str):
+        raise PolicyError(f"Gate {gate_id!r}: 'message' must be a string.")
+    message = message.strip()
 
     # Parsed once here rather than per branch: every gate type carries it, and
     # the legal set is keyed on the already-validated gate_type.
