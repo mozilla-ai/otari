@@ -12474,6 +12474,12 @@
             "title": "Reencrypted",
             "type": "integer"
           },
+          "skipped": {
+            "default": 0,
+            "description": "Number of rows whose stored key changed between the read and the write, so the re-encryption was not applied. They already hold whoever wrote them last.",
+            "title": "Skipped",
+            "type": "integer"
+          },
           "unreadable": {
             "description": "Number of encrypted keys left untouched because they could not be decrypted.",
             "title": "Unreadable",
@@ -12493,6 +12499,12 @@
           "reencrypted": {
             "description": "Number of stored search-tool keys re-encrypted.",
             "title": "Reencrypted",
+            "type": "integer"
+          },
+          "skipped": {
+            "default": 0,
+            "description": "Number of rows whose stored key changed between the read and the write, so the re-encryption was not applied. They already hold whoever wrote them last.",
+            "title": "Skipped",
             "type": "integer"
           },
           "unreadable": {
