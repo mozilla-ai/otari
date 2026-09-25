@@ -35,10 +35,13 @@ from any_llm.types.messages import (
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from gateway.api.routes._tools import WEB_SEARCH_HEADER
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, MCP_CLIENT_BETA
 from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
+
+from .conftest import MODEL_NAME
 
 _CONTEXT_MANAGEMENT = {"edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]}
 _BETAS = ["compact-2026-01-12"]
@@ -1848,6 +1851,141 @@ def test_intercept_off_still_forwards_provider_keywords(
 
     assert resp.status_code == 200, resp.text
     assert [tool["type"] for tool in captured.get("tools") or []] == ["web_search_20250305"]
+
+
+def test_auto_claims_a_search_keyword_the_provider_cannot_run_with_native_blocks(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With `Otari-Web-Search: auto`, a dated keyword sent for a model whose provider
+    has no search runs on the gateway backend and still answers in Anthropic's blocks."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
+    seen: list[tuple[Any, frozenset[str]]] = []
+
+    async def fake_loop(
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
+    ) -> MessageResponse:
+        seen.append((pool, native_tools))
+        return _text_response("ok")
+
+    fake_backend = AsyncMock()
+    fake_backend.purpose_hints = lambda: []
+    fake_builder_result = AsyncMock(
+        __aenter__=AsyncMock(return_value=fake_backend),
+        __aexit__=AsyncMock(return_value=None),
+    )
+    with (
+        patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
+        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 2}],
+            },
+            headers={**api_key_header, WEB_SEARCH_HEADER: "auto"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert seen == [(fake_backend, frozenset({WEB_SEARCH_TOOL_NAME}))]
+
+
+@pytest.mark.parametrize(
+    ("backend_url", "header"),
+    [(None, "auto"), ("http://127.0.0.1:9999/search", None)],
+    ids=["auto-without-a-backend", "backend-without-the-header"],
+)
+def test_a_search_keyword_the_provider_cannot_run_is_forwarded(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    backend_url: str | None,
+    header: str | None,
+) -> None:
+    """With nothing to run it on, or no header asking for `auto`, the keyword passes
+    through as it always has."""
+    if backend_url is None:
+        monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    else:
+        monkeypatch.setenv("OTARI_WEB_SEARCH_URL", backend_url)
+    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _text_response("ok")
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [{"type": "web_search_20250305"}],
+            },
+            headers={**api_key_header, **({WEB_SEARCH_HEADER: header} if header else {})},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert [tool["type"] for tool in captured.get("tools") or []] == ["web_search_20250305"]
+
+
+def test_an_unknown_web_search_header_value_is_rejected(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    resp = client.post(
+        f"{API_ROOT}/messages",
+        json={
+            "model": MODEL_NAME,
+            "messages": [{"role": "user", "content": "search"}],
+            "max_tokens": 100,
+            "tools": [{"type": "web_search_20250305"}],
+        },
+        headers={**api_key_header, WEB_SEARCH_HEADER: "gateway"},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "Otari-Web-Search must be one of auto, otari, provider" in resp.text
+
+
+def test_the_header_cannot_hand_an_intercepted_search_to_the_provider(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interception puts every search under the workspace policy and tool pricing,
+    so `Otari-Web-Search: provider` is refused rather than letting a caller opt out."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
+    forwarded = AsyncMock()
+
+    with patch("gateway.api.routes.messages.amessages", new=forwarded):
+        resp = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [{"type": "web_search_20250305"}],
+            },
+            headers={**api_key_header, WEB_SEARCH_HEADER: "provider"},
+        )
+
+    assert resp.status_code == 403, resp.text
+    assert "cannot hand it to the provider" in resp.text
+    forwarded.assert_not_awaited()
 
 
 def test_intercept_without_a_backend_forwards_rather_than_400s(

@@ -49,7 +49,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost, build_attempt_client_args
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
-from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields
+from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
@@ -655,6 +655,7 @@ async def create_response(
         max_tool_iterations=request_body.max_tool_iterations,
         tools_header=request_body.tools_header,
         code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+        web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
         code_execution_port=code_execution_port,
         mcp_server_port=mcp_server_port,
         sandbox_containers=build_sandbox_container_registry(

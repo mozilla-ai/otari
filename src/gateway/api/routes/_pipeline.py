@@ -97,6 +97,7 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.api.routes._tools import (
     CODE_EXECUTION_HEADER,
+    WEB_SEARCH_HEADER,
     _build_web_retrieval_backend,
     _extract_code_execution_tool,
     _extract_web_fetch_tool,
@@ -104,13 +105,17 @@ from gateway.api.routes._tools import (
     _is_provider_web_search_tool_type,
     _resolve_sandbox_purpose_hint,
     _web_search_intercept_enabled,
+    claims_provider_web_search,
     decide_code_executor,
     declares_code_execution,
     first_provider_code_execution_tool,
+    first_provider_web_search_tool,
     native_code_execution_dialect,
     parse_code_execution_header,
+    parse_web_search_header,
     provider_runs_code_natively,
     resolve_code_executor_preference,
+    web_search_header_conflicts,
     web_search_max_results_baseline,
 )
 from gateway.core.config import ATTEMPT_ID_HEADER, REQUEST_ID_HEADER, GatewayConfig
@@ -345,6 +350,11 @@ CODE_EXECUTOR_NOT_CONFIGURED_DETAIL = (
     "Set OTARI_SANDBOX_URL on the gateway, or let the provider run it."
 )
 CODE_EXECUTION_HEADER_INVALID_DETAIL = f"{CODE_EXECUTION_HEADER} must be one of auto, otari, provider"
+WEB_SEARCH_HEADER_INVALID_DETAIL = f"{WEB_SEARCH_HEADER} must be one of auto, otari, provider"
+WEB_SEARCH_INTERCEPTED_DETAIL = (
+    f"this deployment runs every web search on its own backend; the {WEB_SEARCH_HEADER} "
+    "header cannot hand it to the provider"
+)
 CODE_EXECUTOR_PINNED_DETAIL = (
     f"this workspace's code-execution policy decides who runs code; the {CODE_EXECUTION_HEADER} "
     "header cannot choose otherwise"
@@ -2872,6 +2882,7 @@ async def prepare_gateway_tools(
     max_tool_iterations: int | None,
     tools_header: str | None,
     code_execution_header: str | None = None,
+    web_search_header: str | None = None,
     sandbox_files: SandboxFileBridge | None = None,
     code_execution_port: CodeExecutionPort | None = None,
     container_id: str | None = None,
@@ -2895,11 +2906,31 @@ async def prepare_gateway_tools(
     reservation taken by :func:`resolve_request_context` before propagating.
     """
     try:
-        intercept_web_search = _web_search_intercept_enabled(ctx.config) and ctx.config.web_search_configured()
+        try:
+            requested_web_search = parse_web_search_header(web_search_header)
+        except ValueError:
+            raise adapter.error(400, WEB_SEARCH_HEADER_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from None
+        provider_search_entry = first_provider_web_search_tool(tools)
+        intercept_web_search = _web_search_intercept_enabled(ctx.config)
+        backend_configured = ctx.config.web_search_configured()
+        if (
+            provider_search_entry is not None
+            and backend_configured
+            and web_search_header_conflicts(requested_web_search, intercept=intercept_web_search)
+        ):
+            raise adapter.error(403, WEB_SEARCH_INTERCEPTED_DETAIL, ErrorKind.PERMISSION)
+        claim_web_search = claims_provider_web_search(
+            provider_search_entry,
+            requested=requested_web_search,
+            intercept=intercept_web_search,
+            backend_configured=backend_configured,
+            providers=_candidate_provider_names(ctx),
+            dialect=adapter.name,
+        )
         _validate_managed_web_declarations(
             adapter,
             tools,
-            intercept_web_search=intercept_web_search,
+            intercept_web_search=claim_web_search,
         )
 
         # The organization's and the policy's guardrails are merged in here
@@ -3192,14 +3223,12 @@ async def prepare_gateway_tools(
                 raise adapter.error(400, CONTAINER_NOT_GATEWAY_RUN_DETAIL, ErrorKind.INVALID_REQUEST)
 
         web_search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
-        # Interception (claiming the provider-named web_search keywords) is opt-in and
-        # additionally requires a backend: without one there is nothing to intercept
-        # *to*, and claiming the keyword would turn a request the provider would have
-        # served into a 400. So with no backend configured, or the toggle off, a
-        # provider-named keyword passes through exactly as it always has.
+        # A provider-named keyword is claimed only with a backend to run it on, and
+        # then as the request's header or the deployment's interception toggle says
+        # (see `claims_provider_web_search`). Otherwise it passes through.
         web_search_tool_entry, tools_after_search = _extract_web_search_tool(
             tools_after_sandbox,
-            intercept=intercept_web_search,
+            intercept=claim_web_search,
         )
         try:
             _read_web_search_max_uses(web_search_tool_entry)
@@ -3415,6 +3444,19 @@ def _dispatch_provider_name(ctx: RequestContext) -> str | None:
     if ctx.route is not None and ctx.route.attempts:
         return ctx.route.attempts[0].provider
     return None
+
+
+def _candidate_provider_names(ctx: RequestContext) -> list[str | None]:
+    """The any-llm provider of every candidate the request may dispatch to, head first.
+
+    A standalone routing plan's attempts or the platform's, which the dispatch
+    walks on failure; otherwise just :func:`_dispatch_provider_name`.
+    """
+    if ctx.plan is not None and len(ctx.plan.attempts) > 1:
+        return [attempt.provider.value for attempt in ctx.plan.attempts]
+    if ctx.route is not None and len(ctx.route.attempts) > 1:
+        return [attempt.provider for attempt in ctx.route.attempts]
+    return [_dispatch_provider_name(ctx)]
 
 
 async def _standalone_code_execution_policy(
