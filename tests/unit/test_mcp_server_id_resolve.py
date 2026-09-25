@@ -14,9 +14,15 @@ from conftest import InstallControlPlane
 from gateway.adapters.mcp_server_adapter import RemoteMcpServers
 from gateway.api.routes.messages import _ensure_anthropic_error
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
+from gateway.exceptions.tools_exceptions import McpServerResolutionFailedError
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.ports.mcp_server_port import McpServerScope
 from gateway.services.tenancy.workspace_mcp_server_service import MAX_MCP_SERVERS_PER_WORKSPACE
+
+
+def _scope(user_token: str = "tk_user") -> McpServerScope:
+    """The scope a hybrid caller supplies, which carries a token and no workspace."""
+    return McpServerScope(workspace_id=None, user_token=user_token)
 
 
 def _config(*, base_url: str | None = "https://platform.local") -> Any:
@@ -53,7 +59,7 @@ async def test_repeated_ids_are_sent_once_in_request_order(
 
     first = uuid.UUID("11111111-1111-1111-1111-111111111111")
     second = uuid.UUID("22222222-2222-2222-2222-222222222222")
-    await RemoteMcpServers(_config()).resolve_many(McpServerScope(user_token="tk_user"), [first, second, first])
+    await RemoteMcpServers(_config()).resolve_many(_scope(), [first, second, first])
 
     assert captured["body"]["mcp_server_ids"] == [str(first), str(second)]
 
@@ -86,7 +92,7 @@ async def test_resolve_returns_configs(
     control_plane_transport(fake_post)
 
     ids = [uuid.UUID("11111111-1111-1111-1111-111111111111")]
-    out = await RemoteMcpServers(_config()).resolve_many(McpServerScope(user_token="tk_user"), ids)
+    out = await RemoteMcpServers(_config()).resolve_many(_scope(), ids)
 
     assert isinstance(out[0], McpServerConfig)
     assert out[0].name == "calendar"
@@ -108,7 +114,7 @@ async def test_resolve_empty_servers_returns_empty(
         return _ok_response([])
 
     control_plane_transport(fake_post)
-    out = await RemoteMcpServers(_config()).resolve_many(McpServerScope(user_token="tk"), [uuid.uuid4()])
+    out = await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert out == []
 
 
@@ -122,7 +128,7 @@ async def test_resolve_404_passes_through(
     control_plane_transport(fake_post)
 
     with pytest.raises(ControlPlaneError) as ei:
-        await RemoteMcpServers(_config()).resolve_many(McpServerScope(user_token="tk"), [uuid.uuid4()])
+        await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 404
     assert ei.value.message == "MCPServer not found"
 
@@ -142,7 +148,7 @@ async def test_resolve_5xx_maps_to_502(
     control_plane_transport(fake_post)
 
     with pytest.raises(ControlPlaneError) as ei:
-        await RemoteMcpServers(_config()).resolve_many(McpServerScope(user_token="tk"), [uuid.uuid4()])
+        await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 502
 
 
@@ -156,14 +162,14 @@ async def test_resolve_network_error_maps_to_502(
     control_plane_transport(fake_post)
 
     with pytest.raises(ControlPlaneError) as ei:
-        await RemoteMcpServers(_config()).resolve_many(McpServerScope(user_token="tk"), [uuid.uuid4()])
+        await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 502
 
 
 @pytest.mark.asyncio
 async def test_resolve_misconfigured_platform_500() -> None:
     with pytest.raises(ControlPlaneError) as ei:
-        await RemoteMcpServers(_config(base_url=None)).resolve_many(McpServerScope(user_token="tk"), [uuid.uuid4()])
+        await RemoteMcpServers(_config(base_url=None)).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 500
 
 
@@ -180,7 +186,7 @@ async def test_resolve_429_passthrough_with_retry_after(
     control_plane_transport(fake_post)
 
     with pytest.raises(ControlPlaneRefusedError) as ei:
-        await RemoteMcpServers(_config()).resolve_many(McpServerScope(user_token="tk"), [uuid.uuid4()])
+        await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 429
     assert ei.value.retry_after == "30"
     assert ei.value.message == "slow down"
@@ -199,7 +205,7 @@ async def test_resolve_402_passthrough(
     control_plane_transport(fake_post)
 
     with pytest.raises(ControlPlaneError) as ei:
-        await RemoteMcpServers(_config()).resolve_many(McpServerScope(user_token="tk"), [uuid.uuid4()])
+        await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 402
     assert ei.value.message == "quota exhausted"
 
@@ -218,7 +224,7 @@ async def test_resolve_422_collapses_to_502(
     control_plane_transport(fake_post)
 
     with pytest.raises(ControlPlaneError) as ei:
-        await RemoteMcpServers(_config()).resolve_many(McpServerScope(user_token="tk"), [uuid.uuid4()])
+        await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
     assert ei.value.status_code == 502
 
 
@@ -232,3 +238,53 @@ def test_the_request_bound_admits_every_server_a_workspace_can_hold() -> None:
     nothing pointing at the cause.
     """
     assert MAX_MCP_SERVER_IDS >= MAX_MCP_SERVERS_PER_WORKSPACE
+
+
+@pytest.mark.asyncio
+async def test_an_answer_omitting_servers_resolves_to_none(
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    """A peer that names no servers at all is served, not refused."""
+
+    async def fake_post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> Any:
+        return httpx.Response(200, json={})
+
+    control_plane_transport(fake_post)
+
+    out = await RemoteMcpServers(_config()).resolve_many(
+        _scope("tk"), [uuid.uuid4()]
+    )
+
+    assert out == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param([], id="the answer is not an object"),
+        pytest.param({"servers": None}, id="servers is null"),
+        pytest.param({"servers": {"a": 1}}, id="servers is an object"),
+        pytest.param({"servers": "none"}, id="servers is a string"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_an_unreadable_answer_is_a_resolution_failure(
+    payload: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    """An unreadable answer never resolves to no servers.
+
+    Resolving it to none would serve a request that named stored servers without any of them, and bill it.
+    """
+
+    async def fake_post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> Any:
+        return httpx.Response(200, json=payload)
+
+    control_plane_transport(fake_post)
+
+    with pytest.raises(McpServerResolutionFailedError):
+        await RemoteMcpServers(_config()).resolve_many(
+            _scope("tk"), [uuid.uuid4()]
+        )

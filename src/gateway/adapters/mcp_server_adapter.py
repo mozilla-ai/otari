@@ -53,10 +53,10 @@ class RemoteMcpServers(McpServerPort):
         self._config = config
 
     async def _ask(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[Any] | None:
-        """The ``servers`` entry of the peer's answer.
+        """The peer's ``servers`` list, or ``None`` where its answer omits the key.
 
-        Ids are de-duplicated with their order kept, because the protocol does not
-        say what the peer answers for a repeated id.
+        IDs are de-duplicated with their order kept, because the protocol does not define a repeated ID.
+        An unreadable answer is refused, so a malformed ``servers`` value never reads as an absent one.
         """
         if not scope.user_token:
             raise McpServerResolutionFailedError
@@ -66,12 +66,18 @@ class RemoteMcpServers(McpServerPort):
             endpoint=ResolveEndpoint.MCP_SERVERS,
             body={"mcp_server_ids": [str(uid) for uid in dict.fromkeys(server_ids)]},
         )
-        servers = payload.get("servers") if isinstance(payload, dict) else None
-        return servers if isinstance(servers, list) else None
+        if not isinstance(payload, dict):
+            raise McpServerResolutionFailedError
+        if "servers" not in payload:
+            return None
+        servers = payload["servers"]
+        if not isinstance(servers, list):
+            raise McpServerResolutionFailedError
+        return servers
 
     async def resolve_many(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
-        # An answer naming no servers resolves to none rather than refusing, which
-        # is the contract this side has always had.
+        # An answer omitting the key resolves to no servers rather than refusing,
+        # which is the contract this side has always had.
         entries = await self._ask(scope, server_ids) or []
         try:
             return [
