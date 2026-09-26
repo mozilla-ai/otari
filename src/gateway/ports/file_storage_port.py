@@ -51,9 +51,10 @@ class FileStoragePort(Protocol):
 
         No size ceiling of its own: the cap belongs to whoever produces
         ``chunks``, and this stores whatever it is given.
-        An adapter makes a best-effort attempt to remove what a failed or
-        abandoned stream wrote, because no ref comes back for a caller to clean
-        up with. A caller must not assume nothing landed.
+        An adapter writes to a temporary object and publishes it only after the
+        source is fully consumed. If the source or write fails, or the task is
+        cancelled before publication, the adapter removes the temporary object
+        and leaves no object under the requested file id.
         """
         ...
 

@@ -207,6 +207,26 @@ async def test_put_stream_removes_orphaned_upload_when_cancelled_after_success(
     assert listing.get("KeyCount", 0) == 0
 
 
+@pytest.mark.asyncio
+async def test_put_stream_removes_object_when_upload_reports_failure_after_commit(
+    s3_store: S3FileStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = s3_store._client  # noqa: SLF001 - simulate a lost response after the server commits
+    original_upload_fileobj = client.upload_fileobj
+
+    def _commit_then_fail(fileobj: IO[bytes], bucket: str, key: str) -> None:
+        original_upload_fileobj(fileobj, bucket, key)
+        raise RuntimeError("response lost after commit")
+
+    monkeypatch.setattr(client, "upload_fileobj", _commit_then_fail)
+
+    with pytest.raises(RuntimeError, match="response lost after commit"):
+        await s3_store.put_stream("file-postcommitfailure01", _iter([b"data"]))
+
+    listing = await asyncio.to_thread(client.list_objects_v2, Bucket=_BUCKET)
+    assert listing.get("KeyCount", 0) == 0
+
+
 def test_missing_boto3_names_the_extra_to_install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "boto3", None)
 

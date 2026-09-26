@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any, Callable, TypeVar
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -33,6 +34,28 @@ _STREAM_CHUNK_BYTES = 1024 * 1024
 # is a per-upload budget, not a global one: N concurrent put_stream calls can
 # hold up to N * this many bytes in memory before any of them spill to disk.
 _SPOOL_MAX_MEMORY_BYTES = 10 * 1024 * 1024
+_T = TypeVar("_T")
+
+
+async def _run_blocking(operation: Callable[[], _T]) -> _T:
+    """Finish a storage operation before propagating task cancellation."""
+    task = asyncio.create_task(asyncio.to_thread(operation))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except BaseException:
+                break
+        if task.done() and not task.cancelled():
+            try:
+                task.result()
+            except BaseException:
+                pass
+        raise
 
 
 def _shard_key(file_id: str) -> str:
@@ -76,6 +99,7 @@ class LocalDirFileStore:
 
     def __init__(self, root: str) -> None:
         self._root = Path(root)
+        self._publication_lock = asyncio.Lock()
 
     def _resolve(self, storage_ref: str) -> Path:
         """Resolve ``storage_ref`` under the root, rejecting any escape.
@@ -109,34 +133,68 @@ class LocalDirFileStore:
     async def put_stream(self, file_id: str, chunks: AsyncIterator[bytes]) -> tuple[str, int]:
         ref = _shard_key(file_id)
         path = self._resolve(ref)
+        temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
 
         def _mkparent() -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
 
         def _unlink_partial() -> None:
+            temporary_path.unlink(missing_ok=True)
+
+        def _unlink_published() -> None:
             path.unlink(missing_ok=True)
+
+        publication_succeeded = False
+        publication_lock_acquired = False
+
+        def _publish() -> None:
+            nonlocal publication_succeeded
+            temporary_path.replace(path)
+            publication_succeeded = True
 
         await asyncio.to_thread(_mkparent)
         total = 0
+        opened_handles: list[IO[bytes]] = []
+
+        def _open() -> None:
+            opened_handles.append(temporary_path.open("xb"))
+
+        handle: IO[bytes] | None = None
+        handle_closed = False
         try:
-            async with _open_handle(path, "wb") as handle:
-                async for chunk in chunks:
-                    total += len(chunk)
-                    await asyncio.to_thread(handle.write, chunk)
+            await _run_blocking(_open)
+            handle = opened_handles[0]
+            write_chunk = handle.write
+            async for chunk in chunks:
+                total += len(chunk)
+                await _run_blocking(lambda: write_chunk(chunk))
+            await _run_blocking(handle.close)
+            handle_closed = True
+            handle = None
+            await self._publication_lock.acquire()
+            publication_lock_acquired = True
+            await _run_blocking(_publish)
         except BaseException:
-            # The chunk source (e.g. the files service's size cap, or a client
-            # disconnect) failed partway through; don't leave a truncated blob
-            # with no storage_ref pointing at it, since the caller never gets a
-            # ref back to clean it up. BaseException includes CancelledError,
-            # so this cleanup itself runs inside an already-cancelling task;
-            # shield it so a repeated cancel() can't cut it off before the
-            # unlink completes, and don't let a cleanup failure mask the
-            # original error.
+            if handle is None and opened_handles:
+                handle = opened_handles[0]
+            if handle is not None and not handle_closed:
+                try:
+                    await _run_blocking(handle.close)
+                except Exception as close_exc:
+                    logger.warning("put_stream: failed to close temporary blob %s: %s", ref, close_exc)
+            if publication_succeeded:
+                try:
+                    await _run_blocking(_unlink_published)
+                except Exception as cleanup_exc:
+                    logger.warning("put_stream: failed to remove published blob %s: %s", ref, cleanup_exc)
             try:
-                await asyncio.shield(asyncio.to_thread(_unlink_partial))
+                await _run_blocking(_unlink_partial)
             except Exception as cleanup_exc:
-                logger.warning("put_stream: failed to remove partial blob %s: %s", ref, cleanup_exc)
+                logger.warning("put_stream: failed to remove temporary blob %s: %s", ref, cleanup_exc)
             raise
+        finally:
+            if publication_lock_acquired:
+                self._publication_lock.release()
         return ref, total
 
     async def get_stream(self, storage_ref: str) -> AsyncGenerator[bytes, None]:
@@ -251,57 +309,26 @@ class S3FileStore:
         key = _shard_key(file_id)
         total = 0
         spool: IO[bytes] = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_MEMORY_BYTES)
-        upload_task: asyncio.Task[None] | None = None
         try:
+            async for chunk in chunks:
+                total += len(chunk)
+                await _run_blocking(lambda: spool.write(chunk))
+            await _run_blocking(lambda: spool.seek(0))
             try:
-                async for chunk in chunks:
-                    total += len(chunk)
-                    await asyncio.to_thread(spool.write, chunk)
-                await asyncio.to_thread(spool.seek, 0)
-                # upload_fileobj runs in a worker thread and, once started,
-                # keeps running there even if *we* get cancelled while
-                # awaiting it: to_thread's cancellation only detaches us from
-                # waiting, it does not stop the thread. Wrapping it in a real
-                # Task lets us find out what actually happened even after
-                # being cancelled, instead of assuming "cancelled" means
-                # "nothing was uploaded".
-                upload_task = asyncio.create_task(
-                    asyncio.to_thread(self._client.upload_fileobj, spool, self._bucket, key)
-                )
-                # upload_fileobj manages multipart upload internally,
-                # including aborting an incomplete multipart upload if it
-                # fails partway, so no manual abort_multipart_upload is
-                # needed here.
-                await asyncio.shield(upload_task)
+                # _run_blocking waits for the transfer thread to settle even
+                # when this task is cancelled, so cleanup cannot race upload.
+                await _run_blocking(lambda: self._client.upload_fileobj(spool, self._bucket, key))
             except BaseException:
-                if upload_task is not None:
-                    try:
-                        # Our await above may have been cancelled while the
-                        # upload was still running in its thread; shield
-                        # keeps upload_task itself uncancelled, so wait for
-                        # it to actually settle and see how it really
-                        # turned out.
-                        await asyncio.shield(upload_task)
-                    except Exception:
-                        pass  # the upload itself failed; s3transfer already aborts multipart on its own failure
-                    else:
-                        # It finished successfully despite the cancellation:
-                        # the object really landed in S3 with nothing that
-                        # will ever reference or clean it up, so remove it
-                        # ourselves.
-                        try:
-                            await asyncio.shield(
-                                asyncio.to_thread(self._client.delete_object, Bucket=self._bucket, Key=key)
-                            )
-                        except Exception as cleanup_exc:
-                            logger.warning("put_stream: failed to remove orphaned upload %s: %s", key, cleanup_exc)
+                try:
+                    # A transfer can fail after the server accepted the
+                    # object but before the client received confirmation.
+                    await _run_blocking(lambda: self._client.delete_object(Bucket=self._bucket, Key=key))
+                except Exception as cleanup_exc:
+                    logger.warning("put_stream: failed to remove orphaned upload %s: %s", key, cleanup_exc)
                 raise
         finally:
-            # Shielded like _open_handle: this runs during unwind on a
-            # cancelled upload too, and an unshielded await here could be cut
-            # off by a repeated cancel() before the spool file actually closes.
             try:
-                await asyncio.shield(asyncio.to_thread(spool.close))
+                await _run_blocking(spool.close)
             except Exception as cleanup_exc:
                 logger.warning("put_stream: failed to close spool file for %s: %s", key, cleanup_exc)
         return key, total
@@ -412,38 +439,55 @@ class FsspecFileStore:
     async def put_stream(self, file_id: str, chunks: AsyncIterator[bytes]) -> tuple[str, int]:
         ref = _shard_key(file_id)
         path = self._resolve(ref)
+        temporary_path = self._resolve(f"{ref}.partial-{uuid.uuid4().hex}")
         total = 0
+        opened_handles: list[IO[bytes]] = []
 
-        def _open() -> IO[bytes]:
-            self._mkparent(path)
-            handle: IO[bytes] = self._fs.open(path, "wb")
-            return handle
+        def _open() -> None:
+            self._mkparent(temporary_path)
+            opened_handles.append(self._fs.open(temporary_path, "wb"))
+
+        publication_attempted = False
 
         def _discard_partial() -> None:
-            try:
-                self._fs.rm(path)
-            except FileNotFoundError:
-                pass
+            candidates = (temporary_path, path) if publication_attempted else (temporary_path,)
+            for candidate in candidates:
+                try:
+                    self._fs.rm(candidate)
+                except FileNotFoundError:
+                    pass
 
-        with _translate_fsspec_errors(ref):
-            handle = await asyncio.to_thread(_open)
+        handle: IO[bytes] | None = None
+        handle_closed = False
         try:
-            try:
-                async for chunk in chunks:
-                    total += len(chunk)
-                    with _translate_fsspec_errors(ref):
-                        await asyncio.to_thread(handle.write, chunk)
-            finally:
-                # Object-store handles upload on close, so the close is part of
-                # the write and its failure is a write failure. Shielded like the
-                # local backend's: this also runs while a cancellation unwinds.
+            with _translate_fsspec_errors(ref):
+                await _run_blocking(_open)
+                handle = opened_handles[0]
+            write_chunk = handle.write
+            async for chunk in chunks:
+                total += len(chunk)
                 with _translate_fsspec_errors(ref):
-                    await asyncio.shield(asyncio.to_thread(handle.close))
+                    await _run_blocking(lambda: write_chunk(chunk))
+            with _translate_fsspec_errors(ref):
+                await _run_blocking(handle.close)
+                handle_closed = True
+            handle = None
+            publication_attempted = True
+            with _translate_fsspec_errors(ref):
+                await _run_blocking(lambda: self._fs.mv(temporary_path, path))
         except BaseException:
+            if handle is None and opened_handles:
+                handle = opened_handles[0]
+            if handle is not None and not handle_closed:
+                try:
+                    with _translate_fsspec_errors(ref):
+                        await _run_blocking(handle.close)
+                except Exception as close_exc:  # noqa: BLE001
+                    logger.warning("put_stream: failed to close temporary blob %s: %s", ref, close_exc)
             try:
-                await asyncio.shield(asyncio.to_thread(_discard_partial))
+                await _run_blocking(_discard_partial)
             except Exception as cleanup_exc:  # noqa: BLE001
-                logger.warning("put_stream: failed to remove partial blob %s: %s", ref, cleanup_exc)
+                logger.warning("put_stream: failed to remove temporary blob %s: %s", ref, cleanup_exc)
             raise
         return ref, total
 
