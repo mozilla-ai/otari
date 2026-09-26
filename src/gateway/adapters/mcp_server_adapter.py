@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.core.deployment import Plane, deployment_for
-from gateway.exceptions.tools_exceptions import McpServerResolutionFailedError
+from gateway.exceptions.tools_exceptions import McpResolutionFailure, McpServerResolutionFailedError
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.services.control_plane import ResolveEndpoint, resolve
@@ -35,14 +35,14 @@ class LocalMcpServers(McpServerPort):
 
     async def resolve_many(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
         if scope.workspace_id is None:
-            raise McpServerResolutionFailedError
+            raise McpServerResolutionFailedError(McpResolutionFailure.NO_WORKSPACE)
         return await resolve_workspace_mcp_servers(
             self._session, workspace_id=scope.workspace_id, server_ids=server_ids
         )
 
     async def resolve_one(self, scope: McpServerScope, server_id: uuid.UUID) -> ResolvedMcpServer | None:
         if scope.workspace_id is None:
-            raise McpServerResolutionFailedError
+            raise McpServerResolutionFailedError(McpResolutionFailure.NO_WORKSPACE)
         return await resolve_workspace_mcp_server(self._session, workspace_id=scope.workspace_id, server_id=server_id)
 
 
@@ -59,7 +59,7 @@ class RemoteMcpServers(McpServerPort):
         An empty list resolves to no servers, and an answer omitting the key is refused.
         """
         if not scope.user_token:
-            raise McpServerResolutionFailedError
+            raise McpServerResolutionFailedError(McpResolutionFailure.NO_CALLER_CREDENTIAL)
         payload = await resolve(
             self._config,
             user_token=scope.user_token,
@@ -67,10 +67,10 @@ class RemoteMcpServers(McpServerPort):
             body={"mcp_server_ids": [str(uid) for uid in dict.fromkeys(server_ids)]},
         )
         if not isinstance(payload, dict):
-            raise McpServerResolutionFailedError
+            raise McpServerResolutionFailedError(McpResolutionFailure.ANSWER_NOT_AN_OBJECT)
         servers = payload.get("servers")
         if not isinstance(servers, list):
-            raise McpServerResolutionFailedError
+            raise McpServerResolutionFailedError(McpResolutionFailure.NO_SERVER_LIST)
         return servers
 
     async def resolve_many(self, scope: McpServerScope, server_ids: list[uuid.UUID]) -> list[McpServerConfig]:
@@ -89,7 +89,7 @@ class RemoteMcpServers(McpServerPort):
         except (ValidationError, KeyError, TypeError):
             # The underlying error quotes the answer, which carries the stored
             # URL and credential, so it reaches neither the caller nor the log.
-            raise McpServerResolutionFailedError from None
+            raise McpServerResolutionFailedError(McpResolutionFailure.ENTRY_UNREADABLE) from None
 
     async def resolve_one(self, scope: McpServerScope, server_id: uuid.UUID) -> ResolvedMcpServer | None:
         servers = await self._ask(scope, [server_id])
@@ -98,7 +98,7 @@ class RemoteMcpServers(McpServerPort):
             # Both mean the caller cannot reach it.
             return None
         if len(servers) != 1:
-            raise McpServerResolutionFailedError
+            raise McpServerResolutionFailedError(McpResolutionFailure.SEVERAL_ENTRIES)
 
         entry = servers[0]
         if isinstance(entry, dict):
@@ -110,9 +110,9 @@ class RemoteMcpServers(McpServerPort):
         except ValidationError:
             # The validation error quotes the answer, which carries the stored
             # URL and credential.
-            raise McpServerResolutionFailedError from None
+            raise McpServerResolutionFailedError(McpResolutionFailure.ENTRY_UNREADABLE) from None
         if resolved.id != server_id:
-            raise McpServerResolutionFailedError
+            raise McpServerResolutionFailedError(McpResolutionFailure.ID_MISMATCH)
         return resolved
 
 
