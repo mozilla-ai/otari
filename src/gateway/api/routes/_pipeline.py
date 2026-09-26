@@ -50,7 +50,7 @@ from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Proto
 from urllib.parse import ParseResult, urlparse
 
 from any_llm import LLMProvider
-from any_llm.exceptions import AnyLLMError, UnsupportedParameterError
+from any_llm.exceptions import AnyLLMError, InvalidRequestError, UnsupportedParameterError
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -662,6 +662,17 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     if (param := _rejected_param(exc)) is not None:
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _provider_rejected_param_detail(param))
     if status_code is None:
+        # A status-less InvalidRequestError means the provider (gemini, bedrock,
+        # anthropic) rejected the request shape before assigning an HTTP status.
+        # Mirror the UnsupportedParameterError / NotImplementedError branches: the
+        # exception type is the whole signal, and the provider's own message names
+        # what was wrong. Gated on the failure's own status rather than each
+        # link's, so a chain that does carry one (401, 429, 5xx) keeps its fixed
+        # detail instead of echoing the upstream text as a client 400.
+        if any(isinstance(candidate, InvalidRequestError) for candidate in upstream_exception_chain(exc)):
+            return ProviderErrorMapping(
+                status.HTTP_400_BAD_REQUEST, _upstream_message_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
+            )
         return None
     # Account billing exhaustion, which several providers report as a 400/422
     # rather than the 402 the condition deserves (and DeepSeek does report as a
