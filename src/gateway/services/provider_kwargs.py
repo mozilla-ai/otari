@@ -254,6 +254,17 @@ def get_provider_kwargs(
     else:
         _warn_undeclared_env_provider(config, provider)
 
+    # boto3 reads AWS_DEFAULT_REGION, while some AWS runtimes expose only AWS_REGION.
+    if provider == LLMProvider.BEDROCK:
+        region = (os.getenv("AWS_REGION") or "").strip()
+        default_region = (os.getenv("AWS_DEFAULT_REGION") or "").strip()
+        client_args = kwargs.get("client_args")
+        if region and not default_region:
+            if client_args is None:
+                kwargs["client_args"] = {"region_name": region}
+            elif isinstance(client_args, dict) and "region_name" not in client_args:
+                kwargs["client_args"] = {**client_args, "region_name": region}
+
     placeholder = keyless_placeholder_api_key(provider, kwargs.get("api_base"), kwargs.get("api_key"))
     if placeholder is not None:
         kwargs["api_key"] = placeholder

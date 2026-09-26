@@ -412,6 +412,52 @@ def test_get_provider_kwargs_strips_provider_type_and_models() -> None:
     assert kwargs == {"api_base": "http://x/v1", "api_key": "k"}
 
 
+def test_bedrock_uses_aws_region_when_default_region_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+
+    kwargs = get_provider_kwargs(GatewayConfig(), LLMProvider.BEDROCK)
+
+    assert kwargs["client_args"] == {"region_name": "us-east-1"}
+
+
+def test_bedrock_region_fallback_preserves_other_client_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    config = GatewayConfig(providers={"bedrock": {"client_args": {"retries": {"max_attempts": 2}}}})
+
+    kwargs = get_provider_kwargs(config, LLMProvider.BEDROCK)
+
+    assert kwargs["client_args"] == {
+        "retries": {"max_attempts": 2},
+        "region_name": "us-east-1",
+    }
+
+
+def test_bedrock_preserves_explicit_region_and_aws_default_region(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    explicit_config = GatewayConfig(providers={"bedrock": {"client_args": {"region_name": "ap-southeast-2"}}})
+
+    explicit_kwargs = get_provider_kwargs(explicit_config, LLMProvider.BEDROCK)
+
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+    default_config = GatewayConfig(providers={"bedrock": {"client_args": {"retries": {"max_attempts": 2}}}})
+    default_kwargs = get_provider_kwargs(default_config, LLMProvider.BEDROCK)
+
+    assert explicit_kwargs["client_args"] == {"region_name": "ap-southeast-2"}
+    assert default_kwargs["client_args"] == {"retries": {"max_attempts": 2}}
+
+
+def test_aws_region_fallback_is_limited_to_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+
+    kwargs = get_provider_kwargs(GatewayConfig(), LLMProvider.OPENAI)
+
+    assert "client_args" not in kwargs
+
+
 # ---------------------------------------------------------------------------
 # get_provider_kwargs: keyless custom-endpoint placeholder (mozilla-ai/otari#421)
 # ---------------------------------------------------------------------------
