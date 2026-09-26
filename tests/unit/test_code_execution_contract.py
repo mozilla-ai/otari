@@ -24,7 +24,7 @@ import pytest
 import yaml
 from jsonschema import Draft202012Validator
 
-from gateway.types.code_execution import ExecResponse, SessionHandle
+from gateway.types.code_execution import CodeExecutionResult, ExecResponse, SessionHandle
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DOC_PATH = _REPO_ROOT / "docs" / "code-execution-protocol.md"
@@ -230,6 +230,22 @@ def test_gateway_client_parses_the_spec_examples(spec: dict[str, Any]) -> None:
     parsed = ExecResponse.model_validate(schemas["ExecResponse"]["examples"][0])
     assert parsed.result_block.type == "code_execution_tool_result"
     assert [ref.filename for ref in parsed.result_block.content.content] == ["chart.png"]
+
+
+def test_a_content_entry_that_names_no_file_is_not_a_file_ref() -> None:
+    """An object naming no file is dropped, not validated into a blank reference."""
+    result = CodeExecutionResult.model_validate(
+        {
+            "stdout": "ok",
+            "content": [
+                {"type": "text", "text": "x = 1"},
+                {"file_id": None, "filename": ""},
+                {"type": "code_execution_output", "file_id": "f1"},
+                {"type": "code_execution_output", "filename": "chart.png"},
+            ],
+        }
+    )
+    assert [(ref.file_id, ref.filename) for ref in result.content] == [("f1", ""), ("", "chart.png")]
 
 
 def test_result_block_type_is_not_a_closed_enum(spec: dict[str, Any]) -> None:

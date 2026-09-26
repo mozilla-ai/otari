@@ -729,8 +729,13 @@ async def test_session_handle_violation_message_omits_the_payload(monkeypatch: p
         ),
         pytest.param(
             {"stdout": "ok", "return_code": 0, "content": [{"filename": None}, "bare-id"]},
-            "stdout:\nok\nfiles: ?",
+            "stdout:\nok",
             id="file-ref-unnameable",
+        ),
+        pytest.param(
+            {"stdout": "ok", "return_code": 0, "content": [{"type": "text", "text": "x = 1"}]},
+            "stdout:\nok",
+            id="non-file-block",
         ),
     ],
 )
