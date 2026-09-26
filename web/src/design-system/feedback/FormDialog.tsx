@@ -171,6 +171,14 @@ export function FormDialog({
           onOpenChange(true)
           return
         }
+        const active = document.activeElement
+        if (
+          active instanceof HTMLElement &&
+          active.getAttribute("role") === "combobox" &&
+          active.getAttribute("aria-expanded") === "true"
+        ) {
+          return
+        }
         requestClose()
       }}
     >

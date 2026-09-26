@@ -67,6 +67,13 @@ import {
 } from "@/shared/helpers/tableSelection"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import {
+  emptyExpiryParts,
+  expiryPartsFromIso,
+  expiryValue,
+  withExpiryDate,
+  withExpiryTime,
+} from "./expiry"
 import { KeyActionsMenu } from "./KeyActionsMenu"
 import { isVirtualUser, keyFingerprint, secretCaption } from "./secretCaption"
 
@@ -110,15 +117,6 @@ function isExpired(key: ApiKey): boolean {
   if (!key.expires_at) return false
   const t = new Date(key.expires_at).getTime()
   return !Number.isNaN(t) && t < Date.now()
-}
-
-// datetime-local wants "YYYY-MM-DDTHH:mm" in local time; build it from an ISO value.
-function toDatetimeLocal(iso: string | null): string {
-  if (!iso) return ""
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ""
-  const pad = (value: number) => String(value).padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 const label = (apiKey: ApiKey): string => apiKey.key_name ?? apiKey.id
@@ -430,7 +428,9 @@ function CreateKeyDialog({
   const { selected: workspace, isLoading: workspaceLoading } =
     useSelectedWorkspace()
   const [keyName, setKeyName] = useState("")
-  const [expiresAt, setExpiresAt] = useState("")
+  const [expiry, setExpiry] = useState(emptyExpiryParts)
+  const expiresAt = expiryValue(expiry)
+  const expiryValid = (!expiry.date && !expiry.time) || Boolean(expiresAt)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [userId, setUserId] = useState("")
   const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
@@ -468,7 +468,8 @@ function CreateKeyDialog({
   // caller belongs to that default, which is the answer this form surfaces
   // rather than pre-empting.
   const workspaceUnresolved = workspaceLoading
-  const isBlocked = !scopeValid || ownerMissing || workspaceUnresolved
+  const isBlocked =
+    !scopeValid || !expiryValid || ownerMissing || workspaceUnresolved
 
   // What the form owns, handed to the guard whole rather than compared field by
   // field: the two drifted apart once already, with the guard armed for three
@@ -482,6 +483,8 @@ function CreateKeyDialog({
   // the operator would lose.
   const { isDirty } = useDirtySnapshot({
     keyName,
+    expiryDate: expiry.date,
+    expiryTime: expiry.time,
     expiresAt,
     userId,
     allowedModels,
@@ -492,7 +495,7 @@ function CreateKeyDialog({
 
   const resetForm = () => {
     setKeyName("")
-    setExpiresAt("")
+    setExpiry(emptyExpiryParts())
     setShowAdvanced(false)
     setUserId("")
     setAllowedModels(undefined)
@@ -612,17 +615,28 @@ function CreateKeyDialog({
         shouldReserveMessage
       />
       <Field
-        label="Expires (optional)"
-        value={expiresAt}
-        onChange={setExpiresAt}
-        type="datetime-local"
+        label="Expiry date (optional)"
+        value={expiry.date}
+        onChange={(date) =>
+          setExpiry((current) => withExpiryDate(current, date))
+        }
+        type="date"
+        shouldReserveMessage={false}
+      />
+      <Field
+        label="Expiry time (local)"
+        value={expiry.time}
+        onChange={(time) =>
+          setExpiry((current) => withExpiryTime(current, time))
+        }
+        type="time"
         description={
           expiresInPast ? (
             <span className="text-danger">
               That time is in the past; the key would be rejected immediately.
             </span>
           ) : (
-            "Leave blank for a key that never expires."
+            "Leave both fields blank for a key that never expires."
           )
         }
         shouldReserveMessage
@@ -744,7 +758,11 @@ function EditKeyForm({
   // key and the note it feeds names other owners.
   const users = useUsers(isDeploymentWide)
   const [keyName, setKeyName] = useState(apiKey.key_name ?? "")
-  const [expiresAt, setExpiresAt] = useState(toDatetimeLocal(apiKey.expires_at))
+  const [expiry, setExpiry] = useState(() =>
+    expiryPartsFromIso(apiKey.expires_at),
+  )
+  const expiresAt = expiryValue(expiry)
+  const expiryValid = (!expiry.date && !expiry.time) || Boolean(expiresAt)
   const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
     apiKey.allowed_models ?? undefined,
   )
@@ -758,6 +776,8 @@ function EditKeyForm({
   const [scopeValid, setScopeValid] = useState(true)
   const { isDirty } = useDirtySnapshot({
     keyName,
+    expiryDate: expiry.date,
+    expiryTime: expiry.time,
     expiresAt,
     allowedModels,
     excludeFromBudget,
@@ -766,7 +786,7 @@ function EditKeyForm({
   })
 
   const submit = () => {
-    if (update.isPending || !scopeValid) return
+    if (update.isPending || !scopeValid || !expiryValid) return
     const shared = {
       key_name: keyName.trim() || null,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
@@ -793,7 +813,7 @@ function EditKeyForm({
       submitLabel="Save"
       onSubmit={submit}
       isPending={update.isPending}
-      isSubmitDisabled={!scopeValid}
+      isSubmitDisabled={!scopeValid || !expiryValid}
       isDirty={isDirty}
       error={update.error}
     >
@@ -806,11 +826,22 @@ function EditKeyForm({
         shouldReserveMessage={false}
       />
       <Field
-        label="Expires"
-        value={expiresAt}
-        onChange={setExpiresAt}
-        type="datetime-local"
-        description="Blank clears the expiry."
+        label="Expiry date"
+        value={expiry.date}
+        onChange={(date) =>
+          setExpiry((current) => withExpiryDate(current, date))
+        }
+        type="date"
+        shouldReserveMessage={false}
+      />
+      <Field
+        label="Expiry time (local)"
+        value={expiry.time}
+        onChange={(time) =>
+          setExpiry((current) => withExpiryTime(current, time))
+        }
+        type="time"
+        description="Leave both fields blank to clear the expiry."
         shouldReserveMessage
       />
       {isDeploymentWide && apiKey.user_id ? (

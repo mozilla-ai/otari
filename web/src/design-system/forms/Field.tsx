@@ -7,7 +7,7 @@ interface FieldProps {
   value: string
   onChange: (value: string) => void
   placeholder?: string
-  type?: "text" | "datetime-local"
+  type?: "text" | "date" | "time" | "datetime-local"
   isRequired?: boolean
   /** Renders the input read-only and dimmed. A caller that cannot write should
       say so on the field rather than only on the button that commits it. */

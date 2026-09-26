@@ -1,7 +1,9 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { useState } from "react"
 import { describe, expect, it, vi } from "vitest"
 
+import { ComboBoxField } from "@/design-system/forms/ComboBoxField"
 import { FormDialog } from "./FormDialog"
 
 const base = {
@@ -324,6 +326,38 @@ describe("FormDialog", () => {
   })
 
   describe("the dirty guard", () => {
+    it("closes an open combobox before guarding a dirty form on Escape", async () => {
+      const user = userEvent.setup()
+      const onOpenChange = vi.fn()
+      function DialogWithComboBox() {
+        const [value, setValue] = useState("")
+        return (
+          <FormDialog {...base} isOpen isDirty onOpenChange={onOpenChange}>
+            <ComboBoxField
+              label="Owner"
+              value={value}
+              onChange={setValue}
+              options={[{ value: "alice", label: "Alice" }]}
+            />
+          </FormDialog>
+        )
+      }
+
+      render(<DialogWithComboBox />)
+      const owner = screen.getByRole("combobox", { name: "Owner" })
+      await user.click(owner)
+      expect(await screen.findByRole("listbox")).toBeInTheDocument()
+
+      await user.keyboard("{Escape}")
+
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "Create key" }),
+      ).toBeInTheDocument()
+      expect(screen.queryByText("Unsaved changes")).toBeNull()
+      expect(onOpenChange).not.toHaveBeenCalled()
+    })
+
     it("holds the dialog open and swaps the footer instead of closing", async () => {
       const onOpenChange = vi.fn()
       const user = userEvent.setup()

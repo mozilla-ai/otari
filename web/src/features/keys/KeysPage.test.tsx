@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent, { type UserEvent } from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -849,6 +849,24 @@ describe("KeysPage", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("Unsaved changes")
   })
 
+  it("guards a partially filled expiry before closing the create dialog", async () => {
+    mockApi({ keys: [] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    fireEvent.change(await screen.findByLabelText("Expiry date (optional)"), {
+      target: { value: "2030-01-02" },
+    })
+
+    await user.keyboard("{Escape}")
+    expect(screen.getByRole("dialog")).toHaveTextContent("Unsaved changes")
+  })
+
   it("does not walk /v1/users until the create dialog is opened", async () => {
     // The dialog stays mounted while closed so it can animate out, which left
     // its owner picker's roster fetching on every visit to the page.
@@ -1020,8 +1038,326 @@ describe("KeysPage", () => {
     expect(JSON.parse(String(post?.[1]?.body)).allowed_models).toEqual([
       "openai:gpt-4o",
     ])
+    expect(JSON.parse(String(post?.[1]?.body)).expires_at).toBeNull()
     // User-first: the key names its owner rather than auto-creating a virtual user.
     expect(JSON.parse(String(post?.[1]?.body)).user_id).toBe("alice")
+  })
+
+  it("preserves the time when replacing a cleared expiry date", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.setSystemTime(new Date(2026, 8, 25, 14, 37))
+    try {
+      const fetchMock = mockApi({ keys: [] })
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      renderPage(<KeysPage />)
+
+      await screen.findByText("No API keys yet")
+      await user.click(
+        screen.getByRole("button", { name: "Create your first key" }),
+      )
+      await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+      await user.keyboard("{Escape}")
+
+      const date = screen.getByLabelText("Expiry date (optional)")
+      const time = screen.getByLabelText("Expiry time (local)")
+      expect(date).toHaveValue("")
+      expect(time).toHaveValue("")
+
+      fireEvent.change(date, { target: { value: "2030-11-04" } })
+      expect(time).toHaveValue("14:37")
+      fireEvent.change(time, { target: { value: "09:15" } })
+      expect(date).toHaveValue("2030-11-04")
+
+      fireEvent.change(date, { target: { value: "" } })
+      expect(date).toHaveValue("")
+      expect(time).toHaveValue("09:15")
+
+      fireEvent.change(date, { target: { value: "2030-12-01" } })
+      expect(time).toHaveValue("09:15")
+      await submitTheCreateDialog(user)
+
+      const post = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url).endsWith(`${API_ROOT}/keys`) &&
+          (init?.method ?? "") === "POST",
+      )
+      expect(JSON.parse(String(post?.[1]?.body)).expires_at).toBe(
+        new Date(2030, 11, 1, 9, 15).toISOString(),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  describe.each([true, false])(
+    "create expiry validation (deployment operator: %s)",
+    (deploymentOperator) => {
+      it.each([
+        { field: "date", recovery: "complete" },
+        { field: "time", recovery: "complete" },
+        { field: "date", recovery: "clear" },
+        { field: "time", recovery: "clear" },
+      ])(
+        "blocks a cleared $field until $recovery",
+        async ({ field, recovery }) => {
+          const fetchMock = mockApi({ keys: [], deploymentOperator })
+          const user = userEvent.setup()
+          renderPage(<KeysPage />)
+
+          await screen.findByText("No API keys yet")
+          await user.click(
+            screen.getByRole("button", { name: "Create your first key" }),
+          )
+          if (deploymentOperator) {
+            await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+            await user.click(screen.getByLabelText("Name"))
+          }
+
+          const dialog = await screen.findByRole("dialog", { name: "New key" })
+          const date = within(dialog).getByLabelText("Expiry date (optional)")
+          const time = within(dialog).getByLabelText("Expiry time (local)")
+          const submit = within(dialog).getByRole("button", {
+            name: "Create key",
+          })
+          fireEvent.change(date, { target: { value: "2030-11-04" } })
+          fireEvent.change(time, { target: { value: "09:15" } })
+          expect(submit).toBeEnabled()
+
+          const cleared = field === "date" ? date : time
+          const retained = field === "date" ? time : date
+          fireEvent.change(cleared, { target: { value: "" } })
+          expect(retained).toHaveValue(
+            field === "date" ? "09:15" : "2030-11-04",
+          )
+          expect(submit).toBeDisabled()
+          await user.click(submit)
+          // Submit the form directly too: disabling its button is not the guard.
+          const form = submit.closest("form")
+          if (!form) throw new Error("Create key button must belong to a form")
+          fireEvent.submit(form)
+          expect(
+            fetchMock.mock.calls.some(
+              ([url, init]) =>
+                KEYS_URL.test(String(url)) && init?.method === "POST",
+            ),
+          ).toBe(false)
+
+          if (recovery === "complete") {
+            fireEvent.change(cleared, {
+              target: { value: field === "date" ? "2030-11-04" : "09:15" },
+            })
+          } else {
+            fireEvent.change(retained, { target: { value: "" } })
+          }
+          expect(submit).toBeEnabled()
+          await submitTheCreateDialog(user)
+          const posts = fetchMock.mock.calls.filter(
+            ([url, init]) =>
+              KEYS_URL.test(String(url)) && init?.method === "POST",
+          )
+          expect(posts).toHaveLength(1)
+          expect(String(posts[0][0])).toBe(
+            `${API_ROOT}/${deploymentOperator ? "keys" : "organizations/me/keys"}`,
+          )
+          expect(JSON.parse(String(posts[0][1]?.body)).expires_at).toBe(
+            recovery === "complete"
+              ? new Date(2030, 10, 4, 9, 15).toISOString()
+              : null,
+          )
+        },
+      )
+    },
+  )
+
+  it("defaults today's expiry date to the next local minute", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.setSystemTime(new Date(2026, 8, 25, 14, 37, 40))
+    try {
+      const fetchMock = mockApi({ keys: [] })
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      renderPage(<KeysPage />)
+
+      await screen.findByText("No API keys yet")
+      await user.click(
+        screen.getByRole("button", { name: "Create your first key" }),
+      )
+      await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+      await user.keyboard("{Escape}")
+
+      const date = screen.getByLabelText("Expiry date (optional)")
+      const time = screen.getByLabelText("Expiry time (local)")
+      fireEvent.change(date, { target: { value: "2026-09-25" } })
+
+      expect(time).toHaveValue("14:38")
+      await submitTheCreateDialog(user)
+
+      const post = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url).endsWith(`${API_ROOT}/keys`) &&
+          (init?.method ?? "") === "POST",
+      )
+      expect(JSON.parse(String(post?.[1]?.body)).expires_at).toBe(
+        new Date(2026, 8, 25, 14, 38).toISOString(),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("advances today's expiry date when the next minute crosses midnight", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.setSystemTime(new Date(2026, 8, 25, 23, 59, 40))
+    try {
+      const fetchMock = mockApi({ keys: [] })
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      renderPage(<KeysPage />)
+
+      await screen.findByText("No API keys yet")
+      await user.click(
+        screen.getByRole("button", { name: "Create your first key" }),
+      )
+      await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+      await user.keyboard("{Escape}")
+
+      const date = screen.getByLabelText("Expiry date (optional)")
+      const time = screen.getByLabelText("Expiry time (local)")
+      fireEvent.change(date, { target: { value: "2026-09-25" } })
+
+      expect(date).toHaveValue("2026-09-26")
+      expect(time).toHaveValue("00:00")
+      await submitTheCreateDialog(user)
+
+      const post = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url).endsWith(`${API_ROOT}/keys`) &&
+          (init?.method ?? "") === "POST",
+      )
+      expect(JSON.parse(String(post?.[1]?.body)).expires_at).toBe(
+        new Date(2026, 8, 26, 0, 0).toISOString(),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("preserves the date when replacing a cleared expiry time", async () => {
+    const initialExpiry = new Date(2030, 0, 2, 9, 45).toISOString()
+    const fetchMock = mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "ci-bot", expires_at: initialExpiry }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!
+    await chooseAction(user, row, "Edit")
+    const date = await screen.findByLabelText("Expiry date")
+    const time = screen.getByLabelText("Expiry time (local)")
+    expect(date).toHaveValue("2030-01-02")
+    expect(time).toHaveValue("09:45")
+
+    fireEvent.change(time, { target: { value: "" } })
+    expect(date).toHaveValue("2030-01-02")
+    expect(time).toHaveValue("")
+    fireEvent.change(time, { target: { value: "16:20" } })
+    expect(date).toHaveValue("2030-01-02")
+    expect(time).toHaveValue("16:20")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    const patch = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url).includes(`${API_ROOT}/keys/key-1`) &&
+        (init?.method ?? "") === "PATCH",
+    )
+    expect(JSON.parse(String(patch?.[1]?.body)).expires_at).toBe(
+      new Date(2030, 0, 2, 16, 20).toISOString(),
+    )
+  })
+
+  it("submits a changed date with the existing time when editing", async () => {
+    const initialExpiry = new Date(2030, 0, 2, 9, 45).toISOString()
+    const fetchMock = mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "ci-bot", expires_at: initialExpiry }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!
+    await chooseAction(user, row, "Edit")
+    const date = await screen.findByLabelText("Expiry date")
+    const time = screen.getByLabelText("Expiry time (local)")
+    expect(time).toHaveValue("09:45")
+
+    fireEvent.change(date, { target: { value: "2030-02-06" } })
+    expect(time).toHaveValue("09:45")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    const patch = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url).includes(`${API_ROOT}/keys/key-1`) &&
+        (init?.method ?? "") === "PATCH",
+    )
+    expect(JSON.parse(String(patch?.[1]?.body)).expires_at).toBe(
+      new Date(2030, 1, 6, 9, 45).toISOString(),
+    )
+  })
+
+  it("blocks saving a partially cleared expiry when editing", async () => {
+    const initialExpiry = new Date(2030, 0, 2, 9, 45).toISOString()
+    const fetchMock = mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "ci-bot", expires_at: initialExpiry }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!
+    await chooseAction(user, row, "Edit")
+    const date = await screen.findByLabelText("Expiry date")
+
+    fireEvent.change(date, { target: { value: "" } })
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).includes(`${API_ROOT}/keys/key-1`) &&
+          (init?.method ?? "") === "PATCH",
+      ),
+    ).toBe(false)
+  })
+
+  it("clears both expiry fields together when editing", async () => {
+    const initialExpiry = new Date(2030, 0, 2, 9, 45).toISOString()
+    const fetchMock = mockApi({
+      keys: [
+        apiKey({ id: "key-1", key_name: "ci-bot", expires_at: initialExpiry }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!
+    await chooseAction(user, row, "Edit")
+    const date = await screen.findByLabelText("Expiry date")
+    const time = screen.getByLabelText("Expiry time (local)")
+
+    fireEvent.change(date, { target: { value: "" } })
+    expect(date).toHaveValue("")
+    expect(time).toHaveValue("09:45")
+    fireEvent.change(time, { target: { value: "" } })
+    expect(time).toHaveValue("")
+
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    const patch = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url).includes(`${API_ROOT}/keys/key-1`) &&
+        (init?.method ?? "") === "PATCH",
+    )
+    expect(JSON.parse(String(patch?.[1]?.body)).expires_at).toBeNull()
   })
 
   it("creates a budget-exempt key when the toggle is checked", async () => {
@@ -1328,6 +1664,21 @@ describe("KeysPage", () => {
     expect(screen.getByRole("button", { name: "Keep editing" })).toBeVisible()
     await user.click(screen.getByRole("button", { name: "Discard" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  })
+
+  it("guards a partially filled expiry before closing the edit dialog", async () => {
+    mockApi({ keys: [apiKey({ id: "key-1", key_name: "ci-bot" })] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!
+    await chooseAction(user, row, "Edit")
+    fireEvent.change(await screen.findByLabelText("Expiry date"), {
+      target: { value: "2030-01-02" },
+    })
+    await user.keyboard("{Escape}")
+
+    expect(screen.getByRole("button", { name: "Keep editing" })).toBeVisible()
   })
 
   it("toggles exclude_from_budget on an existing key via PATCH", async () => {
