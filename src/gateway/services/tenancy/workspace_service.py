@@ -398,6 +398,10 @@ class WorkspaceService:
         workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
         await self._require_workspace_management_access(user=user, workspace=workspace)
 
+        # The lock every ceiling-creation path takes. Without it a ceiling created
+        # on this membership between the sweep and the delete outlives it.
+        await self.workspaces.lock(workspace.id)
+
         member = await self.members.get_by_workspace_and_user(workspace.id, user_id)
         if member is None:
             return

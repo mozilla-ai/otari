@@ -447,10 +447,10 @@ async def test_concurrent_deletes_cannot_remove_the_last_workspace(
 
 
 class _PausingListener:
-    """Delegates to the real listener, then holds the delete open until the racing writer settles.
+    """Delegates to the real listener, then holds the delete or removal open until the racing writer settles.
 
-    The orphan only appears when that writer commits between the delete's ceiling
-    sweep and the row delete, so that interleaving is pinned rather than raced for.
+    The orphan only appears when that writer commits between the ceiling sweep and
+    the row delete, so that interleaving is pinned rather than raced for.
     """
 
     def __init__(self, inner: WorkspaceBudgetDefaultService, let_the_writer_run: Callable[[], Awaitable[None]]) -> None:
@@ -462,6 +462,7 @@ class _PausingListener:
 
     async def member_removed(self, member: WorkspaceMember) -> None:
         await self._inner.member_removed(member)
+        await self._let_the_writer_run()
 
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         await self._inner.workspace_deleted(workspace_id, member_ids)
@@ -566,16 +567,17 @@ class _RaceOutcome(NamedTuple):
     contended: bool
 
 
-async def _race_a_workspace_delete(
+async def _race_a_ceiling_sweep(
     *,
     owner: User,
     workspace_id: uuid.UUID,
     sessions: async_sessionmaker[AsyncSession],
     produce: Callable[[AsyncSession, asyncio.Event], Awaitable[object]],
+    removing: uuid.UUID | None = None,
 ) -> _RaceOutcome:
-    """Delete the workspace while ``produce`` runs on a session of its own.
+    """Delete the workspace, or remove the user ``removing`` from it, while ``produce`` runs on a session of its own.
 
-    The delete pauses after its ceiling sweep, which is the window an orphan needs.
+    The delete or removal pauses after its ceiling sweep, which is the window an orphan needs.
     ``produce`` sets the event it is passed immediately before the call under test, so the
     pause covers that call alone and not the setup around it.
     ``contended`` is false when the producer finished inside the pause, which is what a
@@ -608,13 +610,16 @@ async def _race_a_workspace_delete(
         async with sessions() as session:
             actor = await UserRepository(session).get(owner.id)
             assert actor is not None
-            deleter = WorkspaceService(
+            workspaces = WorkspaceService(
                 session,
                 membership_listener=_PausingListener(WorkspaceBudgetDefaultService(session), let_the_producer_run),
             )
-            await deleter.delete_workspace(user=actor, workspace_id=workspace_id)
+            if removing is None:
+                await workspaces.delete_workspace(user=actor, workspace_id=workspace_id)
+            else:
+                await workspaces.remove_member(user=actor, workspace_id=workspace_id, user_id=removing)
     finally:
-        # Awaited even when the delete raised, so a real failure is not buried under a
+        # Awaited even when the delete or removal raised, so a real failure is not buried under a
         # task whose exception was never retrieved.
         produced = await racing
     return _RaceOutcome(produced=produced, contended=not finished_early)
@@ -665,7 +670,7 @@ async def test_an_organization_ceiling_created_during_a_workspace_delete_leaves_
             ),
         )
 
-    race = await _race_a_workspace_delete(
+    race = await _race_a_ceiling_sweep(
         owner=owner,
         workspace_id=target.id,
         sessions=sessions,
@@ -705,7 +710,7 @@ async def test_a_deployment_ceiling_created_during_a_workspace_delete_leaves_no_
             OrganizationService(session, membership_listener=None),
         )
 
-    race = await _race_a_workspace_delete(
+    race = await _race_a_ceiling_sweep(
         owner=owner,
         workspace_id=target.id,
         sessions=sessions,
@@ -719,6 +724,51 @@ async def test_a_deployment_ceiling_created_during_a_workspace_delete_leaves_no_
     assert race.contended
     assert isinstance(race.produced, HTTPException)
     assert race.produced.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_an_organization_ceiling_created_during_a_member_removal_leaves_no_orphan(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """A ceiling must not outlive a membership removed on its own, without its workspace.
+
+    The removal sweeps the membership's ceilings and then deletes the row, so a create
+    committing between the two leaves a ceiling keyed on a membership that is gone.
+    """
+    owner, target, membership = await _seed_a_workspace_to_delete(async_db)
+    budget = await _budget_service(async_db).create_organization_budget(
+        user=owner,
+        request=OrganizationBudgetCreate(name="Cap", max_budget=10.0),
+    )
+    await async_db.commit()
+
+    async def create(session: AsyncSession, ready: asyncio.Event) -> object:
+        actor = await UserRepository(session).get(owner.id)
+        assert actor is not None
+        creator = _budget_service(session)
+        ready.set()
+        return await creator.create_organization_ceiling(
+            user=actor,
+            request=OrganizationScopedBudgetCreate(
+                scope_type=SCOPE_WORKSPACE_MEMBER,
+                scope_id=str(membership.id),
+                budget_id=budget.budget_id,
+            ),
+        )
+
+    race = await _race_a_ceiling_sweep(
+        owner=owner,
+        workspace_id=target.id,
+        sessions=sessions,
+        produce=create,
+        removing=owner.id,
+    )
+
+    ceilings = (await async_db.execute(select(ScopedBudget))).scalars().all()
+    assert [ceiling.scope_id for ceiling in ceilings if ceiling.scope_id == str(membership.id)] == []
+    # The negative above would pass on a create that never contended. These say it did.
+    assert race.contended
+    assert isinstance(race.produced, OrganizationScopeNotFoundError)
 
 
 async def test_a_workspace_delete_sweeps_a_ceiling_that_won_the_lock(
