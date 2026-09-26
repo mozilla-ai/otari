@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Collection
 from datetime import UTC, datetime
 from typing import Any, cast
 from unittest.mock import Mock
@@ -89,17 +89,32 @@ class _StubFiles:
         add_error: Exception | None = None,
         delete_error: Exception | None = None,
         rows: list[FileObject] | None = None,
+        reservation_gone: bool = False,
     ) -> None:
         self._add_error = add_error
         self._delete_error = delete_error
         self._rows = rows or []
+        self._reservation_gone = reservation_gone
         self.added: list[FileObject] = []
+        self.stored: list[FileObject] = []
+        self.removed: list[str] = []
         self.discarded: list[str] = []
 
     async def add(self, record: FileObject) -> None:
         if self._add_error is not None:
             raise self._add_error
         self.added.append(record)
+
+    async def mark_stored(self, record: FileObject, size: int) -> bool:
+        if self._reservation_gone:
+            return False
+        record.bytes = size
+        record.pending_since = None
+        self.stored.append(record)
+        return True
+
+    async def remove_all(self, file_ids: Collection[str]) -> None:
+        self.removed.extend(file_ids)
 
     async def page(self, query: FilePageQuery) -> list[FileObject]:
         return self._rows[: query.limit]
@@ -164,7 +179,7 @@ def _upload(*parts: bytes, workspace_id: uuid.UUID | None = _WORKSPACE) -> NewFi
 
 
 @pytest.mark.asyncio
-async def test_an_upload_whose_row_will_not_land_takes_its_blob_with_it() -> None:
+async def test_an_upload_whose_row_will_not_land_writes_no_bytes() -> None:
     store = _MemoryStore()
     service = _service(store, _StubFiles(add_error=SQLAlchemyError()))
 
@@ -175,19 +190,54 @@ async def test_an_upload_whose_row_will_not_land_takes_its_blob_with_it() -> Non
 
 
 @pytest.mark.asyncio
-async def test_an_empty_upload_is_refused_and_leaves_no_blob() -> None:
+async def test_a_stored_upload_is_reserved_first_and_stamped_once_its_bytes_land() -> None:
     store = _MemoryStore()
+    files = _StubFiles()
+
+    record = await _service(store, files).store(_upload(b"a,b\n"))
+
+    assert files.added == [record]
+    assert files.stored == [record]
+    assert record.pending_since is None
+    assert record.bytes == len(b"a,b\n")
+    assert store.blobs == {record.storage_ref: b"a,b\n"}
+
+
+@pytest.mark.asyncio
+async def test_an_empty_upload_is_refused_and_gives_its_reservation_back() -> None:
+    store = _MemoryStore()
+    files = _StubFiles()
 
     with pytest.raises(EmptyUploadError):
-        await _service(store, _StubFiles()).store(_upload())
+        await _service(store, files).store(_upload())
 
+    assert files.stored == []
+    assert files.removed == [files.added[0].id]
     assert store.blobs == {}
 
 
 @pytest.mark.asyncio
-async def test_an_upload_past_the_ceiling_is_refused() -> None:
+async def test_an_upload_past_the_ceiling_is_refused_and_gives_its_reservation_back() -> None:
+    store = _MemoryStore()
+    files = _StubFiles()
+
     with pytest.raises(UploadTooLargeError):
-        await _service(_MemoryStore(), _StubFiles(), files_max_bytes=4).store(_upload(b"12345"))
+        await _service(store, files, files_max_bytes=4).store(_upload(b"12345"))
+
+    assert files.removed == [files.added[0].id]
+    assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_an_upload_reclaimed_while_it_was_writing_is_refused_and_takes_its_bytes() -> None:
+    """The sweep can reach a reservation mid-write, and a silent stamp would claim a file nobody holds."""
+    store = _MemoryStore()
+    files = _StubFiles(reservation_gone=True)
+
+    with pytest.raises(FileStorageError):
+        await _service(store, files).store(_upload(b"a,b\n"))
+
+    assert store.blobs == {}
 
 
 @pytest.mark.asyncio

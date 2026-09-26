@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Uuid
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base
@@ -14,7 +14,9 @@ class FileObject(Base):
     """Uploaded file metadata for the OpenAI-compatible files API.
 
     The raw bytes live in a pluggable blob store; this row holds metadata plus
-    the ``storage_ref`` that store minted for them. Files are scoped to
+    the ``storage_ref`` that store minted for them, which is allocated before
+    the bytes are written so a partial write is always named by a row.
+    ``pending_since`` is set while those bytes are still owed. Files are scoped to
     ``user_id`` for tenant isolation and soft-deleted via ``deleted_at``.
     ``workspace_id`` is a second, independent axis: it says which workspace the
     upload was made in, so a key confined to one workspace never reaches
@@ -34,6 +36,14 @@ class FileObject(Base):
             "id",
         ),
         Index("ix_file_objects_user_created", "user_id", "created_at", "id"),
+        # The sweep's pending arm. Partial, so it holds only the rows still
+        # waiting for their bytes rather than one entry per file.
+        Index(
+            "ix_file_objects_pending_since",
+            "pending_since",
+            postgresql_where=text("pending_since IS NOT NULL"),
+            sqlite_where=text("pending_since IS NOT NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: f"file-{uuid.uuid4().hex}")
@@ -60,6 +70,9 @@ class FileObject(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
     )
+    # Set when the row is reserved and cleared once its bytes land. No read
+    # serves a pending row, and the sweep reclaims one once it is stale.
+    pending_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
 

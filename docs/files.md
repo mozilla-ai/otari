@@ -233,7 +233,8 @@ upload storage (see [Storage backends](#storage-backends)).
 code-execution call may store from its sandbox, and what one reply may copy
 from a provider's (see above). An expired file answers 404 at once, and the
 background sweep (`files_sweep_interval_sec`, hourly by default, `0` to
-disable) then reclaims its bytes and row along with those of deleted files.
+disable) then reclaims its bytes and row along with those of deleted files and
+of files whose bytes never landed.
 - `file_understanding_enabled`: master switch for content normalization.
 - `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:
 how images are handled for text-only models. The describe model may be a local
@@ -247,10 +248,17 @@ deleted file, or one past `files_retention_hours`, loses its row and bytes
 within an hour where cleanup was the operator's task. Set
 `files_sweep_interval_sec: 0` to keep it that way.
 
-If recording sandbox or provider output fails during commit, Otari retains the
-bytes because the metadata may already have committed. If the commit actually
-failed, this can leave an orphan blob. The sweep only follows database rows and
-cannot reclaim blobs without metadata; those require manual reconciliation.
+An upload's row is written before its bytes, so an upload that is refused, loses
+its connection or stops partway leaves a row naming its blob rather than a blob
+nothing names. A refused upload gives both back at once. Where that cleanup
+cannot finish, because the store will not drop the bytes or the database will
+not take the change, the row remains and the sweep reclaims it once it is more
+than an hour old, which is how long an upload has to arrive.
+
+Sandbox and provider output is still recorded after its bytes. If that record
+fails during commit, Otari retains the bytes because the metadata may already
+have committed, and a commit that actually failed leaves an orphan blob the
+sweep cannot reach.
 
 ### Storage backends
 

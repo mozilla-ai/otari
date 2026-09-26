@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 from gateway.core.config import GatewayConfig
@@ -35,6 +35,11 @@ DefaultWorkspace = Callable[[], Awaitable[uuid.UUID]]
 # because a page is one query and one JSON body.
 DEFAULT_LIST_LIMIT = 100
 MAX_LIST_LIMIT = 1000
+
+# How long a reserved row keeps its bytes before the sweep reclaims it. It has
+# to outlast the slowest write a deployment will accept, because a row younger
+# than this may still be receiving its bytes.
+_PENDING_GRACE = timedelta(hours=1)
 
 
 class FileDialect(StrEnum):
@@ -143,12 +148,11 @@ class FileService:
     """Everything the Files API does with a caller's uploads.
 
     The bytes go to a blob store behind :class:`FileStoragePort` and the
-    metadata to a row, and the two are kept in step as far as they can be: an
-    upload refused after its bytes are written takes them with it, and a
-    discarded file loses its bytes after the row says so. Neither is absolute.
-    A cancellation between the write and the commit leaves bytes no row points
-    at, because the commit's outcome is unknown there and removing them could
-    destroy the bytes of a row that did land.
+    metadata to a row, and the row comes first: an upload is recorded against
+    an allocated storage reference before a byte is written, and stamped as
+    stored once the bytes land. Whatever stops an upload partway therefore
+    leaves a row naming its blob, which the sweep reclaims, rather than bytes
+    nothing points at.
     """
 
     def __init__(
@@ -168,72 +172,36 @@ class FileService:
     async def store(self, upload: NewFile) -> FileObject:
         """Store an upload's bytes and record the file, and return the row.
 
+        The row is written before the bytes and stamped once they land. A
+        refused upload gives both back, and an upload that stops some other way
+        leaves a row the sweep reclaims, so the store never holds bytes nothing
+        names.
+
         Raises:
             UploadTooLargeError: the upload ran past the deployment's ceiling.
             EmptyUploadError: the upload carried no bytes.
-            FileStorageError: the bytes were written but the row would not land.
+            FileStorageError: the file could not be recorded.
         """
         file_id = f"file-{uuid.uuid4().hex}"
-        max_bytes = self._config.files_max_bytes
         storage_ref = await self._file_store.allocate(file_id)
-        size = await self._file_store.put_stream(storage_ref, _capped(upload.chunks, max_bytes))
+        record = await self._reserve(upload, file_id, storage_ref)
+
+        try:
+            size = await self._file_store.put_stream(storage_ref, _capped(upload.chunks, self._config.files_max_bytes))
+        except UploadTooLargeError:
+            await self.abandon(record)
+            raise
         if size == 0:
-            # The size is only known once the stream drains, so a zero-byte blob
-            # is already in the store by the time the upload is refused.
-            await self._drop_orphan(storage_ref, file_id)
+            await self.abandon(record)
             raise EmptyUploadError
 
-        now = datetime.now(UTC)
-        try:
-            async with self._uow:
-                try:
-                    # Resolved here rather than before the upload: it reads the
-                    # database, and doing that first would hold the session's
-                    # transaction open for as long as the bytes take to store.
-                    workspace_id = upload.workspace_id
-                    if workspace_id is None:
-                        workspace_id = await self._default_workspace()
-                    record = FileObject(
-                        id=file_id,
-                        user_id=upload.user_id,
-                        workspace_id=workspace_id,
-                        filename=upload.filename or file_id,
-                        mime_type=guess_mime_type(upload.filename, upload.content_type),
-                        bytes=size,
-                        purpose=upload.purpose,
-                        storage_ref=storage_ref,
-                        created_at=now,
-                        expires_at=expiry_for(self._config, now),
-                    )
-                    await self._files.add(record)
-                except BaseException:
-                    # Raised inside the block, so the Unit of Work has not
-                    # reached its commit and the bytes are certainly
-                    # unreferenced. A cancellation is caught here for that
-                    # reason: it cannot strand a row that landed, because none
-                    # can have landed yet.
-                    await self._drop_orphan(storage_ref, file_id)
-                    raise
-        except DATABASE_ERRORS as exc:
-            # Logged before the cleanup, so the failure that ended the upload is
-            # on the record whatever the cleanup then does.
-            logger.error("Failed to persist file metadata for %s: %s", file_id, exc)
-            # The bytes were written before the row was staged; drop them so a
-            # failed insert does not leak a blob nothing references.
-            await self._drop_orphan(storage_ref, file_id)
-            raise FileStorageError(f"Could not record the file {file_id}") from exc
-        except Exception:
-            # The commit itself failed, so the block rolled back and the row did
-            # not land. A cancellation is deliberately not caught out here: it
-            # can arrive while the commit is in flight, where the outcome is
-            # unknown and dropping the bytes of a row that did land is worse.
-            # The inner handler has already dropped the blob for anything that
-            # failed before the commit, and dropping twice is a no-op.
-            await self._drop_orphan(storage_ref, file_id)
-            raise
-
+        await self.mark_stored(record, size)
         logger.info(
-            "Stored file %s (%d bytes) for user %s in workspace %s", file_id, size, upload.user_id, workspace_id
+            "Stored file %s (%d bytes) for user %s in workspace %s",
+            file_id,
+            size,
+            upload.user_id,
+            record.workspace_id,
         )
         return record
 
@@ -390,17 +358,63 @@ class FileService:
                 await discard_output_bytes(self._file_store, output.storage_ref)
             raise
 
+    async def mark_stored(self, record: FileObject, size: int) -> None:
+        """Start serving a reserved file, now that its bytes are in the store.
+
+        Raises:
+            FileStorageError: the file is not served, because its reservation
+                would not change or was reclaimed while the bytes were written.
+        """
+        try:
+            async with self._uow:
+                stamped = await self._files.mark_stored(record, size)
+        except DATABASE_ERRORS as exc:
+            logger.error("Failed to record the stored bytes of file %s: %s", record.id, exc)
+            raise FileStorageError(f"Could not record the file {record.id}") from exc
+        if not stamped:
+            logger.warning("File %s was reclaimed while its bytes were being written", record.id)
+            await self.abandon(record)
+            raise FileStorageError(f"Could not record the file {record.id}")
+
+    async def abandon(self, record: FileObject) -> None:
+        """Give back a reservation whose file will never be served, best effort.
+
+        Both halves are best effort because the row outlives a failed cleanup,
+        so whatever does not come away here the sweep reclaims later.
+        The bytes go first: a row left behind is reclaimable, and a row removed
+        ahead of bytes that will not go is the orphan this order exists to stop.
+        """
+        if record.storage_ref is not None:
+            try:
+                await self._file_store.delete(record.storage_ref)
+            except OSError as exc:
+                logger.warning("Could not remove the bytes of the abandoned file %s: %s", record.id, exc)
+                return
+        try:
+            async with self._uow:
+                await self._files.remove_all([record.id])
+        except DATABASE_ERRORS as exc:
+            logger.warning("Could not remove the row of the abandoned file %s: %s", record.id, exc)
+
     async def sweep(self, *, batch_size: int, after: tuple[datetime, str] | None = None) -> SweepBatch:
-        """Delete expired or revoked bytes between short database transactions."""
+        """Delete expired, revoked and abandoned bytes between short database transactions."""
+        now = datetime.now(UTC)
         async with self._uow:
-            records = await self._files.reclaimable(batch_size=batch_size, after=after)
+            records = await self._files.reclaimable(
+                batch_size=batch_size, pending_before=now - _PENDING_GRACE, after=after
+            )
             candidates = [(record.id, record.storage_ref, record.created_at) for record in records]
+            # Claimed in the block that selected them, so a write that completes
+            # after this point is refused rather than served bytes about to go.
+            await self._files.claim([file_id for file_id, _, _ in candidates], now)
         reclaimed: list[str] = []
         for file_id, storage_ref, _ in candidates:
             try:
                 if storage_ref is not None:
                     await self._file_store.delete(storage_ref)
             except FileNotFoundError:
+                # An abandoned row may never have had bytes, and a blob already
+                # gone is the outcome this wanted.
                 pass
             except OSError as exc:
                 logger.warning("File sweep could not remove bytes for %s: %s", file_id, exc)
@@ -413,17 +427,36 @@ class FileService:
         cursor = (candidates[-1][2], candidates[-1][0]) if candidates else None
         return SweepBatch(reclaimed=len(reclaimed), seen=len(candidates), cursor=cursor)
 
-    async def _drop_orphan(self, storage_ref: str, file_id: str) -> None:
-        """Remove bytes that no row points at, best effort.
+    async def _reserve(self, upload: NewFile, file_id: str, storage_ref: str) -> FileObject:
+        """Record the file pending, so its bytes are named before they are written.
 
-        A store that will not drop them leaves an orphan for an operator to
-        reclaim, which is a smaller failure than replacing the refusal that
-        caused the cleanup with a storage error.
+        Raises:
+            FileStorageError: the row would not land, so no bytes are written.
         """
+        now = datetime.now(UTC)
         try:
-            await self._file_store.delete(storage_ref)
-        except OSError as exc:
-            logger.warning("Could not remove the unreferenced blob %s for %s: %s", storage_ref, file_id, exc)
+            async with self._uow:
+                workspace_id = upload.workspace_id
+                if workspace_id is None:
+                    workspace_id = await self._default_workspace()
+                record = FileObject(
+                    id=file_id,
+                    user_id=upload.user_id,
+                    workspace_id=workspace_id,
+                    filename=upload.filename or file_id,
+                    mime_type=guess_mime_type(upload.filename, upload.content_type),
+                    bytes=0,
+                    purpose=upload.purpose,
+                    storage_ref=storage_ref,
+                    created_at=now,
+                    pending_since=now,
+                    expires_at=expiry_for(self._config, now),
+                )
+                await self._files.add(record)
+        except DATABASE_ERRORS as exc:
+            logger.error("Failed to reserve file metadata for %s: %s", file_id, exc)
+            raise FileStorageError(f"Could not record the file {file_id}") from exc
+        return record
 
     async def _position(self, cursor_id: str, listing: FileListing) -> tuple[datetime, str]:
         """The ``(created_at, id)`` key a cursor resumes after.
