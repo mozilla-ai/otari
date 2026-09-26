@@ -1,5 +1,7 @@
 """Errors that the tools domain may raise, each carrying the status it renders as."""
 
+from enum import StrEnum
+
 from fastapi import status
 
 from gateway.exceptions import (
@@ -95,20 +97,39 @@ class SandboxImageNotAllowedError(TenancyValidationError):
     """
 
 
+class McpResolutionFailure(StrEnum):
+    """Why an MCP server could not be resolved.
+
+    The message a caller sees is fixed, so a member is the only thing that tells one cause from another.
+    No member names any part of the peer's answer.
+    """
+
+    ANSWER_NOT_AN_OBJECT = "the answer is not an object"
+    ENTRY_UNREADABLE = "an entry could not be read"
+    ID_MISMATCH = "an entry names a different server"
+    NO_CALLER_CREDENTIAL = "the request carried no caller credential"
+    NO_SERVER_LIST = "the answer carries no list of servers"
+    NO_WORKSPACE = "the request named no workspace"
+    SEVERAL_ENTRIES = "several entries answered a request for one"
+
+
 class McpServerResolutionFailedError(TenancyError):
     """An MCP server could not be resolved.
 
-    The message is fixed because the underlying detail quotes the stored server
-    URL or its credential.
+    The message is fixed because an error boundary may return it.
+    The underlying detail quotes the stored server URL or its credential.
+    The cause travels as ``reason``, which a boundary logs and never returns.
     """
 
     status_code = status.HTTP_502_BAD_GATEWAY
 
-    def __init__(self, message: str = "MCP server resolution failed") -> None:
-        super().__init__(message)
+    def __init__(self, reason: McpResolutionFailure) -> None:
+        super().__init__("MCP server resolution failed")
+        self.reason = reason
 
 
 __all__ = [
+    "McpResolutionFailure",
     "McpServerResolutionFailedError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",

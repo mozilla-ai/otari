@@ -222,8 +222,8 @@ def test_execution_timings_include_server_resolution(
 
     assert response.status_code == 200, response.text
     info.assert_called_once()
-    duration_ms = info.call_args.args[6]
-    phases = dict(field.split("=", 1) for field in info.call_args.args[7].split())
+    duration_ms = info.call_args.args[7]
+    phases = dict(field.split("=", 1) for field in info.call_args.args[8].split())
     resolve_ms = float(phases["resolve_ms"])
     assert resolve_ms >= 15
     assert duration_ms >= resolve_ms
@@ -676,7 +676,7 @@ def test_the_total_deadline_includes_platform_resolution_and_logs_the_outcome(
         "execution_state": "not_started",
     }
     info.assert_called_once()
-    assert info.call_args.args[4:6] == ("mcp_connection_failed", "not_started")
+    assert info.call_args.args[4:7] == ("mcp_connection_failed", "-", "not_started")
     assert session.calls == []
 
 
