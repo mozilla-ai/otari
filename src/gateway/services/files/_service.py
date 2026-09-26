@@ -22,7 +22,6 @@ from gateway.log_config import logger
 from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.repositories.files import FilePageQuery, FileRepositories, OutputFileRow
-from gateway.services.files._cleanup import discard_output_bytes
 from gateway.services.files._file_ids import file_id_in, page_token
 from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._staging import StagedFile
@@ -82,14 +81,13 @@ class NewFile:
 
 @dataclass(frozen=True)
 class NewOutput:
-    """A produced file to register after its bytes have been stored."""
+    """A produced file to record before its bytes are written."""
 
     file_id: str
     user_id: str
     workspace_id: uuid.UUID
     filename: str
     mime_type: str
-    bytes: int
     purpose: str
     storage_ref: str
     expires_at: datetime | None
@@ -330,33 +328,31 @@ class FileService:
         async with self._uow:
             return await self._files.existing_ids(file_ids)
 
-    async def record_output(self, output: NewOutput) -> None:
-        """Record stored output, cleaning up on failure but not on an uncertain commit."""
-        staged = False
+    async def reserve_output(self, output: NewOutput) -> FileObject:
+        """Record a produced file pending, so its bytes are named before they are written.
+
+        Raises:
+            FileStorageError: the row would not land, so no bytes are written.
+        """
+        row = OutputFileRow(
+            file_id=output.file_id,
+            user_id=output.user_id,
+            workspace_id=output.workspace_id,
+            filename=output.filename,
+            mime_type=output.mime_type,
+            purpose=output.purpose,
+            storage_ref=output.storage_ref,
+            expires_at=output.expires_at,
+            provider=output.provider,
+            provider_instance=output.provider_instance,
+            provider_container_id=output.provider_container_id,
+        )
         try:
-            row = OutputFileRow(
-                file_id=output.file_id,
-                user_id=output.user_id,
-                workspace_id=output.workspace_id,
-                filename=output.filename,
-                mime_type=output.mime_type,
-                bytes=output.bytes,
-                purpose=output.purpose,
-                storage_ref=output.storage_ref,
-                expires_at=output.expires_at,
-                provider=output.provider,
-                provider_instance=output.provider_instance,
-                provider_container_id=output.provider_container_id,
-            )
             async with self._uow:
-                await self._files.record_output(row)
-                staged = True
-        except BaseException:
-            # A commit error can follow a successful database commit.
-            # Before staging completes, no output can have committed.
-            if not staged:
-                await discard_output_bytes(self._file_store, output.storage_ref)
-            raise
+                return await self._files.reserve_output(row)
+        except DATABASE_ERRORS as exc:
+            logger.error("Failed to reserve file metadata for %s: %s", output.file_id, exc)
+            raise FileStorageError(f"Could not record the file {output.file_id}") from exc
 
     async def mark_stored(self, record: FileObject, size: int) -> None:
         """Start serving a reserved file, now that its bytes are in the store.

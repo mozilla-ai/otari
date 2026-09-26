@@ -53,14 +53,13 @@ def _past(key: tuple[datetime, str], *, ascending: bool) -> ColumnElement[bool]:
 
 @dataclass(frozen=True)
 class OutputFileRow:
-    """Metadata for a produced file whose bytes have already been stored."""
+    """Metadata for a produced file, as it stands before its bytes are written."""
 
     file_id: str
     user_id: str
     workspace_id: uuid.UUID
     filename: str
     mime_type: str
-    bytes: int
     purpose: str
     storage_ref: str
     expires_at: datetime | None
@@ -215,27 +214,28 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
         result = await self.db.execute(select(FileObject.id).where(FileObject.id.in_(usable)))
         return set(result.scalars())
 
-    async def record_output(self, row: OutputFileRow) -> None:
-        """Stage the row for a file a run wrote."""
+    async def reserve_output(self, row: OutputFileRow) -> FileObject:
+        """Stage a pending row for a file a run is writing, and return it."""
         now = datetime.now(UTC)
-        self.db.add(
-            FileObject(
-                id=row.file_id,
-                user_id=row.user_id,
-                workspace_id=row.workspace_id,
-                filename=row.filename,
-                mime_type=row.mime_type,
-                bytes=row.bytes,
-                purpose=row.purpose,
-                storage_ref=row.storage_ref,
-                provider=row.provider,
-                provider_instance=row.provider_instance,
-                provider_container_id=row.provider_container_id,
-                created_at=now,
-                expires_at=row.expires_at,
-            )
+        record = FileObject(
+            id=row.file_id,
+            user_id=row.user_id,
+            workspace_id=row.workspace_id,
+            filename=row.filename,
+            mime_type=row.mime_type,
+            bytes=0,
+            purpose=row.purpose,
+            storage_ref=row.storage_ref,
+            provider=row.provider,
+            provider_instance=row.provider_instance,
+            provider_container_id=row.provider_container_id,
+            created_at=now,
+            pending_since=now,
+            expires_at=row.expires_at,
         )
+        self.db.add(record)
         await self.db.flush()
+        return record
 
     async def reclaimable(
         self,

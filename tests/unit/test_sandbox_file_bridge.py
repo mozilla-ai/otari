@@ -1,9 +1,10 @@
 """The bridge between the ``/v1/files`` store and a sandbox session.
 
 Covers what the sandbox backend's own tests stub out: that a produced file is
-streamed into the store, that an empty one leaves nothing behind, and that a
-row which fails to land takes its blob with it. Also covers copying the files a
-provider's own sandbox produced, with the provider's client stubbed.
+streamed into the store, that its row is recorded before its bytes, and that a
+row which will not land stops the write rather than following it. Also covers
+copying the files a provider's own sandbox produced, with the provider's client
+stubbed.
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.files_exceptions import FileStorageError
+from gateway.models.files import FileObject
 from gateway.repositories.files import FileRepositories, FileRepository, OutputFileRow
 from gateway.services.files import (
     CODE_EXECUTION_OUTPUT_PURPOSE,
@@ -126,6 +129,7 @@ class _StubFiles(FileRepository):
         record_error: BaseException | None = None,
     ) -> None:
         super().__init__(cast(UnitOfWork, db))
+        self._rows: list[FileObject] = db.added
         self._known = set(known)
         self._error = error
         self._record_error = record_error
@@ -133,12 +137,21 @@ class _StubFiles(FileRepository):
     async def existing_ids(self, file_ids: Collection[str]) -> set[str]:
         if self._error is not None:
             raise self._error
-        return set(file_ids) & self._known
+        return set(file_ids) & (self._known | {row.id for row in self._rows})
 
-    async def record_output(self, row: OutputFileRow) -> None:
+    async def reserve_output(self, row: OutputFileRow) -> FileObject:
         if self._record_error is not None:
             raise self._record_error
-        await super().record_output(row)
+        return await super().reserve_output(row)
+
+    async def mark_stored(self, record: FileObject, size: int) -> bool:
+        record.bytes = size
+        record.pending_since = None
+        return True
+
+    async def remove_all(self, file_ids: Collection[str]) -> None:
+        gone = set(file_ids)
+        self._rows[:] = [row for row in self._rows if row.id not in gone]
 
 
 def _bridge(
@@ -189,7 +202,7 @@ async def test_store_output_streams_the_file_in_and_writes_its_row() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_empty_output_leaves_no_blob_and_no_row() -> None:
+async def test_an_empty_output_gives_its_reservation_back() -> None:
     store = _MemoryStore()
     db = _FakeDb()
 
@@ -199,16 +212,17 @@ async def test_an_empty_output_leaves_no_blob_and_no_row() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_row_that_fails_to_land_takes_its_blob_with_it() -> None:
+async def test_an_output_whose_row_will_not_land_writes_no_bytes() -> None:
     store = _MemoryStore()
 
-    with pytest.raises(TimeoutError):
+    with pytest.raises(FileStorageError):
         await _bridge(store, record_error=TimeoutError()).store_output("out.csv", _chunks(b"a,b\n"))
     assert store.blobs == {}
 
 
 @pytest.mark.asyncio
-async def test_a_lost_commit_acknowledgment_keeps_committed_file_bytes() -> None:
+async def test_a_lost_reservation_acknowledgment_writes_no_bytes() -> None:
+    """The row may have landed pending, which the sweep reclaims, so no bytes follow it."""
     store = _MemoryStore()
     uow = _AcknowledgmentLostUnitOfWork(_FakeDb())
 
@@ -216,7 +230,8 @@ async def test_a_lost_commit_acknowledgment_keeps_committed_file_bytes() -> None
         await _bridge(store, uow).store_output("out.csv", _chunks(b"a,b\n"))
 
     (record,) = uow.committed
-    assert store.blobs == {record.storage_ref: b"a,b\n"}
+    assert record.pending_since is not None
+    assert store.blobs == {}
 
 
 def test_the_output_budget_never_exceeds_the_upload_cap() -> None:
@@ -226,17 +241,18 @@ def test_the_output_budget_never_exceeds_the_upload_cap() -> None:
     assert _bridge(store, files_output_max_files=3).max_output_files == 3
 
 
-class _FailingSecondBlock(_FakeUnitOfWork):
-    """The lookup succeeds, but the output commit has an unknown outcome."""
+class _FailingBlock(_FakeUnitOfWork):
+    """Every block up to ``failing`` succeeds, and that one has an unknown outcome."""
 
-    def __init__(self, db: Any) -> None:
+    def __init__(self, db: Any, failing: int) -> None:
         super().__init__(db)
+        self._failing = failing
         self._blocks = 0
 
     async def __aexit__(self, *exc: object) -> None:
         await super().__aexit__(*exc)
         self._blocks += 1
-        if self._blocks > 1:
+        if self._blocks == self._failing:
             raise TimeoutError("connect timed out")
 
 
@@ -391,7 +407,39 @@ async def test_a_file_the_provider_refuses_does_not_stop_the_rest(monkeypatch: p
 
 
 @pytest.mark.asyncio
-async def test_a_copied_file_whose_row_fails_takes_its_blob_with_it(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_an_empty_provider_file_is_not_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An empty copy is a refusal here too, as it is on the other two write paths."""
+    _stub_provider(monkeypatch, {"file_01empty": b""})
+    store = _MemoryStore()
+    db = _FakeDb()
+
+    await _copy(_bridge(store, _CommittingUnitOfWork(db)), "file_01empty")
+
+    assert db.added == []
+    assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_a_file_a_copy_could_not_take_is_left_for_a_later_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed copy gives its row back, so the ID it claimed does not block the next request."""
+    gone = ProviderFileUnavailableError("anthropic could not serve file file_01a")
+    files: dict[str, bytes | Exception] = {"file_01a": gone}
+    _stub_provider(monkeypatch, files)
+    store = _MemoryStore()
+    db = _FakeDb()
+
+    await _copy(_bridge(store, _CommittingUnitOfWork(db)), "file_01a")
+    assert db.added == []
+
+    files["file_01a"] = b"chart"
+    await _copy(_bridge(store, _CommittingUnitOfWork(db)), "file_01a")
+
+    assert [record.id for record in db.added] == ["file_01a"]
+    assert list(store.blobs.values()) == [b"chart"]
+
+
+@pytest.mark.asyncio
+async def test_a_copied_file_whose_row_will_not_land_writes_no_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_provider(monkeypatch, {"file_01a": b"a"})
     store = _MemoryStore()
 
@@ -401,11 +449,22 @@ async def test_a_copied_file_whose_row_fails_takes_its_blob_with_it(monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_a_copied_file_with_an_uncertain_commit_keeps_its_blob(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_copy_whose_reservation_is_uncertain_writes_no_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_provider(monkeypatch, {"file_01a": b"a"})
     store = _MemoryStore()
 
-    await _copy(_bridge(store, _FailingSecondBlock(_FakeDb())), "file_01a")
+    await _copy(_bridge(store, _FailingBlock(_FakeDb(), failing=2)), "file_01a")
+
+    assert store.blobs == {}
+
+
+@pytest.mark.asyncio
+async def test_a_copy_whose_stamp_is_uncertain_keeps_its_blob(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The row may have been served, so the bytes stay rather than stranding it."""
+    _stub_provider(monkeypatch, {"file_01a": b"a"})
+    store = _MemoryStore()
+
+    await _copy(_bridge(store, _FailingBlock(_FakeDb(), failing=3)), "file_01a")
 
     assert list(store.blobs.values()) == [b"a"]
 
@@ -477,21 +536,18 @@ async def test_a_blob_goes_when_its_row_cannot_be_built(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_a_cancelled_commit_keeps_the_bytes() -> None:
-    """The row may have landed, so the bytes stay rather than stranding it.
-
-    An orphan is reclaimable; a live row pointing at bytes that were deleted is not.
-    """
+async def test_a_cancelled_reservation_writes_no_bytes() -> None:
+    """Cancelled as the reservation commits, so its outcome is unknown and no bytes follow."""
     store = _MemoryStore()
 
     with pytest.raises(asyncio.CancelledError):
         await _bridge(store, _CancellingUnitOfWork(_FakeDb())).store_output("out.csv", _chunks(b"a,b\n"))
 
-    assert list(store.blobs.values()) == [b"a,b\n"]
+    assert store.blobs == {}
 
 
 @pytest.mark.asyncio
-async def test_an_output_cancelled_before_its_commit_takes_its_blob_with_it() -> None:
+async def test_an_output_cancelled_inside_its_reservation_writes_no_bytes() -> None:
     """The other side of the previous test: cancelled inside the block, no row can have landed."""
     store = _MemoryStore()
     bridge = _bridge(store, _CommittingUnitOfWork(_FakeDb()), record_error=asyncio.CancelledError())
