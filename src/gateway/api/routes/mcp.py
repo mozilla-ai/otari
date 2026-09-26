@@ -389,8 +389,10 @@ async def _resolve_server(
     scope = McpServerScope(workspace_id=principal.workspace_id, user_token=principal.user_token)
     try:
         resolved = await mcp_server_port.resolve_one(scope, mcp_server_id)
-    except McpServerResolutionFailedError:
-        raise McpExecutionError(CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502) from None
+    except McpServerResolutionFailedError as exc:
+        raise McpExecutionError(
+            CODE_RESOLUTION_FAILED, ExecutionState.NOT_STARTED, 502, cause=exc.reason
+        ) from None
     except (SecretDecryptionError, SecretBoxUnavailableError):
         # Connecting without the credential the workspace configured would send
         # an unauthenticated request to a server that expects one.
@@ -556,22 +558,10 @@ async def list_mcp_tools(
                 raise McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
     except TimeoutError:
         exc = McpExecutionError(CODE_DISCOVERY_LIMIT_EXCEEDED, ExecutionState.NOT_STARTED, 502)
-        logger.info(
-            "Stateless MCP discovery request_id=%s server_id=%s outcome=%s duration_ms=%.2f",
-            getattr(raw_request.state, "otari_request_id", "-"),
-            mcp_server_id,
-            exc.code,
-            (time.monotonic() - started) * 1000,
-        )
+        _log_discovery_outcome(raw_request, mcp_server_id, exc, started)
         raise exc from None
     except McpExecutionError as exc:
-        logger.info(
-            "Stateless MCP discovery request_id=%s server_id=%s outcome=%s duration_ms=%.2f",
-            getattr(raw_request.state, "otari_request_id", "-"),
-            mcp_server_id,
-            exc.code,
-            (time.monotonic() - started) * 1000,
-        )
+        _log_discovery_outcome(raw_request, mcp_server_id, exc, started)
         raise
 
     logger.info(
@@ -666,14 +656,35 @@ async def execute_mcp_tool(
             ExecutionState.OUTCOME_UNKNOWN if dispatched else ExecutionState.NOT_STARTED,
             504 if dispatched else 502,
         )
-        _log_outcome(raw_request, request, exc.execution_state, exc.code, started, timings)
+        _log_outcome(raw_request, request, exc.execution_state, exc.code, started, timings, cause=exc.cause)
         raise exc from None
     except McpExecutionError as exc:
-        _log_outcome(raw_request, request, exc.execution_state, exc.code, started, timings)
+        _log_outcome(raw_request, request, exc.execution_state, exc.code, started, timings, cause=exc.cause)
         raise
 
     _log_outcome(raw_request, request, ExecutionState.COMPLETED, "ok", started, timings)
     return result
+
+
+def _log_discovery_outcome(
+    raw_request: Request,
+    mcp_server_id: uuid.UUID,
+    exc: McpExecutionError,
+    started: float,
+) -> None:
+    """Record a discovery failure's outcome, cause and request id, and nothing else.
+
+    The cause narrows a code that covers several conditions.
+    Nothing logged here names what the remote server said.
+    """
+    logger.info(
+        "Stateless MCP discovery request_id=%s server_id=%s outcome=%s cause=%s duration_ms=%.2f",
+        getattr(raw_request.state, "otari_request_id", "-"),
+        mcp_server_id,
+        exc.code,
+        exc.cause or "-",
+        (time.monotonic() - started) * 1000,
+    )
 
 
 def _log_outcome(
@@ -683,20 +694,24 @@ def _log_outcome(
     outcome: str,
     started: float,
     timings: dict[str, float],
+    *,
+    cause: str | None = None,
 ) -> None:
-    """Record timings, outcome and correlation ids, and nothing else (R-OBS-1, R-OBS-2).
+    """Record timings, outcome, cause and both ids, and nothing else.
 
     Both ids are opaque: the caller's ``client_execution_id`` is a canonical
     UUID validated at parse time, and the Otari request id is generated here.
     Neither carries user content, approval content, arguments or credentials.
+    The cause narrows an outcome that covers several conditions.
     """
     logger.info(
         "Stateless MCP execution request_id=%s client_execution_id=%s server_id=%s "
-        "outcome=%s execution_state=%s duration_ms=%.2f phases=%s",
+        "outcome=%s cause=%s execution_state=%s duration_ms=%.2f phases=%s",
         getattr(raw_request.state, "otari_request_id", "-"),
         request.client_execution_id,
         request.mcp_server_id,
         outcome,
+        cause or "-",
         execution_state.value,
         (time.monotonic() - started) * 1000,
         # Durations and one byte count. The tool name, the arguments and the

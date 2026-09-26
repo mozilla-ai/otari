@@ -19,7 +19,7 @@ from conftest import InstallControlPlane
 from gateway.adapters.mcp_server_adapter import RemoteMcpServers
 from gateway.api.routes.mcp import _Principal, _resolve_server
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError
-from gateway.exceptions.tools_exceptions import McpServerResolutionFailedError
+from gateway.exceptions.tools_exceptions import McpResolutionFailure, McpServerResolutionFailedError
 from gateway.ports.mcp_server_port import McpServerScope
 from gateway.services.mcp_stateless import (
     CODE_RESOLUTION_FAILED,
@@ -152,30 +152,33 @@ async def test_an_absent_allowlist_stays_absent(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "payload",
+    ("payload", "reason"),
     [
-        {"servers": [_entry(), _entry(id=str(OTHER_ID))]},
-        {"servers": [_entry(id=str(OTHER_ID))]},
-        {"servers": [_entry(id="not-a-uuid")]},
-        {"servers": [_entry(url=None)]},
-        {"servers": [_entry(enabled="yes")]},
-        {"servers": [_entry(allowed_tools="create_issue")]},
-        {"servers": "github"},
-        {},
-        [],
+        ({"servers": [_entry(), _entry(id=str(OTHER_ID))]}, McpResolutionFailure.SEVERAL_ENTRIES),
+        ({"servers": [_entry(id=str(OTHER_ID))]}, McpResolutionFailure.ID_MISMATCH),
+        ({"servers": [_entry(id="not-a-uuid")]}, McpResolutionFailure.ENTRY_UNREADABLE),
+        ({"servers": [_entry(url=None)]}, McpResolutionFailure.ENTRY_UNREADABLE),
+        ({"servers": [_entry(enabled="yes")]}, McpResolutionFailure.ENTRY_UNREADABLE),
+        ({"servers": [_entry(allowed_tools="create_issue")]}, McpResolutionFailure.ENTRY_UNREADABLE),
+        ({"servers": "github"}, McpResolutionFailure.NO_SERVER_LIST),
+        ({}, McpResolutionFailure.NO_SERVER_LIST),
+        ([], McpResolutionFailure.ANSWER_NOT_AN_OBJECT),
     ],
 )
 async def test_anything_but_one_matching_entry_is_a_resolution_failure(
     payload: Any,
+    reason: McpResolutionFailure,
     monkeypatch: pytest.MonkeyPatch,
     control_plane_transport: InstallControlPlane,
 ) -> None:
+    """One status covers every one of these, so the reason is what tells an operator them apart."""
     _platform_returns(payload, control_plane_transport)
 
     with pytest.raises(McpServerResolutionFailedError) as raised:
         await RemoteMcpServers(_config()).resolve_one(_scope(), SERVER_ID)
 
     assert raised.value.status_code == 502
+    assert raised.value.reason is reason
 
 
 @pytest.mark.asyncio
@@ -225,9 +228,13 @@ async def test_an_id_reaching_nothing_is_the_same_refusal_wherever_the_rows_live
 
 @pytest.mark.asyncio
 async def test_an_unreadable_answer_is_the_resolution_failure_this_contract_publishes() -> None:
-    """The port's failure reaches the caller as a 502, not as an unhandled 500."""
+    """The port's failure reaches the caller as a 502, not as an unhandled 500.
+
+    One code covers every resolution failure, so the cause rides along to the
+    outcome log the route writes. Nothing here reaches the caller.
+    """
     principal = _Principal(user_token="tk_user", workspace_id=None)
-    port = _PortAnswering(raises=McpServerResolutionFailedError())
+    port = _PortAnswering(raises=McpServerResolutionFailedError(McpResolutionFailure.ENTRY_UNREADABLE))
 
     with pytest.raises(McpExecutionError) as raised:
         await _resolve_server(principal, port, SERVER_ID)
@@ -235,3 +242,4 @@ async def test_an_unreadable_answer_is_the_resolution_failure_this_contract_publ
     assert raised.value.code == CODE_RESOLUTION_FAILED
     assert raised.value.execution_state is ExecutionState.NOT_STARTED
     assert raised.value.status_code == 502
+    assert raised.value.cause == McpResolutionFailure.ENTRY_UNREADABLE

@@ -185,13 +185,24 @@ class McpExecutionError(Exception):
     than a message: the detail a caller sees is fixed per category (R-ERR-1),
     and anything the remote server or the exception said about why is exactly
     what must not travel.
+
+    ``cause`` narrows a code that covers several conditions, for the outcome
+    log alone. It never reaches the caller, and it names nothing the remote
+    server said.
     """
 
-    def __init__(self, code: str, execution_state: ExecutionState, status_code: int) -> None:
+    def __init__(
+        self,
+        code: str,
+        execution_state: ExecutionState,
+        status_code: int,
+        cause: str | None = None,
+    ) -> None:
         super().__init__(code)
         self.code = code
         self.execution_state = execution_state
         self.status_code = status_code
+        self.cause = cause
 
 
 # --------------------------------------------------------------------------- #
