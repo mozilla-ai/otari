@@ -1,0 +1,6 @@
+name: Otari CodeQL
+
+paths-ignore:
+  # Both files are generated, so a fix here is lost on the next regeneration.
+  - 'web/src/client/schema.ts'
+  - 'web/src/routeTree.gen.ts'
