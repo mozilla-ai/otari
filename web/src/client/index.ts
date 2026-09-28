@@ -546,6 +546,12 @@ export type InviteOrganizationMemberRequest = Defaulted<
 >
 export type InviteOrganizationMemberResult =
   Schemas["InviteOrganizationMemberResultPublic"]
+export type BulkInviteOrganizationMembersRequest = Defaulted<
+  Schemas["BulkInviteOrganizationMembersRequest"],
+  "role"
+>
+export type BulkInviteOrganizationMembersResult =
+  Schemas["BulkInviteOrganizationMembersResultPublic"]
 export type InvitationPreview = Schemas["InvitationPreviewPublic"]
 export type AcceptInvitationRequest = Defaulted<
   Schemas["AcceptInvitationRequest"],

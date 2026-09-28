@@ -103,6 +103,9 @@ OrganizationMemberSettableStatus = Literal["active", "suspended"]
 # the read endpoints put on repeatable filters (``MAX_FILTER_VALUES``).
 MAX_WORKSPACE_ASSIGNMENTS = 50
 
+# How many addresses one bulk invitation may carry.
+MAX_BULK_INVITATIONS = 100
+
 # Roles that may manage an organization or a workspace. Fixed roles are the
 # settled OSS line; anything finer-grained is overlay depth.
 MANAGEMENT_ROLES = frozenset({"owner", "admin"})
@@ -1098,6 +1101,31 @@ class InviteOrganizationMemberResultPublic(SQLModel):
     accept_link: str
     expires_at: datetime
     created_at: datetime
+
+
+class BulkInviteOrganizationMembersRequest(SQLModel):
+    """Invite several addresses at once, all with the same role and workspace assignments."""
+
+    emails: list[str] = Field(min_length=1, max_length=MAX_BULK_INVITATIONS)
+    role: OrganizationMemberRole = "member"
+    workspace_assignments: list[WorkspaceAssignmentRequest] | None = Field(
+        default=None,
+        max_length=MAX_WORKSPACE_ASSIGNMENTS,
+    )
+
+
+class BulkInvitationFailurePublic(SQLModel):
+    """An address the bulk invite could not invite, and why."""
+
+    email: str
+    detail: str
+
+
+class BulkInviteOrganizationMembersResultPublic(SQLModel):
+    """What a bulk invite produced: one entry per address, in request order, in one of the two lists."""
+
+    invited: list[InviteOrganizationMemberResultPublic]
+    failed: list[BulkInvitationFailurePublic]
 
 
 class ValidateInvitationRequest(SQLModel):

@@ -9,6 +9,7 @@ Creating, listing and switching organizations therefore belong here rather than 
 The service offers no way to delete an organization, because historical attribution resolves through its rows.
 """
 
+import asyncio
 import hashlib
 import re
 import secrets
@@ -19,6 +20,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions import TenancyConflictError, TenancyValidationError
 from gateway.exceptions.organizations_exceptions import (
     InvitationAlreadyPendingError,
     InvitationAlreadyUsedError,
@@ -43,6 +45,9 @@ from gateway.models.tenancy import (
     ActiveOrganizationMemberPublic,
     ActiveOrganizationMembersPublic,
     ActiveOrganizationMemberUpdateRequest,
+    BulkInvitationFailurePublic,
+    BulkInviteOrganizationMembersRequest,
+    BulkInviteOrganizationMembersResultPublic,
     CallerIdentityPublic,
     CallerOrganizationMembershipPublic,
     CallerOrganizationMembershipsPublic,
@@ -57,6 +62,7 @@ from gateway.models.tenancy import (
     Organization,
     OrganizationCreateRequest,
     OrganizationMember,
+    OrganizationMemberRole,
     OrganizationMembershipContextPublic,
     OrganizationPublic,
     PendingOrganizationInvitationPublic,
@@ -201,6 +207,10 @@ def _default_organization_name(email: str, full_name: str | None) -> str:
 # default so the common deployment is never truncated, and bounded so one
 # unusually large organization cannot make every context read unbounded.
 CALLER_WORKSPACE_LIMIT = 1000
+
+
+# How many invitation emails a bulk invite sends at once.
+_BULK_INVITE_MAIL_CONCURRENCY = 5
 
 
 class OrganizationService:
@@ -1008,94 +1018,223 @@ class OrganizationService:
         if actor_membership.role != "owner" and request.role == "owner":
             raise MembershipUpdateError("Only organization owners can grant the owner role")
 
-        target = await self.users.get_by_email(email)
         try:
-            if target is None:
-                target = await self.users.create_local_identity(
-                    full_name=None,
-                    email=email,
-                    active_organization_id=organization.id,
-                )
-
-            # Locked before the status check that decides create/revive/refuse,
-            # not just inside the revive branch below: two concurrent invites to
-            # the same suspended membership can otherwise both read "suspended"
-            # (nothing has committed yet to see), both fall through to revive
-            # it, and both mint their own live pending invitation for the one
-            # membership, since organization_member_id carries no uniqueness to
-            # catch that as an IntegrityError instead. The second caller through
-            # this lock re-reads the membership fresh, so it sees the first
-            # caller's write.
-            await self.organizations.lock(organization.id)
-            membership = await self.members.get_by_organization_and_user(organization.id, target.id)
-            if membership is not None and membership.status == "active":
-                raise OrganizationMemberAlreadyExistsError(email)
-            if membership is not None and membership.status == "invited":
-                # Expiry is lazy: `_resolve_pending_invitation` only flips a
-                # `pending` row to `expired` when someone presents its token,
-                # so a link nobody ever opened can sit `pending` in the
-                # database indefinitely with its `expires_at` already in the
-                # past. Re-checking the timestamp here, not the stored status,
-                # is what keeps re-inviting from dead-ending on an
-                # unaccepted, unopened, long-expired link forever.
-                pending = await self.invitations.get_pending_by_organization_members([membership.id])
-                now = datetime.now(UTC)
-                if any(invitation.expires_at >= now for invitation in pending):
-                    raise InvitationAlreadyPendingError(email)
-                # Every row here is stale; expire them explicitly so this
-                # fresh invite is the only `pending` one for the membership,
-                # rather than leaving one whose own timestamp has already
-                # passed to fight the new one over which invitation_id the
-                # roster shows.
-                for stale in pending:
-                    await self.invitations.update_status(stale, {"status": "expired"})
-
-            if membership is None:
-                membership = await self.members.create_membership(
-                    organization_id=organization.id,
-                    user_id=target.id,
-                    role=request.role,
-                    status="invited",
-                )
-            else:
-                # Reviving a suspended membership: the same guard the plain
-                # add-member revive branch uses, since this also writes a role.
-                await self._validate_membership_update(
-                    actor_membership=actor_membership,
-                    target_membership=membership,
-                    update_data={"role": request.role, "status": "invited"},
-                    organization_id=organization.id,
-                )
-                membership = await self.members.update_membership(
-                    membership,
-                    {"role": request.role, "status": "invited"},
-                )
-
-            token = secrets.token_urlsafe(32)
-            expires_at = datetime.now(UTC) + timedelta(hours=config.invitation_expiry_hours)
-            invitation = await self.invitations.create_invitation(
-                organization_id=organization.id,
-                organization_member_id=membership.id,
+            invitation, membership, token = await self._stage_invitation(
+                user=user,
+                organization=organization,
+                actor_membership=actor_membership,
                 email=email,
-                invited_by_user_id=user.id,
-                token_hash=_hash_invitation_token(token),
-                workspace_assignments=[assignment.model_dump(mode="json") for assignment in assignments],
-                expires_at=expires_at,
+                role=request.role,
+                assignments=assignments,
+                config=config,
             )
             await self.db.commit()
         except IntegrityError:
             # Two admins inviting the same address at once: the unique index on
             # (organization, user) decides which racer's insert wins, and the
             # loser reports the conflict rather than a 500. The row lock taken
-            # above is what actually decides the invited-vs-suspended-vs-active
-            # question this branch answers; `Invitation.organization_member_id`
-            # itself carries no uniqueness (see its own comment on the model),
-            # since a membership can be invited, revoked, and re-invited more
-            # than once over its life.
+            # in `_stage_invitation` is what actually decides the
+            # invited-vs-suspended-vs-active question this branch answers;
+            # `Invitation.organization_member_id` itself carries no uniqueness
+            # (see its own comment on the model), since a membership can be
+            # invited, revoked, and re-invited more than once over its life.
             await self.db.rollback()
             raise OrganizationMemberAlreadyExistsError(email) from None
 
+        return await self._mail_invitation(
+            mailer=Mailer(config),
+            user=user,
+            organization=organization,
+            invitation=invitation,
+            membership=membership,
+            token=token,
+            config=config,
+        )
+
+    async def invite_active_organization_members_for_user(
+        self,
+        *,
+        user: User,
+        request: BulkInviteOrganizationMembersRequest,
+        config: GatewayConfig,
+    ) -> BulkInviteOrganizationMembersResultPublic:
+        """Invite several addresses to the caller's organization at once.
+
+        Each address goes through the same checks as a single invite, inside its
+        own savepoint, so one that is refused (already a member, say) is reported
+        in ``failed`` and does not stop the rest. The invitations commit together
+        and the emails then go out concurrently, so every result still carries
+        whether its own email was sent.
+        """
+        organization = await self.get_active_organization_for_user(user)
+        actor_membership = await self.require_active_organization_management_access(
+            user=user,
+            organization=organization,
+        )
+        assignments = request.workspace_assignments or []
+        await self._require_workspaces_in_organization(organization, assignments)
+        if actor_membership.role != "owner" and request.role == "owner":
+            raise MembershipUpdateError("Only organization owners can grant the owner role")
+
+        staged: list[tuple[Invitation, OrganizationMember, str]] = []
+        failed: list[BulkInvitationFailurePublic] = []
+        seen: set[str] = set()
+        for raw in request.emails:
+            try:
+                email = _validated_email(raw)
+                if email in seen:
+                    continue
+                seen.add(email)
+                # A savepoint, not a rollback: rolling the whole transaction back
+                # would expire every instance loaded so far, the organization
+                # and the caller's membership included.
+                async with self.db.begin_nested():
+                    staged.append(
+                        await self._stage_invitation(
+                            user=user,
+                            organization=organization,
+                            actor_membership=actor_membership,
+                            email=email,
+                            role=request.role,
+                            assignments=assignments,
+                            config=config,
+                        )
+                    )
+            except IntegrityError:
+                failed.append(
+                    BulkInvitationFailurePublic(
+                        email=raw, detail=str(OrganizationMemberAlreadyExistsError(raw.strip()))
+                    )
+                )
+            except (TenancyConflictError, TenancyValidationError) as exc:
+                failed.append(BulkInvitationFailurePublic(email=raw, detail=str(exc)))
+        await self.db.commit()
+
         mailer = Mailer(config)
+        # Bounded, so a large batch does not open a hundred SMTP connections at once.
+        limit = asyncio.Semaphore(_BULK_INVITE_MAIL_CONCURRENCY)
+
+        async def mail(
+            invitation: Invitation, membership: OrganizationMember, token: str
+        ) -> InviteOrganizationMemberResultPublic:
+            async with limit:
+                return await self._mail_invitation(
+                    mailer=mailer,
+                    user=user,
+                    organization=organization,
+                    invitation=invitation,
+                    membership=membership,
+                    token=token,
+                    config=config,
+                )
+
+        invited = await asyncio.gather(*(mail(*one) for one in staged))
+        return BulkInviteOrganizationMembersResultPublic(invited=list(invited), failed=failed)
+
+    async def _stage_invitation(
+        self,
+        *,
+        user: User,
+        organization: Organization,
+        actor_membership: OrganizationMember,
+        email: str,
+        role: OrganizationMemberRole,
+        assignments: list[WorkspaceAssignmentRequest],
+        config: GatewayConfig,
+    ) -> tuple[Invitation, OrganizationMember, str]:
+        """Write one invitation and its ``invited`` membership, uncommitted; return them with the raw token.
+
+        Refuses an address that already holds an active membership, or one with
+        a still-unexpired invitation pending.
+        """
+        target = await self.users.get_by_email(email)
+        if target is None:
+            target = await self.users.create_local_identity(
+                full_name=None,
+                email=email,
+                active_organization_id=organization.id,
+            )
+
+        # Locked before the status check that decides create/revive/refuse,
+        # not just inside the revive branch below: two concurrent invites to
+        # the same suspended membership can otherwise both read "suspended"
+        # (nothing has committed yet to see), both fall through to revive
+        # it, and both mint their own live pending invitation for the one
+        # membership, since organization_member_id carries no uniqueness to
+        # catch that as an IntegrityError instead. The second caller through
+        # this lock re-reads the membership fresh, so it sees the first
+        # caller's write.
+        await self.organizations.lock(organization.id)
+        membership = await self.members.get_by_organization_and_user(organization.id, target.id)
+        if membership is not None and membership.status == "active":
+            raise OrganizationMemberAlreadyExistsError(email)
+        if membership is not None and membership.status == "invited":
+            # Expiry is lazy: `_resolve_pending_invitation` only flips a
+            # `pending` row to `expired` when someone presents its token,
+            # so a link nobody ever opened can sit `pending` in the
+            # database indefinitely with its `expires_at` already in the
+            # past. Re-checking the timestamp here, not the stored status,
+            # is what keeps re-inviting from dead-ending on an
+            # unaccepted, unopened, long-expired link forever.
+            pending = await self.invitations.get_pending_by_organization_members([membership.id])
+            now = datetime.now(UTC)
+            if any(invitation.expires_at >= now for invitation in pending):
+                raise InvitationAlreadyPendingError(email)
+            # Every row here is stale; expire them explicitly so this
+            # fresh invite is the only `pending` one for the membership,
+            # rather than leaving one whose own timestamp has already
+            # passed to fight the new one over which invitation_id the
+            # roster shows.
+            for stale in pending:
+                await self.invitations.update_status(stale, {"status": "expired"})
+
+        if membership is None:
+            membership = await self.members.create_membership(
+                organization_id=organization.id,
+                user_id=target.id,
+                role=role,
+                status="invited",
+            )
+        else:
+            # Reviving a suspended membership: the same guard the plain
+            # add-member revive branch uses, since this also writes a role.
+            await self._validate_membership_update(
+                actor_membership=actor_membership,
+                target_membership=membership,
+                update_data={"role": role, "status": "invited"},
+                organization_id=organization.id,
+            )
+            membership = await self.members.update_membership(
+                membership,
+                {"role": role, "status": "invited"},
+            )
+
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.now(UTC) + timedelta(hours=config.invitation_expiry_hours)
+        invitation = await self.invitations.create_invitation(
+            organization_id=organization.id,
+            organization_member_id=membership.id,
+            email=email,
+            invited_by_user_id=user.id,
+            token_hash=_hash_invitation_token(token),
+            workspace_assignments=[assignment.model_dump(mode="json") for assignment in assignments],
+            expires_at=expires_at,
+        )
+        return invitation, membership, token
+
+    async def _mail_invitation(
+        self,
+        *,
+        mailer: Mailer,
+        user: User,
+        organization: Organization,
+        invitation: Invitation,
+        membership: OrganizationMember,
+        token: str,
+        config: GatewayConfig,
+    ) -> InviteOrganizationMemberResultPublic:
+        """Email a committed invitation's accept link, where links can be mailed, and report whether it went."""
+        email = invitation.email
         accept_link = mailer.link(_invitation_accept_path(token))
         mail_sent = False
         # can_send_links, not is_configured: an accept link that is relative

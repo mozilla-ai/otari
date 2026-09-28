@@ -43,6 +43,8 @@ from gateway.models.tenancy import (
     ActiveOrganizationMembersPublic,
     ActiveOrganizationMemberUpdateRequest,
     ActiveOrganizationUpdateRequest,
+    BulkInviteOrganizationMembersRequest,
+    BulkInviteOrganizationMembersResultPublic,
     CallerOrganizationMembershipsPublic,
     InviteOrganizationMemberRequest,
     InviteOrganizationMemberResultPublic,
@@ -352,6 +354,29 @@ async def invite_active_organization_member(
     )
 
 
+@router.post("/me/member-invitations/bulk")
+async def bulk_invite_active_organization_members(
+    service: OrganizationServiceDep,
+    current_identity: CurrentIdentity,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    body: BulkInviteOrganizationMembersRequest,
+) -> BulkInviteOrganizationMembersResultPublic:
+    """Invite several addresses to the caller's active organization at once.
+
+    Organization owners and admins only. Every address gets the same role and
+    workspace assignments. Each one is checked as ``POST /me/member-invitations``
+    would check it, and an address that is refused lands in ``failed`` with the
+    reason rather than failing the request, so the answer is 200 even when some
+    or all were refused. Each invited entry carries its own ``mail_sent`` and
+    accept link.
+    """
+    return await service.invite_active_organization_members_for_user(
+        user=current_identity,
+        request=body,
+        config=config,
+    )
+
+
 @router.delete("/me/member-invitations/{invitation_id}")
 async def revoke_active_organization_member_invitation(
     service: OrganizationServiceDep,
@@ -368,7 +393,6 @@ async def revoke_active_organization_member_invitation(
         invitation_id=invitation_id,
     )
     return Message(message="Invitation revoked")
-
 
 
 # =============================================================================

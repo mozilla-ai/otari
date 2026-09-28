@@ -8,6 +8,8 @@ import {
 import type {
   AcceptInvitationRequest,
   AcceptInvitationResult,
+  BulkInviteOrganizationMembersRequest,
+  BulkInviteOrganizationMembersResult,
   CallerOrganizationMembership,
   CreateOrganizationDomainRequest,
   CreateOrganizationRequest,
@@ -273,6 +275,23 @@ export function useInviteOrganizationMember() {
     mutationFn: (body: InviteOrganizationMemberRequest) =>
       apiFetch<InviteOrganizationMemberResult>(
         "/organizations/me/member-invitations",
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+    },
+  })
+}
+
+// Several addresses in one call: each is invited or refused on its own, and
+// every invited entry carries its own `mail_sent` and accept link.
+export function useBulkInviteOrganizationMembers() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: BulkInviteOrganizationMembersRequest) =>
+      apiFetch<BulkInviteOrganizationMembersResult>(
+        "/organizations/me/member-invitations/bulk",
         { method: "POST", body: JSON.stringify(body) },
       ),
     onSuccess: () => {

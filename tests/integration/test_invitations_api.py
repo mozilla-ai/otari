@@ -713,3 +713,72 @@ def test_an_unknown_pending_membership_is_a_404(
         headers=master_key_header,
     )
     assert response.status_code == 404, response.text
+
+
+def _bulk_invite(client: TestClient, headers: dict[str, str], emails: list[str], **extra: Any) -> dict[str, Any]:
+    response = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations/bulk",
+        json={"emails": emails, **extra},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    result: dict[str, Any] = response.json()
+    return result
+
+
+def test_bulk_invite_reports_each_address_and_one_refusal_does_not_stop_the_rest(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    _invite(client, master_key_header, email="pending@example.com")
+    workspace_id = client.get(f"{API_ROOT}/workspaces", headers=master_key_header).json()["data"][0]["id"]
+
+    result = _bulk_invite(
+        client,
+        master_key_header,
+        # A refusal between two good addresses, a duplicate and a malformed one.
+        ["one@example.com", "pending@example.com", "not-an-address", "two@example.com", "ONE@example.com"],
+        role="admin",
+        workspace_assignments=[{"workspace_id": workspace_id, "role": "member"}],
+    )
+
+    assert [row["email"] for row in result["invited"]] == ["one@example.com", "two@example.com"]
+    assert all(row["role"] == "admin" and row["mail_sent"] is False for row in result["invited"])
+    assert [row["email"] for row in result["failed"]] == ["pending@example.com", "not-an-address"]
+    assert all(row["detail"] for row in result["failed"])
+
+    # Committed, on the roster, and each link works on its own.
+    assert _roster_row(client, master_key_header, "two@example.com")["status"] == "invited"
+    accepted = client.post(
+        f"{API_ROOT}/invitations/accept",
+        json={"token": _token_from(result["invited"][0]["accept_link"])},
+    )
+    assert accepted.status_code == 200, accepted.text
+    placements = _roster_row(client, master_key_header, "one@example.com")
+    assert placements["status"] == "active"
+
+
+def test_bulk_invite_emails_every_address_when_a_transport_is_configured(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+
+    result = _bulk_invite(client, master_key_header, [f"mailed{n}@example.com" for n in range(7)])
+
+    assert len(result["invited"]) == 7
+    assert result["failed"] == []
+    assert all(row["mail_sent"] is True for row in result["invited"])
+    assert len({row["accept_link"] for row in result["invited"]}) == 7
+
+
+def test_bulk_invite_refuses_an_empty_list(client: TestClient, master_key_header: dict[str, str]) -> None:
+    response = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations/bulk",
+        json={"emails": []},
+        headers=master_key_header,
+    )
+    assert response.status_code == 422

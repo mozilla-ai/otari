@@ -2281,6 +2281,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/member-invitations/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Invite Active Organization Members
+         * @description Invite several addresses to the caller's active organization at once.
+         *
+         *     Organization owners and admins only. Every address gets the same role and
+         *     workspace assignments. Each one is checked as ``POST /me/member-invitations``
+         *     would check it, and an address that is refused lands in ``failed`` with the
+         *     reason rather than failing the request, so the answer is 200 even when some
+         *     or all were refused. Each invited entry carries its own ``mail_sent`` and
+         *     accept link.
+         */
+        post: operations["organizations-bulk_invite_active_organization_members"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/member-invitations/{invitation_id}": {
         parameters: {
             query?: never;
@@ -6437,6 +6464,42 @@ export interface components {
             }[];
             /** Vendor */
             vendor: string;
+        };
+        /**
+         * BulkInvitationFailurePublic
+         * @description An address the bulk invite could not invite, and why.
+         */
+        BulkInvitationFailurePublic: {
+            /** Detail */
+            detail: string;
+            /** Email */
+            email: string;
+        };
+        /**
+         * BulkInviteOrganizationMembersRequest
+         * @description Invite several addresses at once, all with the same role and workspace assignments.
+         */
+        BulkInviteOrganizationMembersRequest: {
+            /** Emails */
+            emails: string[];
+            /**
+             * Role
+             * @default member
+             * @enum {string}
+             */
+            role: "owner" | "admin" | "member" | "viewer";
+            /** Workspace Assignments */
+            workspace_assignments?: components["schemas"]["WorkspaceAssignmentRequest"][] | null;
+        };
+        /**
+         * BulkInviteOrganizationMembersResultPublic
+         * @description What a bulk invite produced: one entry per address, in request order, in one of the two lists.
+         */
+        BulkInviteOrganizationMembersResultPublic: {
+            /** Failed */
+            failed: components["schemas"]["BulkInvitationFailurePublic"][];
+            /** Invited */
+            invited: components["schemas"]["InviteOrganizationMemberResultPublic"][];
         };
         /**
          * CallToolResult
@@ -17555,6 +17618,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InviteOrganizationMemberResultPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organizations-bulk_invite_active_organization_members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkInviteOrganizationMembersRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkInviteOrganizationMembersResultPublic"];
                 };
             };
             /** @description Validation Error */

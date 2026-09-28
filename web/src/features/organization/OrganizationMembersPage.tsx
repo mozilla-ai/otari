@@ -10,6 +10,7 @@ import {
 
 import type {
   Budget,
+  BulkInviteOrganizationMembersResult,
   InviteOrganizationMemberRequest,
   InviteOrganizationMemberResult,
   MemberAttribution,
@@ -31,8 +32,8 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
-import { Field } from "@/design-system/forms/Field"
 import { Select } from "@/design-system/forms/Select"
+import { TextArea } from "@/design-system/forms/TextArea"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
@@ -51,6 +52,7 @@ import {
   useUpdateScopedBudget,
 } from "@/shared/api/budgets"
 import {
+  useBulkInviteOrganizationMembers,
   useInviteOrganizationMember,
   useOrganizationContext,
   useOrganizationMembersPage,
@@ -170,6 +172,18 @@ function StatusMark({ status }: { status: string }) {
   )
 }
 
+// Addresses pasted as a list, separated by commas, semicolons or whitespace,
+// deduplicated without regard to case.
+export function parseAddresses(text: string): string[] {
+  const seen = new Set<string>()
+  return text.split(/[\s,;]+/).filter((address) => {
+    const key = address.toLowerCase()
+    if (address === "" || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 // Adding someone is an address plus a role, and optionally the workspaces to
 // drop them into once they accept. The membership lands `invited`, and every
 // deployment gets an accept link to share: emailed as well where mail can be
@@ -183,6 +197,7 @@ function InviteMemberForm({
   onClose: () => void
 }) {
   const invite = useInviteOrganizationMember()
+  const bulkInvite = useBulkInviteOrganizationMembers()
   const { mail_ready } = useDeployment()
   const workspaces = useWorkspaces()
   const { selected } = useSelectedWorkspace()
@@ -190,7 +205,9 @@ function InviteMemberForm({
   const [role, setRole] = useState<MembershipRole>("member")
   const [workspaceIds, setWorkspaceIds] = useState<string[]>([])
   const [result, setResult] = useState<InviteOrganizationMemberResult>()
-  const trimmed = email.trim()
+  const [outcomes, setOutcomes] =
+    useState<BulkInviteOrganizationMembersResult>()
+  const addresses = parseAddresses(email)
 
   // Seeded once the workspace list answers, and only then: the default is a
   // starting point the operator can clear, not a value re-imposed on every
@@ -230,8 +247,7 @@ function InviteMemberForm({
     )
 
   const submit = () => {
-    const body: InviteOrganizationMemberRequest = {
-      email: trimmed,
+    const body: Omit<InviteOrganizationMemberRequest, "email"> = {
       role,
       // Omitted rather than sent empty: no assignment is not the same request
       // as an empty list of them.
@@ -245,7 +261,66 @@ function InviteMemberForm({
             )
           : null,
     }
-    invite.mutate(body, { onSuccess: setResult })
+    if (addresses.length === 1) {
+      invite.mutate({ ...body, email: addresses[0] }, { onSuccess: setResult })
+      return
+    }
+    bulkInvite.mutate(
+      { ...body, emails: addresses },
+      { onSuccess: setOutcomes },
+    )
+  }
+
+  if (outcomes) {
+    const { invited, failed } = outcomes
+    const unsent = invited.filter((one) => !one.mail_sent).length
+    return (
+      <FormDialog
+        isOpen={isOpen}
+        onOpenChange={(open) => {
+          if (!open) onClose()
+        }}
+        title="Invitations"
+        // Same rule as the single result: a link that was not emailed is shown
+        // only here, so the acknowledgement is the way out.
+        isDismissable={unsent === 0}
+        submitLabel="Done"
+        onSubmit={onClose}
+        isPending={false}
+      >
+        <InfoBanner>
+          Invited {invited.length} of {invited.length + failed.length}.
+          {unsent > 0
+            ? ` Otari did not send ${unsent === 1 ? "one email" : `${unsent} emails`}; share those links yourself.`
+            : null}
+        </InfoBanner>
+        <ul className="flex flex-col gap-3">
+          {failed.map((one) => (
+            <li key={one.email} className="flex flex-col gap-1">
+              <strong className="break-all text-sm">{one.email}</strong>
+              <span className="text-xs text-danger">{one.detail}</span>
+            </li>
+          ))}
+          {invited.map((one) => (
+            <li key={one.invitation_id} className="flex flex-col gap-1">
+              <strong className="break-all text-sm">{one.email}</strong>
+              {one.mail_sent ? (
+                <span className="text-xs text-muted">Email sent.</span>
+              ) : (
+                <CopyableValue
+                  value={absoluteDashboardLink(one.accept_link)}
+                  label={`Accept link for ${one.email}`}
+                >
+                  <span className="break-all text-xs">
+                    {absoluteDashboardLink(one.accept_link)}
+                  </span>
+                </CopyableValue>
+              )}
+            </li>
+          ))}
+        </ul>
+      </FormDialog>
+    )
   }
 
   // After a successful invite: whether it was emailed, and the link either way,
@@ -303,25 +378,30 @@ function InviteMemberForm({
         if (!open) onClose()
       }}
       title="Invitation"
-      submitLabel="Invite member"
+      submitLabel={
+        addresses.length > 1
+          ? `Invite ${addresses.length} members`
+          : "Invite member"
+      }
       onSubmit={submit}
-      isPending={invite.isPending}
-      isSubmitDisabled={trimmed === ""}
+      isPending={invite.isPending || bulkInvite.isPending}
+      isSubmitDisabled={addresses.length === 0}
       isDirty={isDirty}
-      error={invite.error}
+      error={invite.error ?? bulkInvite.error}
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field
-          label="Email address"
+        <TextArea
+          label="Email addresses"
           value={email}
           onChange={setEmail}
-          placeholder="alice@example.com"
+          placeholder="alice@example.com, bob@example.com"
+          rows={2}
           isRequired
-          autoFocus
+          className="sm:col-span-2"
           description={
             mail_ready
-              ? "An email with an accept link is sent here, and you get the same link to share. The membership becomes active once they follow it."
-              : "This deployment sends no mail, so you get an accept link to share with them. The membership becomes active once they follow it."
+              ? "One or more, separated by commas or new lines. An email with an accept link is sent here, and you get the same link to share. The membership becomes active once they follow it."
+              : "One or more, separated by commas or new lines. This deployment sends no mail, so you get an accept link to share with them. The membership becomes active once they follow it."
           }
         />
         <Select

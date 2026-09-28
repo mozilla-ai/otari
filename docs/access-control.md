@@ -217,6 +217,12 @@ An owner or admin can invite a person to an organization and selected workspaces
 The dashboard always shows the accept link after an invite, so it can be shared
 by hand. If mail is configured, Otari also emails it.
 
+To invite several people at once, paste their addresses into the invite dialog,
+separated by commas or new lines (up to 100). Everyone gets the same role and
+workspaces. Each address is invited or refused on its own, so one that is already
+a member does not stop the rest, and the result lists every address with whether
+its email went out, or its accept link to share when it did not.
+
 Opening the link lets the invitee accept. If the invited address has never signed
 in, the accept page asks them to choose a first password, and once they accept
 they can sign in straight away. No verification email is needed, so this works on
