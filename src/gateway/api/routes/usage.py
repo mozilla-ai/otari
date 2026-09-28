@@ -228,7 +228,8 @@ class UsageEntry(BaseModel):
     # composing it from the two fields above is a second copy of the rule, and the
     # copy is what let the dashboard offer a checkbox the delete then refused (#781).
     bulk_editable: bool
-    # Routing attribution. All null for a request that named a plain model.
+    # Routing attribution. All null for a request that named a plain model, except
+    # `request_group_id`, which is the request's `Otari-Request-ID` on every row.
     # `status == "absorbed"` marks an attempt a policy recovered from; those rows
     # are excluded from `error_count` and from `request_count`, since the request
     # they belong to is counted once by the attempt that served it.
@@ -647,9 +648,11 @@ async def get_request_settlement(
     # that settles the request has not been written yet.
     if successes == 0 and errors == 0:
         raise HTTPException(status_code=404, detail="Request not found")
+    # Any error row means the request failed. A success row does not mean it
+    # served: a vision describe side-call writes one before the main call runs.
     return RequestSettlement(
         request_id=request_id,
-        status="success" if successes else "error",
+        status="error" if errors else "success",
         cost_usd=f"{quantize_cost(cost):.6f}" if priced_rows else None,
         prompt_tokens=int(prompt_tokens),
         completion_tokens=int(completion_tokens),

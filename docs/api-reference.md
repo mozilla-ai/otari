@@ -116,7 +116,9 @@ so the total covers the attempts it fell over from as well as the one that
 served. `cost_usd` uses the inline format and is `null` when nothing was priced.
 An API key sees only its own requests and the master key sees any. The endpoint
 answers 404 until the request has settled, since usage rows are written in the
-background, and for an id that is unknown or belongs to another key.
+background, and for an id that is unknown or belongs to another key. A stream the
+client abandoned before the provider reported any usage, and that ran no gateway
+tools, has nothing to bill and writes no row, so its id stays 404.
 
 This lookup is standalone only. In hybrid mode the platform owns settlement, and
 a failed stream reports no usage to it; see

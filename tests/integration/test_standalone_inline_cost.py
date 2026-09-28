@@ -10,6 +10,7 @@ import json
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
@@ -27,6 +28,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from conftest import seed_workspace_id
 from gateway.core.config import API_ROOT, REQUEST_ID_HEADER
 from gateway.models.usage import UsageLog
 
@@ -299,3 +301,40 @@ def test_an_unknown_request_id_is_not_found(client: TestClient, master_key_heade
     response = client.get(f"{API_ROOT}/usage/requests/{uuid.uuid4()}", headers=master_key_header)
 
     assert response.status_code == 404
+
+
+def test_a_failed_request_with_a_successful_side_call_settles_as_an_error(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """A vision describe side-call writes a success row before the main call runs.
+
+    That row is part of the request's bill, and it must not make a request whose
+    main call failed read as having succeeded.
+    """
+    request_id = str(uuid.uuid4())
+    with db_session_factory() as db:
+        workspace_id = seed_workspace_id(db)
+        for status, cost in (("success", Decimal("0.001000")), ("error", None)):
+            db.add(
+                UsageLog(
+                    id=str(uuid.uuid4()),
+                    workspace_id=workspace_id,
+                    timestamp=datetime.now(UTC),
+                    model=MODEL_NAME,
+                    provider="openai",
+                    endpoint="/v1/chat/completions",
+                    status=status,
+                    cost=cost,
+                    request_group_id=request_id,
+                )
+            )
+        db.commit()
+
+    settled = client.get(f"{API_ROOT}/usage/requests/{request_id}", headers=master_key_header)
+
+    assert settled.status_code == 200, settled.text
+    assert settled.json()["status"] == "error"
+    assert settled.json()["cost_usd"] == "0.001000"
+    assert settled.json()["row_count"] == 2
