@@ -22,7 +22,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
-from gateway.api.routes._idempotency import IDEMPOTENCY_KEY_HEADER, IDEMPOTENT_REPLAYED_HEADER, _request_hash
+from gateway.api.routes._idempotency import (
+    IDEMPOTENCY_KEY_HEADER,
+    IDEMPOTENT_REPLAYED_HEADER,
+    IdempotencyGuard,
+    _request_hash,
+)
 from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.inference import IdempotencyRecord, IdempotencyState
@@ -487,5 +492,57 @@ async def test_a_retry_waits_for_the_original_request(
         else:
             assert isinstance(outcome, Claimed)
             assert outcome.token != claimed.token
+    finally:
+        await engine.dispose()
+
+
+class _StubRequest:
+    headers: dict[str, str] = {}
+
+    async def body(self) -> bytes:
+        return b"{}"
+
+
+@pytest.mark.asyncio
+async def test_a_running_request_keeps_its_claim_past_the_lease(
+    postgres_url: str, clean_database: None, test_config: GatewayConfig
+) -> None:
+    """A request slower than the lease renews its claim, so a retry cannot take it over and run it again."""
+    config = test_config.model_copy(update={"idempotency_lease_sec": 3})
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def locked_until() -> datetime:
+        async with sessions() as db:
+            return (await db.execute(select(IdempotencyRecord.locked_until))).scalar_one()
+
+    try:
+        async with sessions() as request_db:
+            request_db.add(User(user_id=_USER))
+            await request_db.commit()
+            request_uow = UnitOfWork(request_db)
+
+            async def renew(request: IdempotentRequest, claimed: Claimed) -> bool:
+                async with sessions() as heartbeat_db:
+                    heartbeat_uow = UnitOfWork(heartbeat_db)
+                    service = IdempotencyService(heartbeat_uow, InferenceRepositories.on(heartbeat_uow), config)
+                    return await service.renew(request, claimed)
+
+            guard = IdempotencyGuard(
+                _StubRequest(),  # type: ignore[arg-type]
+                IdempotencyService(request_uow, InferenceRepositories.on(request_uow), config),
+                "slow-request",
+                renew=renew,
+                renew_every_sec=0.2,
+            )
+            assert isinstance(await guard.admit(endpoint=_CHAT_ENDPOINT, user_id=_USER, api_key_id=None), Claimed)
+            first = await locked_until()
+            await asyncio.sleep(1.0)
+            assert await locked_until() > first
+
+            await guard.release()
+
+        async with sessions() as db:
+            assert (await db.execute(select(func.count()).select_from(IdempotencyRecord))).scalar_one() == 0
     finally:
         await engine.dispose()

@@ -194,6 +194,14 @@ class IdempotencyService:
                 expires_at=expires_at,
             )
 
+    async def renew(self, request: IdempotentRequest, claimed: Claimed) -> bool:
+        """Extend the claim's lease while its request runs; False once the claim is no longer this request's."""
+        locked_until = datetime.now(UTC) + timedelta(seconds=self._config.idempotency_lease_sec)
+        async with self._uow:
+            return await self._keys.extend_lease(
+                request.scope, request.key, claim_token=claimed.token, locked_until=locked_until
+            )
+
     async def release(self, request: IdempotentRequest, claimed: Claimed) -> None:
         """Give the key back so a retry runs the request again."""
         async with self._uow:

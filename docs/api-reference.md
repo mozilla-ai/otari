@@ -103,10 +103,17 @@ in its place.
 
 - A key belongs to the API key that sent it (or, for the master key, to the
   billed user), so two callers never see each other's responses.
-- The same key with a different body is refused with 422. Key order and
-  whitespace in the JSON body do not count as a difference.
+- A retry has to be the same request: the same body, and the same
+  `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Router` and
+  `anthropic-beta` headers, since those change what the request does. The same
+  key with a different body or different values for those headers is refused
+  with 422, so send a new key for a new request. Key order and whitespace in the
+  JSON body do not count as a difference.
 - A retry that waits longer than `idempotency_wait_sec` for the original is
-  answered 409 with `Retry-After`; retry again with the same key.
+  answered 409 with `Retry-After`; retry again with the same key. However long
+  the original takes, a retry never runs it a second time while it is still
+  running. If the worker running it dies, its key frees up within
+  `idempotency_lease_sec` (a minute by default).
 - A response is kept for `idempotency_retention_sec` (a day by default),
   generated content included, and then deleted. It is stored encrypted with
   `OTARI_SECRET_KEY`, so a deployment without that key ignores the header, and

@@ -21,12 +21,12 @@ class InferenceSettings(BaseModel):
         ),
     )
     idempotency_lease_sec: Annotated[int, OMITTED] = Field(
-        default=900,
-        gt=0,
+        default=60,
+        ge=3,
         description=(
-            "How long a request holding an Idempotency-Key may stay in flight before a retry with "
-            "the same key may take it over. It must exceed the slowest non-streaming request this "
-            "deployment serves, or a retry could run the request a second time."
+            "How long a claim on an Idempotency-Key stays valid without being renewed. The request "
+            "holding it renews it every third of this while it runs, so this bounds how long a key "
+            "stays blocked after the worker running its request dies, not how long a request may take."
         ),
     )
     idempotency_wait_sec: Annotated[int, OMITTED] = Field(

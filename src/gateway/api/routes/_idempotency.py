@@ -12,9 +12,11 @@ encrypted with it.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import json
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any
 
@@ -25,7 +27,7 @@ from gateway.api.deps import build_idempotency_service, get_config, get_unit_of_
 from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER
 from gateway.core.config import REQUEST_ID_HEADER, ROUTER_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
-from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.services.inference import (
     Admission,
@@ -98,15 +100,33 @@ def _usable(key: str) -> bool:
     return 0 < len(key) <= _MAX_KEY_LENGTH and key.isascii() and key.isprintable() and key.strip() == key
 
 
-class IdempotencyGuard:
-    """One request's hold on its ``Idempotency-Key``, released unless the request completes."""
+Renewer = Callable[[IdempotentRequest, Claimed], Awaitable[bool]]
 
-    def __init__(self, raw_request: Request, service: IdempotencyService | None, key: str | None) -> None:
+
+class IdempotencyGuard:
+    """One request's hold on its ``Idempotency-Key``, released unless the request completes.
+
+    While the request runs, the claim's lease is renewed in the background, so a
+    retry can take the key over only once the worker running the request is gone.
+    """
+
+    def __init__(
+        self,
+        raw_request: Request,
+        service: IdempotencyService | None,
+        key: str | None,
+        *,
+        renew: Renewer | None = None,
+        renew_every_sec: float = 20.0,
+    ) -> None:
         self._raw_request = raw_request
         self._service = service
         self._key = key
+        self._renew = renew
+        self._renew_every_sec = renew_every_sec
         self._request: IdempotentRequest | None = None
         self._claimed: Claimed | None = None
+        self._heartbeat: asyncio.Task[None] | None = None
 
     @property
     def active(self) -> bool:
@@ -132,10 +152,31 @@ class IdempotencyGuard:
         outcome = await self._service.admit(self._request)
         if isinstance(outcome, Claimed):
             self._claimed = outcome
+            if self._renew is not None:
+                self._heartbeat = asyncio.create_task(self._keep_alive(self._request, outcome))
         return outcome
+
+    async def _keep_alive(self, request: IdempotentRequest, claimed: Claimed) -> None:
+        """Renew the lease until stopped, or until the claim is no longer this request's."""
+        assert self._renew is not None
+        while True:
+            await asyncio.sleep(self._renew_every_sec)
+            try:
+                if not await self._renew(request, claimed):
+                    return
+            except DATABASE_ERRORS:
+                logger.warning("Could not renew an idempotency claim; retrying", exc_info=True)
+
+    async def _stop_heartbeat(self) -> None:
+        heartbeat, self._heartbeat = self._heartbeat, None
+        if heartbeat is not None:
+            heartbeat.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat
 
     async def complete(self, body: Any, response: Response, *, status_code: int = 200) -> None:
         """Store the response this request is about to return, for a retry to be given."""
+        await self._stop_heartbeat()
         if self._service is None or self._request is None or self._claimed is None:
             return
         encoded = json.dumps(jsonable_encoder(body), separators=(",", ":"))
@@ -164,6 +205,7 @@ class IdempotencyGuard:
 
     async def release(self) -> None:
         """Give the key back so a retry runs the request again. A no-op once completed."""
+        await self._stop_heartbeat()
         if self._service is None or self._request is None or self._claimed is None:
             return
         claimed, self._claimed = self._claimed, None
@@ -196,7 +238,15 @@ async def get_idempotency_guard(
     service = None
     if uow is not None and idempotency_key is not None and config.idempotency_retention_sec > 0 and storage_available():
         service = build_idempotency_service(uow, config)
-    guard = IdempotencyGuard(raw_request, service, idempotency_key)
+
+    async def renew(request: IdempotentRequest, claimed: Claimed) -> bool:
+        # A Unit of Work of its own: the request's belongs to the request's task.
+        async with create_unit_of_work() as heartbeat_uow:
+            return await build_idempotency_service(heartbeat_uow, config).renew(request, claimed)
+
+    guard = IdempotencyGuard(
+        raw_request, service, idempotency_key, renew=renew, renew_every_sec=config.idempotency_lease_sec / 3
+    )
     try:
         yield guard
     finally:
