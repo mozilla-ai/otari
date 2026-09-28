@@ -159,11 +159,10 @@ settlement.
 
 ## Tools, MCP, and guardrails
 
-An `otari_*` tool type always runs in the gateway. A provider-native web-search
-type passes through unless `web_search_intercept` is on or the request's
-`Otari-Web-Search` header (the executor vocabulary: `auto`, `otari`, `provider`)
-says otherwise; the header cannot undo interception, and `auto` weighs every
-fallback candidate (`claims_provider_web_search` in `api/routes/_tools.py`). A provider-native
+An `otari_*` tool type always runs in the gateway. Who runs a provider-native
+web-search type is described in
+[web-search interception](../../docs/tools.md#web-search-interception) and
+decided by `claims_provider_web_search` in `api/routes/_tools.py`. A provider-native
 code-execution type is decided by the executor (`models/tools.py`,
 resolved in `api/routes/_tools.py`): a workspace pin wins over everything, the
 `Otari-Code-Execution` header wins over the deployment default, and `auto`
