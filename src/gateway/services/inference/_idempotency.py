@@ -133,9 +133,11 @@ class IdempotencyService:
         record = await self._keys.find(request.scope, request.key)
         if record is None:
             return _RETRY
-        if _as_utc(record.expires_at) <= now or (
-            record.state == IdempotencyState.IN_PROGRESS and _as_utc(record.locked_until) <= now
-        ):
+        # A running claim is stale only once its lease lapses, since the request
+        # renews the lease and not the retention; a stored response once its
+        # retention does.
+        stale_at = record.locked_until if record.state == IdempotencyState.IN_PROGRESS else record.expires_at
+        if _as_utc(stale_at) <= now:
             taken = await self._keys.take_over(
                 request.scope, request.key, previous_token=record.claim_token, values=claim
             )

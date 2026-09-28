@@ -18,7 +18,7 @@ import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionChunk, ChatCompletionMessage, Choice, CompletionUsage
 from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
@@ -34,7 +34,7 @@ from gateway.models.inference import IdempotencyRecord, IdempotencyState
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
 from gateway.repositories.inference import InferenceRepositories
-from gateway.services.inference import Claimed, IdempotencyService, IdempotentRequest, Replay
+from gateway.services.inference import Claimed, IdempotencyService, IdempotentRequest, Replay, StillInFlight
 from gateway.services.secret_box import generate_secret_key
 
 from .conftest import MODEL_NAME, _to_async_url, build_test_client
@@ -544,5 +544,37 @@ async def test_a_running_request_keeps_its_claim_past_the_lease(
 
         async with sessions() as db:
             assert (await db.execute(select(func.count()).select_from(IdempotencyRecord))).scalar_one() == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_running_claim_outlives_its_retention(
+    postgres_url: str, clean_database: None, test_config: GatewayConfig
+) -> None:
+    """Only a lapsed lease frees a running claim, so a request slower than the retention is not run twice."""
+    config = test_config.model_copy(
+        update={"idempotency_retention_sec": 1, "idempotency_lease_sec": 60, "idempotency_wait_sec": 0}
+    )
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    request = IdempotentRequest(
+        scope=f"master:{_USER}", key="outlives", request_hash="0" * 64, user_id=_USER, api_key_id=None
+    )
+    try:
+        async with sessions() as original_db, sessions() as retry_db:
+            original_db.add(User(user_id=_USER))
+            await original_db.commit()
+            original_uow, retry_uow = UnitOfWork(original_db), UnitOfWork(retry_db)
+            original = IdempotencyService(original_uow, InferenceRepositories.on(original_uow), config)
+            retry = IdempotencyService(retry_uow, InferenceRepositories.on(retry_uow), config)
+
+            assert isinstance(await original.admit(request), Claimed)
+            # Past the lease-or-retention expiry an in-progress claim is stamped with, but inside its lease.
+            async with sessions() as db:
+                await db.execute(update(IdempotencyRecord).values(expires_at=datetime.now(UTC) - timedelta(seconds=1)))
+                await db.commit()
+
+            assert isinstance(await retry.admit(request), StillInFlight)
     finally:
         await engine.dispose()
