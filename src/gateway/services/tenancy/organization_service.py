@@ -1083,6 +1083,7 @@ class OrganizationService:
             try:
                 email = _validated_email(raw)
                 if email in seen:
+                    failed.append(BulkInvitationFailurePublic(email=raw, detail=f"{email} is listed more than once"))
                     continue
                 seen.add(email)
                 # A savepoint, not a rollback: rolling the whole transaction back

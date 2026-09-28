@@ -1122,7 +1122,7 @@ class BulkInvitationFailurePublic(SQLModel):
 
 
 class BulkInviteOrganizationMembersResultPublic(SQLModel):
-    """What a bulk invite produced: one entry per address, in request order, in one of the two lists."""
+    """What a bulk invite produced: one entry per submitted address, repeats included, in one of the two lists."""
 
     invited: list[InviteOrganizationMemberResultPublic]
     failed: list[BulkInvitationFailurePublic]

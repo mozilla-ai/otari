@@ -744,7 +744,9 @@ def test_bulk_invite_reports_each_address_and_one_refusal_does_not_stop_the_rest
 
     assert [row["email"] for row in result["invited"]] == ["one@example.com", "two@example.com"]
     assert all(row["role"] == "admin" and row["mail_sent"] is False for row in result["invited"])
-    assert [row["email"] for row in result["failed"]] == ["pending@example.com", "not-an-address"]
+    # Every submitted address is accounted for, the repeat included.
+    assert [row["email"] for row in result["failed"]] == ["pending@example.com", "not-an-address", "ONE@example.com"]
+    assert "more than once" in result["failed"][2]["detail"]
     assert all(row["detail"] for row in result["failed"])
 
     # Committed, on the roster, and each link works on its own.

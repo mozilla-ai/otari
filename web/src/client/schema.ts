@@ -6493,7 +6493,7 @@ export interface components {
         };
         /**
          * BulkInviteOrganizationMembersResultPublic
-         * @description What a bulk invite produced: one entry per address, in request order, in one of the two lists.
+         * @description What a bulk invite produced: one entry per submitted address, repeats included, in one of the two lists.
          */
         BulkInviteOrganizationMembersResultPublic: {
             /** Failed */
