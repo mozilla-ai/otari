@@ -81,6 +81,7 @@ the corresponding startup value after the database is available.
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
+| `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. See [Retrying safely](api-reference.md#retrying-safely). |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
 | `mode` | `standalone`, `hosted`, or `hybrid`. See [Modes](modes.md). |

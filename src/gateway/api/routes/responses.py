@@ -8,7 +8,6 @@ from any_llm.types.responses import Response as ResponsesResponse
 from any_llm.types.responses import ResponsesParams, ResponseStreamEvent
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi import Response as FastAPIResponse
-from fastapi.responses import StreamingResponse
 from openai.types.responses import ResponseUsage
 from openresponses_types.types import Usage as OpenResponsesUsage
 from pydantic import ConfigDict, Field
@@ -27,6 +26,7 @@ from gateway.api.deps import (
     get_unit_of_work_if_needed,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content
+from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
@@ -521,7 +521,8 @@ async def create_response(
     model_provider: ModelProviderPortDep,
     code_execution_port: CodeExecutionPortDep,
     mcp_server_port: McpServerPortDep,
-) -> dict[str, Any] | StreamingResponse:
+    idempotency: IdempotencyGuardDep,
+) -> dict[str, Any] | FastAPIResponse:
     """OpenAI-compatible Responses endpoint.
 
     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
@@ -573,26 +574,31 @@ async def create_response(
         chars = len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or ""))
         return chars, stats.vision_usage()
 
-    ctx = await resolve_request_context(
-        adapter=_ADAPTER,
-        raw_request=raw_request,
-        response=response,
-        db=db,
-        uow=uow,
-        config=config,
-        log_writer=log_writer,
-        model=request_body.model,
-        user_id_from_request=request_body.user,
-        estimate_prompt_chars=len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or "")),
-        estimate_max_output_tokens=max_output_tokens,
-        master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
-        user_forbidden_detail=_USER_FORBIDDEN,
-        routing_signal=lambda: routing_signal_from_text(
-            _routing_text(request_body), raw_request, has_tools=bool(request_body.tools)
-        ),
-        normalize_messages=_normalize,
-        tools=request_body.tools,
-    )
+    try:
+        ctx = await resolve_request_context(
+            adapter=_ADAPTER,
+            raw_request=raw_request,
+            response=response,
+            db=db,
+            uow=uow,
+            config=config,
+            log_writer=log_writer,
+            model=request_body.model,
+            user_id_from_request=request_body.user,
+            estimate_prompt_chars=len(str(request_body.input))
+            + len(str(getattr(request_body, "instructions", "") or "")),
+            estimate_max_output_tokens=max_output_tokens,
+            master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
+            user_forbidden_detail=_USER_FORBIDDEN,
+            routing_signal=lambda: routing_signal_from_text(
+                _routing_text(request_body), raw_request, has_tools=bool(request_body.tools)
+            ),
+            normalize_messages=_normalize,
+            tools=request_body.tools,
+            idempotency=None if bool(request_body.stream) else idempotency,
+        )
+    except IdempotentReplay as replay:
+        return replay.response()
 
     # Provider-support guard: an unsupported provider would just fail
     # downstream, so surface a clearer 400 upfront. In hybrid mode validate
@@ -788,4 +794,6 @@ async def create_response(
         base_request_fields=base_request_fields,
     )
 
-    return result.model_dump(exclude_none=True)
+    body = result.model_dump(exclude_none=True)
+    await idempotency.complete(body, response)
+    return body

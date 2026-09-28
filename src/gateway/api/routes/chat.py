@@ -10,7 +10,6 @@ from any_llm.types.completion import (
     CompletionUsage,
 )
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
-from fastapi.responses import StreamingResponse
 from pydantic import Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +26,7 @@ from gateway.api.deps import (
     get_unit_of_work_if_needed,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
+from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
@@ -403,7 +403,8 @@ async def chat_completions(
     model_provider: ModelProviderPortDep,
     code_execution_port: CodeExecutionPortDep,
     mcp_server_port: McpServerPortDep,
-) -> ChatCompletion | StreamingResponse:
+    idempotency: IdempotencyGuardDep,
+) -> ChatCompletion | Response:
     """OpenAI-compatible chat completions endpoint.
 
     Supports both streaming and non-streaming responses.
@@ -427,6 +428,7 @@ async def chat_completions(
         model_provider=model_provider,
         code_execution_port=code_execution_port,
         mcp_server_port=mcp_server_port,
+        idempotency=idempotency,
     )
 
 
@@ -445,7 +447,8 @@ async def run_chat_completion(
     code_execution_port: CodeExecutionPort | None,
     mcp_server_port: McpServerPort,
     session_principal: SessionPrincipal | None = None,
-) -> ChatCompletion | StreamingResponse:
+    idempotency: IdempotencyGuard | None = None,
+) -> ChatCompletion | Response:
     """Serve one chat completion, from the resolved preamble to the response.
 
     The body of :func:`chat_completions`, as a plain function so a second route
@@ -510,27 +513,31 @@ async def run_chat_completion(
 
     output_cap = _effective_output_cap(request.max_tokens, request.max_completion_tokens)
 
-    ctx = await resolve_request_context(
-        adapter=adapter,
-        raw_request=raw_request,
-        response=response,
-        db=db,
-        uow=uow,
-        config=config,
-        log_writer=log_writer,
-        model=request.model,
-        user_id_from_request=request.user,
-        estimate_prompt_chars=len(str(request.messages)),
-        estimate_max_output_tokens=output_cap,
-        master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
-        user_forbidden_detail=_USER_FORBIDDEN,
-        session_principal=session_principal,
-        routing_signal=lambda: routing_signal_from_messages(
-            request.messages, raw_request, has_tools=bool(request.tools)
-        ),
-        normalize_messages=_normalize,
-        tools=request.tools,
-    )
+    try:
+        ctx = await resolve_request_context(
+            adapter=adapter,
+            raw_request=raw_request,
+            response=response,
+            db=db,
+            uow=uow,
+            config=config,
+            log_writer=log_writer,
+            model=request.model,
+            user_id_from_request=request.user,
+            estimate_prompt_chars=len(str(request.messages)),
+            estimate_max_output_tokens=output_cap,
+            master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
+            user_forbidden_detail=_USER_FORBIDDEN,
+            session_principal=session_principal,
+            routing_signal=lambda: routing_signal_from_messages(
+                request.messages, raw_request, has_tools=bool(request.tools)
+            ),
+            normalize_messages=_normalize,
+            tools=request.tools,
+            idempotency=None if request.stream else idempotency,
+        )
+    except IdempotentReplay as replay:
+        return replay.response()
 
     tool_ctx = await prepare_gateway_tools(
         adapter=adapter,
@@ -664,7 +671,7 @@ async def run_chat_completion(
         ctx, config, request.model, adapter=adapter, model_provider=model_provider
     )
     call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
-    return await run_standalone_non_stream(
+    result = await run_standalone_non_stream(
         adapter=adapter,
         ctx=ctx,
         tool_ctx=tool_ctx,
@@ -675,3 +682,6 @@ async def run_chat_completion(
         display_model=resolved.alias,
         base_request_fields=request_fields,
     )
+    if idempotency is not None:
+        await idempotency.complete(result, response)
+    return result

@@ -1,0 +1,430 @@
+"""A retried completion sent with an ``Idempotency-Key`` is answered once and billed once.
+
+The case this exists for is a non-streaming request that succeeded upstream
+while its response was lost on the way back (a dropped connection, a client
+timeout): without the key, the retry calls the provider again and bills again.
+"""
+
+import asyncio
+import json
+import time
+import uuid
+from collections.abc import AsyncIterator, Callable, Generator
+from datetime import UTC, datetime, timedelta
+from typing import Any
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from any_llm.types.completion import ChatCompletion, ChatCompletionChunk, ChatCompletionMessage, Choice, CompletionUsage
+from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
+from fastapi.testclient import TestClient
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import Session
+
+from gateway.api.routes._idempotency import IDEMPOTENCY_KEY_HEADER, IDEMPOTENT_REPLAYED_HEADER, _request_hash
+from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.models.inference import IdempotencyRecord, IdempotencyState
+from gateway.models.usage import UsageLog
+from gateway.models.users import User
+from gateway.repositories.inference import InferenceRepositories
+from gateway.services.inference import Claimed, IdempotencyService, IdempotentRequest, Replay
+
+from .conftest import MODEL_NAME, _to_async_url, build_test_client
+
+_USER = "idempotency-user"
+_CHAT_ENDPOINT = "/v1/chat/completions"
+
+
+def _completion() -> ChatCompletion:
+    return ChatCompletion(
+        id="chatcmpl-idem",
+        object="chat.completion",
+        created=0,
+        model=MODEL_NAME,
+        choices=[Choice(index=0, message=ChatCompletionMessage(role="assistant", content="hi"), finish_reason="stop")],
+        usage=CompletionUsage(prompt_tokens=100_000, completion_tokens=200_000, total_tokens=300_000),
+    )
+
+
+def _chat_body(content: str = "hi", **extra: Any) -> dict[str, Any]:
+    return {"model": MODEL_NAME, "messages": [{"role": "user", "content": content}], "user": _USER, **extra}
+
+
+def _post_chat(
+    client: TestClient, headers: dict[str, str], provider: AsyncMock, body: dict[str, Any] | None = None
+) -> Any:
+    with patch("gateway.api.routes.chat.acompletion", new=provider):
+        return client.post(f"{API_ROOT}/chat/completions", json=body or _chat_body(), headers=headers)
+
+
+def _usage_rows(make_session: Callable[[], Session]) -> int:
+    with make_session() as db:
+        return db.execute(select(func.count()).select_from(UsageLog).where(UsageLog.user_id == _USER)).scalar_one()
+
+
+def _wait_for_usage_rows(make_session: Callable[[], Session], expected: int, *, timeout: float = 3.0) -> None:
+    """Poll with fresh sessions, since the usage row may be written by a background writer."""
+    deadline = time.monotonic() + timeout
+    while _usage_rows(make_session) < expected:
+        assert time.monotonic() < deadline, "the usage row was never written"
+        time.sleep(0.05)
+
+
+@pytest.fixture
+def user(client: TestClient, master_key_header: dict[str, str]) -> None:
+    response = client.post(f"{API_ROOT}/users", json={"user_id": _USER}, headers=master_key_header)
+    assert response.status_code == 200, response.text
+    response = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": MODEL_NAME, "input_price_per_million": 1.0, "output_price_per_million": 1.0},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+
+
+def _keyed(headers: dict[str, str], key: str) -> dict[str, str]:
+    return {**headers, IDEMPOTENCY_KEY_HEADER: key}
+
+
+def test_retry_replays_the_original_response_without_billing_again(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    user: None,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+    headers = _keyed(master_key_header, "retry-1")
+
+    first = _post_chat(client, headers, provider)
+    assert first.status_code == 200, first.text
+    _wait_for_usage_rows(db_session_factory, 1)
+    second = _post_chat(client, headers, provider)
+
+    assert second.status_code == 200, second.text
+    assert provider.await_count == 1
+    assert second.json() == first.json()
+    assert second.json()["usage"]["cost_usd"] == first.json()["usage"]["cost_usd"]
+    assert second.headers[REQUEST_ID_HEADER] == first.headers[REQUEST_ID_HEADER]
+    assert second.headers[IDEMPOTENT_REPLAYED_HEADER] == "true"
+    assert IDEMPOTENT_REPLAYED_HEADER not in first.headers
+    assert _usage_rows(db_session_factory) == 1
+
+
+def test_key_order_and_spacing_do_not_make_a_different_request(
+    client: TestClient, master_key_header: dict[str, str], user: None
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+    headers = {**_keyed(master_key_header, "canonical"), "Content-Type": "application/json"}
+
+    with patch("gateway.api.routes.chat.acompletion", new=provider):
+        first = client.post(
+            f"{API_ROOT}/chat/completions",
+            content=(
+                f'{{"user": "{_USER}", "model": "{MODEL_NAME}", "messages": [{{"role": "user", "content": "hi"}}]}}'
+            ),
+            headers=headers,
+        )
+        second = client.post(
+            f"{API_ROOT}/chat/completions",
+            content=f'{{"messages":[{{"content":"hi","role":"user"}}],"model":"{MODEL_NAME}","user":"{_USER}"}}',
+            headers=headers,
+        )
+
+    assert first.status_code == second.status_code == 200
+    assert provider.await_count == 1
+
+
+def test_reusing_a_key_for_a_different_request_is_refused(
+    client: TestClient, master_key_header: dict[str, str], user: None
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+    headers = _keyed(master_key_header, "reused")
+
+    assert _post_chat(client, headers, provider).status_code == 200
+    refused = _post_chat(client, headers, provider, _chat_body("something else"))
+
+    assert refused.status_code == 422, refused.text
+    assert IDEMPOTENCY_KEY_HEADER in refused.text
+    assert provider.await_count == 1
+
+
+def test_a_failed_request_releases_its_key_so_the_retry_runs(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    user: None,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    provider = AsyncMock(side_effect=[RuntimeError("upstream overloaded"), _completion()])
+    headers = _keyed(master_key_header, "after-failure")
+
+    failed = _post_chat(client, headers, provider)
+    retried = _post_chat(client, headers, provider)
+
+    assert failed.status_code >= 500
+    assert retried.status_code == 200, retried.text
+    assert IDEMPOTENT_REPLAYED_HEADER not in retried.headers
+    assert provider.await_count == 2
+    with db_session_factory() as db:
+        record = db.execute(select(IdempotencyRecord)).scalar_one()
+    assert record.state == IdempotencyState.COMPLETED
+
+
+def test_keys_are_scoped_to_the_caller(client: TestClient, master_key_header: dict[str, str], user: None) -> None:
+    def _key_header() -> dict[str, str]:
+        response = client.post(
+            f"{API_ROOT}/keys", json={"key_name": f"k-{uuid.uuid4()}", "user_id": _USER}, headers=master_key_header
+        )
+        assert response.status_code == 200, response.text
+        return {API_KEY_HEADER: f"Bearer {response.json()['key']}"}
+
+    provider = AsyncMock(return_value=_completion())
+    first, second = _key_header(), _key_header()
+
+    assert _post_chat(client, _keyed(first, "shared"), provider).status_code == 200
+    other = _post_chat(client, _keyed(second, "shared"), provider)
+
+    assert other.status_code == 200, other.text
+    assert IDEMPOTENT_REPLAYED_HEADER not in other.headers
+    assert provider.await_count == 2
+
+
+def test_streaming_requests_ignore_the_key(client: TestClient, master_key_header: dict[str, str], user: None) -> None:
+    async def _stream(**_kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        async def _chunks() -> AsyncIterator[ChatCompletionChunk]:
+            yield ChatCompletionChunk(
+                id="chunk", object="chat.completion.chunk", created=0, model=MODEL_NAME, choices=[]
+            )
+
+        return _chunks()
+
+    provider = AsyncMock(side_effect=_stream)
+    headers = _keyed(master_key_header, "streamed")
+
+    for _ in range(2):
+        response = _post_chat(client, headers, provider, _chat_body(stream=True))
+        assert response.status_code == 200, response.text
+
+    assert provider.await_count == 2
+
+
+@pytest.mark.parametrize("key", ["", "x" * 256])
+def test_an_unusable_key_is_refused(
+    client: TestClient, master_key_header: dict[str, str], user: None, key: str
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+
+    response = _post_chat(client, _keyed(master_key_header, key), provider)
+
+    assert response.status_code == 400, response.text
+    provider.assert_not_awaited()
+
+
+def test_messages_retry_is_replayed(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_user: dict[str, Any],
+    messages_request_body: dict[str, Any],
+) -> None:
+    messages_request_body["metadata"] = {"user_id": test_user["user_id"]}
+    result = MessageResponse(
+        id="msg_idem",
+        type="message",
+        role="assistant",
+        content=[TextBlock(type="text", text="Hello!")],
+        model="claude-3-5-sonnet",
+        stop_reason="end_turn",
+        usage=MessageUsage(input_tokens=10, output_tokens=5),
+    )
+    provider = AsyncMock(return_value=result)
+    headers = _keyed(master_key_header, "messages-1")
+
+    with patch("gateway.api.routes.messages.amessages", new=provider):
+        first = client.post(f"{API_ROOT}/messages", json=messages_request_body, headers=headers)
+        second = client.post(f"{API_ROOT}/messages", json=messages_request_body, headers=headers)
+
+    assert first.status_code == second.status_code == 200
+    assert second.json() == first.json()
+    assert second.headers[IDEMPOTENT_REPLAYED_HEADER] == "true"
+    assert provider.await_count == 1
+
+
+def test_responses_retry_is_replayed(
+    client: TestClient, master_key_header: dict[str, str], responses_request_body: dict[str, Any]
+) -> None:
+    class _Result:
+        usage = None
+
+        def model_dump(self, *, exclude_none: bool = False) -> dict[str, Any]:
+            return {"id": "resp_idem", "output": [{"type": "message", "content": "Hello"}]}
+
+    provider = AsyncMock(return_value=_Result())
+    headers = _keyed(master_key_header, "responses-1")
+
+    with patch("gateway.api.routes.responses.aresponses", new=provider):
+        first = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=headers)
+        second = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=headers)
+
+    assert first.status_code == second.status_code == 200
+    assert second.json() == first.json()
+    assert second.headers[IDEMPOTENT_REPLAYED_HEADER] == "true"
+    assert provider.await_count == 1
+
+
+def _hold_key(
+    make_session: Callable[[], Session], key: str, *, locked_until: datetime, body: dict[str, Any] | None = None
+) -> None:
+    """Leave a claim on ``key`` as a request still in flight on another worker would."""
+    now = datetime.now(UTC)
+    with make_session() as db:
+        db.add(
+            IdempotencyRecord(
+                scope=f"master:{_USER}",
+                idempotency_key=key,
+                request_hash=_request_hash(_CHAT_ENDPOINT, _json_bytes(body or _chat_body())),
+                claim_token=str(uuid.uuid4()),
+                state=IdempotencyState.IN_PROGRESS,
+                user_id=_USER,
+                api_key_id=None,
+                created_at=now,
+                locked_until=locked_until,
+                expires_at=now + timedelta(days=1),
+            )
+        )
+        db.commit()
+
+
+def _json_bytes(body: dict[str, Any]) -> bytes:
+    return json.dumps(body).encode()
+
+
+@pytest.fixture
+def no_wait_client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    yield from build_test_client(test_config.model_copy(update={"idempotency_wait_sec": 0}))
+
+
+def test_a_retry_while_the_original_is_in_flight_is_told_to_come_back(
+    no_wait_client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    response = no_wait_client.post(f"{API_ROOT}/users", json={"user_id": _USER}, headers=master_key_header)
+    assert response.status_code == 200
+    _hold_key(db_session_factory, "in-flight", locked_until=datetime.now(UTC) + timedelta(minutes=10))
+    provider = AsyncMock(return_value=_completion())
+
+    response = _post_chat(no_wait_client, _keyed(master_key_header, "in-flight"), provider)
+
+    assert response.status_code == 409, response.text
+    assert response.headers["Retry-After"]
+    provider.assert_not_awaited()
+
+
+def test_an_abandoned_claim_is_taken_over_once_its_lease_passes(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    user: None,
+    db_session_factory: Callable[[], Session],
+) -> None:
+    _hold_key(db_session_factory, "abandoned", locked_until=datetime.now(UTC) - timedelta(seconds=1))
+    provider = AsyncMock(return_value=_completion())
+
+    response = _post_chat(client, _keyed(master_key_header, "abandoned"), provider)
+
+    assert response.status_code == 200, response.text
+    assert provider.await_count == 1
+
+
+@pytest.fixture
+def ignoring_client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    yield from build_test_client(test_config.model_copy(update={"idempotency_retention_sec": 0}))
+
+
+def test_a_deployment_can_turn_the_header_off(ignoring_client: TestClient, master_key_header: dict[str, str]) -> None:
+    response = ignoring_client.post(f"{API_ROOT}/users", json={"user_id": _USER}, headers=master_key_header)
+    assert response.status_code == 200
+    provider = AsyncMock(return_value=_completion())
+    headers = _keyed(master_key_header, "ignored")
+
+    for _ in range(2):
+        assert _post_chat(ignoring_client, headers, provider).status_code == 200
+
+    assert provider.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_deletes_only_expired_records(async_db: AsyncSession, test_config: GatewayConfig) -> None:
+    async_db.add(User(user_id=_USER))
+    await async_db.commit()
+    now = datetime.now(UTC)
+
+    def _record(key: str, *, state: str, expires_at: datetime, locked_until: datetime) -> IdempotencyRecord:
+        return IdempotencyRecord(
+            scope=f"master:{_USER}",
+            idempotency_key=key,
+            request_hash="0" * 64,
+            claim_token=str(uuid.uuid4()),
+            state=state,
+            user_id=_USER,
+            created_at=now,
+            locked_until=locked_until,
+            expires_at=expires_at,
+        )
+
+    past, future = now - timedelta(seconds=1), now + timedelta(hours=1)
+    async_db.add_all(
+        [
+            _record("expired", state=IdempotencyState.COMPLETED, expires_at=past, locked_until=past),
+            _record("kept", state=IdempotencyState.COMPLETED, expires_at=future, locked_until=past),
+            _record("live-claim", state=IdempotencyState.IN_PROGRESS, expires_at=past, locked_until=future),
+        ]
+    )
+    await async_db.commit()
+
+    uow = UnitOfWork(async_db)
+    deleted = await IdempotencyService(uow, InferenceRepositories.on(uow), test_config).sweep()
+
+    assert deleted == 1
+    remaining = (await async_db.execute(select(IdempotencyRecord.idempotency_key))).scalars().all()
+    assert sorted(remaining) == ["kept", "live-claim"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("original_succeeds", [True, False])
+async def test_a_retry_waits_for_the_original_request(
+    postgres_url: str, clean_database: None, test_config: GatewayConfig, original_succeeds: bool
+) -> None:
+    """The retry joins the in-flight original: its response if it succeeds, the key if it fails."""
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    request = IdempotentRequest(
+        scope=f"master:{_USER}", key="joined", request_hash="0" * 64, user_id=_USER, api_key_id=None
+    )
+    try:
+        async with sessions() as original_db, sessions() as retry_db:
+            original_db.add(User(user_id=_USER))
+            await original_db.commit()
+            original_uow, retry_uow = UnitOfWork(original_db), UnitOfWork(retry_db)
+            original = IdempotencyService(original_uow, InferenceRepositories.on(original_uow), test_config)
+            retry = IdempotencyService(retry_uow, InferenceRepositories.on(retry_uow), test_config)
+
+            claimed = await original.admit(request)
+            assert isinstance(claimed, Claimed)
+            waiting = asyncio.create_task(retry.admit(request))
+            await asyncio.sleep(0.5)
+            assert not waiting.done()
+
+            if original_succeeds:
+                await original.complete(request, claimed, status_code=200, body='{"ok":true}', headers={})
+            else:
+                await original.release(request, claimed)
+            outcome = await asyncio.wait_for(waiting, timeout=5)
+
+        if original_succeeds:
+            assert outcome == Replay(status_code=200, body='{"ok":true}', headers={})
+        else:
+            assert isinstance(outcome, Claimed)
+            assert outcome.token != claimed.token
+    finally:
+        await engine.dispose()

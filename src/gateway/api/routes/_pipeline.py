@@ -67,6 +67,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import extract_credential_token, verify_api_key_or_master_key
 from gateway.api.routes._attempts import walk_attempts
 from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
+from gateway.api.routes._idempotency import (
+    IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL,
+    IDEMPOTENCY_KEY_REUSED_DETAIL,
+    INVALID_IDEMPOTENCY_KEY_DETAIL,
+    IdempotencyGuard,
+    IdempotentReplay,
+    InvalidKey,
+)
 from gateway.api.routes._platform import (
     _DEFAULT_STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS,
     _DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS,
@@ -171,6 +179,7 @@ from gateway.services.code_execution import (
 )
 from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for
 from gateway.services.guardrails import InProcessGuardrail
+from gateway.services.inference import Claimed, KeyReused, Replay, StillInFlight
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
@@ -1721,6 +1730,29 @@ async def _resolve_keyed_user_id(
         raise
 
 
+async def _admit_idempotent(
+    guard: IdempotencyGuard, adapter: FormatAdapter[Any, Any], *, user_id: str, api_key_id: str | None
+) -> None:
+    """Claim the request's ``Idempotency-Key``, before anything is reserved against its budget.
+
+    Raises :class:`IdempotentReplay` when the key already holds this request's
+    response, which the route returns as it is.
+    """
+    match await guard.admit(endpoint=adapter.endpoint, user_id=user_id, api_key_id=api_key_id):
+        case None | Claimed():
+            return
+        case Replay() as replay:
+            raise IdempotentReplay(replay)
+        case InvalidKey():
+            raise adapter.error(400, INVALID_IDEMPOTENCY_KEY_DETAIL, ErrorKind.INVALID_REQUEST)
+        case KeyReused():
+            raise adapter.error(422, IDEMPOTENCY_KEY_REUSED_DETAIL, ErrorKind.INVALID_REQUEST)
+        case StillInFlight():
+            raise adapter.error(
+                409, IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL, ErrorKind.INVALID_REQUEST, headers={"Retry-After": "5"}
+            )
+
+
 async def resolve_request_context(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -1745,6 +1777,7 @@ async def resolve_request_context(
     ]
     | None = None,
     tools: list[dict[str, Any]] | None = None,
+    idempotency: IdempotencyGuard | None = None,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
 
@@ -1990,6 +2023,9 @@ async def resolve_request_context(
                     started_at=started_at,
                 )
                 raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
+
+        if idempotency is not None and session_principal is None:
+            await _admit_idempotent(idempotency, adapter, user_id=user_id, api_key_id=api_key_id)
 
         # Derived from the workspace already resolved above, not via
         # `organization_for_key_id` (which would re-derive the same workspace

@@ -15487,7 +15487,10 @@ export interface operations {
     "chat-chat_completions": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again, and waits for the original while it is still running. Reusing a key for a different body is refused with 422. Ignored for streaming requests and in hybrid mode. */
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -16419,7 +16422,10 @@ export interface operations {
     "messages-create_message": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again, and waits for the original while it is still running. Reusing a key for a different body is refused with 422. Ignored for streaming requests and in hybrid mode. */
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -20185,7 +20191,10 @@ export interface operations {
     "responses-create_response": {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again, and waits for the original while it is still running. Reusing a key for a different body is refused with 422. Ignored for streaming requests and in hybrid mode. */
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };

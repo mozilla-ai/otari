@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from typing_extensions import override
 
 from gateway import features
-from gateway.api.deps import build_file_service, set_config
+from gateway.api.deps import build_file_service, build_idempotency_service, set_config
 from gateway.api.main import register_routers
 from gateway.container import Container, build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
@@ -39,6 +39,7 @@ from gateway.services.code_execution.container_sweeper import run_sandbox_contai
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import run_file_sweeper
+from gateway.services.inference import run_idempotency_sweeper
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
 from gateway.services.model_catalog_service import (
@@ -191,6 +192,15 @@ def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutin
     )
 
 
+def _start_idempotency_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:
+    """Return the idempotency record sweep, or None when the header is ignored or the interval disables it."""
+    if config.idempotency_retention_sec <= 0 or config.idempotency_sweep_interval_sec <= 0:
+        return None
+    return run_idempotency_sweeper(
+        config.idempotency_sweep_interval_sec, lambda uow: build_idempotency_service(uow, config)
+    )
+
+
 def _start_container_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:
     """Return the sandbox container sweep, or None when no sandbox is held past its request."""
     if not config.sandbox_configured() or config.sandbox_container_idle_ttl_sec <= 0:
@@ -257,6 +267,8 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     # The provider reclaims a held sandbox on its own timer; this drops the
     # rows that named it once nobody can resume them.
     _LifespanWorker("sandbox container sweep", _start_container_sweeper),
+    # Stored responses hold generated content, so they go once their retention passes.
+    _LifespanWorker("idempotency sweep", _start_idempotency_sweeper),
 )
 
 

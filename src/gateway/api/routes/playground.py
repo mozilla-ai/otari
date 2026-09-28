@@ -187,7 +187,7 @@ async def playground_chat_completions(
     mcp_server_port: McpServerPortDep,
     key_format: ApiKeyFormatPortDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
-) -> ChatCompletion | StreamingResponse:
+) -> ChatCompletion | Response:
     """Run one chat completion for the signed-in caller.
 
     Streaming and non-streaming both, identically to ``POST

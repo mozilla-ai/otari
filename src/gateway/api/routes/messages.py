@@ -13,7 +13,6 @@ from any_llm.types.messages import (
     MessageStreamEvent,
 )
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +31,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
+from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     CONTAINER_AUTO,
@@ -756,7 +756,8 @@ async def create_message(
     model_provider: ModelProviderPortDep,
     code_execution_port: CodeExecutionPortDep,
     mcp_server_port: McpServerPortDep,
-) -> dict[str, Any] | StreamingResponse:
+    idempotency: IdempotencyGuardDep,
+) -> dict[str, Any] | Response:
     """Anthropic Messages API-compatible endpoint.
 
     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
@@ -840,7 +841,10 @@ async def create_message(
             ),
             normalize_messages=_normalize,
             tools=request.tools,
+            idempotency=None if request.stream else idempotency,
         )
+    except IdempotentReplay as replay:
+        return replay.response()
     except HTTPException as exc:
         # The hybrid preamble (platform resolve / auth) raises format-agnostic
         # plain-string HTTPExceptions (some with a Retry-After header); re-wrap
@@ -1014,7 +1018,9 @@ async def create_message(
         base_request_fields=request_fields,
     )
 
-    return result.model_dump(exclude_none=True)
+    body = result.model_dump(exclude_none=True)
+    await idempotency.complete(body, response)
+    return body
 
 
 # Input tokens are approximated as ``chars / 4``, because the gateway has no tokenizer.

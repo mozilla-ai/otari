@@ -83,6 +83,38 @@ rate that priced the model: `organization` (an organization's override),
 genai-prices dataset). Hybrid mode attaches the platform's settlement instead;
 see [Hybrid mode protocol](hybrid-mode-protocol.md#inline-response-fields).
 
+### Retrying safely
+
+A request the provider or the gateway refused (a 429, a 529, any other error) is
+not billed: its budget hold is refunded, so a client can retry it as it is. So is
+a stream the client disconnected from. The case that does bill twice is a
+non-streaming request that succeeded while its response was lost on the way
+back, through a dropped connection or a client timeout, because the retry calls
+the provider again.
+
+Send an `Idempotency-Key` header on a non-streaming Chat, Messages, or Responses
+request to make that retry safe. The value is any unique string of 1 to 255
+printable ASCII characters; a UUID is the usual choice. A retry with the same key
+and the same body then gets the original response, with its original
+`Otari-Request-ID` and `usage.cost_usd`, and an `Otari-Idempotent-Replayed: true`
+header, without calling the provider or billing again. While the original is
+still running the retry waits for it, and if the original fails the retry runs
+in its place.
+
+- A key belongs to the API key that sent it (or, for the master key, to the
+  billed user), so two callers never see each other's responses.
+- The same key with a different body is refused with 422. Key order and
+  whitespace in the JSON body do not count as a difference.
+- A retry that waits longer than `idempotency_wait_sec` for the original is
+  answered 409 with `Retry-After`; retry again with the same key.
+- A response is kept for `idempotency_retention_sec` (a day by default),
+  generated content included, and then deleted. Responses larger than 8 MiB are
+  not kept, so a retry of one runs again.
+- Only a successful response is kept. The request is still authenticated and
+  checked against the key's model access on a retry.
+- Streaming requests ignore the header, and so does hybrid mode, which has no
+  local database to keep the response in.
+
 ## Search
 
 `POST /api/v1/search` and `POST /api/v1/search/{search_tool_name}` run a configured

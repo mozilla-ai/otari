@@ -32,6 +32,7 @@ from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.files import FileRepositories
+from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.providers import OrgProviderKeyModelRepository
 from gateway.repositories.tenancy import OrganizationGuardrailDefinitionRepository, OrgProviderKeyRepository
@@ -41,6 +42,7 @@ from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileService, SandboxFileBridge, StagedFile
+from gateway.services.inference import IdempotencyService
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.organization_pricing_service import OrganizationPricingService
@@ -667,6 +669,11 @@ def build_file_service(uow: UnitOfWork, file_store: FileStoragePort, config: Gat
         raise RuntimeError("Unscoped uploads are not supported in this context; specify a workspace.")
 
     return FileService(uow, FileRepositories.on(uow), file_store, config, reject_unscoped_upload)
+
+
+def build_idempotency_service(uow: UnitOfWork, config: GatewayConfig) -> IdempotencyService:
+    """Build idempotency-key handling for a completion request or the expiry sweep."""
+    return IdempotencyService(uow, InferenceRepositories.on(uow), config)
 
 
 def build_sandbox_file_bridge(
