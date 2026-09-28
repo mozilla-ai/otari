@@ -225,10 +225,11 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     # its DELETE /{model_key:path} does not sit behind the catalog catch-all.
     RouterMount(pricing.operator_router, Plane.CONTROL),
     RouterMount(pricing.catalog_router, Plane.CONTROL),
-    # Both prefixed /usage. POST /external-events authenticates with an API
-    # key rather than operator standing, so it is mounted on its own router.
+    # Both prefixed /usage. POST /external-events and GET /requests/{id}
+    # authenticate with an API key rather than operator standing, so they are
+    # mounted on their own router.
     RouterMount(usage.operator_router, Plane.CONTROL),
-    RouterMount(usage.ingest_router, Plane.CONTROL),
+    RouterMount(usage.key_router, Plane.CONTROL),
     RouterMount(agent_telemetry.router, Plane.CONTROL),
     RouterMount(settings.router, Plane.CONTROL),
     RouterMount(mail.router, Plane.CONTROL),

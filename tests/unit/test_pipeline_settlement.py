@@ -498,6 +498,7 @@ def _build(
     workspace_id: uuid.UUID | None = None,
     started_at: float | None = None,
     tool_tally: ToolUsageTally | None = None,
+    request_id: str | None = None,
 ) -> Any:
     return build_streaming_response(
         adapter=chat._ADAPTER,
@@ -514,6 +515,7 @@ def _build(
         workspace_id=workspace_id,
         started_at=started_at,
         tool_tally=tool_tally,
+        request_id=request_id,
     )
 
 
@@ -677,6 +679,69 @@ async def test_client_disconnect_with_tool_work_records_ttft(monkeypatch: pytest
     assert logged["ttft_ms"] <= logged["latency_ms"]
 
 
+_PARTIAL_USAGE = CompletionUsage(prompt_tokens=120, completion_tokens=0, total_tokens=120)
+
+
+@pytest.mark.asyncio
+async def test_stream_error_after_reported_usage_bills_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stream that dies after the provider reported tokens still owes for them.
+
+    Refunding would record a request the provider charged for as free, and the
+    caller, who never received a cost, could not recover it by request id.
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(_PARTIAL_USAGE)
+        raise RuntimeError("upstream broke")
+
+    await _drain(_build(stream(), GatewayConfig(), request_id="req-1"))
+
+    assert settlement.refunded == 0
+    assert settlement.reconciled == [Decimal("0.25")]
+    assert settlement.settled_tokens == [120]
+    (logged,) = settlement.logged
+    assert logged["usage_override"].prompt_tokens == 120
+    assert logged["error"] == "upstream broke"
+    assert logged["request_id"] == "req-1"
+
+
+@pytest.mark.asyncio
+async def test_client_disconnect_after_reported_usage_bills_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(_PARTIAL_USAGE)
+        yield _chunk()
+
+    response = _build(stream(), GatewayConfig(), request_id="req-1")
+    iterator = response.body_iterator
+    await iterator.__anext__()
+    await iterator.aclose()
+
+    assert settlement.refunded == 0
+    assert settlement.reconciled == [Decimal("0.25")]
+    (logged,) = settlement.logged
+    assert logged["usage_override"].prompt_tokens == 120
+    assert logged["request_id"] == "req-1"
+
+
+@pytest.mark.asyncio
+async def test_completed_stream_row_carries_the_request_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(_PARTIAL_USAGE)
+
+    await _drain(_build(stream(), GatewayConfig(), request_id="req-1"))
+
+    (logged,) = settlement.logged
+    assert logged["request_id"] == "req-1"
+
+
 class _FakeLogWriter:
     def __init__(self) -> None:
         self.put_rows: list[Any] = []
@@ -713,6 +778,27 @@ async def test_log_usage_skips_the_workspace_lookup_when_given_one(monkeypatch: 
     )
 
     assert lookups == 0
+
+
+@pytest.mark.asyncio
+async def test_log_usage_stores_the_request_id_as_the_group_of_an_unrouted_row() -> None:
+    """An unrouted row has no attribution, and is findable by ``Otari-Request-ID`` all the same."""
+    writer = _FakeLogWriter()
+
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, writer),
+        api_key_id=None,
+        model="gpt-4",
+        provider="openai",
+        endpoint="/v1/chat/completions",
+        workspace_id=uuid.uuid4(),
+        request_id="req-1",
+    )
+
+    (row,) = writer.put_rows
+    assert row.request_group_id == "req-1"
+    assert row.policy_name is None
 
 
 @pytest.mark.asyncio

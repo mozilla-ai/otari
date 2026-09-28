@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from time import monotonic
 from typing import Annotated, Any, Literal, NamedTuple, TypeVar, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import ColumnElement, and_, case, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_api_key_or_master_key
 from gateway.api.routes._billing_schemas import ChargeLine, MeterMap
 from gateway.core.config import GatewayConfig
+from gateway.core.metered_pricing import quantize_cost
 from gateway.core.sql import (
     MAX_FILTER_VALUES,
     bucket_expr,
@@ -55,8 +56,9 @@ from gateway.services.web_retrieval_backend import WEB_FETCH_TOOL_NAME, WEB_SEAR
 # authenticate differently. Reading or amending every tenant's usage rows is
 # deployment-wide, so that gate is declared on the router and a route added later
 # inherits it; ``POST /external-events`` files rows on behalf of the API key that
-# holds them, and is split onto a router of its own rather than left as a
-# route-level override so that admitting a non-operator is spelled here. Each
+# holds them, and ``GET /requests/{request_id}`` reads a key's own request back,
+# so both sit on a router of their own rather than a route-level override, and
+# admitting a non-operator is spelled here. Each
 # router names its own rule, so adding a route to either one inherits a gate
 # rather than none.
 operator_router = APIRouter(
@@ -64,7 +66,7 @@ operator_router = APIRouter(
     tags=["usage"],
     dependencies=[Depends(require_deployment_operator)],
 )
-ingest_router = APIRouter(
+key_router = APIRouter(
     prefix="/usage",
     tags=["usage"],
     dependencies=[Depends(verify_api_key_or_master_key)],
@@ -558,7 +560,7 @@ async def list_usage(
     ]
 
 
-@ingest_router.post("/external-events")
+@key_router.post("/external-events")
 async def ingest_external_usage(
     request: ExternalEventsRequest,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
@@ -584,6 +586,75 @@ async def ingest_external_usage(
         api_key=api_key,
         is_master_key=is_master_key,
         reject_user_mismatch=config.reject_user_mismatch,
+    )
+
+
+class RequestSettlement(BaseModel):
+    """What one request settled at, summed over every usage row it wrote.
+
+    A routed request writes a row per attempt and a vision-normalized one a row for
+    the describe call, all sharing the ``Otari-Request-ID`` the caller was sent as
+    their ``request_group_id``, so this is the request's whole bill rather than one
+    attempt's. ``cost_usd`` uses the inline ``usage.cost_usd`` format and is null
+    when no row was priced.
+    """
+
+    request_id: str
+    status: Literal["success", "error"]
+    cost_usd: str | None
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    row_count: int
+
+
+@key_router.get("/requests/{request_id}")
+async def get_request_settlement(
+    request_id: Annotated[str, Path(max_length=255)],
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> RequestSettlement:
+    """Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).
+
+    This is how a caller recovers the cost of a request whose response never
+    carried one: a stream that failed or was disconnected mid-response, or a
+    request that errored. An API key sees only the requests it made; the master
+    key sees any. Returns 404 until the request has settled (its rows are written
+    by a background writer, so a lookup made the instant a stream closes can
+    precede them), and for an id that is unknown or belongs to another key, with
+    no way to tell those apart.
+    """
+    api_key, is_master_key = auth_result
+    conditions: list[ColumnElement[bool]] = [UsageLog.request_group_id == request_id]
+    if not is_master_key:
+        if api_key is None:
+            raise HTTPException(status_code=404, detail="Request not found")
+        conditions.append(UsageLog.api_key_id == api_key.id)
+    stmt = select(
+        func.count(),
+        func.sum(UsageLog.cost),
+        func.count(UsageLog.cost),
+        func.coalesce(func.sum(UsageLog.prompt_tokens), 0),
+        func.coalesce(func.sum(UsageLog.completion_tokens), 0),
+        func.coalesce(func.sum(UsageLog.total_tokens), 0),
+        func.count(case((UsageLog.status == "success", 1))),
+        func.count(case((UsageLog.status == "error", 1))),
+    ).where(*conditions)
+    row_count, cost, priced_rows, prompt_tokens, completion_tokens, total_tokens, successes, errors = (
+        await db.execute(stmt)
+    ).one()
+    # Absorbed rows alone are attempts a routing policy fell over from: the row
+    # that settles the request has not been written yet.
+    if successes == 0 and errors == 0:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return RequestSettlement(
+        request_id=request_id,
+        status="success" if successes else "error",
+        cost_usd=f"{quantize_cost(cost):.6f}" if priced_rows else None,
+        prompt_tokens=int(prompt_tokens),
+        completion_tokens=int(completion_tokens),
+        total_tokens=int(total_tokens),
+        row_count=int(row_count),
     )
 
 

@@ -226,9 +226,9 @@ Pricing, budgets, and usage use the resolved model. Completion responses use the
 policy name.
 
 Each failed attempt before a successful fallback gets an `absorbed` usage row.
-All attempts share a `request_group_id`. Absorbed rows have no settled model
-cost and do not increase request or error totals; the final row represents the
-caller-visible request.
+All attempts share a `request_group_id`, which is the request's `Otari-Request-ID`.
+Absorbed rows have no settled model cost and do not increase request or error
+totals; the final row represents the caller-visible request.
 
 Built-in tool charges settle on the final row. Candidate price and remaining
 budget are checked before each attempt, so a fallback cannot silently bypass

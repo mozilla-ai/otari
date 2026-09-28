@@ -147,7 +147,9 @@ class UsageLog(Base):
     # "router:<name>"). `attempt_position` and `attempt_count` locate the row in
     # the plan, so "served on attempt 2 of 3" is a query rather than a log grep.
     # `request_group_id` ties a request's rows together, which is what makes the
-    # absorbed attempts findable from the row that served.
+    # absorbed attempts findable from the row that served. The gateway writes the
+    # `Otari-Request-ID` it sent the caller here on every row, routed or not, so a
+    # caller can look a request's cost up by that id.
     policy_name: Mapped[str | None] = mapped_column(index=True)
     selection_reason: Mapped[str | None] = mapped_column()
     attempt_position: Mapped[int | None] = mapped_column()

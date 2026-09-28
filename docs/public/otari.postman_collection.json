@@ -8203,6 +8203,34 @@
           }
         },
         {
+          "name": "Get Request Settlement",
+          "request": {
+            "description": "Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).\n\nThis is how a caller recovers the cost of a request whose response never\ncarried one: a stream that failed or was disconnected mid-response, or a\nrequest that errored. An API key sees only the requests it made; the master\nkey sees any. Returns 404 until the request has settled (its rows are written\nby a background writer, so a lookup made the instant a stream closes can\nprecede them), and for an id that is unknown or belongs to another key, with\nno way to tell those apart.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usage",
+                "requests",
+                ":request_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/usage/requests/:request_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "request_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Usage Series",
           "request": {
             "description": "Time series split by one dimension, for the dashboard's stacked charts.\n\nSame filters and window bounds as ``/summary`` (kept in lockstep: the\ndashboard serializes one filter object for both, and a filter this endpoint\nsilently ignored would make the stacked chart disagree with the tiles beside\nit). The window's top groups by spend are returned as their own series;\neverything past the top eight folds into a single ``other`` series per\nbucket, so the stack always reconciles with the summary totals. Points are\nsparse (populated cells only); the bucket grid is bounded like ``/summary``'s\nseries, so an hourly bucket over a too-wide window is rejected rather than\nballooning the payload.",

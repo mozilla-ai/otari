@@ -94,7 +94,7 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("tool_settings.catalog", tool_settings.catalog_router, verify_catalog_reader),
     ("tool_settings.reader", tool_settings.reader_router, verify_master_key),
     ("tools", tools.router, verify_catalog_reader),
-    ("usage.ingest", usage.ingest_router, verify_api_key_or_master_key),
+    ("usage.key", usage.key_router, verify_api_key_or_master_key),
     ("hooks", hooks.router, hooks.verify_hook_caller),
 ]
 

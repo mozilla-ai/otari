@@ -132,6 +132,7 @@ GET /api/v1/models/discoverable                     # not yet wrapped
 GET /api/v1/models/metadata                         # not yet wrapped
 # Other control-plane extensions of already-covered resources
 GET /api/v1/usage/count                             # not yet wrapped
+GET /api/v1/usage/requests/{request_id}            # not yet wrapped
 POST /api/v1/keys/{key_id}/rotate                   # not yet wrapped
 GET /api/v1/budgets/{budget_id}/reset-logs          # not yet wrapped
 

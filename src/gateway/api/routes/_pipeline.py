@@ -259,6 +259,7 @@ from gateway.streaming import (
     StreamFormat,
     StreamingAttemptFailure,
     iterate_streaming_attempts,
+    merge_stream_usage,
     streaming_generator,
 )
 from gateway.types.attempt import Attempt
@@ -1021,7 +1022,8 @@ class RequestContext:
         # Ties this request's usage rows together. A routed request can write more
         # than one (the attempt that served, plus one per absorbed failure), and
         # without a shared id they would be unrelated rows in the activity log.
-        # `None` for an unrouted request, which writes exactly one row.
+        # Equal to `request_id` when routed; `None` for an unrouted request, whose
+        # rows take `request_id` directly because no attribution carries it.
         self.request_group_id = request_group_id
 
 
@@ -1127,6 +1129,7 @@ async def resolve_dispatch_provider(
             detail=unresolvable_model_detail(model_selector),
             status_code=status.HTTP_400_BAD_REQUEST,
             started_at=ctx.started_at,
+            request_id=ctx.request_id,
         )
         _raise_for_unresolvable_model(model_selector, exc)
     return await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=model_provider)
@@ -1264,6 +1267,7 @@ async def _serve_from_hosted_credential(
             detail=denied_detail,
             status_code=status.HTTP_403_FORBIDDEN,
             started_at=ctx.started_at,
+            request_id=ctx.request_id,
         )
         raise adapter.error(403, denied_detail, ErrorKind.PERMISSION) from exc
     except Exception as exc:
@@ -1300,6 +1304,7 @@ async def _serve_from_hosted_credential(
             detail=HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
             status_code=status.HTTP_502_BAD_GATEWAY,
             started_at=ctx.started_at,
+            request_id=ctx.request_id,
         )
         # The same detail the unusable-``response_provider`` branch below returns:
         # from the caller's side both are "this build could not put an upstream
@@ -1339,6 +1344,7 @@ async def _serve_from_hosted_credential(
             detail=HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
             status_code=status.HTTP_502_BAD_GATEWAY,
             started_at=ctx.started_at,
+            request_id=ctx.request_id,
         )
         raise adapter.error(502, HOSTED_CREDENTIAL_UNUSABLE_DETAIL, ErrorKind.API) from exc
 
@@ -1377,6 +1383,7 @@ async def _bill_vision_side_call(
     endpoint: str,
     usage: CompletionUsage,
     counts_toward_budget: bool = True,
+    request_id: str | None = None,
 ) -> None:
     """Meter and bill a vision describe side-call made during normalization.
 
@@ -1410,6 +1417,7 @@ async def _bill_vision_side_call(
         user_id=user_id,
         usage_override=usage,
         counts_toward_budget=counts_toward_budget,
+        request_id=request_id,
     )
     # Commit the spend directly via an unreserved handle (no held estimate to
     # release): this just adds the actual cost to users.spend. When the request is
@@ -1580,6 +1588,7 @@ async def _compile_request_plan(
     started_at: float,
     routing_signal: Callable[[], RoutingSignal] | None = None,
     workspace_id: uuid.UUID | None = None,
+    request_id: str | None = None,
 ) -> CompiledPlan | None:
     """Compile ``model`` into a plan when it names a routing policy, else ``None``.
 
@@ -1648,6 +1657,7 @@ async def _compile_request_plan(
             detail=exc.operator_detail,
             status_code=exc.status_code,
             started_at=started_at,
+            request_id=request_id,
         )
         raise adapter.error(exc.status_code, exc.caller_detail, ErrorKind.PERMISSION) from exc
 
@@ -1667,6 +1677,7 @@ async def _resolve_keyed_user_id(
     master_key_user_required_detail: str,
     user_forbidden_detail: str,
     started_at: float,
+    request_id: str | None = None,
 ) -> str:
     """The billed user for a key- or master-key-authenticated request.
 
@@ -1715,6 +1726,7 @@ async def _resolve_keyed_user_id(
                 detail=user_forbidden_detail,
                 status_code=exc.status_code,
                 started_at=started_at,
+                request_id=request_id,
             )
         raise
 
@@ -1879,6 +1891,7 @@ async def resolve_request_context(
                 master_key_user_required_detail=master_key_user_required_detail,
                 user_forbidden_detail=user_forbidden_detail,
                 started_at=started_at,
+                request_id=request_id,
             )
             # Resolved before the plan rather than with the gate below, because the
             # compiler must drop candidates this caller may not use: a chain that fell
@@ -1911,6 +1924,7 @@ async def resolve_request_context(
             started_at=started_at,
             routing_signal=routing_signal,
             workspace_id=workspace_id,
+            request_id=request_id,
         )
         if plan is not None:
             head = plan.head
@@ -1956,6 +1970,7 @@ async def resolve_request_context(
                 detail=not_allowed_detail,
                 status_code=status.HTTP_403_FORBIDDEN,
                 started_at=started_at,
+                request_id=request_id,
             )
             raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
 
@@ -1986,6 +2001,7 @@ async def resolve_request_context(
                     detail=not_allowed_detail,
                     status_code=status.HTTP_403_FORBIDDEN,
                     started_at=started_at,
+                    request_id=request_id,
                 )
                 raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
 
@@ -2072,6 +2088,7 @@ async def resolve_request_context(
                     detail=str(exc.detail),
                     status_code=exc.status_code,
                     started_at=started_at,
+                    request_id=request_id,
                 )
             raise
         # require_pricing is a budget-enforcement safety gate: it refuses a request
@@ -2094,6 +2111,7 @@ async def resolve_request_context(
                 detail=no_pricing_detail,
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 started_at=started_at,
+                request_id=request_id,
             )
             raise adapter.error(
                 402,
@@ -2153,6 +2171,7 @@ async def resolve_request_context(
                         endpoint=adapter.endpoint,
                         usage=vision_usage,
                         counts_toward_budget=not budget_exempt,
+                        request_id=request_id,
                     )
                 # Attachments expanded the payload, so the stored inputs must
                 # follow or a later fallover would reprice against the pre-
@@ -2232,7 +2251,7 @@ async def resolve_request_context(
         resolved_provider=resolved_provider,
         plan=plan,
         estimate_inputs=estimate_inputs,
-        request_group_id=str(uuid.uuid4()) if plan is not None else None,
+        request_group_id=request_id if plan is not None else None,
         organization_id=organization_id,
         request_id=request_id,
     )
@@ -3631,6 +3650,7 @@ async def _require_tool_pricing(
                 detail=detail,
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 started_at=ctx.started_at,
+                request_id=ctx.request_id,
             )
             # Same kind the model gate uses for its own 402, so both no-pricing
             # rejections map to one wire shape per format.
@@ -3753,6 +3773,7 @@ async def record_usage(
     attribution: RoutingAttribution | None = None,
     tool_tally: ToolUsageTally | None = None,
     workspace_id: uuid.UUID | None = None,
+    request_id: str | None = None,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
@@ -3804,6 +3825,9 @@ async def record_usage(
             ``api_key_id``) and the same un-memoized cost a master-key request
             already pays once elsewhere -- passing it explicitly here is what
             avoids paying that twice on the same request.
+        request_id: The ``Otari-Request-ID`` the caller was sent, stored as the
+            row's ``request_group_id`` when ``attribution`` carries none, so every
+            row a request writes is findable by the id the caller holds.
 
     Returns:
         The computed cost for this request, or None when usage/pricing is absent,
@@ -3830,7 +3854,7 @@ async def record_usage(
         selection_reason=attribution.selection_reason if attribution else None,
         attempt_position=attribution.position if attribution else None,
         attempt_count=attribution.attempt_count if attribution else None,
-        request_group_id=attribution.request_group_id if attribution else None,
+        request_group_id=attribution.request_group_id if attribution else request_id,
     )
 
     usage_data = usage_override
@@ -4080,6 +4104,7 @@ async def log_gateway_rejection(
     detail: str,
     status_code: int,
     started_at: float | None,
+    request_id: str | None = None,
 ) -> None:
     """Record a request the gateway itself refused before any provider was called.
 
@@ -4149,6 +4174,7 @@ async def log_gateway_rejection(
             status_code=status_code,
             latency_ms=_elapsed_ms(started_at),
             counts_toward_budget=True,
+            request_id=request_id,
         )
     except Exception:
         # Deliberately broad, and deliberately not re-raised: see the docstring.
@@ -4198,6 +4224,7 @@ async def _log_failure_and_refund(
         attribution=attribution,
         tool_tally=tool_tally,
         workspace_id=ctx.workspace_id,
+        request_id=ctx.request_id,
     )
     if ctx.reservation is not None:
         if cost:
@@ -4547,16 +4574,33 @@ def build_streaming_response(
     * ``on_error``: report/log the failure and refund the reservation.
     * ``on_incomplete``: client disconnected mid-stream; refund so the
       reservation does not leak.
+
+    A stream that fails or is abandoned after the provider reported usage (an
+    Anthropic ``message_start`` carries the input tokens) still owes for those
+    tokens, so ``on_error`` and ``on_incomplete`` price what was reported rather
+    than recording the request as free. Every row carries ``request_id`` as its
+    ``request_group_id``, which is what lets a caller whose stream never delivered
+    a cost look it up by ``Otari-Request-ID`` afterwards.
     """
     platform_active = platform_correlation_id is not None
     # Both modes settle before the terminal suffix so its usage object can carry
     # the cost: hybrid from the platform's report, standalone from its own row.
     settles_inline = platform_active or (db is not None and log_writer is not None)
     first_chunk_at: float | None = None
+    # Usage the provider reported before the stream ended, whether or not it ended
+    # cleanly. The generator hands only a completed stream's usage to a callback.
+    reported_usage: CompletionUsage | None = None
 
     def _on_first_chunk() -> None:
         nonlocal first_chunk_at
         first_chunk_at = time.monotonic()
+
+    def _extract_usage(chunk: ChunkT) -> CompletionUsage | None:
+        nonlocal reported_usage
+        chunk_usage = adapter.extract_stream_usage(chunk)
+        if chunk_usage:
+            reported_usage = chunk_usage if reported_usage is None else merge_stream_usage(reported_usage, chunk_usage)
+        return chunk_usage
 
     async def _on_complete(usage_data: CompletionUsage) -> SettledCost | None:
         if platform_active:
@@ -4591,6 +4635,7 @@ def build_streaming_response(
             attribution=attribution,
             tool_tally=tool_tally,
             workspace_id=workspace_id,
+            request_id=request_id,
         )
         if reservation is not None:
             await reconcile_reservation(
@@ -4638,6 +4683,7 @@ def build_streaming_response(
                 attribution=attribution,
                 tool_tally=tool_tally,
                 workspace_id=workspace_id,
+                request_id=request_id,
             )
             # "Free" is about the tokens the provider never reported, not about
             # tool calls the gateway definitely ran and owes for.
@@ -4666,6 +4712,7 @@ def build_streaming_response(
             attribution=attribution,
             tool_tally=tool_tally,
             workspace_id=workspace_id,
+            request_id=request_id,
         )
         # The estimate covers the unreported tokens; log_usage adds any tool cost on
         # top of it, so reconcile against the row's total rather than the estimate.
@@ -4705,6 +4752,7 @@ def build_streaming_response(
             provider=provider,
             endpoint=adapter.endpoint,
             user_id=user_id,
+            usage_override=reported_usage,
             error=str(exc),
             status_code=failure_status_code(exc),
             latency_ms=_elapsed_ms(started_at),
@@ -4713,28 +4761,31 @@ def build_streaming_response(
             attribution=attribution,
             tool_tally=tool_tally,
             workspace_id=workspace_id,
+            request_id=request_id,
         )
         if reservation is not None:
-            # A stream that died after running searches still owes for them, and a
-            # refund would release the hold without recording that spend. This is
-            # also where the streaming tool-iteration cap lands, since the cap is
-            # raised inside the generator.
+            # A stream that died after reporting tokens or running searches still
+            # owes for them, and a refund would release the hold without recording
+            # that spend. This is also where the streaming tool-iteration cap
+            # lands, since the cap is raised inside the generator.
             if failed_cost:
-                await reconcile_reservation(db, reservation, failed_cost)
+                await reconcile_reservation(db, reservation, failed_cost, actual_tokens=_settled_tokens(reported_usage))
             else:
                 await refund_reservation(db, reservation)
 
     async def _on_incomplete() -> None:
         # Client disconnected mid-stream: release the reservation.
         #
-        # Tool work already done is still owed. Without this, disconnecting after the
-        # searches have run is an unlimited supply of unbilled, unrecorded searches,
-        # which is the abuse this metering exists to close. A row is written only when
-        # there was tool work, so an abandoned stream that ran no tools keeps its
-        # existing behavior of leaving no trace.
+        # Tokens the provider already reported and tool work already done are still
+        # owed. Without this, disconnecting after the searches have run is an
+        # unlimited supply of unbilled, unrecorded searches, which is the abuse this
+        # metering exists to close. A row is written only when there is something to
+        # bill, so an abandoned stream that reported nothing and ran no tools leaves
+        # no trace.
         if db is None or reservation is None:
             return
-        if log_writer is not None and tool_tally is not None and not tool_tally.is_empty():
+        has_tool_work = tool_tally is not None and not tool_tally.is_empty()
+        if log_writer is not None and (has_tool_work or reported_usage is not None):
             abandoned_cost = await log_usage(
                 db=db,
                 log_writer=log_writer,
@@ -4743,15 +4794,19 @@ def build_streaming_response(
                 provider=provider,
                 endpoint=adapter.endpoint,
                 user_id=user_id,
+                usage_override=reported_usage,
                 error="client disconnected before the stream completed",
                 latency_ms=_elapsed_ms(started_at),
                 ttft_ms=_ttft_ms(started_at, first_chunk_at),
                 counts_toward_budget=_handle_counts_toward_budget(reservation),
                 tool_tally=tool_tally,
                 workspace_id=workspace_id,
+                request_id=request_id,
             )
             if abandoned_cost:
-                await reconcile_reservation(db, reservation, abandoned_cost)
+                await reconcile_reservation(
+                    db, reservation, abandoned_cost, actual_tokens=_settled_tokens(reported_usage)
+                )
                 return
         await refund_reservation(db, reservation)
 
@@ -4778,7 +4833,7 @@ def build_streaming_response(
         streaming_generator(
             stream=stream,
             format_chunk=adapter.format_chunk,
-            extract_usage=adapter.extract_stream_usage,
+            extract_usage=_extract_usage,
             fmt=adapter.stream_format,
             on_complete=_on_complete,
             on_error=_on_error,
@@ -5653,6 +5708,7 @@ async def run_standalone_non_stream(
                     attribution=attribution,
                     tool_tally=tool_ctx.tally,
                     workspace_id=ctx.workspace_id,
+                    request_id=ctx.request_id,
                 )
             if ctx.reservation is not None:
                 await reconcile_reservation(

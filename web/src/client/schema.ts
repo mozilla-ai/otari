@@ -4705,6 +4705,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/usage/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Request Settlement
+         * @description Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).
+         *
+         *     This is how a caller recovers the cost of a request whose response never
+         *     carried one: a stream that failed or was disconnected mid-response, or a
+         *     request that errored. An API key sees only the requests it made; the master
+         *     key sees any. Returns 404 until the request has settled (its rows are written
+         *     by a background writer, so a lookup made the instant a stream closes can
+         *     precede them), and for an id that is unknown or belongs to another key, with
+         *     no way to tell those apart.
+         */
+        get: operations["usage-get_request_settlement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage/series": {
         parameters: {
             query?: never;
@@ -11559,6 +11587,35 @@ export interface components {
              * @description The same message whether or not the address has a password to reset.
              */
             message: string;
+        };
+        /**
+         * RequestSettlement
+         * @description What one request settled at, summed over every usage row it wrote.
+         *
+         *     A routed request writes a row per attempt and a vision-normalized one a row for
+         *     the describe call, all sharing the ``Otari-Request-ID`` the caller was sent as
+         *     their ``request_group_id``, so this is the request's whole bill rather than one
+         *     attempt's. ``cost_usd`` uses the inline ``usage.cost_usd`` format and is null
+         *     when no row was priced.
+         */
+        RequestSettlement: {
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Cost Usd */
+            cost_usd: string | null;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Request Id */
+            request_id: string;
+            /** Row Count */
+            row_count: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "success" | "error";
+            /** Total Tokens */
+            total_tokens: number;
         };
         /**
          * RequirementGroup
@@ -21337,6 +21394,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InFlightResponse"];
+                };
+            };
+        };
+    };
+    "usage-get_request_settlement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestSettlement"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

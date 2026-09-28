@@ -12655,6 +12655,61 @@
         "title": "RequestPasswordResetResponse",
         "type": "object"
       },
+      "RequestSettlement": {
+        "description": "What one request settled at, summed over every usage row it wrote.\n\nA routed request writes a row per attempt and a vision-normalized one a row for\nthe describe call, all sharing the ``Otari-Request-ID`` the caller was sent as\ntheir ``request_group_id``, so this is the request's whole bill rather than one\nattempt's. ``cost_usd`` uses the inline ``usage.cost_usd`` format and is null\nwhen no row was priced.",
+        "properties": {
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "success",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request_id",
+          "status",
+          "cost_usd",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "row_count"
+        ],
+        "title": "RequestSettlement",
+        "type": "object"
+      },
       "RequirementGroup": {
         "description": "A guardrail-level \"at least one of these must be provided\" constraint.\n\nSome guardrails require *a value* that no single parameter's :attr:`ParameterSpec.required`\nor :attr:`ParameterSpec.effectively_required` can express, because it can be satisfied by any\nof several parameters \u2014 e.g. watsonx needs a ``project_id`` *or* a ``space_id``. Each group\nnames the interchangeable parameters (and any environment variables that also satisfy it); a\nconfig UI should require the user to supply at least one member.",
         "properties": {
@@ -33114,6 +33169,58 @@
           }
         ],
         "summary": "List In Flight",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/api/v1/usage/requests/{request_id}": {
+      "get": {
+        "description": "Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).\n\nThis is how a caller recovers the cost of a request whose response never\ncarried one: a stream that failed or was disconnected mid-response, or a\nrequest that errored. An API key sees only the requests it made; the master\nkey sees any. Returns 404 until the request has settled (its rows are written\nby a background writer, so a lookup made the instant a stream closes can\nprecede them), and for an id that is unknown or belongs to another key, with\nno way to tell those apart.",
+        "operationId": "usage-get_request_settlement",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "maxLength": 255,
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestSettlement"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Request Settlement",
         "tags": [
           "usage"
         ]

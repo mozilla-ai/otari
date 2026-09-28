@@ -93,7 +93,7 @@ ANTHROPIC_STREAM_FORMAT = StreamFormat(
 )
 
 
-def _merge_usage(current: CompletionUsage, update: CompletionUsage) -> CompletionUsage:
+def merge_stream_usage(current: CompletionUsage, update: CompletionUsage) -> CompletionUsage:
     """Merge usage data, keeping the last non-zero value for each field."""
     return GatewayUsage(
         prompt_tokens=update.prompt_tokens or current.prompt_tokens,
@@ -244,7 +244,7 @@ async def streaming_generator(
                     continue
                 chunk_usage = extract_usage(chunk)
                 if chunk_usage:
-                    usage = _merge_usage(usage, chunk_usage)
+                    usage = merge_stream_usage(usage, chunk_usage)
                     has_usage = True
 
                 if settle_before_done and is_cost_carrier is not None and is_cost_carrier(chunk):
