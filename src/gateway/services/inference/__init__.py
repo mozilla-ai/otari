@@ -8,6 +8,7 @@ from gateway.services.inference._idempotency import (
     KeyReused,
     Replay,
     StillInFlight,
+    storage_available,
 )
 from gateway.services.inference._sweeper import run_idempotency_sweeper
 
@@ -20,4 +21,5 @@ __all__ = [
     "Replay",
     "StillInFlight",
     "run_idempotency_sweeper",
+    "storage_available",
 ]

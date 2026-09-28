@@ -15488,7 +15488,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again, and waits for the original while it is still running. Reusing a key for a different body is refused with 422. Ignored for streaming requests and in hybrid mode. */
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again, and waits for the original while it is still running. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
             };
             path?: never;
@@ -16423,7 +16423,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again, and waits for the original while it is still running. Reusing a key for a different body is refused with 422. Ignored for streaming requests and in hybrid mode. */
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again, and waits for the original while it is still running. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
             };
             path?: never;
@@ -20192,7 +20192,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again, and waits for the original while it is still running. Reusing a key for a different body is refused with 422. Ignored for streaming requests and in hybrid mode. */
+                /** @description A unique value, such as a UUID, that makes a non-streaming request safe to retry. A retry with the same key and body returns the original response, request ID and cost without calling the provider or billing again, and waits for the original while it is still running. Reusing a key for a different body is refused with 422. Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, which encrypts the stored response. */
                 "Idempotency-Key"?: string | null;
             };
             path?: never;

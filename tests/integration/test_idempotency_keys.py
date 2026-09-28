@@ -30,6 +30,7 @@ from gateway.models.usage import UsageLog
 from gateway.models.users import User
 from gateway.repositories.inference import InferenceRepositories
 from gateway.services.inference import Claimed, IdempotencyService, IdempotentRequest, Replay
+from gateway.services.secret_box import generate_secret_key
 
 from .conftest import MODEL_NAME, _to_async_url, build_test_client
 
@@ -72,6 +73,12 @@ def _wait_for_usage_rows(make_session: Callable[[], Session], expected: int, *, 
         time.sleep(0.05)
 
 
+@pytest.fixture(autouse=True)
+def secret_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stored responses are encrypted, so a deployment needs a key to store any."""
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+
+
 @pytest.fixture
 def user(client: TestClient, master_key_header: dict[str, str]) -> None:
     response = client.post(f"{API_ROOT}/users", json={"user_id": _USER}, headers=master_key_header)
@@ -110,6 +117,47 @@ def test_retry_replays_the_original_response_without_billing_again(
     assert second.headers[IDEMPOTENT_REPLAYED_HEADER] == "true"
     assert IDEMPOTENT_REPLAYED_HEADER not in first.headers
     assert _usage_rows(db_session_factory) == 1
+    with db_session_factory() as db:
+        stored = db.execute(select(IdempotencyRecord.response_body)).scalar_one()
+    assert stored is not None
+    assert "chatcmpl-idem" not in stored
+
+
+def test_without_a_secret_key_nothing_is_stored(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    user: None,
+    db_session_factory: Callable[[], Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OTARI_SECRET_KEY")
+    provider = AsyncMock(return_value=_completion())
+    headers = _keyed(master_key_header, "no-secret")
+
+    for _ in range(2):
+        assert _post_chat(client, headers, provider).status_code == 200
+
+    assert provider.await_count == 2
+    with db_session_factory() as db:
+        assert db.execute(select(func.count()).select_from(IdempotencyRecord)).scalar_one() == 0
+
+
+def test_a_body_no_key_can_decrypt_runs_again(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    user: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+    headers = _keyed(master_key_header, "rotated")
+
+    assert _post_chat(client, headers, provider).status_code == 200
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    retried = _post_chat(client, headers, provider)
+
+    assert retried.status_code == 200, retried.text
+    assert IDEMPOTENT_REPLAYED_HEADER not in retried.headers
+    assert provider.await_count == 2
 
 
 def test_key_order_and_spacing_do_not_make_a_different_request(

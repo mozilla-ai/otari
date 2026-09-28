@@ -108,8 +108,11 @@ in its place.
 - A retry that waits longer than `idempotency_wait_sec` for the original is
   answered 409 with `Retry-After`; retry again with the same key.
 - A response is kept for `idempotency_retention_sec` (a day by default),
-  generated content included, and then deleted. Responses larger than 8 MiB are
-  not kept, so a retry of one runs again.
+  generated content included, and then deleted. It is stored encrypted with
+  `OTARI_SECRET_KEY`, so a deployment without that key ignores the header, and
+  a response no configured key can decrypt (after the key was rotated away)
+  runs again. Responses larger than 8 MiB are not kept, so a retry of one runs
+  again.
 - Only a successful response is kept. The request is still authenticated and
   checked against the key's model access on a retry.
 - Streaming requests ignore the header, and so does hybrid mode, which has no

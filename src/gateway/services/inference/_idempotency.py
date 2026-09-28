@@ -5,6 +5,10 @@ timeout) would otherwise call the provider again and be billed again. The first
 request claims the key before it is dispatched; a retry with the same key and
 body gets the stored response, or waits for the claim holder to finish. Only a
 success is stored: a failed request is refunded, so a retry of it runs again.
+
+The stored body is the generated content, so it is encrypted with
+``OTARI_SECRET_KEY``. A deployment without that key stores nothing, and a body
+that no configured key can decrypt is treated as missing and runs again.
 """
 
 from __future__ import annotations
@@ -21,6 +25,13 @@ from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.inference import IdempotencyRecord, IdempotencyState
 from gateway.repositories.inference import InferenceRepositories
+from gateway.services.secret_box import (
+    SecretBoxUnavailableError,
+    SecretDecryptionError,
+    decrypt_secret,
+    encrypt_secret,
+    secret_box_configured,
+)
 
 _POLL_INTERVAL_SEC = 0.25
 
@@ -132,7 +143,13 @@ class IdempotencyService:
         if record.request_hash != request.request_hash:
             return KeyReused()
         if record.state == IdempotencyState.COMPLETED:
-            return _replay(record)
+            replay = _replay(record)
+            if replay is not None:
+                return replay
+            taken = await self._keys.take_over(
+                request.scope, request.key, previous_token=record.claim_token, values=claim
+            )
+            return Claimed(token) if taken else _RETRY
         return None
 
     def _claim_values(self, request: IdempotentRequest, token: str, now: datetime) -> dict[str, Any]:
@@ -163,15 +180,16 @@ class IdempotencyService:
         body: str,
         headers: dict[str, str],
     ) -> bool:
-        """Store the response a retry will be given; False when the claim was lost meanwhile."""
+        """Store the response, encrypted, for a retry to be given; False when the claim was lost meanwhile."""
         expires_at = datetime.now(UTC) + timedelta(seconds=self._config.idempotency_retention_sec)
+        ciphertext = encrypt_secret(body)
         async with self._uow:
             return await self._keys.complete(
                 request.scope,
                 request.key,
                 claim_token=claimed.token,
                 status_code=status_code,
-                response_body=body,
+                response_body=ciphertext,
                 response_headers=headers,
                 expires_at=expires_at,
             )
@@ -187,9 +205,17 @@ class IdempotencyService:
             return await self._keys.delete_expired(datetime.now(UTC))
 
 
-def _replay(record: IdempotencyRecord) -> Replay:
-    return Replay(
-        status_code=record.status_code or 200,
-        body=record.response_body or "null",
-        headers=dict(record.response_headers or {}),
-    )
+def storage_available() -> bool:
+    """Whether a response can be stored, which needs a key to encrypt it with."""
+    return secret_box_configured()
+
+
+def _replay(record: IdempotencyRecord) -> Replay | None:
+    """The stored response, or None when no configured key can decrypt it."""
+    if record.response_body is None:
+        return None
+    try:
+        body = decrypt_secret(record.response_body)
+    except (SecretBoxUnavailableError, SecretDecryptionError):
+        return None
+    return Replay(status_code=record.status_code or 200, body=body, headers=dict(record.response_headers or {}))

@@ -5,7 +5,9 @@ is reserved. A retry with the same key and body is answered with the stored
 response (and its original request ID and cost) without calling the provider or
 billing again, or waits for the request still holding the key. Streaming
 requests and hybrid mode ignore the header: a stream the client dropped is
-already refunded, and a hybrid gateway has no database to hold the key in.
+already refunded, and a hybrid gateway has no database to hold the key in. So
+does a deployment without ``OTARI_SECRET_KEY``, since the stored response is
+encrypted with it.
 """
 
 from __future__ import annotations
@@ -30,7 +32,9 @@ from gateway.services.inference import (
     IdempotencyService,
     IdempotentRequest,
     Replay,
+    storage_available,
 )
+from gateway.services.secret_box import SecretBoxUnavailableError
 
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 IDEMPOTENT_REPLAYED_HEADER = "Otari-Idempotent-Replayed"
@@ -137,6 +141,11 @@ class IdempotencyGuard:
             stored = await self._service.complete(
                 self._request, claimed, status_code=status_code, body=encoded, headers=headers
             )
+        except SecretBoxUnavailableError:
+            logger.warning("Could not encrypt the response for idempotent replay; releasing the key")
+            self._claimed = claimed
+            await self.release()
+            return
         except DATABASE_ERRORS:
             # The response is already paid for and about to be returned; failing it
             # now would lose it. The claim lapses at its lease instead.
@@ -169,14 +178,15 @@ async def get_idempotency_guard(
                 "A retry with the same key and body returns the original response, request ID and "
                 "cost without calling the provider or billing again, and waits for the original "
                 "while it is still running. Reusing a key for a different body is refused with 422. "
-                "Ignored for streaming requests and in hybrid mode."
+                "Ignored for streaming requests, in hybrid mode, and on a deployment without OTARI_SECRET_KEY, "
+                "which encrypts the stored response."
             ),
         ),
     ] = None,
 ) -> AsyncIterator[IdempotencyGuard]:
     """Yield the request's guard, and release its claim if the request did not complete."""
     service = None
-    if uow is not None and idempotency_key is not None and config.idempotency_retention_sec > 0:
+    if uow is not None and idempotency_key is not None and config.idempotency_retention_sec > 0 and storage_available():
         service = build_idempotency_service(uow, config)
     guard = IdempotencyGuard(raw_request, service, idempotency_key)
     try:
