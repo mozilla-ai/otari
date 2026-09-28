@@ -198,6 +198,19 @@ def test_reusing_a_key_for_a_different_request_is_refused(
     assert provider.await_count == 1
 
 
+def test_reusing_a_key_with_different_tool_headers_is_refused(
+    client: TestClient, master_key_header: dict[str, str], user: None
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+    headers = _keyed(master_key_header, "reused-header")
+
+    assert _post_chat(client, headers, provider).status_code == 200
+    refused = _post_chat(client, {**headers, "Otari-Web-Search": "otari"}, provider)
+
+    assert refused.status_code == 422, refused.text
+    assert provider.await_count == 1
+
+
 def test_a_failed_request_releases_its_key_so_the_retry_runs(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -330,7 +343,7 @@ def _hold_key(
             IdempotencyRecord(
                 scope=f"master:{_USER}",
                 idempotency_key=key,
-                request_hash=_request_hash(_CHAT_ENDPOINT, _json_bytes(body or _chat_body())),
+                request_hash=_request_hash(_CHAT_ENDPOINT, _json_bytes(body or _chat_body()), {}),
                 claim_token=str(uuid.uuid4()),
                 state=IdempotencyState.IN_PROGRESS,
                 user_id=_USER,

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any
 
@@ -22,7 +22,8 @@ from fastapi import Depends, Header, Request, Response
 from fastapi.encoders import jsonable_encoder
 
 from gateway.api.deps import build_idempotency_service, get_config, get_unit_of_work_if_needed
-from gateway.core.config import REQUEST_ID_HEADER, GatewayConfig
+from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER
+from gateway.core.config import REQUEST_ID_HEADER, ROUTER_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
@@ -44,6 +45,9 @@ _MAX_STORED_BODY_BYTES = 8 * 1024 * 1024
 # The response headers a replay repeats: the ones that describe this request
 # rather than the moment it was answered, which rate-limit headers do.
 _REPLAYED_HEADERS = (REQUEST_ID_HEADER, "Otari-Container-Id", "Otari-Container-Expires-At")
+# The request headers that change what a request does, so they count toward
+# whether a retry is the same request.
+_REQUEST_SHAPING_HEADERS = (CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, ROUTER_HEADER, "anthropic-beta")
 
 INVALID_IDEMPOTENCY_KEY_DETAIL = f"{IDEMPOTENCY_KEY_HEADER} must be 1 to {_MAX_KEY_LENGTH} printable ASCII characters."
 IDEMPOTENCY_KEY_REUSED_DETAIL = (
@@ -77,13 +81,17 @@ class IdempotentReplay(Exception):
         )
 
 
-def _request_hash(endpoint: str, body: bytes) -> str:
-    """SHA-256 of the endpoint and the body, with the JSON canonicalized so key order and spacing do not matter."""
+def _request_hash(endpoint: str, body: bytes, headers: Mapping[str, str]) -> str:
+    """SHA-256 of what the request asks for: the endpoint, the body and the headers that change the result.
+
+    The JSON is canonicalized so key order and spacing do not matter.
+    """
     try:
         canonical = json.dumps(json.loads(body), sort_keys=True, separators=(",", ":")).encode()
     except ValueError:
         canonical = body
-    return hashlib.sha256(endpoint.encode() + b"\n" + canonical).hexdigest()
+    options = json.dumps([headers.get(name) for name in _REQUEST_SHAPING_HEADERS]).encode()
+    return hashlib.sha256(endpoint.encode() + b"\n" + options + b"\n" + canonical).hexdigest()
 
 
 def _usable(key: str) -> bool:
@@ -117,7 +125,7 @@ class IdempotencyGuard:
         self._request = IdempotentRequest(
             scope=f"key:{api_key_id}" if api_key_id is not None else f"master:{user_id}",
             key=self._key,
-            request_hash=_request_hash(endpoint, await self._raw_request.body()),
+            request_hash=_request_hash(endpoint, await self._raw_request.body(), self._raw_request.headers),
             user_id=user_id,
             api_key_id=api_key_id,
         )
