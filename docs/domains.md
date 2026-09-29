@@ -62,8 +62,9 @@ Each domain has a section below. The shared set follows them. A route module
 whose name starts with an underscore is a shared helper, which the target shape
 moves out of the routes layer.
 
-A section names a module only when neither its path nor the section's prose
-shows its domain.
+The boundary check reads each `###` heading below as a domain name, so a
+heading is the domain's name in lower case with hyphens. A section names a
+module only when neither its path nor the section's prose shows its domain.
 
 Two groups of modules fail the domain test and are split here. Tenancy holds
 sign-in and organization management, which are separate sets of use cases, so

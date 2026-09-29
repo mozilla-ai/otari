@@ -39,6 +39,7 @@ def _point_main_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(check, "CLI_ROOT", tmp_path / "cli" / "src")
     # main() refuses to run without the light CLI's root, so every temporary tree gets an empty one.
     _write(tmp_path, "cli/src/otari_agent/__init__.py", "")
+    _write(tmp_path, "docs/domains.md", "## The domains\n\n### things\n")
     for name in [name for name in vars(check) if name.endswith("_BASELINE")]:
         monkeypatch.setattr(check, name, ())
 
@@ -851,3 +852,150 @@ def test_renaming_the_unit_of_work_on_a_relative_import_is_flagged(tmp_path: Pat
         "gateway/services/thing_service.py:1 imports UnitOfWork as UoW; "
         "the rule reads the name at the call site, so import it under its own name"
     ]
+
+
+_DOMAINS_PAGE = """# Backend domains
+
+## The target shape
+
+### Not a domain
+
+## The domains
+
+### api-keys
+
+### budgets
+
+### Shared
+
+## Order of work
+
+### also-not-a-domain
+"""
+
+
+def _domains_page(tmp_path: Path, text: str = _DOMAINS_PAGE) -> Path:
+    return _write(tmp_path, "docs/domains.md", text)
+
+
+def test_documented_domains_reads_only_the_domains_section() -> None:
+    assert check.documented_domains(_DOMAINS_PAGE) == ({"api_keys", "budgets"}, [])
+
+
+@pytest.mark.parametrize(
+    ("heading", "violation"),
+    [
+        (
+            "agent guardrails",
+            "docs/domains.md heading '### agent guardrails' is not a domain name in lower case with hyphens",
+        ),
+        ("Budgets", "docs/domains.md heading '### Budgets' is not a domain name in lower case with hyphens"),
+        ("budgets", "docs/domains.md names the domain 'budgets' twice"),
+    ],
+)
+def test_documented_domains_refuses_a_heading_it_cannot_read(heading: str, violation: str) -> None:
+    page = _DOMAINS_PAGE.replace("### Shared", f"### {heading}\n\n### Shared")
+    assert violation in check.documented_domains(page)[1]
+
+
+def test_documented_domains_refuses_a_page_with_no_domains_section() -> None:
+    assert check.documented_domains("# Backend domains\n") == (
+        set(),
+        ["docs/domains.md has no '## The domains' section"],
+    )
+
+
+def test_a_lower_case_shared_heading_is_not_a_domain() -> None:
+    domains, violations = check.documented_domains(_DOMAINS_PAGE.replace("### Shared", "### shared"))
+    assert (domains, violations) == ({"api_keys", "budgets"}, [])
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "gateway/services/api_keys/__init__.py",
+        "gateway/repositories/budgets/__init__.py",
+        "gateway/schemas/budgets.py",
+        "gateway/exceptions/api_keys_exceptions.py",
+    ],
+)
+def test_a_location_named_for_a_documented_domain_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str
+) -> None:
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    _write(tmp_path, relative_path, "")
+    assert check.check_domain_names(tmp_path, _domains_page(tmp_path)) == []
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "location"),
+    [
+        ("gateway/services/billing/__init__.py", "gateway/services/billing/"),
+        ("gateway/repositories/billing/__init__.py", "gateway/repositories/billing/"),
+        ("gateway/schemas/billing.py", "gateway/schemas/billing.py"),
+        ("gateway/exceptions/billing_exceptions.py", "gateway/exceptions/billing_exceptions.py"),
+    ],
+)
+def test_a_location_named_for_no_documented_domain_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str, location: str
+) -> None:
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    _write(tmp_path, relative_path, "")
+    assert check.check_domain_names(tmp_path, _domains_page(tmp_path)) == [
+        f"{location} names no domain in docs/domains.md; name it for a domain there, or give the new domain a section"
+    ]
+
+
+def test_an_exceptions_module_without_the_suffix_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    _write(tmp_path, "gateway/exceptions/budgets.py", "")
+    assert check.check_domain_names(tmp_path, _domains_page(tmp_path)) == [
+        "gateway/exceptions/budgets.py is not named <domain>_exceptions.py"
+    ]
+
+
+def test_a_shared_exceptions_module_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    _write(tmp_path, "gateway/exceptions/_base.py", "")
+    _write(tmp_path, "gateway/exceptions/shared_exceptions.py", "")
+    assert check.check_domain_names(tmp_path, _domains_page(tmp_path)) == []
+
+
+def test_a_directory_that_is_not_a_package_is_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    _write(tmp_path, "gateway/services/.mypy_cache/cache.json", "")
+    assert check.check_domain_names(tmp_path, _domains_page(tmp_path)) == []
+
+
+def test_a_location_on_the_domain_name_baseline_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ("gateway/services/tenancy/",))
+    _write(tmp_path, "gateway/services/tenancy/__init__.py", "")
+    assert check.check_domain_names(tmp_path, _domains_page(tmp_path)) == []
+
+
+@pytest.mark.parametrize("package", ["tenancy", "budgets"])
+def test_a_domain_name_baseline_entry_that_is_gone_or_now_a_domain_must_leave_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, package: str
+) -> None:
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", (f"gateway/services/{package}/",))
+    if package == "budgets":
+        _write(tmp_path, "gateway/services/budgets/__init__.py", "")
+    assert check.check_domain_names(tmp_path, _domains_page(tmp_path)) == [
+        f"gateway/services/{package}/ is on the domain name baseline but no longer exists or now names a domain; "
+        "remove it from the baseline"
+    ]
+
+
+def test_a_missing_domains_page_is_flagged(tmp_path: Path) -> None:
+    assert check.check_domain_names(tmp_path, tmp_path / "docs" / "domains.md") == [
+        "docs/domains.md not found; the domain names are read from its '## The domains' section"
+    ]
+
+
+def test_main_fails_on_a_package_named_for_no_domain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path, "src/gateway/services/__init__.py", "")
+    _write(tmp_path, "tests/__init__.py", "")
+    _point_main_at(tmp_path, monkeypatch)
+    assert check.main() == 0
+    _write(tmp_path, "src/gateway/services/billing/__init__.py", "")
+    assert check.main() == 1
