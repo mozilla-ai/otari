@@ -1,17 +1,17 @@
 schema_version: "1.0"
 policy:
   id: otari/architecture
-  description: The modular monolith's layer rules, checked by their own script.
+  description: A script checks the modular monolith's layer rules.
 
 gates:
 
   - id: architecture-layer-rules-check
-    type: command_if_changed
-    runs: [stop.session]
+    type: verifier
+    runs: [stop.verifier]
     enforcement: required
-    when_changed: ["src/gateway/**", "cli/src/otari_agent/**"]
-    require: ["make check-architecture", "make lint"]
+    when_changed: ["cli/src/otari_agent/**", "scripts/check_architecture.py", "src/**", "tests/**"]
+    verifier: .otari/verifiers/check-architecture.sh
     message: >-
-      You touched src/gateway/ or cli/src/otari_agent/; run `make check-architecture` (or `make lint`,
-      which includes it) and fix any reported import/layering violation
-      before finishing (see AGENTS.md, "Lint / Typecheck").
+      The layer and import rules check failed. Fix each reported violation
+      (ARCHITECTURE.md, "The modular monolith"), and never add a module to a
+      baseline to pass it.
