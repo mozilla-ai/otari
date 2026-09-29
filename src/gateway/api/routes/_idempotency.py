@@ -152,6 +152,9 @@ class IdempotencyGuard:
             headers = {name: response.headers[name] for name in _REPLAYED_HEADERS if name in response.headers}
             claimed, self._claimed = self._claimed, None
             await self._service.complete(self._request, claimed, status_code=status_code, body=encoded, headers=headers)
+        except Exception:
+            # The response is already paid for. A failed store leaves the claim to lapse at its lease.
+            logger.exception("Could not store the response for idempotent replay")
         finally:
             await self._stop_heartbeat()
 
@@ -162,6 +165,9 @@ class IdempotencyGuard:
                 return
             claimed, self._claimed = self._claimed, None
             await self._service.release(self._request, claimed)
+        except Exception:
+            # The request already has its outcome. A failed release leaves the claim to lapse at its lease.
+            logger.exception("Could not release an idempotency claim")
         finally:
             await self._stop_heartbeat()
 
