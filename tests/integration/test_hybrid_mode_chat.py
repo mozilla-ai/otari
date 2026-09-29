@@ -2044,8 +2044,7 @@ def test_hybrid_mode_web_search_merges_workspace_config(
     monkeypatch: pytest.MonkeyPatch,
     control_plane_transport: InstallControlPlane,
 ) -> None:
-    """When enabled, the resolved workspace config is merged into the tool
-    entry with per-request values winning over workspace defaults."""
+    """A request value that narrows a workspace limit survives, and the workspace fills what the request left blank."""
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
     _FakeWebSearchBackend.last_tool_entry = None
     _FakeWebSearchBackend.last_auth_token = None
@@ -2094,7 +2093,7 @@ def test_hybrid_mode_web_search_merges_workspace_config(
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
-            # Per-request max_results=3 must win over the workspace default 9.
+            # 3 is below the workspace's ceiling of 9, so it survives.
             "tools": [{"type": "otari_web_search", "max_results": 3}],
         },
         headers={"Authorization": "Bearer user_test_token"},
@@ -2103,9 +2102,8 @@ def test_hybrid_mode_web_search_merges_workspace_config(
     assert response.status_code == 200
     merged = _FakeWebSearchBackend.last_tool_entry
     assert merged is not None
-    # Per-request value wins.
     assert merged["max_results"] == 3
-    # Workspace defaults fill in the unset keys.
+    # The workspace fills what the request left blank.
     assert merged["allowed_domains"] == ["docs.python.org"]
     assert merged["purpose_hint"] == "workspace hint"
     assert merged["provider_options"] == {"search_depth": "advanced"}

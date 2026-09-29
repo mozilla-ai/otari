@@ -223,7 +223,9 @@ from gateway.services.tenancy.workspace_code_execution_policy_service import (
 from gateway.services.tenancy.workspace_web_search_service import (
     MAX_WEB_SEARCH_DOMAINS,
     InvalidStoredWebSearchDomainError,
+    ResolvedWebSearchConfig,
     narrow_web_search_tool_entry,
+    read_web_search_policy,
     resolve_workspace_web_search_config,
 )
 from gateway.services.tool_usage import (
@@ -2845,27 +2847,16 @@ def _combined_fetch_policy(
     return DomainPolicy(allowed=allowed, blocked=blocked)
 
 
-def _validated_hybrid_web_policy(payload: dict[str, Any]) -> tuple[bool, set[str], DomainPolicy]:
-    """Strictly validate the authorization fields supplied by the control plane."""
-    enabled = payload.get("enabled")
+def _read_hybrid_web_policy(payload: dict[str, Any]) -> tuple[set[str], ResolvedWebSearchConfig]:
+    """Read the tool names the control plane authorizes and the workspace's web search policy.
+
+    Raises ``ValueError`` when the answer is malformed, so an unreadable answer fails closed.
+    """
     # Legacy platforms authorize Search only; an explicit null remains malformed.
     authorized = payload.get("authorized_tools", [WEB_SEARCH_TOOL_NAME])
-    if not isinstance(enabled, bool):
-        raise ValueError("enabled must be a boolean")
     if not isinstance(authorized, list) or any(not isinstance(value, str) for value in authorized):
         raise ValueError("authorized_tools must be a list of strings")
-    domain_values: dict[str, list[str] | None] = {}
-    for field in ("allowed_domains", "blocked_domains"):
-        value = payload.get(field)
-        if value is not None and (
-            not isinstance(value, list)
-            or len(value) > MAX_WEB_SEARCH_DOMAINS
-            or any(not isinstance(item, str) for item in value)
-        ):
-            raise ValueError(f"{field} must be a bounded list of strings")
-        domain_values[field] = value
-    policy = _policy_from_domain_values(domain_values["allowed_domains"], domain_values["blocked_domains"])
-    return enabled, set(authorized), policy
+    return set(authorized), read_web_search_policy(payload)
 
 
 async def prepare_gateway_tools(
@@ -3262,6 +3253,17 @@ async def prepare_gateway_tools(
             raise adapter.error(400, WEB_SEARCH_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
 
         if use_web_search or use_web_fetch:
+            requested_tools = [
+                name
+                for name, requested in (
+                    (WEB_SEARCH_TOOL_NAME, use_web_search),
+                    (WEB_FETCH_TOOL_NAME, use_web_fetch),
+                )
+                if requested
+            ]
+            workspace_search: ResolvedWebSearchConfig | None
+            # A stored workspace row carries no per-tool authorization.
+            authorized_tools: set[str] | None = None
             if ctx.hybrid_mode:
                 assert ctx.user_token is not None
                 if (
@@ -3270,50 +3272,15 @@ async def prepare_gateway_tools(
                     and url_targets_platform(web_search_url, ctx.config.platform.get("base_url"))
                 ):
                     web_search_auth_token = ctx.config.platform_token
-                requested_tools = [
-                    name
-                    for name, requested in (
-                        (WEB_SEARCH_TOOL_NAME, use_web_search),
-                        (WEB_FETCH_TOOL_NAME, use_web_fetch),
-                    )
-                    if requested
-                ]
                 web_search_policy = await _resolve_platform_web_search(
                     config=ctx.config,
                     user_token=ctx.user_token,
                     requested_tools=requested_tools,
                 )
                 try:
-                    enabled, authorized_tools, mandatory_policy = _validated_hybrid_web_policy(web_search_policy)
+                    authorized_tools, workspace_search = _read_hybrid_web_policy(web_search_policy)
                 except (ValueError, DomainRuleValidationError) as exc:
                     raise adapter.error(502, MALFORMED_WEB_ACCESS_POLICY_DETAIL, ErrorKind.API) from exc
-                if not enabled:
-                    detail = WEB_ACCESS_NOT_ENABLED_DETAIL if use_web_fetch else WEB_SEARCH_NOT_ENABLED_DETAIL
-                    raise adapter.error(403, detail, ErrorKind.PERMISSION)
-                if not set(requested_tools) <= authorized_tools:
-                    raise adapter.error(403, WEB_ACCESS_TOOL_NOT_AUTHORIZED_DETAIL, ErrorKind.PERMISSION)
-                try:
-                    web_fetch_policy = _combined_fetch_policy(
-                        mandatory_policy,
-                        web_search_tool_entry if use_web_fetch else None,
-                    )
-                except DisjointDomainAllowListsError as exc:
-                    raise adapter.error(403, WEB_ACCESS_DOMAINS_EXCLUDED_DETAIL, ErrorKind.PERMISSION) from exc
-                if web_search_tool_entry is not None:
-                    # Search keeps the platform contract's historical defaults
-                    # precedence. Fetch separately retains mandatory domains above.
-                    for key in ("max_results", "allowed_domains", "blocked_domains", "purpose_hint"):
-                        resolved_value = web_search_policy.get(key)
-                        if not web_search_tool_entry.get(key) and resolved_value is not None:
-                            web_search_tool_entry[key] = resolved_value
-                    workspace_options = web_search_policy.get("provider_options")
-                    if isinstance(workspace_options, dict):
-                        request_options = web_search_tool_entry.get("provider_options")
-                        web_search_tool_entry["provider_options"] = (
-                            {**workspace_options, **request_options}
-                            if isinstance(request_options, dict)
-                            else workspace_options
-                        )
             else:
                 if ctx.db is None or ctx.workspace_id is None:
                     raise adapter.error(500, WEB_SEARCH_CONFIG_UNRESOLVABLE_DETAIL, ErrorKind.API)
@@ -3321,31 +3288,33 @@ async def prepare_gateway_tools(
                     workspace_search = await resolve_workspace_web_search_config(ctx.db, ctx.workspace_id)
                 except InvalidStoredWebSearchDomainError as exc:
                     raise adapter.error(503, WEB_SEARCH_CONFIG_INVALID_DETAIL, ErrorKind.API) from exc
-                mandatory_policy = DomainPolicy()
-                if workspace_search is not None:
-                    if not workspace_search.enabled:
-                        detail = WEB_ACCESS_NOT_ENABLED_DETAIL if use_web_fetch else WEB_SEARCH_NOT_ENABLED_DETAIL
-                        raise adapter.error(403, detail, ErrorKind.PERMISSION)
-                    mandatory_policy = _policy_from_domain_values(
-                        workspace_search.allowed_domains,
-                        workspace_search.blocked_domains,
-                    )
+            mandatory_policy = DomainPolicy()
+            if workspace_search is not None:
+                if not workspace_search.enabled:
+                    detail = WEB_ACCESS_NOT_ENABLED_DETAIL if use_web_fetch else WEB_SEARCH_NOT_ENABLED_DETAIL
+                    raise adapter.error(403, detail, ErrorKind.PERMISSION)
+                mandatory_policy = _policy_from_domain_values(
+                    workspace_search.allowed_domains,
+                    workspace_search.blocked_domains,
+                )
+            if authorized_tools is not None and not set(requested_tools) <= authorized_tools:
+                raise adapter.error(403, WEB_ACCESS_TOOL_NOT_AUTHORIZED_DETAIL, ErrorKind.PERMISSION)
+            try:
+                web_fetch_policy = _combined_fetch_policy(
+                    mandatory_policy,
+                    web_search_tool_entry if use_web_fetch else None,
+                )
+            except DisjointDomainAllowListsError as exc:
+                raise adapter.error(403, WEB_ACCESS_DOMAINS_EXCLUDED_DETAIL, ErrorKind.PERMISSION) from exc
+            if workspace_search is not None and web_search_tool_entry is not None:
                 try:
-                    web_fetch_policy = _combined_fetch_policy(
-                        mandatory_policy,
-                        web_search_tool_entry if use_web_fetch else None,
+                    web_search_tool_entry = narrow_web_search_tool_entry(
+                        web_search_tool_entry,
+                        workspace_search,
+                        baseline_max_results=web_search_max_results_baseline(ctx.config),
                     )
-                except DisjointDomainAllowListsError as exc:
-                    raise adapter.error(403, WEB_ACCESS_DOMAINS_EXCLUDED_DETAIL, ErrorKind.PERMISSION) from exc
-                if workspace_search is not None and web_search_tool_entry is not None:
-                    try:
-                        web_search_tool_entry = narrow_web_search_tool_entry(
-                            web_search_tool_entry,
-                            workspace_search,
-                            baseline_max_results=web_search_max_results_baseline(ctx.config),
-                        )
-                    except WorkspaceWebSearchDomainsExcludedError as exc:
-                        raise adapter.error(403, exc.message, ErrorKind.PERMISSION) from exc
+                except WorkspaceWebSearchDomainsExcludedError as exc:
+                    raise adapter.error(403, exc.message, ErrorKind.PERMISSION) from exc
 
         # Inside the try so a rejection releases the budget reservation the
         # request already took, like every other admission failure here.

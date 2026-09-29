@@ -362,16 +362,11 @@ no tools. Every requested tool must be in the effective authorization list or
 the request fails with `403`. Fetch always requires an explicit `"web_fetch"`
 entry, so a legacy response denies Fetch-only and combined Search/Fetch requests.
 
-Recognized domain-list fields must be lists of valid strings. A malformed
-recognized field fails closed with `502` instead of being coerced.
+Every recognized field must have its documented type and stay within the limits a stored workspace policy has: `max_results` an integer from 1 to 20, `purpose_hint` a string of at most 2,048 characters, `provider_options` an object with at most 30 keys that serializes to at most 4,096 bytes of JSON, and each domain list at most 100 valid hostnames of at most 253 characters each. A malformed recognized field fails closed with `502` instead of being coerced. A whitespace-only `purpose_hint` reads as absent.
 
-For Search, `max_results`, `allowed_domains`, `blocked_domains`, and
-`purpose_hint` remain workspace defaults where the request supplies no value;
-`provider_options` is shallow-merged with request keys winning. For Fetch,
-allowed and blocked domains form a mandatory policy that request-supplied Search
-filters may only narrow when both tools are declared. Fetch authorization does
-not depend on a Search provider, credential, or backend URL. `provider` is
-informational: the active Search backend is configured on the gateway itself.
+A workspace's `max_results`, `allowed_domains` and `blocked_domains` are a ceiling that a request may narrow and may not widen. The data plane applies the lower of the workspace's `max_results` and the request's own, or the deployment's default where the request names none. It applies the union of the two block-lists. Each allow-list entry is a domain suffix that also covers its subdomains, so the two allow-lists intersect by keeping the narrower entry of each overlapping pair: a request naming `docs.example.com` under a workspace allowing `example.com` keeps `docs.example.com`. A request whose allow-list overlaps the workspace's nowhere is refused with `403`. `purpose_hint` fills the request's hint only where it has none, and `provider_options` is shallow-merged with request keys winning.
+
+For Fetch, allowed and blocked domains form a mandatory policy that request-supplied Search filters may only narrow when both tools are declared. Fetch authorization does not depend on a Search provider, credential, or backend URL. `provider` is informational: the active Search backend is configured on the data plane itself.
 
 ### Failure
 
