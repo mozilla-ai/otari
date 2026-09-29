@@ -163,6 +163,11 @@ class IdempotencyService:
         self._config = config
         self._sleep = sleep
 
+    @staticmethod
+    def is_enabled(config: GatewayConfig) -> bool:
+        """Whether this deployment honors idempotency keys, which needs a retention and a key to encrypt with."""
+        return config.idempotency_retention_sec > 0 and secret_box_configured()
+
     async def admit(self, request: IdempotentRequest) -> Admission:
         """Claim the key, or answer with what the request already holding it produced.
 
@@ -298,11 +303,6 @@ class IdempotencyService:
         """Delete the records whose retention has passed, returning how many went."""
         async with self._uow:
             return await self._keys.delete_expired(datetime.now(UTC))
-
-
-def storage_available() -> bool:
-    """Whether a response can be stored, which needs a key to encrypt it with."""
-    return secret_box_configured()
 
 
 def _replay(record: IdempotencyRecord) -> Replay | None:

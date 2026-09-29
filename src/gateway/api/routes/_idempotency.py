@@ -34,7 +34,6 @@ from gateway.services.inference import (
     IdempotentRequest,
     InvalidKey,
     Replay,
-    storage_available,
 )
 
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
@@ -191,7 +190,7 @@ async def get_idempotency_guard(
 ) -> AsyncIterator[IdempotencyGuard]:
     """Yield the request's guard, and release its claim if the request did not complete."""
     service = None
-    if uow is not None and idempotency_key is not None and config.idempotency_retention_sec > 0 and storage_available():
+    if uow is not None and idempotency_key is not None and IdempotencyService.is_enabled(config):
         service = build_idempotency_service(uow, config)
 
     async def renew(request: IdempotentRequest, claimed: Claimed) -> bool:
