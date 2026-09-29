@@ -6,7 +6,8 @@ applyTo: "src/gateway/**/*.py"
 
 The backend is a modular monolith. The layers are the top-level folders under
 `src/gateway/`, and each layer holds one package or module per domain.
-`docs/domains.md` assigns every module to its domain.
+A module in its domain's target location belongs to that domain by its path,
+and `docs/domains.md` says what each domain owns.
 
 ## Old shape and new shape
 

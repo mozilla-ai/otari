@@ -65,8 +65,8 @@ cannot attach to more than one table, so a shared mixin passes `sa_type` plus
 The backend is a modular monolith. [ARCHITECTURE.md](../../../ARCHITECTURE.md#the-modular-monolith)
 names the shape and gives the layer and import rules.
 [docs/domains.md](../../../docs/domains.md#the-target-shape) gives what each layer holds, how a
-domain fits together and the domain test, assigns every module to its domain, and gives the steps
-for moving one domain into the shape. This section adds the house style for code in those layers.
+domain fits together and the domain test, says what each domain owns, and gives the steps for
+moving one domain into the shape. This section adds the house style for code in those layers.
 
 **New and moved code follows the target shape. Most existing code does not, so never copy the
 module beside yours.** `SERVICE_DATABASE_IMPORT_BASELINE`, `ROUTE_DATABASE_IMPORT_BASELINE` and `FLAT_MODULE_BASELINE` in

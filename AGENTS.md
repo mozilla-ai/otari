@@ -172,10 +172,11 @@ unlike the artifacts above, so a reader finds the drift rather than CI.
 
 Some pages bind code rather than describe it:
 
-- [docs/domains.md](docs/domains.md) is the backend's target shape. It assigns every
-  module under `services/`, `api/routes/`, `models/` and `repositories/` to one domain
-  and gives what each layer holds. New backend code goes where that page puts its
-  domain, not beside the code it most resembles.
+- [docs/domains.md](docs/domains.md) is the backend's target shape: what each layer
+  holds and what each domain owns. New backend code goes in its domain's target
+  location, not beside the code it most resembles. A new domain needs a section there
+  before it gets a package or a schemas or exceptions module, or the architecture check
+  fails.
 - [docs/hybrid-mode-protocol.md](docs/hybrid-mode-protocol.md) and
   [docs/code-execution-protocol.md](docs/code-execution-protocol.md) are the wire
   contracts a peer implements. They are normative for the semantics a schema cannot
@@ -203,7 +204,7 @@ Some pages bind code rather than describe it:
   against [Cardinal rules for contributors](ARCHITECTURE.md#cardinal-rules-for-contributors)
   and run `make lint`.
 - If you changed behavior a docs page describes, update that page in the same PR (see Docs
-  above). A new backend module owes [docs/domains.md](docs/domains.md) its domain.
+  above). A new domain owes [docs/domains.md](docs/domains.md) a section.
 
 ## Writing style
 
