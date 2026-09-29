@@ -16,9 +16,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import random
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
@@ -37,7 +38,10 @@ from gateway.services.secret_box import (
     secret_box_configured,
 )
 
-_POLL_INTERVAL_SEC = 0.25
+_FIRST_POLL_SEC = 0.1
+_MAX_POLL_SEC = 2.0
+# A claim can change between the insert and the read. After this many changes in a row, the retry waits.
+_MAX_IMMEDIATE_RETRIES = 3
 # A response larger than this is not stored, so a retry of it runs again.
 _MAX_STORED_BODY_BYTES = 8 * 1024 * 1024
 
@@ -142,6 +146,14 @@ class _Retry:
 _RETRY = _Retry()
 
 
+def _poll_delays(rng: random.Random) -> Iterator[float]:
+    """Yield the delays between looks at a claim, which double up to a cap and carry jitter so retries spread out."""
+    base = _FIRST_POLL_SEC
+    while True:
+        yield base / 2 + rng.uniform(0, base / 2)
+        base = min(base * 2, _MAX_POLL_SEC)
+
+
 def _as_utc(value: datetime) -> datetime:
     """Read a naive stored timestamp (SQLite) as UTC."""
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
@@ -176,17 +188,22 @@ class IdempotencyService:
         request a second time.
         """
         deadline = time.monotonic() + self._config.idempotency_wait_sec
+        delays = _poll_delays(random.Random())
+        changes = 0
         while True:
             async with self._uow:
                 outcome = await self._try_admit(request)
             if isinstance(outcome, _Retry):
-                continue
-            if outcome is not None:
+                changes += 1
+                if changes < _MAX_IMMEDIATE_RETRIES:
+                    continue
+            elif outcome is not None:
                 return outcome
+            changes = 0
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return StillInFlight()
-            await self._sleep(min(_POLL_INTERVAL_SEC, remaining))
+            await self._sleep(min(next(delays), remaining))
 
     async def _try_admit(self, request: IdempotentRequest) -> Admission | _Retry | None:
         now = datetime.now(UTC)
