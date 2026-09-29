@@ -13,7 +13,6 @@ encrypted with it.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 from collections.abc import AsyncIterator, Callable, Coroutine
 from typing import Annotated, Any
@@ -25,6 +24,7 @@ from gateway.api.deps import build_idempotency_service, get_config, get_unit_of_
 from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER
 from gateway.core.config import REQUEST_ID_HEADER, ROUTER_HEADER, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.log_config import logger
 from gateway.services.inference import (
     Admission,
     Claimed,
@@ -132,8 +132,13 @@ class IdempotencyGuard:
         heartbeat, self._heartbeat = self._heartbeat, None
         if heartbeat is not None:
             heartbeat.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            try:
                 await heartbeat
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                # The response is already paid for, so a failed renewal must not lose it.
+                logger.warning("Idempotency claim renewal failed", exc_info=True)
 
     async def complete(self, body: Any, response: Response, *, status_code: int = 200) -> None:
         """Store the response this request is about to return, for a retry to be given."""

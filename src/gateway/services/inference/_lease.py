@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 
-from gateway.core.database import DATABASE_ERRORS
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
 from gateway.services.inference._idempotency import Claimed, IdempotencyService, IdempotentRequest
@@ -28,5 +27,6 @@ async def keep_claim_alive(
             async with create_unit_of_work() as uow:
                 if not await build_service(uow).renew(request, claimed):
                     return
-        except DATABASE_ERRORS:
+        except Exception:
+            # A lapsed lease lets a retry run the request again, so no error ends the renewal.
             logger.warning("Could not renew an idempotency claim; retrying", exc_info=True)
