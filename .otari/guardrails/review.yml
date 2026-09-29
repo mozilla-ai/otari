@@ -67,6 +67,8 @@ gates:
     type: judge
     runs: [stop.session]
     enforcement: advisory
+    # A security finding outranks every style and architecture finding when a turn caps its judge gates.
+    priority: 10
     when_changed: ["src/gateway/**", "cli/src/otari_agent/**"]
     rubric: Flag any log statement, error message, or public-facing error response that
       includes a secret, token, or raw API key, or that otherwise leaks internal details
