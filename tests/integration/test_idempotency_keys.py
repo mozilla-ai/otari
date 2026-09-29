@@ -696,20 +696,13 @@ async def test_the_sweep_deletes_in_bounded_batches(async_db: AsyncSession, test
     await async_db.commit()
     uow = UnitOfWork(async_db)
     repositories = InferenceRepositories.on(uow)
-    batches: list[int] = []
-    delete_expired = repositories.idempotency.delete_expired
+    keys = repositories.idempotency
 
-    async def counted(now: datetime, *, limit: int) -> int:
-        deleted = await delete_expired(now, limit=limit)
-        batches.append(deleted)
-        return deleted
-
-    repositories.idempotency.delete_expired = counted  # type: ignore[method-assign]
-
-    deleted = await IdempotencyService(uow, repositories, test_config).sweep(batch_size=2)
+    with patch.object(keys, "delete_expired", wraps=keys.delete_expired) as delete_expired:
+        deleted = await IdempotencyService(uow, repositories, test_config).sweep(batch_size=2)
 
     assert deleted == 5
-    assert batches == [2, 2, 1]
+    assert delete_expired.await_count == 3
     assert (await async_db.execute(select(func.count()).select_from(IdempotencyRecord))).scalar_one() == 0
 
 

@@ -10,7 +10,7 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.services.inference import IdempotencyService, IdempotentRequest, StillInFlight
-from gateway.services.inference._idempotency import _CHANGES_BEFORE_WAITING, _poll_delays
+from gateway.services.inference._idempotency import _CHANGES_BEFORE_WAITING, _MAX_POLL_SEC, _poll_delays
 from gateway.services.secret_box import generate_secret_key
 
 
@@ -39,12 +39,14 @@ class _NoUnitOfWork:
         return None
 
 
-def test_waiting_retries_back_off_exponentially_with_jitter() -> None:
-    delays = list(itertools.islice(_poll_delays(random.Random(0)), 8))
+def test_waiting_retries_back_off_up_to_a_cap_with_jitter() -> None:
+    delays = list(itertools.islice(_poll_delays(random.Random(1)), 12))
+    other = list(itertools.islice(_poll_delays(random.Random(2)), 12))
 
-    bases = [0.1, 0.2, 0.4, 0.8, 1.6, 2.0, 2.0, 2.0]
-    for delay, base in zip(delays, bases, strict=True):
-        assert base / 2 <= delay <= base
+    assert delays[:5] == sorted(delays[:5])
+    assert delays[-1] > delays[0] * 8
+    assert max(delays) <= _MAX_POLL_SEC
+    assert delays != other
 
 
 @pytest.mark.asyncio
