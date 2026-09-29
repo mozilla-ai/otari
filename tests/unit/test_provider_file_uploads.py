@@ -74,9 +74,15 @@ class _Store:
 class _Client:
     """The provider's files client, answering one upload."""
 
-    def __init__(self, metadata: FileMetadata | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        metadata: FileMetadata | None = None,
+        error: Exception | None = None,
+        accept_delay: timedelta | None = None,
+    ) -> None:
         self._metadata = metadata
         self._error = error
+        self._accept_delay = accept_delay
         self.uploads: list[dict[str, Any]] = []
         self.discarded: list[str] = []
         self.closed = False
@@ -85,6 +91,9 @@ class _Client:
         self.uploads.append({"data": data, "filename": filename, "mime_type": mime_type, "expires_in": expires_in})
         if self._error is not None:
             raise self._error
+        if self._accept_delay is not None:
+            accepted = datetime.now(UTC) + self._accept_delay
+            return FileMetadata(id="file_new", expires_at=accepted + timedelta(seconds=expires_in))
         assert self._metadata is not None
         return self._metadata
 
@@ -222,6 +231,23 @@ async def test_a_copy_never_outlives_the_files_expiry(monkeypatch: pytest.Monkey
 
     asked = client.uploads[0]["expires_in"]
     assert 0 < asked <= 2 * 3600, "the copy was asked for more life than the file has"
+
+
+@pytest.mark.asyncio
+async def test_a_copy_capped_by_the_files_expiry_survives_a_slow_upload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The provider counts the life it was asked for from when it accepts the upload, not from when it was asked."""
+    copies = _Copies()
+    client = _Client(accept_delay=timedelta(seconds=5))
+    staged = replace(_STAGED, expires_at=datetime.now(UTC) + timedelta(hours=2))
+    config = GatewayConfig(files_provider_upload_ttl_hours=48)
+
+    file_id = await _uploader(monkeypatch, copies=copies, store=_Store(), client=client, config=config).file_id_for(
+        staged
+    )
+
+    assert file_id == "file_new"
+    assert client.discarded == []
+    assert copies.recorded[0].expires_at <= staged.expires_at
 
 
 @pytest.mark.asyncio

@@ -140,13 +140,14 @@ credential. A request resolving a different credential makes a copy of its own
 rather than naming one its account does not hold.
 
 **A copy never outlives the file's expiry.** Where `files_retention_hours` is
-set, the copy's expiry is cut back to whatever the file itself has left, so the
-provider never holds a file past the point Otari would have stopped serving it.
+set, the copy's expiry is cut back to whatever the file itself has left, less a
+minute for the provider to accept the upload, so the provider never holds a file
+past the point Otari would have stopped serving it.
 A provider that reports a longer expiry than that has the copy deleted again and
 the request refused, because the promise is about the copy that exists rather
 than the one Otari asked for.
 Anthropic will not hold a file for less than an hour, so a file with less than an
-hour left cannot have a copy at all, and such a request is refused. That makes
+hour and a minute left cannot have a copy at all, and such a request is refused. That makes
 `files_retention_hours` and the provider's floor interact: set retention to an
 hour against Anthropic and no file is ever copyable, because a file is under an
 hour from its expiry almost at once. Leave retention comfortably above the floor

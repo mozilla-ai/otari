@@ -32,6 +32,10 @@ from gateway.services.files._staging import StagedFile
 # input, which costs more than the upload it saved.
 _REUSE_MARGIN = timedelta(minutes=5)
 
+# How long an upload may take to be accepted. The provider counts a copy's life
+# from acceptance, so a copy capped by its file's expiry is asked for this much less.
+_ACCEPT_SLACK = timedelta(minutes=1)
+
 
 def _as_utc(value: datetime) -> datetime:
     """``value`` in UTC, reading an offset-less timestamp as UTC, which is what providers report."""
@@ -122,7 +126,7 @@ class ProviderFileUploader:
         """
         ttl = timedelta(hours=self._config.files_provider_upload_ttl_hours)
         if staged.expires_at is not None:
-            ttl = min(ttl, _as_utc(staged.expires_at) - now)
+            ttl = min(ttl, _as_utc(staged.expires_at) - now - _ACCEPT_SLACK)
         if ttl < minimum_copy_lifetime(self._provider) or ttl <= _REUSE_MARGIN:
             logger.warning(
                 "File %s has less life left than provider %s will hold a copy for; "
