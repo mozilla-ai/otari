@@ -24,7 +24,7 @@ export interface RadioOption {
  * The box fills with `--color-control-indicator` and the dot is
  * `--color-accent-glyph`, the same pairing the checkbox uses.
  */
-export function RadioVisual({ isSelected }: { isSelected: boolean }) {
+function RadioVisual({ isSelected }: { isSelected: boolean }) {
   return (
     <span
       className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center transition-colors ${
