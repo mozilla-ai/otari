@@ -433,8 +433,10 @@ fail a request: `default_purpose_hint` is used when it is a non-empty string,
 known executor. Anything else narrows nothing.
 
 `tools` and `exec_timeout_s` are accepted and **not** applied by Otari today.
-The control plane enforces both on every sandbox call, and this side was left
-relying on that. Whether a data plane should enforce them as well is
+When `OTARI_SANDBOX_URL` names the control plane, the control plane enforces
+both on every sandbox call. Any other sandbox runs without them, so a workspace
+limit on tools or timeout does not reach it. Whether a data plane should
+enforce them itself is
 [#1726](https://github.com/mozilla-ai/otari/issues/1726).
 
 A policy narrows what the deployment already allows and never widens it. A
