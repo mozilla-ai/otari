@@ -78,6 +78,14 @@ def test_fails_outside_a_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert "Not inside a Git repository" in result.output
 
 
+def test_declining_the_starter_policy_says_the_user_level_gates_still_run(repo: Path, isolated_home: Path) -> None:
+    _guardrail_path(isolated_home).write_text(_COMMAND_GATES, encoding="utf-8")
+    result = _invoke("--api-key", "k", input="n\n")
+    assert result.exit_code == 0, result.output
+    assert "every gate check passes" not in result.output
+    assert "your own gates in ~/.otari/" in result.output
+
+
 def test_declining_the_starter_policy_still_registers_the_hook(repo: Path) -> None:
     result = _invoke("--api-key", "k", input="n\n")
     assert result.exit_code == 0, result.output

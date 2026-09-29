@@ -754,6 +754,23 @@ def test_generate_refuses_the_file_that_would_break_the_composition(
     assert not (repo / hook_cli.GUARDRAIL_DIR / "generated.yml").exists()
 
 
+def test_the_file_limit_refusal_counts_the_user_level_files_apart(
+    repo: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for index in range(MAX_POLICY_FILES - 1):
+        path = repo / hook_cli.GUARDRAIL_DIR / f"f{index}.yml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_EXISTING_GATES_WITH_COMMENT.replace("no-force-push", f"g{index}"), encoding="utf-8")
+    personal = isolated_home / hook_cli.GUARDRAIL_FILE
+    personal.parent.mkdir(parents=True)
+    personal.write_text(_EXISTING_GATES_WITH_COMMENT, encoding="utf-8")
+    _stub_claude_only(monkeypatch)
+
+    result = _invoke(monkeypatch)
+    assert result.exit_code != 0
+    assert f"{MAX_POLICY_FILES - 1} in this repo and 1 in ~/.otari/" in result.output
+
+
 def test_generate_still_appends_to_an_existing_file_at_the_limit(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The escape hatch the refusal names: appending adds no file, so it stays legal."""
     for index in range(MAX_POLICY_FILES):

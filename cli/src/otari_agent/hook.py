@@ -2813,6 +2813,12 @@ def hook_setup(harness: str, api_key: str | None) -> None:
             starter.parent.mkdir(parents=True, exist_ok=True)
             starter.write_text(_starter_gates_yaml(root.name), encoding="utf-8")
             click.echo(f"Wrote {starter}. Split it into {GUARDRAIL_DIR}/ when it grows.")
+        elif _hook_guardrail_spec(root) is not None:
+            click.echo(
+                f"Skipping. otari hook will still be registered below and will check your own gates in "
+                f"{GuardrailOrigin.USER.directory} here. This repo's gates start once {GUARDRAIL_FILE} or "
+                f"{GUARDRAIL_DIR}/ exists; see docs/agent-guardrails.md."
+            )
         else:
             click.echo(
                 f"Skipping. otari hook will still be registered below, but every gate check "
@@ -3391,9 +3397,12 @@ def guardrails_generate(
     # the command that did it would have said "Added 1 gate(s)".
     composed = _hook_guardrail_files(root)
     if not target.is_file() and _joins_the_composed_set(target, root) and len(composed) >= MAX_POLICY_FILES:
+        user_count = sum(1 for file in composed if file.origin is GuardrailOrigin.USER)
+        split = f" ({len(composed) - user_count} in this repo and {user_count} in {GuardrailOrigin.USER.directory})"
         raise click.ClickException(
-            f"{root} already composes {len(composed)} guardrail files, the most this build reads "
-            f"({MAX_POLICY_FILES}). Adding {_guardrails_relative_to(target, root) or target} would make the "
+            f"{root} already composes {len(composed)} guardrail files{split if user_count else ''}, "
+            f"the most this build reads ({MAX_POLICY_FILES}). "
+            f"Adding {_guardrail_file_name(target_file, root)} would make the "
             "whole guardrail unloadable, so every gate in it would stop being enforced. Pass "
             "--guardrail-file to append to one of the existing files instead."
         )

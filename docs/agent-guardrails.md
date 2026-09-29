@@ -272,7 +272,8 @@ someone shares or lifts out of another repository. Otari's own repository keeps
 nineteen, and eleven of them hold one architecture rule each.
 
 Every file parses on its own, a gate id is unique across the whole set, and one
-unparseable file yields no guardrail rather than a partial one. The rules that
+unparseable file yields none of the repository's gates rather than a partial set.
+Your own files in `~/.otari/` are the exception, as the next section explains. The rules that
 apply once there is more than one file are under
 [Composing several files](agent-guardrails-reference.md#composing-several-files).
 
@@ -303,7 +304,7 @@ Some rules belong to a person, not to a repository: no `git reset --hard`, no re
 - The hook puts `user:` in front of every gate ID from `~/.otari/`, so `no-force-push` in your file is `user:no-force-push` in every message and in `otari guardrails validate`. A repository gate can therefore use the same ID as yours without a clash. A repository gate whose ID itself starts with `user:` can still clash, and the clash is an error that names both files.
 - A repository cannot turn off your gates. When the combined set cannot load, because of a clash, a broken file, or too many files, the hook enforces your gates alone and says that the repository's gates are off each time it reports anything. When your own files are the broken ones, it enforces the repository's gates alone. Only when neither side loads does it enforce no gate.
 - A `verifier` gate in a file under `~/.otari/` names its script relative to your home directory, for example `verifier: .otari/verifiers/lint-before-stop.sh`. The script must be inside `~/.otari/verifiers/`. It runs with the repository root as its working directory, so it checks the repository the session changed.
-- When a gate from `~/.otari/` fails, the message names its file, for example `[~/.otari/guardrails/git-safety.yml]`.
+- When a gate from `~/.otari/` fails, the message shows its `user:` ID. When more than one file composes, it also names the file, for example `[~/.otari/guardrails/git-safety.yml]`.
 - `otari guardrails validate` checks your files with the repository's, and lists which gates come from `~/.otari/` and which come from the repository.
 
 A repository checked out at your home directory owns `~/.otari/` itself, so its files are read once, as the repository's.
