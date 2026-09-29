@@ -206,7 +206,7 @@ class IdempotencyService:
             await self._sleep(min(next(delays), remaining))
 
     async def _try_admit(self, request: IdempotentRequest) -> Admission | _Retry | None:
-        now = datetime.now(UTC)
+        now = await self._keys.get_database_time()
         token = str(uuid.uuid4())
         claim = self._claim_values(request, token, now)
         if await self._keys.insert_claim({"scope": request.scope, "idempotency_key": request.key, **claim}):
@@ -278,9 +278,10 @@ class IdempotencyService:
             logger.warning("Could not encrypt the response for idempotent replay; releasing the key")
             await self.release(request, claimed)
             return False
-        expires_at = datetime.now(UTC) + timedelta(seconds=self._config.idempotency_retention_sec)
+        retention = timedelta(seconds=self._config.idempotency_retention_sec)
         try:
             async with self._uow:
+                expires_at = await self._keys.get_database_time() + retention
                 stored = await self._keys.complete(
                     request.scope,
                     request.key,
@@ -299,8 +300,8 @@ class IdempotencyService:
 
     async def renew(self, request: IdempotentRequest, claimed: Claimed) -> bool:
         """Extend the claim's lease while its request runs; False once the claim is no longer this request's."""
-        locked_until = datetime.now(UTC) + timedelta(seconds=self._config.idempotency_lease_sec)
         async with self._uow:
+            locked_until = await self._keys.get_database_time() + timedelta(seconds=self._config.idempotency_lease_sec)
             return await self._keys.extend_lease(
                 request.scope, request.key, claim_token=claimed.token, locked_until=locked_until
             )
@@ -319,7 +320,7 @@ class IdempotencyService:
     async def sweep(self) -> int:
         """Delete the records whose retention has passed, returning how many went."""
         async with self._uow:
-            return await self._keys.delete_expired(datetime.now(UTC))
+            return await self._keys.delete_expired(await self._keys.get_database_time())
 
 
 def _replay(record: IdempotencyRecord) -> Replay | None:

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Never, cast
 
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
@@ -21,6 +21,15 @@ class IdempotencyRepository(BaseRepository[IdempotencyRecord, Never, Never]):
 
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, IdempotencyRecord)
+
+    async def get_database_time(self) -> datetime:
+        """Return the database's current time, so every gateway times leases by the same clock.
+
+        SQLite serves one host, so its gateway's own clock is that clock.
+        """
+        if dialect_name(self.db) != "postgresql":
+            return datetime.now(UTC)
+        return (await self.db.execute(select(func.now()))).scalar_one()
 
     async def insert_claim(self, values: dict[str, Any]) -> bool:
         """Insert a fresh ``in_progress`` claim, returning False when the key is already held.

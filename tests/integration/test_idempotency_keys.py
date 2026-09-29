@@ -43,6 +43,7 @@ from gateway.services.inference import (
     StillInFlight,
     keep_claim_alive,
 )
+from gateway.services.inference import _idempotency as service_module
 from gateway.services.inference import _lease as lease_module
 from gateway.services.secret_box import generate_secret_key
 
@@ -624,6 +625,38 @@ async def test_a_running_claim_outlives_its_retention(
             async with sessions() as db:
                 await db.execute(update(IdempotencyRecord).values(expires_at=datetime.now(UTC) - timedelta(seconds=1)))
                 await db.commit()
+
+            assert isinstance(await retry.admit(request), StillInFlight)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_gateway_whose_clock_runs_ahead_does_not_take_over_a_live_claim(
+    postgres_url: str, clean_database: None, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Leases are timed by the database, so clock skew between gateways cannot free a running claim."""
+    config = test_config.model_copy(update={"idempotency_wait_sec": 0})
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    request = IdempotentRequest(
+        scope=f"master:{_USER}", key="skewed", request_hash="0" * 64, user_id=_USER, api_key_id=None
+    )
+    try:
+        async with sessions() as original_db, sessions() as retry_db:
+            original_db.add(User(user_id=_USER))
+            await original_db.commit()
+            original_uow, retry_uow = UnitOfWork(original_db), UnitOfWork(retry_db)
+            original = IdempotencyService(original_uow, InferenceRepositories.on(original_uow), config)
+            retry = IdempotencyService(retry_uow, InferenceRepositories.on(retry_uow), config)
+            assert isinstance(await original.admit(request), Claimed)
+
+            class _FastClock(datetime):
+                @classmethod
+                def now(cls, tz: Any = None) -> "_FastClock":
+                    return cls.fromtimestamp(time.time() + 600, tz)
+
+            monkeypatch.setattr(service_module, "datetime", _FastClock)
 
             assert isinstance(await retry.admit(request), StillInFlight)
     finally:
