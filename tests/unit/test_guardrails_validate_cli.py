@@ -494,7 +494,7 @@ def test_user_level_gates_are_checked_with_the_repo_and_listed_apart(repo: Path,
     result = _invoke()
     assert result.exit_code == 0, result.output
     assert "composed from 2 files" in result.output
-    assert "from ~/.otari/: personal" in result.output
+    assert "from ~/.otari/: user:personal" in result.output
     assert "from .otari/: team" in result.output
 
 
@@ -511,11 +511,11 @@ def test_a_user_level_guardrail_alone_is_enough_to_validate(repo: Path, isolated
     result = _invoke("--path", "personal.txt")
     assert result.exit_code == 0, result.output
     assert "~/.otari/guardrails.yml" in result.output
-    assert "fires      personal (required)" in result.output
+    assert "fires      user:personal (required)" in result.output
 
 
-def test_a_gate_id_in_a_user_file_and_a_repo_file_is_reported(repo: Path, isolated_home: Path) -> None:
-    _write_into(repo, ".otari/guardrails.yml", _one_gate("shared"))
+def test_a_repo_gate_that_copies_the_user_prefix_is_reported(repo: Path, isolated_home: Path) -> None:
+    _write_into(repo, ".otari/guardrails.yml", _one_gate("user:shared"))
     _write_into(isolated_home, ".otari/guardrails.yml", _one_gate("shared"))
     result = _invoke()
     assert result.exit_code != 0
@@ -535,3 +535,33 @@ def test_a_user_level_verifier_is_probed_under_home(repo: Path, isolated_home: P
     result = _invoke()
     assert result.exit_code == 1, result.output
     assert "`chmod +x ~/.otari/verifiers/check.sh`" in result.output
+
+
+def test_a_user_level_file_named_directly_is_checked_as_the_users(repo: Path, isolated_home: Path) -> None:
+    """Named with `--guardrail-file`, a file under `~/.otari/` is still probed and prefixed as the hook would."""
+    verifiers = isolated_home / ".otari/verifiers"
+    verifiers.mkdir(parents=True)
+    (verifiers / "check.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    personal = isolated_home / ".otari/guardrails.yml"
+    _write_into(
+        isolated_home,
+        ".otari/guardrails.yml",
+        _HEADER + "  - id: g\n    type: verifier\n    runs: [stop.verifier]\n"
+        "    enforcement: required\n    verifier: .otari/verifiers/check.sh\n    message: m\n",
+    )
+    result = _invoke("--guardrail-file", str(personal))
+    assert result.exit_code == 1, result.output
+    assert "user:g" in result.output
+    assert "`chmod +x ~/.otari/verifiers/check.sh`" in result.output
+
+
+def test_a_draft_under_otari_home_that_the_hook_never_reads_is_checked_as_a_repo_file(
+    repo: Path, isolated_home: Path
+) -> None:
+    """Only `~/.otari/guardrails.yml` and `~/.otari/guardrails/` are the user's, so a draft elsewhere keeps its IDs."""
+    draft = isolated_home / ".otari/draft.yml"
+    _write_into(isolated_home, ".otari/draft.yml", _one_gate("draft-gate"))
+    result = _invoke("--guardrail-file", str(draft), "--path", "draft-gate.txt")
+    assert result.exit_code == 0, result.output
+    assert "fires      draft-gate (required)" in result.output
+    assert "user:draft-gate" not in result.output

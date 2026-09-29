@@ -97,7 +97,7 @@ meets all of them for free.
   make easy to get wrong and no single file can show, which is why
   `otari guardrails validate` composes by default.
 - **Every file declares the same `schema_version`.**
-- **Your own files compose too.** `~/.otari/guardrails.yml` and every file under `~/.otari/guardrails/` compose after the repository's files, under these same rules. A gate ID in both a file under `~/.otari/` and a repository file is an error that names both files. When the combined set cannot load, the hook enforces your files alone, or the repository's alone when yours are the broken ones, and says which. See [Your own guardrail in `~/.otari/`](agent-guardrails.md#your-own-guardrail-in-otari).
+- **Your own files compose too.** `~/.otari/guardrails.yml` and every file under `~/.otari/guardrails/` compose after the repository's files, under these same rules. The hook puts `user:` in front of every gate ID from `~/.otari/`, so those IDs cannot clash with the repository's unless a repository ID also starts with `user:`. When the combined set cannot load, the hook enforces your files alone, or the repository's alone when yours are the broken ones, and says which. See [Your own guardrail in `~/.otari/`](agent-guardrails.md#your-own-guardrail-in-otari).
 - **Order is not contract.** Files compose in repo-relative path order, and
   that order is only ever a tiebreak. What decides which `judge` and
   `verifier` gates survive their per-run caps is `priority` on the gate

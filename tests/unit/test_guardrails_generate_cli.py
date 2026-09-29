@@ -840,16 +840,48 @@ def test_the_file_limit_holds_however_the_target_is_spelled(
     assert not (repo / hook_cli.GUARDRAIL_DIR / "new.yml").exists()
 
 
-def test_an_id_used_in_a_user_level_file_is_skipped(
+def test_an_id_used_in_a_user_level_file_is_still_free_in_the_repo(
     repo: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The user's gates compose with the repo's, so their IDs are taken too."""
+    """A user-level gate ID carries a prefix, so the same ID is free for a repo gate."""
     personal = isolated_home / hook_cli.GUARDRAIL_FILE
     personal.parent.mkdir(parents=True)
     personal.write_text(_EXISTING_GATES_WITH_COMMENT, encoding="utf-8")
     _stub_claude_only(monkeypatch)
     _stub_cli_output(monkeypatch, json.dumps([{**_VALID_PROPOSAL, "id": "no-force-push"}]))
 
-    result = _invoke(monkeypatch)
+    result = _invoke(monkeypatch, keys="yn")
+    assert result.exit_code == 0, result.output
+    assert "Skipping 'no-force-push'" not in result.output
+    assert "Add this gate?" in result.output
+
+
+def test_appending_to_a_user_level_file_checks_the_prefixed_id(
+    repo: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A gate added to `~/.otari/` takes the `user:` prefix, so that is the ID that has to be free."""
+    personal = isolated_home / hook_cli.GUARDRAIL_FILE
+    personal.parent.mkdir(parents=True)
+    personal.write_text(_EXISTING_GATES_WITH_COMMENT, encoding="utf-8")
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([{**_VALID_PROPOSAL, "id": "no-force-push"}]))
+
+    result = _invoke(monkeypatch, "--guardrail-file", str(personal))
     assert result.exit_code == 0, result.output
     assert "Skipping 'no-force-push': already in ~/.otari/guardrails.yml." in result.output
+
+
+def test_a_broken_user_level_file_does_not_stop_generating_for_the_repo(
+    repo: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The hook still enforces the repo's gates when a user-level file is broken, so generate still runs."""
+    personal = isolated_home / hook_cli.GUARDRAIL_FILE
+    personal.parent.mkdir(parents=True)
+    personal.write_text("gates: [", encoding="utf-8")
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([_VALID_PROPOSAL]))
+
+    result = _invoke(monkeypatch, keys="yn")
+    assert result.exit_code == 0, result.output
+    assert "~/.otari/guardrails.yml does not parse" in result.output
+    assert "Add this gate?" in result.output

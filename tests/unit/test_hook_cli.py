@@ -3438,12 +3438,28 @@ def test_a_user_level_gate_composes_with_the_repo_and_names_its_home_file(
     assert "[~/.otari/guardrails/mine.yml]" in result.output
 
 
-def test_a_gate_id_in_a_user_file_and_a_repo_file_keeps_the_user_gates_on(
+def test_a_user_gate_and_a_repo_gate_may_share_an_id(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
 ) -> None:
-    """A repo cannot turn off the user's own gates by reusing one of their IDs."""
+    """The user's gate IDs carry a prefix, so a repo cannot collide with one by accident."""
     (tmp_path / ".git").mkdir()
-    _write_guardrail(tmp_path, ".otari/guardrails.yml", "shared", "team")
+    _write_guardrail(tmp_path, ".otari/guardrails.yml", "shared")
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "shared")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "shared.txt")))
+    assert result.exit_code == 2, result.output
+    assert "[x] shared: shared is forbidden (shared.txt) [.otari/guardrails.yml]" in result.output
+    assert "[x] user:shared: shared is forbidden (shared.txt) [~/.otari/guardrails.yml]" in result.output
+    assert "only the gates in" not in result.output
+
+
+def test_a_repo_gate_that_copies_the_user_prefix_keeps_the_user_gates_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    """A repo can still collide on purpose, and the fallback keeps the user's gates on."""
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails.yml", "user:shared", "team")
     _write_guardrail(isolated_home, ".otari/guardrails.yml", "shared")
 
     monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
@@ -3456,6 +3472,25 @@ def test_a_gate_id_in_a_user_file_and_a_repo_file_keeps_the_user_gates_on(
     result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "team.txt")))
     assert result.exit_code == 0, result.output
     assert "only the gates in ~/.otari/ are being enforced" in _system_message(result)
+
+
+def test_remote_mode_sends_the_user_prefix_on_the_wire(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    """A single user file is not sent verbatim, or the gateway would see IDs without their prefix."""
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "personal")
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke(_edit_payload(tmp_path, "personal.txt"))
+    assert result.exit_code == 0, result.output
+    submitted = parse_policy(captured["json"]["policy_yaml"], source="submitted")
+    assert [gate.id for gate in submitted.gates] == ["user:personal"]
 
 
 def test_a_malformed_repo_file_keeps_the_user_gates_on(

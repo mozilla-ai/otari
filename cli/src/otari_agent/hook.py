@@ -38,6 +38,7 @@ from otari_agent.domain.policy import (
     PolicyFile,
     compose_policy,
     parse_policy,
+    parse_policy_file,
 )
 from otari_agent.domain.types import (
     CheckVerdict,
@@ -368,10 +369,14 @@ def _guardrail_moved_notice(root: Path) -> str | None:
 
 
 class GuardrailOrigin(Enum):
-    """Who owns a guardrail file. Each value is the directory the owner keeps it in."""
+    """Who owns a guardrail file, with the directory the owner keeps it in and the prefix on the owner's gate IDs."""
 
-    REPO = ".otari/"
-    USER = "~/.otari/"
+    REPO = (".otari/", "")
+    USER = ("~/.otari/", "user:")
+
+    def __init__(self, directory: str, gate_id_prefix: str) -> None:
+        self.directory = directory
+        self.gate_id_prefix = gate_id_prefix
 
 
 class GuardrailFile(NamedTuple):
@@ -435,10 +440,31 @@ def _hook_guardrail_files(root: Path) -> list[GuardrailFile]:
     ]
 
 
+def _guardrail_file_origin(path: Path, root: Path) -> GuardrailOrigin:
+    """Who owns the guardrail file at `path`: the user for a file the hook reads from `~/.otari/`, else the repo."""
+    try:
+        resolved = path.resolve()
+        home = Path.home()
+        user_file = (home / GUARDRAIL_FILE).resolve()
+        user_dir = (home / GUARDRAIL_DIR).resolve()
+    except (OSError, RuntimeError):
+        return GuardrailOrigin.REPO
+    if resolved.is_relative_to(root.resolve()):
+        return GuardrailOrigin.REPO
+    if resolved == user_file or resolved.is_relative_to(user_dir):
+        return GuardrailOrigin.USER
+    return GuardrailOrigin.REPO
+
+
 def _guardrail_file_name(file: GuardrailFile, root: Path) -> str:
     """How a report names a guardrail file: repo-relative, or under `~/` for a user-level one."""
     if file.origin is GuardrailOrigin.USER:
-        return f"~/{file.path.relative_to(Path.home()).as_posix()}"
+        home = Path.home()
+        relative = _guardrails_relative_to(file.path, home) or _guardrails_relative_to(
+            file.path.resolve(), home.resolve()
+        )
+        if relative is not None:
+            return f"~/{relative}"
     # A file outside the repo has no repo-relative spelling.
     return _guardrails_relative_to(file.path, root) or file.path.as_posix()
 
@@ -462,7 +488,7 @@ def _composed_guardrail_id(files: list[GuardrailFile], root: Path) -> str:
     elif repo:
         parts.append(f"{GUARDRAIL_FILE} + {GUARDRAIL_DIR}/" if repo[0].path == root / GUARDRAIL_FILE else GUARDRAIL_DIR)
     if len(repo) < len(files):
-        parts.append(GuardrailOrigin.USER.value)
+        parts.append(GuardrailOrigin.USER.directory)
     return " + ".join(parts)
 
 
@@ -490,7 +516,7 @@ def _read_guardrail_files(files: list[GuardrailFile], root: Path) -> list[Policy
             body = file.path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise GuardrailReadError(f"could not read {name} ({exc})") from exc
-        sources.append(PolicyFile(name=name, body=body))
+        sources.append(PolicyFile(name=name, body=body, gate_id_prefix=file.origin.gate_id_prefix))
     return sources
 
 
@@ -502,7 +528,7 @@ def _compose_guardrail(sources: list[PolicyFile], policy_id: str) -> PolicySpec:
     file's own `policy.id` and gets no per-gate source it has no use for.
     """
     if len(sources) == 1:
-        return parse_policy(sources[0].body, source=sources[0].name)
+        return parse_policy_file(sources[0])
     return compose_policy(sources, policy_id=policy_id)
 
 
@@ -574,14 +600,19 @@ def _merged_guardrail_yaml(sources: list[PolicyFile], policy_id: str) -> str:
     A single-file guardrail is sent exactly as it sits on disk, comments and
     all, so the common case puts nothing on the wire that was not written by
     hand.
+    A file with a gate ID prefix is merged instead, so the gateway sees the same IDs this process evaluates.
     """
-    if len(sources) == 1:
+    if len(sources) == 1 and not sources[0].gate_id_prefix:
         return sources[0].body
     documents = [yaml.safe_load(source.body) for source in sources]
     merged = {
         "schema_version": documents[0]["schema_version"],
         "policy": {"id": policy_id, "description": f"Composed from {len(sources)} guardrail files."},
-        "gates": [gate for document in documents for gate in document["gates"]],
+        "gates": [
+            {**gate, "id": f"{source.gate_id_prefix}{gate['id']}"}
+            for source, document in zip(sources, documents, strict=True)
+            for gate in document["gates"]
+        ],
     }
     return yaml.safe_dump(merged, sort_keys=False)
 
@@ -2132,7 +2163,7 @@ def hook(
             return
         loaded_origin, guardrail = fallback
         load_notice = (
-            f"could not load {failed_name} ({exc}); only the gates in {loaded_origin.value} are being enforced."
+            f"could not load {failed_name} ({exc}); only the gates in {loaded_origin.directory} are being enforced."
         )
     guardrail_name = guardrail.name
     sources = guardrail.sources
@@ -3221,9 +3252,10 @@ def _joins_the_composed_set(target: Path, root: Path) -> bool:
     answer would be a wrong "outside the set", and the caller skips the
     file-count guard on the strength of it.
     """
-    if target == (root / GUARDRAIL_FILE).resolve():
+    base = Path.home() if _guardrail_file_origin(target, root) is GuardrailOrigin.USER else root
+    if target == (base / GUARDRAIL_FILE).resolve():
         return True
-    return target.suffix in _GUARDRAIL_SUFFIXES and target.is_relative_to((root / GUARDRAIL_DIR).resolve())
+    return target.suffix in _GUARDRAIL_SUFFIXES and target.is_relative_to((base / GUARDRAIL_DIR).resolve())
 
 
 def _generate_target(root: Path) -> Path:
@@ -3350,6 +3382,7 @@ def guardrails_generate(
     # every check below compares it against paths under the resolved repo
     # root. See `_joins_the_composed_set`.
     target = (guardrail_file_option if guardrail_file_option is not None else _generate_target(root)).resolve()
+    target_file = GuardrailFile(target, _guardrail_file_origin(target, root))
 
     # Before the model call, not after: writing the file that takes the set
     # past MAX_POLICY_FILES would report success and leave the repo with a
@@ -3374,15 +3407,21 @@ def guardrails_generate(
     # play, "already in the guardrail" leaves a reader opening each one to
     # find out where.
     existing_ids: dict[str, str] = {}
-    for file in dict.fromkeys([*composed, GuardrailFile(target, GuardrailOrigin.REPO)]):
+    for file in dict.fromkeys([*composed, target_file]):
         path = file.path
         if not path.is_file():
             continue
-        try:
-            existing_spec = parse_policy(path.read_text(encoding="utf-8"), source=str(path))
-        except (OSError, UnicodeDecodeError, PolicyError) as exc:
-            raise click.ClickException(f"{path} does not currently parse: {exc}") from exc
         name = _guardrail_file_name(file, root)
+        try:
+            existing_spec = parse_policy_file(
+                PolicyFile(name=name, body=path.read_text(encoding="utf-8"), gate_id_prefix=file.origin.gate_id_prefix)
+            )
+        except (OSError, UnicodeDecodeError, PolicyError) as exc:
+            # The hook still enforces one owner's gates when the other's files are broken.
+            if file.origin is not target_file.origin:
+                click.secho(f"{name} does not parse, so its gate IDs were not checked ({exc}).", fg="yellow")
+                continue
+            raise click.ClickException(f"{path} does not currently parse: {exc}") from exc
         existing_ids.update({gate.id: name for gate in existing_spec.gates})
 
     candidates = cli_override if cli_override is not None else _GATES_GENERATE_DEFAULT_CLI_ORDER
@@ -3431,8 +3470,9 @@ def guardrails_generate(
             if not isinstance(gate_id, str) or not gate_id:
                 click.secho("Skipping a proposal with no valid 'id'.", fg="yellow")
                 break
-            if gate_id in existing_ids:
-                click.secho(f"Skipping {gate_id!r}: already in {existing_ids[gate_id]}.", fg="yellow")
+            composed_id = f"{target_file.origin.gate_id_prefix}{gate_id}"
+            if composed_id in existing_ids:
+                click.secho(f"Skipping {gate_id!r}: already in {existing_ids[composed_id]}.", fg="yellow")
                 break
 
             try:
@@ -3451,7 +3491,7 @@ def guardrails_generate(
             choice = _gates_generate_read_choice("Add this gate? [y]es/[n]o/[e]dit/[q]uit: ", "yneq", "n")
             if choice == "y":
                 _gates_generate_append(target, root.name, current)
-                existing_ids[gate_id] = _guardrails_relative_to(target, root) or target.name
+                existing_ids[composed_id] = _guardrail_file_name(target_file, root)
                 accepted += 1
                 click.secho(f"Added {gate_id!r} to {target}.", fg="green")
                 break
@@ -3713,7 +3753,7 @@ def guardrails_validate(
             raise click.ClickException(
                 f"No guardrail file at {guardrail_file_option}. `otari guardrails generate` starts one."
             )
-        files = [GuardrailFile(guardrail_file_option, GuardrailOrigin.REPO)]
+        files = [GuardrailFile(guardrail_file_option, _guardrail_file_origin(guardrail_file_option, root))]
     else:
         files = _hook_guardrail_files(root)
         if not files:
@@ -3722,7 +3762,7 @@ def guardrails_validate(
                 moved
                 or (
                     f"No guardrail in {root}: no {GUARDRAIL_FILE}, nothing under {GUARDRAIL_DIR}/, "
-                    f"and nothing in {GuardrailOrigin.USER.value}. `otari hook setup` starts one."
+                    f"and nothing in {GuardrailOrigin.USER.directory}. `otari hook setup` starts one."
                 )
             )
 
@@ -3748,7 +3788,7 @@ def guardrails_validate(
         for origin in GuardrailOrigin:
             gate_ids = [gate.id for gate in spec.gates if origins[gate.id] is origin]
             if gate_ids:
-                click.echo(f"  from {origin.value}: {', '.join(gate_ids)}")
+                click.echo(f"  from {origin.directory}: {', '.join(gate_ids)}")
     for finding in findings:
         in_file = spec.gate_sources.get(finding.gate_id or "")
         where = f"{finding.gate_id}{f' ({in_file})' if in_file else ''}: " if finding.gate_id is not None else ""
