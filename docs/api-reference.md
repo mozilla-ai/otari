@@ -110,18 +110,26 @@ in its place.
   with 422, so send a new key for a new request. Key order and whitespace in the
   JSON body do not count as a difference.
 - A retry that waits longer than `idempotency_wait_sec` for the original is
-  answered 409 with `Retry-After`; retry again with the same key. However long
-  the original takes, a retry never runs it a second time while it is still
-  running. If the worker running it dies, its key frees up within
-  `idempotency_lease_sec` (a minute by default).
+  answered 409 with `Retry-After`; retry again with the same key. A waiting
+  retry checks on the original less often the longer it waits.
+- The request holding a key renews its claim while it runs, so a retry does not
+  run it a second time however long it takes. If the worker running it dies, its
+  key frees up within `idempotency_lease_sec` (a minute by default).
 - A response is kept for `idempotency_retention_sec` (a day by default),
   generated content included, and then deleted. It is stored encrypted with
   `OTARI_SECRET_KEY`, so a deployment without that key ignores the header, and
   a response no configured key can decrypt (after the key was rotated away)
   runs again. Responses larger than 8 MiB are not kept, so a retry of one runs
-  again.
-- Only a successful response is kept. The request is still authenticated and
-  checked against the key's model access on a retry.
+  again. Expired responses are still deleted after the header is turned off.
+- Only a successful response is kept. On a retry the request is still
+  authenticated and checked against the key's model access, and a user who has
+  since been blocked is refused rather than given the stored response.
+
+Billing once is guaranteed while the gateway and its database stay up. Two cases
+can still bill a retry again, because the original's response was never stored:
+the gateway stops after the provider answers and before the response is stored,
+or the database is unreachable for longer than `idempotency_lease_sec` while the
+original runs, so its claim lapses and a retry takes it over.
 - Streaming requests ignore the header, and so does hybrid mode, which has no
   local database to keep the response in.
 
