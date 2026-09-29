@@ -22,7 +22,13 @@ from fastapi.encoders import jsonable_encoder
 
 from gateway.api.deps import build_idempotency_service, get_config, get_unit_of_work_if_needed
 from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER
-from gateway.core.config import REQUEST_ID_HEADER, ROUTER_HEADER, GatewayConfig
+from gateway.core.config import (
+    CONVERSATION_HEADER,
+    REQUEST_ID_HEADER,
+    ROUTER_HEADER,
+    ROUTER_TASK_HEADER,
+    GatewayConfig,
+)
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.services.inference import (
@@ -42,7 +48,14 @@ IDEMPOTENT_REPLAYED_HEADER = "Otari-Idempotent-Replayed"
 _REPLAYED_HEADERS = (REQUEST_ID_HEADER, "Otari-Container-Id", "Otari-Container-Expires-At")
 # The request headers that change what a request does, so they count toward
 # whether a retry is the same request.
-_REQUEST_SHAPING_HEADERS = (CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, ROUTER_HEADER, "anthropic-beta")
+_REQUEST_SHAPING_HEADERS = (
+    CODE_EXECUTION_HEADER,
+    WEB_SEARCH_HEADER,
+    ROUTER_HEADER,
+    "anthropic-beta",
+    ROUTER_TASK_HEADER,
+    CONVERSATION_HEADER,
+)
 
 INVALID_IDEMPOTENCY_KEY_DETAIL = (
     f"{IDEMPOTENCY_KEY_HEADER} must be 1 to {IdempotentRequest.MAX_KEY_LENGTH} printable ASCII characters."

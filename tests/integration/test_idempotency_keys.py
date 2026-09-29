@@ -29,7 +29,14 @@ from gateway.api.routes._idempotency import (
     IDEMPOTENT_REPLAYED_HEADER,
     IdempotencyGuard,
 )
-from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig
+from gateway.core.config import (
+    API_KEY_HEADER,
+    API_ROOT,
+    CONVERSATION_HEADER,
+    REQUEST_ID_HEADER,
+    ROUTER_TASK_HEADER,
+    GatewayConfig,
+)
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.inference import IdempotencyRecord, IdempotencyState
 from gateway.models.usage import UsageLog
@@ -221,6 +228,20 @@ def test_reusing_a_key_with_different_tool_headers_is_refused(
 
     assert _post_chat(client, headers, provider).status_code == 200
     refused = _post_chat(client, {**headers, "Otari-Web-Search": "otari"}, provider)
+
+    assert refused.status_code == 422, refused.text
+    assert provider.await_count == 1
+
+
+@pytest.mark.parametrize("header", [ROUTER_TASK_HEADER, CONVERSATION_HEADER])
+def test_reusing_a_key_with_different_routing_headers_is_refused(
+    client: TestClient, master_key_header: dict[str, str], user: None, header: str
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+    headers = _keyed(master_key_header, f"reused-{header}")
+
+    assert _post_chat(client, {**headers, header: "first"}, provider).status_code == 200
+    refused = _post_chat(client, {**headers, header: "second"}, provider)
 
     assert refused.status_code == 422, refused.text
     assert provider.await_count == 1

@@ -104,11 +104,12 @@ in its place.
 - A key belongs to the API key that sent it (or, for the master key, to the
   billed user), so two callers never see each other's responses.
 - A retry has to be the same request: the same body, and the same
-  `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Router` and
-  `anthropic-beta` headers, since those change what the request does. The same
-  key with a different body or different values for those headers is refused
-  with 422, so send a new key for a new request. Key order and whitespace in the
-  JSON body do not count as a difference.
+  `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Router`,
+  `Otari-Router-Task`, `Otari-Conversation-Id` and `anthropic-beta` headers,
+  since those change what the request does. The same key with a different body
+  or different values for those headers is refused with 422, so send a new key
+  for a new request. Key order and whitespace in the JSON body do not count as a
+  difference.
 - A retry that waits longer than `idempotency_wait_sec` for the original is
   answered 409 with `Retry-After`; retry again with the same key. A waiting
   retry checks on the original less often the longer it waits.
