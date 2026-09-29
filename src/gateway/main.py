@@ -192,10 +192,8 @@ def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutin
     )
 
 
-def _start_idempotency_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:
-    """Return the idempotency record sweep, or None when the header is ignored or the interval disables it."""
-    if config.idempotency_retention_sec <= 0 or config.idempotency_sweep_interval_sec <= 0:
-        return None
+def _start_idempotency_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None]:
+    """Return the idempotency record sweep, which runs even while the header is ignored so stored records expire."""
     return run_idempotency_sweeper(
         config.idempotency_sweep_interval_sec, lambda uow: build_idempotency_service(uow, config)
     )

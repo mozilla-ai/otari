@@ -39,6 +39,6 @@ class InferenceSettings(BaseModel):
     )
     idempotency_sweep_interval_sec: Annotated[int, OMITTED] = Field(
         default=3600,
-        ge=0,
-        description="How often expired idempotency records are deleted. 0 disables the sweep.",
+        ge=1,
+        description="How often expired idempotency records are deleted.",
     )
