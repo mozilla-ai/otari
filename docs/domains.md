@@ -83,7 +83,9 @@ Its tables sit in `models/tenancy.py` today, which organizations holds.
 Organizations, workspaces, members, invitations, email-domain claims, first-boot
 provisioning, the setup guide, and the gateway's billing users.
 
-It also owns `models/users.py`, `repositories/users_repository.py` and
+It defines `MembershipListener`, the interface budgets implements to react to a
+membership change without organizations importing budgets. It also owns
+`models/users.py`, `repositories/users_repository.py` and
 `services/workspace_scope.py`.
 
 ### api-keys
@@ -226,6 +228,13 @@ target shape has the overview service ask each domain's service for its data.
 
 The overview has no slot of its own in the order of work. Its queries move with
 each domain it reads, and budgets is the first.
+
+### feedback
+
+This domain holds the messages a signed-in dashboard user sends to the Otari
+team. The gateway forwards each one to otari.ai without the caller's
+credentials, and limits how often one caller may send. It is a core feature,
+switched by `feedback_enabled`.
 
 ### Shared
 
