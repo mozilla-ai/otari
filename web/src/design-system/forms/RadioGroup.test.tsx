@@ -59,4 +59,43 @@ describe("RadioGroup", () => {
     render(<Live />)
     expect(screen.getByRole("radiogroup", { name: LABEL })).toBeInTheDocument()
   })
+
+  it("describes an option by its description without folding it into the name", () => {
+    render(
+      <RadioGroup
+        label={LABEL}
+        value="30d"
+        onChange={() => {}}
+        options={[
+          {
+            value: "30d",
+            label: "30 days",
+            description: "Older rows are pruned",
+          },
+        ]}
+      />,
+    )
+    const radio = screen.getByRole("radio", { name: "30 days" })
+    expect(radio).toHaveAccessibleDescription("Older rows are pruned")
+  })
+
+  it("links the error message to the group only while it is invalid", () => {
+    const props = {
+      label: LABEL,
+      value: "30d",
+      onChange: () => {},
+      options: OPTIONS,
+      errorMessage: "Pick a retention period",
+    }
+    const { rerender } = render(<RadioGroup {...props} isInvalid />)
+    expect(
+      screen.getByRole("radiogroup", { name: LABEL }),
+    ).toHaveAccessibleDescription("Pick a retention period")
+
+    rerender(<RadioGroup {...props} isInvalid={false} />)
+    expect(screen.queryByText("Pick a retention period")).toBeNull()
+    expect(screen.getByRole("radiogroup", { name: LABEL })).not.toHaveAttribute(
+      "aria-describedby",
+    )
+  })
 })

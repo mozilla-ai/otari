@@ -1,8 +1,9 @@
 import type { ReactNode } from "react"
 import {
-  Radio as AriaRadio,
   RadioGroup as AriaRadioGroup,
   Label,
+  RadioButton,
+  RadioField,
   Text,
 } from "react-aria-components"
 
@@ -112,29 +113,36 @@ export function RadioGroup({
         }
       >
         {options.map((option) => (
-          <AriaRadio
+          <RadioField
             key={option.value}
             value={option.value}
             isDisabled={option.isDisabled}
-            className="group flex w-fit items-start gap-2 text-body"
+            className="flex w-fit flex-col"
           >
-            {({ isSelected }) => (
-              <>
-                <RadioVisual isSelected={isSelected} />
-                <span className="flex flex-col">
-                  <span className="text-body">{option.label}</span>
-                  {option.description ? (
-                    <span className="text-caption">{option.description}</span>
-                  ) : null}
-                </span>
-              </>
-            )}
-          </AriaRadio>
+            <RadioButton className="group flex items-start gap-2 text-body">
+              {({ isSelected }) => (
+                <>
+                  <RadioVisual isSelected={isSelected} />
+                  {option.label}
+                </>
+              )}
+            </RadioButton>
+            {option.description ? (
+              // Outside the button so it describes the radio rather than joining
+              // its name; indented past the indicator and its gap to sit under
+              // the label.
+              <Text slot="description" className="pl-6 text-caption">
+                {option.description}
+              </Text>
+            ) : null}
+          </RadioField>
         ))}
       </div>
       <FieldMessages shouldReserve={false}>
         {isInvalid && errorMessage ? (
-          <span className="text-danger">{errorMessage}</span>
+          <Text slot="errorMessage" className="text-danger">
+            {errorMessage}
+          </Text>
         ) : null}
       </FieldMessages>
     </AriaRadioGroup>
