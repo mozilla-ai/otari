@@ -255,6 +255,7 @@ A repository with more concerns than one file holds keeps a directory instead:
     architecture/
       layer-rules.yml
   verifiers/
+    check-architecture.sh
     no-conflict-markers.sh
     no-stranded-docblocks.py
 ```
@@ -268,7 +269,7 @@ partway through splitting one file into several.
 between files rather than migrating them, so there is no cost to starting there.
 Group a directory by concern rather than by gate type: a file is the unit
 someone shares or lifts out of another repository. Otari's own repository keeps
-eight.
+nineteen, and eleven of them hold one architecture rule each.
 
 Every file parses on its own, a gate id is unique across the whole set, and one
 unparseable file yields no guardrail rather than a partial one. The rules that
