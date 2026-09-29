@@ -89,6 +89,12 @@ class IdempotentReplay(Exception):
 KeepAlive = Callable[[IdempotentRequest, Claimed], Coroutine[Any, Any, None]]
 
 
+def _header_values(raw_request: Request, name: str) -> str | None:
+    """Every value a request sent for ``name``, since a header such as ``anthropic-beta`` may repeat."""
+    values = raw_request.headers.getlist(name)
+    return ",".join(values) if values else None
+
+
 class IdempotencyGuard:
     """One request's hold on its ``Idempotency-Key``, released unless the request completes.
 
@@ -127,7 +133,7 @@ class IdempotencyGuard:
             self._key,
             endpoint=endpoint,
             body=await self._raw_request.body(),
-            options=[self._raw_request.headers.get(name) for name in _REQUEST_SHAPING_HEADERS],
+            options=[_header_values(self._raw_request, name) for name in _REQUEST_SHAPING_HEADERS],
             user_id=user_id,
             api_key_id=api_key_id,
         )

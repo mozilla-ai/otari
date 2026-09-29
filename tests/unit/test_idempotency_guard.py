@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import Response
+from starlette.datastructures import Headers
 
 from gateway.api.routes._idempotency import IdempotencyGuard
 from gateway.services.inference import Claimed, IdempotentRequest
@@ -13,7 +14,7 @@ from gateway.services.inference import Claimed, IdempotentRequest
 def _raw_request() -> MagicMock:
     raw = MagicMock()
     raw.body = AsyncMock(return_value=b"{}")
-    raw.headers = {}
+    raw.headers = Headers()
     return raw
 
 

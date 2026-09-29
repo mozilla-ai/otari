@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
+from starlette.datastructures import Headers
 
 from gateway.api.routes._idempotency import (
     _REQUEST_SHAPING_HEADERS,
@@ -243,6 +244,27 @@ def test_reusing_a_key_with_different_routing_headers_is_refused(
     assert _post_chat(client, {**headers, header: "first"}, provider).status_code == 200
     refused = _post_chat(client, {**headers, header: "second"}, provider)
 
+    assert refused.status_code == 422, refused.text
+    assert provider.await_count == 1
+
+
+def test_reusing_a_key_with_another_value_of_a_repeated_header_is_refused(
+    client: TestClient, master_key_header: dict[str, str], user: None
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+    headers = list(_keyed(master_key_header, "repeated-header").items())
+
+    with patch("gateway.api.routes.chat.acompletion", new=provider):
+        first = client.post(
+            f"{API_ROOT}/chat/completions", json=_chat_body(), headers=[*headers, ("anthropic-beta", "one")]
+        )
+        refused = client.post(
+            f"{API_ROOT}/chat/completions",
+            json=_chat_body(),
+            headers=[*headers, ("anthropic-beta", "one"), ("anthropic-beta", "two")],
+        )
+
+    assert first.status_code == 200, first.text
     assert refused.status_code == 422, refused.text
     assert provider.await_count == 1
 
@@ -576,7 +598,7 @@ async def test_a_retry_waits_for_the_original_request(
 
 
 class _StubRequest:
-    headers: dict[str, str] = {}
+    headers = Headers()
 
     async def body(self) -> bytes:
         return b"{}"
