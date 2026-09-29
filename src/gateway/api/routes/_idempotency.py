@@ -198,7 +198,10 @@ async def get_idempotency_guard(
 
     async def keep_alive(request: IdempotentRequest, claimed: Claimed) -> None:
         await keep_claim_alive(
-            request, claimed, config.idempotency_lease_sec, lambda uow: build_idempotency_service(uow, config)
+            request,
+            claimed,
+            config.idempotency_lease_sec,
+            lambda worker_uow: build_idempotency_service(worker_uow, config),
         )
 
     guard = IdempotencyGuard(raw_request, service, idempotency_key, keep_alive=keep_alive)
