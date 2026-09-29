@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Never, cast
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
@@ -143,17 +143,24 @@ class IdempotencyRepository(BaseRepository[IdempotencyRecord, Never, Never]):
         )
         await self.db.flush()
 
-    async def delete_expired(self, now: datetime) -> int:
-        """Delete every row whose retention has passed and whose claim is no longer live."""
+    async def delete_expired(self, now: datetime, *, limit: int) -> int:
+        """Delete up to ``limit`` rows whose retention has passed and whose claim is no longer live."""
+        expired = (
+            select(IdempotencyRecord.scope, IdempotencyRecord.idempotency_key)
+            .where(
+                IdempotencyRecord.expires_at <= now,
+                or_(
+                    IdempotencyRecord.state == IdempotencyState.COMPLETED,
+                    IdempotencyRecord.locked_until <= now,
+                ),
+            )
+            .limit(limit)
+        )
         result = cast(
             "CursorResult[Any]",
             await self.db.execute(
                 delete(IdempotencyRecord).where(
-                    IdempotencyRecord.expires_at <= now,
-                    or_(
-                        IdempotencyRecord.state == IdempotencyState.COMPLETED,
-                        IdempotencyRecord.locked_until <= now,
-                    ),
+                    tuple_(IdempotencyRecord.scope, IdempotencyRecord.idempotency_key).in_(expired)
                 )
             ),
         )

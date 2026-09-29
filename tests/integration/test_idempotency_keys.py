@@ -661,3 +661,42 @@ async def test_a_gateway_whose_clock_runs_ahead_does_not_take_over_a_live_claim(
             assert isinstance(await retry.admit(request), StillInFlight)
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_deletes_in_bounded_batches(async_db: AsyncSession, test_config: GatewayConfig) -> None:
+    async_db.add(User(user_id=_USER))
+    await async_db.commit()
+    past = datetime.now(UTC) - timedelta(seconds=1)
+    async_db.add_all(
+        IdempotencyRecord(
+            scope=f"master:{_USER}",
+            idempotency_key=f"expired-{index}",
+            request_hash="0" * 64,
+            claim_token=str(uuid.uuid4()),
+            state=IdempotencyState.COMPLETED,
+            user_id=_USER,
+            created_at=past,
+            locked_until=past,
+            expires_at=past,
+        )
+        for index in range(5)
+    )
+    await async_db.commit()
+    uow = UnitOfWork(async_db)
+    repositories = InferenceRepositories.on(uow)
+    batches: list[int] = []
+    delete_expired = repositories.idempotency.delete_expired
+
+    async def counted(now: datetime, *, limit: int) -> int:
+        deleted = await delete_expired(now, limit=limit)
+        batches.append(deleted)
+        return deleted
+
+    repositories.idempotency.delete_expired = counted  # type: ignore[method-assign]
+
+    deleted = await IdempotencyService(uow, repositories, test_config).sweep(batch_size=2)
+
+    assert deleted == 5
+    assert batches == [2, 2, 1]
+    assert (await async_db.execute(select(func.count()).select_from(IdempotencyRecord))).scalar_one() == 0
