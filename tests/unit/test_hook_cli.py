@@ -3438,19 +3438,85 @@ def test_a_user_level_gate_composes_with_the_repo_and_names_its_home_file(
     assert "[~/.otari/guardrails/mine.yml]" in result.output
 
 
-def test_a_gate_id_in_a_user_file_and_a_repo_file_fails_open_naming_both(
+def test_a_gate_id_in_a_user_file_and_a_repo_file_keeps_the_user_gates_on(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
 ) -> None:
+    """A repo cannot turn off the user's own gates by reusing one of their IDs."""
     (tmp_path / ".git").mkdir()
-    _write_guardrail(tmp_path, ".otari/guardrails.yml", "shared")
+    _write_guardrail(tmp_path, ".otari/guardrails.yml", "shared", "team")
     _write_guardrail(isolated_home, ".otari/guardrails.yml", "shared")
 
     monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "shared.txt")))
+    assert result.exit_code == 2, result.output
+    assert "shared is forbidden" in result.output
+    assert "both .otari/guardrails.yml and ~/.otari/guardrails.yml" in result.output
+    assert "only the gates in ~/.otari/ are being enforced" in result.output
+
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "team.txt")))
     assert result.exit_code == 0, result.output
-    message = _system_message(result)
-    assert "no gate is being enforced" in message
-    assert "both .otari/guardrails.yml and ~/.otari/guardrails.yml" in message
+    assert "only the gates in ~/.otari/ are being enforced" in _system_message(result)
+
+
+def test_a_malformed_repo_file_keeps_the_user_gates_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".otari").mkdir()
+    (tmp_path / ".otari/guardrails.yml").write_text("gates: [", encoding="utf-8")
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "personal")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "personal.txt")))
+    assert result.exit_code == 2, result.output
+    assert "personal is forbidden" in result.output
+    assert "only the gates in ~/.otari/ are being enforced" in result.output
+
+
+def test_a_repo_that_links_to_a_user_file_cannot_turn_it_off_with_a_broken_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "personal")
+    linked = tmp_path / ".otari/guardrails/linked.yml"
+    linked.parent.mkdir(parents=True)
+    linked.symlink_to(isolated_home / ".otari/guardrails.yml")
+    (tmp_path / ".otari/guardrails/broken.yml").write_text("gates: [", encoding="utf-8")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "personal.txt")))
+    assert result.exit_code == 2, result.output
+    assert "personal is forbidden" in result.output
+    assert "only the gates in ~/.otari/ are being enforced" in result.output
+
+
+def test_a_malformed_user_file_keeps_the_repo_gates_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails.yml", "team")
+    (isolated_home / ".otari").mkdir()
+    (isolated_home / ".otari/guardrails.yml").write_text("gates: [", encoding="utf-8")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "team.txt")))
+    assert result.exit_code == 2, result.output
+    assert "team is forbidden" in result.output
+    assert "only the gates in .otari/ are being enforced" in result.output
+
+
+def test_malformed_files_on_both_sides_enforce_no_gate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    for home in (tmp_path, isolated_home):
+        (home / ".otari").mkdir()
+        (home / ".otari/guardrails.yml").write_text("gates: [", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "any.txt")))
+    assert result.exit_code == 0, result.output
+    assert "no gate is being enforced" in _system_message(result)
 
 
 def test_a_user_level_verifier_runs_from_home_against_the_repo(

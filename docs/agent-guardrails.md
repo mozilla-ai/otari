@@ -300,8 +300,8 @@ Some rules belong to a person, not to a repository: no `git reset --hard`, no re
 
 `otari hook` composes these files with the repository's own, under the rules in [Composing several files](agent-guardrails-reference.md#composing-several-files). Your gates apply in every repository where the hook runs, and nobody else gets them.
 
-- A gate ID used in both a file under `~/.otari/` and a file in the repository is an error that names both files. The hook then fails open and enforces no gate, as it does for any guardrail it cannot load.
-- A repository cannot turn off your gates.
+- A gate ID used in both a file under `~/.otari/` and a file in the repository is an error that names both files.
+- A repository cannot turn off your gates. When the combined set cannot load, because of a shared gate ID, a broken file, or too many files, the hook enforces your gates alone and says that the repository's gates are off each time it reports anything. When your own files are the broken ones, it enforces the repository's gates alone. Only when neither side loads does it enforce no gate.
 - A `verifier` gate in a file under `~/.otari/` names its script relative to your home directory, for example `verifier: .otari/verifiers/lint-before-stop.sh`. The script must be inside `~/.otari/verifiers/`. It runs with the repository root as its working directory, so it checks the repository the session changed.
 - When a gate from `~/.otari/` fails, the message names its file, for example `[~/.otari/guardrails/git-safety.yml]`.
 - `otari guardrails validate` checks your files with the repository's, and lists which gates come from `~/.otari/` and which come from the repository.

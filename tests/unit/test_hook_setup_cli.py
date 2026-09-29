@@ -139,6 +139,15 @@ def test_a_user_level_read_gate_adds_read_to_the_matcher(repo: Path, isolated_ho
     assert _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Read"
 
 
+def test_a_broken_repo_file_still_leaves_the_user_level_gates_in_the_matcher(repo: Path, isolated_home: Path) -> None:
+    """The hook still enforces the user's gates when the repo's files fail, so it must still be called for them."""
+    _guardrail_path(repo).write_text("gates: [", encoding="utf-8")
+    _guardrail_path(isolated_home).write_text(_COMMAND_GATES, encoding="utf-8")
+    result = _invoke("--api-key", "k")
+    assert result.exit_code == 0, result.output
+    assert _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Bash"
+
+
 def test_a_policy_with_no_read_gate_keeps_read_out_of_the_matcher(repo: Path) -> None:
     _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     result = _invoke("--api-key", "k")

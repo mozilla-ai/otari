@@ -269,7 +269,7 @@ _MOVED_GUARDRAIL_FILE = ".otari-guardrails.yml"
 
 
 def _hook_not_enforcing(message: str) -> None:
-    """Report, visibly, that this event enforced nothing, and leave the turn unblocked.
+    """Report, visibly, that this event left some or all gates unenforced, and leave the turn unblocked.
 
     stderr alone will not do it. Claude Code surfaces a non-blocking hook's
     stderr in its own debug log and nowhere else, never in the transcript and
@@ -443,14 +443,6 @@ def _guardrail_file_name(file: GuardrailFile, root: Path) -> str:
     return _guardrails_relative_to(file.path, root) or file.path.as_posix()
 
 
-def _gate_origins(spec: PolicySpec, files: list[GuardrailFile], root: Path) -> dict[str, GuardrailOrigin]:
-    """Who owns each gate of `spec`, composed from `files`, keyed by gate ID."""
-    if len(files) == 1:
-        return {gate.id: files[0].origin for gate in spec.gates}
-    origin_by_name = {_guardrail_file_name(file, root): file.origin for file in files}
-    return {gate_id: origin_by_name[name] for gate_id, name in spec.gate_sources.items()}
-
-
 def _composed_guardrail_id(files: list[GuardrailFile], root: Path) -> str:
     """A name for the composed set, for a report that has to call it something.
 
@@ -515,17 +507,58 @@ def _compose_guardrail(sources: list[PolicyFile], policy_id: str) -> PolicySpec:
 
 
 def _hook_guardrail_spec(root: Path) -> PolicySpec | None:
-    """This repo's composed guardrail, the user's own files included, or None when it cannot be loaded.
+    """The gates the hook enforces in this repo, the user's own included, or None when none load.
 
     It reports no load error, so it suits a caller that only reads the gates.
+    When the combined set does not load, it returns the side the hook falls back to.
     """
     files = _hook_guardrail_files(root)
     if not files:
         return None
     try:
-        return _compose_guardrail(_read_guardrail_files(files, root), _composed_guardrail_id(files, root))
+        return _hook_load_guardrail(files, root).spec
     except (GuardrailReadError, PolicyError):
-        return None
+        fallback = _hook_load_one_origin(files, root)
+        return None if fallback is None else fallback[1].spec
+
+
+class _LoadedGuardrail(NamedTuple):
+    """A composed guardrail with the name a report calls it by and the owner of each gate, keyed by gate ID."""
+
+    name: str
+    sources: list[PolicyFile]
+    spec: PolicySpec
+    origins: Mapping[str, GuardrailOrigin]
+
+
+def _hook_load_guardrail(files: list[GuardrailFile], root: Path) -> _LoadedGuardrail:
+    """Read and compose `files`, or raise `GuardrailReadError` or `PolicyError` naming the file at fault."""
+    name = _composed_guardrail_id(files, root)
+    sources = _read_guardrail_files(files, root)
+    spec = _compose_guardrail(sources, name)
+    if len(files) == 1:
+        origins = {gate.id: files[0].origin for gate in spec.gates}
+    else:
+        origin_by_source = {source.name: file.origin for file, source in zip(files, sources, strict=True)}
+        origins = {gate.id: origin_by_source[spec.gate_sources[gate.id]] for gate in spec.gates}
+    return _LoadedGuardrail(name, sources, spec, origins)
+
+
+def _hook_load_one_origin(files: list[GuardrailFile], root: Path) -> tuple[GuardrailOrigin, _LoadedGuardrail] | None:
+    """Load the user's files alone, or else the repo's files alone, and return the owner whose files loaded.
+
+    Return None when neither side loads.
+    The user's side comes first, so a broken repo file cannot turn off the user's own gates.
+    """
+    for origin in (GuardrailOrigin.USER, GuardrailOrigin.REPO):
+        subset = [file for file in files if file.origin is origin]
+        if not subset or len(subset) == len(files):
+            continue
+        try:
+            return origin, _hook_load_guardrail(subset, root)
+        except (GuardrailReadError, PolicyError):
+            continue
+    return None
 
 
 def _merged_guardrail_yaml(sources: list[PolicyFile], policy_id: str) -> str:
@@ -2080,18 +2113,30 @@ def hook(
         if moved is not None:
             _hook_not_enforcing(moved)
         return
-    guardrail_name = _composed_guardrail_id(guardrail_files, root)
+    # This holds a notice when only one side of the guardrail loaded. The
+    # verdict exits at the end report it. The other exits report nothing, or
+    # report that no gate is enforced at all.
+    load_notice: str | None = None
     try:
-        sources = _read_guardrail_files(guardrail_files, root)
-        spec = _compose_guardrail(sources, guardrail_name)
+        guardrail = _hook_load_guardrail(guardrail_files, root)
     except (GuardrailReadError, PolicyError) as exc:
         # Fail-open, like every other collection failure in this command: a
         # guardrail this build cannot load must not exit nonzero and block the
         # turn on its own malformedness. Said visibly, though, because
         # composing several files puts this state within reach of a file
         # somebody else added rather than only the one you just edited.
-        _hook_not_enforcing(f"could not load {guardrail_name} ({exc}); no gate is being enforced.")
-        return
+        failed_name = _composed_guardrail_id(guardrail_files, root)
+        fallback = _hook_load_one_origin(guardrail_files, root)
+        if fallback is None:
+            _hook_not_enforcing(f"could not load {failed_name} ({exc}); no gate is being enforced.")
+            return
+        loaded_origin, guardrail = fallback
+        load_notice = (
+            f"could not load {failed_name} ({exc}); only the gates in {loaded_origin.value} are being enforced."
+        )
+    guardrail_name = guardrail.name
+    sources = guardrail.sources
+    spec = guardrail.spec
 
     paths: list[str] = []
     # `[]`, not None, by default: PreToolUse's edit-tool branch below leaves
@@ -2251,7 +2296,7 @@ def hook(
             harness=harness,
             judge_cli_override=judge_cli,
         )
-        check_results = _hook_collect_check_verdicts(spec, root, paths, _gate_origins(spec, guardrail_files, root))
+        check_results = _hook_collect_check_verdicts(spec, root, paths, guardrail.origins)
     else:
         return  # An event this harness integration does not check yet.
 
@@ -2405,9 +2450,13 @@ def hook(
     # "pass": a future gate type's not_applicable is a clean result too, and
     # must not get reported here as something the caller needs to look at.
     if not failing:
+        if load_notice is not None:
+            _hook_not_enforcing(load_notice)
         return
 
     summary = _failing_summary(failing)
+    if load_notice is not None:
+        summary += f"\n  ({load_notice})"
     if blocked:
         # stop_hook_active is the harness's own signal that this Stop is
         # already the continuation a previous block forced. It matters because
@@ -3677,13 +3726,13 @@ def guardrails_validate(
                 )
             )
 
-    target = _composed_guardrail_id(files, root) if guardrail_file_option is None else str(guardrail_file_option)
     try:
-        spec = _compose_guardrail(_read_guardrail_files(files, root), target)
+        guardrail = _hook_load_guardrail(files, root)
     except (GuardrailReadError, PolicyError) as exc:
         raise click.ClickException(str(exc)) from exc
-
-    origins = _gate_origins(spec, files, root)
+    target = guardrail.name if guardrail_file_option is None else str(guardrail_file_option)
+    spec = guardrail.spec
+    origins = guardrail.origins
     findings = validate_policy(
         spec,
         judge_gate_limit=_HOOK_JUDGE_MAX_GATES_PER_RUN,
@@ -3692,7 +3741,7 @@ def guardrails_validate(
     )
     # `policy_id` is the composed set's own name where several files compose,
     # which is `target` again; one file declares its own, worth showing.
-    declared = "" if spec.policy_id == target else f" {spec.policy_id},"
+    declared = "" if spec.policy_id == guardrail.name else f" {spec.policy_id},"
     composed = f" composed from {len(files)} files," if len(files) > 1 else ""
     click.echo(f"{target}:{declared}{composed} {len(spec.gates)} gate(s), schema {spec.schema_version}.")
     if GuardrailOrigin.USER in origins.values():
