@@ -451,6 +451,22 @@ async def _held_handle(
     )
 
 
+async def require_spending_user(db: AsyncSession, user_id: str) -> User:
+    """Return the user a request is served for, refusing one who may not be: 404 when unknown, 403 when blocked."""
+    user = await get_active_user(db, user_id, for_update=False)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User '{user_id}' not found",
+        )
+    if user.blocked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"User '{user_id}' is blocked",
+        )
+    return user
+
+
 async def reserve_budget(
     db: AsyncSession,
     user_id: str,
@@ -501,18 +517,7 @@ async def reserve_budget(
     held_tokens = min(max(estimated_tokens, 0), MAX_COUNT_LIMIT)
     held_requests = max(requests, 0)
     normalized = _normalize_strategy(strategy)
-    user = await get_active_user(db, user_id, for_update=False)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User '{user_id}' not found",
-        )
-    if user.blocked:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User '{user_id}' is blocked",
-        )
+    user = await require_spending_user(db, user_id)
 
     # Budget-exempt request (e.g. a key flagged exclude_from_budget): the user is
     # still validated and a block still rejects, but no estimate is reserved and

@@ -265,6 +265,34 @@ def test_keys_are_scoped_to_the_caller(client: TestClient, master_key_header: di
     assert provider.await_count == 2
 
 
+def test_an_unknown_user_is_refused_before_the_key_is_claimed(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+
+    response = _post_chat(client, _keyed(master_key_header, "unknown-user"), provider, _chat_body(user="nobody"))
+
+    assert response.status_code == 404, response.text
+    provider.assert_not_awaited()
+    with db_session_factory() as db:
+        assert db.execute(select(func.count()).select_from(IdempotencyRecord)).scalar_one() == 0
+
+
+def test_a_blocked_user_is_not_given_the_stored_response(
+    client: TestClient, master_key_header: dict[str, str], user: None
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+    headers = _keyed(master_key_header, "blocked-later")
+    assert _post_chat(client, headers, provider).status_code == 200
+
+    blocked = client.patch(f"{API_ROOT}/users/{_USER}", json={"blocked": True}, headers=master_key_header)
+    assert blocked.status_code == 200, blocked.text
+    retried = _post_chat(client, headers, provider)
+
+    assert retried.status_code == 403, retried.text
+    assert IDEMPOTENT_REPLAYED_HEADER not in retried.headers
+
+
 def test_streaming_requests_ignore_the_key(client: TestClient, master_key_header: dict[str, str], user: None) -> None:
     async def _stream(**_kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
         async def _chunks() -> AsyncIterator[ChatCompletionChunk]:

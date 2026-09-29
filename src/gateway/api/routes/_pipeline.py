@@ -167,6 +167,7 @@ from gateway.services.budgets import (
     increase_reservation,
     reconcile_reservation,
     refund_reservation,
+    require_spending_user,
     reserve_budget,
 )
 from gateway.services.code_execution import (
@@ -2023,7 +2024,25 @@ async def resolve_request_context(
                 )
                 raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
 
-        if idempotency is not None and session_principal is None:
+        if idempotency is not None and session_principal is None and idempotency.active:
+            # A replay skips the reservation, which is where an unknown or blocked user is refused.
+            try:
+                await require_spending_user(db, user_id)
+            except HTTPException as exc:
+                if exc.status_code != status.HTTP_404_NOT_FOUND:
+                    await log_gateway_rejection(
+                        db=db,
+                        log_writer=log_writer,
+                        api_key_id=api_key_id,
+                        user_id=user_id,
+                        model=gate_model,
+                        provider=gate_instance,
+                        endpoint=adapter.endpoint,
+                        detail=str(exc.detail),
+                        status_code=exc.status_code,
+                        started_at=started_at,
+                    )
+                raise
             await _admit_idempotent(idempotency, adapter, user_id=user_id, api_key_id=api_key_id)
 
         # Derived from the workspace already resolved above, not via
