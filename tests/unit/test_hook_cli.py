@@ -1273,6 +1273,8 @@ def _git_status_and_diff_run(git_status_stdout: str = "", git_diff_stdout: str =
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=git_status_stdout, stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=git_diff_stdout, stderr="")
         raise AssertionError(f"unexpected subprocess.run call before claude -p: {cmd}")
@@ -1285,6 +1287,8 @@ def test_stop_event_submits_a_judge_verdict_from_claude_p(
 ) -> None:
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="+ changed line\n", stderr="")
@@ -1360,6 +1364,8 @@ def test_stop_event_locally_evaluates_a_judge_verdict_and_warns(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="+ changed line\n", stderr="")
         if cmd[0] == "/usr/bin/claude":
@@ -1385,6 +1391,8 @@ def test_stop_event_locally_evaluates_a_judge_verdict_and_warns(
 def test_judge_model_is_overridable_via_flag(monkeypatch: pytest.MonkeyPatch, judge_repo: Path) -> None:
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
@@ -1417,6 +1425,8 @@ def test_judge_dry_run_never_calls_claude_but_still_counts_and_logs(
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="+ changed line\n", stderr="")
@@ -1466,6 +1476,8 @@ def test_stop_event_parses_a_verdict_wrapped_in_a_markdown_code_fence(
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
@@ -1526,6 +1538,8 @@ def test_stop_event_reports_error_when_claude_p_output_is_not_valid_json(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[0] == "/usr/bin/claude":
@@ -1555,6 +1569,8 @@ def test_stop_event_warns_when_the_diff_is_truncated(monkeypatch: pytest.MonkeyP
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=oversize_diff, stderr="")
@@ -1586,6 +1602,8 @@ def test_stop_event_warns_when_the_transcript_is_truncated(
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
@@ -1671,6 +1689,8 @@ def test_stop_event_bounds_judge_reasoning_and_a_required_gate_still_blocks(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[0] == "/usr/bin/claude":
@@ -1732,6 +1752,8 @@ def test_stop_event_survives_a_judge_setup_failure_and_still_blocks(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         raise AssertionError(f"unexpected subprocess.run call: {cmd}")
@@ -1783,6 +1805,8 @@ def test_stop_event_never_calls_the_model_when_diff_collection_fails(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         nonlocal claude_call_count
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=1, stdout="", stderr="fatal: bad revision")
@@ -1842,6 +1866,8 @@ def test_stop_event_retries_the_judge_diff_only_when_the_prompt_is_too_long(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="+ changed line\n", stderr="")
         if cmd[0] == "/usr/bin/claude":
@@ -1894,6 +1920,8 @@ def test_stop_event_does_not_retry_when_there_is_no_transcript_to_drop(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         nonlocal claude_call_count
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="+ changed line\n", stderr="")
@@ -1963,6 +1991,8 @@ def test_stop_event_bounds_total_judge_time_so_a_required_gate_still_reaches_the
         nonlocal claude_call_count
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=" M CHANGELOG.md\0", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[0] == "/usr/bin/claude":
@@ -2143,6 +2173,8 @@ def test_stop_event_caps_the_number_of_judge_gates_evaluated(monkeypatch: pytest
         nonlocal claude_call_count
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[0] == "/usr/bin/claude":
@@ -2229,6 +2261,8 @@ def test_stop_event_runs_a_when_changed_judge_gate_that_applies(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=" M src/module.py\0", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[0] == "/usr/bin/claude":

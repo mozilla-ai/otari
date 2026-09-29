@@ -77,6 +77,8 @@ def _git_status_and_diff_run() -> Callable[..., subprocess.CompletedProcess[str]
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         raise AssertionError(f"unexpected subprocess.run call before the judge CLI itself: {cmd}")

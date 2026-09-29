@@ -556,13 +556,25 @@ what "no `--judge-model`/`OTARI_HOOK_JUDGE_MODEL` given" defaults to:
   for a later `Stop` event's own transcript scan to mistake for real session
   evidence.
 
+The diff covers tracked changes (`git diff HEAD`) and every untracked file
+the ignore rules do not exclude, each appended as a `new file` hunk. Both
+halves are needed, because a rule about what a change adds is mostly a rule
+about files Git has never seen, and a tracked-only diff shows a judge the
+edits while hiding the new code. An untracked file is rendered directly
+rather than through `git diff --no-index /dev/null <path>`, which would cost
+one subprocess per file and whose `/dev/null` operand Git for Windows does
+not resolve. Each one is capped on its own
+(`_HOOK_JUDGE_MAX_UNTRACKED_FILE_CHARS`) so a single generated artifact
+cannot crowd out every other new file, a binary is reported by name with its
+content omitted, and one that cannot be read at all is skipped, its path
+still reaching a `path` gate through `changed_paths`.
+
 A diff `otari hook` could not collect at all (`git diff HEAD` failing: no
 `HEAD` yet, a timeout, `git` itself missing) is kept distinct from one it
-collected and found genuinely empty (a new, untracked file matching
-`when_changed`, whose content this diff does not cover either way; see
-above): the former skips the model call entirely and reports `error`
-directly, rather than asking the model to judge a change it cannot see,
-which a real call confirmed can still come back `pass`.
+collected and found genuinely empty: the former skips the model call
+entirely and reports `error` directly, rather than asking the model to judge
+a change it cannot see, which a real call confirmed can still come back
+`pass`.
 
 The diff and transcript are each capped independently (`_HOOK_JUDGE_MAX_DIFF_CHARS`,
 `_HOOK_JUDGE_MAX_TRANSCRIPT_CHARS` in `cli.py`), sized against a real
@@ -576,7 +588,8 @@ headroom. The caps keep the worst case near that validated-safe size.
 
 `git diff HEAD`'s own bytes are a tracked file's real content, not
 necessarily valid UTF-8 (a Latin-1-encoded file, a binary blob committed by
-mistake, ...); collecting it decodes leniently (`errors="replace"`) and
+mistake, ...); collecting it decodes leniently (`errors="replace"`, which an
+untracked file's own bytes also get) and
 catches a timeout or a missing `git` binary, rather than letting either
 crash `otari hook` outright before it ever reaches the evaluator and takes
 every gate in the guardrail, mechanical and required ones included, down with

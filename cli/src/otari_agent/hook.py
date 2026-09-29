@@ -742,6 +742,13 @@ def _hook_collect_codex_transcript_commands(transcript_path: Path) -> list[str] 
 # per-invocation overhead (system prompt, tool definitions) on top.
 _HOOK_JUDGE_MAX_DIFF_CHARS = 60_000
 _HOOK_JUDGE_MAX_TRANSCRIPT_CHARS = 40_000
+
+# An untracked file's own share of the diff budget above. One generated
+# artifact or vendored blob a session happened to drop in the tree would
+# otherwise consume the whole budget and truncate away every other new file,
+# which is the opposite of what including untracked content is for: a judge
+# gate needs to see each new file a change adds, not all of one of them.
+_HOOK_JUDGE_MAX_UNTRACKED_FILE_CHARS = 10_000
 # A judge call's own bound, deliberately separate from the 10s git status/diff
 # calls above: those are local filesystem operations with nothing to wait on
 # but disk, while this one is a full model invocation. 120s measured too tight
@@ -910,13 +917,96 @@ def _hook_extract_codex_judge_transcript(transcript_path: Path) -> str:
     return "\n".join(texts)
 
 
+def _hook_untracked_paths(repo_root: Path) -> list[str]:
+    """Paths Git does not track and the ignore rules do not exclude.
+
+    `--exclude-standard` is what keeps a judge prompt free of `.venv`,
+    `node_modules` and build output: without it this lists every ignored file
+    in the tree, which is most of it.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
+            ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+    if result.returncode != 0:
+        return []
+    return [path for path in result.stdout.split("\0") if path]
+
+
+def _hook_render_untracked_file(repo_root: Path, path: str) -> str:
+    """One untracked file as the `new file` hunk `git diff` would emit for it.
+
+    Rendered here rather than by shelling out to `git diff --no-index
+    /dev/null <path>` per file: that is one subprocess per new file, and its
+    `/dev/null` operand is a POSIX path that Git for Windows does not resolve,
+    so a Windows clone would silently get nothing. The output shape is the
+    same either way, which is what a judge gate reads.
+
+    An empty return means the file contributes nothing and the caller skips
+    it. Its path still reaches a `path` gate through `changed_paths`.
+    """
+    try:
+        with (repo_root / path).open("rb") as handle:
+            # Bounded so a multi-gigabyte artifact dropped in the tree is never
+            # read into memory whole. 4 bytes per character is UTF-8's own
+            # maximum, so this cannot truncate below the character budget.
+            raw = handle.read(_HOOK_JUDGE_MAX_UNTRACKED_FILE_CHARS * 4 + 1)
+    except OSError:
+        # Unreadable: a permission denied, a dangling symlink, or a file
+        # removed between the listing above and this read.
+        return ""
+    header = f"diff --git a/{path} b/{path}\nnew file\n"
+    if b"\0" in raw:
+        # Git's own heuristic for binary, and a judge gate has nothing to read
+        # in the bytes anyway.
+        return f"{header}Binary file, content not shown.\n"
+    content = raw.decode("utf-8", errors="replace")
+    if len(content) > _HOOK_JUDGE_MAX_UNTRACKED_FILE_CHARS:
+        content = content[:_HOOK_JUDGE_MAX_UNTRACKED_FILE_CHARS] + "\n... (file truncated)"
+    lines = content.splitlines()
+    body = "".join(f"+{line}\n" for line in lines)
+    return f"{header}--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{len(lines)} @@\n{body}"
+
+
+def _hook_collect_untracked_diff(repo_root: Path, budget: int) -> str:
+    """Every untracked file as a new-file diff, up to `budget` characters.
+
+    Whole files only: a partial file is cut at the per-file bound above, and
+    once the next one does not fit the budget this stops rather than emitting
+    a fragment a judge gate would read as the end of the change.
+    """
+    if budget <= 0:
+        return ""
+    rendered: list[str] = []
+    used = 0
+    for path in _hook_untracked_paths(repo_root):
+        hunk = _hook_render_untracked_file(repo_root, path)
+        if not hunk:
+            continue
+        if used + len(hunk) > budget:
+            break
+        rendered.append(hunk)
+        used += len(hunk)
+    return "".join(rendered)
+
+
 def _hook_collect_diff(repo_root: Path) -> str | None:
     """The working tree's own diff against HEAD, for a judge gate's prompt.
 
-    Tracked changes only (`git diff HEAD`): a new, untracked file's content is
-    a known gap in this first iteration, not a silent one, since
-    `_hook_collect_changed_paths` already reports its path in `changed_paths`
-    even though this diff carries none of its content. Returns None only when
+    `git diff HEAD` for tracked changes, then every untracked file appended as
+    a new-file hunk. Both halves matter: the rule most of these gates check is
+    about what a change *adds*, and a change that adds a capability is mostly
+    files Git has never seen, so a tracked-only diff shows a judge the edits
+    and hides the new code. Returns None only when
     Git itself could not answer (no HEAD yet, not a repository, a timeout, or
     `git` itself missing), mirroring `_hook_collect_changed_paths`'s own
     fail-open sentinel: a diff collection failure must degrade this one
@@ -950,6 +1040,10 @@ def _hook_collect_diff(repo_root: Path) -> str | None:
     if result.returncode != 0:
         return None
     diff = result.stdout
+    # Tracked first, and it keeps whatever of the budget it needs: an edit to
+    # an existing file is the more precise evidence, since its hunk carries the
+    # surrounding code a new file has none of.
+    diff += _hook_collect_untracked_diff(repo_root, _HOOK_JUDGE_MAX_DIFF_CHARS - len(diff))
     if len(diff) > _HOOK_JUDGE_MAX_DIFF_CHARS:
         click.echo(
             f"otari hook: diff is {len(diff):,} characters, over the {_HOOK_JUDGE_MAX_DIFF_CHARS:,} limit; "
