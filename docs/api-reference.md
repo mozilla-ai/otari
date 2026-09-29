@@ -124,6 +124,8 @@ in its place.
 - Only a successful response is kept. On a retry the request is still
   authenticated and checked against the key's model access, and a user who has
   since been blocked is refused rather than given the stored response.
+- Streaming requests ignore the header, and so does hybrid mode, which has no
+  local database to keep the response in.
 
 A retry runs again, and is billed again, whenever the original's response was
 not stored or can no longer be read. The cases above are the ones a deployment
@@ -132,8 +134,6 @@ turned off, or `OTARI_SECRET_KEY` was rotated away. Two more come from failures:
 the gateway stops after the provider answers and before the response is stored,
 or the database stays unreachable for about `idempotency_lease_sec` while the
 original runs, so its claim lapses and a retry takes it over.
-- Streaming requests ignore the header, and so does hybrid mode, which has no
-  local database to keep the response in.
 
 ## Search
 
