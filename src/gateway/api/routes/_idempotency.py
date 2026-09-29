@@ -14,10 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Annotated, Any
 
 from fastapi import Depends, Header, Request, Response
@@ -34,16 +32,13 @@ from gateway.services.inference import (
     Claimed,
     IdempotencyService,
     IdempotentRequest,
+    InvalidKey,
     Replay,
     storage_available,
 )
-from gateway.services.secret_box import SecretBoxUnavailableError
 
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 IDEMPOTENT_REPLAYED_HEADER = "Otari-Idempotent-Replayed"
-_MAX_KEY_LENGTH = 255
-# A response larger than this is not stored, so a retry of it runs again.
-_MAX_STORED_BODY_BYTES = 8 * 1024 * 1024
 # The response headers a replay repeats: the ones that describe this request
 # rather than the moment it was answered, which rate-limit headers do.
 _REPLAYED_HEADERS = (REQUEST_ID_HEADER, "Otari-Container-Id", "Otari-Container-Expires-At")
@@ -51,18 +46,15 @@ _REPLAYED_HEADERS = (REQUEST_ID_HEADER, "Otari-Container-Id", "Otari-Container-E
 # whether a retry is the same request.
 _REQUEST_SHAPING_HEADERS = (CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, ROUTER_HEADER, "anthropic-beta")
 
-INVALID_IDEMPOTENCY_KEY_DETAIL = f"{IDEMPOTENCY_KEY_HEADER} must be 1 to {_MAX_KEY_LENGTH} printable ASCII characters."
+INVALID_IDEMPOTENCY_KEY_DETAIL = (
+    f"{IDEMPOTENCY_KEY_HEADER} must be 1 to {IdempotentRequest.MAX_KEY_LENGTH} printable ASCII characters."
+)
 IDEMPOTENCY_KEY_REUSED_DETAIL = (
     f"This {IDEMPOTENCY_KEY_HEADER} was already used for a different request. Use a new key for a new request."
 )
 IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL = (
     f"A request with this {IDEMPOTENCY_KEY_HEADER} is still in progress. Retry with the same key to get its result."
 )
-
-
-@dataclass(frozen=True)
-class InvalidKey:
-    """The header is not a usable key."""
 
 
 class IdempotentReplay(Exception):
@@ -81,23 +73,6 @@ class IdempotentReplay(Exception):
             headers=headers,
             media_type="application/json",
         )
-
-
-def _request_hash(endpoint: str, body: bytes, headers: Mapping[str, str]) -> str:
-    """SHA-256 of what the request asks for: the endpoint, the body and the headers that change the result.
-
-    The JSON is canonicalized so key order and spacing do not matter.
-    """
-    try:
-        canonical = json.dumps(json.loads(body), sort_keys=True, separators=(",", ":")).encode()
-    except ValueError:
-        canonical = body
-    options = json.dumps([headers.get(name) for name in _REQUEST_SHAPING_HEADERS]).encode()
-    return hashlib.sha256(endpoint.encode() + b"\n" + options + b"\n" + canonical).hexdigest()
-
-
-def _usable(key: str) -> bool:
-    return 0 < len(key) <= _MAX_KEY_LENGTH and key.isascii() and key.isprintable() and key.strip() == key
 
 
 Renewer = Callable[[IdempotentRequest, Claimed], Awaitable[bool]]
@@ -140,16 +115,18 @@ class IdempotencyGuard:
         """
         if self._service is None or self._key is None:
             return None
-        if not _usable(self._key):
-            return InvalidKey()
-        self._request = IdempotentRequest(
-            scope=f"key:{api_key_id}" if api_key_id is not None else f"master:{user_id}",
-            key=self._key,
-            request_hash=_request_hash(endpoint, await self._raw_request.body(), self._raw_request.headers),
+        request = IdempotentRequest.of(
+            self._key,
+            endpoint=endpoint,
+            body=await self._raw_request.body(),
+            options=[self._raw_request.headers.get(name) for name in _REQUEST_SHAPING_HEADERS],
             user_id=user_id,
             api_key_id=api_key_id,
         )
-        outcome = await self._service.admit(self._request)
+        if isinstance(request, InvalidKey):
+            return request
+        self._request = request
+        outcome = await self._service.admit(request)
         if isinstance(outcome, Claimed):
             self._claimed = outcome
             if self._renew is not None:
@@ -180,28 +157,9 @@ class IdempotencyGuard:
         if self._service is None or self._request is None or self._claimed is None:
             return
         encoded = json.dumps(jsonable_encoder(body), separators=(",", ":"))
-        if len(encoded.encode()) > _MAX_STORED_BODY_BYTES:
-            logger.info("Response too large to store for idempotent replay; releasing the key")
-            await self.release()
-            return
         headers = {name: response.headers[name] for name in _REPLAYED_HEADERS if name in response.headers}
         claimed, self._claimed = self._claimed, None
-        try:
-            stored = await self._service.complete(
-                self._request, claimed, status_code=status_code, body=encoded, headers=headers
-            )
-        except SecretBoxUnavailableError:
-            logger.warning("Could not encrypt the response for idempotent replay; releasing the key")
-            self._claimed = claimed
-            await self.release()
-            return
-        except DATABASE_ERRORS:
-            # The response is already paid for and about to be returned; failing it
-            # now would lose it. The claim lapses at its lease instead.
-            logger.warning("Could not store the response for idempotent replay", exc_info=True)
-            return
-        if not stored:
-            logger.warning("Idempotency claim was taken over before the request completed")
+        await self._service.complete(self._request, claimed, status_code=status_code, body=encoded, headers=headers)
 
     async def release(self) -> None:
         """Give the key back so a retry runs the request again. A no-op once completed."""
@@ -209,10 +167,7 @@ class IdempotencyGuard:
         if self._service is None or self._request is None or self._claimed is None:
             return
         claimed, self._claimed = self._claimed, None
-        try:
-            await self._service.release(self._request, claimed)
-        except DATABASE_ERRORS:
-            logger.warning("Could not release an idempotency claim; it lapses at its lease", exc_info=True)
+        await self._service.release(self._request, claimed)
 
 
 async def get_idempotency_guard(

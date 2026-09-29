@@ -73,7 +73,6 @@ from gateway.api.routes._idempotency import (
     INVALID_IDEMPOTENCY_KEY_DETAIL,
     IdempotencyGuard,
     IdempotentReplay,
-    InvalidKey,
 )
 from gateway.api.routes._platform import (
     _DEFAULT_STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS,
@@ -179,7 +178,7 @@ from gateway.services.code_execution import (
 )
 from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for
 from gateway.services.guardrails import InProcessGuardrail
-from gateway.services.inference import Claimed, KeyReused, Replay, StillInFlight
+from gateway.services.inference import Claimed, InvalidKey, KeyReused, Replay, StillInFlight
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (

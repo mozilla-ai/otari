@@ -14,15 +14,19 @@ that no configured key can decrypt is treated as missing and runs again.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, ClassVar
 
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.log_config import logger
 from gateway.models.inference import IdempotencyRecord, IdempotencyState
 from gateway.repositories.inference import InferenceRepositories
 from gateway.services.secret_box import (
@@ -34,17 +38,72 @@ from gateway.services.secret_box import (
 )
 
 _POLL_INTERVAL_SEC = 0.25
+# A response larger than this is not stored, so a retry of it runs again.
+_MAX_STORED_BODY_BYTES = 8 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class InvalidKey:
+    """The key is not one this service accepts."""
 
 
 @dataclass(frozen=True)
 class IdempotentRequest:
     """One request's claim on its key: who sent it, and what it asked for."""
 
+    MAX_KEY_LENGTH: ClassVar[int] = 255
+
     scope: str
     key: str
     request_hash: str
     user_id: str
     api_key_id: str | None
+
+    @classmethod
+    def of(
+        cls,
+        key: str,
+        *,
+        endpoint: str,
+        body: bytes,
+        options: Sequence[str | None],
+        user_id: str,
+        api_key_id: str | None,
+    ) -> IdempotentRequest | InvalidKey:
+        """The claim a caller makes with ``key``, or InvalidKey when the key is unusable.
+
+        A key belongs to the API key that sent it, or to the billed user for the master key,
+        so two callers never share one.
+        ``options`` are the request settings outside the body that change its result.
+        """
+        if not _usable(key):
+            return InvalidKey()
+        return cls(
+            scope=f"key:{api_key_id}" if api_key_id is not None else f"master:{user_id}",
+            key=key,
+            request_hash=_request_hash(endpoint, body, options),
+            user_id=user_id,
+            api_key_id=api_key_id,
+        )
+
+
+def _usable(key: str) -> bool:
+    return (
+        0 < len(key) <= IdempotentRequest.MAX_KEY_LENGTH and key.isascii() and key.isprintable() and key.strip() == key
+    )
+
+
+def _request_hash(endpoint: str, body: bytes, options: Sequence[str | None]) -> str:
+    """SHA-256 of what the request asks for: the endpoint, the body and the options that change the result.
+
+    The JSON is canonicalized so key order and spacing do not matter.
+    """
+    try:
+        canonical = json.dumps(json.loads(body), sort_keys=True, separators=(",", ":")).encode()
+    except ValueError:
+        canonical = body
+    encoded_options = json.dumps(list(options)).encode()
+    return hashlib.sha256(endpoint.encode() + b"\n" + encoded_options + b"\n" + canonical).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -182,19 +241,39 @@ class IdempotencyService:
         body: str,
         headers: dict[str, str],
     ) -> bool:
-        """Store the response, encrypted, for a retry to be given; False when the claim was lost meanwhile."""
+        """Store the response, encrypted, for a retry to be given, returning whether it was stored.
+
+        A response that cannot be stored gives the key back, so a retry runs again.
+        A failed write leaves the claim to lapse at its lease, since the response is already paid for.
+        """
+        if len(body.encode()) > _MAX_STORED_BODY_BYTES:
+            logger.info("Response too large to store for idempotent replay; releasing the key")
+            await self.release(request, claimed)
+            return False
+        try:
+            ciphertext = encrypt_secret(body)
+        except SecretBoxUnavailableError:
+            logger.warning("Could not encrypt the response for idempotent replay; releasing the key")
+            await self.release(request, claimed)
+            return False
         expires_at = datetime.now(UTC) + timedelta(seconds=self._config.idempotency_retention_sec)
-        ciphertext = encrypt_secret(body)
-        async with self._uow:
-            return await self._keys.complete(
-                request.scope,
-                request.key,
-                claim_token=claimed.token,
-                status_code=status_code,
-                response_body=ciphertext,
-                response_headers=headers,
-                expires_at=expires_at,
-            )
+        try:
+            async with self._uow:
+                stored = await self._keys.complete(
+                    request.scope,
+                    request.key,
+                    claim_token=claimed.token,
+                    status_code=status_code,
+                    response_body=ciphertext,
+                    response_headers=headers,
+                    expires_at=expires_at,
+                )
+        except DATABASE_ERRORS:
+            logger.warning("Could not store the response for idempotent replay", exc_info=True)
+            return False
+        if not stored:
+            logger.warning("Idempotency claim was taken over before the request completed")
+        return stored
 
     async def renew(self, request: IdempotentRequest, claimed: Claimed) -> bool:
         """Extend the claim's lease while its request runs; False once the claim is no longer this request's."""
@@ -205,9 +284,15 @@ class IdempotencyService:
             )
 
     async def release(self, request: IdempotentRequest, claimed: Claimed) -> None:
-        """Give the key back so a retry runs the request again."""
-        async with self._uow:
-            await self._keys.release(request.scope, request.key, claim_token=claimed.token)
+        """Give the key back so a retry runs the request again.
+
+        A failed delete leaves the claim to lapse at its lease.
+        """
+        try:
+            async with self._uow:
+                await self._keys.release(request.scope, request.key, claim_token=claimed.token)
+        except DATABASE_ERRORS:
+            logger.warning("Could not release an idempotency claim; it lapses at its lease", exc_info=True)
 
     async def sweep(self) -> int:
         """Delete the records whose retention has passed, returning how many went."""

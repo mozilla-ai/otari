@@ -23,10 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session
 
 from gateway.api.routes._idempotency import (
+    _REQUEST_SHAPING_HEADERS,
     IDEMPOTENCY_KEY_HEADER,
     IDEMPOTENT_REPLAYED_HEADER,
     IdempotencyGuard,
-    _request_hash,
 )
 from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -343,12 +343,21 @@ def _hold_key(
 ) -> None:
     """Leave a claim on ``key`` as a request still in flight on another worker would."""
     now = datetime.now(UTC)
+    request = IdempotentRequest.of(
+        key,
+        endpoint=_CHAT_ENDPOINT,
+        body=_json_bytes(body or _chat_body()),
+        options=[None] * len(_REQUEST_SHAPING_HEADERS),
+        user_id=_USER,
+        api_key_id=None,
+    )
+    assert isinstance(request, IdempotentRequest)
     with make_session() as db:
         db.add(
             IdempotencyRecord(
                 scope=f"master:{_USER}",
                 idempotency_key=key,
-                request_hash=_request_hash(_CHAT_ENDPOINT, _json_bytes(body or _chat_body()), {}),
+                request_hash=request.request_hash,
                 claim_token=str(uuid.uuid4()),
                 state=IdempotencyState.IN_PROGRESS,
                 user_id=_USER,
