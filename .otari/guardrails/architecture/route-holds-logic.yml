@@ -1,0 +1,19 @@
+schema_version: "1.0"
+policy:
+  id: otari/architecture/route-holds-logic
+  description: A route parses the request, calls one service and returns a schema.
+
+gates:
+
+  - id: route-holds-logic
+    type: judge
+    runs: [stop.session]
+    enforcement: advisory
+    when_changed:
+      - "src/gateway/api/routes/**"
+    rubric: >-
+      Judge only code this diff adds under src/gateway/api/routes/. Fail if it adds a
+      database query, a business rule or a Pydantic model class to a route module. A
+      business rule decides what the product allows or does. A check on the shape of the
+      request itself is not a business rule. This is the routes row in docs/domains.md,
+      "The target shape". Pass if the diff adds none of these.
