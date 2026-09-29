@@ -10,7 +10,7 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.services.inference import IdempotencyService, IdempotentRequest, StillInFlight
-from gateway.services.inference._idempotency import _poll_delays
+from gateway.services.inference._idempotency import _CHANGES_BEFORE_WAITING, _poll_delays
 from gateway.services.secret_box import generate_secret_key
 
 
@@ -65,7 +65,7 @@ async def test_a_claim_that_keeps_changing_does_not_spin() -> None:
     outcome = await asyncio.wait_for(service.admit(request), timeout=2)
 
     assert isinstance(outcome, StillInFlight)
-    assert keys.find.await_count <= 4
+    assert keys.find.await_count == _CHANGES_BEFORE_WAITING
 
 
 @pytest.mark.asyncio

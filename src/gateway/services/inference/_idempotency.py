@@ -40,8 +40,9 @@ from gateway.services.secret_box import (
 
 _FIRST_POLL_SEC = 0.1
 _MAX_POLL_SEC = 2.0
-# A claim can change between the insert and the read. After this many changes in a row, the retry waits.
-_MAX_IMMEDIATE_RETRIES = 3
+# A claim can change between the insert and the read.
+# After this many changes in a row, the retry waits, and the count starts again after the wait.
+_CHANGES_BEFORE_WAITING = 3
 # A response larger than this is not stored, so a retry of it runs again.
 _MAX_STORED_BODY_BYTES = 8 * 1024 * 1024
 
@@ -212,7 +213,7 @@ class IdempotencyService:
                 outcome = await self._try_admit(request)
             if isinstance(outcome, _Retry):
                 changes += 1
-                if changes < _MAX_IMMEDIATE_RETRIES:
+                if changes < _CHANGES_BEFORE_WAITING:
                     continue
             elif outcome is not None:
                 return outcome
