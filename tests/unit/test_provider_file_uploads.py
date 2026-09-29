@@ -19,6 +19,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import (
     AttachedFileExpiresTooSoonError,
+    ProviderCopyNotRecordedError,
     ProviderUploadDisabledError,
     ProviderUploadFailedError,
 )
@@ -50,6 +51,18 @@ class _Copies:
     async def record(self, copy: FileProviderCopy) -> None:
         self.row = copy
         self.recorded.append(copy)
+
+
+class _RacedCopies(_Copies):
+    """A table where another request records the same copy between this one's read and write."""
+
+    def __init__(self, winner: FileProviderCopy | None) -> None:
+        super().__init__()
+        self._winner = winner
+
+    async def record(self, copy: FileProviderCopy) -> None:
+        self.row = self._winner
+        raise ProviderCopyNotRecordedError
 
 
 class _Uow:
@@ -290,3 +303,23 @@ async def test_a_provider_holding_the_copy_too_long_has_it_taken_back(monkeypatc
 
     assert client.discarded == ["file_new"], "the copy was left at the provider"
     assert copies.recorded == []
+
+
+@pytest.mark.asyncio
+async def test_a_copy_another_request_recorded_first_does_not_fail_this_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    copies = _RacedCopies(_copy(datetime.now(UTC) + timedelta(hours=1), provider_file_id="file_other"))
+    client = _Client(FileMetadata(id="file_new"))
+
+    file_id = await _uploader(monkeypatch, copies=copies, store=_Store(), client=client).file_id_for(_STAGED)
+
+    assert file_id == "file_new"
+
+
+@pytest.mark.asyncio
+async def test_an_integrity_failure_with_no_row_recorded_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A conflict that left no copy is not a race, such as the file being deleted meanwhile."""
+    copies = _RacedCopies(None)
+    client = _Client(FileMetadata(id="file_new"))
+
+    with pytest.raises(ProviderUploadFailedError):
+        await _uploader(monkeypatch, copies=copies, store=_Store(), client=client).file_id_for(_STAGED)

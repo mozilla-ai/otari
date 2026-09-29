@@ -108,3 +108,7 @@ class ProviderUploadFailedError(ProviderAttachmentError):
 
     def __init__(self) -> None:
         super().__init__("An attached file could not be made available to the provider's code execution")
+
+
+class ProviderCopyNotRecordedError(Exception):
+    """The database refused a provider copy's row, most often because another request recorded one first."""

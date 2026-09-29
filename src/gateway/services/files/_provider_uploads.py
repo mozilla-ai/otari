@@ -17,6 +17,7 @@ from gateway.core.database import DATABASE_ERRORS
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import (
     AttachedFileExpiresTooSoonError,
+    ProviderCopyNotRecordedError,
     ProviderUploadDisabledError,
     ProviderUploadFailedError,
 )
@@ -87,9 +88,37 @@ class ProviderFileUploader:
             logger.warning("No workspace resolved to make a copy of file %s", staged.file_id)
             raise ProviderUploadFailedError
         now = datetime.now(UTC)
+        existing = await self._recorded_copy(staged, workspace_id)
+        if existing is not None and existing.expires_at > now + _REUSE_MARGIN:
+            return existing.provider_file_id
+
+        copy = await self._upload(staged, workspace_id)
         try:
             async with self._uow:
-                existing = await self._copies.in_account(
+                await self._copies.record(copy)
+        except ProviderCopyNotRecordedError as exc:
+            # Another request recorded a copy in the same account first. This
+            # one is just as usable and expires on its own at the provider.
+            if await self._recorded_copy(staged, workspace_id) is None:
+                logger.warning("Could not record the copy of file %s: %s", staged.file_id, exc)
+                raise ProviderUploadFailedError from exc
+        except DATABASE_ERRORS as exc:
+            # The copy is at the provider and nothing names it, so it is
+            # unreachable until its own expiry. Refusing stops this request
+            # adding a second; a retry while the database is down adds another.
+            logger.warning("Could not record the copy of file %s: %s", staged.file_id, exc)
+            raise ProviderUploadFailedError from exc
+        return copy.provider_file_id
+
+    async def _recorded_copy(self, staged: StagedFile, workspace_id: uuid.UUID) -> FileProviderCopy | None:
+        """The copy recorded for ``staged`` in this request's provider account, or None.
+
+        Raises:
+            ProviderUploadFailedError: the copies could not be read.
+        """
+        try:
+            async with self._uow:
+                return await self._copies.in_account(
                     staged.file_id,
                     provider=self._provider,
                     provider_instance=self._provider_instance,
@@ -98,20 +127,6 @@ class ProviderFileUploader:
         except DATABASE_ERRORS as exc:
             logger.warning("Could not read the copies of file %s: %s", staged.file_id, exc)
             raise ProviderUploadFailedError from exc
-        if existing is not None and existing.expires_at > now + _REUSE_MARGIN:
-            return existing.provider_file_id
-
-        copy = await self._upload(staged, workspace_id)
-        try:
-            async with self._uow:
-                await self._copies.record(copy)
-        except DATABASE_ERRORS as exc:
-            # The copy is at the provider and nothing names it, so it is
-            # unreachable until its own expiry. Refusing stops this request
-            # adding a second; a retry while the database is down adds another.
-            logger.warning("Could not record the copy of file %s: %s", staged.file_id, exc)
-            raise ProviderUploadFailedError from exc
-        return copy.provider_file_id
 
     def _lifetime(self, staged: StagedFile, now: datetime) -> timedelta:
         """How long the copy may live: the configured life, never past the file's own.

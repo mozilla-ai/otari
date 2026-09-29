@@ -8,6 +8,7 @@ level.
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -17,11 +18,15 @@ import httpx
 import pytest
 from any_llm.types.messages import MessageResponse, TextBlock
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_ROOT
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.files_exceptions import ProviderCopyNotRecordedError
 from gateway.models.files import FileObject, FileProviderCopy
+from gateway.repositories.files import FileProviderCopyRepository
 
 _CODE_TOOL = {"type": "code_execution_20250825", "name": "code_execution"}
 _MODEL = "anthropic:claude-sonnet-4-5"
@@ -244,3 +249,20 @@ def test_file_understanding_off_still_runs_code_that_attaches_nothing(
     assert response.status_code == 200, response.text
     assert forwarded[0][0]["content"] == "Compute 2 + 2."
     assert anthropic_files.uploads == []
+
+
+@pytest.mark.asyncio
+async def test_a_copy_row_the_database_refuses_is_reported_as_not_recorded(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
+    copy = FileProviderCopy(
+        file_id="file-that-does-not-exist",
+        provider="anthropic",
+        provider_instance="anthropic",
+        credential_workspace_id=uuid.uuid4(),
+        provider_file_id=_PROVIDER_FILE_ID,
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+
+    with pytest.raises(ProviderCopyNotRecordedError):
+        async with uow:
+            await FileProviderCopyRepository(uow).record(copy)

@@ -6,8 +6,10 @@ import uuid
 from typing import Never
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.files_exceptions import ProviderCopyNotRecordedError
 from gateway.models.files import FileProviderCopy
 from gateway.repositories.base_repository import BaseRepository
 
@@ -41,6 +43,12 @@ class FileProviderCopyRepository(BaseRepository[FileProviderCopy, Never, Never])
 
         A copy the provider has since expired is replaced rather than kept
         beside the new one, which is what the primary key already says.
+
+        Raises:
+            ProviderCopyNotRecordedError: the database refused the row.
         """
         await self.db.merge(copy)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError as exc:
+            raise ProviderCopyNotRecordedError from exc
