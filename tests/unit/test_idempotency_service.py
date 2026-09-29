@@ -66,3 +66,16 @@ async def test_a_claim_that_keeps_changing_does_not_spin() -> None:
 
     assert isinstance(outcome, StillInFlight)
     assert keys.find.await_count <= 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch_size", [0, -1])
+async def test_a_sweep_needs_a_positive_batch_size(batch_size: int) -> None:
+    service = IdempotencyService(
+        _NoUnitOfWork(),  # type: ignore[arg-type]
+        MagicMock(idempotency=MagicMock()),
+        GatewayConfig(),
+    )
+
+    with pytest.raises(ValueError, match="batch"):
+        await asyncio.wait_for(service.sweep(batch_size=batch_size), timeout=2)

@@ -151,7 +151,10 @@ class IdempotencyRepository(BaseRepository[IdempotencyRecord, Never, Never]):
         await self.db.flush()
 
     async def delete_expired(self, now: datetime, *, limit: int) -> int:
-        """Delete up to ``limit`` rows whose retention has passed and whose claim is no longer live."""
+        """Delete up to ``limit`` of the oldest rows whose retention has passed and whose claim is no longer live.
+
+        Rows another sweep holds are skipped, so gateways sweeping at once delete different rows.
+        """
         expired = (
             select(IdempotencyRecord.scope, IdempotencyRecord.idempotency_key)
             .where(
@@ -161,7 +164,9 @@ class IdempotencyRepository(BaseRepository[IdempotencyRecord, Never, Never]):
                     IdempotencyRecord.locked_until <= now,
                 ),
             )
+            .order_by(IdempotencyRecord.expires_at)
             .limit(limit)
+            .with_for_update(skip_locked=True)
         )
         result = cast(
             "CursorResult[Any]",
