@@ -260,6 +260,7 @@ async def test_a_copy_capped_by_the_files_expiry_survives_a_slow_upload(monkeypa
 
     assert file_id == "file_new"
     assert client.discarded == []
+    assert staged.expires_at is not None
     assert copies.recorded[0].expires_at <= staged.expires_at
 
 
