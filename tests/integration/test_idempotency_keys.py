@@ -10,6 +10,7 @@ import json
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Generator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -34,7 +35,15 @@ from gateway.models.inference import IdempotencyRecord, IdempotencyState
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
 from gateway.repositories.inference import InferenceRepositories
-from gateway.services.inference import Claimed, IdempotencyService, IdempotentRequest, Replay, StillInFlight
+from gateway.services.inference import (
+    Claimed,
+    IdempotencyService,
+    IdempotentRequest,
+    Replay,
+    StillInFlight,
+    keep_claim_alive,
+)
+from gateway.services.inference import _lease as lease_module
 from gateway.services.secret_box import generate_secret_key
 
 from .conftest import MODEL_NAME, _to_async_url, build_test_client
@@ -514,39 +523,43 @@ class _StubRequest:
 
 @pytest.mark.asyncio
 async def test_a_running_request_keeps_its_claim_past_the_lease(
-    postgres_url: str, clean_database: None, test_config: GatewayConfig
+    postgres_url: str, clean_database: None, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A request slower than the lease renews its claim, so a retry cannot take it over and run it again."""
     config = test_config.model_copy(update={"idempotency_lease_sec": 3})
     engine = create_async_engine(_to_async_url(postgres_url))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
 
+    @asynccontextmanager
+    async def worker_unit_of_work() -> AsyncIterator[UnitOfWork]:
+        async with sessions() as db:
+            yield UnitOfWork(db)
+
+    monkeypatch.setattr(lease_module, "create_unit_of_work", worker_unit_of_work)
+
+    def build(uow: UnitOfWork) -> IdempotencyService:
+        return IdempotencyService(uow, InferenceRepositories.on(uow), config)
+
     async def locked_until() -> datetime:
         async with sessions() as db:
             return (await db.execute(select(IdempotencyRecord.locked_until))).scalar_one()
+
+    async def keep_alive(request: IdempotentRequest, claimed: Claimed) -> None:
+        await keep_claim_alive(request, claimed, config.idempotency_lease_sec, build)
 
     try:
         async with sessions() as request_db:
             request_db.add(User(user_id=_USER))
             await request_db.commit()
-            request_uow = UnitOfWork(request_db)
-
-            async def renew(request: IdempotentRequest, claimed: Claimed) -> bool:
-                async with sessions() as heartbeat_db:
-                    heartbeat_uow = UnitOfWork(heartbeat_db)
-                    service = IdempotencyService(heartbeat_uow, InferenceRepositories.on(heartbeat_uow), config)
-                    return await service.renew(request, claimed)
-
             guard = IdempotencyGuard(
                 _StubRequest(),  # type: ignore[arg-type]
-                IdempotencyService(request_uow, InferenceRepositories.on(request_uow), config),
+                build(UnitOfWork(request_db)),
                 "slow-request",
-                renew=renew,
-                renew_every_sec=0.2,
+                keep_alive=keep_alive,
             )
             assert isinstance(await guard.admit(endpoint=_CHAT_ENDPOINT, user_id=_USER, api_key_id=None), Claimed)
             first = await locked_until()
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(1.5)
             assert await locked_until() > first
 
             await guard.release()
