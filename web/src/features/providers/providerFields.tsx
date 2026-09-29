@@ -14,6 +14,7 @@ import { Field } from "@/design-system/forms/Field"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 import { SecretField } from "@/design-system/forms/SecretField"
 import { useProviderCatalog } from "@/shared/api/providers"
+import { providerDisplayName } from "@/shared/helpers/providers"
 
 import {
   type CredentialFieldValues,
@@ -174,7 +175,9 @@ export function ClientArgsField({
 
 // A searchable provider picker over the known-provider catalog. Selection sets
 // an id (provider id, or a provider_type) while the input shows the display
-// name. `extra` prepends synthetic options like "OpenAI-compatible".
+// name. `extra` prepends synthetic options like "OpenAI-compatible". The whole
+// catalog is offered, uncapped: it is any-llm's registry, a few dozen entries,
+// and a cap silently hid whichever providers sorted last.
 export function ProviderComboBox({
   label,
   value,
@@ -209,7 +212,16 @@ export function ProviderComboBox({
     const catalogOptions = includeCatalog
       ? (catalog.data ?? [])
           .filter((provider) => !excludeIds?.includes(provider.id))
-          .map((provider) => ({ id: provider.id, name: provider.name }))
+          .map((provider) => ({
+            id: provider.id,
+            // The catalog falls back to the bare id when genai-prices has no
+            // name for a provider (`xai`), so spell it as the rest of the
+            // dashboard does.
+            name:
+              provider.name === provider.id
+                ? providerDisplayName(provider.id)
+                : provider.name,
+          }))
       : []
     return [...extra, ...catalogOptions]
   }, [catalog.data, extra, includeCatalog, excludeIds])
@@ -227,14 +239,12 @@ export function ProviderComboBox({
   const selectedName = options.find((option) => option.id === value)?.name ?? ""
   const query =
     text.trim() === selectedName.trim() ? "" : text.trim().toLowerCase()
-  const visible = options
-    .filter(
-      (option) =>
-        !query ||
-        option.name.toLowerCase().includes(query) ||
-        option.id.toLowerCase().includes(query),
-    )
-    .slice(0, 50)
+  const visible = options.filter(
+    (option) =>
+      !query ||
+      option.name.toLowerCase().includes(query) ||
+      option.id.toLowerCase().includes(query),
+  )
 
   // Both gated on `includeCatalog`: a picker offering only the API dialects must
   // not report a catalog it excludes.
