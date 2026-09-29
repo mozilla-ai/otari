@@ -7,6 +7,7 @@ import pytest
 from fastapi import Response
 from starlette.datastructures import Headers
 
+from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
 from gateway.api.routes._idempotency import IdempotencyGuard
 from gateway.services.inference import Claimed, IdempotentRequest
 
@@ -89,3 +90,18 @@ async def test_an_unexpected_release_error_does_not_replace_the_request_outcome(
     await guard.release()
 
     service.release.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_the_guardrail_verdict_is_stored_for_a_replay() -> None:
+    service = MagicMock()
+    service.admit = AsyncMock(return_value=Claimed("token"))
+    service.complete = AsyncMock(return_value=True)
+    guard = IdempotencyGuard(_raw_request(), service, "k")
+    await guard.admit(endpoint="/v1/chat/completions", user_id="u", api_key_id=None)
+    response = Response()
+    response.headers[GUARDRAILS_RESULT_HEADER] = '[{"profile":"p","mode":"monitor","valid":true,"score":null}]'
+
+    await guard.complete({"ok": True}, response)
+
+    assert GUARDRAILS_RESULT_HEADER in service.complete.await_args.kwargs["headers"]

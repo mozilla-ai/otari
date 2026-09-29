@@ -21,6 +21,7 @@ from fastapi import Depends, Header, Request, Response
 from fastapi.encoders import jsonable_encoder
 
 from gateway.api.deps import build_idempotency_service, get_config, get_unit_of_work_if_needed
+from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
 from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER
 from gateway.core.config import (
     CONVERSATION_HEADER,
@@ -45,7 +46,7 @@ IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 IDEMPOTENT_REPLAYED_HEADER = "Otari-Idempotent-Replayed"
 # The response headers a replay repeats: the ones that describe this request
 # rather than the moment it was answered, which rate-limit headers do.
-_REPLAYED_HEADERS = (REQUEST_ID_HEADER, "Otari-Container-Id", "Otari-Container-Expires-At")
+_REPLAYED_HEADERS = (REQUEST_ID_HEADER, "Otari-Container-Id", "Otari-Container-Expires-At", GUARDRAILS_RESULT_HEADER)
 # The request headers that change what a request does, so they count toward
 # whether a retry is the same request.
 _REQUEST_SHAPING_HEADERS = (
