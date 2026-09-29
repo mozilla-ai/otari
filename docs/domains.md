@@ -1,11 +1,11 @@
 # Backend domains
 
 The gateway's backend is a modular monolith: one process and one deploy, with
-the code cut by domain. This page gives the target shape of a domain, and
-assigns every module under `services/`, `api/routes/`, `models/` and
-`repositories/` in `src/gateway/` to one domain or to the shared set.
-`core/` is listed only where a domain owns a module there. The rest of it is
-wiring every domain uses and belongs to none.
+the code cut by domain. This page gives the target shape of a domain and what
+each domain owns.
+
+A module in its domain's target location belongs to that domain by its path. A
+module still in the old shape moves to its target location when its domain does.
 
 ## The target shape
 
@@ -56,34 +56,14 @@ How a domain fits together:
 Most modules are not in this shape yet. New and moved code follows the target,
 not the module beside it.
 
-## The shape today
-
-Measured on `main` at `cf2968c1`, 2026-09-21, and updated by each domain change
-since. A module "runs queries" when it imports a query builder (`select`,
-`update`, `delete` or `insert` from SQLAlchemy or SQLModel) and calls `execute`,
-`exec`, `scalar`, `scalars` or `get` on a session.
-
-| Measure | Count |
-| --- | --- |
-| Service modules | 125, of which 64 sit flat at the top of `services/` |
-| Service modules that run queries | 35, plus 2 that only call `session.get` |
-| Route modules | 74 |
-| Route modules that run queries | 16, plus 1 that only calls `session.get` |
-| Route modules that define Pydantic models inline | 40 |
-| Model modules | 20 |
-| Repository modules | 21: a base, `users_repository.py`, and the rest under `tenancy/`, `overview/`, `api_keys/`, `files/`, `budgets/`, `pricing/`, `providers/` and `code_execution/` |
-| Service packages per domain | 6: `services/tools/`, which holds the built-in tool registry and no service yet, `services/overview/`, `services/budgets/`, `services/api_keys/`, `services/files/` and `services/providers/`, which holds the organization-scoped half of providers. `services/mail/`, `services/routing/` and `services/tenancy/` are older subpackages |
-| Repository packages per domain | 6: `repositories/overview/`, `repositories/api_keys/`, `repositories/files/`, `repositories/budgets/`, `repositories/pricing/` and `repositories/providers/`. `repositories/tenancy/` is an older subpackage |
-| Modules in `schemas/` | Four domain modules so far, `budgets.py`, `files.py`, `overview.py` and `providers.py` |
-| Modules in `exceptions/` | The shared error bases in `_base.py`, which the package root re-exports, `shared_exceptions.py` for the errors no one domain owns, and nine domain modules: `budget_exceptions.py`, `feedback_exceptions.py`, `files_exceptions.py`, `guardrails_exceptions.py`, `identity_exceptions.py`, `organizations_exceptions.py`, `pricing_exceptions.py`, `providers_exceptions.py` and `tools_exceptions.py` |
-
 ## The domains
 
-Each domain has a section below. The shared set follows them. A module
-appears once. Paths are relative to their layer's directory. A domain
-package is listed by its directory, which covers every module inside it. A
-route module whose name starts with an underscore is a shared helper, which
-the target shape moves out of the routes layer.
+Each domain has a section below. The shared set follows them. A route module
+whose name starts with an underscore is a shared helper, which the target shape
+moves out of the routes layer.
+
+A section names a module only when neither its path nor the section's prose
+shows its domain.
 
 Two groups of modules fail the domain test and are split here. Tenancy holds
 sign-in and organization management, which are separate sets of use cases, so
@@ -96,17 +76,6 @@ Who a person is and how they sign in: passwords, passkeys, OAuth, dashboard
 sessions, email verification and reset, the profile, and deployment-wide
 account administration.
 
-- Routes: `admin.py`, `auth_oauth.py`, `auth_password.py`,
-  `auth_password_reset.py`, `auth_profile.py`, `auth_session.py`,
-  `auth_signup.py`, `auth_webauthn.py`; helper `_public_auth.py`
-- Services: `tenancy/user_service.py`, `tenancy/webauthn_service.py`,
-  `tenancy/deployment_user_service.py`, `tenancy/email_address.py`,
-  `tenancy/tokens.py`, `tenancy/verification_email.py`,
-  `tenancy/password_reset_email.py`, `oauth_service.py`, `password_service.py`,
-  `dashboard_session_service.py`
-- Repositories: `tenancy/user_repository.py`
-- Exceptions: `identity_exceptions.py`
-
 Its tables sit in `models/tenancy.py` today, which organizations holds.
 
 ### organizations
@@ -114,41 +83,18 @@ Its tables sit in `models/tenancy.py` today, which organizations holds.
 Organizations, workspaces, members, invitations, email-domain claims, first-boot
 provisioning, the setup guide, and the gateway's billing users.
 
-- Routes: `organizations.py`, `workspaces.py`, `invitations.py`,
-  `workspace_activation.py`, `users.py`
-- Services: `tenancy/organization_service.py`, `tenancy/workspace_service.py`,
-  `tenancy/authorization.py`, `tenancy/invitation_email.py`,
-  `tenancy/organization_domain_service.py`, `tenancy/domain_verification.py`,
-  `tenancy/provisioning_service.py`, `tenancy/workspace_activation_service.py`,
-  `workspace_scope.py`
-- Repositories: `tenancy/organization_repository.py`,
-  `tenancy/organization_member_repository.py`,
-  `tenancy/organization_domain_repository.py`,
-  `tenancy/invitation_repository.py`, `tenancy/workspace_repository.py`,
-  `users_repository.py`
-- Exceptions: `organizations_exceptions.py`
-- Models: `tenancy.py`, `users.py`
+It also owns `models/users.py`, `repositories/users_repository.py` and
+`services/workspace_scope.py`.
 
 ### api-keys
 
 The deployment's and the members' API keys, and which models a key may reach.
 
-- Routes: `keys.py`, `organization_keys.py`
-- Services: `api_keys/`, `model_access.py`, `bootstrap_service.py`
-- Repositories: `api_keys/`
-- Models: `api_keys.py`
+It also owns `services/model_access.py` and `services/bootstrap_service.py`.
 
 ### budgets
 
 Ceilings, reservations, reset periods and per-member policies.
-
-- Routes: `budgets.py`, `scoped_budgets.py`, `organization_budgets.py`,
-  `workspace_member_budget_policies.py`
-- Services: `budgets/`
-- Repositories: `budgets/`
-- Schemas: `budgets.py`
-- Exceptions: `budget_exceptions.py`
-- Models: `budgets.py`
 
 `models/budgets.py` holds the scope, reset-alignment and reservation-status
 vocabularies, with the columns they name, and the schemas and services import
@@ -159,27 +105,12 @@ them from there.
 The deployment price list, organization rate overrides and upstream price
 snapshots.
 
-- Routes: `pricing.py`, `organization_pricing.py`
-- Services: `pricing_service.py`, `pricing_init_service.py`,
-  `pricing_refresh_service.py`, `organization_pricing_service.py`
-- Repositories: `pricing/`
-- Exceptions: `pricing_exceptions.py`
-- Models: `pricing.py`, `pricing_schemas.py`
+It also owns `models/pricing_schemas.py`.
 
 ### providers
 
 Provider credentials: instances configured at runtime, organization-scoped
 provider keys, their health, and what a dispatch needs to reach a provider.
-
-- Routes: `providers.py`, `org_provider_keys.py`
-- Services: `providers/`, `provider_store_service.py`,
-  `provider_health_service.py`, `provider_metadata_service.py`,
-  `provider_kwargs.py`, `bedrock_gateway_auth.py`,
-  `tenancy/org_provider_key_service.py`
-- Repositories: `providers/`, `tenancy/org_provider_key_repository.py`
-- Schemas: `providers.py`
-- Exceptions: `providers_exceptions.py`
-- Models: `providers.py`, `provider_keys.py`
 
 `tenancy/org_provider_key_service.py` has three divider sections (organization
 keys, workspace overrides, model restrictions) and splits along them.
@@ -190,36 +121,19 @@ keys, workspace overrides, model restrictions) and splits along them.
 The models a caller may see and name: the catalog, discovery, capabilities,
 short spellings and aliases.
 
-- Routes: `models.py`, `catalog.py`, `aliases.py`
-- Services: `model_catalog_service.py`, `model_discovery_service.py`,
-  `model_capabilities.py`, `model_identity.py`, `merged_catalog_service.py`,
-  `catalog_selectors.py`, `selector_index_service.py`, `alias_service.py`,
-  `tenancy/organization_model_access.py`
+It also owns `services/tenancy/organization_model_access.py`.
 
 ### routing
 
 Routing policies, their compiled plans and the router backends.
-
-- Routes: `routing.py`, `routing_memory.py`, `organization_routing.py`
-- Services: `routing/backends.py`, `routing/compiler.py`, `routing/decide.py`,
-  `routing/knn.py`, `routing/weighted.py`, `policy_store.py`
-- Models: `routing.py`
 
 ### files
 
 Uploaded files: the Files API, the `file_objects` table, and a file's
 lifecycle, including its expiry and the sweep that gives its storage back.
 The bytes sit in a pluggable blob backend. The row holds the metadata and
-the reference to them.
-
-- Routes: `files.py`
-- Services: `files/`
-- Repositories: `files/`
-- Schemas: `files.py`
-- Exceptions: `files_exceptions.py`
-- Models: `files.py`
-- Ports: `file_storage_port.py`
-- Adapters: `file_storage_adapter.py`
+the reference to them. The domain owns `ports/file_storage_port.py` and
+`adapters/file_storage_adapter.py`.
 
 The model never calls files, so it is not a tool. Inference normalizes an
 uploaded file into a request. Tools hands one to a sandbox and returns one
@@ -234,26 +148,8 @@ transactions, with output compensation and cleanup storage calls outside them.
 The tools the gateway runs itself: the tool loop, MCP, web search, web
 retrieval and code execution.
 
-- Routes: `tools.py`, `tool_settings.py`, `search.py`, `search_tools.py`,
-  `web_search_backend.py`, `workspace_web_search.py`, `mcp.py`,
-  `workspace_mcp_servers.py`, `workspace_code_execution_policy.py`;
-  helper `_tools.py`
-- Services: `_tool_loop.py`, `tools/`, `mcp_loop.py`, `mcp_loop_messages.py`,
-  `mcp_loop_responses.py`, `mcp_client.py`, `mcp_stateless.py`,
-  `sandbox_backend.py`, `search_backend.py`, `web_search_backend.py`,
-  `web_search_providers.py`, `web_extraction.py`,
-  `web_fetch_service.py`, `web_retrieval_backend.py`,
-  `web_retrieval_network.py`, `web_retrieval_policy.py`,
-  `search_tool_store_service.py`, `tool_settings_service.py`,
-  `tool_format.py`, `tool_usage.py`, `tenancy/workspace_mcp_server_service.py`,
-  `tenancy/workspace_web_search_service.py`,
-  `tenancy/workspace_code_execution_policy_service.py`, `code_execution/`
-- Repositories: `code_execution/`
-- Exceptions: `tools_exceptions.py`
-- Ports: `code_execution_port.py`, `mcp_server_port.py`
-- Adapters: `code_execution_adapter.py`, `e2b_code_execution_adapter.py`,
-  `mcp_server_adapter.py`
-- Models: `tools.py`, `mcp.py`
+It owns the code execution and MCP server ports in `ports/`, and their adapters
+in `adapters/`.
 
 `mcp_server_port.py` names where a workspace's MCP servers come from. One
 deployment holds those rows and another asks a peer that holds them for it, so
@@ -273,62 +169,29 @@ called, and an organization's guardrail configuration. Distinct from
 `agent-guardrails` below, which checks what a coding agent did to a
 repository; the two share no route, table or identifier.
 
-- Routes: `organization_guardrails.py`, `organization_guardrail_definitions.py`
-- Services: `guardrails.py`, `guardrail_catalog.py`,
-  `tenancy/organization_guardrail_service.py`,
-  `tenancy/organization_guardrail_definition_service.py`,
-  `tenancy/organization_guardrail_runner.py`
-- Repositories: `tenancy/organization_guardrail_definition_repository.py`
-- Exceptions: `guardrails_exceptions.py`
-- Models: `guardrails.py`
-
 ### agent-guardrails
 
 The Hook Server that evaluates an Agent Guardrails policy against caller-submitted
 evidence. The evaluator is pure policy code with no database, so the domain has
 a service package and no repository.
 
-- Routes: `hooks.py`
-- Outside the four layers: the evaluator is `otari_agent.domain`, in the
-  `otari-agent` workspace member (`cli/`), so `otari hook` can run without the gateway
+Its evaluator is `otari_agent.domain`, in the `otari-agent` workspace member
+(`cli/`), so `otari hook` can run without the gateway.
 
 ### usage-and-telemetry
 
 Usage rows, the usage log writer, OTLP ingest and coding-agent telemetry.
 
-- Routes: `usage.py`, `organization_usage.py`, `otlp.py`, `agent_telemetry.py`;
-  helper `_billing_schemas.py`
-- Services: `usage_admin_service.py`, `external_usage_service.py`,
-  `log_writer.py`, `agent_telemetry_service.py`,
-  `agent_telemetry_admin_service.py`; the Claude Code transcript parser is
-  `otari_agent.claude_code_import`, beside the CLI that uses it
-- Models: `usage.py`
+It also owns the route helper `api/routes/_billing_schemas.py`.
 
 ### inference
 
 The request path: the completion dialects, the pass-through endpoints, batches
 and the Playground.
 
-- Routes: `chat.py`, `messages.py`, `responses.py`, `embeddings.py`,
-  `images.py`, `audio.py`, `rerank.py`, `moderations.py`, `batches.py`,
-  `playground.py`; helpers `_pipeline.py`, `_attempts.py`, `_platform.py`,
-  `_passthrough.py`, `_normalize.py`, `_schema_derive.py`, `_helpers.py`
-- Services: `batch_service.py`, `content_normalizer.py`, `vision.py`,
-  `upstream_redaction.py`, `playground_service.py`, `playground_dispatch.py`
-- Models: `inference.py`, `playground.py`
-
 ### platform
 
 Deployment settings, health, modes, maintenance mode and mail.
-
-- Routes: `settings.py`, `bootstrap.py`, `health.py`, `maintenance_mode.py`,
-  `hosted_mode.py`, `hybrid_mode.py`, `mail.py`
-- Services: `control_plane/`, `runtime_settings_service.py`,
-  `maintenance_mode_service.py`, `master_key_service.py`, `mail/mailer.py`,
-  `mail/message.py`, `mail/templates.py`, `mail/transports.py`
-- Models: `platform.py`
-- Exceptions: `control_plane_exceptions.py`
-- Core: `deployment.py`, `surface.py`, `feature.py`
 
 `control_plane/` is how a deployment asks the control plane a peer runs for it
 what a workspace may do. It is a Gateway in Fowler's sense and an
@@ -349,18 +212,13 @@ Alert destinations, rules, send-once delivery and the test send. It knows
 nothing about what triggers an alert and imports no other domain. Each trigger
 lives in the domain it watches and calls the alerts service.
 
-- No code yet. It arrives in the target shape.
+Nothing is built yet. Its code goes in the target shape when it is built.
 
 ### overview
 
 The dashboard overview's summary: the counts and the budget health that the
 page shows, in one answer. It is a read model across api-keys, organizations
 and budgets, so it has no tables of its own and writes nothing.
-
-- Routes: `overview.py`
-- Services: `overview/`
-- Repositories: `overview/`
-- Schemas: `overview.py`
 
 `overview/overview_repository.py` reads the tables of those three domains
 directly, and it takes the session instead of extending `BaseRepository`. The
@@ -375,7 +233,7 @@ Cross-cutting modules that several domains import. They stay where they are.
 
 - Services: `url_safety.py`, `secret_box.py`, `file_extractors.py`
 - Repositories: `base_repository.py`
-- Exceptions: `shared_exceptions.py`
+- Exceptions: `_base.py`, `shared_exceptions.py`
 - Models: `base.py`, `money.py`, `secret_fields.py`
 
 `file_extractors.py` turns bytes into text and holds no state. Inference
@@ -414,8 +272,7 @@ requests for a large domain:
    class's status.
 6. Remove the domain's modules from every baseline in the boundary check.
 
-Code moves and behavior changes stay in separate commits. The counts above go
-down for the domain, and the pull request records them.
+Code moves and behavior changes stay in separate commits.
 
 ## Sources
 
