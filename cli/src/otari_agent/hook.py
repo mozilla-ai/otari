@@ -917,12 +917,18 @@ def _hook_extract_codex_judge_transcript(transcript_path: Path) -> str:
     return "\n".join(texts)
 
 
-def _hook_untracked_paths(repo_root: Path) -> list[str]:
+def _hook_untracked_paths(repo_root: Path) -> list[str] | None:
     """Paths Git does not track and the ignore rules do not exclude.
 
     `--exclude-standard` is what keeps a judge prompt free of `.venv`,
     `node_modules` and build output: without it this lists every ignored file
     in the tree, which is most of it.
+
+    None is the same fail sentinel `_hook_collect_diff` returns, and it is not
+    the empty list: a tree with nothing untracked in it and a tree whose
+    untracked files could not be listed produce identical evidence, so
+    collapsing them would send a judge an empty diff for a change made
+    entirely of new files.
     """
     try:
         result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
@@ -936,9 +942,9 @@ def _hook_untracked_paths(repo_root: Path) -> list[str]:
             check=False,
         )
     except (subprocess.TimeoutExpired, OSError):
-        return []
+        return None
     if result.returncode != 0:
-        return []
+        return None
     return [path for path in result.stdout.split("\0") if path]
 
 
@@ -951,20 +957,37 @@ def _hook_render_untracked_file(repo_root: Path, path: str) -> str:
     so a Windows clone would silently get nothing. The output shape is the
     same either way, which is what a judge gate reads.
 
-    An empty return means the file contributes nothing and the caller skips
-    it. Its path still reaches a `path` gate through `changed_paths`.
+    A symlink is rendered as its own link text and its target is never
+    opened, which is also what Git stores for one. The ignore rules filter
+    the link's path and say nothing about where it points, so following one
+    would read a file outside the repository entirely (a credentials file in
+    the home directory, say) into a prompt that leaves the machine. Regular
+    files open with `O_NOFOLLOW` so that a path swapped for a symlink between
+    the check and the open fails rather than resolving.
+
+    A file that exists but cannot be read is named with its content left out,
+    rather than dropped: silence here would shorten the change a judge rules
+    on without saying so.
     """
+    full = repo_root / path
+    header = f"diff --git a/{path} b/{path}\nnew file\n"
+    if full.is_symlink():
+        try:
+            return f"{header}Symlink to {os.readlink(full)}, target not read.\n"
+        except OSError:
+            return f"{header}Symlink, target not read.\n"
     try:
-        with (repo_root / path).open("rb") as handle:
+        # O_NOFOLLOW is POSIX-only; Windows creation of a symlink is itself a
+        # privileged operation, and is_symlink above still covers the
+        # unraced case there.
+        descriptor = os.open(full, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(descriptor, "rb") as handle:
             # Bounded so a multi-gigabyte artifact dropped in the tree is never
             # read into memory whole. 4 bytes per character is UTF-8's own
             # maximum, so this cannot truncate below the character budget.
             raw = handle.read(_HOOK_JUDGE_MAX_UNTRACKED_FILE_CHARS * 4 + 1)
     except OSError:
-        # Unreadable: a permission denied, a dangling symlink, or a file
-        # removed between the listing above and this read.
-        return ""
-    header = f"diff --git a/{path} b/{path}\nnew file\n"
+        return f"{header}Unreadable, content not shown.\n"
     if b"\0" in raw:
         # Git's own heuristic for binary, and a judge gate has nothing to read
         # in the bytes anyway.
@@ -977,21 +1000,23 @@ def _hook_render_untracked_file(repo_root: Path, path: str) -> str:
     return f"{header}--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{len(lines)} @@\n{body}"
 
 
-def _hook_collect_untracked_diff(repo_root: Path, budget: int) -> str:
+def _hook_collect_untracked_diff(repo_root: Path, budget: int) -> str | None:
     """Every untracked file as a new-file diff, up to `budget` characters.
 
     Whole files only: a partial file is cut at the per-file bound above, and
     once the next one does not fit the budget this stops rather than emitting
-    a fragment a judge gate would read as the end of the change.
+    a fragment a judge gate would read as the end of the change. None
+    propagates `_hook_untracked_paths`'s own fail sentinel.
     """
     if budget <= 0:
         return ""
+    paths = _hook_untracked_paths(repo_root)
+    if paths is None:
+        return None
     rendered: list[str] = []
     used = 0
-    for path in _hook_untracked_paths(repo_root):
+    for path in paths:
         hunk = _hook_render_untracked_file(repo_root, path)
-        if not hunk:
-            continue
         if used + len(hunk) > budget:
             break
         rendered.append(hunk)
@@ -1043,7 +1068,10 @@ def _hook_collect_diff(repo_root: Path) -> str | None:
     # Tracked first, and it keeps whatever of the budget it needs: an edit to
     # an existing file is the more precise evidence, since its hunk carries the
     # surrounding code a new file has none of.
-    diff += _hook_collect_untracked_diff(repo_root, _HOOK_JUDGE_MAX_DIFF_CHARS - len(diff))
+    untracked = _hook_collect_untracked_diff(repo_root, _HOOK_JUDGE_MAX_DIFF_CHARS - len(diff))
+    if untracked is None:
+        return None
+    diff += untracked
     if len(diff) > _HOOK_JUDGE_MAX_DIFF_CHARS:
         click.echo(
             f"otari hook: diff is {len(diff):,} characters, over the {_HOOK_JUDGE_MAX_DIFF_CHARS:,} limit; "

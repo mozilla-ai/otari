@@ -565,9 +565,22 @@ rather than through `git diff --no-index /dev/null <path>`, which would cost
 one subprocess per file and whose `/dev/null` operand Git for Windows does
 not resolve. Each one is capped on its own
 (`_HOOK_JUDGE_MAX_UNTRACKED_FILE_CHARS`) so a single generated artifact
-cannot crowd out every other new file, a binary is reported by name with its
-content omitted, and one that cannot be read at all is skipped, its path
-still reaching a `path` gate through `changed_paths`.
+cannot crowd out every other new file, and a binary is reported by name with
+its content omitted.
+
+A symlink is rendered as its link text and its target is never opened, which
+is also what Git stores for one. The ignore rules filter the link's own path
+and say nothing about where it points, so following one would read a file
+outside the repository entirely into a prompt that leaves the machine. A
+file that exists but cannot be read is likewise named with its content left
+out rather than dropped, since dropping it would shorten the change a judge
+rules on without saying so.
+
+Failing to list the untracked files at all (`git ls-files` timing out or
+erroring) is a collection failure, not an empty result: a tree with nothing
+untracked and a tree whose untracked files could not be listed would
+otherwise produce the same evidence, which for a change made entirely of new
+files is no evidence.
 
 A diff `otari hook` could not collect at all (`git diff HEAD` failing: no
 `HEAD` yet, a timeout, `git` itself missing) is kept distinct from one it
