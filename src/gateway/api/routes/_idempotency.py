@@ -141,22 +141,29 @@ class IdempotencyGuard:
                 logger.warning("Idempotency claim renewal failed", exc_info=True)
 
     async def complete(self, body: Any, response: Response, *, status_code: int = 200) -> None:
-        """Store the response this request is about to return, for a retry to be given."""
-        await self._stop_heartbeat()
-        if self._service is None or self._request is None or self._claimed is None:
-            return
-        encoded = json.dumps(jsonable_encoder(body), separators=(",", ":"))
-        headers = {name: response.headers[name] for name in _REPLAYED_HEADERS if name in response.headers}
-        claimed, self._claimed = self._claimed, None
-        await self._service.complete(self._request, claimed, status_code=status_code, body=encoded, headers=headers)
+        """Store the response this request is about to return, for a retry to be given.
+
+        The claim stays renewed until the response is stored, so a retry cannot take it over meanwhile.
+        """
+        try:
+            if self._service is None or self._request is None or self._claimed is None:
+                return
+            encoded = json.dumps(jsonable_encoder(body), separators=(",", ":"))
+            headers = {name: response.headers[name] for name in _REPLAYED_HEADERS if name in response.headers}
+            claimed, self._claimed = self._claimed, None
+            await self._service.complete(self._request, claimed, status_code=status_code, body=encoded, headers=headers)
+        finally:
+            await self._stop_heartbeat()
 
     async def release(self) -> None:
         """Give the key back so a retry runs the request again. A no-op once completed."""
-        await self._stop_heartbeat()
-        if self._service is None or self._request is None or self._claimed is None:
-            return
-        claimed, self._claimed = self._claimed, None
-        await self._service.release(self._request, claimed)
+        try:
+            if self._service is None or self._request is None or self._claimed is None:
+                return
+            claimed, self._claimed = self._claimed, None
+            await self._service.release(self._request, claimed)
+        finally:
+            await self._stop_heartbeat()
 
 
 async def get_idempotency_guard(
