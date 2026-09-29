@@ -130,6 +130,15 @@ def test_an_existing_read_policy_adds_read_to_the_matcher(repo: Path) -> None:
     assert settings["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Read"
 
 
+def test_a_user_level_read_gate_adds_read_to_the_matcher(repo: Path, isolated_home: Path) -> None:
+    """The hook composes the user's own gates in this repo, so the matcher has to reach them too."""
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(isolated_home).write_text(_READ_GATES.replace("id: g\n", "id: personal\n"), encoding="utf-8")
+    result = _invoke("--api-key", "k")
+    assert result.exit_code == 0, result.output
+    assert _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Read"
+
+
 def test_a_policy_with_no_read_gate_keeps_read_out_of_the_matcher(repo: Path) -> None:
     _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
     result = _invoke("--api-key", "k")

@@ -838,3 +838,18 @@ def test_the_file_limit_holds_however_the_target_is_spelled(
     assert result.exit_code != 0, result.output
     assert "stop being enforced" in result.output
     assert not (repo / hook_cli.GUARDRAIL_DIR / "new.yml").exists()
+
+
+def test_an_id_used_in_a_user_level_file_is_skipped(
+    repo: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The user's gates compose with the repo's, so their IDs are taken too."""
+    personal = isolated_home / hook_cli.GUARDRAIL_FILE
+    personal.parent.mkdir(parents=True)
+    personal.write_text(_EXISTING_GATES_WITH_COMMENT, encoding="utf-8")
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([{**_VALID_PROPOSAL, "id": "no-force-push"}]))
+
+    result = _invoke(monkeypatch)
+    assert result.exit_code == 0, result.output
+    assert "Skipping 'no-force-push': already in ~/.otari/guardrails.yml." in result.output
