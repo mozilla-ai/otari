@@ -6,6 +6,7 @@ their content is rendered, so a mocked `subprocess.run` would only assert
 that the fixture matches itself.
 """
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -157,17 +158,29 @@ def test_listing_untracked_files_failing_is_a_collection_failure(
     assert hook_cli._hook_collect_diff(repo) is None
 
 
-def test_an_unreadable_file_is_named_rather_than_dropped(tmp_path: Path) -> None:
-    """Silence would shorten the change a judge rules on without saying so."""
+def test_an_unreadable_file_is_named_rather_than_dropped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Silence would shorten the change a judge rules on without saying so.
+
+    The refusal is injected rather than made with `chmod(0o000)`, which a
+    privileged runner reads straight through and Windows does not honor at
+    all. What is under test is that an `OSError` becomes a named placeholder,
+    not the platform's own permission semantics.
+    """
     repo = _repo(tmp_path)
-    unreadable = repo / "locked.py"
-    unreadable.write_text("value = 1\n", encoding="utf-8")
-    unreadable.chmod(0o000)
-    try:
-        diff = hook_cli._hook_collect_diff(repo)
-    finally:
-        unreadable.chmod(0o600)
+    (repo / "locked.py").write_text("value = 1\n", encoding="utf-8")
+    (repo / "open.py").write_text("readable = True\n", encoding="utf-8")
+    real_open = os.open
+
+    def refuse_one(path: object, *args: int, **kwargs: object) -> int:
+        if str(path).endswith("locked.py"):
+            raise PermissionError(13, "Permission denied")
+        return real_open(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "open", refuse_one)
+
+    diff = hook_cli._hook_collect_diff(repo)
 
     assert diff is not None
     assert "b/locked.py" in diff
     assert "Unreadable, content not shown." in diff
+    assert "+readable = True" in diff, "one refused file must not drop the others"
