@@ -373,6 +373,18 @@ def _is_container_block(block: dict[str, Any], fmt: WireFormat) -> bool:
     return fmt == "anthropic" and block.get("type") == _CONTAINER
 
 
+def has_container_blocks(messages: Any, fmt: WireFormat) -> bool:
+    """Whether any message carries a block naming a file for a code-execution container."""
+    if not isinstance(messages, list):
+        return False
+    return any(
+        isinstance(block, dict) and _is_container_block(block, fmt)
+        for message in messages
+        if isinstance(message, dict) and isinstance(message.get("content"), list)
+        for block in message["content"]
+    )
+
+
 async def _normalize_block(
     block: Any,
     fmt: WireFormat,

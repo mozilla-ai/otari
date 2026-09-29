@@ -100,7 +100,7 @@ def _upload_file(client: TestClient, headers: dict[str, str]) -> str:
     return str(stored.json()["id"])
 
 
-def _run(client: TestClient, headers: dict[str, str], file_id: str) -> tuple[Any, list[Any]]:
+def _run(client: TestClient, headers: dict[str, str], file_id: str | None) -> tuple[Any, list[Any]]:
     """Post a request whose code Anthropic runs, and report what reached the provider."""
     forwarded: list[Any] = []
 
@@ -110,7 +110,14 @@ def _run(client: TestClient, headers: dict[str, str], file_id: str) -> tuple[Any
 
     body = {
         "model": _MODEL,
-        "messages": [{"role": "user", "content": [{"type": "container_upload", "file_id": file_id}]}],
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"type": "container_upload", "file_id": file_id}]
+                if file_id is not None
+                else "Compute 2 + 2.",
+            }
+        ],
         "max_tokens": 100,
         "tools": [_CODE_TOOL],
     }
@@ -221,4 +228,19 @@ def test_file_understanding_off_refuses_rather_than_forwarding_the_block(
 
     assert response.status_code == 400, response.text
     assert forwarded == []
+    assert anthropic_files.uploads == []
+
+
+def test_file_understanding_off_still_runs_code_that_attaches_nothing(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    anthropic_files: _StubAnthropicFiles,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cast(Any, client.app).state.config, "file_understanding_enabled", False, raising=True)
+
+    response, forwarded = _run(client, api_key_header, None)
+
+    assert response.status_code == 200, response.text
+    assert forwarded[0][0]["content"] == "Compute 2 + 2."
     assert anthropic_files.uploads == []

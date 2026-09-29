@@ -38,7 +38,12 @@ from gateway.exceptions.files_exceptions import (
 )
 from gateway.log_config import logger
 from gateway.models.tools import CodeExecutor
-from gateway.services.content_normalizer import NormalizationStats, WireFormat, normalize_messages
+from gateway.services.content_normalizer import (
+    NormalizationStats,
+    WireFormat,
+    has_container_blocks,
+    normalize_messages,
+)
 from gateway.services.files import FileService, ProviderFileUploader
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.tools import Dialect
@@ -164,7 +169,7 @@ async def normalize_request_messages(
         HTTPException: only where ``container_uploads`` is set, carrying the
             status the files domain gave the refusal.
     """
-    if container_uploads is not None and not config.file_understanding_enabled:
+    if container_uploads is not None and not config.file_understanding_enabled and has_container_blocks(messages, fmt):
         # Nothing below would examine the blocks, so a `container_upload` would
         # reach the provider naming a file of the caller's choosing.
         raise HTTPException(
