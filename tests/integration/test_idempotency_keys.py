@@ -700,3 +700,23 @@ async def test_the_sweep_deletes_in_bounded_batches(async_db: AsyncSession, test
     assert deleted == 5
     assert batches == [2, 2, 1]
     assert (await async_db.execute(select(func.count()).select_from(IdempotencyRecord))).scalar_one() == 0
+
+
+@pytest.mark.asyncio
+async def test_the_database_clock_is_read_when_asked_not_when_the_transaction_began(
+    postgres_url: str, clean_database: None
+) -> None:
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with sessions() as db:
+            uow = UnitOfWork(db)
+            keys = InferenceRepositories.on(uow).idempotency
+            async with uow:
+                began = (await db.execute(select(func.now()))).scalar_one()
+                await asyncio.sleep(1.0)
+                read = await keys.get_database_time()
+
+        assert read - began >= timedelta(seconds=0.9)
+    finally:
+        await engine.dispose()

@@ -25,11 +25,12 @@ class IdempotencyRepository(BaseRepository[IdempotencyRecord, Never, Never]):
     async def get_database_time(self) -> datetime:
         """Return the database's current time, so every gateway times leases by the same clock.
 
+        The time is read when asked, not when the open transaction began.
         SQLite serves one host, so its gateway's own clock is that clock.
         """
         if dialect_name(self.db) != "postgresql":
             return datetime.now(UTC)
-        return (await self.db.execute(select(func.now()))).scalar_one()
+        return cast("datetime", (await self.db.execute(select(func.clock_timestamp()))).scalar_one())
 
     async def insert_claim(self, values: dict[str, Any]) -> bool:
         """Insert a fresh ``in_progress`` claim, returning False when the key is already held.
