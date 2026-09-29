@@ -25,6 +25,8 @@ from otari_agent.domain.check import PolicyCheckError
 from otari_agent.domain.policy import parse_policy
 from otari_agent.settings import HookSettings
 
+pytestmark = pytest.mark.usefixtures("isolated_home", "no_otari_env")
+
 
 def _guardrail_path(root: Path) -> Path:
     """`.otari/guardrails.yml` under `root`, with its parent directory created."""

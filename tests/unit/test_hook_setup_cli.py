@@ -16,6 +16,8 @@ from click.testing import CliRunner
 import otari_agent.hook as hook_cli
 from otari_agent.settings import HookSettings
 
+pytestmark = pytest.mark.usefixtures("isolated_home", "no_otari_env")
+
 
 def _guardrail_path(root: Path) -> Path:
     """`.otari/guardrails.yml` under `root`, with its parent directory created."""
