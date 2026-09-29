@@ -279,6 +279,17 @@ def test_an_unknown_user_is_refused_before_the_key_is_claimed(
         assert db.execute(select(func.count()).select_from(IdempotencyRecord)).scalar_one() == 0
 
 
+def test_a_malformed_key_is_refused_before_the_user_is_looked_up(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+
+    response = _post_chat(client, _keyed(master_key_header, " padded"), provider, _chat_body(user="nobody"))
+
+    assert response.status_code == 400, response.text
+    provider.assert_not_awaited()
+
+
 def test_a_blocked_user_is_not_given_the_stored_response(
     client: TestClient, master_key_header: dict[str, str], user: None
 ) -> None:

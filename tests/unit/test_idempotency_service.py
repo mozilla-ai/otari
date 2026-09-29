@@ -54,6 +54,7 @@ async def test_a_claim_that_keeps_changing_does_not_spin() -> None:
     keys.insert_claim = AsyncMock(return_value=False)
     keys.find = AsyncMock(return_value=None)
     keys.get_database_time = AsyncMock(return_value=datetime.now(UTC))
+    keys.get_caller = AsyncMock(return_value=MagicMock(blocked=False))
     service = IdempotencyService(
         _NoUnitOfWork(),  # type: ignore[arg-type]
         MagicMock(idempotency=keys),

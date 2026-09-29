@@ -13,7 +13,9 @@ from sqlalchemy.engine import CursorResult
 from gateway.core.sql import dialect_name
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.inference import IdempotencyRecord, IdempotencyState
+from gateway.models.users import User
 from gateway.repositories.base_repository import BaseRepository
+from gateway.repositories.users_repository import get_active_user
 
 
 class IdempotencyRepository(BaseRepository[IdempotencyRecord, Never, Never]):
@@ -31,6 +33,10 @@ class IdempotencyRepository(BaseRepository[IdempotencyRecord, Never, Never]):
         if dialect_name(self.db) != "postgresql":
             return datetime.now(UTC)
         return cast("datetime", (await self.db.execute(select(func.clock_timestamp()))).scalar_one())
+
+    async def get_caller(self, user_id: str) -> User | None:
+        """Return the user a key is claimed for, or None when no such user exists."""
+        return await get_active_user(self.db, user_id)
 
     async def insert_claim(self, values: dict[str, Any]) -> bool:
         """Insert a fresh ``in_progress`` claim, returning False when the key is already held.

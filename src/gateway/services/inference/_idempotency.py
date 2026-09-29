@@ -136,7 +136,17 @@ class StillInFlight:
     """The request holding the key did not finish within the wait."""
 
 
-Admission = Claimed | Replay | KeyReused | StillInFlight
+@dataclass(frozen=True)
+class UnknownCaller:
+    """The user the key would be claimed for does not exist."""
+
+
+@dataclass(frozen=True)
+class BlockedCaller:
+    """The user the key would be claimed for is blocked, so is given nothing, not even a stored response."""
+
+
+Admission = Claimed | Replay | KeyReused | StillInFlight | UnknownCaller | BlockedCaller
 
 
 class _Retry:
@@ -186,7 +196,14 @@ class IdempotencyService:
         While another request with the same key and body is in flight this waits
         for it, for at most ``idempotency_wait_sec``, rather than running the
         request a second time.
+        An unknown or blocked user is refused before any key is read or claimed.
         """
+        async with self._uow:
+            caller = await self._keys.get_caller(request.user_id)
+        if caller is None:
+            return UnknownCaller()
+        if caller.blocked:
+            return BlockedCaller()
         deadline = time.monotonic() + self._config.idempotency_wait_sec
         delays = _poll_delays(random.Random())
         changes = 0

@@ -167,7 +167,6 @@ from gateway.services.budgets import (
     increase_reservation,
     reconcile_reservation,
     refund_reservation,
-    require_spending_user,
     reserve_budget,
 )
 from gateway.services.code_execution import (
@@ -179,7 +178,15 @@ from gateway.services.code_execution import (
 )
 from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for
 from gateway.services.guardrails import InProcessGuardrail
-from gateway.services.inference import Claimed, InvalidKey, KeyReused, Replay, StillInFlight
+from gateway.services.inference import (
+    BlockedCaller,
+    Claimed,
+    InvalidKey,
+    KeyReused,
+    Replay,
+    StillInFlight,
+    UnknownCaller,
+)
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
@@ -1751,6 +1758,10 @@ async def _admit_idempotent(
             raise adapter.error(
                 409, IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL, ErrorKind.INVALID_REQUEST, headers={"Retry-After": "5"}
             )
+        case UnknownCaller():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User '{user_id}' not found")
+        case BlockedCaller():
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"User '{user_id}' is blocked")
 
 
 async def resolve_request_context(
@@ -2024,12 +2035,12 @@ async def resolve_request_context(
                 )
                 raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
 
-        if idempotency is not None and session_principal is None and idempotency.active:
-            # A replay skips the reservation, which is where an unknown or blocked user is refused.
+        if idempotency is not None and session_principal is None:
             try:
-                await require_spending_user(db, user_id)
+                await _admit_idempotent(idempotency, adapter, user_id=user_id, api_key_id=api_key_id)
             except HTTPException as exc:
-                if exc.status_code != status.HTTP_404_NOT_FOUND:
+                # Only a blocked user is logged: usage_logs.user_id is a foreign key, so an unknown user cannot be.
+                if exc.status_code == status.HTTP_403_FORBIDDEN:
                     await log_gateway_rejection(
                         db=db,
                         log_writer=log_writer,
@@ -2043,7 +2054,6 @@ async def resolve_request_context(
                         started_at=started_at,
                     )
                 raise
-            await _admit_idempotent(idempotency, adapter, user_id=user_id, api_key_id=api_key_id)
 
         # Derived from the workspace already resolved above, not via
         # `organization_for_key_id` (which would re-derive the same workspace
